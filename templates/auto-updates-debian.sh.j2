@@ -1,0 +1,76 @@
+#!/bin/bash
+# Auto-updates script for Debian/Ubuntu
+# Managed by Ansible - do not edit manually
+
+set -euo pipefail
+
+LOG_TAG="auto-updates"
+
+log() { logger -t "$LOG_TAG" "$*"; echo "$*"; }
+
+send_notification() {
+    local title="$1"
+    local body="${2:-}"
+    local type="${3:-info}"
+    curl -sf -o /dev/null \
+      -X POST "{{ apprise_endpoint }}/notify/{{ apprise_token }}" \
+      --form-string "title=${title}" \
+      --form-string "body=${body}" \
+      --form-string "tag={{ apprise_alert_tags }}" \
+      --form-string "type=${type}" \
+      --max-time 10 \
+      --retry 2 \
+      --retry-delay 3 2>/dev/null || true
+}
+
+log "Starting automatic updates..."
+
+# Update package lists
+log "Updating apt cache..."
+apt-get update -qq
+
+# Count upgradable packages
+UPDATE_COUNT=$(apt list --upgradable 2>/dev/null | grep -c upgradable || echo 0)
+
+if [[ "$UPDATE_COUNT" -gt 0 ]]; then
+    log "$UPDATE_COUNT packages to upgrade"
+    send_notification "[Updates] ${HOSTNAME}" "${UPDATE_COUNT} packages to upgrade"
+
+    # Upgrade all packages
+    log "Upgrading packages..."
+    DEBIAN_FRONTEND=noninteractive apt-get full-upgrade -y \
+      -o Dpkg::Options::="--force-confdef" \
+      -o Dpkg::Options::="--force-confold"
+
+    # Clean up
+    log "Cleaning up..."
+    apt-get autoremove -y
+    apt-get autoclean -y
+
+    # Update Tailscale if installed
+    if command -v tailscale &>/dev/null; then
+        log "Updating Tailscale..."
+        apt-get install --only-upgrade -y tailscale || true
+    fi
+else
+    log "All packages are up to date"
+fi
+
+# Check if reboot required
+if [ -f /var/run/reboot-required ]; then
+    log "Reboot required, scheduling reboot..."
+    if [ "{{ auto_updates_reboot_if_required | default(true) | lower }}" = "true" ]; then
+        send_notification "[Updates] ${HOSTNAME}: rebooting" "Reboot required after updates, rebooting in 1 minute" "warning"
+        shutdown -r +1 "Auto-updates: rebooting in 1 minute"
+    else
+        log "Reboot required but auto-reboot disabled"
+        send_notification "[Updates] ${HOSTNAME}" "Reboot required but auto-reboot is disabled" "warning"
+    fi
+else
+    log "No reboot required"
+    if [[ "$UPDATE_COUNT" -gt 0 ]]; then
+        send_notification "[Updates] ${HOSTNAME}" "Updates complete, no reboot required"
+    fi
+fi
+
+log "Auto-updates complete"

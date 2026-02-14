@@ -21,51 +21,8 @@
     # Debian/Ubuntu auto-updates script
     # =========================================================================
     - name: Create auto-updates script (Debian)
-      ansible.builtin.copy:
-        content: |
-          #!/bin/bash
-          set -euo pipefail
-
-          LOG_TAG="auto-updates"
-
-          log() { logger -t "$LOG_TAG" "$*"; echo "$*"; }
-
-          log "Starting automatic updates..."
-
-          # Update package lists
-          log "Updating apt cache..."
-          apt-get update -qq
-
-          # Upgrade all packages
-          log "Upgrading packages..."
-          DEBIAN_FRONTEND=noninteractive apt-get full-upgrade -y \
-            -o Dpkg::Options::="--force-confdef" \
-            -o Dpkg::Options::="--force-confold"
-
-          # Clean up
-          log "Cleaning up..."
-          apt-get autoremove -y
-          apt-get autoclean -y
-
-          # Update Tailscale if installed
-          if command -v tailscale &>/dev/null; then
-            log "Updating Tailscale..."
-            apt-get install --only-upgrade -y tailscale || true
-          fi
-
-          # Check if reboot required
-          if [ -f /var/run/reboot-required ]; then
-            log "Reboot required, scheduling reboot..."
-            if [ "{{ auto_updates_reboot_if_required | default(true) | lower }}" = "true" ]; then
-              shutdown -r +1 "Auto-updates: rebooting in 1 minute"
-            else
-              log "Reboot required but auto-reboot disabled"
-            fi
-          else
-            log "No reboot required"
-          fi
-
-          log "Auto-updates complete"
+      ansible.builtin.template:
+        src: ../templates/auto-updates-debian.sh.j2
         dest: /usr/local/sbin/auto-updates
         owner: root
         group: root
@@ -77,27 +34,8 @@
     # Arch Linux auto-updates script
     # =========================================================================
     - name: Create auto-updates script (Arch)
-      ansible.builtin.copy:
-        content: |
-          #!/bin/bash
-          set -euo pipefail
-
-          LOG_TAG="auto-updates"
-
-          log() { logger -t "$LOG_TAG" "$*"; echo "$*"; }
-
-          log "Starting automatic updates..."
-
-          # Update package database and upgrade
-          log "Upgrading packages..."
-          pacman -Syu --noconfirm
-
-          # Clean package cache (keep last 2 versions)
-          log "Cleaning package cache..."
-          paccache -rk2 2>/dev/null || true
-
-          log "Auto-updates complete"
-          log "Note: Arch does not have automatic reboot-required detection"
+      ansible.builtin.template:
+        src: ../templates/auto-updates-arch.sh.j2
         dest: /usr/local/sbin/auto-updates
         owner: root
         group: root

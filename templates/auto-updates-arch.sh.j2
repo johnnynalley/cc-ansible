@@ -1,0 +1,48 @@
+#!/bin/bash
+# Auto-updates script for Arch Linux
+# Managed by Ansible - do not edit manually
+
+set -euo pipefail
+
+LOG_TAG="auto-updates"
+
+log() { logger -t "$LOG_TAG" "$*"; echo "$*"; }
+
+send_notification() {
+    local title="$1"
+    local body="${2:-}"
+    local type="${3:-info}"
+    curl -sf -o /dev/null \
+      -X POST "{{ apprise_endpoint }}/notify/{{ apprise_token }}" \
+      --form-string "title=${title}" \
+      --form-string "body=${body}" \
+      --form-string "tag={{ apprise_alert_tags }}" \
+      --form-string "type=${type}" \
+      --max-time 10 \
+      --retry 2 \
+      --retry-delay 3 2>/dev/null || true
+}
+
+log "Starting automatic updates..."
+
+# Count upgradable packages before upgrading
+UPDATE_COUNT=$(pacman -Qu 2>/dev/null | wc -l || echo 0)
+
+if [[ "$UPDATE_COUNT" -gt 0 ]]; then
+    log "$UPDATE_COUNT packages to upgrade"
+    send_notification "[Updates] ${HOSTNAME}" "${UPDATE_COUNT} packages to upgrade"
+
+    # Update package database and upgrade
+    log "Upgrading packages..."
+    pacman -Syu --noconfirm
+
+    # Clean package cache (keep last 2 versions)
+    log "Cleaning package cache..."
+    paccache -rk2 2>/dev/null || true
+
+    send_notification "[Updates] ${HOSTNAME}" "Updates complete"
+else
+    log "All packages are up to date"
+fi
+
+log "Auto-updates complete"

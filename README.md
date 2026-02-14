@@ -108,7 +108,9 @@ homelab-ansible/
 │   ├── mergerfs-media.mount.j2 # MergerFS systemd mount unit
 │   ├── avahi-timemachine.service.j2  # Time Machine mDNS advertisement
 │   ├── docker-stacks.service.j2  # Docker stacks systemd service
-│   ├── network-watchdog.sh.j2  # Network recovery watchdog script
+│   ├── auto-updates-debian.sh.j2  # Debian auto-updates with notifications
+│   ├── auto-updates-arch.sh.j2  # Arch auto-updates with notifications
+│   ├── network-watchdog.sh.j2  # Network recovery watchdog with notifications
 │   ├── gluetun-watchdog.sh.j2  # Gluetun VPN crash loop watchdog
 │   ├── proxmox-virtiofs-directory.cfg.j2  # VirtioFS directory mappings
 │   ├── proxmox-cluster-firewall.fw.j2    # Datacenter firewall rules
@@ -608,10 +610,12 @@ Centralized notification router for infrastructure and media alerts using tag-ba
 
 ```
 Diun (container updates) ──┐
-smartd (disk health) ──────┼──→ Apprise API (docker-vm) → Pushover "Homelab" (Time Sensitive)
-apcupsd (UPS power) ───────┤                           → Email (iCloud SMTP)
-Sonarr/Radarr (grabs) ────┤                           → Pushover "cc-media-feed" (silent)
-Jellyseerr (requests) ─────┘
+smartd (disk health) ──────┤
+apcupsd (UPS power) ───────┤
+auto-updates (weekly) ─────┼──→ Apprise API (docker-vm) → Pushover "Homelab" (Time Sensitive)
+network-watchdog (recovery)┤                           → Email (iCloud SMTP)
+Sonarr/Radarr (grabs) ─────┤                           → Pushover "cc-media-feed" (silent)
+Jellyseerr (requests) ──────┘
 
 Sonarr/Radarr ──→ Discord (native connection, rich embeds with poster art)
 ```
@@ -621,6 +625,8 @@ Sonarr/Radarr ──→ Discord (native connection, rich embeds with poster art)
 - **Four Apprise tags**: `push` (infrastructure → Homelab app), `email` (iCloud SMTP), `media-feed` (Sonarr/Radarr → cc-media-feed app), `media-requests` (Jellyseerr → cc-media-feed app)
 - **Diun**: Container image update notifier on all Docker VMs (`/opt/diun/`), sends with `push` tag
 - **smartd/apcupsd**: Infrastructure alerts, send with `push` tag
+- **auto-updates**: Notifies before updates (package count), after completion, and before reboots
+- **network-watchdog**: Best-effort notifications on gateway/Tailscale recovery, pre-reboot, and max-reboot exceeded
 - **Sonarr/Radarr**: Dual notifications — Discord (rich embeds) + Apprise `media-feed` tag (silent Pushover)
 - **Jellyseerr**: Webhook to Apprise with `media-requests` tag (silent Pushover)
 - **ntfy**: Commented out in docker-compose, config preserved at `/opt/notifications/ntfy/`. Switched to Pushover because ntfy iOS lacks per-topic push control.

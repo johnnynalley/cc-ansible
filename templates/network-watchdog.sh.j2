@@ -10,6 +10,21 @@ FAILURE_COUNT_FILE="${STATE_DIR}/failures"
 
 log() { logger -t "$LOG_TAG" "$*"; }
 
+send_notification() {
+    local title="$1"
+    local body="${2:-}"
+    local type="${3:-info}"
+    curl -sf -o /dev/null \
+      -X POST "{{ apprise_endpoint }}/notify/{{ apprise_token }}" \
+      --form-string "title=${title}" \
+      --form-string "body=${body}" \
+      --form-string "tag={{ apprise_alert_tags }}" \
+      --form-string "type=${type}" \
+      --max-time 10 \
+      --retry 2 \
+      --retry-delay 3 2>/dev/null || true
+}
+
 # Configuration
 GATEWAY_CHECK_HOST="${GATEWAY_CHECK_HOST:-_gateway}"
 TAILSCALE_CHECK_HOST="${TAILSCALE_CHECK_HOST:-100.100.100.100}"
@@ -81,6 +96,7 @@ should_reboot_now() {
     # Check if we've exceeded max reboots
     if [[ "$reboot_count" -ge "$MAX_AUTO_REBOOTS" ]]; then
         log "Max auto-reboots ($MAX_AUTO_REBOOTS) reached - manual intervention required"
+        send_notification "[Network] ${HOSTNAME}" "Max auto-reboots ($MAX_AUTO_REBOOTS) reached - manual intervention required" "failure"
         return 1
     fi
 
@@ -381,6 +397,7 @@ recover_gateway() {
                 local reboot_num
                 reboot_num=$(echo "$(get_reboot_state)" | cut -d' ' -f1)
                 log "CRITICAL: No IPv4 address - requesting reboot ($reboot_num/$MAX_AUTO_REBOOTS)"
+                send_notification "[Network] ${HOSTNAME}: rebooting" "No IPv4 address after $MAX_DHCP_RECOVERY_ATTEMPTS recovery attempts (reboot $reboot_num/$MAX_AUTO_REBOOTS)" "warning"
                 set_failure_count "dhcp_recovery" 0
                 shutdown -r +1 "Network watchdog: No IPv4 address (reboot $reboot_num/$MAX_AUTO_REBOOTS)" || true
             else
@@ -444,6 +461,7 @@ main() {
     if check_gateway; then
         if [[ "$gateway_failures" -gt 0 ]]; then
             log "Gateway connectivity restored"
+            send_notification "[Network] ${HOSTNAME}" "Gateway connectivity restored"
             # Clear reboot state since network is working
             clear_reboot_state
         fi
@@ -465,6 +483,7 @@ main() {
         if check_tailscale; then
             if [[ "$tailscale_failures" -gt 0 ]]; then
                 log "Tailscale connectivity restored"
+                send_notification "[Network] ${HOSTNAME}" "Tailscale connectivity restored"
                 restart_dependent_services
             fi
             set_failure_count "tailscale" 0

@@ -591,13 +591,13 @@ Centralized notification system for infrastructure alerts (SMART disk errors, UP
 
 **Architecture:**
 ```
-Diun (docker-vm) ─────┐
-Diun (media-vm) ──────┼──→ Apprise API ───→ Pushover "Homelab" app (infrastructure, Time Sensitive)
-Diun (nextcloud-vm) ──┤   (docker-vm)  ───→ Pushover "cc-media-feed" app (media, silent)
-smartd (all physical) ─┤                ───→ Email (iCloud SMTP)
-apcupsd (proxmox) ────┤
-Sonarr/Radarr ────────┤ (native Apprise connection, media-feed tag)
-Jellyseerr ────────────┘ (webhook, media-requests tag)
+Diun (container updates) ──┐
+smartd (disk health) ──────┤
+apcupsd (UPS power) ───────┤
+auto-updates (weekly) ─────┼──→ Apprise API ───→ Pushover "Homelab" app (infrastructure, Time Sensitive)
+network-watchdog (recovery)┤   (docker-vm)  ───→ Pushover "cc-media-feed" app (media, silent)
+Sonarr/Radarr (grabs) ─────┤                ───→ Email (iCloud SMTP)
+Jellyseerr (requests) ─────┘
 
 Sonarr/Radarr ──→ Discord (native connection, rich embeds with poster art)
 ```
@@ -872,7 +872,8 @@ Automatic recovery after router/WiFi restarts is handled by `playbooks/network-r
 - After 3 gateway failures: Restarts networking/DHCP
 - After 5 Tailscale failures: Restarts tailscaled
 - After 5 DHCP recovery failures: Reboots (with backoff) if router is reachable
-- On recovery: Restarts all docker compose stacks (`docker compose restart`) to clear stale connection state, remounts NFS
+- On recovery: Sends Apprise push notification, restarts all docker compose stacks (`docker compose restart`) to clear stale connection state, remounts NFS
+- Notifications are best-effort (network may be down when sending); most reliable for Tailscale recovery notifications
 
 **Router Reachability Check**: Before auto-rebooting for DHCP failures, the watchdog checks if the router is actually reachable (to avoid boot loops during real outages). Uses a multi-layered approach that works in all environments:
 1. **Carrier check** - If physical link is down, skip reboot (network outage)
@@ -1054,8 +1055,8 @@ Current config:
 | `playbooks/apcupsd.yml` | UPS monitoring with Apprise push alerts (pve-m70q master, other nodes as network slaves) |
 | `playbooks/ssh-hardening.yml` | SSH security configuration (key auth, disable password) |
 | `playbooks/bootstrap.yml` | Initial admin user/SSH setup (run as root first time, supports Debian and Arch) |
-| `playbooks/auto-updates.yml` | Systemd timer for scheduled updates |
-| `playbooks/network-recovery.yml` | Network watchdog and Tailscale online target for auto-recovery |
+| `playbooks/auto-updates.yml` | Systemd timer for scheduled updates with Apprise push notifications |
+| `playbooks/network-recovery.yml` | Network watchdog and Tailscale online target with Apprise push notifications on recovery/reboot |
 | `playbooks/wifi.yml` | WiFi powersave disable, optional PCI FLR or module reload resume fix |
 | `playbooks/restic.yml` | Backblaze B2 offsite backup configuration |
 | `playbooks/local-restic.yml` | Local backups to ts440 ZFS (hourly) |
@@ -1091,7 +1092,9 @@ Current config:
 | `templates/mergerfs-media.mount.j2` | MergerFS systemd mount unit |
 | `templates/avahi-timemachine.service.j2` | Avahi mDNS advertisement for Time Machine |
 | `templates/docker-stacks.service.j2` | Systemd service to start Docker stacks (depends on tailscale-online.target) |
-| `templates/network-watchdog.sh.j2` | Network watchdog script with Proxmox bridge fix |
+| `templates/auto-updates-debian.sh.j2` | Debian auto-updates script with Apprise notifications |
+| `templates/auto-updates-arch.sh.j2` | Arch auto-updates script with Apprise notifications |
+| `templates/network-watchdog.sh.j2` | Network watchdog script with Proxmox bridge fix and Apprise notifications |
 | `templates/gluetun-watchdog.sh.j2` | Gluetun VPN crash loop watchdog script |
 | `templates/proxmox-virtiofs-directory.cfg.j2` | VirtioFS directory mappings for Proxmox |
 | `templates/proxmox-cluster-firewall.fw.j2` | Datacenter firewall (IP sets, security groups) |
