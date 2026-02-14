@@ -1,14 +1,16 @@
 # Homelab Ansible
 
-> **Last updated:** 2026-02-11
+> **Last updated:** 2026-02-13
 
-Ansible automation for Johnny's homelab infrastructure (4 Proxmox nodes, 5 VMs/LXCs, Pi orchestrator, gaming workstation, ThinkPad laptop, MacBook).
+Ansible automation for Johnny's homelab infrastructure (4 Proxmox nodes, 6 VMs/LXCs, Ansible controller LXC, gaming workstation, ThinkPad laptop, MacBook).
+
+**Repository**: https://github.com/johnnynalley/homelab-ansible (public)
 
 ## Quick Start
 
 ```bash
-# From the repo directory (on pi5-01)
-cd /srv/configs/ansible/homelab-ansible
+# From the repo directory (on ansible-lxc)
+cd ~/homelab-ansible
 
 # Run a specific playbook
 ansible-playbook playbooks/packages.yml
@@ -44,7 +46,7 @@ homelab-ansible/
 │   │   ├── vms/                # Virtual machines (qemu-guest-agent)
 │   │   ├── lxcs/               # LXC containers
 │   │   ├── vms_lxcs/           # Shared VM+LXC configs
-│   │   ├── orchestrator/       # Pi5 controller
+│   │   ├── orchestrator/       # Ansible controller (ansible-lxc)
 │   │   └── backup_clients/     # Hosts with restic backups
 │   └── host_vars/
 │       ├── ts440/              # Per-host overrides
@@ -80,6 +82,7 @@ homelab-ansible/
 │   ├── gluetun-watchdog.yml    # Gluetun VPN crash loop watchdog
 │   ├── virtiofs.yml            # VirtioFS shares (Proxmox → VMs)
 │   ├── rclone-sync.yml         # rclone OneDrive → Nextcloud sync (macbook-pro/pi5-01)
+│   ├── git-sync.yml            # Auto-pull from GitHub on ts440 (for Nextcloud)
 │   └── proxmox-firewall.yml    # Proxmox firewall rules (datacenter/node/VM)
 ├── tasks/
 │   ├── locale.yml              # Debian locale setup
@@ -124,7 +127,7 @@ managed_hosts
 │   │   ├── vms_lxcs
 │   │   │   ├── vms (docker-vm, media-vm, nextcloud-vm) ← gets qemu-guest-agent
 │   │   │   └── lxcs (homebridge-lxc, syncthing-lxc)
-│   │   ├── orchestrator (pi5-01)
+│   │   ├── orchestrator (ansible-lxc, pi5-01)
 │   │   └── jn-t14s-lin ← ThinkPad T14s (Kubuntu)
 │   └── arch_hosts (jn-desktop) ← CachyOS gaming workstation
 └── macos_hosts (macbook-pro)
@@ -178,7 +181,7 @@ backup_clients
 
 ## SSH Authentication
 
-Ansible uses a dedicated passwordless SSH key (`~/.ssh/ansible_ed25519` on pi5-01) for all hosts, configured in `ansible.cfg` as `private_key_file`.
+Ansible uses a dedicated passwordless SSH key (`~/.ssh/ansible_ed25519` on ansible-lxc) for all hosts, configured in `ansible.cfg` as `private_key_file`.
 
 - **Linux hosts**: Tailscale SSH is the primary transport; the dedicated key is a fallback if Tailscale is down
 - **macOS (macbook-pro)**: Tailscale SSH doesn't work (App Store sandboxed build), so it uses the dedicated key exclusively. SSH is restricted to Tailscale only via `ListenAddress` in sshd_config
@@ -239,7 +242,7 @@ Packages are merged from multiple sources (all applicable variables combined):
 | `packages_arch_workstations_extra` | Arch workstations | nextcloud-client, localsend, discord |
 | `packages_debian_workstations_extra` | Debian workstations | nextcloud-desktop, flatpak |
 | `flatpak_workstations` | Debian workstations | Discord, LocalSend (Flathub IDs) |
-| `packages_orchestrator_extra` | Pi5 | ansible, nfs-common |
+| `packages_orchestrator_extra` | Orchestrator | ansible, nfs-common |
 | `packages_host_extra` | Per-host | (custom per host) |
 
 ## Playbook Reference
@@ -267,6 +270,7 @@ Packages are merged from multiple sources (all applicable variables combined):
 | `gluetun-watchdog.yml` | media-vm | Gluetun VPN crash loop detection and auto-restart |
 | `virtiofs.yml` | `proxmox_nodes`, `vms` | Configure VirtioFS shares between Proxmox hosts and VMs |
 | `rclone-sync.yml` | `managed_hosts` | rclone sync from OneDrive to Nextcloud (macbook-pro via launchd, pi5-01 via systemd) |
+| `git-sync.yml` | `nas_server` | Auto-pull from GitHub every 5 minutes (Nextcloud External Storage) |
 | `proxmox-firewall.yml` | `proxmox_nodes` | Deploy Proxmox firewall rules (datacenter, node, VM/CT) |
 
 ## NFS Configuration
@@ -292,7 +296,8 @@ TS440 serves NFS exports via Tailscale. VMs have been migrated to local config s
 - media-vm: `/opt/media-stack/` (uses VirtioFS for media access)
 - nextcloud-vm: `/opt/nextcloud/` (uses VirtioFS for data storage)
 
-Ansible repo on pi5-01: `/srv/configs/ansible/homelab-ansible`
+Ansible repo on ansible-lxc: `~/homelab-ansible`
+Legacy copy on pi5-01: `/srv/configs/ansible/homelab-ansible` (NFS from ts440, auto-synced from GitHub)
 
 ## Samba Configuration
 
@@ -552,9 +557,9 @@ setfacl -R -d -m o::r /srv/nas-zfs/configs
 
 ## Ansible Environment
 
-Ansible runs on pi5-01 using Debian 12's packaged version (`ansible-core` 2.14). Some newer collection modules aren't available, so `docker-stacks.yml` uses shell commands instead of `community.docker.docker_compose_v2` for better compatibility.
+Ansible runs on ansible-lxc (CT 104 on pve-m70q, Ubuntu 25.04) with `ansible-core` 2.18. The repo clone is at `~/homelab-ansible` on ansible-lxc.
 
-**Future consideration**: Migrate Ansible to a dedicated Ubuntu LXC for access to newer Ansible versions and collection features.
+ts440 auto-pulls from GitHub every 5 minutes (`git-sync.timer`) to keep the Nextcloud External Storage copy current.
 
 ## Tips
 

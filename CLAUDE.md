@@ -1,6 +1,6 @@
 # CLAUDE.md
 
-> **Last updated:** 2026-02-11
+> **Last updated:** 2026-02-13
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
@@ -8,8 +8,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Ansible automation for a homelab infrastructure consisting of:
 - 4 Proxmox hypervisors (ts440, pve-alto, pve-herc, pve-m70q)
-- 5 VMs/LXC containers (docker-vm, media-vm, nextcloud-vm, homebridge-lxc, syncthing-lxc)
-- 1 Raspberry Pi 5 orchestrator (pi5-01) running Ansible locally
+- 6 VMs/LXC containers (docker-vm, media-vm, nextcloud-vm, ansible-lxc, homebridge-lxc, syncthing-lxc)
+- 1 Ansible controller LXC (ansible-lxc, CT 104 on pve-m70q) running Ansible locally
+- 1 Raspberry Pi 5 (pi5-01)
 - 1 CachyOS gaming workstation (jn-desktop)
 - 1 Kubuntu laptop (jn-t14s-lin) — ThinkPad T14s, dual-boot with Windows
 - 1 macOS workstation (macbook-pro)
@@ -32,7 +33,27 @@ All hosts communicate via Tailscale VPN (100.x.x.x addresses).
 
 If a package exists in the system repos, add it to the appropriate `packages_*` variable. If a service needs configuration, create or update the relevant playbook/task file.
 
+## Git Workflow
+
+The repository is hosted on GitHub (public): https://github.com/johnnynalley/homelab-ansible
+
+**ansible-lxc** (CT 104 on pve-m70q, Ubuntu 25.04) is the Ansible controller. The working clone lives at `~/homelab-ansible` on ansible-lxc. All Ansible commands should be run from there.
+
+**Workflow:**
+1. Make changes on ansible-lxc (`~/homelab-ansible`)
+2. Commit and push to GitHub
+3. ts440 automatically pulls every 5 minutes via `git-sync.timer` (deployed by `playbooks/git-sync.yml`), keeping `/srv/nas-zfs/configs/ansible/homelab-ansible` in sync for Nextcloud External Storage access
+4. pi5-01 still has a copy at `/srv/configs/ansible/homelab-ansible` (via NFS mount from ts440), but it is no longer the controller
+
+**git-sync on ts440:**
+- Systemd timer runs every 5 minutes
+- Pulls latest from GitHub to `/srv/nas-zfs/configs/ansible/homelab-ansible`
+- Keeps Nextcloud External Storage (Configs folder) up to date automatically
+- Deploy with: `ansible-playbook playbooks/git-sync.yml`
+
 ## Common Commands
+
+All commands should be run from ansible-lxc (`~/homelab-ansible`).
 
 ```bash
 # Run all playbooks via site.yml
@@ -67,7 +88,7 @@ ansible <hostname> -m shell -a "command here" --become
 
 ## SSH Authentication
 
-Ansible on pi5-01 uses a **dedicated passwordless SSH key** (`~/.ssh/ansible_ed25519`) for all host connections. This is configured as the default in `ansible.cfg` via `private_key_file`.
+Ansible on ansible-lxc uses a **dedicated passwordless SSH key** (`~/.ssh/ansible_ed25519`) for all host connections. This is configured as the default in `ansible.cfg` via `private_key_file`.
 
 **Two keys are deployed by `bootstrap.yml`:**
 
@@ -98,7 +119,7 @@ ssh-copy-id -i ~/.ssh/ansible_ed25519.pub johnny@<tailscale-ip>
 Host groups form a hierarchy in `inventory/hosts.ini`:
 - `managed_hosts` → all managed systems
   - `linux_hosts` → `debian_hosts` + `arch_hosts`
-    - `debian_hosts`: `proxmox_nodes`, `vms_lxcs` (child groups: `vms` + `lxcs`), `orchestrator`, jn-t14s-lin
+    - `debian_hosts`: `proxmox_nodes`, `vms_lxcs` (child groups: `vms` + `lxcs`), `orchestrator` (ansible-lxc), jn-t14s-lin, pi5-01
     - `arch_hosts`: jn-desktop (CachyOS gaming workstation)
   - `macos_hosts`: macbook-pro
 - `workstations` → **cross-platform group** for desktops/laptops (jn-desktop, jn-t14s-lin, macbook-pro)
@@ -197,7 +218,7 @@ All mounts use `cache=never` to prevent host memory exhaustion.
 **Config Storage**: Application configs have been migrated to local storage on each VM for better performance and independence:
 - **docker-vm**: `/opt/caddy/`, `/opt/vaultwarden/` (no NFS dependencies)
 - **media-vm**: `/opt/media-stack/` (58GB, all media service configs)
-- **nas-zfs/configs**: Only contains `ansible/` directory (this repo), accessed by pi5-01 via NFS
+- **nas-zfs/configs**: Only contains `ansible/` directory (this repo), auto-synced from GitHub via git-sync timer, accessible via Nextcloud External Storage and pi5-01 NFS
 
 **NFS Exports**: ts440 exports storage for clients over Tailscale:
 - `/srv/exports/configs` → pi5-01 (Ansible repo access)
@@ -443,7 +464,7 @@ The 1080p-Anime quality profile groups 1080p and 2160p together, letting CF scor
 
 **Manual sync:**
 ```bash
-# Run from pi5-01
+# Run from ansible-lxc
 ansible media-vm -m shell -a "docker exec recyclarr recyclarr sync" --become
 ```
 
@@ -943,6 +964,7 @@ Current config:
 | `playbooks/gluetun-watchdog.yml` | Gluetun VPN crash loop detection and auto-restart (media-vm) |
 | `playbooks/virtiofs.yml` | Configure VirtioFS shares between Proxmox hosts and VMs |
 | `playbooks/rclone-sync.yml` | rclone sync from OneDrive to Nextcloud (macbook-pro via launchd, pi5-01 via systemd) |
+| `playbooks/git-sync.yml` | Git auto-pull timer on ts440 (syncs GitHub repo every 5 minutes for Nextcloud External Storage) |
 | `playbooks/proxmox-firewall.yml` | Deploy Proxmox firewall rules (datacenter, node, VM/CT) |
 | `tasks/tailscale.yml` | Tailscale VPN installation |
 | `tasks/docker-network.yml` | Ensure Docker networks exist |
@@ -1527,13 +1549,11 @@ Benefits:
 
 ## Ansible Environment
 
-Ansible runs on pi5-01 (Raspberry Pi 5) using Debian 12's packaged version:
-- `ansible` 7.7.0 (collection bundle)
-- `ansible-core` 2.14.18 (runtime)
+Ansible runs on ansible-lxc (CT 104 on pve-m70q, Ubuntu 25.04) with `ansible-core` 2.18. The controller uses `ansible_connection=local` in the `orchestrator` group.
 
-**Limitation**: Debian 12's `ansible-core` 2.14 is older and some newer Ansible collection modules (like `community.docker.docker_compose_v2`) aren't available in the system-packaged collections. The `docker-stacks.yml` playbook uses shell commands instead to avoid collection version dependencies.
+The working repo clone is at `~/homelab-ansible` on ansible-lxc.
 
-**Future consideration**: Migrate Ansible to a dedicated Ubuntu LXC container. Ubuntu typically ships newer Ansible versions and would provide access to latest collection features without manual collection management. This would also isolate Ansible from the Pi's OS updates.
+**Legacy**: pi5-01 previously served as the Ansible controller using Debian 12's packaged `ansible-core` 2.14. It is now a regular managed host. The repo copy at `/srv/configs/ansible/homelab-ansible` (via NFS from ts440) remains accessible but is read-only (auto-synced from GitHub by git-sync timer).
 
 ## Vault Setup
 
