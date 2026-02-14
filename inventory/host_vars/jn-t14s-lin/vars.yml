@@ -10,3 +10,6 @@ ansible_become_flags: "-S"
 
 # network_watchdog_enabled and auto_updates_enabled inherited from
 # group_vars/workstations/vars.yml
+
+# SMART disk monitoring
+smartd_enabled: true

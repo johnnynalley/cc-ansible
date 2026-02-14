@@ -587,13 +587,15 @@ cat /var/lib/gluetun-watchdog/restart_log
 
 #### Notification Stack (Diun + Apprise + ntfy)
 
-Centralized notification system for Docker container image updates, with support for push notifications and email.
+Centralized notification system for infrastructure alerts (SMART disk errors, UPS power events, Docker image updates), with push notifications and email routing.
 
 **Architecture:**
 ```
 Diun (docker-vm) ─────┐
-Diun (media-vm) ──────┼──→ Apprise API ───→ ntfy (phone push)
-Diun (nextcloud-vm) ──┘   (docker-vm)  ───→ Email (iCloud SMTP)
+Diun (media-vm) ──────┼──→ Apprise API ───→ ntfy (phone push via upstream relay)
+Diun (nextcloud-vm) ──┤   (docker-vm)  ───→ Email (iCloud SMTP)
+smartd (all physical) ─┤
+apcupsd (proxmox) ─────┘
 ```
 
 **Components:**
@@ -610,24 +612,34 @@ Diun (nextcloud-vm) ──┘   (docker-vm)  ───→ Email (iCloud SMTP)
 - Watch schedule: every 6 hours (`0 */6 * * *`) with 30s jitter
 - Docker provider: `watchByDefault: true` (monitors all running containers)
 - `firstCheckNotif: false` — only notifies on actual updates, not first scan
+- Sends with `tags: [push]` so only ntfy is triggered (not email)
 - docker-vm Diun reaches Apprise at `http://apprise:8000` (Docker network)
 - media-vm/nextcloud-vm Diun reaches Apprise at `https://apprise.jnalley.me` (via Caddy)
 
-**Apprise Configuration** (`/opt/notifications/apprise-config/diun.cfg`):
+**Apprise Configuration** (`/opt/notifications/apprise-config/notifications.cfg`):
 - `APPRISE_STATEFUL_MODE=simple` — human-readable config files at `/config/`
-- Config key `diun` maps to file `/config/diun.cfg` (TEXT format, one URL per line)
-- Contains ntfy and email notification URLs (email credentials — treat as secret)
+- Config key `notifications` maps to file `/config/notifications.cfg` (TEXT format)
+- Contains tagged notification URLs (email credentials — treat as secret)
+
+**Tag routing:**
+- `push` tag → ntfy (`compute-corner` topic)
+- `email` tag → email (iCloud SMTP)
+- Both tags or no tag → all targets
+
+Apps control routing by specifying tags when sending. Diun uses `tags: [push]` for ntfy-only. smartd and apcupsd use `apprise_alert_tags` variable (default: `push`). To add email for critical alerts, change to `push,email` in `group_vars/all/vars.yml`.
 
 **Apprise email URL format note**: When the SMTP username contains `@`, use the `?user=` query parameter format instead of embedding in the URL path. Apprise's URL serialization loses `%40` encoding when stored via the API, causing authentication failures. The query parameter approach (`mailtos://domain?user=...&pass=...&smtp=host`) is reliable.
 
 **ntfy Configuration** (`/opt/notifications/ntfy/server.yml`):
 - Listens on port 1025 (internal), reverse proxied by Caddy at `ntfy.jnalley.me`
 - `behind-proxy: true` for correct client IP logging
-- Topic: `container-updates` (subscribe in ntfy app)
+- `upstream-base-url: "https://ntfy.sh"` — required for iOS push notifications (relays poll requests through ntfy.sh's APNs credentials; actual message content is fetched directly from our server)
+- Topic: `compute-corner` (subscribe in ntfy app)
 
 **Access:**
 - ntfy web UI: `https://ntfy.jnalley.me`
 - Apprise web UI: `https://apprise.jnalley.me`
+- Apprise config UI: `https://apprise.jnalley.me/cfg/notifications`
 - Apprise health: `https://apprise.jnalley.me/status`
 
 **Verification:**
@@ -637,16 +649,18 @@ ansible docker-vm -m shell -a "docker exec diun diun notif test" --become
 ansible media-vm -m shell -a "docker exec diun diun notif test" --become
 
 # Check Apprise config is loaded
-curl -s https://apprise.jnalley.me/json/urls/diun/?privacy=1
+curl -s https://apprise.jnalley.me/json/urls/notifications/?privacy=1
 
 # Check ntfy messages
-curl -s "https://ntfy.jnalley.me/container-updates/json?poll=1&since=1h"
+curl -s "https://ntfy.jnalley.me/compute-corner/json?poll=1&since=1h"
 
 # View Diun logs (which images were checked)
 ansible docker-vm -m shell -a "docker logs diun --tail 20 2>&1" --become
 ```
 
-**Adding new notification targets**: Edit `/opt/notifications/apprise-config/diun.cfg` on docker-vm and restart Apprise (`docker compose restart apprise` in `/opt/notifications/`). Apprise supports 90+ services — see [Apprise wiki](https://github.com/caronc/apprise/wiki) for URL formats.
+**Adding new notification targets**: Edit `/opt/notifications/apprise-config/notifications.cfg` on docker-vm and restart Apprise (`docker compose restart apprise` in `/opt/notifications/`). Apprise supports 90+ services — see [Apprise wiki](https://github.com/caronc/apprise/wiki) for URL formats.
+
+**Adding a new app**: Point its webhook at `https://apprise.jnalley.me/notify/notifications` with `tag` in the POST body to control routing. Use `push` for ntfy only, `email` for email only, or both.
 
 #### Reverse Proxy (Caddy on docker-vm)
 
@@ -1013,8 +1027,8 @@ Current config:
 | `site.yml` | Master playbook that imports packages, msmtp, smartmontools, apcupsd, ssh-hardening, auto-updates, network-recovery, wifi, restic, local-restic, nfs, filesystem-mounts, samba, mergerfs, zfs-snapshots, virtiofs, docker-stacks, gluetun-watchdog, rclone-sync, storage-status, proxmox-firewall |
 | `playbooks/packages.yml` | Multi-platform package installation |
 | `playbooks/msmtp.yml` | Lightweight SMTP relay (iCloud) for system email alerts |
-| `playbooks/smartmontools.yml` | SMART disk monitoring with email alerts |
-| `playbooks/apcupsd.yml` | UPS monitoring (pve-m70q master, other nodes as network slaves) |
+| `playbooks/smartmontools.yml` | SMART disk monitoring with Apprise push alerts |
+| `playbooks/apcupsd.yml` | UPS monitoring with Apprise push alerts (pve-m70q master, other nodes as network slaves) |
 | `playbooks/ssh-hardening.yml` | SSH security configuration (key auth, disable password) |
 | `playbooks/bootstrap.yml` | Initial admin user/SSH setup (run as root first time, supports Debian and Arch) |
 | `playbooks/auto-updates.yml` | Systemd timer for scheduled updates |
@@ -1048,8 +1062,9 @@ Current config:
 | `templates/sanoid.conf.j2` | Jinja2 template for sanoid snapshot configuration |
 | `templates/msmtprc.j2` | msmtp SMTP relay configuration |
 | `templates/smartd.conf.j2` | smartmontools monitoring configuration |
+| `templates/smartd-notify.sh.j2` | smartd Apprise notification script (called via `-M exec`) |
 | `templates/apcupsd.conf.j2` | apcupsd UPS daemon configuration (master/slave) |
-| `templates/apcupsd-event-notify.sh.j2` | apcupsd email notification script |
+| `templates/apcupsd-event-notify.sh.j2` | apcupsd Apprise notification script (replaces sendmail) |
 | `templates/mergerfs-media.mount.j2` | MergerFS systemd mount unit |
 | `templates/avahi-timemachine.service.j2` | Avahi mDNS advertisement for Time Machine |
 | `templates/docker-stacks.service.j2` | Systemd service to start Docker stacks (depends on tailscale-online.target) |

@@ -64,8 +64,8 @@ homelab-ansible/
 ├── playbooks/
 │   ├── packages.yml            # Multi-platform package installation
 │   ├── msmtp.yml               # SMTP relay (iCloud) for system email
-│   ├── smartmontools.yml       # SMART disk monitoring with alerts
-│   ├── apcupsd.yml             # UPS monitoring (master/slave)
+│   ├── smartmontools.yml       # SMART disk monitoring (Apprise alerts)
+│   ├── apcupsd.yml             # UPS monitoring (Apprise alerts, master/slave)
 │   ├── bootstrap.yml           # Initial user/SSH setup (Debian + Arch)
 │   ├── ssh-hardening.yml       # SSH security configuration
 │   ├── auto-updates.yml        # Scheduled system updates
@@ -103,7 +103,8 @@ homelab-ansible/
 │   ├── msmtprc.j2              # msmtp SMTP relay config
 │   ├── smartd.conf.j2          # smartd monitoring config
 │   ├── apcupsd.conf.j2         # apcupsd daemon config (master/slave)
-│   ├── apcupsd-event-notify.sh.j2  # apcupsd email notification
+│   ├── apcupsd-event-notify.sh.j2  # apcupsd Apprise notification
+│   ├── smartd-notify.sh.j2     # smartd Apprise notification
 │   ├── mergerfs-media.mount.j2 # MergerFS systemd mount unit
 │   ├── avahi-timemachine.service.j2  # Time Machine mDNS advertisement
 │   ├── docker-stacks.service.j2  # Docker stacks systemd service
@@ -252,8 +253,8 @@ Packages are merged from multiple sources (all applicable variables combined):
 | `site.yml` | varies | Run all playbooks in order |
 | `packages.yml` | `managed_hosts` | Install baseline packages (multi-platform) |
 | `msmtp.yml` | `linux_hosts` | SMTP relay for system email (iCloud) |
-| `smartmontools.yml` | `linux_hosts` | SMART disk monitoring with email alerts |
-| `apcupsd.yml` | `proxmox_nodes` | UPS monitoring (pve-m70q master, others slave) |
+| `smartmontools.yml` | `linux_hosts` | SMART disk monitoring with Apprise push alerts |
+| `apcupsd.yml` | `proxmox_nodes` | UPS monitoring with Apprise push alerts (pve-m70q master, others slave) |
 | `bootstrap.yml` | `linux_hosts` | Create admin user, SSH keys, sudo setup (Debian + Arch) |
 | `ssh-hardening.yml` | `linux_hosts` | SSH security (key auth, disable password) |
 | `auto-updates.yml` | `linux_hosts` | Configure automatic updates + reboot |
@@ -602,27 +603,32 @@ cat ~/Library/Logs/rclone-sync.log
 rclone config reconnect nextcloud:
 ```
 
-## Notification Stack (Diun + Apprise + ntfy)
+## Notification Stack (Apprise + ntfy)
 
-Container image update notifications across all Docker VMs, routed through a centralized Apprise API.
+Centralized notification router for infrastructure alerts using tag-based routing.
 
 ```
-Diun (docker-vm/media-vm/nextcloud-vm) → Apprise API (docker-vm) → ntfy + Email
+Diun (container updates) ──┐
+smartd (disk health) ──────┼──→ Apprise API (docker-vm) → ntfy push / Email
+apcupsd (UPS power) ───────┘
 ```
 
-- **Diun**: Checks registries every 6 hours for newer images, notifies via Apprise
-- **Apprise API**: Notification router at `/opt/notifications/` on docker-vm. Config at `apprise-config/diun.cfg`
-- **ntfy**: Push notification server at `/opt/notifications/` on docker-vm. Subscribe to `container-updates` topic in the ntfy app
-- **Diun configs**: `/opt/diun/diun.yml` on each VM. docker-vm uses Docker network (`http://apprise:8000`), others use Caddy (`https://apprise.jnalley.me`)
+- **Apprise API**: Notification router at `/opt/notifications/` on docker-vm. Config at `apprise-config/notifications.cfg`
+- **ntfy**: Push notification server at `/opt/notifications/` on docker-vm. Subscribe to `compute-corner` topic in the ntfy app. Uses `upstream-base-url: "https://ntfy.sh"` for iOS push via APNs
+- **Diun**: Container image update notifier on all Docker VMs (`/opt/diun/`), sends with `push` tag
+- **smartd**: SMART disk alerts on Proxmox nodes + workstations, sends via `/usr/local/bin/smartd-notify` script
+- **apcupsd**: UPS power alerts on Proxmox nodes, sends via `/etc/apcupsd/event-notify.sh` script
+- **Tag routing**: `push` → ntfy, `email` → email, both/no tag → all targets
+- **Adding apps**: POST to `https://apprise.jnalley.me/notify/notifications` with `tag` field for routing
 
 ```bash
 # Test notifications
 ansible docker-vm -m shell -a "docker exec diun diun notif test" --become
 
 # Check ntfy messages
-curl -s "https://ntfy.jnalley.me/container-updates/json?poll=1&since=1h"
+curl -s "https://ntfy.jnalley.me/compute-corner/json?poll=1&since=1h"
 
-# Add notification targets: edit /opt/notifications/apprise-config/diun.cfg on docker-vm
+# Edit targets: /opt/notifications/apprise-config/notifications.cfg on docker-vm
 # Then restart: cd /opt/notifications && docker compose restart apprise
 ```
 

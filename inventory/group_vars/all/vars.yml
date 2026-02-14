@@ -38,6 +38,11 @@ msmtp_smtp_host: smtp.mail.me.com
 msmtp_smtp_port: 587
 msmtp_default_recipient: jn@jnalley.me
 
+# Apprise notification router (centralized alerts)
+apprise_endpoint: "https://apprise.jnalley.me"
+apprise_token: "notifications"
+apprise_alert_tags: "push"
+
 # SMART monitoring defaults (disabled by default, enabled per-group)
 smartd_enabled: false
 smartd_alert_email: root

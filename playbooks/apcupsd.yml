@@ -55,7 +55,7 @@
         owner: root
         group: root
         mode: "0755"
-      when: apcupsd_email_enabled | default(false)
+      when: apcupsd_notify_enabled | default(false)
 
     - name: Configure apcupsd event hooks
       ansible.builtin.copy:
@@ -72,7 +72,7 @@
         - offbattery
         - commfailure
         - commok
-      when: apcupsd_email_enabled | default(false)
+      when: apcupsd_notify_enabled | default(false)
 
     - name: Ensure apcupsd is enabled and running
       ansible.builtin.systemd:

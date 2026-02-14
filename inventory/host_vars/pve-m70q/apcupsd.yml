@@ -12,5 +12,5 @@ apcupsd_device: ""
 apcupsd_nisip: "0.0.0.0"
 apcupsd_netserver: "on"
 
-# Email alerts on power events
-apcupsd_email_enabled: true
+# Apprise notifications on power events
+apcupsd_notify_enabled: true

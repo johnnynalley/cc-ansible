@@ -5,5 +5,3 @@
 # Enable msmtp mail relay for system notifications
 msmtp_enabled: true
 
-# Enable SMART disk monitoring
-smartd_enabled: true

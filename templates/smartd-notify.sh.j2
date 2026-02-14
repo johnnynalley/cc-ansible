@@ -1,0 +1,36 @@
+#!/bin/bash
+# smartd notification via Apprise - Managed by Ansible
+# Called by smartd via -M exec when a SMART issue is detected
+#
+# Environment variables set by smartd:
+#   SMARTD_DEVICE      - Device path (e.g., /dev/sda)
+#   SMARTD_DEVICETYPE  - Device type
+#   SMARTD_FAILTYPE    - Failure type (e.g., CurrentPendingSector, Temperature)
+#   SMARTD_MESSAGE     - Short failure description
+#   SMARTD_ADDRESS     - Value from -m flag
+#   stdin              - Full message body
+
+APPRISE_ENDPOINT="{{ apprise_endpoint }}"
+APPRISE_TOKEN="{{ apprise_token }}"
+APPRISE_TAGS="{{ apprise_alert_tags }}"
+
+HOSTNAME=$(hostname)
+DEVICE="${SMARTD_DEVICE:-unknown}"
+FAILTYPE="${SMARTD_FAILTYPE:-Unknown}"
+
+# Read full message from stdin
+MESSAGE=$(cat)
+
+TITLE="[SMART] ${HOSTNAME}: ${FAILTYPE} on ${DEVICE}"
+
+curl -sf -o /dev/null \
+  -X POST "${APPRISE_ENDPOINT}/notify/${APPRISE_TOKEN}" \
+  --form-string "title=${TITLE}" \
+  --form-string "body=${MESSAGE}" \
+  --form-string "tag=${APPRISE_TAGS}" \
+  --form-string "type=warning" \
+  --max-time 30 \
+  --retry 3 \
+  --retry-delay 5
+
+exit $?

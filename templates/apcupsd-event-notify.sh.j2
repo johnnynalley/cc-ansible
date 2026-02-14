@@ -1,34 +1,49 @@
 #!/bin/bash
 # apcupsd event notification script - Managed by Ansible
-# Sends email notifications for UPS events via msmtp
+# Sends notifications for UPS events via Apprise
 
 EVENT="$1"
 HOSTNAME=$(hostname)
-MAILTO="{{ apcupsd_alert_email | default('root') }}"
-FROM="{{ msmtp_from_address | default('jn@jnalley.me') }}"
 
-send_mail() {
+APPRISE_ENDPOINT="{{ apprise_endpoint }}"
+APPRISE_TOKEN="{{ apprise_token }}"
+APPRISE_TAGS="{{ apprise_alert_tags }}"
+
+send_notify() {
     local subject="$1"
     local body="$2"
 
-    printf "Subject: [UPS] %s: %s\nTo: %s\nFrom: %s\n\n%s" \
-        "$HOSTNAME" "$subject" "$MAILTO" "$FROM" "$body" | /usr/sbin/sendmail "$MAILTO"
+    curl -sf -o /dev/null \
+      -X POST "${APPRISE_ENDPOINT}/notify/${APPRISE_TOKEN}" \
+      --form-string "title=[UPS] ${HOSTNAME}: ${subject}" \
+      --form-string "body=${body}" \
+      --form-string "tag=${APPRISE_TAGS}" \
+      --form-string "type=warning" \
+      --max-time 30 \
+      --retry 3 \
+      --retry-delay 5
 }
 
 case "$EVENT" in
     onbattery)
         STATUS=$(apcaccess status 2>/dev/null || echo "Unable to query status")
-        send_mail "Running on battery power" "UPS is now running on battery power.\n\nUPS Status:\n${STATUS}"
+        send_notify "Running on battery power" "UPS is now running on battery power.
+
+UPS Status:
+${STATUS}"
         ;;
     offbattery)
         STATUS=$(apcaccess status 2>/dev/null || echo "Unable to query status")
-        send_mail "Power restored" "UPS is back on mains power.\n\nUPS Status:\n${STATUS}"
+        send_notify "Power restored" "UPS is back on mains power.
+
+UPS Status:
+${STATUS}"
         ;;
     commfailure)
-        send_mail "Communication failure" "Lost communication with UPS."
+        send_notify "Communication failure" "Lost communication with UPS."
         ;;
     commok)
-        send_mail "Communication restored" "Communication with UPS restored."
+        send_notify "Communication restored" "Communication with UPS restored."
         ;;
 esac
 

@@ -18,5 +18,5 @@ apcupsd_polltime: 60
 apcupsd_batterylevel: 15
 apcupsd_minutes: 7
 
-# Email alerts on power events
-apcupsd_email_enabled: true
+# Apprise notifications on power events
+apcupsd_notify_enabled: true

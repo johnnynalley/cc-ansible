@@ -35,6 +35,15 @@
         state: present
       when: ansible_facts.os_family == "Archlinux"
 
+    - name: Deploy smartd notification script
+      ansible.builtin.template:
+        src: ../templates/smartd-notify.sh.j2
+        dest: /usr/local/bin/smartd-notify
+        owner: root
+        group: root
+        mode: "0755"
+      notify: Restart smartd
+
     - name: Configure smartd
       ansible.builtin.template:
         src: ../templates/smartd.conf.j2

@@ -11,4 +11,4 @@ apcupsd_nisip: "127.0.0.1"
 apcupsd_netserver: "on"
 apcupsd_polltime: 60
 
-apcupsd_email_enabled: true
+apcupsd_notify_enabled: true

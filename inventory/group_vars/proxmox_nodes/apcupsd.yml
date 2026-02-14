@@ -13,6 +13,5 @@ apcupsd_batterylevel: 10
 apcupsd_minutes: 5
 apcupsd_timeout: 0
 
-# Email alerts (requires msmtp)
-apcupsd_email_enabled: false
-apcupsd_alert_email: root
+# Apprise notifications on power events
+apcupsd_notify_enabled: false
