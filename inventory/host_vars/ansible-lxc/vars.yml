@@ -1,0 +1,9 @@
+# =============================================================================
+# ansible-lxc - Host Variables (Ansible Controller, Ubuntu LXC)
+# =============================================================================
+
+admin_user: johnny
+
+# sudo-rs (Ubuntu 25.10+ default) uses a non-standard prompt that Ansible
+# doesn't recognize. -S reads password from stdin instead of tty prompt.
+ansible_become_flags: "-S"

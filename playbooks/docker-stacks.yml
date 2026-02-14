@@ -110,14 +110,14 @@
       changed_when: "'Stopped' in stop_result.stdout"
 
     - name: Prune dangling Docker images
-      ansible.builtin.shell: docker image prune -f
+      community.docker.docker_prune:
+        images: true
       register: prune_result
-      changed_when: "'Total reclaimed space' in prune_result.stdout and 'Total reclaimed space: 0B' not in prune_result.stdout"
 
     - name: Report pruned images
       ansible.builtin.debug:
-        msg: "{{ prune_result.stdout_lines | select('search', 'Total reclaimed') | first | default('No images pruned') }}"
-      when: prune_result.stdout_lines | select('search', 'Total reclaimed') | list | length > 0
+        msg: "Reclaimed {{ prune_result.images_space_reclaimed | default(0) | human_readable }} from {{ prune_result.images | default([]) | length }} image(s)"
+      when: prune_result.images | default([]) | length > 0
 
   handlers:
     - name: Reload systemd

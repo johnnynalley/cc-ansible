@@ -76,7 +76,29 @@
     # =========================================================================
     # Sudo configuration for Ansible
     # =========================================================================
-    - name: Allow sudo without TTY (required for Ansible)
+    - name: Check if host uses sudo-rs
+      ansible.builtin.stat:
+        path: /usr/lib/cargo/bin/sudo
+      register: sudo_rs_check
+      tags: [sudo]
+
+    # sudo-rs (Ubuntu 25.10+) doesn't support !requiretty and wraps custom
+    # prompts in [sudo: ...], breaking Ansible's nonce detection. Use NOPASSWD.
+    - name: Configure passwordless sudo for Ansible (sudo-rs)
+      ansible.builtin.copy:
+        content: |
+          # Passwordless sudo for Ansible automation (sudo-rs compatible)
+          # sudo-rs cannot use password-based become with Ansible
+          {{ admin_user }} ALL=(ALL) NOPASSWD: ALL
+        dest: /etc/sudoers.d/ansible-{{ admin_user }}
+        owner: root
+        group: root
+        mode: "0440"
+        validate: "visudo -cf %s"
+      when: sudo_rs_check.stat.exists
+      tags: [sudo]
+
+    - name: Allow sudo without TTY (regular sudo)
       ansible.builtin.copy:
         content: |
           # Allow {{ admin_user }} to use sudo without TTY (required for Ansible)
@@ -87,6 +109,7 @@
         group: root
         mode: "0440"
         validate: "visudo -cf %s"
+      when: not sudo_rs_check.stat.exists
       tags: [sudo]
 
     # =========================================================================

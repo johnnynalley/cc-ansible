@@ -557,7 +557,7 @@ setfacl -R -d -m o::r /srv/nas-zfs/configs
 
 ## Ansible Environment
 
-Ansible runs on ansible-lxc (CT 104 on pve-m70q, Ubuntu 25.04) with `ansible-core` 2.18. The repo clone is at `~/homelab-ansible` on ansible-lxc.
+Ansible runs on ansible-lxc (CT 104 on pve-m70q, Ubuntu 25.10) with `ansible-core` 2.19. The repo clone is at `~/homelab-ansible` on ansible-lxc.
 
 ts440 auto-pulls from GitHub every 5 minutes (`git-sync.timer`) to keep the Nextcloud External Storage copy current.
 

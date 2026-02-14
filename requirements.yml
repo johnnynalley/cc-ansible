@@ -8,3 +8,11 @@ collections:
   # AUR package management for Arch Linux hosts
   - name: kewlfft.aur
     version: ">=0.13.0"
+
+  # Docker container and network management
+  - name: community.docker
+    version: ">=4.0.0"
+
+  # General modules (homebrew, pacman, etc.)
+  - name: community.general
+    version: ">=10.0.0"

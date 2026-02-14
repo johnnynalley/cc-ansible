@@ -923,7 +923,7 @@ Host vars in `inventory/host_vars/jn-t14s-lin/`:
 
 **sudo-rs Compatibility:**
 
-Kubuntu 25.10 ships `sudo-rs` (Rust implementation) as the default sudo. sudo-rs uses a different prompt format (`[sudo: authenticate] Password:`) that Ansible's become plugin doesn't recognize. Workaround: passwordless sudo via `/etc/sudoers.d/ansible-johnny` with `NOPASSWD: ALL`. The `ansible_become_flags: "-S"` is set in host_vars to use stdin mode.
+Ubuntu 25.10+ ships `sudo-rs` (Rust implementation) as the default sudo. sudo-rs doesn't support `!requiretty` and wraps custom prompts in `[sudo: ...]`, breaking Ansible's become nonce detection. The `bootstrap.yml` playbook automatically detects sudo-rs (checks for `/usr/lib/cargo/bin/sudo`) and deploys `NOPASSWD: ALL` instead of `!requiretty`. Hosts with sudo-rs also need `ansible_become_flags: "-S"` in host_vars.
 
 **WiFi (Qualcomm QCNFA765 / ath11k_pci):**
 
@@ -1549,7 +1549,7 @@ Benefits:
 
 ## Ansible Environment
 
-Ansible runs on ansible-lxc (CT 104 on pve-m70q, Ubuntu 25.04) with `ansible-core` 2.18. The controller uses `ansible_connection=local` in the `orchestrator` group.
+Ansible runs on ansible-lxc (CT 104 on pve-m70q, Ubuntu 25.10) with `ansible-core` 2.19. The controller uses `ansible_connection=local` in the `orchestrator` group. Key collections: `community.docker` 4.6.1, `community.general` 11.1.0, `kewlfft.aur` 0.13.0.
 
 The working repo clone is at `~/homelab-ansible` on ansible-lxc.
 

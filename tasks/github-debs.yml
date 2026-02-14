@@ -17,8 +17,11 @@
   tags: [packages, apt, deb]
 
 - name: Get latest version from GitHub API
-  ansible.builtin.shell: |
-    curl -fsSL -H "Accept: application/vnd.github.v3+json" "{{ item.item.api }}" | python3 -c "import sys,json; print(json.load(sys.stdin)['tag_name'])"
+  ansible.builtin.uri:
+    url: "{{ item.item.api }}"
+    return_content: true
+    headers:
+      Accept: application/vnd.github.v3+json
   register: deb_latest_versions
   loop: "{{ deb_installed_versions.results | default([]) }}"
   when: item is not skipped
@@ -31,5 +34,5 @@
   loop: "{{ deb_latest_versions.results | default([]) }}"
   when:
     - item is not skipped
-    - item.item.stdout != (item.stdout | regex_replace('^v', ''))
+    - item.item.stdout != (item.json.tag_name | regex_replace('^v', ''))
   tags: [packages, apt, deb]
