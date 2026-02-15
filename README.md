@@ -1,6 +1,6 @@
 # Homelab Ansible
 
-> **Last updated:** 2026-02-14
+> **Last updated:** 2026-02-15
 
 Ansible automation for Johnny's homelab infrastructure (4 Proxmox nodes, 6 VMs/LXCs, Ansible controller LXC, gaming workstation, ThinkPad laptop, MacBook).
 
@@ -340,6 +340,7 @@ ansible ts440 -m shell -a "pdbedit -L" --become
 Automatic recovery after router/WiFi restarts via `network-recovery.yml`:
 
 - **Network Watchdog** runs every 60 seconds:
+  - Ensures interfaces are UP (catches link flaps where carrier recovers but interface stays DOWN)
   - Fixes Proxmox bridge interfaces that got detached (`eno1` removed from `vmbr0`)
   - Restarts networking/DHCP after gateway failures
   - Restarts Tailscale after connectivity failures

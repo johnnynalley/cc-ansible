@@ -1,6 +1,6 @@
 # CLAUDE.md
 
-> **Last updated:** 2026-02-14
+> **Last updated:** 2026-02-15
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
@@ -159,7 +159,7 @@ Package lists follow naming convention: `packages_linux_common`, `packages_debia
 
 TS440 is the primary NAS server with a complex storage stack. Key components:
 
-**ZFS Pool**: Primary storage at `/srv/nas-zfs` containing configs, media, and other data. ZFS performance degrades above 80% capacity - keep pools under this threshold.
+**ZFS Pool**: Primary storage at `/srv/nas-zfs` on a 2x 8TB Seagate ST8000NM0055 mirror (~7.3TB usable). Contains configs, media, and other data. ZFS performance degrades above 80% capacity - keep pools under this threshold.
 
 **MergerFS Media Pool**: `/srv/media` aggregates multiple storage sources:
 - `/srv/nas-01/media` (2TB Lacie SSD)
@@ -866,6 +866,7 @@ rclone config reconnect nextcloud:
 Automatic recovery after router/WiFi restarts is handled by `playbooks/network-recovery.yml`. This deploys two components to Linux servers (excludes `workstations` group):
 
 **Network Watchdog** (`network-watchdog.timer`): Runs every 60 seconds and:
+- Ensures primary interface and bridge ports are UP (catches link flaps where carrier recovers but interface stays DOWN)
 - Checks gateway connectivity (pings router)
 - Checks Tailscale connectivity (pings 100.100.100.100)
 - On Proxmox hosts: Fixes bridge interfaces that got detached (common issue when router restarts - `eno1` gets removed from `vmbr0`)
@@ -883,7 +884,7 @@ Automatic recovery after router/WiFi restarts is handled by `playbooks/network-r
 **Tailscale Online Target** (`tailscale-online.target`): A systemd target that only activates when Tailscale is actually connected (not just the daemon running). Services like `docker-stacks.service` depend on this instead of `tailscaled.service`.
 
 Key files:
-- `templates/network-watchdog.sh.j2` - Watchdog script with Proxmox bridge fix and router reachability check
+- `templates/network-watchdog.sh.j2` - Watchdog script with interface UP check, Proxmox bridge fix, and router reachability check
 - `playbooks/network-recovery.yml` - Deploys watchdog and tailscale-online target (hosts: `linux_hosts:!workstations`)
 
 Troubleshooting network issues:
@@ -1094,7 +1095,7 @@ Current config:
 | `templates/docker-stacks.service.j2` | Systemd service to start Docker stacks (depends on tailscale-online.target) |
 | `templates/auto-updates-debian.sh.j2` | Debian auto-updates script with Apprise notifications |
 | `templates/auto-updates-arch.sh.j2` | Arch auto-updates script with Apprise notifications |
-| `templates/network-watchdog.sh.j2` | Network watchdog script with Proxmox bridge fix and Apprise notifications |
+| `templates/network-watchdog.sh.j2` | Network watchdog script with interface UP check, Proxmox bridge fix, and Apprise notifications |
 | `templates/gluetun-watchdog.sh.j2` | Gluetun VPN crash loop watchdog script |
 | `templates/proxmox-virtiofs-directory.cfg.j2` | VirtioFS directory mappings for Proxmox |
 | `templates/proxmox-cluster-firewall.fw.j2` | Datacenter firewall (IP sets, security groups) |
