@@ -1,0 +1,351 @@
+#!/usr/bin/env python3
+
+# mergerfs-balance - Balance files across mergerfs branches (ZFS-compatible)
+#
+# Auto-discovers branches from a mergerfs mount. Uses zfs list for accurate
+# space reporting on ZFS datasets (statvfs reports total=available without
+# quotas, making ZFS branches appear 100% free).
+#
+# Recalculates source/destination for every file move.
+#
+# Based on mergerfs.balance from mergerfs-tools by Antonio SJ Musumeci.
+
+import argparse
+import ctypes
+import errno
+import fnmatch
+import io
+import os
+import shlex
+import subprocess
+import sys
+
+
+_libc = ctypes.CDLL("libc.so.6", use_errno=True)
+_lgetxattr = _libc.lgetxattr
+_lgetxattr.argtypes = [
+    ctypes.c_char_p, ctypes.c_char_p, ctypes.c_void_p, ctypes.c_size_t
+]
+
+
+def lgetxattr(path, name):
+    if type(path) == str:
+        path = path.encode(errors='backslashreplace')
+    if type(name) == str:
+        name = name.encode(errors='backslashreplace')
+    length = 64
+    while True:
+        buf = ctypes.create_string_buffer(length)
+        res = _lgetxattr(path, name, buf, ctypes.c_size_t(length))
+        if res >= 0:
+            return buf.raw[0:res].decode(errors='backslashreplace')
+        else:
+            err = ctypes.get_errno()
+            if err == errno.ERANGE:
+                length *= 2
+            elif err == errno.ENODATA:
+                return None
+            else:
+                raise IOError(err, os.strerror(err), path)
+
+
+def ismergerfs(path):
+    try:
+        lgetxattr(path, 'user.mergerfs.version')
+        return True
+    except IOError:
+        return False
+
+
+def mergerfs_control_file(basedir):
+    if basedir == '/':
+        return None
+    ctrlfile = os.path.join(basedir, '.mergerfs')
+    if os.path.exists(ctrlfile):
+        return ctrlfile
+    return mergerfs_control_file(os.path.dirname(basedir))
+
+
+def mergerfs_srcmounts(ctrlfile):
+    return lgetxattr(ctrlfile, 'user.mergerfs.srcmounts').split(':')
+
+
+# ── Branch stats (ZFS-aware) ────────────────────────────────────────
+
+
+def get_branch_fstype(path):
+    try:
+        return subprocess.check_output(
+            ['findmnt', '-n', '-o', 'FSTYPE', '-T', path],
+            stderr=subprocess.DEVNULL
+        ).decode().strip()
+    except subprocess.CalledProcessError:
+        return 'unknown'
+
+
+def get_zfs_dataset(path):
+    try:
+        return subprocess.check_output(
+            ['findmnt', '-n', '-o', 'SOURCE', '-T', path],
+            stderr=subprocess.DEVNULL
+        ).decode().strip()
+    except subprocess.CalledProcessError:
+        return None
+
+
+def get_branch_stats(path):
+    """Return (total, avail) in bytes. Uses zfs list for ZFS branches."""
+    fstype = get_branch_fstype(path)
+
+    if fstype == 'zfs':
+        dataset = get_zfs_dataset(path)
+        if dataset:
+            try:
+                out = subprocess.check_output(
+                    ['zfs', 'list', '-Hp', '-o', 'used,avail', dataset],
+                    stderr=subprocess.DEVNULL
+                ).decode().strip().split()
+                used, avail = int(out[0]), int(out[1])
+                return (used + avail, avail)
+            except (subprocess.CalledProcessError, ValueError, IndexError):
+                pass
+
+    vfs = os.statvfs(path)
+    total = vfs.f_blocks * vfs.f_frsize
+    avail = vfs.f_bavail * vfs.f_frsize
+    return (total, avail)
+
+
+def branch_stats(srcmounts):
+    """Return [(branch, pct_used, total, avail), ...] sorted by pct_used descending."""
+    stats = []
+    for src in srcmounts:
+        total, avail = get_branch_stats(src)
+        pct_used = (1.0 - avail / total) if total > 0 else 1.0
+        stats.append((src, pct_used, total, avail))
+    return sorted(stats, key=lambda x: x[1], reverse=True)
+
+
+def all_within_range(stats, threshold):
+    if len(stats) <= 1:
+        return True
+    return abs(stats[0][1] - stats[-1][1]) <= threshold
+
+
+# ── File finding ─────────────────────────────────────────────────────
+
+
+def match(name, patterns):
+    for pat in patterns:
+        if fnmatch.fnmatch(name, pat):
+            return True
+    return False
+
+
+def exclude_by_size(filepath, exclude_lt, exclude_gt):
+    try:
+        size = os.lstat(filepath).st_size
+        if exclude_lt and size < exclude_lt:
+            return True
+        if exclude_gt and size > exclude_gt:
+            return True
+        return False
+    except OSError:
+        return False
+
+
+def find_a_file(src, relpath, file_includes, file_excludes,
+                path_includes, path_excludes, exclude_lt, exclude_gt):
+    basepath = os.path.join(src, relpath)
+    for dirpath, dirnames, filenames in os.walk(basepath):
+        for filename in filenames:
+            filepath = os.path.join(dirpath, filename)
+            if match(filename, file_excludes):
+                continue
+            if match(filepath, path_excludes):
+                continue
+            if not match(filename, file_includes):
+                continue
+            if not match(filepath, path_includes):
+                continue
+            if exclude_by_size(filepath, exclude_lt, exclude_gt):
+                continue
+            return os.path.relpath(filepath, src)
+    return None
+
+
+# ── Helpers ──────────────────────────────────────────────────────────
+
+
+def human_size(nbytes):
+    for unit in ['B', 'KiB', 'MiB', 'GiB', 'TiB']:
+        if abs(nbytes) < 1024:
+            return f"{nbytes:.1f} {unit}"
+        nbytes /= 1024
+    return f"{nbytes:.1f} PiB"
+
+
+def human_to_bytes(s):
+    if not s or s == '0':
+        return 0
+    suffix = s[-1].upper()
+    mult = {'K': 1024, 'M': 1024**2, 'G': 1024**3, 'T': 1024**4}
+    if suffix in mult:
+        return int(s[:-1]) * mult[suffix]
+    return int(s)
+
+
+def print_status(stats):
+    for branch, pct_used, total, avail in stats:
+        used = total - avail
+        print(f'    {pct_used*100:5.1f}% used  {human_size(used):>10s} / {human_size(total):>10s}  '
+              f'({human_size(avail)} free)  {branch}')
+
+
+def print_cmd(args):
+    print('  ' + ' '.join(shlex.quote(a) for a in args))
+
+
+# ── Main ─────────────────────────────────────────────────────────────
+
+
+def buildargparser():
+    parser = argparse.ArgumentParser(
+        description='Balance files across mergerfs branches (ZFS-compatible)')
+    parser.add_argument('dir', type=str,
+                        help='mergerfs mount point or subdirectory')
+    parser.add_argument('-p', dest='percentage', type=float, default=2.0,
+                        help='target percentage range of usage (default: 2.0)')
+    parser.add_argument('-i', '--include', dest='include', type=str,
+                        action='append', default=[],
+                        help='fnmatch file filter (can use multiple times)')
+    parser.add_argument('-e', '--exclude', dest='exclude', type=str,
+                        action='append', default=[],
+                        help='fnmatch file exclude (can use multiple times)')
+    parser.add_argument('-I', '--include-path', dest='includepath', type=str,
+                        action='append', default=[],
+                        help='fnmatch path filter (can use multiple times)')
+    parser.add_argument('-E', '--exclude-path', dest='excludepath', type=str,
+                        action='append', default=[],
+                        help='fnmatch path exclude (can use multiple times)')
+    parser.add_argument('-s', dest='excludelt', type=str, default='0',
+                        help='exclude files smaller than <int>[KMGT]')
+    parser.add_argument('-S', dest='excludegt', type=str, default='0',
+                        help='exclude files larger than <int>[KMGT]')
+    parser.add_argument('-n', '--dry-run', action='store_true',
+                        help='show what would be moved without moving')
+    return parser
+
+
+def main():
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf8',
+                                  errors='backslashreplace', line_buffering=True)
+    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf8',
+                                  errors='backslashreplace', line_buffering=True)
+
+    parser = buildargparser()
+    args = parser.parse_args()
+    args.dir = os.path.realpath(args.dir)
+
+    ctrlfile = mergerfs_control_file(args.dir)
+    if not ctrlfile or not ismergerfs(ctrlfile):
+        print(f"{args.dir} is not a mergerfs mount")
+        sys.exit(1)
+
+    mntpoint = os.path.dirname(ctrlfile)
+    relpath = ''
+    if args.dir != mntpoint:
+        relpath = os.path.relpath(args.dir, mntpoint)
+
+    file_includes = ['*'] if not args.include else args.include
+    file_excludes = args.exclude
+    path_includes = ['*'] if not args.includepath else args.includepath
+    path_excludes = args.excludepath
+    exclude_lt = human_to_bytes(args.excludelt)
+    exclude_gt = human_to_bytes(args.excludegt)
+    srcmounts = mergerfs_srcmounts(ctrlfile)
+    threshold = args.percentage / 100
+
+    # Show initial state
+    print('Branches:')
+    for src in srcmounts:
+        fstype = get_branch_fstype(src)
+        total, avail = get_branch_stats(src)
+        print(f'  {src}  ({fstype}, {human_size(total)} total, {human_size(avail)} free)')
+
+    stats = branch_stats(srcmounts)
+    spread = abs(stats[0][1] - stats[-1][1]) * 100
+    print(f'\nCurrent spread: {spread:.1f}%  (target: {args.percentage:.1f}%)')
+    print_status(stats)
+    print()
+
+    if all_within_range(stats, threshold):
+        print('Already balanced.')
+        sys.exit(0)
+
+    move_count = 0
+    try:
+        while True:
+            stats = branch_stats(srcmounts)
+            if all_within_range(stats, threshold):
+                break
+
+            # fullest = first (highest pct_used), emptiest = last
+            fromdrive = None
+            relfilepath = None
+
+            for candidate, pct_used, _, _ in stats:
+                # don't try to move from the emptiest branch to itself
+                if candidate == stats[-1][0]:
+                    break
+                relfilepath = find_a_file(
+                    candidate, relpath,
+                    file_includes, file_excludes,
+                    path_includes, path_excludes,
+                    exclude_lt, exclude_gt)
+                if relfilepath:
+                    fromdrive = candidate
+                    break
+
+            if not relfilepath:
+                print('No eligible files found to transfer.')
+                break
+
+            todrive = stats[-1][0]
+
+            move_count += 1
+            from_pct = next(s[1] for s in stats if s[0] == fromdrive)
+            to_pct = stats[-1][1]
+            print(f'[{move_count}] {relfilepath}')
+            print(f'  {fromdrive} ({from_pct*100:.1f}% used) -> {todrive} ({to_pct*100:.1f}% used)')
+
+            cmd = ['rsync', '-avlHAXWE', '--relative', '--progress',
+                   '--remove-source-files',
+                   os.path.join(fromdrive, './', relfilepath),
+                   todrive + '/']
+
+            if args.dry_run:
+                print_cmd(cmd)
+                print('  (dry run)\n')
+                # Can't loop in dry-run since nothing changes — show first move only
+                break
+
+            print_cmd(cmd)
+            rv = subprocess.call(cmd)
+            if rv:
+                print(f'rsync exited with code {rv}')
+                break
+            print()
+
+    except KeyboardInterrupt:
+        print(f'\nStopped.')
+
+    # Final status
+    stats = branch_stats(srcmounts)
+    spread = abs(stats[0][1] - stats[-1][1]) * 100
+    print(f'\n{move_count} file(s) moved. Spread: {spread:.1f}%')
+    print_status(stats)
+
+
+if __name__ == '__main__':
+    main()
