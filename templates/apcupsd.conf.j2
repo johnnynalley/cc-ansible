@@ -1,6 +1,5 @@
-# apcupsd configuration - Managed by Ansible
-# Do not edit manually - changes will be overwritten
-#
+## apcupsd.conf v1.1 ##
+# Managed by Ansible - do not edit manually
 # Mode: {{ 'MASTER (USB)' if apcupsd_upstype == 'usb' else 'SLAVE (Network)' }}
 
 ## General Configuration
@@ -8,11 +7,12 @@ UPSNAME {{ apcupsd_upsname | default(inventory_hostname) }}
 UPSCABLE {{ apcupsd_cable | default('usb') }}
 UPSTYPE {{ apcupsd_upstype }}
 DEVICE {{ apcupsd_device | default('') }}
-
-## Network Information Server (NIS)
 LOCKFILE /var/lock
-NISIP {{ apcupsd_nisip | default('0.0.0.0') }}
-NISPORT {{ apcupsd_nisport | default(3551) }}
+
+## Script Directories
+SCRIPTDIR /etc/apcupsd
+PWRFAILDIR /etc/apcupsd
+NOLOGINDIR /etc
 
 ## Shutdown Behavior
 ONBATTERYDELAY {{ apcupsd_onbatterydelay | default(6) }}
@@ -24,13 +24,21 @@ ANNOYDELAY {{ apcupsd_annoydelay | default(60) }}
 NOLOGON {{ apcupsd_nologon | default('disable') }}
 KILLDELAY {{ apcupsd_killdelay | default(0) }}
 
-## NIS Network Access
+## Network Information Server (NIS)
 NETSERVER {{ apcupsd_netserver | default('on') }}
+NISIP {{ apcupsd_nisip | default('0.0.0.0') }}
+NISPORT {{ apcupsd_nisport | default(3551) }}
+EVENTSFILE /var/log/apcupsd.events
+EVENTSFILEMAX 10
 {% if apcupsd_upstype == 'net' %}
 
 ## Network slave - polling configuration
 POLLTIME {{ apcupsd_polltime | default(60) }}
 {% endif %}
+
+## UPS Sharing
+UPSCLASS standalone
+UPSMODE disable
 
 ## Logging
 STATTIME {{ apcupsd_stattime | default(0) }}
@@ -40,8 +48,3 @@ DATATIME {{ apcupsd_datatime | default(0) }}
 
 ## Self-test interval (hours, 0=disable)
 SELFTEST {{ apcupsd_selftest | default('336') }}
-
-## Event script directory
-SCRIPTDIR /etc/apcupsd
-PWRFAILDIR /etc/apcupsd
-NOLOGINDIR /etc
