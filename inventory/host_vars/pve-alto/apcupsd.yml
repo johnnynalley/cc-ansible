@@ -6,7 +6,7 @@ apcupsd_enabled: true
 apcupsd_upsname: pve-alto-ups
 apcupsd_cable: ether
 apcupsd_upstype: net
-apcupsd_device: "100.75.110.105:3551"
+apcupsd_device: "192.168.1.134:3551"
 apcupsd_nisip: "127.0.0.1"
 apcupsd_netserver: "on"
 apcupsd_polltime: 60

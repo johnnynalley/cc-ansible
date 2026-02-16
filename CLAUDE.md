@@ -1055,7 +1055,7 @@ Current config:
 | `playbooks/packages.yml` | Multi-platform package installation |
 | `playbooks/msmtp.yml` | Lightweight SMTP relay (iCloud) for system email alerts |
 | `playbooks/smartmontools.yml` | SMART disk monitoring with Apprise push alerts |
-| `playbooks/apcupsd.yml` | UPS monitoring with Apprise push alerts (pve-m70q master, other nodes as network slaves) |
+| `playbooks/apcupsd.yml` | UPS monitoring with Apprise push alerts (pve-m70q USB master at 192.168.1.134, other nodes as network slaves over LAN) |
 | `playbooks/ssh-hardening.yml` | SSH security configuration (key auth, disable password) |
 | `playbooks/bootstrap.yml` | Initial admin user/SSH setup (run as root first time, supports Debian and Arch) |
 | `playbooks/auto-updates.yml` | Systemd timer for scheduled updates with Apprise push notifications. Includes Proxmox kernel version check (Proxmox packages don't set `/var/run/reboot-required`) |
