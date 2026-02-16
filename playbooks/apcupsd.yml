@@ -74,6 +74,20 @@
         - commok
       when: apcupsd_notify_enabled | default(false)
 
+    - name: Disable USB autosuspend for APC UPS devices
+      ansible.builtin.copy:
+        content: |
+          # Managed by Ansible - do not edit manually
+          # Disable USB autosuspend for APC UPS devices to prevent
+          # intermittent communication loss (kernel suspends the port)
+          ACTION=="add|change", SUBSYSTEM=="usb", ATTR{idVendor}=="051d", ATTR{power/control}="on"
+        dest: /etc/udev/rules.d/99-apc-ups-no-autosuspend.rules
+        owner: root
+        group: root
+        mode: "0644"
+      when: apcupsd_upstype == 'usb'
+      notify: Reload udev and apply UPS rule
+
     - name: Ensure apcupsd is enabled and running
       ansible.builtin.systemd:
         name: apcupsd
@@ -81,6 +95,11 @@
         state: started
 
   handlers:
+    - name: Reload udev and apply UPS rule
+      ansible.builtin.shell: |
+        udevadm control --reload-rules
+        udevadm trigger --subsystem-match=usb --attr-match=idVendor=051d
+
     - name: Restart apcupsd
       ansible.builtin.systemd:
         name: apcupsd
