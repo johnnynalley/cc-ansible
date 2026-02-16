@@ -52,8 +52,25 @@ else
 fi
 
 # Check if reboot required
+REBOOT_NEEDED=false
+
+# Standard Debian/Ubuntu check (dpkg trigger from linux-image-* packages)
 if [ -f /var/run/reboot-required ]; then
-    log "Reboot required, scheduling reboot..."
+    REBOOT_NEEDED=true
+    log "Reboot required (reboot-required flag set)"
+fi
+
+# Proxmox kernel check — proxmox-kernel-* packages don't set reboot-required
+if [ "$REBOOT_NEEDED" = "false" ]; then
+    RUNNING_KERNEL=$(uname -r)
+    LATEST_KERNEL=$(ls -t /boot/vmlinuz-* 2>/dev/null | head -1 | sed 's|/boot/vmlinuz-||')
+    if [ -n "$LATEST_KERNEL" ] && [ "$RUNNING_KERNEL" != "$LATEST_KERNEL" ]; then
+        REBOOT_NEEDED=true
+        log "Reboot required (running ${RUNNING_KERNEL}, installed ${LATEST_KERNEL})"
+    fi
+fi
+
+if [ "$REBOOT_NEEDED" = "true" ]; then
     if [ "{{ auto_updates_reboot_if_required | default(true) | lower }}" = "true" ]; then
         send_notification "[Updates] ${HOSTNAME}: rebooting" "Reboot required after updates, rebooting in 1 minute" "warning"
         shutdown -r +1 "Auto-updates: rebooting in 1 minute"
