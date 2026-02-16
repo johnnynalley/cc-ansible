@@ -1,6 +1,6 @@
 # CLAUDE.md
 
-> **Last updated:** 2026-02-15
+> **Last updated:** 2026-02-16
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
@@ -35,25 +35,25 @@ If a package exists in the system repos, add it to the appropriate `packages_*` 
 
 ## Git Workflow
 
-The repository is hosted on GitHub (public): https://github.com/johnnynalley/homelab-ansible
+The repository is hosted on GitHub (public): https://github.com/johnnynalley/cc-ansible
 
-**ansible-lxc** (CT 104 on pve-m70q, Ubuntu 25.04) is the Ansible controller. The working clone lives at `~/homelab-ansible` on ansible-lxc. All Ansible commands should be run from there.
+**ansible-lxc** (CT 104 on pve-m70q, Ubuntu 25.04) is the Ansible controller. The working clone lives at `~/cc-ansible` on ansible-lxc. All Ansible commands should be run from there.
 
 **Workflow:**
-1. Make changes on ansible-lxc (`~/homelab-ansible`)
+1. Make changes on ansible-lxc (`~/cc-ansible`)
 2. Commit and push to GitHub
-3. ts440 automatically pulls every 5 minutes via `git-sync.timer` (deployed by `playbooks/git-sync.yml`), keeping `/srv/nas-zfs/configs/ansible/homelab-ansible` in sync for Nextcloud External Storage access
-4. pi5-01 still has a copy at `/srv/configs/ansible/homelab-ansible` (via NFS mount from ts440), but it is no longer the controller
+3. ts440 automatically pulls every 5 minutes via `git-sync.timer` (deployed by `playbooks/git-sync.yml`), keeping `/srv/nas-zfs/configs/ansible/cc-ansible` in sync for Nextcloud External Storage access
+4. pi5-01 still has a copy at `/srv/configs/ansible/cc-ansible` (via NFS mount from ts440), but it is no longer the controller
 
 **git-sync on ts440:**
 - Systemd timer runs every 5 minutes
-- Pulls latest from GitHub to `/srv/nas-zfs/configs/ansible/homelab-ansible`
+- Pulls latest from GitHub to `/srv/nas-zfs/configs/ansible/cc-ansible`
 - Keeps Nextcloud External Storage (Configs folder) up to date automatically
 - Deploy with: `ansible-playbook playbooks/git-sync.yml`
 
 ## Common Commands
 
-All commands should be run from ansible-lxc (`~/homelab-ansible`).
+All commands should be run from ansible-lxc (`~/cc-ansible`).
 
 ```bash
 # Run all playbooks via site.yml
@@ -274,7 +274,7 @@ ts440 serves SMB shares over Tailscale, managed by Ansible via `playbooks/samba.
 **Connecting from macOS:**
 1. Finder → Cmd+K → `smb://100.71.188.16/Configs`
 2. Authenticate with Samba credentials
-3. Navigate to `ansible/homelab-ansible` for this repo
+3. Navigate to `ansible/cc-ansible` for this repo
 
 **Discovery over Tailscale**: Time Machine discovery works via SMB's AAPL extensions, NOT mDNS (mDNS doesn't traverse WireGuard tunnels). Connect using the Tailscale IP.
 
@@ -1660,9 +1660,9 @@ Benefits:
 
 Ansible runs on ansible-lxc (CT 104 on pve-m70q, Ubuntu 25.10) with `ansible-core` 2.19. The controller uses `ansible_connection=local` in the `orchestrator` group. Key collections: `community.docker` 4.6.1, `community.general` 11.1.0, `kewlfft.aur` 0.13.0.
 
-The working repo clone is at `~/homelab-ansible` on ansible-lxc.
+The working repo clone is at `~/cc-ansible` on ansible-lxc.
 
-**Legacy**: pi5-01 previously served as the Ansible controller using Debian 12's packaged `ansible-core` 2.14. It is now a regular managed host. The repo copy at `/srv/configs/ansible/homelab-ansible` (via NFS from ts440) remains accessible but is read-only (auto-synced from GitHub by git-sync timer).
+**Legacy**: pi5-01 previously served as the Ansible controller using Debian 12's packaged `ansible-core` 2.14. It is now a regular managed host. The repo copy at `/srv/configs/ansible/cc-ansible` (via NFS from ts440) remains accessible but is read-only (auto-synced from GitHub by git-sync timer).
 
 ## Vault Setup
 

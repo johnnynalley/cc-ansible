@@ -1,7 +1,7 @@
 # =============================================================================
 # Git Sync - Auto-pull repo on ts440 for Nextcloud External Storage
 # =============================================================================
-# Keeps /srv/nas-zfs/configs/ansible/homelab-ansible in sync with GitHub
+# Keeps /srv/nas-zfs/configs/ansible/cc-ansible in sync with GitHub
 # so Nextcloud's External Storage always shows the latest files.
 #
 # Usage: ansible-playbook playbooks/git-sync.yml
@@ -12,7 +12,7 @@
   become: true
 
   vars:
-    git_sync_repo_path: /srv/nas-zfs/configs/ansible/homelab-ansible
+    git_sync_repo_path: /srv/nas-zfs/configs/ansible/cc-ansible
     git_sync_interval: "*-*-* *:0/5"  # every 5 minutes
     git_sync_user: johnny
 
@@ -23,7 +23,7 @@
         mode: "0644"
         content: |
           [Unit]
-          Description=Pull latest homelab-ansible from GitHub
+          Description=Pull latest cc-ansible from GitHub
           After=network-online.target
           Wants=network-online.target
 
@@ -41,7 +41,7 @@
         mode: "0644"
         content: |
           [Unit]
-          Description=Pull homelab-ansible every 5 minutes
+          Description=Pull cc-ansible every 5 minutes
 
           [Timer]
           OnCalendar={{ git_sync_interval }}

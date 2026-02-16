@@ -1,16 +1,16 @@
-# Homelab Ansible
+# CC-Ansible
 
-> **Last updated:** 2026-02-15
+> **Last updated:** 2026-02-16
 
 Ansible automation for Johnny's homelab infrastructure (4 Proxmox nodes, 6 VMs/LXCs, Ansible controller LXC, gaming workstation, ThinkPad laptop, MacBook).
 
-**Repository**: https://github.com/johnnynalley/homelab-ansible (public)
+**Repository**: https://github.com/johnnynalley/cc-ansible (public)
 
 ## Quick Start
 
 ```bash
 # From the repo directory (on ansible-lxc)
-cd ~/homelab-ansible
+cd ~/cc-ansible
 
 # Run a specific playbook
 ansible-playbook playbooks/packages.yml
@@ -28,7 +28,7 @@ ansible-playbook site.yml
 ## Directory Structure
 
 ```
-homelab-ansible/
+cc-ansible/
 ├── ansible.cfg                  # Ansible configuration
 ├── site.yml                     # Master playbook (runs all)
 ├── inventory/
@@ -299,8 +299,8 @@ TS440 serves NFS exports via Tailscale. VMs have been migrated to local config s
 - media-vm: `/opt/media-stack/` (uses VirtioFS for media access)
 - nextcloud-vm: `/opt/nextcloud/` (uses VirtioFS for data storage)
 
-Ansible repo on ansible-lxc: `~/homelab-ansible`
-Legacy copy on pi5-01: `/srv/configs/ansible/homelab-ansible` (NFS from ts440, auto-synced from GitHub)
+Ansible repo on ansible-lxc: `~/cc-ansible`
+Legacy copy on pi5-01: `/srv/configs/ansible/cc-ansible` (NFS from ts440, auto-synced from GitHub)
 
 ## Samba Configuration
 
@@ -322,7 +322,7 @@ The NAS server (currently ts440) serves SMB shares over Tailscale, managed by `p
 # In Finder: Cmd+K, then enter:
 smb://100.71.188.16/Configs
 
-# For ansible repo, navigate to: ansible/homelab-ansible
+# For ansible repo, navigate to: ansible/cc-ansible
 ```
 
 ### Samba User Management
@@ -563,7 +563,7 @@ setfacl -R -d -m o::r /srv/nas-zfs/configs
 
 ## Ansible Environment
 
-Ansible runs on ansible-lxc (CT 104 on pve-m70q, Ubuntu 25.10) with `ansible-core` 2.19. The repo clone is at `~/homelab-ansible` on ansible-lxc.
+Ansible runs on ansible-lxc (CT 104 on pve-m70q, Ubuntu 25.10) with `ansible-core` 2.19. The repo clone is at `~/cc-ansible` on ansible-lxc.
 
 ts440 auto-pulls from GitHub every 5 minutes (`git-sync.timer`) to keep the Nextcloud External Storage copy current.
 
