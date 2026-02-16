@@ -1,6 +1,6 @@
 # CC-Ansible
 
-> **Last updated:** 2026-02-16
+> **Last updated:** 2026-02-17
 
 Ansible automation for Johnny's homelab infrastructure (4 Proxmox nodes, 6 VMs/LXCs, Ansible controller LXC, gaming workstation, ThinkPad laptop, MacBook).
 
@@ -74,7 +74,7 @@ cc-ansible/
 │   ├── wifi.yml                # WiFi powersave + suspend/resume fix
 │   ├── restic.yml              # B2 offsite backup configuration
 │   ├── local-restic.yml        # Local backups to ts440 ZFS
-│   ├── mergerfs.yml            # MergerFS media pool (nas_server)
+│   ├── mergerfs.yml            # MergerFS media pool + balance script (nas_server)
 │   ├── zfs-snapshots.yml       # ZFS snapshots, scrub, ARC tuning
 │   ├── nfs.yml                 # NFS server/client setup
 │   ├── filesystem-mounts.yml   # Local NTFS/exFAT mounts
@@ -117,6 +117,9 @@ cc-ansible/
 │   ├── proxmox-cluster-firewall.fw.j2    # Datacenter firewall rules
 │   ├── proxmox-node-firewall.fw.j2       # Node-level firewall rules
 │   └── proxmox-vm-firewall.fw.j2         # VM/CT firewall rules
+├── scripts/
+│   ├── mergerfs-balance        # ZFS-compatible mergerfs branch balancer
+│   └── storage-status          # Storage usage report (ZFS + mergerfs)
 └── bin/
     └── ansible-menu            # Interactive playbook launcher
 ```
@@ -267,7 +270,7 @@ Packages are merged from multiple sources (all applicable variables combined):
 | `wifi.yml` | `linux_hosts` | WiFi powersave disable, optional PCI FLR or module reload resume fix |
 | `restic.yml` | `backup_clients` | B2 offsite backup with systemd timer |
 | `local-restic.yml` | `backup_clients` | Hourly backups to ts440 ZFS |
-| `mergerfs.yml` | `nas_server` | MergerFS media pool mount |
+| `mergerfs.yml` | `nas_server` | MergerFS media pool mount + balance script |
 | `zfs-snapshots.yml` | `nas_server` | ZFS snapshots (sanoid), scrub, ARC tuning, ACLs |
 | `nfs.yml` | `nas_server` + clients | NFS server/client configuration |
 | `filesystem-mounts.yml` | `linux_hosts` | Local filesystem mounts (NTFS, exFAT) |

@@ -168,7 +168,7 @@ TS440 is the primary NAS server with a complex storage stack. Key components:
 - `/srv/nas-zfs/media` (ZFS pool)
 - `/srv/media-02/media`, `/srv/media-03/media` (additional ZFS datasets)
 
-The mergerfs mount is managed by a systemd unit at `/etc/systemd/system/srv-media.mount` (not Ansible-managed). Critical options for NFS compatibility:
+The mergerfs mount is managed by a systemd unit deployed via `playbooks/mergerfs.yml`. Critical options for NFS compatibility:
 - `inodecalc=path-hash` - stable inode numbers based on file paths, preventing stale NFS file handles (ESTALE errors)
 - `func.getattr=newest` - consistent file attributes across underlying drives for NFS stability
 
@@ -1062,7 +1062,7 @@ Current config:
 | `playbooks/wifi.yml` | WiFi powersave disable, optional PCI FLR or module reload resume fix |
 | `playbooks/restic.yml` | Backblaze B2 offsite backup configuration |
 | `playbooks/local-restic.yml` | Local backups to ts440 ZFS (hourly) |
-| `playbooks/mergerfs.yml` | MergerFS media pool (nas_server) |
+| `playbooks/mergerfs.yml` | MergerFS media pool and balance script deployment (nas_server) |
 | `playbooks/zfs-snapshots.yml` | ZFS snapshots (sanoid), scrub, ARC tuning, ACLs (nas_server) |
 | `playbooks/nfs.yml` | NFS server (nas_server) and client mounts |
 | `playbooks/filesystem-mounts.yml` | Local filesystem mounts (NTFS, exFAT, bind mounts) for non-NFS drives |
@@ -1102,6 +1102,8 @@ Current config:
 | `templates/proxmox-cluster-firewall.fw.j2` | Datacenter firewall (IP sets, security groups) |
 | `templates/proxmox-node-firewall.fw.j2` | Node-level firewall rules |
 | `templates/proxmox-vm-firewall.fw.j2` | VM/CT firewall rules |
+| `scripts/mergerfs-balance` | ZFS-compatible mergerfs branch balancer (deployed to nas_server via mergerfs.yml) |
+| `scripts/storage-status` | Storage usage report with ZFS and mergerfs support |
 | `bin/ansible-menu` | Interactive bash script for running playbooks |
 
 **media-vm specific files** (not Ansible-managed, deployed manually):
