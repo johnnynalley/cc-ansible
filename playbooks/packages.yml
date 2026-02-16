@@ -53,6 +53,7 @@
             + (packages_lxcs_extra | default([]))
             + (packages_orchestrator_extra | default([]))
             + (packages_debian_workstations_extra | default([]))
+            + (packages_debian_development_extra | default([]))
             + (packages_host_extra | default([]))
             | flatten | unique
           }}
@@ -116,6 +117,7 @@
             + (packages_linux_extra | default([]))
             + (packages_arch_extra | default([]))
             + (packages_arch_workstations_extra | default([]))
+            + (packages_arch_development_extra | default([]))
             + (packages_host_extra | default([]))
             | flatten | unique
           }}

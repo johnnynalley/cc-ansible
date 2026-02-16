@@ -1,0 +1,10 @@
+# Development tools — split by OS for packages with different names
+packages_debian_development_extra:
+  - gh
+  - shellcheck
+  - yq
+
+packages_arch_development_extra:
+  - github-cli
+  - shellcheck
+  - yq
