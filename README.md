@@ -1,6 +1,6 @@
 # CC-Ansible
 
-> **Last updated:** 2026-02-17
+> **Last updated:** 2026-02-16
 
 Ansible automation for Johnny's homelab infrastructure (4 Proxmox nodes, 6 VMs/LXCs, Ansible controller LXC, gaming workstation, ThinkPad laptop, MacBook).
 
@@ -479,6 +479,7 @@ docker-vm (VM 110 on pve-m70q) runs infrastructure services:
 | Jellyseerr | `requests.jnalley.me` | Media requests (Plex OAuth) |
 | Cloudflared | - | Cloudflare Tunnel (public access) |
 | Apprise API | `apprise.jnalley.me` | Notification router (Pushover + email) |
+| FreshRSS | `rss.jnalley.me` | RSS aggregator (Google Reader API for Reeder) |
 | Diun | - | Docker image update notifier |
 
 Stacks support `start: true/false` in `docker.yml` to control service state.

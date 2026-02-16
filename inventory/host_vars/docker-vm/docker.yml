@@ -31,6 +31,9 @@ docker_stacks:
   - name: notifications
     path: /opt/notifications
     build: false
+  - name: freshrss
+    path: /opt/freshrss
+    build: false
   - name: diun
     path: /opt/diun
     build: false

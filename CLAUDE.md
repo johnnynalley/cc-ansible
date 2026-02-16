@@ -1,6 +1,6 @@
 # CLAUDE.md
 
-> **Last updated:** 2026-02-17
+> **Last updated:** 2026-02-16
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
@@ -331,6 +331,7 @@ Lightweight VM running only infrastructure services. Specs: 6 cores, 6GB RAM, di
 - **Jellyseerr**: Media request management (`requests.jnalley.me`) - uses Plex OAuth
 - **Cloudflared**: Cloudflare Tunnel for public access to Nextcloud/Jellyseerr
 - **Notifications**: Apprise API (`apprise.jnalley.me`) + Pushover — centralized notification routing (ntfy container commented out, preserved for future use)
+- **FreshRSS**: Self-hosted RSS aggregator (`rss.jnalley.me`) — Google Reader API for Reeder integration
 - **Diun**: Docker Image Update Notifier — monitors containers for available image updates
 
 **Docker Network**: Services use `caddy-proxy` network (created by Caddy stack). Other stacks join it as external.
@@ -689,7 +690,7 @@ ansible docker-vm -m shell -a "docker logs diun --tail 20 2>&1" --become
 #### Reverse Proxy (Caddy on docker-vm)
 
 Caddy proxies all services over Tailscale with HTTPS (DNS-01 via Cloudflare):
-- **docker-vm services** (via Docker network): `vaultwarden`, `apprise` (note: `ntfy.jnalley.me` Caddy entry is inactive — ntfy container is commented out)
+- **docker-vm services** (via Docker network): `vaultwarden`, `freshrss`, `apprise` (note: `ntfy.jnalley.me` Caddy entry is inactive — ntfy container is commented out)
 - **media-vm services** (via Tailscale IP 100.66.6.113): `plex`, `sonarr`, `radarr`, `prowlarr`, `bazarr`, `sabnzbd`, `qbit`, `huntarr`, `tautulli`, `audiobookshelf`, `tdarr`, `photos` (Immich)
 
 Caddyfile location: `/opt/caddy/Caddyfile` (on docker-vm, stored locally)
