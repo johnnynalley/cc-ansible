@@ -51,3 +51,11 @@
         name: "{{ mergerfs_mount_path | regex_replace('^/', '') | regex_replace('/', '-') }}.mount"
         enabled: true
         state: started
+
+    - name: Deploy mergerfs-balance script
+      ansible.builtin.copy:
+        src: ../scripts/mergerfs-balance
+        dest: /usr/local/bin/mergerfs-balance
+        owner: root
+        group: root
+        mode: "0755"

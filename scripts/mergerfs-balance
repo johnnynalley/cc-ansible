@@ -335,7 +335,7 @@ def main():
             if rv:
                 print(f'rsync exited with code {rv}')
                 break
-            print()
+            print('\n-\n')
 
     except KeyboardInterrupt:
         print(f'\nStopped.')
