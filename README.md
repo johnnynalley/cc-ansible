@@ -47,6 +47,7 @@ cc-ansible/
 │   │   ├── lxcs/               # LXC containers
 │   │   ├── vms_lxcs/           # Shared VM+LXC configs
 │   │   ├── orchestrator/       # Ansible controller (ansible-lxc)
+│   │   ├── development/        # Dev tooling (gh, shellcheck, yq)
 │   │   └── backup_clients/     # Hosts with restic backups
 │   └── host_vars/
 │       ├── ts440/              # Per-host overrides
@@ -68,7 +69,7 @@ cc-ansible/
 │   ├── apcupsd.yml             # UPS monitoring (Apprise alerts, master/slave)
 │   ├── bootstrap.yml           # Initial user/SSH setup (Debian + Arch)
 │   ├── ssh-hardening.yml       # SSH security configuration
-│   ├── auto-updates.yml        # Scheduled system updates
+│   ├── auto-updates.yml        # Scheduled system updates (Proxmox kernel reboot detection)
 │   ├── network-recovery.yml    # Network watchdog + Tailscale recovery
 │   ├── wifi.yml                # WiFi powersave + suspend/resume fix
 │   ├── restic.yml              # B2 offsite backup configuration
@@ -138,6 +139,8 @@ managed_hosts
 workstations (jn-desktop, jn-t14s-lin, macbook-pro) ← no auto-recovery/reboots
 
 nas_server (ts440) ← portable NAS role group
+
+development (ansible-lxc) ← dev tooling (gh, shellcheck, yq)
 
 backup_clients
 ├── proxmox_nodes

@@ -1,6 +1,6 @@
 # CLAUDE.md
 
-> **Last updated:** 2026-02-16
+> **Last updated:** 2026-02-17
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
@@ -127,6 +127,7 @@ Host groups form a hierarchy in `inventory/hosts.ini`:
   - Group vars disable automated recovery: `network_watchdog_enabled: false`, `auto_updates_enabled: false`
   - Playbooks like `network-recovery.yml` explicitly exclude this group: `hosts: linux_hosts:!workstations`
 - `nas_server` → **portable NAS role group** (currently ts440). Storage services: NFS, Samba, ZFS, mergerfs, drive mounts. Migrate NAS to new hardware by changing membership in this group.
+- `development` → **cross-platform group** for dev tooling (gh, shellcheck, yq). Currently: ansible-lxc. Packages split by OS: `packages_debian_development_extra`, `packages_arch_development_extra`
 - `backup_clients` → separate group for restic backups (includes `proxmox_nodes`, `vms_lxcs`, `orchestrator`, `workstations`, `arch_hosts`)
 
 VMs and LXCs are split so VMs get `qemu-guest-agent` while LXCs don't need it.
@@ -153,7 +154,7 @@ Playbooks detect OS via `ansible_facts.os_family` and conditionally execute plat
 - Arch: pacman
 - macOS: homebrew (brew/casks)
 
-Package lists follow naming convention: `packages_linux_common`, `packages_debian_extra`, `packages_<group>_extra`, `packages_host_extra`. Workstation packages are split by OS: `packages_arch_workstations_extra`, `packages_debian_workstations_extra` (in `group_vars/workstations/packages.yml`). Apps not in apt repos (Discord, LocalSend) are installed via Flatpak on Debian workstations using `flatpak_workstations` variable; Arch gets them natively via pacman.
+Package lists follow naming convention: `packages_linux_common`, `packages_debian_extra`, `packages_<group>_extra`, `packages_host_extra`. Cross-platform groups split packages by OS: `packages_arch_workstations_extra`, `packages_debian_workstations_extra` (in `group_vars/workstations/packages.yml`); `packages_debian_development_extra`, `packages_arch_development_extra` (in `group_vars/development/packages.yml`). Apps not in apt repos (Discord, LocalSend) are installed via Flatpak on Debian workstations using `flatpak_workstations` variable; Arch gets them natively via pacman.
 
 ### TS440 Storage Architecture
 
@@ -1056,7 +1057,7 @@ Current config:
 | `playbooks/apcupsd.yml` | UPS monitoring with Apprise push alerts (pve-m70q master, other nodes as network slaves) |
 | `playbooks/ssh-hardening.yml` | SSH security configuration (key auth, disable password) |
 | `playbooks/bootstrap.yml` | Initial admin user/SSH setup (run as root first time, supports Debian and Arch) |
-| `playbooks/auto-updates.yml` | Systemd timer for scheduled updates with Apprise push notifications |
+| `playbooks/auto-updates.yml` | Systemd timer for scheduled updates with Apprise push notifications. Includes Proxmox kernel version check (Proxmox packages don't set `/var/run/reboot-required`) |
 | `playbooks/network-recovery.yml` | Network watchdog and Tailscale online target with Apprise push notifications on recovery/reboot |
 | `playbooks/wifi.yml` | WiFi powersave disable, optional PCI FLR or module reload resume fix |
 | `playbooks/restic.yml` | Backblaze B2 offsite backup configuration |
@@ -1093,7 +1094,7 @@ Current config:
 | `templates/mergerfs-media.mount.j2` | MergerFS systemd mount unit |
 | `templates/avahi-timemachine.service.j2` | Avahi mDNS advertisement for Time Machine |
 | `templates/docker-stacks.service.j2` | Systemd service to start Docker stacks (depends on tailscale-online.target) |
-| `templates/auto-updates-debian.sh.j2` | Debian auto-updates script with Apprise notifications |
+| `templates/auto-updates-debian.sh.j2` | Debian auto-updates script with Apprise notifications and Proxmox kernel reboot detection |
 | `templates/auto-updates-arch.sh.j2` | Arch auto-updates script with Apprise notifications |
 | `templates/network-watchdog.sh.j2` | Network watchdog script with interface UP check, Proxmox bridge fix, and Apprise notifications |
 | `templates/gluetun-watchdog.sh.j2` | Gluetun VPN crash loop watchdog script |
