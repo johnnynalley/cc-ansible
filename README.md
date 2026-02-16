@@ -262,7 +262,7 @@ Packages are merged from multiple sources (all applicable variables combined):
 | `packages.yml` | `managed_hosts` | Install baseline packages (multi-platform) |
 | `msmtp.yml` | `linux_hosts` | SMTP relay for system email (iCloud) |
 | `smartmontools.yml` | `linux_hosts` | SMART disk monitoring with Apprise push alerts |
-| `apcupsd.yml` | `proxmox_nodes` | UPS monitoring with Apprise push alerts (pve-m70q USB master at LAN IP, others slave over LAN) |
+| `apcupsd.yml` | `proxmox_nodes` | UPS monitoring with Apprise push alerts (pve-m70q master, others slave) |
 | `bootstrap.yml` | `linux_hosts` | Create admin user, SSH keys, sudo setup (Debian + Arch) |
 | `ssh-hardening.yml` | `linux_hosts` | SSH security (key auth, disable password) |
 | `auto-updates.yml` | `linux_hosts` | Configure automatic updates + reboot |
