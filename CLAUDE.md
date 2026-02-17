@@ -552,25 +552,30 @@ ansible media-vm -m shell -a "docker exec gluetun wget -qO- https://ipinfo.io/js
 
 #### Gluetun VPN Watchdog
 
-Gluetun's internal VPN restart (`HEALTH_RESTART_VPN=on`) doesn't properly clean up tun0 routes, causing self-reinforcing crash loops where OpenVPN connects but traffic can't flow (`RTNETLINK answers: File exists`). The watchdog detects this and does a full `docker restart` to clear the stale state.
+Gluetun's internal VPN restart (`HEALTH_RESTART_VPN=on`) doesn't properly clean up tun0 routes, causing self-reinforcing crash loops where OpenVPN connects but traffic can't flow (`RTNETLINK answers: File exists`). The watchdog detects this and does a full `docker compose up -d --force-recreate` (not just `restart`) to destroy the container and its network namespace, clearing the stale routes. Dependent containers (qBittorrent) that share Gluetun's network namespace are recreated together.
 
 **How it works:**
 - Systemd timer runs every 60 seconds on media-vm
 - Checks Gluetun's Docker healthcheck status
-- After 3 consecutive failures (~3 minutes), restarts the container
+- After 3 consecutive failures (~3 minutes), force-recreates Gluetun + dependent containers
+- Sends silent Pushover notification on recovery or max-restart exhaustion (`push-quiet` tag)
 - Rate-limited to 5 restarts per hour to prevent infinite restart loops
-- If max restarts exceeded, logs error and requires manual intervention
+- If max restarts exceeded, sends alert and requires manual intervention
+
+**Why force-recreate**: `docker compose restart` keeps the same container and network namespace. Since qBittorrent shares Gluetun's namespace (`network_mode: "service:gluetun"`), the namespace stays alive even when Gluetun stops, preserving the stale routes. `--force-recreate` destroys the container entirely, creating a fresh namespace on startup.
 
 **Configuration** (in `host_vars/media-vm/vars.yml`):
 ```yaml
 gluetun_watchdog_enabled: true
 gluetun_watchdog_compose_dir: /opt/media-stack
 # Optional overrides (defaults shown):
-# gluetun_watchdog_interval: 60        # Check interval in seconds
-# gluetun_watchdog_max_failures: 3     # Failures before restart
-# gluetun_watchdog_max_restarts: 5     # Max restarts per window
-# gluetun_watchdog_restart_window: 3600 # Window in seconds (1 hour)
-# gluetun_watchdog_container: gluetun  # Container name
+# gluetun_watchdog_interval: 60                    # Check interval in seconds
+# gluetun_watchdog_max_failures: 3                 # Failures before restart
+# gluetun_watchdog_max_restarts: 5                 # Max restarts per window
+# gluetun_watchdog_restart_window: 3600            # Window in seconds (1 hour)
+# gluetun_watchdog_container: gluetun              # Container name
+# gluetun_watchdog_dependent_containers: qbittorrent  # Containers sharing network namespace
+# gluetun_watchdog_notify_tag: push-quiet          # Apprise tag for notifications
 ```
 
 **Troubleshooting:**
@@ -596,8 +601,9 @@ Centralized notification system for infrastructure alerts (SMART disk errors, UP
 Diun (container updates) ──┐
 smartd (disk health) ──────┤
 apcupsd (UPS power) ───────┤
-auto-updates (weekly) ─────┼──→ Apprise API ───→ Pushover "Homelab" app (infrastructure, Time Sensitive)
-network-watchdog (recovery)┤   (docker-vm)  ───→ Pushover "cc-media-feed" app (media, silent)
+auto-updates (weekly) ─────┼──→ Apprise API ───→ Pushover "Computer Corner" app (infrastructure, Time Sensitive)
+network-watchdog (recovery)┤   (docker-vm)  ───→ Pushover "Computer Corner" app (infrastructure, silent/quiet)
+gluetun-watchdog (VPN) ────┤                ───→ Pushover "cc-media-feed" app (media, silent)
 Sonarr/Radarr (grabs) ─────┤                ───→ Email (iCloud SMTP)
 Jellyseerr (requests) ─────┘
 
@@ -621,14 +627,14 @@ Sonarr/Radarr ──→ Discord (native connection, rich embeds with poster art)
 
 | App | Purpose | Priority | iOS Behavior |
 |-----|---------|----------|--------------|
-| Homelab | Infrastructure alerts (Diun, smartd, apcupsd) | Normal (0) | Time Sensitive notification |
+| Computer Corner | Infrastructure alerts (Diun, smartd, apcupsd) | Normal (0) | Time Sensitive notification |
 | cc-media-feed | Media notifications (Sonarr/Radarr grabs, Jellyseerr requests) | Lowest (-2) | Silent, in-app only |
 
 **Diun Configuration** (`/opt/diun/diun.yml` on each VM):
 - Watch schedule: every 6 hours (`0 */6 * * *`) with 30s jitter
 - Docker provider: `watchByDefault: true` (monitors all running containers)
 - `firstCheckNotif: false` — only notifies on actual updates, not first scan
-- Sends with `tags: [push]` so only Pushover "Homelab" is triggered (not email)
+- Sends with `tags: [push]` so only Pushover "Computer Corner" is triggered (not email)
 - docker-vm Diun reaches Apprise at `http://apprise:8000` (Docker network)
 - media-vm/nextcloud-vm Diun reaches Apprise at `https://apprise.jnalley.me` (via Caddy)
 
@@ -641,13 +647,15 @@ Sonarr/Radarr ──→ Discord (native connection, rich embeds with poster art)
 
 | Tag | Target | Purpose |
 |-----|--------|---------|
-| `push` | Pushover "Homelab" app (normal priority) | Infrastructure alerts |
+| `push` | Pushover "Computer Corner" app (normal priority) | Infrastructure alerts |
+| `push-quiet` | Pushover "Computer Corner" app (priority -2, silent) | Automated recovery alerts (gluetun-watchdog) |
 | `email` | iCloud SMTP | Email notifications |
 | `media-feed` | Pushover "cc-media-feed" app (priority -2, silent) | Sonarr/Radarr grab notifications |
 | `media-requests` | Pushover "cc-media-feed" app (priority -2, silent) | Jellyseerr request notifications |
 
 **Tag routing:**
-- `push` tag → Pushover "Homelab" app (Time Sensitive on iOS)
+- `push` tag → Pushover "Computer Corner" app (Time Sensitive on iOS)
+- `push-quiet` tag → Pushover "Computer Corner" app (silent, in-app only)
 - `email` tag → email (iCloud SMTP)
 - `media-feed` tag → Pushover "cc-media-feed" app (silent)
 - `media-requests` tag → Pushover "cc-media-feed" app (silent)
@@ -685,7 +693,7 @@ ansible docker-vm -m shell -a "docker logs diun --tail 20 2>&1" --become
 
 **Adding new notification targets**: Edit `/opt/notifications/apprise-config/notifications.cfg` on docker-vm and restart Apprise (`docker compose restart apprise` in `/opt/notifications/`). Apprise supports 90+ services — see [Apprise wiki](https://github.com/caronc/apprise/wiki) for URL formats.
 
-**Adding a new app**: Point its webhook at `https://apprise.jnalley.me/notify/notifications` with `tag` in the POST body to control routing. Use `push` for Pushover "Homelab" only, `email` for email only, `media-feed` or `media-requests` for silent media notifications, or combine tags.
+**Adding a new app**: Point its webhook at `https://apprise.jnalley.me/notify/notifications` with `tag` in the POST body to control routing. Use `push` for Pushover "Computer Corner" only, `email` for email only, `media-feed` or `media-requests` for silent media notifications, or combine tags.
 
 #### Reverse Proxy (Caddy on docker-vm)
 

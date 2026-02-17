@@ -2,7 +2,7 @@
 # Gluetun VPN watchdog - detects crash loops and does a full container restart
 # Managed by Ansible - do not edit manually
 
-set -euo pipefail
+set -uo pipefail
 
 LOG_TAG="gluetun-watchdog"
 STATE_DIR="/var/lib/gluetun-watchdog"
@@ -15,10 +15,27 @@ MAX_RESTARTS="{{ gluetun_watchdog_max_restarts | default(5) }}"
 RESTART_WINDOW="{{ gluetun_watchdog_restart_window | default(3600) }}"
 COMPOSE_DIR="{{ gluetun_watchdog_compose_dir | default('/opt/media-stack') }}"
 CONTAINER_NAME="{{ gluetun_watchdog_container | default('gluetun') }}"
+# Containers sharing gluetun's network namespace (must be recreated together)
+DEPENDENT_CONTAINERS="{{ gluetun_watchdog_dependent_containers | default('qbittorrent') }}"
 
 mkdir -p "$STATE_DIR"
 
 log() { logger -t "$LOG_TAG" "$*"; }
+
+send_notification() {
+    local title="$1"
+    local body="${2:-}"
+    local type="${3:-warning}"
+    curl -sf -o /dev/null \
+      -X POST "{{ apprise_endpoint }}/notify/{{ apprise_token }}" \
+      --form-string "title=${title}" \
+      --form-string "body=${body}" \
+      --form-string "tag={{ gluetun_watchdog_notify_tag | default('push-quiet') }}" \
+      --form-string "type=${type}" \
+      --max-time 10 \
+      --retry 2 \
+      --retry-delay 3 2>/dev/null || true
+}
 
 # ---------------------------------------------------------------------------
 # Failure counting (persistent across runs)
@@ -115,24 +132,36 @@ restart_gluetun() {
 
     if [[ "$recent_restarts" -ge "$MAX_RESTARTS" ]]; then
         log "ERROR: $MAX_RESTARTS restarts within $(( RESTART_WINDOW / 60 ))m window - manual intervention required"
+        send_notification \
+            "Gluetun watchdog: manual intervention required" \
+            "$MAX_RESTARTS restarts in $(( RESTART_WINDOW / 60 ))m on $(hostname). VPN is down." \
+            "failure"
         return 1
     fi
 
-    log "Restarting $CONTAINER_NAME (restart $((recent_restarts + 1))/$MAX_RESTARTS within window)..."
+    log "Restarting $CONTAINER_NAME + dependents (restart $((recent_restarts + 1))/$MAX_RESTARTS within window)..."
     record_restart
 
-    cd "$COMPOSE_DIR" && docker compose restart "$CONTAINER_NAME" 2>&1 | while read -r line; do
+    # Force-recreate to destroy the network namespace and clear stale tun0 routes.
+    # Dependent containers (e.g. qbittorrent) share gluetun's namespace and must
+    # be recreated together, otherwise they're orphaned on the old namespace.
+    # shellcheck disable=SC2086
+    cd "$COMPOSE_DIR" && docker compose up -d --force-recreate "$CONTAINER_NAME" $DEPENDENT_CONTAINERS 2>&1 | while read -r line; do
         log "$line"
     done
 
     # Wait for container to stabilize
-    sleep 20
+    sleep 30
 
     if check_gluetun_health; then
-        log "Container recovered after restart"
+        log "Container recovered after force-recreate"
+        send_notification \
+            "Gluetun watchdog: VPN recovered" \
+            "Force-recreated $CONTAINER_NAME + dependents on $(hostname). VPN is back up." \
+            "info"
         return 0
     else
-        log "Container still unhealthy after restart - will retry next cycle"
+        log "Container still unhealthy after force-recreate - will retry next cycle"
         return 1
     fi
 }
@@ -142,9 +171,8 @@ restart_gluetun() {
 # ---------------------------------------------------------------------------
 
 main() {
-    local health_result
-    check_gluetun_health
-    health_result=$?
+    local health_result=0
+    check_gluetun_health || health_result=$?
 
     # Container doesn't exist - nothing to monitor
     if [[ "$health_result" -eq 2 ]]; then

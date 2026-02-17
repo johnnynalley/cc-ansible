@@ -358,7 +358,7 @@ Check status: `journalctl -t network-watchdog -f`
 
 ## Gluetun VPN Watchdog
 
-Gluetun's internal VPN restart doesn't clean up tun0 routes, causing crash loops. The watchdog (`gluetun-watchdog.yml`) runs every 60 seconds on media-vm, detects the loop via Docker healthcheck, and does a full container restart after 3 consecutive failures. Rate-limited to 5 restarts/hour.
+Gluetun's internal VPN restart doesn't clean up tun0 routes, causing crash loops (`RTNETLINK answers: File exists`). The watchdog (`gluetun-watchdog.yml`) runs every 60 seconds on media-vm, detects the loop via Docker healthcheck, and does a full `docker compose up -d --force-recreate` of Gluetun + qBittorrent after 3 consecutive failures. Force-recreate (not just restart) is required to destroy the network namespace and clear stale routes. Sends silent Pushover notification on recovery (`push-quiet` tag). Rate-limited to 5 restarts/hour.
 
 Check status: `journalctl -t gluetun-watchdog -f`
 
@@ -474,7 +474,7 @@ docker-vm (VM 110 on pve-m70q) runs infrastructure services:
 | Caddy | - | Reverse proxy (DNS-01 via Cloudflare) |
 | Vaultwarden | `vaultwarden.jnalley.me` | Password manager |
 | Uptime Kuma | `status.jnalley.me` | Service monitoring |
-| Homepage | `home.jnalley.me` | Homelab dashboard |
+| Homepage | `home.jnalley.me` | Dashboard |
 | Gitea | `git.jnalley.me` | Self-hosted Git (SSH on 2222) |
 | Jellyseerr | `requests.jnalley.me` | Media requests (Plex OAuth) |
 | Cloudflared | - | Cloudflare Tunnel (public access) |
@@ -620,8 +620,9 @@ Centralized notification router for infrastructure and media alerts using tag-ba
 Diun (container updates) ──┐
 smartd (disk health) ──────┤
 apcupsd (UPS power) ───────┤
-auto-updates (weekly) ─────┼──→ Apprise API (docker-vm) → Pushover "Homelab" (Time Sensitive)
-network-watchdog (recovery)┤                           → Email (iCloud SMTP)
+auto-updates (weekly) ─────┼──→ Apprise API (docker-vm) → Pushover "Computer Corner" (Time Sensitive)
+network-watchdog (recovery)┤                           → Pushover "Computer Corner" (silent/quiet)
+gluetun-watchdog (VPN) ────┤                           → Email (iCloud SMTP)
 Sonarr/Radarr (grabs) ─────┤                           → Pushover "cc-media-feed" (silent)
 Jellyseerr (requests) ──────┘
 
@@ -629,12 +630,13 @@ Sonarr/Radarr ──→ Discord (native connection, rich embeds with poster art)
 ```
 
 - **Apprise API**: Notification router at `/opt/notifications/` on docker-vm. Config uses `pover://` URLs for Pushover
-- **Two Pushover apps**: "Homelab" (normal priority, Time Sensitive on iOS) and "cc-media-feed" (priority -2, silent/in-app only)
-- **Four Apprise tags**: `push` (infrastructure → Homelab app), `email` (iCloud SMTP), `media-feed` (Sonarr/Radarr → cc-media-feed app), `media-requests` (Jellyseerr → cc-media-feed app)
+- **Two Pushover apps**: "Computer Corner" (normal + quiet priority) and "cc-media-feed" (priority -2, silent/in-app only)
+- **Five Apprise tags**: `push` (infrastructure → Computer Corner app, Time Sensitive), `push-quiet` (automated recovery → Computer Corner app, silent), `email` (iCloud SMTP), `media-feed` (Sonarr/Radarr → cc-media-feed app), `media-requests` (Jellyseerr → cc-media-feed app)
 - **Diun**: Container image update notifier on all Docker VMs (`/opt/diun/`), sends with `push` tag
 - **smartd/apcupsd**: Infrastructure alerts, send with `push` tag
 - **auto-updates**: Notifies before updates (package count), after completion, and before reboots
 - **network-watchdog**: Best-effort notifications on gateway/Tailscale recovery, pre-reboot, and max-reboot exceeded
+- **gluetun-watchdog**: Silent notifications on VPN recovery or max-restart exhaustion (`push-quiet` tag)
 - **Sonarr/Radarr**: Dual notifications — Discord (rich embeds) + Apprise `media-feed` tag (silent Pushover)
 - **Jellyseerr**: Webhook to Apprise with `media-requests` tag (silent Pushover)
 - **ntfy**: Commented out in docker-compose, config preserved at `/opt/notifications/ntfy/`. Switched to Pushover because ntfy iOS lacks per-topic push control.
