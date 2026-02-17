@@ -10,6 +10,11 @@ packages_debian_extra:
   - iputils-ping    # ping (usually included on Arch)
   - locales
 
+# Ubuntu-only packages (not available on Debian/Proxmox)
+packages_ubuntu_extra:
+  - update-notifier-common  # MOTD: "X updates available" message + reboot-required
+  - landscape-common        # MOTD: system info (load, memory, disk, users)
+
 # Auto-updates schedule (Debian-based systems)
 # Hosts use UTC timezone — 08:00 UTC = 2:00 AM Central (3:00 AM during CDT)
 auto_updates_oncalendar: "Sun *-*-* 08:00:00"

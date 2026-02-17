@@ -47,6 +47,7 @@
             (packages_linux_common | default([]))
             + (packages_linux_extra | default([]))
             + (packages_debian_extra | default([]))
+            + ((packages_ubuntu_extra | default([])) if ansible_facts.distribution == 'Ubuntu' else [])
             + (packages_proxmox_extra | default([]))
             + (packages_vms_lxcs_extra | default([]))
             + (packages_vms_extra | default([]))
