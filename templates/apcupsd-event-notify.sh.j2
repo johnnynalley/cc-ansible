@@ -7,7 +7,7 @@ HOSTNAME=$(hostname)
 
 APPRISE_ENDPOINT="{{ apprise_endpoint }}"
 APPRISE_TOKEN="{{ apprise_token }}"
-APPRISE_TAGS="{{ apprise_alert_tags }}"
+APPRISE_TAGS="{{ apcupsd_alert_tags | default(apprise_alert_tags) }}"
 
 send_notify() {
     local subject="$1"

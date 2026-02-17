@@ -21,6 +21,10 @@ pve_node_firewall:
     - { action: ACCEPT, iface: vmbr0, proto: tcp, dport: 3128, comment: "Spice proxy (LAN)" }
     - { action: ACCEPT, iface: vmbr0, proto: tcp, dport: "60000:60050", comment: "Live migration (LAN)" }
 
+    # apcupsd NIS (ts440 is USB master)
+    - { action: ACCEPT, iface: vmbr0, proto: tcp, dport: 3551, comment: "apcupsd NIS (LAN)" }
+    - { action: ACCEPT, iface: tailscale0, proto: tcp, dport: 3551, comment: "apcupsd NIS (Tailscale)" }
+
     # NFS server (ts440 exports to Tailscale clients)
     - { action: ACCEPT, iface: tailscale0, proto: tcp, dport: 2049, comment: "NFSv4 (Tailscale)" }
 

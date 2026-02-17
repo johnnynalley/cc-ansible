@@ -1,19 +1,18 @@
 # =============================================================================
-# ts440 - apcupsd Slave Configuration (Network client)
+# ts440 - apcupsd Master Configuration (USB-connected UPS)
 # =============================================================================
-# Monitors pve-m70q's UPS over the network for graceful shutdown.
-# Higher thresholds than default so storage server shuts down earlier,
-# giving ZFS pools time to export cleanly.
+# USB cable physically connected to this host.
+# Serves UPS status to all other Proxmox nodes via NIS (port 3551).
+# Higher shutdown thresholds than default so storage server shuts down
+# earlier, giving ZFS pools time to export cleanly.
 
 apcupsd_enabled: true
 apcupsd_upsname: ts440-ups
-apcupsd_cable: ether
-apcupsd_upstype: net
-apcupsd_device: "192.168.1.134:3551"
-apcupsd_nisip: "127.0.0.1"
+apcupsd_cable: usb
+apcupsd_upstype: usb
+apcupsd_device: ""
+apcupsd_nisip: "0.0.0.0"
 apcupsd_netserver: "on"
-apcupsd_polltime: 60
-apcupsd_startup_delay: 0
 
 # Shut down earlier than other nodes (storage safety)
 apcupsd_batterylevel: 15

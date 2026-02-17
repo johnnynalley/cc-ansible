@@ -1,16 +1,16 @@
 # =============================================================================
-# pve-m70q - apcupsd Master Configuration (USB-connected UPS)
+# pve-m70q - apcupsd Slave Configuration (Network client)
 # =============================================================================
-# USB cable physically connected to this host.
-# Serves UPS status to all other Proxmox nodes via NIS (port 3551).
 
 apcupsd_enabled: true
 apcupsd_upsname: pve-m70q-ups
-apcupsd_cable: usb
-apcupsd_upstype: usb
-apcupsd_device: ""
-apcupsd_nisip: "0.0.0.0"
+apcupsd_cable: ether
+apcupsd_upstype: net
+apcupsd_device: "192.168.1.146:3551"
+apcupsd_nisip: "127.0.0.1"
 apcupsd_netserver: "on"
+apcupsd_polltime: 60
+apcupsd_startup_delay: 0
 
 # Apprise notifications on power events
 apcupsd_notify_enabled: true

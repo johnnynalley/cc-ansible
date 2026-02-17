@@ -122,6 +122,12 @@
       when: apcupsd_upstype == 'usb'
       notify: Reload udev and apply UPS rule
 
+    - name: Remove USB autosuspend rule from non-USB hosts
+      ansible.builtin.file:
+        path: /etc/udev/rules.d/99-apc-ups-no-autosuspend.rules
+        state: absent
+      when: apcupsd_upstype != 'usb'
+
     - name: Ensure apcupsd is enabled and running
       ansible.builtin.systemd:
         name: apcupsd

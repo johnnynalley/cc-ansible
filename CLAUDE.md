@@ -1,6 +1,6 @@
 # CLAUDE.md
 
-> **Last updated:** 2026-02-17
+> **Last updated:** 2026-02-18
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
@@ -661,7 +661,7 @@ Sonarr/Radarr ──→ Discord (native connection, rich embeds with poster art)
 - `media-requests` tag → Pushover "cc-media-feed" app (silent)
 - Both `push` and `email` or no tag → all infrastructure targets
 
-Apps control routing by specifying tags when sending. Diun uses `tags: [push]` for Pushover-only. smartd and apcupsd use `apprise_alert_tags` variable (default: `push`). To add email for critical alerts, change to `push,email` in `group_vars/all/vars.yml`.
+Apps control routing by specifying tags when sending. Diun uses `tags: [push]` for Pushover-only. smartd and apcupsd use `apprise_alert_tags` variable (default: `push`). apcupsd supports per-service override via `apcupsd_alert_tags`, falling back to `apprise_alert_tags` if unset. To add email for critical alerts, change to `push,email` in `group_vars/all/vars.yml`.
 
 **Media Notifications:**
 
@@ -1063,7 +1063,7 @@ Current config:
 | `playbooks/packages.yml` | Multi-platform package installation |
 | `playbooks/msmtp.yml` | Lightweight SMTP relay (iCloud) for system email alerts |
 | `playbooks/smartmontools.yml` | SMART disk monitoring with Apprise push alerts |
-| `playbooks/apcupsd.yml` | UPS monitoring with Apprise push alerts (pve-m70q USB master, other nodes as network slaves). Deploys udev rule on master to disable USB autosuspend for APC devices. Staggers slave startup via systemd drop-in to avoid NIS mutex contention |
+| `playbooks/apcupsd.yml` | UPS monitoring with Apprise push alerts (ts440 USB master, other nodes as network slaves). Deploys udev rule on master to disable USB autosuspend for APC devices. Staggers slave startup via systemd drop-in to avoid NIS mutex contention. Cleans up udev rule from non-USB hosts |
 | `playbooks/ssh-hardening.yml` | SSH security configuration (key auth, disable password) |
 | `playbooks/bootstrap.yml` | Initial admin user/SSH setup (run as root first time, supports Debian and Arch) |
 | `playbooks/auto-updates.yml` | Systemd timer for scheduled updates with Apprise push notifications. Includes Proxmox kernel version check (Proxmox packages don't set `/var/run/reboot-required`) |

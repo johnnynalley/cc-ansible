@@ -2,7 +2,7 @@
 # Proxmox Nodes - apcupsd UPS Monitoring (defaults)
 # =============================================================================
 # All Proxmox nodes are on the same APC UPS.
-# pve-m70q is the USB-connected master; others are network slaves.
+# ts440 is the USB-connected master; others are network slaves.
 
 # Disabled by default - enable per-host
 apcupsd_enabled: false

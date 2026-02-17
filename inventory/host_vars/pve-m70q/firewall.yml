@@ -10,10 +10,6 @@ pve_node_firewall:
     - { action: ACCEPT, iface: vmbr0, proto: tcp, dport: 22, comment: "SSH (LAN)" }
     - { action: ACCEPT, iface: tailscale0, proto: tcp, dport: 8006, comment: "Proxmox API (Tailscale)" }
     - { action: ACCEPT, iface: tailscale0, proto: tcp, dport: 22, comment: "SSH (Tailscale)" }
-    # apcupsd NIS (UPS master - serves status to all Proxmox nodes)
-    - { action: ACCEPT, iface: tailscale0, proto: tcp, dport: 3551, comment: "apcupsd NIS (Tailscale)" }
-    - { action: ACCEPT, iface: vmbr0, proto: tcp, dport: 3551, comment: "apcupsd NIS (LAN)" }
-
     - { action: ACCEPT, iface: tailscale0, proto: icmp, comment: "Ping (Tailscale)" }
     - { action: DROP, comment: "Default deny" }
 
