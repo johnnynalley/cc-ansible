@@ -1,6 +1,6 @@
 # CLAUDE.md
 
-> **Last updated:** 2026-02-18
+> **Last updated:** 2026-02-17
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
@@ -158,147 +158,31 @@ Package lists follow naming convention: `packages_linux_common`, `packages_debia
 
 ### TS440 Storage Architecture
 
-TS440 is the primary NAS server with a complex storage stack. Key components:
+TS440 is the primary NAS server (currently the sole `nas_server` group member). Key components:
 
-**ZFS Pool**: Primary storage at `/srv/nas-zfs` on a 2x 8TB Seagate ST8000NM0055 mirror (~7.3TB usable). Contains configs, media, and other data. ZFS performance degrades above 80% capacity - keep pools under this threshold.
+**ZFS Pool**: 2x 8TB mirror at `/srv/nas-zfs` (~7.3TB usable). Keep under 80% capacity. ARC max set to 2GB (in `group_vars/nas_server/zfs.yml`). media-vm has 10GB RAM to accommodate 20+ containers including GPU-accelerated Immich ML.
 
-**MergerFS Media Pool**: `/srv/media` aggregates multiple storage sources:
-- `/srv/nas-01/media` (2TB Lacie SSD)
-- `/srv/nas-02/media`, `/srv/nas-04/media` (older drives)
-- `/srv/nas-zfs/media` (ZFS pool)
-- `/srv/media-02/media`, `/srv/media-03/media` (additional ZFS datasets)
+**MergerFS**: `/srv/media` aggregates multiple drives into a unified media pool. Branches and options defined in `group_vars/nas_server/mergerfs.yml`. Boot ordering uses `After=` directives only — `Requires=` and `RequiresMountsFor=` caused dependency failures with the mixed ZFS/fstab setup.
 
-The mergerfs mount is managed by a systemd unit deployed via `playbooks/mergerfs.yml`. Critical options for NFS compatibility:
-- `inodecalc=path-hash` - stable inode numbers based on file paths, preventing stale NFS file handles (ESTALE errors)
-- `func.getattr=newest` - consistent file attributes across underlying drives for NFS stability
+**Incomplete Downloads**: The Lacie SSD (`/srv/nas-01`) has a downloads directory **outside** the mergerfs branch tree, bind-mounted to `/srv/media-downloads` (defined in `host_vars/ts440/mounts.yml`). This abstracts the underlying drive — to move downloads to a different SSD, just update `mounts.yml`. Passed to media-vm via VirtioFS as `/srv/incomplete_downloads`.
 
-**Incomplete Downloads (Lacie SSD)**: The 2TB Lacie SSD (`/srv/nas-01`) has a dedicated downloads directory **outside** the mergerfs branch tree:
+**VirtioFS**: media-vm and nextcloud-vm access storage via VirtioFS (not NFS). Config in `host_vars/ts440/virtiofs.yml` (host side) and `host_vars/<vm>/virtiofs.yml` (guest side). All mounts use `cache=never` to prevent virtiofsd from consuming 5GB+ per mount on the host. Guest page cache still works, so streaming performance is unaffected.
 
-```
-/srv/nas-01/
-├── downloads/
-│   └── media-downloads/    ← bind-mounted to /srv/media-downloads (Ansible-managed via host_vars/ts440/mounts.yml)
-│       └── incomplete/     ← VirtioFS to media-vm as /srv/incomplete_downloads
-│           ├── usenet/     ← SABnzbd temp downloads
-│           └── torrents/   ← qBittorrent temp downloads
-└── media/                  ← mergerfs branch (unchanged)
-```
+**VirtioFS ACL Limitation**: VirtioFS does **not** pass through POSIX ACLs to guests. Files must have adequate **base permissions** (`chmod`) — ACLs set via `setfacl` on the host are invisible inside VMs. Default ACL `setfacl -R -d -m o::r /srv/nas-zfs/configs` ensures new files get `o+r` for Nextcloud access through VirtioFS.
 
-The bind mount at `/srv/media-downloads` abstracts the underlying drive — to move incomplete downloads to a different SSD, just update `mounts.yml`. Each download client only sees its own subdirectory:
-- SABnzbd: `/srv/incomplete_downloads/usenet:/incomplete`
-- qBittorrent: `/srv/incomplete_downloads/torrents:/incomplete`
-
-Once complete, files are moved to `/data/downloads/complete` (SABnzbd) or `/data/downloads/torrents/` (qBittorrent), both on the mergerfs pool where Sonarr/Radarr can hardlink them to media libraries.
-
-Critical boot ordering:
-- Must start **after** ZFS mounts and individual drive mounts
-- Uses `After=` directives with exact systemd unit names (e.g., `srv-nas\x2d01.mount`)
-- Avoids `Requires=` and `RequiresMountsFor=` which caused dependency failures with the mixed ZFS/fstab setup
-
-**Media VM (VM 100 on ts440)**: Runs all media-related Docker services including Plex, Sonarr, Radarr, Prowlarr, Bazarr, SABnzbd, Huntarr, Tautulli, Audiobookshelf, Tdarr, Recyclarr, and Portainer. Uses VirtioFS for high-performance storage access (eliminates NFS overhead - SABnzbd downloads improved from ~25 MB/s over NFS to ~43 MB/s via VirtioFS). Autostart is handled by `/etc/systemd/system/vm-media-autostart.service` which waits for `srv-media.mount`.
-
-VirtioFS mounts on media-vm (Ansible-managed via `host_vars/ts440/virtiofs.yml` and `host_vars/media-vm/virtiofs.yml`):
-
-| Host Path | Guest Mount | Purpose |
-|-----------|-------------|---------|
-| `/srv/plex-library` | `/srv/plex` | Plex media library |
-| `/srv/media` | `/srv/media` | Full mergerfs pool for Sonarr/Radarr/etc. |
-| `/srv/media-downloads/incomplete` | `/srv/incomplete_downloads` | Lacie SSD for SABnzbd + qBittorrent temp storage |
-| `/srv/nas-zfs/media/books` | `/srv/books` | Audiobooks for Audiobookshelf |
-| `/srv/nas-zfs/media/photos` | `/srv/photos` | Photos/videos for Immich |
-| `/srv/nas-zfs/media/archive/untitled` | `/srv/untitled` | Immich external library (locked folder) |
-
-All mounts use `cache=never` to prevent host memory exhaustion.
-
-**VirtioFS Memory Optimization**: All VirtioFS mounts use `cache=never` to prevent the virtiofsd daemon from caching file data on the host. Without this, virtiofsd can consume 5GB+ per mount, causing severe memory pressure on ts440. With `cache=never`, virtiofsd uses only a few KB each. The guest OS (media-vm) still caches in its own page cache, so performance impact is minimal for streaming workloads.
-
-**VirtioFS ACL Limitation**: VirtioFS does **not** pass through POSIX ACLs to guest VMs. Files must have adequate **base permissions** (`chmod`) — ACLs set via `setfacl` on the host are invisible to guests. For example, a file with mode `0670` and ACL `user:www-data:rwx` will be unreadable by www-data inside nextcloud-vm because only the base "other" bits (`---`) are visible. A default ACL (`setfacl -R -d -m o::r /srv/nas-zfs/configs`) is set to ensure new files in the configs directory inherit `o+r` for Nextcloud External Storage access.
+**Config Storage**: Application configs are stored locally at `/opt/` on each VM (not NFS). This eliminates NFS boot dependencies and improves performance. Configs are backed up hourly to ts440 ZFS via `local-restic.yml`.
 
 **Bind Mounts**: `/srv/plex-library` is bind-mounted from `/srv/media/plex` via fstab with `x-systemd.requires-mounts-for=/srv/media`.
 
-**Config Storage**: Application configs have been migrated to local storage on each VM for better performance and independence:
-- **docker-vm**: `/opt/caddy/`, `/opt/vaultwarden/` (no NFS dependencies)
-- **media-vm**: `/opt/media-stack/` (58GB, all media service configs)
-- **nas-zfs/configs**: Only contains `ansible/` directory (this repo), auto-synced from GitHub via git-sync timer, accessible via Nextcloud External Storage and pi5-01 NFS
-
-**NFS Exports**: ts440 exports storage for clients over Tailscale:
-- `/srv/exports/configs` → pi5-01 (Ansible repo access)
-- `/srv/nas-zfs` → jn-desktop (full NAS access for gaming workstation)
-
-VMs no longer use NFS - docker-vm and media-vm store all configs locally and are fully independent of ts440 for config access.
-
-**NFS Export Configuration Warning**: When adding exports in `group_vars/nas_server/nfs.yml`, do NOT use `bind_source` for paths already under the pseudo-root (`/srv`). Using `bind_source: /srv/nas-zfs` for a `name: nas-zfs` export creates a circular bind mount (`/srv/nas-zfs` → `/srv/nas-zfs`) that masks ZFS child datasets. For paths already under `/srv`, omit `bind_source` entirely - the export template will reference the path directly.
-
-**NFS crossmnt option**: The `/srv/nas-zfs` export uses `crossmnt` to traverse ZFS child datasets. This causes the client to show multiple NFS mounts (one per ZFS dataset) but they all work as a unified tree under `/mnt/nas-zfs`. Without `crossmnt`, child dataset directories would appear empty.
-
-**Note**: media-vm (VM 100) runs on ts440 itself and uses VirtioFS instead of NFS for all storage access, providing significantly better performance (~43 MB/s vs ~25 MB/s for downloads).
-
-**ZFS Performance Tuning**: ts440 has 15GB RAM shared between Proxmox, media-vm, and ZFS ARC (read cache). Key tuning:
-
-- **ZFS ARC max**: Configured in `/etc/modprobe.d/zfs.conf` via `options zfs zfs_arc_max=<bytes>`. Currently set to 2GB (`2147483648`). Can be changed live with `echo <bytes> | sudo tee /sys/module/zfs/parameters/zfs_arc_max`.
-- **media-vm RAM**: Allocated 10GB. Increased from 6GB after Immich ML processing caused OOM freezes. media-vm runs 20+ containers including Plex, full *arr stack, Immich (with CUDA ML), Booklore, Byparr, and more.
-- **Balance**: media-vm needs adequate RAM for all containers. ZFS ARC was reduced from 5GB to 2GB to accommodate — ARC was already self-shrinking to ~2GB under pressure anyway, so this formalizes what the system was doing naturally.
-
-Diagnostic commands:
-```bash
-# Check ARC stats
-cat /proc/spl/kstat/zfs/arcstats | grep -E '^size|^c_max'
-
-# Check memory pressure (swap usage is bad)
-free -h
-
-# Check I/O latency
-iostat -x 1 5
-```
+**NFS Configuration Warnings**:
+- Do NOT use `bind_source` in `group_vars/nas_server/nfs.yml` for paths already under the pseudo-root (`/srv`). It creates circular bind mounts that mask ZFS child datasets.
+- The `/srv/nas-zfs` export uses `crossmnt` to traverse ZFS child datasets. Clients show multiple NFS mounts but they work as a unified tree.
 
 ### Samba/SMB Shares (ts440)
 
-ts440 serves SMB shares over Tailscale, managed by Ansible via `playbooks/samba.yml`. Configuration is defined in `inventory/host_vars/ts440/vars.yml` under `smb_shares`.
+Managed by `playbooks/samba.yml`. Shares defined in `inventory/host_vars/ts440/vars.yml` under `smb_shares`. Uses `@smbusers` group for authentication and fruit VFS module (`catia fruit streams_xattr`) for macOS compatibility and Time Machine support. Avahi mDNS advertisement for LAN discovery.
 
-**Current shares:**
-
-| Share | Path | Purpose |
-|-------|------|---------|
-| NAS-ZFS | `/mnt/nas-zfs` | Full ZFS pool root |
-| Configs | `/mnt/nas-zfs/configs` | All configs (includes ansible) |
-| Backups | `/mnt/nas-zfs/backups` | Backup directory |
-| Time Machine | `/mnt/nas-zfs/backups/timemachine` | macOS Time Machine target |
-| NAS | `/srv/NAS/Files` | Legacy NAS files |
-| NAS-01 to NAS-05 | `/srv/nas-01` to `/srv/nas-05` | Individual drive access |
-
-**Key configuration:**
-- Uses `@smbusers` group for authentication (not individual users)
-- macOS compatibility via fruit VFS module (`catia fruit streams_xattr`)
-- Time Machine support with `fruit:time machine = yes`
-- Avahi mDNS advertisement for LAN discovery (`/etc/avahi/services/timemachine.service`)
-
-**Connecting from macOS:**
-1. Finder → Cmd+K → `smb://100.71.188.16/Configs`
-2. Authenticate with Samba credentials
-3. Navigate to `ansible/cc-ansible` for this repo
-
-**Discovery over Tailscale**: Time Machine discovery works via SMB's AAPL extensions, NOT mDNS (mDNS doesn't traverse WireGuard tunnels). Connect using the Tailscale IP.
-
-**Samba user management:**
-```bash
-# Set/update Samba password (interactive, run on ts440)
-ansible ts440 -m shell -a "smbpasswd -a johnny" --become
-
-# List Samba users
-ansible ts440 -m shell -a "pdbedit -L" --become
-```
-
-Troubleshooting Time Machine not appearing in macOS picker:
-```bash
-# Restart smbd (most common fix)
-ansible ts440 -m systemd -a "name=smbd state=restarted" --become
-
-# Check Avahi service is valid
-ansible ts440 -m shell -a "journalctl -u avahi-daemon | grep -i timemachine" --become
-
-# Verify Samba config
-ansible ts440 -m shell -a "testparm -s" --become
-```
+**Discovery over Tailscale**: Time Machine discovery works via SMB's AAPL extensions, NOT mDNS (mDNS doesn't traverse WireGuard tunnels). Connect using the Tailscale IP: `smb://100.71.188.16/<share>`.
 
 ### Docker Container Management
 
@@ -320,161 +204,21 @@ docker_stacks:
 
 #### docker-vm (VM 110 on pve-m70q)
 
-Lightweight VM running only infrastructure services. Specs: 6 cores, 6GB RAM, disk on `local-lvm`.
-
-**Stacks on docker-vm**:
-- **Caddy**: Reverse proxy with automatic HTTPS via Cloudflare DNS-01 challenge
-- **Vaultwarden**: Bitwarden-compatible password manager
-- **Uptime Kuma**: Service monitoring dashboard (`status.jnalley.me`)
-- **Homepage**: Homelab dashboard (`home.jnalley.me`)
-- **Gitea**: Self-hosted Git server (`git.jnalley.me`, SSH on port 2222)
-- **Jellyseerr**: Media request management (`requests.jnalley.me`) - uses Plex OAuth
-- **Cloudflared**: Cloudflare Tunnel for public access to Nextcloud/Jellyseerr
-- **Notifications**: Apprise API (`apprise.jnalley.me`) + Pushover — centralized notification routing (ntfy container commented out, preserved for future use)
-- **FreshRSS**: Self-hosted RSS aggregator (`rss.jnalley.me`) — Google Reader API for Reeder integration
-- **Diun**: Docker Image Update Notifier — monitors containers for available image updates
-
-**Docker Network**: Services use `caddy-proxy` network (created by Caddy stack). Other stacks join it as external.
-
-**Config Storage**: Configs stored locally at `/opt/<service>/` on docker-vm. This avoids NFS dependency issues and allows docker-vm to boot independently of ts440. Configs are backed up via restic (`/opt` is in `restic_backup_paths_extra`).
-
-**Boot Ordering**: `docker-stacks.service` starts containers after docker.service (no NFS dependencies).
-
-**Stack Control**: The `docker_stacks` variable supports a `start` field:
-- `start: true` (default) - Ensure stack is running
-- `start: false` - Ensure stack is stopped (useful for disabling services without removing config)
+Lightweight VM (6 cores, 6GB RAM) running infrastructure services. Stacks defined in `host_vars/docker-vm/docker.yml`. Services use `caddy-proxy` Docker network (created by Caddy stack; other stacks join as external). Configs stored locally at `/opt/<service>/`, backed up via restic.
 
 #### nextcloud-vm (VM 101 on ts440)
 
-Nextcloud AIO instance with VirtioFS storage access to ts440's ZFS pool.
-
-**VM Specs**: 4GB RAM, 2 cores, 32GB local disk
-
-**Stacks on nextcloud-vm**:
-- **Nextcloud AIO**: All-in-one Nextcloud deployment with Collabora, Talk, etc.
-- **Diun**: Docker Image Update Notifier — monitors containers for available image updates
-
-**VirtioFS Mounts** (Ansible-managed via `host_vars/ts440/virtiofs.yml` and `host_vars/nextcloud-vm/virtiofs.yml`):
-
-| Host Path | Guest Mount | Purpose |
-|-----------|-------------|---------|
-| `/srv/nas-zfs/nextcloud` | `/srv/nextcloud` | Nextcloud data directory |
-| `/srv/nas-zfs/configs` | `/srv/configs` | Ansible configs (External Storage) |
-| `/srv/nas-zfs/backups/nextcloud-aio` | `/srv/nextcloud-aio-backup` | Nextcloud AIO backup location |
-| `/srv/nas-zfs/media/photos` | `/srv/photos` | Immich photos (External Storage, read-only) |
-
-All mounts use `cache=never` to prevent host memory exhaustion. Data directory at `/srv/nas-zfs/nextcloud/data` is owned by www-data (UID 33).
-
-**Access**:
-- Admin interface: `https://100.112.46.126:8080` (Tailscale only)
-- Web interface: `https://nextcloud.jnalley.me` (public via Cloudflare Tunnel)
-
-**Public Access**: Cloudflare Tunnel routes `nextcloud.jnalley.me` → `100.112.46.126:11000`. No ports exposed on router, home IP hidden behind Cloudflare.
-
-**Email Configuration**:
-Nextcloud sends email via iCloud SMTP (same account as ts440 smartmontools alerts):
-- From: `nextcloud@<domain>` (see vault for domain)
-- SMTP: `smtp.mail.me.com:587` (STARTTLS)
-- Auth: iCloud email with app-specific password (credentials in vault)
-
-Settings configured via `occ` CLI (UI may not save all fields properly):
-```bash
-occ config:system:set mail_smtpmode --value='smtp'
-occ config:system:set mail_smtpsecure --value='tls'
-occ config:system:set mail_smtphost --value='smtp.mail.me.com'
-occ config:system:set mail_smtpport --value='587'
-occ config:system:set mail_smtpauth --value='1' --type=integer
-occ config:system:set mail_smtpname --value='<icloud-email>'
-occ config:system:set mail_smtppassword --value='<app-password>'
-occ config:system:set mail_from_address --value='nextcloud'
-occ config:system:set mail_domain --value='<domain>'
-```
-
-**Mail Providers Setting**: Use "System email account" (not "User's email account"). This sends all Nextcloud emails (notifications, calendar invites) from the system SMTP. The "User's email account" option requires users to configure the Nextcloud Mail app with their own email - unnecessary for single-user.
-
-**iOS CalDAV/CardDAV**: App passwords must be created with the correct login name. If you log in with email, app passwords get that as `login_name`, but iOS sends the display username — causing auth failures. Create app passwords via CLI to ensure correct login name:
-```bash
-docker exec -u www-data nextcloud-aio-nextcloud php occ user:auth-tokens:add Johnny
-```
+Nextcloud AIO with VirtioFS storage access (mounts in `host_vars/nextcloud-vm/virtiofs.yml`). Public via Cloudflare Tunnel at `nextcloud.jnalley.me`. Email via iCloud SMTP (same account as smartmontools alerts; credentials in vault). Stacks: Nextcloud AIO, Diun.
 
 #### media-vm (VM 100 on ts440)
 
-Primary media services VM. Specs: 10GB RAM, 4 cores, 200GB local disk, Quadro P2200 GPU passthrough, VirtioFS for media access.
+Primary media VM (10GB RAM, 4 cores, 200GB disk, Quadro P2200 GPU passthrough). Stacks in `host_vars/media-vm/docker.yml`. GPU shared between Plex (NVENC transcoding) and Immich (CUDA ML inference).
 
-**Stacks on media-vm**:
-- **media-stack**: Plex, Sonarr, Radarr, Prowlarr, Bazarr, SABnzbd, qBittorrent, Gluetun, Huntarr, Tautulli, Tdarr, Recyclarr, Audiobookshelf
-- **immich**: Immich photo/video management (server, machine learning, PostgreSQL, Redis, folder-album-creator) with GPU acceleration
-- **portainer**: Docker management UI (ports 9000/9443)
-- **diun**: Docker Image Update Notifier — monitors containers for available image updates
+**Critical**: All media containers must use the same VirtioFS mount path (`/srv/media/plex:/data`). Using different paths causes stale file handle errors. Hardlinks work because all downloads and media libraries share the same `/data` mount on mergerfs.
 
-**Config Storage**: All configs stored locally at `/opt/` on media-vm (backed up hourly to ts440 ZFS):
-- `/opt/media-stack/docker-compose.yml` - main stack including audiobookshelf
-- `/opt/immich/docker-compose.yml` - Immich stack (server, ML, postgres, redis, folder-album-creator)
-- `/opt/portainer/docker-compose.yml`
+**Immich**: Photo/video management at `photos.jnalley.me`. ML container capped at `mem_limit: 2g` to prevent OOM-freezing the VM. External library (`/srv/untitled`) is auto-locked by `immich_folder_album_creator` every 6 hours.
 
-**Media Access**: All containers access media via the same VirtioFS mount path to prevent stale file handle issues:
-- `/srv/media/plex:/data` - mergerfs media pool (Plex read-only, Sonarr, Radarr, SABnzbd, Tdarr, qBittorrent)
-- `/srv/incomplete_downloads/usenet:/incomplete` - SABnzbd temp downloads (Lacie SSD)
-- `/srv/incomplete_downloads/torrents:/incomplete` - qBittorrent temp downloads (Lacie SSD)
-
-**Hardlink compatibility**: All media containers share the same `/data` mount (`/srv/media/plex` on mergerfs). Completed downloads land at `/data/downloads/complete` (SABnzbd) or `/data/downloads/torrents/` (qBittorrent), and Sonarr/Radarr hardlink from there to `/data/Shows/`, `/data/Anime/`, `/data/Movies/` — all on the same filesystem.
-
-**Important**: All media containers must use the same mount path (`/srv/media/plex`). Using different paths (e.g., `/srv/plex` vs `/srv/media/plex`) causes VirtioFS stale file handle errors when files are added, requiring container restarts. Sonarr/Radarr should also have Plex notifications configured (Settings → Connect → Plex) to trigger library updates on import.
-
-**GPU Sharing (Quadro P2200)**: The GPU is shared between Plex (transcoding via NVENC) and Immich (ML inference via CUDA). Plex uses `runtime: nvidia`, Immich uses `deploy.resources.reservations` — both work simultaneously. NVIDIA GPU scheduling handles multi-process access. Contention is rare since Plex transcoding is on-demand and Immich ML is bursty (on new uploads).
-
-#### Immich (Photo/Video Management)
-
-Immich provides self-hosted photo/video management with GPU-accelerated face detection, CLIP search, and video transcoding. Access at `https://photos.jnalley.me` (Tailscale only).
-
-**Storage**:
-- Photos/videos: `/srv/photos` (VirtioFS from `nas-zfs/media/photos` on ZFS)
-- App data (DB, config): `/opt/immich/` (local disk, backed up hourly via restic)
-- ML model cache: Docker volume `immich_model-cache`
-
-**Containers**: `immich_server` (port 2283), `immich_machine_learning` (CUDA, `mem_limit: 2g`), `immich_postgres` (pgvecto.rs), `immich_redis`, `immich_folder_album_creator`
-
-**Memory limit**: The ML container is capped at 2GB (`mem_limit: 2g` in docker-compose) to prevent it from OOM-freezing the entire VM during bulk uploads. Docker kills just the ML container if it exceeds the limit, and Immich auto-restarts it to resume processing.
-
-**External library**: `/srv/untitled` is mounted read-only into the Immich container at `/mnt/external/untitled`. Source is `/srv/nas-zfs/media/archive/untitled` on ts440 (ZFS dataset `nas_zfs/media/archive`). Configured as an external library in Immich — files are indexed in-place, not copied.
-
-**Auto-lock (folder-album-creator)**: The `immich_folder_album_creator` container ([Salvoxia/immich-folder-album-creator](https://github.com/Salvoxia/immich-folder-album-creator)) runs every 6 hours and automatically moves all external library assets to Immich's locked folder. Config at `/opt/immich/folder-album-creator.env`. Uses `VISIBILITY: locked` so assets are hidden from timeline/search/face recognition.
-
-**Backup coverage**: Photos are protected by ZFS snapshots (production policy: 24h/7d/4w/6m), B2 offsite backup (auto-included), and the PostgreSQL database at `/opt/immich/postgres` is covered by media-vm's hourly local restic backup.
-
-#### Recyclarr (Custom Format Sync)
-
-Recyclarr syncs TRaSH Guides custom formats to Sonarr/Radarr. Config location: `/opt/media-stack/recyclarr/recyclarr.yml`
-
-**Key settings:**
-- `replace_existing_custom_formats: true` - Allows Recyclarr to update existing CF scores
-- Two profiles configured: `1080p-Anime` and `1080p`
-
-**Anime scoring (via Recyclarr):**
-
-| Custom Format | Score | Notes |
-|---------------|-------|-------|
-| Anime Dual Audio | +3000 | Strong preference for dual audio |
-| Anime LQ Groups | -10000 | Default TRaSH score, blocks LQ groups |
-| x265 (HEVC) | +50 | Slight preference for x265 |
-| BD/WEB Tiers | default | SeaDex-based quality tiers |
-
-**Manual CFs in Sonarr** (not managed by Recyclarr):
-
-| Custom Format | Score | Purpose |
-|---------------|-------|---------|
-| 2160p | -1500 | Penalize 4K unless dual audio (+3000) overcomes it |
-| Portuguese Releases | -10000 | Block Brazilian Portuguese releases (PTBR, Dublado, Anitsu) |
-
-The 1080p-Anime quality profile groups 1080p and 2160p together, letting CF scores decide. This allows 2160p dual audio (+1500 net) to be grabbed when no 1080p dual audio exists, while preferring 1080p otherwise.
-
-**Manual sync:**
-```bash
-# Run from ansible-lxc
-ansible media-vm -m shell -a "docker exec recyclarr recyclarr sync" --become
-```
-
-Recyclarr runs automatically via cron inside the container (daily at midnight).
+**Recyclarr**: Syncs TRaSH Guides custom formats to Sonarr/Radarr. Config at `/opt/media-stack/recyclarr/recyclarr.yml`. Runs daily at midnight.
 
 #### Torrent Fallback (Gluetun + qBittorrent)
 
@@ -488,32 +232,9 @@ Sonarr/Radarr → qBittorrent (priority 2) → Gluetun (VPN tunnel)
              → SABnzbd (priority 1, preferred)
 ```
 
-**Gluetun container:**
-- VPN provider: ProtonVPN (Plus tier required for P2P)
-- Username suffix: `+pmp` required for port forwarding
-- Port forwarding enabled for better torrent connectivity
-- Kill switch built-in (if VPN drops, no traffic leaks)
+qBittorrent uses `network_mode: "service:gluetun"`, so all traffic goes through Gluetun's network namespace. Gluetun's built-in kill switch blocks all traffic when VPN is down. **Important**: qBittorrent's Disk I/O Type must be set to **POSIX-compliant** (not mmap) for VirtioFS compatibility.
 
-**qBittorrent container:**
-- `network_mode: "service:gluetun"` - all traffic routes through VPN
-- WebUI port 8085 exposed via Gluetun
-- **Disk I/O Type: POSIX-compliant** - required for VirtioFS compatibility (mmap doesn't work)
-- Network interface bound to `tun0` for extra leak protection
-- Completed downloads to `/data/downloads/torrents/` (mergerfs via VirtioFS)
-- Incomplete downloads to `/incomplete/` (Lacie SSD via `/srv/incomplete_downloads/torrents`)
-
-**Download client priorities:**
-- SABnzbd: Priority 1 (preferred)
-- qBittorrent: Priority 2 (fallback)
-
-This means Usenet is always tried first. Torrents only grab releases that don't exist on Usenet.
-
-**Seeding behavior:**
-- Ratio limit: 1.0
-- After ratio reached: Pause torrent
-- Sonarr/Radarr handle cleanup after import + seeding complete
-
-**Automatic Port Sync**: ProtonVPN's port forwarding assigns dynamic ports that change on reconnect. A systemd-based automation keeps qBittorrent's listening port in sync:
+**Automatic Port Sync** (not Ansible-managed, deployed manually on media-vm): ProtonVPN assigns dynamic forwarded ports that change on reconnect. A systemd-based automation keeps qBittorrent's listening port in sync:
 
 1. **Gluetun** writes the forwarded port to `/opt/media-stack/gluetun/forwarded_port` via `VPN_PORT_FORWARDING_UP_COMMAND`
 2. **systemd path unit** (`qbit-port-sync.path`) watches that file for changes
@@ -523,78 +244,15 @@ This means Usenet is always tried first. Torrents only grab releases that don't 
    - If API unreachable (Gluetun restart broke qBittorrent's network), restarts qBittorrent via docker compose
    - Updates listening port via API so qBittorrent saves it correctly
 
-**IP Protection**: qBittorrent uses `network_mode: "service:gluetun"`, so all traffic goes through Gluetun's network namespace. Gluetun's built-in kill switch blocks all traffic when VPN is down. During reconnects, qBittorrent simply can't reach the internet until VPN is back up.
-
-**Port sync troubleshooting:**
-```bash
-# Check sync logs
-journalctl -t qbit-port-sync -n 20
-
-# Check current ports match
-ansible media-vm -m shell -a "cat /opt/media-stack/gluetun/forwarded_port" --become
-# Compare with qBittorrent WebUI → Options → Connection → Listening Port
-
-# Manually trigger sync
-ansible media-vm -m shell -a "/usr/local/bin/qbit-port-sync" --become
-
-# Check systemd path unit status
-ansible media-vm -m shell -a "systemctl status qbit-port-sync.path" --become
-```
-
-**Verify VPN is working:**
-```bash
-# Check Gluetun logs
-ansible media-vm -m shell -a "docker logs gluetun 2>&1 | grep -E 'connected|Initialization|port forward'" --become
-
-# Verify external IP is VPN (should be Netherlands)
-ansible media-vm -m shell -a "docker exec gluetun wget -qO- https://ipinfo.io/json" --become
-```
-
 #### Gluetun VPN Watchdog
 
 Gluetun's internal VPN restart (`HEALTH_RESTART_VPN=on`) doesn't properly clean up tun0 routes, causing self-reinforcing crash loops where OpenVPN connects but traffic can't flow (`RTNETLINK answers: File exists`). The watchdog detects this and does a full `docker compose up -d --force-recreate` (not just `restart`) to destroy the container and its network namespace, clearing the stale routes. Dependent containers (qBittorrent) that share Gluetun's network namespace are recreated together.
 
-**How it works:**
-- Systemd timer runs every 60 seconds on media-vm
-- Checks Gluetun's Docker healthcheck status
-- After 3 consecutive failures (~3 minutes), force-recreates Gluetun + dependent containers
-- Sends silent Pushover notification on recovery or max-restart exhaustion (`push-quiet` tag)
-- Rate-limited to 5 restarts per hour to prevent infinite restart loops
-- If max restarts exceeded, sends alert and requires manual intervention
-
-**Why force-recreate**: `docker compose restart` keeps the same container and network namespace. Since qBittorrent shares Gluetun's namespace (`network_mode: "service:gluetun"`), the namespace stays alive even when Gluetun stops, preserving the stale routes. `--force-recreate` destroys the container entirely, creating a fresh namespace on startup.
-
-**Configuration** (in `host_vars/media-vm/vars.yml`):
-```yaml
-gluetun_watchdog_enabled: true
-gluetun_watchdog_compose_dir: /opt/media-stack
-# Optional overrides (defaults shown):
-# gluetun_watchdog_interval: 60                    # Check interval in seconds
-# gluetun_watchdog_max_failures: 3                 # Failures before restart
-# gluetun_watchdog_max_restarts: 5                 # Max restarts per window
-# gluetun_watchdog_restart_window: 3600            # Window in seconds (1 hour)
-# gluetun_watchdog_container: gluetun              # Container name
-# gluetun_watchdog_dependent_containers: qbittorrent  # Containers sharing network namespace
-# gluetun_watchdog_notify_tag: push-quiet          # Apprise tag for notifications
-```
-
-**Troubleshooting:**
-```bash
-# Check watchdog status and logs
-systemctl status gluetun-watchdog.timer
-journalctl -t gluetun-watchdog -n 20
-
-# Manually trigger watchdog
-sudo /usr/local/sbin/gluetun-watchdog
-
-# Check state files
-cat /var/lib/gluetun-watchdog/failure_count
-cat /var/lib/gluetun-watchdog/restart_log
-```
+**Why force-recreate**: `docker compose restart` keeps the same container and network namespace. Since qBittorrent shares Gluetun's namespace (`network_mode: "service:gluetun"`), the namespace stays alive even when Gluetun stops, preserving the stale routes. `--force-recreate` destroys the container entirely, creating a fresh namespace on startup. After 3 consecutive health failures (~3 minutes), it force-recreates Gluetun + dependent containers. Rate-limited to 5 restarts per hour.
 
 #### Notification Stack (Apprise + Pushover)
 
-Centralized notification system for infrastructure alerts (SMART disk errors, UPS power events, Docker image updates) and media notifications, with push notifications via Pushover and email routing.
+Centralized notification system using Apprise API (on docker-vm at `/opt/notifications/`) routing to Pushover and email.
 
 **Architecture:**
 ```
@@ -610,739 +268,92 @@ Jellyseerr (requests) ─────┘
 Sonarr/Radarr ──→ Discord (native connection, rich embeds with poster art)
 ```
 
-**Why Pushover over ntfy**: ntfy's iOS app does not support per-topic push notification control (Apple rejected the APNs entitlement). Even with priority set to `min`, ntfy notifications still appear in the iOS notification center. Pushover allows true silent/in-app-only delivery via priority `-2` (lowest), and each Pushover app can have independent iOS notification settings. ntfy is preserved (commented out in docker-compose, config files on disk) in case the iOS app improves.
+**Apprise tags** control routing: `push` (Pushover infrastructure, Time Sensitive), `push-quiet` (Pushover infrastructure, silent), `email` (iCloud SMTP), `media-feed` (Pushover media, silent), `media-requests` (Pushover media, silent). Services specify tags via `apprise_alert_tags` variable (default: `push` in `group_vars/all/vars.yml`). apcupsd supports per-service override via `apcupsd_alert_tags`. Combine tags like `push,email` for multi-target delivery.
 
-**Components:**
+**Why Pushover over ntfy**: ntfy's iOS app does not support per-topic notification control. Pushover allows true silent delivery via priority `-2` and per-app iOS settings. ntfy config preserved (commented out) in docker-compose.
 
-| Service | Host | Path | Purpose |
-|---------|------|------|---------|
-| Apprise API | docker-vm | `/opt/notifications/` | Notification router — receives webhooks, fans out to Pushover + email |
-| Diun | docker-vm | `/opt/diun/` | Monitors docker-vm containers for image updates |
-| Diun | media-vm | `/opt/diun/` | Monitors media-vm containers for image updates |
-| Diun | nextcloud-vm | `/opt/diun/` | Monitors nextcloud-vm containers for image updates |
+**Apprise email URL gotcha**: When SMTP username contains `@`, use `?user=` query parameter format instead of URL path. Apprise's serialization loses `%40` encoding via API, causing auth failures.
 
-**ntfy** (commented out in docker-compose, config preserved at `/opt/notifications/ntfy/`): Previously used for push notifications. Container and Caddy reverse proxy (`ntfy.jnalley.me`) are inactive but preserved for potential future re-enablement.
-
-**Pushover Apps:**
-
-| App | Purpose | Priority | iOS Behavior |
-|-----|---------|----------|--------------|
-| Computer Corner | Infrastructure alerts (Diun, smartd, apcupsd) | Normal (0) | Time Sensitive notification |
-| cc-media-feed | Media notifications (Sonarr/Radarr grabs, Jellyseerr requests) | Lowest (-2) | Silent, in-app only |
-
-**Diun Configuration** (`/opt/diun/diun.yml` on each VM):
-- Watch schedule: every 6 hours (`0 */6 * * *`) with 30s jitter
-- Docker provider: `watchByDefault: true` (monitors all running containers)
-- `firstCheckNotif: false` — only notifies on actual updates, not first scan
-- Sends with `tags: [push]` so only Pushover "Computer Corner" is triggered (not email)
-- docker-vm Diun reaches Apprise at `http://apprise:8000` (Docker network)
-- media-vm/nextcloud-vm Diun reaches Apprise at `https://apprise.jnalley.me` (via Caddy)
-
-**Apprise Configuration** (`/opt/notifications/apprise-config/notifications.cfg`):
-- `APPRISE_STATEFUL_MODE=simple` — human-readable config files at `/config/`
-- Config key `notifications` maps to file `/config/notifications.cfg` (TEXT format)
-- Contains tagged notification URLs using `pover://` scheme (Pushover credentials — treat as secret)
-
-**Tagged URLs in config:**
-
-| Tag | Target | Purpose |
-|-----|--------|---------|
-| `push` | Pushover "Computer Corner" app (normal priority) | Infrastructure alerts |
-| `push-quiet` | Pushover "Computer Corner" app (priority -2, silent) | Automated recovery alerts (gluetun-watchdog) |
-| `email` | iCloud SMTP | Email notifications |
-| `media-feed` | Pushover "cc-media-feed" app (priority -2, silent) | Sonarr/Radarr grab notifications |
-| `media-requests` | Pushover "cc-media-feed" app (priority -2, silent) | Jellyseerr request notifications |
-
-**Tag routing:**
-- `push` tag → Pushover "Computer Corner" app (Time Sensitive on iOS)
-- `push-quiet` tag → Pushover "Computer Corner" app (silent, in-app only)
-- `email` tag → email (iCloud SMTP)
-- `media-feed` tag → Pushover "cc-media-feed" app (silent)
-- `media-requests` tag → Pushover "cc-media-feed" app (silent)
-- Both `push` and `email` or no tag → all infrastructure targets
-
-Apps control routing by specifying tags when sending. Diun uses `tags: [push]` for Pushover-only. smartd and apcupsd use `apprise_alert_tags` variable (default: `push`). apcupsd supports per-service override via `apcupsd_alert_tags`, falling back to `apprise_alert_tags` if unset. To add email for critical alerts, change to `push,email` in `group_vars/all/vars.yml`.
-
-**Media Notifications:**
-
-Sonarr and Radarr have **two** notification connections each:
-1. **Discord** (native connection in Settings → Connect): Rich embeds with poster art, episode/movie details
-2. **Apprise** (native connection in Settings → Connect): Silent Pushover via `media-feed` tag for unobtrusive mobile tracking
-
-Jellyseerr sends notifications via a **webhook** to Apprise with the `media-requests` tag for silent Pushover delivery.
-
-**Apprise email URL format note**: When the SMTP username contains `@`, use the `?user=` query parameter format instead of embedding in the URL path. Apprise's URL serialization loses `%40` encoding when stored via the API, causing authentication failures. The query parameter approach (`mailtos://domain?user=...&pass=...&smtp=host`) is reliable.
-
-**Access:**
-- Apprise web UI: `https://apprise.jnalley.me`
-- Apprise config UI: `https://apprise.jnalley.me/cfg/notifications`
-- Apprise health: `https://apprise.jnalley.me/status`
-
-**Verification:**
-```bash
-# Test notification from any Diun instance
-ansible docker-vm -m shell -a "docker exec diun diun notif test" --become
-ansible media-vm -m shell -a "docker exec diun diun notif test" --become
-
-# Check Apprise config is loaded
-curl -s https://apprise.jnalley.me/json/urls/notifications/?privacy=1
-
-# View Diun logs (which images were checked)
-ansible docker-vm -m shell -a "docker logs diun --tail 20 2>&1" --become
-```
-
-**Adding new notification targets**: Edit `/opt/notifications/apprise-config/notifications.cfg` on docker-vm and restart Apprise (`docker compose restart apprise` in `/opt/notifications/`). Apprise supports 90+ services — see [Apprise wiki](https://github.com/caronc/apprise/wiki) for URL formats.
-
-**Adding a new app**: Point its webhook at `https://apprise.jnalley.me/notify/notifications` with `tag` in the POST body to control routing. Use `push` for Pushover "Computer Corner" only, `email` for email only, `media-feed` or `media-requests` for silent media notifications, or combine tags.
+Diun runs on all three Docker VMs (docker-vm, media-vm, nextcloud-vm) monitoring containers for image updates. Config at `/opt/diun/diun.yml` on each. Sonarr/Radarr also send to Discord (native connection) for rich embeds with poster art.
 
 #### Reverse Proxy (Caddy on docker-vm)
 
-Caddy proxies all services over Tailscale with HTTPS (DNS-01 via Cloudflare):
-- **docker-vm services** (via Docker network): `vaultwarden`, `freshrss`, `apprise` (note: `ntfy.jnalley.me` Caddy entry is inactive — ntfy container is commented out)
-- **media-vm services** (via Tailscale IP 100.66.6.113): `plex`, `sonarr`, `radarr`, `prowlarr`, `bazarr`, `sabnzbd`, `qbit`, `huntarr`, `tautulli`, `audiobookshelf`, `tdarr`, `photos` (Immich)
+Caddy provides HTTPS for all internal services via Cloudflare DNS-01 challenge. Caddyfile at `/opt/caddy/Caddyfile`. docker-vm services are proxied by container name (`caddy-proxy` Docker network); media-vm services by Tailscale IP (`100.66.6.113`). All services require Tailscale to access.
 
-Caddyfile location: `/opt/caddy/Caddyfile` (on docker-vm, stored locally)
-
-Example Caddyfile entries:
-```caddyfile
-# Local service on docker-vm (container name)
-vaultwarden.jnalley.me {
-    reverse_proxy vaultwarden:80
-}
-
-# Remote service on media-vm (Tailscale IP)
-sonarr.jnalley.me {
-    reverse_proxy 100.66.6.113:8989
-}
-```
-
-All services require Tailscale connection to access (internal-only HTTPS).
-
-**Image Updates**: The playbook separates pull and update steps - it only runs `docker compose up -d` if images were actually updated (detected via "Pull complete" or "Downloaded newer" in pull output). This avoids unnecessary container restarts when images are already current. Pull has retry logic (3 attempts, 10s delay) to handle transient registry timeouts. Dangling images are pruned after each run.
+**Image Updates**: The playbook separates pull and update steps — it only runs `docker compose up -d` if images were actually updated (detected via "Pull complete" or "Downloaded newer" in pull output). This avoids unnecessary container restarts when images are already current. Pull has retry logic (3 attempts, 10s delay) to handle transient registry timeouts. Dangling images are pruned after each run.
 
 #### Cloudflare Tunnel (Public Access)
 
-Cloudflare Tunnel provides public internet access to select services without exposing ports or revealing the home IP.
-
-**Architecture:**
-```
-Public Internet → Cloudflare Edge → cloudflared (docker-vm) → Backend Services
-```
-
-**Publicly accessible services:**
-
-| URL | Backend | Purpose |
-|-----|---------|---------|
-| `nextcloud.jnalley.me` | `100.112.46.126:11000` | Nextcloud (file sharing) |
-| `requests.jnalley.me` | `jellyseerr:5055` | Jellyseerr (media requests) |
-
-**Configuration:**
-- Tunnel managed in Cloudflare Zero Trust dashboard (Networks → Connectors)
-- Token stored in `/opt/cloudflared/.env` on docker-vm
-- Container joins `caddy-proxy` network to reach other containers by name
-
-**Security:**
-- No ports open on router (outbound tunnel connection only)
-- Home IP hidden behind Cloudflare
-- Cloudflare provides DDoS protection
-- Geo-blocking via Cloudflare Security Rules (US only)
-- Services have their own authentication (Nextcloud login, Plex OAuth for Jellyseerr)
-
-**Geo-Blocking (Cloudflare Security Rules):**
-
-All non-US traffic to `jnalley.me` is blocked via a custom security rule:
-
-1. Cloudflare Dashboard → `jnalley.me` → Security → Security Rules
-2. Create rule with expression: `(not ip.src.country in {"US"})`
-3. Action: Block
-
-This applies to all subdomains including tunnel hostnames. Security rules are per-domain - repeat for other domains if needed.
-
-**Troubleshooting:**
-```bash
-# Check tunnel status
-ansible docker-vm -m shell -a "docker logs cloudflared 2>&1 | tail -10" --become
-
-# Verify tunnel is connected (should show "Registered tunnel connection")
-ansible docker-vm -m shell -a "docker logs cloudflared 2>&1 | grep -i registered" --become
-```
-
-**Adding new public hostnames:**
-1. Go to Cloudflare Zero Trust → Networks → Connectors → Your tunnel
-2. Add public hostname with subdomain, domain, and backend URL
-3. For docker-vm containers, use container name (e.g., `jellyseerr:5055`)
-4. For other VMs, use Tailscale IP (e.g., `100.112.46.126:11000`)
+Cloudflare Tunnel (`cloudflared` on docker-vm) provides public access to Nextcloud (`nextcloud.jnalley.me` → `100.112.46.126:11000`) and Jellyseerr (`requests.jnalley.me` → `jellyseerr:5055`). No router ports exposed; home IP hidden. Geo-blocking restricts to US only (Cloudflare Security Rules: `(not ip.src.country in {"US"})` → Block). Managed via Cloudflare Zero Trust dashboard.
 
 ### Backup Architecture
 
 Three-tier backup strategy:
 
-**Offsite (Backblaze B2)**: Daily backups via `restic.yml`
-- Runs at 00:00 UTC with 30m random delay
-- Retention: 7 daily, 4 weekly, 6 monthly
-- ts440 backs up entire `/srv/nas-zfs` with excludes for replaceable media (plex, podcasts) and Time Machine
+- **Offsite (Backblaze B2)**: Daily via `restic.yml` at 00:00 UTC +30m random delay. Retention: 7d/4w/6m. ts440 backs up `/srv/nas-zfs` excluding replaceable media.
+- **Local (ts440 ZFS)**: Hourly via `local-restic.yml`. Backs up `/opt` from VMs to `/srv/nas-zfs/backups/<hostname>/`. Retention: 24h/7d/4w/6m. Uses dedicated SSH key in `group_vars/backup_clients/vault.yml`.
+- **ZFS Snapshots (sanoid)**: Every 15 minutes via `zfs-snapshots.yml`. Policies defined in `group_vars/nas_server/zfs.yml`.
 
-**Local (ts440 ZFS)**: Hourly backups via `local-restic.yml`
-- Backs up `/opt` from docker-vm and media-vm to `/srv/nas-zfs/backups/<hostname>/`
-- Retention: 24 hourly, 7 daily, 4 weekly, 6 monthly
-- Uses dedicated SSH key (stored in `group_vars/backup_clients/vault.yml`)
-- Requires Tailscale ACL: `tag:backup` hosts can SSH to `tag:server`
-
-**ZFS Snapshots (sanoid)**: Automated snapshots via `zfs-snapshots.yml`
-- Runs every 15 minutes on ts440 via systemd timer
-- Production datasets (configs, appdata, files, nextcloud, media/photos): 24 hourly, 7 daily, 4 weekly, 6 monthly
-- Backup datasets (backups, timemachine): 7 daily, 4 weekly, 3 monthly
-- Ignored datasets (media/plex, media/podcasts): no snapshots (replaceable content)
-- Configuration in `group_vars/nas_server/zfs.yml`
-
-**Enable local backups** for a host in `host_vars/<hostname>/vars.yml`:
-```yaml
-local_restic_enabled: true
-local_restic_backup_paths:
-  - /opt
-```
-
-**Accessing restic repos manually**: The env file must be sourced with `set -a` to export variables:
-```bash
-# From the backed-up host (has /etc/restic/local-backup.env)
-sudo bash -c 'set -a && source /etc/restic/local-backup.env && restic snapshots'
-
-# To access a different repo (e.g., old gaming-pc backup from jn-desktop):
-sudo bash -c 'set -a && source /etc/restic/local-backup.env && export RESTIC_REPOSITORY=sftp:johnny@100.71.188.16:/srv/nas-zfs/backups/gaming-pc && restic snapshots'
-```
-
-**Pre-CachyOS backup**: The `gaming-pc` repo at `/srv/nas-zfs/backups/gaming-pc` contains the Kubuntu backup with `/home/jnalley` from before the CachyOS migration.
-
-**Restore commands**:
-```bash
-# List restic snapshots
-restic -r sftp:johnny@100.71.188.16:/srv/nas-zfs/backups/docker-vm snapshots
-
-# Restore specific file from restic
-restic -r sftp:johnny@100.71.188.16:/srv/nas-zfs/backups/docker-vm restore latest --target /tmp/restore --include /opt/caddy/Caddyfile
-
-# List ZFS snapshots
-zfs list -t snapshot -o name,creation,used -s creation
-
-# Restore from ZFS snapshot (browse snapshot contents)
-ls /srv/nas-zfs/.zfs/snapshot/
-cp /srv/nas-zfs/.zfs/snapshot/autosnap_2026-01-26_hourly/configs/file.txt /srv/nas-zfs/configs/
-```
+Enable local backups: set `local_restic_enabled: true` and `local_restic_backup_paths` in host_vars. Source env with `set -a` when accessing repos manually: `sudo bash -c 'set -a && source /etc/restic/local-backup.env && restic snapshots'`.
 
 ### rclone Sync (OneDrive to Nextcloud)
 
-Scheduled one-way sync from a school Microsoft OneDrive account to Nextcloud via WebDAV, managed by `playbooks/rclone-sync.yml`. Runs on macbook-pro.
-
-**Architecture:**
-```
-OneDrive for Mac (desktop app) → local folder → rclone sync → nextcloud:UTD OneDrive/ (WebDAV)
-```
-
-**Why macbook-pro**: The UTD Microsoft 365 tenant blocks third-party OAuth apps, so rclone can't access OneDrive directly. Instead, the OneDrive desktop app syncs files locally, and rclone copies the local folder to Nextcloud. Only syncs when the MacBook is awake (catches up on login via `RunAtLoad`).
-
-**Configuration** (`host_vars/macbook-pro/rclone-sync.yml`):
-- Source: `/Users/johnny/Library/CloudStorage/OneDrive-TheUniversityofTexasatDallas` (local)
-- Schedule: Every 2 hours (launchd `StartInterval: 7200`)
-- Mode: `rclone sync` (deletes propagate — safe due to ZFS snapshots + restic backups)
-- Monitoring: Uptime Kuma push monitor (pings on success)
-
-**rclone remotes** are configured manually (not Ansible-managed) because they contain credentials. Config lives at `~/.config/rclone/rclone.conf` on macbook-pro. Only the `nextcloud` WebDAV remote is needed (no OneDrive remote).
-
-**Key commands:**
-```bash
-# Deploy the playbook
-ansible-playbook playbooks/rclone-sync.yml --limit macbook-pro
-
-# Manual sync trigger (on MacBook)
-~/.local/bin/rclone-sync
-
-# Check status
-launchctl list | grep rclone
-cat ~/Library/Logs/rclone-sync.log
-
-# Check failure count
-cat ~/.local/share/rclone-sync/consecutive_failures
-
-# Re-authenticate Nextcloud WebDAV if password changes
-rclone config reconnect nextcloud:
-```
-
-**Auth failure handling**: The sync script detects exit code 6 (auth failure), logs a clear message with re-auth instructions, and tracks consecutive failures in `~/.local/share/rclone-sync/consecutive_failures`. If the Uptime Kuma push monitor stops receiving heartbeats, it alerts.
-
-**Fallback**: If UTD IT approves the OAuth request (submitted 2026-02-06), the sync can be moved back to pi5-01 using rclone's OneDrive remote directly. The pi5-01 config is preserved (commented out) in `host_vars/pi5-01/rclone-sync.yml`.
+One-way sync from UTD OneDrive to Nextcloud via `playbooks/rclone-sync.yml`. Runs on macbook-pro because UTD's Microsoft 365 tenant blocks third-party OAuth — OneDrive desktop app syncs locally, then rclone copies to Nextcloud WebDAV every 2 hours. Monitored via Uptime Kuma push monitor. rclone remote config is manual (not Ansible-managed) at `~/.config/rclone/rclone.conf`.
 
 ### Network Recovery
 
-Automatic recovery after router/WiFi restarts is handled by `playbooks/network-recovery.yml`. This deploys two components to Linux servers (excludes `workstations` group):
+Deployed via `playbooks/network-recovery.yml` to `linux_hosts:!workstations`.
 
-**Network Watchdog** (`network-watchdog.timer`): Runs every 60 seconds and:
-- Ensures primary interface and bridge ports are UP (catches link flaps where carrier recovers but interface stays DOWN)
-- Checks gateway connectivity (pings router)
-- Checks Tailscale connectivity (pings 100.100.100.100)
-- On Proxmox hosts: Fixes bridge interfaces that got detached (common issue when router restarts - `eno1` gets removed from `vmbr0`)
-- After 3 gateway failures: Restarts networking/DHCP
-- After 5 Tailscale failures: Restarts tailscaled
-- After 5 DHCP recovery failures: Reboots (with backoff) if router is reachable
-- On recovery: Sends Apprise push notification, restarts all docker compose stacks (`docker compose restart`) to clear stale connection state, remounts NFS
-- Notifications are best-effort (network may be down when sending); most reliable for Tailscale recovery notifications
+**Network Watchdog** (`network-watchdog.timer`, every 60s):
+- Ensures interfaces are UP (catches link flaps)
+- On Proxmox: fixes bridge interfaces detached during router restarts (e.g., `eno1` removed from `vmbr0`)
+- After 3 gateway failures: restarts networking/DHCP
+- After 5 Tailscale failures: restarts tailscaled
+- After 5 DHCP recovery failures: reboots (only if router is reachable, to avoid boot loops)
+- On recovery: sends Apprise notification, restarts Docker stacks, remounts NFS
 
-**Router Reachability Check**: Before auto-rebooting for DHCP failures, the watchdog checks if the router is actually reachable (to avoid boot loops during real outages). Uses a multi-layered approach that works in all environments:
-1. **Carrier check** - If physical link is down, skip reboot (network outage)
-2. **ARP cache check** - If gateway MAC is cached, router was recently reachable (works in LXC)
-3. **arping fallback** - Only on hosts where raw sockets work (Proxmox)
+**Tailscale Online Target** (`tailscale-online.target`): Activates only when Tailscale is connected (not just daemon running). Services like `docker-stacks.service` depend on this.
 
-**Tailscale Online Target** (`tailscale-online.target`): A systemd target that only activates when Tailscale is actually connected (not just the daemon running). Services like `docker-stacks.service` depend on this instead of `tailscaled.service`.
+### Workstation Hosts
 
-Key files:
-- `templates/network-watchdog.sh.j2` - Watchdog script with interface UP check, Proxmox bridge fix, and router reachability check
-- `playbooks/network-recovery.yml` - Deploys watchdog and tailscale-online target (hosts: `linux_hosts:!workstations`)
+**jn-desktop** (CachyOS/Arch): Gaming workstation in `arch_hosts` + `workstations` groups. NTFS games drive at `/mnt/games` (uses `ntfs3` kernel driver, not FUSE). NFS mount to ts440 at `/mnt/nas-zfs`. Config in `host_vars/jn-desktop/`. Gaming packages (Steam, Proton) handled by CachyOS meta-package; Ansible only manages OpenRGB, liquidctl, and flatpak. RGB config and BeamMP launcher are not Ansible-managed (backed up via restic).
 
-Troubleshooting network issues:
-```bash
-# Check watchdog status and logs
-systemctl status network-watchdog.timer
-journalctl -t network-watchdog -f
+**jn-t14s-lin** (Kubuntu): ThinkPad T14s laptop in `debian_hosts` + `workstations` groups. Requires `ansible_become_flags: "-S"` in host_vars due to sudo-rs (Ubuntu 25.10+ default). WiFi powersave disabled; optional ath11k resume hooks available in `host_vars/jn-t14s-lin/wifi.yml`.
 
-# Manually run watchdog
-sudo /usr/local/sbin/network-watchdog
-
-# Check if Proxmox bridge has all interfaces attached
-brctl show vmbr0  # Should include eno1
-
-# Manually fix detached bridge interface
-sudo brctl addif vmbr0 eno1
-
-# Check Tailscale status
-tailscale status
-```
-
-### jn-desktop (Gaming Workstation)
-
-jn-desktop is a CachyOS (Arch-based) gaming PC with dual-boot Windows. Tailscale IP: `100.123.248.34`.
-
-**Hardware:**
-- Custom gaming build with RGB (NZXT Kraken X3 AIO, Corsair RAM, MSI motherboard)
-- 1.8TB NVMe games drive (shared with Windows, NTFS)
-- GPU for gaming (no GPU passthrough - native Linux gaming)
-
-**OS Choice**: CachyOS was chosen over standard Arch for its gaming-optimized defaults:
-- Pre-configured gaming kernel with performance patches
-- CachyOS "Install Gaming packages" meta-package handles Steam, Proton, Wine, Lutris, mangohud, gamescope
-- Optimized builds of gaming-related packages
-
-**Ansible Configuration:**
-
-jn-desktop is in both `arch_hosts` (for pacman package management) and `workstations` (for workstation-specific behavior). The `workstations` group_vars disable network watchdog and auto-updates.
-
-Host vars in `inventory/host_vars/jn-desktop/`:
-
-| File | Purpose |
-|------|---------|
-| `vars.yml` | `admin_user: johnny` (watchdog/updates inherited from `group_vars/workstations`) |
-| `packages.yml` | OpenRGB, liquidctl, Discord, Flatpak (gaming packages from CachyOS) |
-| `nfs.yml` | NFS mount for `/mnt/nas-zfs` (full nas-zfs access) |
-| `mounts.yml` | NTFS `/mnt/games` drive (1.8TB NVMe shared with Windows) |
-| `backup.yml` | Restic backup of `/home/johnny` and `/etc/udev/rules.d` |
-
-**Storage Mounts:**
-
-| Mount | Type | Source | Purpose |
-|-------|------|--------|---------|
-| `/mnt/games` | NTFS (ntfs3) | Local NVMe (UUID: 763A44543A441391) | Games shared with Windows dual-boot |
-| `/mnt/nas-zfs` | NFS | ts440:/nas-zfs | Full NAS access over Tailscale |
-
-**NTFS Mount Options**: Uses `ntfs3` kernel driver (not ntfs-3g FUSE) with `uid=1000,gid=1000,umask=0022,nofail` for proper permissions and boot resilience.
-
-**Nextcloud Symlinks:**
-
-XDG directories are symlinked to Nextcloud-synced folders:
-- `~/Documents` → `~/Nextcloud/Documents`
-- `~/Downloads` → `~/Nextcloud/Downloads/jn-desktop`
-- `~/Pictures` → `~/Nextcloud/Photos`
-
-This allows apps that save to standard locations to automatically sync via Nextcloud. Downloads uses a machine-specific subfolder to avoid conflicts with other devices.
-
-**Gaming Setup:**
-
-CachyOS's gaming meta-package handles most gaming software. Ansible only manages:
-- `openrgb` - RGB control for Corsair RAM, MSI motherboard
-- `liquidctl` - NZXT Kraken X3 AIO and Smart Device V2 control
-- `discord` - Communication
-- `flatpak` - For apps not in AUR
-
-**Proton**: CachyOS provides `proton-cachyos` which appears in Steam as "proton-cachyos-X.X-YYYY-MMDD (steam linux runtime)". This is the recommended default for most games. For problematic games, try GE-Proton or official Steam Proton versions.
-
-**RGB Configuration** (not Ansible-managed, backed up via restic):
-
-RGB control uses a hybrid approach with OpenRGB and liquidctl:
-- `~/.local/bin/rgb-hybrid.sh` - Main script that applies all RGB settings
-- `~/.config/autostart/rgb-hybrid.desktop` - Autostart entry
-- `~/.config/OpenRGB/` - OpenRGB profiles and settings
-- `/etc/udev/rules.d/` - udev rules for liquidctl hardware access
-
-**liquidctl devices:**
-- NZXT Kraken X3 (AIO cooler) - Controlled via liquidctl
-- NZXT Smart Device V2 (fan/LED controller) - Controlled via liquidctl
-
-**OpenRGB devices:**
-- Corsair Vengeance RGB RAM
-- MSI motherboard RGB
-
-Restore RGB config from backup:
-```bash
-# Restore from restic (home directory backup)
-restic -r sftp:johnny@100.71.188.16:/srv/nas-zfs/backups/jn-desktop restore latest --target /tmp/restore --include /home/johnny/.local/bin/rgb-hybrid.sh --include /home/johnny/.config/OpenRGB --include /home/johnny/.config/autostart
-
-# Restore udev rules
-restic -r sftp:johnny@100.71.188.16:/srv/nas-zfs/backups/jn-desktop restore latest --target /tmp/restore --include /etc/udev/rules.d
-```
-
-**BeamMP (BeamNG Multiplayer):**
-
-A launcher script exists at `~/.local/bin/beamng-launcher.sh` that provides a KDialog menu for:
-1. Single Player BeamNG.drive
-2. Multiplayer via BeamMP
-3. Check for BeamMP updates
-
-The BeamMP launcher is stored at `/mnt/games/BeamMP/BeamMP-Launcher`.
-
-**Proton Prefix Issues:**
-
-Steam games on Linux use Proton prefixes at `/mnt/games/SteamLibrary/steamapps/compatdata/<appid>/`. Common issues:
-- `My Documents` is a Windows .lnk file, not a real directory - Steam cloud sync may fail trying to write to literal path
-- If cloud sync fails with "error 2" (file not found), the Proton prefix may need recreation
-- Fix: Delete the compatdata folder for the game and let Steam recreate it on next launch
-
-**Bootstrap Notes:**
-
-jn-desktop uses Arch Linux, so bootstrap.yml handles:
-- `wheel` group instead of `sudo` group for admin users
-- `sshd` service name instead of `ssh` (Debian naming)
-- `pacman` package manager instead of `apt`
-
-### jn-t14s-lin (ThinkPad T14s Laptop)
-
-jn-t14s-lin is a Lenovo ThinkPad T14s running Kubuntu 25.10 (Questing Quokka) with dual-boot Windows. Tailscale IP: `100.73.46.86`.
-
-**Ansible Configuration:**
-
-jn-t14s-lin is in both `debian_hosts` (directly, for apt package management) and `workstations` (for workstation-specific behavior). The `workstations` group_vars disable network watchdog and auto-updates.
-
-Host vars in `inventory/host_vars/jn-t14s-lin/`:
-
-| File | Purpose |
-|------|---------|
-| `vars.yml` | `admin_user: johnny`, sudo-rs become flags |
-| `backup.yml` | Restic backup of `/home/johnny` (offsite B2 + local ts440 ZFS) |
-| `wifi.yml` | WiFi powersave disable + optional ath11k resume hooks (PCI FLR or module reload) |
-| `packages.yml` | `plasma-discover-backend-flatpak` (KDE Flatpak/Discover integration) |
-
-**sudo-rs Compatibility:**
-
-Ubuntu 25.10+ ships `sudo-rs` (Rust implementation) as the default sudo. sudo-rs doesn't support `!requiretty` and wraps custom prompts in `[sudo: ...]`, breaking Ansible's become nonce detection. The `bootstrap.yml` playbook automatically detects sudo-rs (checks for `/usr/lib/cargo/bin/sudo`) and deploys `NOPASSWD: ALL` instead of `!requiretty`. Hosts with sudo-rs also need `ansible_become_flags: "-S"` in host_vars.
-
-**WiFi (Qualcomm QCNFA765 / ath11k_pci):**
-
-The WCN6855 chipset (firmware `WLAN.HSP.1.1-03125...3.6510.41`) has a known kernel bug where WiFi fails to reconnect after suspend/resume. A kernel fix landed in 6.16 and is present in Kubuntu 25.10's 6.17 kernel, but Arch users report it's still intermittent on 6.17-6.18.
-
-Current config:
-- WiFi power saving disabled (`wifi.powersave = 2` in NetworkManager) to reduce random disconnects
-- Two optional resume hooks in `wifi.yml` (both commented out in host_vars):
-  - **PCI FLR** (preferred): `wifi_pci_flr_fix` + `wifi_pci_device` — lightweight hardware reset without tearing down driver
-  - **Module reload** (fallback): `suspend_resume_wifi_fix` + `wifi_module` — full modprobe -r/modprobe cycle
-
-**Backups:**
-- Offsite (B2): `/etc`, `/home/johnny` — daily
-- Local (ts440 ZFS): `/home/johnny` — hourly to `/srv/nas-zfs/backups/jn-t14s-lin/`
+Both hosts inherit `network_watchdog_enabled: false` and `auto_updates_enabled: false` from `group_vars/workstations/vars.yml`.
 
 ## Key Files
 
-| File | Purpose |
-|------|---------|
-| `site.yml` | Master playbook that imports packages, msmtp, smartmontools, apcupsd, ssh-hardening, auto-updates, network-recovery, wifi, restic, local-restic, nfs, filesystem-mounts, samba, mergerfs, zfs-snapshots, virtiofs, docker-stacks, gluetun-watchdog, rclone-sync, storage-status, proxmox-firewall |
-| `playbooks/packages.yml` | Multi-platform package installation |
-| `playbooks/msmtp.yml` | Lightweight SMTP relay (iCloud) for system email alerts |
-| `playbooks/smartmontools.yml` | SMART disk monitoring with Apprise push alerts |
-| `playbooks/apcupsd.yml` | UPS monitoring with Apprise push alerts (ts440 USB master, other nodes as network slaves). Deploys udev rule on master to disable USB autosuspend for APC devices. Staggers slave startup via systemd drop-in to avoid NIS mutex contention. Cleans up udev rule from non-USB hosts |
-| `playbooks/ssh-hardening.yml` | SSH security configuration (key auth, disable password) |
-| `playbooks/bootstrap.yml` | Initial admin user/SSH setup (run as root first time, supports Debian and Arch) |
-| `playbooks/auto-updates.yml` | Systemd timer for scheduled updates with Apprise push notifications. Includes Proxmox kernel version check (Proxmox packages don't set `/var/run/reboot-required`) |
-| `playbooks/network-recovery.yml` | Network watchdog and Tailscale online target with Apprise push notifications on recovery/reboot |
-| `playbooks/wifi.yml` | WiFi powersave disable, optional PCI FLR or module reload resume fix |
-| `playbooks/restic.yml` | Backblaze B2 offsite backup configuration |
-| `playbooks/local-restic.yml` | Local backups to ts440 ZFS (hourly) |
-| `playbooks/mergerfs.yml` | MergerFS media pool and balance script deployment (nas_server) |
-| `playbooks/zfs-snapshots.yml` | ZFS snapshots (sanoid), scrub, ARC tuning, ACLs (nas_server) |
-| `playbooks/nfs.yml` | NFS server (nas_server) and client mounts |
-| `playbooks/filesystem-mounts.yml` | Local filesystem mounts (NTFS, exFAT, bind mounts) for non-NFS drives |
-| `playbooks/samba.yml` | Samba/SMB shares and Time Machine (nas_server) |
-| `playbooks/docker-stacks.yml` | Deploy Docker Compose stacks and prune dangling images |
-| `playbooks/gluetun-watchdog.yml` | Gluetun VPN crash loop detection and auto-restart (media-vm) |
-| `playbooks/virtiofs.yml` | Configure VirtioFS shares between Proxmox hosts and VMs |
-| `playbooks/rclone-sync.yml` | rclone sync from OneDrive to Nextcloud (macbook-pro via launchd, pi5-01 via systemd) |
-| `playbooks/git-sync.yml` | Git auto-pull timer on ts440 (syncs GitHub repo every 5 minutes for Nextcloud External Storage) |
-| `playbooks/proxmox-firewall.yml` | Deploy Proxmox firewall rules (datacenter, node, VM/CT) |
-| `tasks/tailscale.yml` | Tailscale VPN installation |
-| `tasks/docker-network.yml` | Ensure Docker networks exist |
-| `tasks/fastfetch.yml` | System info tool with login hook |
-| `tasks/docker.yml` | Docker CE installation from official repository |
-| `tasks/sanoid.yml` | Sanoid installation and ZFS snapshot configuration |
-| `tasks/zfs-scrub.yml` | ZFS scrub schedule, ARC tuning, dataset validation, ACLs |
-| `tasks/nfs-server.yml` | NFS server setup with bind mounts and exports |
-| `tasks/nfs-client.yml` | NFS client mount configuration |
-| `tasks/filesystem-mounts.yml` | Local filesystem mounts (NTFS/exFAT drives, bind mounts) |
-| `tasks/samba.yml` | Samba server setup with fruit VFS for macOS |
-| `templates/exports.j2` | Jinja2 template for /etc/exports |
-| `templates/smb.conf.j2` | Jinja2 template for /etc/samba/smb.conf |
-| `templates/sanoid.conf.j2` | Jinja2 template for sanoid snapshot configuration |
-| `templates/msmtprc.j2` | msmtp SMTP relay configuration |
-| `templates/smartd.conf.j2` | smartmontools monitoring configuration |
-| `templates/smartd-notify.sh.j2` | smartd Apprise notification script (called via `-M exec`) |
-| `templates/apcupsd.conf.j2` | apcupsd UPS daemon configuration (master/slave) |
-| `templates/apcupsd-event-notify.sh.j2` | apcupsd Apprise notification script (replaces sendmail) |
-| `templates/mergerfs-media.mount.j2` | MergerFS systemd mount unit |
-| `templates/avahi-timemachine.service.j2` | Avahi mDNS advertisement for Time Machine |
-| `templates/docker-stacks.service.j2` | Systemd service to start Docker stacks (depends on tailscale-online.target) |
-| `templates/auto-updates-debian.sh.j2` | Debian auto-updates script with Apprise notifications and Proxmox kernel reboot detection |
-| `templates/auto-updates-arch.sh.j2` | Arch auto-updates script with Apprise notifications |
-| `templates/network-watchdog.sh.j2` | Network watchdog script with interface UP check, Proxmox bridge fix, and Apprise notifications |
-| `templates/gluetun-watchdog.sh.j2` | Gluetun VPN crash loop watchdog script |
-| `templates/proxmox-virtiofs-directory.cfg.j2` | VirtioFS directory mappings for Proxmox |
-| `templates/proxmox-cluster-firewall.fw.j2` | Datacenter firewall (IP sets, security groups) |
-| `templates/proxmox-node-firewall.fw.j2` | Node-level firewall rules |
-| `templates/proxmox-vm-firewall.fw.j2` | VM/CT firewall rules |
-| `scripts/mergerfs-balance` | ZFS-compatible mergerfs branch balancer (deployed to nas_server via mergerfs.yml) |
-| `scripts/storage-status` | Storage usage report with ZFS and mergerfs support |
-| `bin/ansible-menu` | Interactive bash script for running playbooks |
+Playbooks are imported via `site.yml` (with tags). Browse with: `ls playbooks/ tasks/ templates/ scripts/ bin/`. Each file has a descriptive header comment. Docker stacks and VirtioFS configs are defined in `host_vars/<hostname>/docker.yml` and `virtiofs.yml`.
 
-**media-vm specific files** (not Ansible-managed, deployed manually):
-
-| File | Purpose |
-|------|---------|
-| `/usr/local/bin/qbit-port-sync` | Script to sync qBittorrent port with Gluetun forwarded port |
-| `/etc/systemd/system/qbit-port-sync.path` | Watches Gluetun port file for changes |
-| `/etc/systemd/system/qbit-port-sync.service` | Runs port sync script when triggered |
+**media-vm specific files** (not Ansible-managed): qBittorrent port sync (`/usr/local/bin/qbit-port-sync`, systemd path unit `qbit-port-sync.path`).
 
 ### Proxmox Firewall (Ansible-Managed)
 
-The `proxmox-firewall.yml` playbook manages firewall rules at three levels.
+Three-level firewall managed by `playbooks/proxmox-firewall.yml`:
+1. **Datacenter** (`cluster.fw`): IP sets and security groups — `group_vars/proxmox_nodes/firewall.yml`
+2. **Node** (`host.fw`): Per-node rules — `host_vars/<node>/firewall.yml` under `pve_node_firewall`
+3. **VM/CT** (`<vmid>.fw`): Per-VM rules — `host_vars/<node>/firewall.yml` under `pve_vm_firewalls`
 
-**VM/CT Reference:**
-
-| VMID | Name | Node | Purpose |
-|------|------|------|---------|
-| 100 | media-vm | ts440 | Plex, *arr stack, media services |
-| 101 | nextcloud-vm | ts440 | Nextcloud AIO |
-| 102 | homebridge-lxc | ts440 | Apple HomeKit bridge (Govee, dummy switches) |
-| 106 | syncthing-lxc | pve-alto | File synchronization |
-| 110 | docker-vm | pve-m70q | Caddy, Vaultwarden, monitoring |
-| 120 | haos-vm | pve-alto | Home Assistant OS (HomeKit bridge) |
-
-**Three firewall levels:**
-
-**1. Datacenter (`/etc/pve/firewall/cluster.fw`):**
-- IP sets: Named groups of IPs (e.g., `haos-vm`, `docker-vm`, `pve-alto`)
-- Security groups: Reusable rule sets (e.g., `corosync-lan` for cluster heartbeat)
-- Configuration: `group_vars/proxmox_nodes/firewall.yml`
-
-**2. Node (`/etc/pve/nodes/<node>/host.fw`):**
-- Node-level rules for API, SSH, cluster traffic
-- Each node can have different rules (e.g., ts440 has NFS/SMB rules)
-- Configuration: `host_vars/<node>/firewall.yml` under `pve_node_firewall`
-
-**3. VM/CT (`/etc/pve/firewall/<vmid>.fw`):**
-- Per-VM rules with default deny policy
-- Only allows traffic from specific sources (e.g., Caddy for reverse proxy)
-- Configuration: `host_vars/<node>/firewall.yml` under `pve_vm_firewalls`
-
-**Key configuration files:**
-
-| File | Purpose |
-|------|---------|
-| `inventory/group_vars/proxmox_nodes/firewall.yml` | Shared IP sets, security groups, firewall enabled flag |
-| `inventory/host_vars/ts440/firewall.yml` | ts440 node + VM 100, 101, 102 rules |
-| `inventory/host_vars/pve-alto/firewall.yml` | pve-alto node + VM 120, CT 106 rules |
-| `inventory/host_vars/pve-m70q/firewall.yml` | pve-m70q node + VM 110 rules |
-| `inventory/host_vars/pve-herc/firewall.yml` | pve-herc node rules (no VMs yet) |
-
-**Security model:**
-- Default deny on all VM/CT inbound traffic (`policy_in: DROP`)
-- Caddy (docker-vm) is the only entry point for web services
-- Direct access to service ports (8989, 7878, etc.) is blocked except from Caddy
-- SSH allowed from Tailscale for management
-
-**Firewall commands:**
-```bash
-# Deploy firewall rules
-ansible-playbook playbooks/proxmox-firewall.yml
-
-# Deploy to specific node
-ansible-playbook playbooks/proxmox-firewall.yml --limit ts440
-
-# View deployed rules
-ansible ts440 -m shell -a "cat /etc/pve/firewall/cluster.fw" --become
-ansible ts440 -m shell -a "cat /etc/pve/nodes/\$(hostname)/host.fw" --become
-ansible ts440 -m shell -a "cat /etc/pve/firewall/100.fw" --become
-
-# Test that direct access is blocked (should timeout)
-curl -m 5 100.66.6.113:8989
-
-# Verify Caddy can still reach services (from docker-vm)
-ansible docker-vm -m shell -a "curl -s http://100.66.6.113:8989" --become
-```
-
-**IP Set reference format:**
-- In node rules: `+<ipset_name>` (e.g., `+pve-alto`)
-- In VM rules: `+dc/<ipset_name>` (e.g., `+dc/docker-vm`) - `dc/` prefix references datacenter-level IP sets
+Security model: default deny (`policy_in: DROP`) on all VMs. Caddy (docker-vm) is the only web entry point. SSH allowed from Tailscale. In VM rules, use `+dc/<ipset>` prefix to reference datacenter-level IP sets.
 
 ### homebridge-lxc (CT 102 on ts440)
 
-Homebridge instance bridging smart home devices to Apple HomeKit.
-
-**Plugins:**
-- `homebridge-govee` - Govee Smart Air Purifier (connects via HTTP API)
-- `homebridge-dummy` - Virtual switches for automations
-
-**Firewall requirements** (in `host_vars/ts440/firewall.yml`):
-- TCP 8581 - Homebridge web UI
-- TCP 51000-56000 - HomeKit Accessory Protocol (HAP) for main bridge and child bridges
-- UDP 5353 - mDNS/Bonjour for HomeKit discovery
-
-**Important**: Homebridge uses dynamic ports for child bridges. The main bridge port is configured in Homebridge (default 51217), but each plugin running as a child bridge gets its own port. Allow a range (51000-56000) rather than a single port.
-
-**Troubleshooting "No Response" in Home app:**
-1. Check Homebridge service: `ansible homebridge-lxc -m shell -a "systemctl status homebridge" --become`
-2. Check logs: `ansible homebridge-lxc -m shell -a "tail -50 /var/lib/homebridge/homebridge.log" --become`
-3. Verify firewall allows HAP ports and mDNS
-4. Ensure iOS device is on the same LAN (192.168.1.x) as homebridge-lxc (192.168.1.106)
-
-**Web UI**: `http://100.96.116.42:8581` (Tailscale) or `http://192.168.1.106:8581` (LAN)
+Homebridge instance bridging smart home devices to Apple HomeKit. Firewall allows HAP port range 51000-56000 (child bridges use dynamic ports). Web UI: `http://100.96.116.42:8581`.
 
 ### haos-vm (VM 120 on pve-alto)
 
-Home Assistant OS instance for home automation.
-
-**Integration with Homebridge:**
-Some devices flow through a chain: Device → Homebridge → Home Assistant (via HomeKit Controller) → HomeKit (via HomeKit Bridge). For example, the Govee purifier appears in HomeKit via this path, not directly from Homebridge.
-
-**Firewall requirements** (in `host_vars/pve-alto/firewall.yml`):
-- TCP 8123 - Home Assistant web UI
-- TCP 22 - SSH
-- TCP 21000-21100 - HomeKit bridge HAP (for HA's HomeKit integration)
-- UDP 5353 - mDNS/Bonjour for HomeKit discovery
-
-**HA Companion App Configuration:**
-The iOS/Android Companion app has separate Internal URL and External URL settings. For Tailscale-based access, set **both** to the same MagicDNS URL:
-```
-http://homeassistant.hinny-liberty.ts.net:8123
-```
-If the Internal URL is blank, the app fails to connect when it detects being on the "local" network.
-
-**Web UI**: `http://100.73.17.121:8123` (Tailscale) or `http://192.168.1.64:8123` (LAN)
-
-**Tailscale MagicDNS**: `http://homeassistant.hinny-liberty.ts.net:8123`
+Home Assistant OS. Some devices chain: Device → Homebridge → Home Assistant (HomeKit Controller) → HomeKit (HomeKit Bridge). **HA Companion App**: Set **both** Internal URL and External URL to `http://homeassistant.hinny-liberty.ts.net:8123` (blank Internal URL causes connection failures on local network).
 
 ### VirtioFS Ansible Management
 
-The `virtiofs.yml` playbook manages VirtioFS shares between Proxmox hosts and guest VMs:
-
-**Host side (Proxmox):**
-1. Creates `/etc/pve/mapping/directory.cfg` with path mappings from `virtiofs_directory_mappings`
-2. Adds VirtioFS lines to VM config (`/etc/pve/qemu-server/<vmid>.conf`) based on `virtiofs_host_configs`
-
-**Guest side (VM):**
-1. Creates mount point directories
-2. Adds entries to `/etc/fstab`
-3. Mounts the VirtioFS shares
-
-**Configuration structure:**
-```yaml
-# host_vars/ts440/virtiofs.yml - Proxmox host
-# virtiofs_directory_mappings is the CANONICAL list of all available shares
-# The template only uses this list for directory.cfg
-virtiofs_directory_mappings:
-  - name: plex_library
-    path: /srv/plex-library
-  - name: nextcloud_data
-    path: /srv/nas-zfs/nextcloud
-
-# virtiofs_host_configs specifies which shares attach to which VMs
-virtiofs_host_configs:
-  - vmid: 101
-    index: 0
-    name: nextcloud_data      # References name from directory_mappings
-    host_path: /srv/nas-zfs/nextcloud
-    cache: never
-
-# host_vars/nextcloud-vm/virtiofs.yml - Guest VM
-virtiofs_mounts:
-  - name: nextcloud_data
-    mount_point: /srv/nextcloud
-    owner: root
-    group: root
-    mode: "0755"
-```
-
-**Important notes:**
-- `virtiofs_directory_mappings` is the single source of truth for available shares
-- VM restart required after adding VirtioFS config to host (playbook notifies but doesn't restart)
-- Both media-vm and nextcloud-vm VirtioFS configs are now fully Ansible-managed
+`playbooks/virtiofs.yml` manages VirtioFS on both sides: host-side config in `host_vars/<proxmox-node>/virtiofs.yml` (directory mappings + VM attachments), guest-side in `host_vars/<vm>/virtiofs.yml` (mount points + fstab entries). `virtiofs_directory_mappings` is the canonical list of available shares. **VM restart required** after adding VirtioFS config to host.
 
 ### Nextcloud External Storage
 
-Nextcloud's External Storage app provides access to ZFS paths via VirtioFS without duplicating data into Nextcloud's data directory.
+Provides access to ZFS paths via VirtioFS without duplicating data. Nextcloud AIO's `NEXTCLOUD_MOUNT` only supports a single path, so bind mounts (defined in `host_vars/nextcloud-vm/mounts.yml`) consolidate multiple VirtioFS paths under `/srv/external`. VirtioFS ACLs don't pass through (see TS440 Storage Architecture), so files need base `o+r` permissions.
 
-**Architecture:**
-```
-ts440 ZFS                    nextcloud-vm                    Nextcloud container
-─────────────────────────────────────────────────────────────────────────────────
-/srv/nas-zfs/configs    →    /srv/configs (VirtioFS)    →    /srv/external/configs
-                              ↓ bind mount
-                             /srv/external/configs
-```
-
-Nextcloud AIO's `NEXTCLOUD_MOUNT` only supports a single path, so we use bind mounts to consolidate multiple VirtioFS paths under `/srv/external`.
-
-**Configured external storage:**
-
-| Folder Name | Path in Nextcloud | Source on ts440 | Access |
-|-------------|-------------------|-----------------|--------|
-| Configs | `/srv/external/configs` | `/srv/nas-zfs/configs` | Read-write |
-| AIO Backup | `/srv/external/nextcloud-aio-backup` | `/srv/nas-zfs/backups/nextcloud-aio` | Read-write |
-| Photos | `/srv/external/photos` | `/srv/nas-zfs/media/photos` | Read-only (Immich-managed) |
-
-**Ansible configuration:**
-- VirtioFS mounts: `host_vars/nextcloud-vm/virtiofs.yml`
-- Bind mounts: `host_vars/nextcloud-vm/mounts.yml`
-- Docker compose with `NEXTCLOUD_MOUNT=/srv/external`: `/opt/nextcloud/docker-compose.yml`
-
-**ACL Setup**: The configs directory is owned by `johnny` but Nextcloud runs as `www-data` (UID 33). ACLs on ts440 grant www-data read-write access:
-```bash
-# Applied on ts440 (source of VirtioFS)
-setfacl -R -m u:33:rwX /srv/nas-zfs/configs
-setfacl -R -d -m u:33:rwX /srv/nas-zfs/configs  # Default ACL for new files
-setfacl -R -d -m o::r /srv/nas-zfs/configs       # Default other-read for VirtioFS passthrough
-```
-
-**Important**: These ACLs are only effective for direct host access. VirtioFS does not pass through POSIX ACLs (see "VirtioFS ACL Limitation" above), so files also need base permissions with `o+r`. The default ACL `o::r` ensures new files are created with other-read, which is what Nextcloud actually uses when reading through VirtioFS. Ansible-vault encrypted files (e.g., `vault.yml`) are safe to be world-readable since their contents are encrypted.
-
-**Enabling Local storage option**: By default, Nextcloud disables the "Local" storage type. Enable it:
-```bash
-ansible nextcloud-vm -m shell -a "docker exec -u www-data nextcloud-aio-nextcloud php occ config:system:set files_external_allow_create_new_local --value=true --type=boolean" --become
-```
-
-**Sync to devices**: External Storage folders are excluded from Nextcloud desktop/mobile sync by default. To sync:
-1. Open Nextcloud client settings
-2. Find the External Storage folder (e.g., Configs)
-3. Enable sync for that folder
-
-This allows selective sync - e.g., sync Configs to laptop but not to phone.
-
-**Setup steps** (manual in Nextcloud UI):
-1. Enable "External storage support" app (Settings → Apps)
-2. Settings → Administration → External storage
-3. Add Local storage with folder name and path (e.g., `/srv/external/configs`)
-4. Set "Available for" to specific users or all users
+Ansible config references: VirtioFS mounts in `host_vars/nextcloud-vm/virtiofs.yml`, bind mounts in `host_vars/nextcloud-vm/mounts.yml`, Docker compose with `NEXTCLOUD_MOUNT=/srv/external` at `/opt/nextcloud/docker-compose.yml`.
 
 ## Future Considerations
 
@@ -1632,41 +643,6 @@ They don't conflict - network-watchdog's gateway ping will succeed through eithe
 | Monthly cost | ~$10 (minimal data usage) |
 | Hardware cost | ~$50-80 one-time |
 | Complexity | Single script on one host |
-
-### Authentik SSO
-
-Authentik (identity provider/SSO) was considered for protecting internal services but deferred due to complexity for a single-user setup. If added later:
-
-1. Deploy Authentik stack on docker-vm (PostgreSQL + Redis + server + worker)
-2. Configure Caddy with forward auth for each protected service:
-   ```caddyfile
-   sonarr.jnalley.me {
-       forward_auth authentik-server:9000 {
-           uri /outpost.goauthentik.io/auth/caddy
-           copy_headers X-Authentik-Username X-Authentik-Groups X-Authentik-Email
-           trusted_proxies private_ranges
-       }
-       reverse_proxy 100.66.6.113:8989
-   }
-   ```
-3. Create embedded outpost and proxy providers in Authentik admin
-4. Firewall already configured to only allow traffic from Caddy (docker-vm)
-
-Services that would bypass Authentik (have their own auth): Plex, Jellyseerr (Plex OAuth), Vaultwarden.
-
-### Docker Compose Migration to Repository
-
-Currently, docker-compose.yml files are created manually on each VM and deployed via `docker_stacks`. A future improvement would be:
-
-1. Store all compose files as Jinja2 templates in `templates/docker-compose/`
-2. Create `host_vars/<vm>/docker-services.yml` with service configurations
-3. Have Ansible template the compose files to `/opt/<service>/docker-compose.yml`
-4. Use ansible-vault for secrets (environment variables)
-
-Benefits:
-- Full Infrastructure as Code for Docker services
-- Version control for compose file changes
-- Centralized secret management
 
 ## Ansible Environment
 
