@@ -62,9 +62,7 @@
         content: |
           #!/bin/bash
           # Managed by Ansible - do not edit manually
-          # Exit 99 tells apccontrol to skip its default action (wall message)
           /etc/apcupsd/event-notify.sh "{{ item }}"
-          exit 99
         dest: "/etc/apcupsd/{{ item }}"
         owner: root
         group: root
