@@ -62,7 +62,9 @@
         content: |
           #!/bin/bash
           # Managed by Ansible - do not edit manually
+          # Exit 99 tells apccontrol to skip its default action (wall message)
           /etc/apcupsd/event-notify.sh "{{ item }}"
+          exit 99
         dest: "/etc/apcupsd/{{ item }}"
         owner: root
         group: root
@@ -73,6 +75,40 @@
         - commfailure
         - commok
       when: apcupsd_notify_enabled | default(false)
+
+    - name: Create apcupsd systemd override directory
+      ansible.builtin.file:
+        path: /etc/systemd/system/apcupsd.service.d
+        state: directory
+        owner: root
+        group: root
+        mode: "0755"
+      when: apcupsd_startup_delay | default(0) | int > 0
+
+    - name: Add startup delay to stagger slave polls
+      ansible.builtin.copy:
+        content: |
+          # Managed by Ansible - do not edit manually
+          # Stagger slave startup to desynchronize NIS polls and avoid
+          # mutex contention on the master's NIS server
+          [Service]
+          ExecStartPre=/bin/sleep {{ apcupsd_startup_delay }}
+        dest: /etc/systemd/system/apcupsd.service.d/startup-delay.conf
+        owner: root
+        group: root
+        mode: "0644"
+      when: apcupsd_startup_delay | default(0) | int > 0
+      notify:
+        - Reload systemd
+        - Restart apcupsd
+
+    - name: Remove startup delay override if not needed
+      ansible.builtin.file:
+        path: /etc/systemd/system/apcupsd.service.d/startup-delay.conf
+        state: absent
+      when: apcupsd_startup_delay | default(0) | int == 0
+      notify:
+        - Reload systemd
 
     - name: Disable USB autosuspend for APC UPS devices
       ansible.builtin.copy:
@@ -95,6 +131,10 @@
         state: started
 
   handlers:
+    - name: Reload systemd
+      ansible.builtin.systemd:
+        daemon_reload: true
+
     - name: Reload udev and apply UPS rule
       ansible.builtin.shell: |
         udevadm control --reload-rules
