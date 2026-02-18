@@ -307,6 +307,13 @@ check_tailscale() {
 
     local status
     status=$(tailscale status --json 2>/dev/null | jq -r '.BackendState // "Unknown"' 2>/dev/null || echo "Unknown")
+
+    # Not yet authenticated — skip monitoring entirely (not a failure)
+    if [[ "$status" == "NeedsLogin" || "$status" == "NeedsMachineAuth" ]]; then
+        set_failure_count "tailscale" 0
+        return 0
+    fi
+
     if [[ "$status" != "Running" ]]; then
         return 1
     fi
