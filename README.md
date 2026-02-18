@@ -1,6 +1,6 @@
 # CC-Ansible
 
-> **Last updated:** 2026-02-18
+> **Last updated:** 2026-02-19
 
 Ansible automation for Johnny's homelab infrastructure (4 Proxmox nodes, 7 VMs/LXCs, Ansible controller LXC, gaming workstation, ThinkPad laptop, MacBook).
 
@@ -197,6 +197,8 @@ Ansible uses a dedicated passwordless SSH key (`~/.ssh/ansible_ed25519` on ansib
 - **macOS (macbook-pro)**: Tailscale SSH doesn't work (App Store sandboxed build), so it uses the dedicated key exclusively. SSH is restricted to Tailscale only via `ListenAddress` in sshd_config
 
 `bootstrap.yml` deploys both the personal key (passphrase-protected, for manual SSH) and the Ansible automation key (passwordless) to new hosts.
+
+**Tailscale SSH MOTD**: `ssh-hardening.yml` deploys `/etc/pam.d/remote` so MOTD displays on Tailscale SSH login. Ubuntu hosts get a rich MOTD (system info, updates) via `landscape-common` + `update-notifier-common`.
 
 ## Bootstrap New Host
 

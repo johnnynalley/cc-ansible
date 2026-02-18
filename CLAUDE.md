@@ -1,6 +1,6 @@
 # CLAUDE.md
 
-> **Last updated:** 2026-02-18
+> **Last updated:** 2026-02-19
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
@@ -102,6 +102,8 @@ Ansible on ansible-lxc uses a **dedicated passwordless SSH key** (`~/.ssh/ansibl
 **macOS (macbook-pro)** cannot use Tailscale SSH (App Store build is sandboxed). It relies exclusively on the dedicated Ansible key over regular SSH. SSH on macbook-pro is restricted to the Tailscale interface only:
 - `ListenAddress 100.119.197.17` in `/etc/ssh/sshd_config`
 - Remote Login enabled for user `johnny` only (System Settings → Sharing)
+
+**Tailscale SSH MOTD**: Tailscale SSH invokes `login(1)` with PAM service `remote`, which by default has no config file (PAM falls back to `other`, which lacks `pam_motd.so`). The `ssh-hardening.yml` playbook deploys `/etc/pam.d/remote` to all Linux hosts to enable MOTD display over Tailscale SSH. Ubuntu hosts show a rich MOTD (system info, available updates) via `landscape-common` and `update-notifier-common` (installed by `packages.yml`). Debian/Proxmox hosts show the basic `uname` and static `/etc/motd`.
 
 **Deploying the key to a new host:**
 ```bash

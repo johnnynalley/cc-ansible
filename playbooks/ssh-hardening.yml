@@ -38,6 +38,31 @@
       notify: Reload SSH
       tags: [ssh, harden]
 
+    # Tailscale SSH invokes login(1) with PAM service 'remote'.
+    # Without this file, PAM falls back to 'other' which lacks
+    # pam_motd.so, so no MOTD is displayed on Tailscale SSH login.
+    - name: Create PAM config for Tailscale SSH (remote service)
+      ansible.builtin.copy:
+        content: |
+          # /etc/pam.d/remote - Tailscale SSH sessions
+          # Tailscale invokes login(1) with PAM service 'remote'.
+          # Without this file, PAM falls back to 'other' (no MOTD).
+
+          @include common-auth
+          @include common-account
+
+          session    required     pam_loginuid.so
+          session    optional     pam_motd.so  motd=/run/motd.dynamic
+          session    optional     pam_motd.so noupdate
+
+          @include common-session
+          @include common-password
+        dest: /etc/pam.d/remote
+        owner: root
+        group: root
+        mode: "0644"
+      tags: [ssh, motd]
+
   handlers:
     - name: Reload SSH
       ansible.builtin.systemd:
