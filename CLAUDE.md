@@ -380,6 +380,8 @@ Ansible config references: VirtioFS mounts in `host_vars/nextcloud-vm/virtiofs.y
 
 **External Storage Scanning**: Nextcloud's `filesystem_check_changes: 1` only detects changes when a user browses into the folder — there's no proactive background scan. `playbooks/nextcloud-scan.yml` deploys a systemd timer on nextcloud-vm that runs `occ files:scan` every 10 minutes (offset by 3 min from git-sync) for the Configs and Photo Library external storage paths. This ensures git-sync changes and photo uploads appear in Nextcloud automatically.
 
+**Claude Memory Sync**: Claude Code's project memory (`~/.claude/projects/-home-johnny-cc-ansible/memory/`) lives on ansible-lxc outside the git repo (kept private — repo is public). `playbooks/claude-memory-sync.yml` deploys a timer on ansible-lxc that rsync's the memory directory to `ts440:/srv/nas-zfs/configs/claude-memory/` every 10 minutes (offset by 2 min). This appears in Nextcloud at `Configs/claude-memory/` and syncs to the Mac via Nextcloud desktop app for use with Claude Desktop.
+
 ## Future Considerations
 
 ### WAN Failover for Cloudflare Tunnel

@@ -1,0 +1,77 @@
+# =============================================================================
+# Claude Memory Sync - Sync Claude Code memory files to NAS for Nextcloud
+# =============================================================================
+# Claude Code's project memory lives on ansible-lxc outside the git repo.
+# This timer rsync's it to ts440 so it appears in Nextcloud External Storage
+# (Configs/claude-memory/) and syncs to the Mac via Nextcloud desktop app.
+#
+# Usage: ansible-playbook playbooks/claude-memory-sync.yml
+# =============================================================================
+
+- name: Ensure claude-memory directory exists on NAS
+  hosts: nas_server
+  become: true
+
+  tasks:
+    - name: Create claude-memory directory
+      ansible.builtin.file:
+        path: /srv/nas-zfs/configs/claude-memory
+        state: directory
+        owner: johnny
+        group: johnny
+        mode: "0755"
+
+- name: Configure Claude memory sync timer
+  hosts: ansible-lxc
+  become: true
+
+  vars:
+    claude_memory_sync_source: /home/johnny/.claude/projects/-home-johnny-cc-ansible/memory/
+    claude_memory_sync_dest: johnny@100.71.188.16:/srv/nas-zfs/configs/claude-memory/
+    claude_memory_sync_key: /home/johnny/.ssh/ansible_ed25519
+    claude_memory_sync_interval: "*-*-* *:2/10"  # every 10 min, offset by 2 min
+    claude_memory_sync_user: johnny
+
+  tasks:
+    - name: Create claude-memory-sync service
+      ansible.builtin.copy:
+        dest: /etc/systemd/system/claude-memory-sync.service
+        mode: "0644"
+        content: |
+          [Unit]
+          Description=Sync Claude Code memory to NAS for Nextcloud access
+          After=network-online.target
+          Wants=network-online.target
+
+          [Service]
+          Type=oneshot
+          User={{ claude_memory_sync_user }}
+          ExecStart=/usr/bin/rsync -a -e "ssh -i {{ claude_memory_sync_key }} -o StrictHostKeyChecking=no" {{ claude_memory_sync_source }} {{ claude_memory_sync_dest }}
+      notify: Reload systemd
+
+    - name: Create claude-memory-sync timer
+      ansible.builtin.copy:
+        dest: /etc/systemd/system/claude-memory-sync.timer
+        mode: "0644"
+        content: |
+          [Unit]
+          Description=Sync Claude memory to NAS every 10 minutes
+
+          [Timer]
+          OnCalendar={{ claude_memory_sync_interval }}
+          Persistent=true
+
+          [Install]
+          WantedBy=timers.target
+      notify: Reload systemd
+
+    - name: Enable and start claude-memory-sync timer
+      ansible.builtin.systemd:
+        name: claude-memory-sync.timer
+        enabled: true
+        state: started
+
+  handlers:
+    - name: Reload systemd
+      ansible.builtin.systemd:
+        daemon_reload: true

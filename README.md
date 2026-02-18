@@ -87,6 +87,7 @@ cc-ansible/
 │   ├── rclone-sync.yml         # rclone OneDrive → Nextcloud sync (macbook-pro/pi5-01)
 │   ├── git-sync.yml            # Auto-pull from GitHub on ts440 (for Nextcloud)
 │   ├── nextcloud-scan.yml      # Periodic occ files:scan for external storage
+│   ├── claude-memory-sync.yml  # Sync Claude Code memory to NAS for Nextcloud
 │   ├── proxmox-firewall.yml    # Proxmox firewall rules (datacenter/node/VM)
 │   └── swap.yml                # Swap configuration (zvol for ZFS, file for others)
 ├── tasks/
@@ -290,6 +291,7 @@ Packages are merged from multiple sources (all applicable variables combined):
 | `rclone-sync.yml` | `managed_hosts` | rclone sync from OneDrive to Nextcloud (macbook-pro via launchd, pi5-01 via systemd) |
 | `git-sync.yml` | `nas_server` | Auto-pull from GitHub every 5 minutes (Nextcloud External Storage) |
 | `nextcloud-scan.yml` | nextcloud-vm | Periodic `occ files:scan` for external storage (every 10 min) |
+| `claude-memory-sync.yml` | `nas_server`, ansible-lxc | Rsync Claude Code memory to NAS for Nextcloud access (every 10 min) |
 | `proxmox-firewall.yml` | `proxmox_nodes` | Deploy Proxmox firewall rules (datacenter, node, VM/CT) |
 
 ## NFS Configuration
@@ -582,7 +584,7 @@ setfacl -R -d -m o::r /srv/nas-zfs/configs
 
 Ansible runs on ansible-lxc (CT 104 on pve-m70q, Ubuntu 25.10) with `ansible-core` 2.19. The repo clone is at `~/cc-ansible` on ansible-lxc.
 
-ts440 auto-pulls from GitHub every 5 minutes (`git-sync.timer`) to keep the Nextcloud External Storage copy current. nextcloud-vm runs `occ files:scan` every 10 minutes (`nextcloud-scan.timer`) so external storage changes appear automatically.
+ts440 auto-pulls from GitHub every 5 minutes (`git-sync.timer`) to keep the Nextcloud External Storage copy current. nextcloud-vm runs `occ files:scan` every 10 minutes (`nextcloud-scan.timer`) so external storage changes appear automatically. Claude Code's project memory is synced from ansible-lxc to ts440 every 10 minutes (`claude-memory-sync.timer`) for Nextcloud access.
 
 ## Tips
 

@@ -106,6 +106,10 @@
   ansible.builtin.import_playbook: playbooks/nextcloud-scan.yml
   tags: [nextcloud, scan]
 
+- name: Configure Claude memory sync to NAS
+  ansible.builtin.import_playbook: playbooks/claude-memory-sync.yml
+  tags: [claude-memory, sync]
+
 - name: Configure Proxmox firewall
   ansible.builtin.import_playbook: playbooks/proxmox-firewall.yml
   tags: [proxmox, firewall]
