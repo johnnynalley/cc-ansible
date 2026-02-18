@@ -1,6 +1,6 @@
 # CLAUDE.md
 
-> **Last updated:** 2026-02-17
+> **Last updated:** 2026-02-18
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
@@ -258,14 +258,15 @@ Centralized notification system using Apprise API (on docker-vm at `/opt/notific
 
 **Architecture:**
 ```
-Diun (container updates) ──┐
-smartd (disk health) ──────┤
-apcupsd (UPS power) ───────┤
-auto-updates (weekly) ─────┼──→ Apprise API ───→ Pushover "Computer Corner" app (infrastructure, Time Sensitive)
-network-watchdog (recovery)┤   (docker-vm)  ───→ Pushover "Computer Corner" app (infrastructure, silent/quiet)
-gluetun-watchdog (VPN) ────┤                ───→ Pushover "cc-media-feed" app (media, silent)
-Sonarr/Radarr (grabs) ─────┤                ───→ Email (iCloud SMTP)
-Jellyseerr (requests) ─────┘
+Diun (container updates) ──────┐
+smartd (disk health) ──────────┤
+apcupsd (UPS power) ───────────┤
+auto-updates (weekly) ─────────┼──→ Apprise API ───→ Pushover "Computer Corner" app (infrastructure, Time Sensitive)
+unattended-upgrades (daily) ───┤   (docker-vm)  ───→ Pushover "Computer Corner" app (infrastructure, silent/quiet)
+network-watchdog (recovery) ───┤                ───→ Pushover "cc-media-feed" app (media, silent)
+gluetun-watchdog (VPN) ────────┤                ───→ Email (iCloud SMTP)
+Sonarr/Radarr (grabs) ─────────┤
+Jellyseerr (requests) ─────────┘
 
 Sonarr/Radarr ──→ Discord (native connection, rich embeds with poster art)
 ```
@@ -302,6 +303,18 @@ Enable local backups: set `local_restic_enabled: true` and `local_restic_backup_
 
 One-way sync from UTD OneDrive to Nextcloud via `playbooks/rclone-sync.yml`. Runs on macbook-pro because UTD's Microsoft 365 tenant blocks third-party OAuth — OneDrive desktop app syncs locally, then rclone copies to Nextcloud WebDAV every 2 hours. Monitored via Uptime Kuma push monitor. rclone remote config is manual (not Ansible-managed) at `~/.config/rclone/rclone.conf`.
 
+### Unattended-Upgrades (Daily Security Patches)
+
+Deployed via `playbooks/unattended-upgrades.yml` to all `debian_hosts` (including workstations — security patches shouldn't wait). Complements the weekly `auto-updates.yml` full-upgrade.
+
+**How it works**: Uses Debian/Ubuntu's native `unattended-upgrades` package with APT's built-in `apt-daily-upgrade.timer` (daily, randomized 12h window). Only applies security-origin patches — not general updates. A systemd drop-in (`/etc/systemd/system/apt-daily-upgrade.service.d/notify.conf`) hooks an `ExecStartPost` script that sends a silent Apprise notification (`push-quiet` tag) when patches are applied.
+
+**Proxmox nodes**: Blacklist `pve-*`, `proxmox-*`, `ceph-*`, `corosync*`, `pve-kernel-*`, `pve-firmware`, `qemu-server`, `libpve-*` packages (defined in `group_vars/proxmox_nodes/vars.yml`) to avoid breaking cluster operations. Base Debian security patches still apply.
+
+**Variables** (in `group_vars/debian_hosts/packages.yml`):
+- `unattended_upgrades_enabled` (default: `true`) — per-host opt-out
+- `unattended_upgrades_blacklist` (default: `[]`) — overridden for Proxmox nodes
+
 ### Network Recovery
 
 Deployed via `playbooks/network-recovery.yml` to `linux_hosts:!workstations`.
@@ -322,7 +335,7 @@ Deployed via `playbooks/network-recovery.yml` to `linux_hosts:!workstations`.
 
 **jn-t14s-lin** (Kubuntu): ThinkPad T14s laptop in `debian_hosts` + `workstations` groups. Requires `ansible_become_flags: "-S"` in host_vars due to sudo-rs (Ubuntu 25.10+ default). WiFi powersave disabled; optional ath11k resume hooks available in `host_vars/jn-t14s-lin/wifi.yml`.
 
-Both hosts inherit `network_watchdog_enabled: false` and `auto_updates_enabled: false` from `group_vars/workstations/vars.yml`.
+Both hosts inherit `network_watchdog_enabled: false` and `auto_updates_enabled: false` from `group_vars/workstations/vars.yml`. They still receive daily security patches via `unattended-upgrades`.
 
 ## Key Files
 

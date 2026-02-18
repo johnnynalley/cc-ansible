@@ -1,0 +1,28 @@
+#!/bin/bash
+# Post-upgrade notification for unattended-upgrades
+# Runs via systemd ExecStartPost after apt-daily-upgrade.service
+# Managed by Ansible - do not edit manually
+
+LOG="/var/log/unattended-upgrades/unattended-upgrades.log"
+TODAY=$(date +%Y-%m-%d)
+
+# Extract package list from today's log entries
+PACKAGES=$(grep "$TODAY" "$LOG" 2>/dev/null | grep "Packages that will be upgraded" | tail -1 | sed 's/.*upgraded: //')
+
+# Nothing upgraded today — exit silently
+[ -z "$PACKAGES" ] && exit 0
+
+PKG_COUNT=$(echo "$PACKAGES" | wc -w)
+
+# Send silent Apprise notification
+curl -sf -o /dev/null \
+  -X POST "{{ apprise_endpoint }}/notify/{{ apprise_token }}" \
+  --form-string "title=[Security] ${HOSTNAME}" \
+  --form-string "body=${PKG_COUNT} security patches applied: ${PACKAGES}" \
+  --form-string "tag=push-quiet" \
+  --form-string "type=info" \
+  --max-time 10 \
+  --retry 2 \
+  --retry-delay 3 2>/dev/null || true
+
+exit 0

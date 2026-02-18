@@ -1,6 +1,6 @@
 # CC-Ansible
 
-> **Last updated:** 2026-02-17
+> **Last updated:** 2026-02-18
 
 Ansible automation for Johnny's homelab infrastructure (4 Proxmox nodes, 7 VMs/LXCs, Ansible controller LXC, gaming workstation, ThinkPad laptop, MacBook).
 
@@ -71,6 +71,7 @@ cc-ansible/
 │   ├── bootstrap.yml           # Initial user/SSH setup (Debian + Arch)
 │   ├── ssh-hardening.yml       # SSH security configuration
 │   ├── auto-updates.yml        # Scheduled system updates (Proxmox kernel reboot detection)
+│   ├── unattended-upgrades.yml # Daily security patches (Debian/Ubuntu, incl. workstations)
 │   ├── network-recovery.yml    # Network watchdog + Tailscale recovery
 │   ├── wifi.yml                # WiFi powersave + suspend/resume fix
 │   ├── restic.yml              # B2 offsite backup configuration
@@ -112,6 +113,8 @@ cc-ansible/
 │   ├── docker-stacks.service.j2  # Docker stacks systemd service
 │   ├── auto-updates-debian.sh.j2  # Debian auto-updates with notifications
 │   ├── auto-updates-arch.sh.j2  # Arch auto-updates with notifications
+│   ├── 50unattended-upgrades.j2  # Security-only unattended-upgrades config
+│   ├── unattended-upgrades-notify.sh.j2  # Post-upgrade Apprise notification
 │   ├── network-watchdog.sh.j2  # Network recovery watchdog with notifications
 │   ├── gluetun-watchdog.sh.j2  # Gluetun VPN crash loop watchdog
 │   ├── proxmox-virtiofs-directory.cfg.j2  # VirtioFS directory mappings
@@ -269,6 +272,7 @@ Packages are merged from multiple sources (all applicable variables combined):
 | `bootstrap.yml` | `linux_hosts` | Create admin user, SSH keys, sudo setup (Debian + Arch) |
 | `ssh-hardening.yml` | `linux_hosts` | SSH security (key auth, disable password) |
 | `auto-updates.yml` | `linux_hosts` | Configure automatic updates + reboot |
+| `unattended-upgrades.yml` | `debian_hosts` | Daily security patches (incl. workstations, Proxmox blacklist) |
 | `network-recovery.yml` | `linux_hosts` | Network watchdog for auto-recovery after outages |
 | `wifi.yml` | `linux_hosts` | WiFi powersave disable, optional PCI FLR or module reload resume fix |
 | `restic.yml` | `backup_clients` | B2 offsite backup with systemd timer |
@@ -620,14 +624,15 @@ rclone config reconnect nextcloud:
 Centralized notification router for infrastructure and media alerts using tag-based routing via Pushover.
 
 ```
-Diun (container updates) ──┐
-smartd (disk health) ──────┤
-apcupsd (UPS power) ───────┤
-auto-updates (weekly) ─────┼──→ Apprise API (docker-vm) → Pushover "Computer Corner" (Time Sensitive)
-network-watchdog (recovery)┤                           → Pushover "Computer Corner" (silent/quiet)
-gluetun-watchdog (VPN) ────┤                           → Email (iCloud SMTP)
-Sonarr/Radarr (grabs) ─────┤                           → Pushover "cc-media-feed" (silent)
-Jellyseerr (requests) ──────┘
+Diun (container updates) ──────┐
+smartd (disk health) ──────────┤
+apcupsd (UPS power) ───────────┤
+auto-updates (weekly) ─────────┼──→ Apprise API (docker-vm) → Pushover "Computer Corner" (Time Sensitive)
+unattended-upgrades (daily) ───┤                           → Pushover "Computer Corner" (silent/quiet)
+network-watchdog (recovery) ───┤                           → Email (iCloud SMTP)
+gluetun-watchdog (VPN) ────────┤                           → Pushover "cc-media-feed" (silent)
+Sonarr/Radarr (grabs) ─────────┤
+Jellyseerr (requests) ─────────┘
 
 Sonarr/Radarr ──→ Discord (native connection, rich embeds with poster art)
 ```
@@ -638,6 +643,7 @@ Sonarr/Radarr ──→ Discord (native connection, rich embeds with poster art)
 - **Diun**: Container image update notifier on all Docker VMs (`/opt/diun/`), sends with `push` tag
 - **smartd/apcupsd**: Infrastructure alerts, send with `push` tag
 - **auto-updates**: Notifies before updates (package count), after completion, and before reboots
+- **unattended-upgrades**: Silent notification (`push-quiet`) when daily security patches are applied
 - **network-watchdog**: Best-effort notifications on gateway/Tailscale recovery, pre-reboot, and max-reboot exceeded
 - **gluetun-watchdog**: Silent notifications on VPN recovery or max-restart exhaustion (`push-quiet` tag)
 - **Sonarr/Radarr**: Dual notifications — Discord (rich embeds) + Apprise `media-feed` tag (silent Pushover)

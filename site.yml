@@ -6,6 +6,10 @@
 #        ansible-playbook site.yml --tags packages
 # =============================================================================
 
+- name: Configure swap files
+  ansible.builtin.import_playbook: playbooks/swap.yml
+  tags: [swap]
+
 - name: Install baseline packages
   ansible.builtin.import_playbook: playbooks/packages.yml
   tags: [packages]
@@ -29,6 +33,10 @@
 - name: Configure automatic updates
   ansible.builtin.import_playbook: playbooks/auto-updates.yml
   tags: [auto-updates]
+
+- name: Configure unattended-upgrades (security patches)
+  ansible.builtin.import_playbook: playbooks/unattended-upgrades.yml
+  tags: [unattended-upgrades, security]
 
 - name: Configure network recovery
   ansible.builtin.import_playbook: playbooks/network-recovery.yml

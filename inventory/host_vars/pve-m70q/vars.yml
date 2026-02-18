@@ -4,3 +4,6 @@
 
 # Legacy host uses johnny user
 admin_user: johnny
+
+# Swap (8 GB zvol) — needed for LXC containers to use their swap allocation
+swap_size_gb: 8

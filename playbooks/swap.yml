@@ -1,0 +1,145 @@
+# =============================================================================
+# Swap Playbook - Configure swap space on Linux hosts
+# =============================================================================
+# Supports two methods based on root filesystem:
+#   - ZFS hosts: Creates a zvol (swap files don't work on ZFS due to CoW holes)
+#   - Non-ZFS hosts: Creates a swap file at /swapfile
+#
+# Opt-in via swap_size_gb variable in host_vars.
+# ZFS hosts also need swap_zfs_pool (defaults to "rpool").
+#
+# Usage: ansible-playbook playbooks/swap.yml
+#        ansible-playbook playbooks/swap.yml --limit pve-m70q,pve-herc
+# =============================================================================
+
+- name: Configure swap
+  hosts: linux_hosts
+  become: true
+  gather_facts: true
+
+  tasks:
+    - name: Detect root filesystem type
+      ansible.builtin.command:
+        cmd: findmnt -n -o FSTYPE /
+      register: root_fstype
+      changed_when: false
+      when: swap_size_gb is defined
+
+    - name: Set ZFS root fact
+      ansible.builtin.set_fact:
+        root_is_zfs: "{{ root_fstype.stdout | default('') | trim == 'zfs' }}"
+      when: swap_size_gb is defined
+
+    # =========================================================================
+    # ZFS zvol swap (for ZFS root filesystems)
+    # =========================================================================
+    - name: Check if swap zvol exists
+      ansible.builtin.command:
+        cmd: zfs list {{ swap_zfs_pool | default('rpool') }}/swap
+      register: zvol_check
+      changed_when: false
+      failed_when: false
+      when:
+        - swap_size_gb is defined
+        - root_is_zfs | default(false)
+
+    - name: Create swap zvol
+      ansible.builtin.command:
+        cmd: zfs create -V {{ swap_size_gb }}G -b 4096 -o compression=zle -o sync=always -o primarycache=metadata -o secondarycache=none {{ swap_zfs_pool | default('rpool') }}/swap
+      when:
+        - swap_size_gb is defined
+        - root_is_zfs | default(false)
+        - zvol_check.rc != 0
+      changed_when: true
+
+    - name: Format swap zvol
+      ansible.builtin.command:
+        cmd: mkswap -f /dev/zvol/{{ swap_zfs_pool | default('rpool') }}/swap
+      when:
+        - swap_size_gb is defined
+        - root_is_zfs | default(false)
+        - zvol_check.rc != 0
+      changed_when: true
+
+    - name: Enable swap zvol
+      ansible.builtin.command:
+        cmd: swapon /dev/zvol/{{ swap_zfs_pool | default('rpool') }}/swap
+      register: swapon_zvol
+      changed_when: swapon_zvol.rc == 0
+      failed_when:
+        - swapon_zvol.rc != 0
+        - "'busy' not in swapon_zvol.stderr | default('')"
+      when:
+        - swap_size_gb is defined
+        - root_is_zfs | default(false)
+
+    - name: Add swap zvol to fstab
+      ansible.builtin.lineinfile:
+        path: /etc/fstab
+        line: "/dev/zvol/{{ swap_zfs_pool | default('rpool') }}/swap none swap sw 0 0"
+        regexp: "zvol.*swap"
+        state: present
+      when:
+        - swap_size_gb is defined
+        - root_is_zfs | default(false)
+
+    # =========================================================================
+    # Swap file (for non-ZFS filesystems)
+    # =========================================================================
+    - name: Check if swap file exists
+      ansible.builtin.stat:
+        path: /swapfile
+      register: swapfile_stat
+      when:
+        - swap_size_gb is defined
+        - not root_is_zfs | default(false)
+
+    - name: Create swap file
+      ansible.builtin.command:
+        cmd: dd if=/dev/zero of=/swapfile bs=1M count={{ swap_size_gb | int * 1024 }}
+      when:
+        - swap_size_gb is defined
+        - not root_is_zfs | default(false)
+        - not swapfile_stat.stat.exists | default(false)
+      changed_when: true
+
+    - name: Set swap file permissions
+      ansible.builtin.file:
+        path: /swapfile
+        owner: root
+        group: root
+        mode: "0600"
+      when:
+        - swap_size_gb is defined
+        - not root_is_zfs | default(false)
+
+    - name: Format swap file
+      ansible.builtin.command:
+        cmd: mkswap /swapfile
+      when:
+        - swap_size_gb is defined
+        - not root_is_zfs | default(false)
+        - not swapfile_stat.stat.exists | default(false)
+      changed_when: true
+
+    - name: Enable swap file
+      ansible.builtin.command:
+        cmd: swapon /swapfile
+      register: swapon_file
+      changed_when: swapon_file.rc == 0
+      failed_when:
+        - swapon_file.rc != 0
+        - "'busy' not in swapon_file.stderr | default('')"
+      when:
+        - swap_size_gb is defined
+        - not root_is_zfs | default(false)
+
+    - name: Add swap file to fstab
+      ansible.builtin.lineinfile:
+        path: /etc/fstab
+        line: "/swapfile none swap sw 0 0"
+        regexp: "^/swapfile"
+        state: present
+      when:
+        - swap_size_gb is defined
+        - not root_is_zfs | default(false)

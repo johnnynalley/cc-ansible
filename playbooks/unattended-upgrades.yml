@@ -1,0 +1,116 @@
+# =============================================================================
+# Unattended-Upgrades Playbook - Daily Security Patches
+# =============================================================================
+# Installs and configures unattended-upgrades for security-only updates.
+# Separate from auto-updates.yml which handles weekly full-upgrade + reboots.
+#
+# This runs on ALL Debian hosts including workstations (security patches
+# shouldn't wait for manual intervention).
+#
+# Proxmox nodes blacklist pve-*/proxmox-*/ceph-* packages to avoid
+# breaking cluster operations.
+#
+# Usage: ansible-playbook playbooks/unattended-upgrades.yml
+#        ansible-playbook playbooks/unattended-upgrades.yml --limit proxmox_nodes
+# =============================================================================
+
+- name: Configure unattended-upgrades for security patches
+  hosts: debian_hosts
+  become: true
+  gather_facts: true
+
+  tasks:
+    # =========================================================================
+    # Skip hosts with unattended_upgrades_enabled: false
+    # =========================================================================
+    - name: End play for hosts with unattended-upgrades disabled
+      ansible.builtin.meta: end_host
+      when: not (unattended_upgrades_enabled | default(true))
+
+    # =========================================================================
+    # Install unattended-upgrades
+    # =========================================================================
+    - name: Install unattended-upgrades package
+      ansible.builtin.apt:
+        name: unattended-upgrades
+        state: present
+        update_cache: true
+        cache_valid_time: 3600
+
+    # =========================================================================
+    # Configure unattended-upgrades (security origins, blacklist, no reboot)
+    # =========================================================================
+    - name: Deploy unattended-upgrades configuration
+      ansible.builtin.template:
+        src: ../templates/50unattended-upgrades.j2
+        dest: /etc/apt/apt.conf.d/50unattended-upgrades
+        owner: root
+        group: root
+        mode: "0644"
+
+    # =========================================================================
+    # Configure APT periodic settings (enable daily security upgrades)
+    # =========================================================================
+    - name: Configure APT periodic settings
+      ansible.builtin.copy:
+        content: |
+          // APT Periodic Settings - Managed by Ansible
+          // Controls apt-daily.timer and apt-daily-upgrade.timer
+          APT::Periodic::Update-Package-Lists "1";
+          APT::Periodic::Unattended-Upgrade "1";
+          APT::Periodic::Download-Upgradeable-Packages "0";
+          APT::Periodic::AutocleanInterval "7";
+        dest: /etc/apt/apt.conf.d/20auto-upgrades
+        owner: root
+        group: root
+        mode: "0644"
+
+    # =========================================================================
+    # Deploy notification script + systemd drop-in
+    # =========================================================================
+    - name: Deploy unattended-upgrades notification script
+      ansible.builtin.template:
+        src: ../templates/unattended-upgrades-notify.sh.j2
+        dest: /usr/local/sbin/unattended-upgrades-notify
+        owner: root
+        group: root
+        mode: "0755"
+
+    - name: Create systemd drop-in directory for apt-daily-upgrade
+      ansible.builtin.file:
+        path: /etc/systemd/system/apt-daily-upgrade.service.d
+        state: directory
+        owner: root
+        group: root
+        mode: "0755"
+
+    - name: Deploy notification drop-in for apt-daily-upgrade
+      ansible.builtin.copy:
+        content: |
+          [Service]
+          ExecStartPost=-/usr/local/sbin/unattended-upgrades-notify
+        dest: /etc/systemd/system/apt-daily-upgrade.service.d/notify.conf
+        owner: root
+        group: root
+        mode: "0644"
+      notify: Reload systemd
+
+    # =========================================================================
+    # Ensure APT timers are enabled
+    # =========================================================================
+    - name: Ensure apt-daily.timer is enabled and started
+      ansible.builtin.systemd:
+        name: apt-daily.timer
+        enabled: true
+        state: started
+
+    - name: Ensure apt-daily-upgrade.timer is enabled and started
+      ansible.builtin.systemd:
+        name: apt-daily-upgrade.timer
+        enabled: true
+        state: started
+
+  handlers:
+    - name: Reload systemd
+      ansible.builtin.systemd:
+        daemon_reload: true

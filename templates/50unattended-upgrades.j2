@@ -1,0 +1,43 @@
+// Unattended-Upgrades Configuration (security patches only)
+// Managed by Ansible - do not edit manually
+
+// Security-only origins (auto-adapts to Debian or Ubuntu codename)
+Unattended-Upgrade::Origins-Pattern {
+{% if ansible_facts.distribution == "Ubuntu" %}
+        "origin=Ubuntu,archive=${distro_codename}-security,label=Ubuntu";
+        "origin=UbuntuESMApps,archive=${distro_codename}-apps-security,label=UbuntuESMApps";
+        "origin=UbuntuESM,archive=${distro_codename}-infra-security,label=UbuntuESM";
+{% elif ansible_facts.distribution == "Debian" %}
+        "origin=Debian,codename=${distro_codename},label=Debian-Security";
+        "origin=Debian,codename=${distro_codename}-security,label=Debian-Security";
+{% endif %}
+};
+
+// Package blacklist - never auto-upgrade these
+Unattended-Upgrade::Package-Blacklist {
+{% for pkg in unattended_upgrades_blacklist %}
+        "{{ pkg }}";
+{% endfor %}
+};
+
+// Do NOT automatically reboot (weekly auto-updates handles reboots)
+Unattended-Upgrade::Automatic-Reboot "false";
+
+// Remove unused kernel packages after upgrade
+Unattended-Upgrade::Remove-Unused-Kernel-Packages "true";
+
+// Remove unused auto-installed dependencies
+Unattended-Upgrade::Remove-Unused-Dependencies "true";
+
+// Remove new unused dependencies after upgrade
+Unattended-Upgrade::Remove-New-Unused-Dependencies "true";
+
+// Keep existing conffiles (same as weekly script: --force-confdef --force-confold)
+Dpkg::Options {
+        "--force-confdef";
+        "--force-confold";
+};
+
+// Log to syslog
+Unattended-Upgrade::SyslogEnable "true";
+Unattended-Upgrade::SyslogFacility "daemon";

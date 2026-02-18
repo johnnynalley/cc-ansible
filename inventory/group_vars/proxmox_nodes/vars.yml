@@ -7,3 +7,15 @@ msmtp_enabled: true
 
 # Enable SMART disk monitoring
 smartd_enabled: true
+
+# Blacklist Proxmox packages from unattended-upgrades
+# These should only be upgraded manually/coordinated to avoid cluster breakage
+unattended_upgrades_blacklist:
+  - "pve-*"
+  - "proxmox-*"
+  - "ceph-*"
+  - "corosync*"
+  - "pve-kernel-*"
+  - "pve-firmware"
+  - "qemu-server"
+  - "libpve-*"

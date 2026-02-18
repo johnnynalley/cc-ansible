@@ -18,3 +18,7 @@ packages_ubuntu_extra:
 # Auto-updates schedule (Debian-based systems)
 # Hosts use UTC timezone — 08:00 UTC = 2:00 AM Central (3:00 AM during CDT)
 auto_updates_oncalendar: "Sun *-*-* 08:00:00"
+
+# Unattended-upgrades (daily security patches via APT native timer)
+unattended_upgrades_enabled: true
+unattended_upgrades_blacklist: []
