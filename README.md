@@ -1,8 +1,8 @@
 # CC-Ansible
 
-> **Last updated:** 2026-02-17
+> **Last updated:** 2026-02-18
 
-Ansible automation for Johnny's homelab infrastructure (4 Proxmox nodes, 6 VMs/LXCs, Ansible controller LXC, gaming workstation, ThinkPad laptop, MacBook).
+Ansible automation for Johnny's homelab infrastructure (4 Proxmox nodes, 7 VMs/LXCs, Ansible controller LXC, gaming workstation, ThinkPad laptop, MacBook).
 
 **Repository**: https://github.com/johnnynalley/cc-ansible (public)
 
@@ -61,7 +61,8 @@ cc-ansible/
 │       ├── syncthing-lxc/
 │       ├── pi5-01/
 │       ├── jn-desktop/         # CachyOS gaming workstation
-│       └── jn-t14s-lin/       # ThinkPad T14s (Kubuntu)
+│       ├── jn-t14s-lin/       # ThinkPad T14s (Kubuntu)
+│       └── dev-vm/            # Development VM (Ubuntu 24.04, pve-m70q)
 ├── playbooks/
 │   ├── packages.yml            # Multi-platform package installation
 │   ├── msmtp.yml               # SMTP relay (iCloud) for system email
@@ -132,7 +133,7 @@ managed_hosts
 │   ├── debian_hosts
 │   │   ├── proxmox_nodes (ts440, pve-alto, pve-herc, pve-m70q)
 │   │   ├── vms_lxcs
-│   │   │   ├── vms (docker-vm, media-vm, nextcloud-vm) ← gets qemu-guest-agent
+│   │   │   ├── vms (docker-vm, media-vm, nextcloud-vm, dev-vm) ← gets qemu-guest-agent
 │   │   │   └── lxcs (homebridge-lxc, syncthing-lxc)
 │   │   ├── orchestrator (ansible-lxc, pi5-01)
 │   │   └── jn-t14s-lin ← ThinkPad T14s (Kubuntu)
@@ -143,7 +144,7 @@ workstations (jn-desktop, jn-t14s-lin, macbook-pro) ← no auto-recovery/reboots
 
 nas_server (ts440) ← portable NAS role group
 
-development (ansible-lxc) ← dev tooling (gh, shellcheck, yq)
+development (dev-vm) ← dev tooling (gh, shellcheck, yq)
 
 backup_clients
 ├── proxmox_nodes

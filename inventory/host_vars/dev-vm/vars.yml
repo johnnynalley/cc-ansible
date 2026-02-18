@@ -1,0 +1,12 @@
+# =============================================================================
+# dev-vm - Host Variables (VM on pve-m70q, Ubuntu 24.04)
+# =============================================================================
+
+admin_user: johnny
+
+# Disable auto-recovery and auto-updates (same as workstations group)
+network_watchdog_enabled: false
+auto_updates_enabled: false
+
+# SMART disk monitoring
+smartd_enabled: true

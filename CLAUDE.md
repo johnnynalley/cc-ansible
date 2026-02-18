@@ -1,6 +1,6 @@
 # CLAUDE.md
 
-> **Last updated:** 2026-02-17
+> **Last updated:** 2026-02-18
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
@@ -8,7 +8,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Ansible automation for a homelab infrastructure consisting of:
 - 4 Proxmox hypervisors (ts440, pve-alto, pve-herc, pve-m70q)
-- 6 VMs/LXC containers (docker-vm, media-vm, nextcloud-vm, ansible-lxc, homebridge-lxc, syncthing-lxc)
+- 7 VMs/LXC containers (docker-vm, media-vm, nextcloud-vm, dev-vm, ansible-lxc, homebridge-lxc, syncthing-lxc)
 - 1 Ansible controller LXC (ansible-lxc, CT 104 on pve-m70q) running Ansible locally
 - 1 Raspberry Pi 5 (pi5-01)
 - 1 CachyOS gaming workstation (jn-desktop)
@@ -119,7 +119,7 @@ ssh-copy-id -i ~/.ssh/ansible_ed25519.pub johnny@<tailscale-ip>
 Host groups form a hierarchy in `inventory/hosts.ini`:
 - `managed_hosts` → all managed systems
   - `linux_hosts` → `debian_hosts` + `arch_hosts`
-    - `debian_hosts`: `proxmox_nodes`, `vms_lxcs` (child groups: `vms` + `lxcs`), `orchestrator` (ansible-lxc), jn-t14s-lin, pi5-01
+    - `debian_hosts`: `proxmox_nodes`, `vms_lxcs` (child groups: `vms` + `lxcs`), `orchestrator` (ansible-lxc, pi5-01), jn-t14s-lin
     - `arch_hosts`: jn-desktop (CachyOS gaming workstation)
   - `macos_hosts`: macbook-pro
 - `workstations` → **cross-platform group** for desktops/laptops (jn-desktop, jn-t14s-lin, macbook-pro)
@@ -127,7 +127,7 @@ Host groups form a hierarchy in `inventory/hosts.ini`:
   - Group vars disable automated recovery: `network_watchdog_enabled: false`, `auto_updates_enabled: false`
   - Playbooks like `network-recovery.yml` explicitly exclude this group: `hosts: linux_hosts:!workstations`
 - `nas_server` → **portable NAS role group** (currently ts440). Storage services: NFS, Samba, ZFS, mergerfs, drive mounts. Migrate NAS to new hardware by changing membership in this group.
-- `development` → **cross-platform group** for dev tooling (gh, shellcheck, yq). Currently: ansible-lxc. Packages split by OS: `packages_debian_development_extra`, `packages_arch_development_extra`
+- `development` → **cross-platform group** for dev tooling (gh, shellcheck, yq). Currently: dev-vm. ansible-lxc gets these via `packages_host_extra` in host_vars instead. Packages split by OS: `packages_debian_development_extra`, `packages_arch_development_extra`
 - `backup_clients` → separate group for restic backups (includes `proxmox_nodes`, `vms_lxcs`, `orchestrator`, `workstations`, `arch_hosts`)
 
 VMs and LXCs are split so VMs get `qemu-guest-agent` while LXCs don't need it.

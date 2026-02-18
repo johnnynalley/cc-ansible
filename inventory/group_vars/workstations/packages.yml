@@ -35,5 +35,5 @@ flatpak_workstations:
 # Version-checked — only reinstalls when upstream has a newer version
 deb_debian_workstations:
   - name: plezy
-    url: "https://github.com/edde746/plezy/releases/latest/download/plezy-linux.deb"
+    url: "https://github.com/edde746/plezy/releases/latest/download/plezy-linux-x64.deb"
     api: "https://api.github.com/repos/edde746/plezy/releases/latest"
