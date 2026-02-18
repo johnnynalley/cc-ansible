@@ -27,6 +27,7 @@ packages_macos_common:
   # macOS specific useful tools
   - mas           # Mac App Store CLI
   - trash         # Safe rm to trash
+  - tldr          # Community-maintained command cheat sheets
 
 packages_macos_casks: []
 # Example casks you might want:

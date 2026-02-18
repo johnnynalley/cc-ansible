@@ -35,6 +35,9 @@ packages_linux_common:
   - nmap
   - iperf3
 
+  # Documentation
+  - tealdeer      # tldr client (community-maintained command cheat sheets)
+
 # Extra packages for Linux hosts (override in child groups)
 packages_linux_extra: []
 
