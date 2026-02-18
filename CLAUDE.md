@@ -1,6 +1,6 @@
 # CLAUDE.md
 
-> **Last updated:** 2026-02-18
+> **Last updated:** 2026-02-17
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
@@ -336,6 +336,14 @@ Deployed via `playbooks/network-recovery.yml` to `linux_hosts:!workstations`.
 **jn-t14s-lin** (Kubuntu): ThinkPad T14s laptop in `debian_hosts` + `workstations` groups. Requires `ansible_become_flags: "-S"` in host_vars due to sudo-rs (Ubuntu 25.10+ default). WiFi powersave disabled; optional ath11k resume hooks available in `host_vars/jn-t14s-lin/wifi.yml`.
 
 Both hosts inherit `network_watchdog_enabled: false` and `auto_updates_enabled: false` from `group_vars/workstations/vars.yml`. They still receive daily security patches via `unattended-upgrades`.
+
+### Swap Configuration
+
+Managed by `playbooks/swap.yml`. Opt-in via `swap_size_gb` in host_vars. Auto-detects root filesystem type via `findmnt`:
+- **ZFS hosts** (Proxmox): Creates a zvol at `rpool/swap` (swap files don't work on ZFS — CoW creates holes that `swapon` rejects, even with `dd`)
+- **Non-ZFS hosts**: Creates a swap file at `/swapfile`
+
+Currently enabled on pve-m70q and pve-herc (8GB each). Pool name configurable via `swap_zfs_pool` (defaults to `rpool`).
 
 ## Key Files
 

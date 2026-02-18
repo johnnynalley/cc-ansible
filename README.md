@@ -1,6 +1,6 @@
 # CC-Ansible
 
-> **Last updated:** 2026-02-18
+> **Last updated:** 2026-02-17
 
 Ansible automation for Johnny's homelab infrastructure (4 Proxmox nodes, 7 VMs/LXCs, Ansible controller LXC, gaming workstation, ThinkPad laptop, MacBook).
 
@@ -86,7 +86,8 @@ cc-ansible/
 │   ├── virtiofs.yml            # VirtioFS shares (Proxmox → VMs)
 │   ├── rclone-sync.yml         # rclone OneDrive → Nextcloud sync (macbook-pro/pi5-01)
 │   ├── git-sync.yml            # Auto-pull from GitHub on ts440 (for Nextcloud)
-│   └── proxmox-firewall.yml    # Proxmox firewall rules (datacenter/node/VM)
+│   ├── proxmox-firewall.yml    # Proxmox firewall rules (datacenter/node/VM)
+│   └── swap.yml                # Swap configuration (zvol for ZFS, file for others)
 ├── tasks/
 │   ├── locale.yml              # Debian locale setup
 │   ├── tailscale.yml           # Tailscale installation + restart policy

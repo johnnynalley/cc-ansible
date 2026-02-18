@@ -23,6 +23,7 @@
         cmd: findmnt -n -o FSTYPE /
       register: root_fstype
       changed_when: false
+      check_mode: false
       when: swap_size_gb is defined
 
     - name: Set ZFS root fact
@@ -39,6 +40,7 @@
       register: zvol_check
       changed_when: false
       failed_when: false
+      check_mode: false
       when:
         - swap_size_gb is defined
         - root_is_zfs | default(false)
