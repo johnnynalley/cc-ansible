@@ -1,6 +1,6 @@
 # CC-Ansible
 
-> **Last updated:** 2026-02-19
+> **Last updated:** 2026-02-17
 
 Ansible automation for Johnny's homelab infrastructure (4 Proxmox nodes, 7 VMs/LXCs, Ansible controller LXC, gaming workstation, ThinkPad laptop, MacBook).
 
@@ -244,10 +244,10 @@ Packages are merged from multiple sources (all applicable variables combined):
 
 | Variable | Scope | Example |
 |----------|-------|---------|
-| `packages_linux_common` | All Linux | curl, git, vim, htop |
+| `packages_linux_common` | All Linux | curl, git, vim, htop, tealdeer |
 | `packages_debian_extra` | Debian/Ubuntu | dnsutils, locales |
 | `packages_arch_extra` | Arch Linux | bind-tools |
-| `packages_macos_common` | macOS | coreutils, mas |
+| `packages_macos_common` | macOS | coreutils, mas, tldr |
 | `packages_proxmox_extra` | Proxmox nodes | smartmontools, pve-headers |
 | `packages_vms_extra` | VMs only | qemu-guest-agent |
 | `packages_lxcs_extra` | LXCs only | (empty by default) |

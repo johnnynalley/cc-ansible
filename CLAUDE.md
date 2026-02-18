@@ -1,6 +1,6 @@
 # CLAUDE.md
 
-> **Last updated:** 2026-02-19
+> **Last updated:** 2026-02-17
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
@@ -156,7 +156,7 @@ Playbooks detect OS via `ansible_facts.os_family` and conditionally execute plat
 - Arch: pacman
 - macOS: homebrew (brew/casks)
 
-Package lists follow naming convention: `packages_linux_common`, `packages_debian_extra`, `packages_<group>_extra`, `packages_host_extra`. Cross-platform groups split packages by OS: `packages_arch_workstations_extra`, `packages_debian_workstations_extra` (in `group_vars/workstations/packages.yml`); `packages_debian_development_extra`, `packages_arch_development_extra` (in `group_vars/development/packages.yml`). Apps not in apt repos (Discord, LocalSend) are installed via Flatpak on Debian workstations using `flatpak_workstations` variable; Arch gets them natively via pacman.
+Package lists follow naming convention: `packages_linux_common`, `packages_debian_extra`, `packages_<group>_extra`, `packages_host_extra`. Cross-platform groups split packages by OS: `packages_arch_workstations_extra`, `packages_debian_workstations_extra` (in `group_vars/workstations/packages.yml`); `packages_debian_development_extra`, `packages_arch_development_extra` (in `group_vars/development/packages.yml`). Apps not in apt repos (Discord, LocalSend) are installed via Flatpak on Debian workstations using `flatpak_workstations` variable; Arch gets them natively via pacman. `tealdeer` (the `tldr` command) is in `packages_linux_common` for all Linux hosts; macOS uses the Homebrew formula `tldr` in `packages_macos_common`.
 
 ### TS440 Storage Architecture
 
