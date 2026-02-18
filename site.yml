@@ -102,6 +102,10 @@
   ansible.builtin.import_playbook: playbooks/git-sync.yml
   tags: [git-sync]
 
+- name: Configure Nextcloud external storage scan
+  ansible.builtin.import_playbook: playbooks/nextcloud-scan.yml
+  tags: [nextcloud, scan]
+
 - name: Configure Proxmox firewall
   ansible.builtin.import_playbook: playbooks/proxmox-firewall.yml
   tags: [proxmox, firewall]

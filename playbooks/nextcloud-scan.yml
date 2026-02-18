@@ -1,0 +1,65 @@
+# =============================================================================
+# Nextcloud External Storage Scan - Periodic file scan for VirtioFS mounts
+# =============================================================================
+# Nextcloud only detects external storage changes on access (filesystem_check_changes: 1).
+# This timer runs occ files:scan periodically so changes from git-sync and other
+# sources appear in Nextcloud without manual browsing.
+#
+# Usage: ansible-playbook playbooks/nextcloud-scan.yml
+# =============================================================================
+
+- name: Configure Nextcloud external storage scan timer
+  hosts: nextcloud-vm
+  become: true
+
+  vars:
+    nextcloud_scan_container: nextcloud-aio-nextcloud
+    nextcloud_scan_oncalendar: "*-*-* *:3/10"  # every 10 minutes, offset by 3 min
+    nextcloud_scan_paths:
+      - /Johnny/files/Configs
+      - /Johnny/files/Photo Library
+
+  tasks:
+    - name: Create nextcloud-scan service
+      ansible.builtin.copy:
+        dest: /etc/systemd/system/nextcloud-scan.service
+        mode: "0644"
+        content: |
+          [Unit]
+          Description=Scan Nextcloud external storage for changes
+          Requires=docker.service
+          After=docker.service
+
+          [Service]
+          Type=oneshot
+          {% for path in nextcloud_scan_paths %}
+          ExecStart=/usr/bin/docker exec -u www-data {{ nextcloud_scan_container }} php occ files:scan --path="{{ path }}"
+          {% endfor %}
+      notify: Reload systemd
+
+    - name: Create nextcloud-scan timer
+      ansible.builtin.copy:
+        dest: /etc/systemd/system/nextcloud-scan.timer
+        mode: "0644"
+        content: |
+          [Unit]
+          Description=Scan Nextcloud external storage every 10 minutes
+
+          [Timer]
+          OnCalendar={{ nextcloud_scan_oncalendar }}
+          Persistent=true
+
+          [Install]
+          WantedBy=timers.target
+      notify: Reload systemd
+
+    - name: Enable and start nextcloud-scan timer
+      ansible.builtin.systemd:
+        name: nextcloud-scan.timer
+        enabled: true
+        state: started
+
+  handlers:
+    - name: Reload systemd
+      ansible.builtin.systemd:
+        daemon_reload: true
