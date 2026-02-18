@@ -252,6 +252,8 @@ Gluetun's internal VPN restart (`HEALTH_RESTART_VPN=on`) doesn't properly clean 
 
 **Why force-recreate**: `docker compose restart` keeps the same container and network namespace. Since qBittorrent shares Gluetun's namespace (`network_mode: "service:gluetun"`), the namespace stays alive even when Gluetun stops, preserving the stale routes. `--force-recreate` destroys the container entirely, creating a fresh namespace on startup. After 3 consecutive health failures (~3 minutes), it force-recreates Gluetun + dependent containers. Rate-limited to 5 restarts per hour.
 
+**Port forwarding monitoring**: The watchdog also checks Gluetun's `/v1/portforward` API for the forwarded port. ProtonVPN's NAT-PMP port mapping can silently fail (returning `port: 0`) even while the VPN tunnel remains healthy. After 5 consecutive checks with no port (~5 minutes), the watchdog force-recreates Gluetun to get a fresh port assignment. Configurable via `gluetun_watchdog_max_portfwd_failures` (default: 5).
+
 #### Notification Stack (Apprise + Pushover)
 
 Centralized notification system using Apprise API (on docker-vm at `/opt/notifications/`) routing to Pushover and email.

@@ -286,7 +286,7 @@ Packages are merged from multiple sources (all applicable variables combined):
 | `filesystem-mounts.yml` | `linux_hosts` | Local filesystem mounts (NTFS, exFAT) |
 | `samba.yml` | `nas_server` | Samba + Time Machine configuration |
 | `docker-stacks.yml` | docker-vm, media-vm, nextcloud-vm | Deploy Docker Compose stacks (only restarts if images changed) |
-| `gluetun-watchdog.yml` | media-vm | Gluetun VPN crash loop detection and auto-restart |
+| `gluetun-watchdog.yml` | media-vm | Gluetun VPN crash loop detection, port forwarding monitoring, and auto-restart |
 | `virtiofs.yml` | `proxmox_nodes`, `vms` | Configure VirtioFS shares between Proxmox hosts and VMs |
 | `rclone-sync.yml` | `managed_hosts` | rclone sync from OneDrive to Nextcloud (macbook-pro via launchd, pi5-01 via systemd) |
 | `git-sync.yml` | `nas_server` | Auto-pull from GitHub every 5 minutes (Nextcloud External Storage) |
@@ -370,7 +370,7 @@ Check status: `journalctl -t network-watchdog -f`
 
 ## Gluetun VPN Watchdog
 
-Gluetun's internal VPN restart doesn't clean up tun0 routes, causing crash loops (`RTNETLINK answers: File exists`). The watchdog (`gluetun-watchdog.yml`) runs every 60 seconds on media-vm, detects the loop via Docker healthcheck, and does a full `docker compose up -d --force-recreate` of Gluetun + qBittorrent after 3 consecutive failures. Force-recreate (not just restart) is required to destroy the network namespace and clear stale routes. Sends silent Pushover notification on recovery (`push-quiet` tag). Rate-limited to 5 restarts/hour.
+Gluetun's internal VPN restart doesn't clean up tun0 routes, causing crash loops (`RTNETLINK answers: File exists`). The watchdog (`gluetun-watchdog.yml`) runs every 60 seconds on media-vm, detects the loop via Docker healthcheck, and does a full `docker compose up -d --force-recreate` of Gluetun + qBittorrent after 3 consecutive failures. Force-recreate (not just restart) is required to destroy the network namespace and clear stale routes. Also monitors port forwarding via Gluetun's `/v1/portforward` API — if the forwarded port is `0` for 5 consecutive checks (~5 minutes), force-recreates to get a fresh port assignment. Sends silent Pushover notification on recovery or port forwarding loss (`push-quiet` tag). Rate-limited to 5 restarts/hour.
 
 Check status: `journalctl -t gluetun-watchdog -f`
 
@@ -650,7 +650,7 @@ Sonarr/Radarr ──→ Discord (native connection, rich embeds with poster art)
 - **auto-updates**: Notifies before updates (package count), after completion, and before reboots
 - **unattended-upgrades**: Silent notification (`push-quiet`) when daily security patches are applied
 - **network-watchdog**: Best-effort notifications on gateway/Tailscale recovery, pre-reboot, and max-reboot exceeded
-- **gluetun-watchdog**: Silent notifications on VPN recovery or max-restart exhaustion (`push-quiet` tag)
+- **gluetun-watchdog**: Silent notifications on VPN recovery, port forwarding loss, or max-restart exhaustion (`push-quiet` tag)
 - **Sonarr/Radarr**: Dual notifications — Discord (rich embeds) + Apprise `media-feed` tag (silent Pushover)
 - **Jellyseerr**: Webhook to Apprise with `media-requests` tag (silent Pushover)
 - **ntfy**: Commented out in docker-compose, config preserved at `/opt/notifications/ntfy/`. Switched to Pushover because ntfy iOS lacks per-topic push control.

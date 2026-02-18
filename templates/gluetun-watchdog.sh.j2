@@ -7,10 +7,12 @@ set -uo pipefail
 LOG_TAG="gluetun-watchdog"
 STATE_DIR="/var/lib/gluetun-watchdog"
 FAILURE_COUNT_FILE="${STATE_DIR}/failure_count"
+PORTFWD_FAILURE_COUNT_FILE="${STATE_DIR}/portfwd_failure_count"
 RESTART_LOG_FILE="${STATE_DIR}/restart_log"
 
 # Configuration (from Ansible variables)
 MAX_FAILURES="{{ gluetun_watchdog_max_failures | default(3) }}"
+MAX_PORTFWD_FAILURES="{{ gluetun_watchdog_max_portfwd_failures | default(5) }}"
 MAX_RESTARTS="{{ gluetun_watchdog_max_restarts | default(5) }}"
 RESTART_WINDOW="{{ gluetun_watchdog_restart_window | default(3600) }}"
 COMPOSE_DIR="{{ gluetun_watchdog_compose_dir | default('/opt/media-stack') }}"
@@ -123,6 +125,33 @@ check_gluetun_health() {
 }
 
 # ---------------------------------------------------------------------------
+# Port forwarding check
+# ---------------------------------------------------------------------------
+
+get_portfwd_failure_count() {
+    [[ -f "$PORTFWD_FAILURE_COUNT_FILE" ]] && cat "$PORTFWD_FAILURE_COUNT_FILE" 2>/dev/null || echo 0
+}
+
+set_portfwd_failure_count() {
+    echo "$1" > "$PORTFWD_FAILURE_COUNT_FILE"
+}
+
+check_port_forwarding() {
+    # Query Gluetun's control API for the forwarded port
+    local response
+    response=$(docker exec "$CONTAINER_NAME" wget -qO- --timeout=5 http://127.0.0.1:8000/v1/portforward 2>/dev/null) || return 1
+
+    local port
+    port=$(echo "$response" | grep -o '"port":[0-9]*' | grep -o '[0-9]*')
+
+    if [[ -z "$port" || "$port" -eq 0 ]]; then
+        return 1
+    fi
+
+    return 0
+}
+
+# ---------------------------------------------------------------------------
 # Restart logic
 # ---------------------------------------------------------------------------
 
@@ -177,10 +206,11 @@ main() {
     # Container doesn't exist - nothing to monitor
     if [[ "$health_result" -eq 2 ]]; then
         set_failure_count 0
+        set_portfwd_failure_count 0
         return 0
     fi
 
-    # Healthy
+    # Healthy - check port forwarding too
     if [[ "$health_result" -eq 0 ]]; then
         local prev_failures
         prev_failures=$(get_failure_count)
@@ -188,14 +218,42 @@ main() {
             log "VPN healthy (was at $prev_failures consecutive failures)"
         fi
         set_failure_count 0
+
+        # Port forwarding check (only meaningful when VPN is healthy)
+        if check_port_forwarding; then
+            local prev_pf_failures
+            prev_pf_failures=$(get_portfwd_failure_count)
+            if [[ "$prev_pf_failures" -gt 0 ]]; then
+                log "Port forwarding restored (was at $prev_pf_failures consecutive failures)"
+            fi
+            set_portfwd_failure_count 0
+        else
+            local pf_failures
+            pf_failures=$(get_portfwd_failure_count)
+            pf_failures=$((pf_failures + 1))
+            set_portfwd_failure_count "$pf_failures"
+
+            log "Port forwarding down ($pf_failures/$MAX_PORTFWD_FAILURES consecutive failures)"
+
+            if [[ "$pf_failures" -ge "$MAX_PORTFWD_FAILURES" ]]; then
+                log "Port forwarding stuck - force-recreating to get new port assignment"
+                send_notification \
+                    "Gluetun watchdog: port forwarding lost" \
+                    "Port forwarding has been down for $pf_failures checks on $(hostname). Restarting Gluetun to get a new port." \
+                    "warning"
+                restart_gluetun
+                set_portfwd_failure_count 0
+            fi
+        fi
         return 0
     fi
 
-    # Unhealthy - increment failure counter
+    # Unhealthy - increment failure counter, reset port fwd counter
     local failures
     failures=$(get_failure_count)
     failures=$((failures + 1))
     set_failure_count "$failures"
+    set_portfwd_failure_count 0
 
     log "VPN unhealthy ($failures/$MAX_FAILURES consecutive failures)"
 
