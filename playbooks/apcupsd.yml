@@ -2,8 +2,8 @@
 # apcupsd Playbook - UPS Monitoring (Master/Slave)
 # =============================================================================
 # Configures apcupsd for UPS power monitoring:
-#   - Master: USB-connected UPS (pve-m70q)
-#   - Slaves: Network clients that monitor master (ts440, pve-alto, pve-herc)
+#   - Master: USB-connected UPS (ts440)
+#   - Slaves: Network clients that monitor master (pve-m70q, pve-alto, pve-herc)
 #
 # VMs don't need apcupsd - the Proxmox host handles VM shutdown.
 #

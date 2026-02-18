@@ -1,0 +1,90 @@
+# =============================================================================
+# e1000e NIC Tuning - Mitigate Hardware TX Hangs on Intel I217/I218/I219
+# =============================================================================
+# Intel e1000e NICs (common onboard NICs on Intel-chipset boards) are prone to
+# "Detected Hardware Unit Hang" errors caused by:
+#   - EEE (Energy Efficient Ethernet): Low-power link negotiation stalls TX ring
+#   - TSO (TCP Segmentation Offload): Large segment offloads can wedge TX descriptors
+#
+# When the driver detects a hang, it resets the NIC, which unregisters it from
+# the kernel and re-registers it. On Proxmox, this detaches the NIC from its
+# bridge (vmbr0), dropping all network connectivity until the watchdog reattaches.
+#
+# This playbook deploys a udev rule to disable EEE and TSO on any e1000e NIC,
+# including after driver resets. It also cleans up the broken modprobe EEE=0
+# parameter (removed from newer kernel versions of e1000e).
+#
+# Usage: ansible-playbook playbooks/e1000e-tuning.yml
+# =============================================================================
+
+- name: Tune e1000e NICs to prevent hardware TX hangs
+  hosts: proxmox_nodes
+  become: true
+  gather_facts: false
+
+  tasks:
+    - name: Detect e1000e network interfaces
+      ansible.builtin.shell: |
+        for iface in /sys/class/net/*/device/driver; do
+          if [ "$(basename "$(readlink "$iface")")" = "e1000e" ]; then
+            echo "$(basename "$(dirname "$(dirname "$iface")")")"
+          fi
+        done
+      register: e1000e_interfaces
+      changed_when: false
+      check_mode: false
+
+    - name: Skip hosts without e1000e NICs
+      ansible.builtin.meta: end_host
+      when: e1000e_interfaces.stdout_lines | length == 0
+
+    - name: Deploy udev rule to disable EEE and TSO on e1000e NICs
+      ansible.builtin.copy:
+        content: |
+          # Managed by Ansible - do not edit manually
+          # Disable EEE (Energy Efficient Ethernet) and TSO (TCP Segmentation Offload)
+          # on Intel e1000e NICs to prevent "Detected Hardware Unit Hang" errors.
+          # EEE causes low-power link negotiation that stalls the TX descriptor ring.
+          # TSO large segment offloads can wedge TX descriptors on I217/I218/I219 NICs.
+          # This rule fires on NIC add (including after driver reset/reload).
+          ACTION=="add", SUBSYSTEM=="net", DRIVERS=="e1000e", RUN+="/usr/sbin/ethtool --set-eee $name eee off", RUN+="/usr/sbin/ethtool -K $name tso off gso off"
+        dest: /etc/udev/rules.d/99-e1000e-disable-eee-tso.rules
+        owner: root
+        group: root
+        mode: "0644"
+      notify: Reload udev rules
+
+    - name: Remove broken modprobe EEE=0 parameter (ignored by newer kernels)
+      ansible.builtin.file:
+        path: /etc/modprobe.d/e1000e-disable-eee.conf
+        state: absent
+
+    - name: Apply EEE and TSO fix to current interfaces
+      ansible.builtin.shell: |
+        ethtool --set-eee {{ item }} eee off 2>/dev/null
+        ethtool -K {{ item }} tso off gso off 2>/dev/null
+        echo "Disabled EEE and TSO on {{ item }}"
+      loop: "{{ e1000e_interfaces.stdout_lines }}"
+      register: ethtool_result
+      changed_when: true
+
+    - name: Show current EEE and offload status
+      ansible.builtin.shell: |
+        echo "=== EEE status ==="
+        ethtool --show-eee {{ item }} 2>/dev/null | head -2
+        echo "=== TSO/GSO status ==="
+        ethtool -k {{ item }} 2>/dev/null | grep -E 'tcp-segmentation-offload|generic-segmentation-offload'
+      loop: "{{ e1000e_interfaces.stdout_lines }}"
+      register: status_output
+      changed_when: false
+
+    - name: Display status
+      ansible.builtin.debug:
+        msg: "{{ item.stdout_lines }}"
+      loop: "{{ status_output.results }}"
+      loop_control:
+        label: "{{ item.item }}"
+
+  handlers:
+    - name: Reload udev rules
+      ansible.builtin.shell: udevadm control --reload-rules

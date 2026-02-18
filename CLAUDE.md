@@ -1,6 +1,6 @@
 # CLAUDE.md
 
-> **Last updated:** 2026-02-17
+> **Last updated:** 2026-02-18
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
@@ -316,6 +316,17 @@ Deployed via `playbooks/unattended-upgrades.yml` to all `debian_hosts` (includin
 **Variables** (in `group_vars/debian_hosts/packages.yml`):
 - `unattended_upgrades_enabled` (default: `true`) — per-host opt-out
 - `unattended_upgrades_blacklist` (default: `[]`) — overridden for Proxmox nodes
+
+### e1000e NIC Tuning
+
+Three of four Proxmox nodes (ts440, pve-m70q, pve-alto) have Intel e1000e NICs (I217/I218/I219) prone to "Detected Hardware Unit Hang" errors where the TX descriptor ring gets stuck. The driver resets the NIC, which unregisters it from the bridge — dropping all connectivity until the network watchdog reattaches it.
+
+**Mitigations** (`playbooks/e1000e-tuning.yml`):
+- **EEE (Energy Efficient Ethernet)**: Disabled via udev rule. Low-power link negotiation stalls the TX ring. The old `modprobe e1000e EEE=0` parameter was removed from newer kernels and silently ignored.
+- **TSO/GSO (TCP/Generic Segmentation Offload)**: Disabled via the same udev rule. Large segment offloads can wedge TX descriptors on these NICs.
+- **ASPM (Active State Power Management)**: Already disabled kernel-wide via `pcie_aspm=off` boot parameter on ts440.
+
+The udev rule (`/etc/udev/rules.d/99-e1000e-disable-eee-tso.rules`) fires on NIC add events, including after driver resets, so settings are re-applied automatically. pve-herc (Realtek r8169) is skipped.
 
 ### Network Recovery
 

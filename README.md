@@ -1,6 +1,6 @@
 # CC-Ansible
 
-> **Last updated:** 2026-02-17
+> **Last updated:** 2026-02-18
 
 Ansible automation for Johnny's homelab infrastructure (4 Proxmox nodes, 7 VMs/LXCs, Ansible controller LXC, gaming workstation, ThinkPad laptop, MacBook).
 
@@ -67,6 +67,7 @@ cc-ansible/
 │   ├── packages.yml            # Multi-platform package installation
 │   ├── msmtp.yml               # SMTP relay (iCloud) for system email
 │   ├── smartmontools.yml       # SMART disk monitoring (Apprise alerts)
+│   ├── e1000e-tuning.yml        # Intel e1000e NIC tuning (disable EEE/TSO)
 │   ├── apcupsd.yml             # UPS monitoring (Apprise alerts, master/slave)
 │   ├── bootstrap.yml           # Initial user/SSH setup (Debian + Arch)
 │   ├── ssh-hardening.yml       # SSH security configuration
@@ -271,6 +272,7 @@ Packages are merged from multiple sources (all applicable variables combined):
 | `packages.yml` | `managed_hosts` | Install baseline packages (multi-platform) |
 | `msmtp.yml` | `linux_hosts` | SMTP relay for system email (iCloud) |
 | `smartmontools.yml` | `linux_hosts` | SMART disk monitoring with Apprise push alerts |
+| `e1000e-tuning.yml` | `proxmox_nodes` | Disable EEE/TSO on Intel e1000e NICs to prevent hardware TX hangs |
 | `apcupsd.yml` | `proxmox_nodes` | UPS monitoring with Apprise push alerts (ts440 USB master, others slave). Staggers slave startup to avoid NIS mutex contention |
 | `bootstrap.yml` | `linux_hosts` | Create admin user, SSH keys, sudo setup (Debian + Arch) |
 | `ssh-hardening.yml` | `linux_hosts` | SSH security (key auth, disable password) |

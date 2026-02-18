@@ -22,6 +22,10 @@
   ansible.builtin.import_playbook: playbooks/smartmontools.yml
   tags: [smartmontools, smart, monitoring]
 
+- name: Tune e1000e NICs (disable EEE/TSO)
+  ansible.builtin.import_playbook: playbooks/e1000e-tuning.yml
+  tags: [e1000e, nic, network]
+
 - name: Configure apcupsd UPS monitoring
   ansible.builtin.import_playbook: playbooks/apcupsd.yml
   tags: [apcupsd, ups]
