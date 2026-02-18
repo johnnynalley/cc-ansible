@@ -1,0 +1,14 @@
+#!/bin/bash
+# Deployed by Ansible (ssh-hardening.yml) - do not edit manually
+# Shows available apt updates (reads from local cache, no network call)
+
+updates=$(apt list --upgradable 2>/dev/null | grep -c 'upgradable')
+if [ "$updates" -gt 0 ]; then
+    # Check for security updates
+    security=$(apt list --upgradable 2>/dev/null | grep -c '\-security')
+    if [ "$security" -gt 0 ]; then
+        printf "  %d update(s) available (%d security).\n" "$updates" "$security"
+    else
+        printf "  %d update(s) available.\n" "$updates"
+    fi
+fi

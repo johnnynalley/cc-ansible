@@ -63,6 +63,50 @@
         mode: "0644"
       tags: [ssh, motd]
 
+    # =========================================================================
+    # Custom MOTD scripts for Debian (non-Ubuntu) hosts
+    # =========================================================================
+    # Ubuntu has landscape-common + update-notifier-common for rich MOTD.
+    # Debian only ships 10-uname. These scripts provide similar system info.
+
+    - name: Deploy custom MOTD scripts (Debian non-Ubuntu)
+      ansible.builtin.template:
+        src: "{{ item.src }}"
+        dest: "/etc/update-motd.d/{{ item.dest }}"
+        owner: root
+        group: root
+        mode: "0755"
+      loop:
+        - { src: ../templates/motd-header.sh.j2, dest: "00-header" }
+        - { src: ../templates/motd-sysinfo.sh.j2, dest: "50-sysinfo" }
+        - { src: ../templates/motd-updates.sh.j2, dest: "90-updates" }
+        - { src: ../templates/motd-reboot-required.sh.j2, dest: "98-reboot-required" }
+      when:
+        - ansible_facts.os_family == "Debian"
+        - ansible_facts.distribution != "Ubuntu"
+      tags: [ssh, motd]
+
+    - name: Remove stock 10-uname (replaced by 00-header)
+      ansible.builtin.file:
+        path: /etc/update-motd.d/10-uname
+        state: absent
+      when:
+        - ansible_facts.os_family == "Debian"
+        - ansible_facts.distribution != "Ubuntu"
+      tags: [ssh, motd]
+
+    - name: Remove static /etc/motd boilerplate (Debian non-Ubuntu)
+      ansible.builtin.copy:
+        content: ""
+        dest: /etc/motd
+        owner: root
+        group: root
+        mode: "0644"
+      when:
+        - ansible_facts.os_family == "Debian"
+        - ansible_facts.distribution != "Ubuntu"
+      tags: [ssh, motd]
+
   handlers:
     - name: Reload SSH
       ansible.builtin.systemd:

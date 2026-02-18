@@ -1,0 +1,6 @@
+#!/bin/bash
+# Deployed by Ansible (ssh-hardening.yml) - do not edit manually
+
+if [ -f /var/run/reboot-required ]; then
+    printf "\n  *** System restart required ***\n"
+fi

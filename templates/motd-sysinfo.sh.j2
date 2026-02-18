@@ -1,0 +1,37 @@
+#!/bin/bash
+# Deployed by Ansible (ssh-hardening.yml) - do not edit manually
+# Mimics landscape-sysinfo output for Debian hosts
+
+uptime_str=$(uptime -p 2>/dev/null | sed 's/^up //')
+
+load=$(cut -d' ' -f1-3 /proc/loadavg)
+cores=$(nproc 2>/dev/null || echo 1)
+
+read -r mem_total mem_avail <<< "$(awk '/MemTotal/{t=$2} /MemAvailable/{a=$2} END{printf "%d %d", t, a}' /proc/meminfo)"
+mem_used=$((mem_total - mem_avail))
+mem_pct=$((mem_used * 100 / mem_total))
+
+disk_pct=$(df / 2>/dev/null | awk 'NR==2{print $5}')
+disk_size=$(df -h / 2>/dev/null | awk 'NR==2{print $2}')
+
+swap_info=$(free 2>/dev/null | awk '/Swap/{if($2>0) printf "%d%%", $3*100/$2; else print "0%"}')
+
+procs=$(ps -e --no-headers 2>/dev/null | wc -l)
+users=$(who 2>/dev/null | wc -l)
+
+printf "  %-18s %s (%s cores)\n" "System load:" "$load" "$cores"
+printf "  %-18s %s of %s\n" "Usage of /:" "$disk_pct" "$disk_size"
+printf "  %-18s %s\n" "Memory usage:" "${mem_pct}%"
+printf "  %-18s %s\n" "Swap usage:" "$swap_info"
+printf "  %-18s %s\n" "Processes:" "$procs"
+printf "  %-18s %s\n" "Users logged in:" "$users"
+printf "  %-18s %s\n" "Uptime:" "$uptime_str"
+
+# Show IPv4 addresses for all interfaces
+while IFS= read -r line; do
+    iface=$(echo "$line" | awk '{print $NF}')
+    addr=$(echo "$line" | awk '{print $2}' | cut -d/ -f1)
+    printf "  %-18s %s\n" "IPv4 ($iface):" "$addr"
+done < <(ip -4 addr show scope global 2>/dev/null | grep 'inet ')
+
+printf "\n"

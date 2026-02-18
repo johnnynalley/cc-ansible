@@ -1,0 +1,4 @@
+#!/bin/bash
+# Deployed by Ansible (ssh-hardening.yml) - do not edit manually
+. /etc/os-release 2>/dev/null
+printf "\n  Welcome to %s (%s %s)\n\n" "$(hostname)" "${PRETTY_NAME:-Linux}" "$(uname -r)"
