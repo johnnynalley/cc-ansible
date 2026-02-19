@@ -56,7 +56,7 @@
       loop_control:
         label: "{{ item.item.name }}"
       register: build_diff_result
-      changed_when: false
+      changed_when: "'(no image changes detected)' not in build_diff_result.stdout"
       when: build_result.results is defined
 
     - name: Show pending image updates (build stacks)
@@ -67,25 +67,32 @@
         label: "{{ item.item.item.name }}"
       when:
         - item is not skipped
-        - item.stdout_lines | default([]) | reject('equalto', '') | list | length > 0
-        - item.stdout_lines | reject('equalto', '') | list != ['(no image changes detected)']
+        - item.changed | default(false)
 
-    - name: Update containers (build stacks)
+    - name: Determine build stacks needing update
+      ansible.builtin.set_fact:
+        build_stacks_to_update: >-
+          {{ build_diff_result.results | default([])
+             | selectattr('changed', 'defined')
+             | selectattr('changed', 'equalto', true)
+             | map(attribute='item.item')
+             | list }}
+
+    - name: Update containers if images changed (build stacks)
       ansible.builtin.shell: |
-        cd "{{ item.item.path }}" && docker compose up -d 2>&1
-      loop: "{{ build_result.results | default([]) }}"
+        cd "{{ item.path }}" && docker compose up -d 2>&1
+      loop: "{{ build_stacks_to_update | default([]) }}"
       loop_control:
-        label: "{{ item.item.name }}"
+        label: "{{ item.name }}"
       register: up_build_result
       changed_when: "'Recreat' in up_build_result.stdout or 'Creat' in up_build_result.stdout or 'Start' in up_build_result.stdout"
-      when: build_result.results is defined
 
     - name: Show recreated containers (build stacks)
       ansible.builtin.debug:
         msg: "{{ item.stdout_lines }}"
       loop: "{{ up_build_result.results | default([]) }}"
       loop_control:
-        label: "{{ item.item.item.name }}"
+        label: "{{ item.item.name }}"
       when:
         - item is not skipped
         - item.changed | default(false)
