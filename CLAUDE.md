@@ -1,6 +1,6 @@
 # CLAUDE.md
 
-> **Last updated:** 2026-02-18
+> **Last updated:** 2026-02-19
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
@@ -171,7 +171,9 @@ TS440 is the primary NAS server (currently the sole `nas_server` group member). 
 
 **media-03 (USB-SATA)**: 2TB Hitachi HDD connected via USB-SATA adapter, formatted ext4 (not ZFS — USB disconnects would fault a ZFS pool). Powered by UPS via power strip. Mount managed in `group_vars/nas_server/mounts.yml` with `nofail` so ts440 boots even if the drive is disconnected.
 
-**Incomplete Downloads**: The Lacie SSD (`/srv/nas-01`) has a downloads directory **outside** the mergerfs branch tree, bind-mounted to `/srv/media-downloads` (defined in `host_vars/ts440/mounts.yml`). This abstracts the underlying drive — to move downloads to a different SSD, just update `mounts.yml`. Passed to media-vm via VirtioFS as `/srv/incomplete_downloads`.
+**mergerfs-balance**: Balances files across mergerfs branches by moving from the fullest to the emptiest. Default path excludes in `/etc/mergerfs-balance.conf` (deployed by `playbooks/mergerfs.yml` from `mergerfs_balance_exclude_paths` variable) protect irreplaceable data on mirrored nas_zfs (photos, archive, books) from being moved to single-drive pools. CLI `-E` flags are merged with config excludes.
+
+**Incomplete Downloads**: The Lacie SSD (`/srv/nas-01`) has a downloads directory **outside** the mergerfs branch tree, bind-mounted to `/srv/media-downloads` (defined in `group_vars/nas_server/mounts.yml`). This abstracts the underlying drive — to move downloads to a different SSD, just update `mounts.yml`. Passed to media-vm via VirtioFS as `/srv/incomplete_downloads`.
 
 **VirtioFS**: media-vm and nextcloud-vm access storage via VirtioFS (not NFS). Config in `host_vars/ts440/virtiofs.yml` (host side) and `host_vars/<vm>/virtiofs.yml` (guest side). All mounts use `cache=never` to prevent virtiofsd from consuming 5GB+ per mount on the host. Guest page cache still works, so streaming performance is unaffected.
 

@@ -1,6 +1,6 @@
 # CC-Ansible
 
-> **Last updated:** 2026-02-18
+> **Last updated:** 2026-02-19
 
 Ansible automation for Johnny's homelab infrastructure (4 Proxmox nodes, 7 VMs/LXCs, Ansible controller LXC, gaming workstation, ThinkPad laptop, MacBook).
 
@@ -113,6 +113,7 @@ cc-ansible/
 │   ├── apcupsd-event-notify.sh.j2  # apcupsd Apprise notification
 │   ├── smartd-notify.sh.j2     # smartd Apprise notification
 │   ├── mergerfs-media.mount.j2 # MergerFS systemd mount unit
+│   ├── mergerfs-balance.conf.j2 # mergerfs-balance default path excludes
 │   ├── avahi-timemachine.service.j2  # Time Machine mDNS advertisement
 │   ├── docker-stacks.service.j2  # Docker stacks systemd service
 │   ├── auto-updates-debian.sh.j2  # Debian auto-updates with notifications
@@ -285,7 +286,7 @@ Packages are merged from multiple sources (all applicable variables combined):
 | `wifi.yml` | `linux_hosts` | WiFi powersave disable, optional PCI FLR or module reload resume fix |
 | `restic.yml` | `backup_clients` | B2 offsite backup with systemd timer |
 | `local-restic.yml` | `backup_clients` | Hourly backups to ts440 ZFS |
-| `mergerfs.yml` | `nas_server` | MergerFS media pool mount + balance script |
+| `mergerfs.yml` | `nas_server` | MergerFS media pool mount + balance script + config excludes |
 | `zfs.yml` | `nas_server` | ZFS snapshots (sanoid), scrub, ARC tuning, property enforcement, ACLs |
 | `nfs.yml` | `nas_server` + clients | NFS server/client configuration |
 | `filesystem-mounts.yml` | `linux_hosts` | Local filesystem mounts (NTFS, exFAT) |
@@ -410,6 +411,26 @@ ansible ts440 -m shell -a "zfs list -t snapshot -o name,creation,used -s creatio
 # Restore from snapshot
 ls /srv/nas-zfs/.zfs/snapshot/
 cp /srv/nas-zfs/.zfs/snapshot/autosnap_2026-01-26_hourly/configs/file.txt /srv/nas-zfs/configs/
+```
+
+## mergerfs-balance
+
+Balances files across mergerfs branches by moving from fullest to emptiest. ZFS-aware (uses `zfs list` for accurate space reporting).
+
+- **Default excludes**: `/etc/mergerfs-balance.conf` protects irreplaceable data on nas_zfs (photos, archive, books) from moving to single-drive pools
+- **Config variable**: `mergerfs_balance_exclude_paths` in `group_vars/nas_server/mergerfs.yml`
+- **CLI excludes**: `-E` flags merge with config excludes (additive)
+- **VirtioFS caveat**: After balancing, media-vm needs a full stop/start (`qm stop`/`qm start`) to clear virtiofsd's stale directory cache
+
+```bash
+# Normal balance (5% target spread, config excludes auto-loaded)
+mergerfs-balance /srv/media -p 5
+
+# Dry run
+mergerfs-balance /srv/media -p 5 --dry-run
+
+# Additional CLI excludes on top of config
+mergerfs-balance /srv/media -p 5 -E "/srv/nas-zfs/media/music/*"
 ```
 
 ## Immich (Photo/Video Management)
