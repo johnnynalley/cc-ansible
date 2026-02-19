@@ -59,3 +59,12 @@
         owner: root
         group: root
         mode: "0755"
+
+    - name: Deploy mergerfs-balance config (default excludes)
+      ansible.builtin.template:
+        src: ../templates/mergerfs-balance.conf.j2
+        dest: /etc/mergerfs-balance.conf
+        owner: root
+        group: root
+        mode: "0644"
+      when: mergerfs_balance_exclude_paths is defined

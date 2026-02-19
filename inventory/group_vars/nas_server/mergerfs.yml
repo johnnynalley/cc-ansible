@@ -37,3 +37,11 @@ mergerfs_after_units:
   - srv-media\x2d01-media.mount
   - srv-media\x2d02-media.mount
   - srv-media\x2d03-media.mount
+
+# Default path excludes for mergerfs-balance
+# These paths should stay on nas_zfs (mirrored) and not be moved to single-drive pools
+# Deployed to /etc/mergerfs-balance.conf, loaded automatically by the script
+mergerfs_balance_exclude_paths:
+  - "/srv/nas-zfs/media/photos/*"
+  - "/srv/nas-zfs/media/archive/*"
+  - "/srv/nas-zfs/media/books/*"

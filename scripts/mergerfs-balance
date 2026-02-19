@@ -207,6 +207,20 @@ def print_cmd(args):
     print('  ' + ' '.join(shlex.quote(a) for a in args))
 
 
+def load_config_excludes(config_path='/etc/mergerfs-balance.conf'):
+    """Load default path excludes from config file (one pattern per line, # comments)."""
+    excludes = []
+    try:
+        with open(config_path) as f:
+            for line in f:
+                line = line.strip()
+                if line and not line.startswith('#'):
+                    excludes.append(line)
+    except FileNotFoundError:
+        pass
+    return excludes
+
+
 # ── Main ─────────────────────────────────────────────────────────────
 
 
@@ -261,7 +275,8 @@ def main():
     file_includes = ['*'] if not args.include else args.include
     file_excludes = args.exclude
     path_includes = ['*'] if not args.includepath else args.includepath
-    path_excludes = args.excludepath
+    config_excludes = load_config_excludes()
+    path_excludes = config_excludes + args.excludepath
     exclude_lt = human_to_bytes(args.excludelt)
     exclude_gt = human_to_bytes(args.excludegt)
     srcmounts = mergerfs_srcmounts(ctrlfile)
