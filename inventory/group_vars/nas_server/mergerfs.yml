@@ -13,6 +13,7 @@ mergerfs_branches:
   - /srv/nas-01/media
   - /srv/nas-02/media
   - /srv/nas-zfs/media
+  - /srv/media-01/media
   - /srv/media-02/media
   - /srv/media-03/media
 
@@ -33,5 +34,6 @@ mergerfs_after_units:
   - srv-nas\x2d01.mount
   - srv-nas\x2d02.mount
   - srv-nas\x2dzfs-media.mount
+  - srv-media\x2d01-media.mount
   - srv-media\x2d02-media.mount
   - srv-media\x2d03-media.mount

@@ -19,6 +19,7 @@ import os
 import shlex
 import subprocess
 import sys
+import time
 
 
 _libc = ctypes.CDLL("libc.so.6", use_errno=True)
@@ -78,7 +79,7 @@ def get_branch_fstype(path):
         return subprocess.check_output(
             ['findmnt', '-n', '-o', 'FSTYPE', '-T', path],
             stderr=subprocess.DEVNULL
-        ).decode().strip()
+        ).decode().strip().split('\n')[0]
     except subprocess.CalledProcessError:
         return 'unknown'
 
@@ -284,6 +285,8 @@ def main():
         sys.exit(0)
 
     move_count = 0
+    session_bytes = 0
+    session_start = time.time()
     try:
         while True:
             stats = branch_stats(srcmounts)
@@ -316,10 +319,16 @@ def main():
             move_count += 1
             from_pct = next(s[1] for s in stats if s[0] == fromdrive)
             to_pct = stats[-1][1]
-            print(f'[{move_count}] {relfilepath}')
+            try:
+                fsize = os.lstat(os.path.join(fromdrive, relfilepath)).st_size
+                size_str = human_size(fsize)
+            except OSError:
+                fsize = 0
+                size_str = '?'
+            print(f'[{move_count}] {relfilepath} ({size_str})')
             print(f'  {fromdrive} ({from_pct*100:.1f}% used) -> {todrive} ({to_pct*100:.1f}% used)')
 
-            cmd = ['rsync', '-avlHAXWE', '--relative', '--progress',
+            cmd = ['rsync', '-avlhHAXWE', '--relative', '--progress',
                    '--remove-source-files',
                    os.path.join(fromdrive, './', relfilepath),
                    todrive + '/']
@@ -335,15 +344,22 @@ def main():
             if rv:
                 print(f'rsync exited with code {rv}')
                 break
+            session_bytes += fsize
             print('\n-\n')
 
     except KeyboardInterrupt:
         print(f'\nStopped.')
 
     # Final status
+    elapsed = time.time() - session_start
     stats = branch_stats(srcmounts)
     spread = abs(stats[0][1] - stats[-1][1]) * 100
-    print(f'\n{move_count} file(s) moved. Spread: {spread:.1f}%')
+    print(f'\n{move_count} file(s) moved, {human_size(session_bytes)} total.')
+    if elapsed > 0 and session_bytes > 0:
+        rate = session_bytes / elapsed
+        mins = elapsed / 60
+        print(f'Elapsed: {mins:.1f} min, average: {human_size(rate)}/s')
+    print(f'Spread: {spread:.1f}%')
     print_status(stats)
 
 

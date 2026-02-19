@@ -165,7 +165,11 @@ TS440 is the primary NAS server (currently the sole `nas_server` group member). 
 
 **ZFS Pool**: 2x 8TB mirror at `/srv/nas-zfs` (~7.3TB usable). Keep under 80% capacity. ARC max set to 2GB (in `group_vars/nas_server/zfs.yml`). media-vm has 10GB RAM to accommodate 20+ containers including GPU-accelerated Immich ML.
 
-**MergerFS**: `/srv/media` aggregates multiple drives into a unified media pool. Branches and options defined in `group_vars/nas_server/mergerfs.yml`. Boot ordering uses `After=` directives only — `Requires=` and `RequiresMountsFor=` caused dependency failures with the mixed ZFS/fstab setup.
+**Media ZFS Pools**: Two 3TB single-drive pools (`media-01`, `media-02`) for plex/podcast overflow. Properties enforced by `playbooks/zfs.yml` (compression=lz4, atime=off, recordsize=1M, acltype=posixacl). Sanoid snapshots: daily:7, weekly:4, monthly:3.
+
+**MergerFS**: `/srv/media` aggregates 6 branches into a unified media pool: nas-01 (2TB SSD), nas-02 (2TB LUKS), nas_zfs, media-01 (3TB ZFS), media-02 (3TB ZFS), media-03 (2TB ext4 via USB-SATA). Branches and options defined in `group_vars/nas_server/mergerfs.yml`. Boot ordering uses `After=` directives only — `Requires=` and `RequiresMountsFor=` caused dependency failures with the mixed ZFS/fstab setup.
+
+**media-03 (USB-SATA)**: 2TB Hitachi HDD connected via USB-SATA adapter, formatted ext4 (not ZFS — USB disconnects would fault a ZFS pool). Powered by UPS via power strip. Mount managed in `group_vars/nas_server/mounts.yml` with `nofail` so ts440 boots even if the drive is disconnected.
 
 **Incomplete Downloads**: The Lacie SSD (`/srv/nas-01`) has a downloads directory **outside** the mergerfs branch tree, bind-mounted to `/srv/media-downloads` (defined in `host_vars/ts440/mounts.yml`). This abstracts the underlying drive — to move downloads to a different SSD, just update `mounts.yml`. Passed to media-vm via VirtioFS as `/srv/incomplete_downloads`.
 
@@ -298,7 +302,7 @@ Three-tier backup strategy:
 
 - **Offsite (Backblaze B2)**: Daily via `restic.yml` at 00:00 UTC +30m random delay. Retention: 7d/4w/6m. ts440 backs up `/srv/nas-zfs` excluding replaceable media.
 - **Local (ts440 ZFS)**: Hourly via `local-restic.yml`. Backs up `/opt` from VMs to `/srv/nas-zfs/backups/<hostname>/`. Retention: 24h/7d/4w/6m. Uses dedicated SSH key in `group_vars/backup_clients/vault.yml`.
-- **ZFS Snapshots (sanoid)**: Every 15 minutes via `zfs-snapshots.yml`. Policies defined in `group_vars/nas_server/zfs.yml`.
+- **ZFS Snapshots (sanoid)**: Every 15 minutes via `zfs.yml`. Policies defined in `group_vars/nas_server/zfs.yml`. Property enforcement (`zfs set`) runs automatically to fix drift.
 
 Enable local backups: set `local_restic_enabled: true` and `local_restic_backup_paths` in host_vars. Source env with `set -a` when accessing repos manually: `sudo bash -c 'set -a && source /etc/restic/local-backup.env && restic snapshots'`.
 
@@ -385,6 +389,8 @@ Home Assistant OS. Some devices chain: Device → Homebridge → Home Assistant 
 ### VirtioFS Ansible Management
 
 `playbooks/virtiofs.yml` manages VirtioFS on both sides: host-side config in `host_vars/<proxmox-node>/virtiofs.yml` (directory mappings + VM attachments), guest-side in `host_vars/<vm>/virtiofs.yml` (mount points + fstab entries). `virtiofs_directory_mappings` is the canonical list of available shares. **VM restart required** after adding VirtioFS config to host.
+
+**VirtioFS + MergerFS caveat**: virtiofsd caches directory state from when it starts. If mergerfs branches change (e.g., after `mergerfs-balance` moves files between drives), virtiofsd won't see the new layout. A guest reboot is NOT enough — the VM must be fully stopped and started from Proxmox (`qm stop`/`qm start`) to restart the virtiofsd process on the host side.
 
 ### Nextcloud External Storage
 

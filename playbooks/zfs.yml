@@ -1,11 +1,11 @@
 # =============================================================================
-# ZFS Snapshots Playbook - Sanoid Snapshot Automation
+# ZFS Playbook - Snapshots, Scrub, Tuning, Properties, ACLs
 # =============================================================================
-# Usage: ansible-playbook playbooks/zfs-snapshots.yml
-#        ansible-playbook playbooks/zfs-snapshots.yml --limit ts440
+# Usage: ansible-playbook playbooks/zfs.yml
+#        ansible-playbook playbooks/zfs.yml --tags zfs-properties
 # =============================================================================
 
-- name: Configure ZFS snapshot automation with sanoid
+- name: Configure ZFS (snapshots, scrub, tuning, properties, ACLs)
   hosts: nas_server
   become: true
   gather_facts: true

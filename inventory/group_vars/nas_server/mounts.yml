@@ -3,7 +3,8 @@
 # =============================================================================
 # Portable: drives and bind mounts travel with the NAS role.
 # If migrating to new hardware with the same drives, UUIDs stay the same.
-# ZFS drives (nas_zfs, media-02, media-03) are managed by ZFS, NOT listed here.
+# ZFS drives (nas_zfs, media-01, media-02) are managed by ZFS, NOT listed here.
+# media-03 is ext4 on USB-SATA — managed here (ZFS over USB risks pool faults on disconnect).
 
 filesystem_mounts:
   # --- Physical Drives ---
@@ -13,12 +14,24 @@ filesystem_mounts:
     src: "UUID=f356a268-d53b-41fa-95a7-3df47c1c22bc"
     fstype: ext4
     opts: "noatime,nofail,x-systemd.device-timeout=5s"
+    owner: johnny
+    group: smbusers
+    mode: "2775"
+
+  # 2TB Hitachi HDD via USB-SATA (ext4) - media overflow
+  - path: /srv/media-03
+    src: "/dev/disk/by-id/ata-Hitachi_HDS723020BLA642_MN1270F32VGU1D-part1"
+    fstype: ext4
+    opts: "noatime,nofail,x-systemd.device-timeout=5s"
 
   # LUKS-encrypted drive (ext4 on dm-crypt)
   - path: /srv/nas-02
     src: /dev/mapper/nas02_crypt
     fstype: ext4
     opts: "noatime,nofail"
+    owner: johnny
+    group: smbusers
+    mode: "2775"
 
   # --- Bind Mounts ---
 
@@ -33,6 +46,8 @@ filesystem_mounts:
     src: /srv/nas-zfs
     fstype: none
     opts: "rbind,nofail"
+    owner: johnny
+    group: johnny
 
   # NFS export: configs directory
   - path: /srv/exports/configs
@@ -45,15 +60,17 @@ filesystem_mounts:
     src: /srv/nas-zfs/configs/ansible
     fstype: none
     opts: "bind,nofail"
+    owner: johnny
+    group: johnny
+    mode: "0775"
 
   # SABnzbd incomplete downloads (Lacie SSD fast storage)
+  # Source is on the Lacie SSD (/srv/nas-01) but OUTSIDE the mergerfs branch
+  # (/srv/nas-01/media/). This keeps download temp files safe from mergerfs-balance.
   - path: /srv/media-downloads
-    src: /srv/nas-01/media/plex/downloads/incomplete
+    src: /srv/nas-01/downloads/media-downloads
     fstype: none
-    opts: "bind,nofail"
-
-  # Incomplete downloads alias
-  - path: /srv/incomplete-downloads
-    src: /srv/media-downloads
-    fstype: none
-    opts: "bind,nofail"
+    opts: "bind,nofail,x-systemd.requires-mounts-for=/srv/nas-01"
+    owner: johnny
+    group: johnny
+    mode: "0775"

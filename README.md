@@ -78,7 +78,7 @@ cc-ansible/
 │   ├── restic.yml              # B2 offsite backup configuration
 │   ├── local-restic.yml        # Local backups to ts440 ZFS
 │   ├── mergerfs.yml            # MergerFS media pool + balance script (nas_server)
-│   ├── zfs-snapshots.yml       # ZFS snapshots, scrub, ARC tuning
+│   ├── zfs.yml                 # ZFS snapshots, scrub, ARC tuning, property enforcement
 │   ├── nfs.yml                 # NFS server/client setup
 │   ├── filesystem-mounts.yml   # Local NTFS/exFAT mounts
 │   ├── samba.yml               # Samba/Time Machine setup
@@ -286,7 +286,7 @@ Packages are merged from multiple sources (all applicable variables combined):
 | `restic.yml` | `backup_clients` | B2 offsite backup with systemd timer |
 | `local-restic.yml` | `backup_clients` | Hourly backups to ts440 ZFS |
 | `mergerfs.yml` | `nas_server` | MergerFS media pool mount + balance script |
-| `zfs-snapshots.yml` | `nas_server` | ZFS snapshots (sanoid), scrub, ARC tuning, ACLs |
+| `zfs.yml` | `nas_server` | ZFS snapshots (sanoid), scrub, ARC tuning, property enforcement, ACLs |
 | `nfs.yml` | `nas_server` + clients | NFS server/client configuration |
 | `filesystem-mounts.yml` | `linux_hosts` | Local filesystem mounts (NTFS, exFAT) |
 | `samba.yml` | `nas_server` | Samba + Time Machine configuration |
@@ -379,14 +379,16 @@ Gluetun's internal VPN restart doesn't clean up tun0 routes, causing crash loops
 
 Check status: `journalctl -t gluetun-watchdog -f`
 
-## ZFS Snapshots (Sanoid)
+## ZFS Configuration
 
-Automated ZFS snapshots on the NAS server via `zfs-snapshots.yml`:
+Managed by `zfs.yml` — snapshots, scrub, ARC tuning, property enforcement, ACLs:
 
-- **Timer**: Runs every 15 minutes
-- **Config**: `group_vars/nas_server/zfs.yml`
+- **Pools**: `nas_zfs` (2x8TB mirror), `media-01` (3TB), `media-02` (3TB)
+- **Snapshots**: Sanoid timer every 15 minutes
 - **Scrub**: Weekly (Sunday 2am) via systemd timer
 - **ARC**: 2GB max (`/etc/modprobe.d/zfs.conf`)
+- **Properties**: Automatically enforced via `zfs set` (compression, acltype, recordsize, atime)
+- **Config**: `group_vars/nas_server/zfs.yml`
 
 ### Retention Policies
 

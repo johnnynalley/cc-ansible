@@ -1,7 +1,7 @@
 # =============================================================================
 # ZFS Scrub + ARC Tuning Tasks
 # =============================================================================
-# Imported by playbooks/zfs-snapshots.yml
+# Imported by playbooks/zfs.yml
 # Expects variables: zfs_pools, zfs_scrub_schedule, zfs_arc_max_bytes
 
 - name: Skip ZFS scrub if not configured
@@ -27,7 +27,7 @@
     group: root
     mode: "0644"
     content: |
-      # Managed by Ansible - playbooks/zfs-snapshots.yml
+      # Managed by Ansible - playbooks/zfs.yml
       [Unit]
       Description=Weekly ZFS scrub
 
@@ -48,7 +48,7 @@
     group: root
     mode: "0644"
     content: |
-      # Managed by Ansible - playbooks/zfs-snapshots.yml
+      # Managed by Ansible - playbooks/zfs.yml
       [Unit]
       Description=ZFS pool scrub
 
@@ -75,37 +75,33 @@
     group: root
     mode: "0644"
     content: |
-      # Managed by Ansible - playbooks/zfs-snapshots.yml
+      # Managed by Ansible - playbooks/zfs.yml
       # ZFS ARC max size (takes effect on reboot)
       options zfs zfs_arc_max={{ zfs_arc_max_bytes }}
   when: zfs_arc_max_bytes is defined
   tags: [zfs-scrub, zfs-tuning]
 
-# --- ZFS Dataset Property Validation ---
+# --- ZFS Dataset Property Enforcement ---
 
-- name: Validate ZFS dataset properties
+- name: Enforce ZFS dataset properties
   ansible.builtin.shell: |
-    zfs get -H -o value {{ item.1.key }} {{ item.0.key }} 2>/dev/null
-  register: zfs_prop_checks
-  changed_when: false
-  failed_when: false
-  loop: "{{ zfs_dataset_properties | dict2items | subelements('value') }}"
+    changed=0
+    {% for prop, val in item.value.items() %}
+    current=$(zfs get -H -o value {{ prop }} {{ item.key }} 2>/dev/null)
+    if [ "$current" != "{{ val }}" ]; then
+      zfs set {{ prop }}={{ val }} {{ item.key }}
+      changed=1
+    fi
+    {% endfor %}
+    [ "$changed" = "1" ] && echo "CHANGED" || true
+  register: zfs_enforce_result
+  changed_when: "'CHANGED' in zfs_enforce_result.stdout"
+  failed_when: zfs_enforce_result.rc != 0
+  loop: "{{ zfs_dataset_properties | dict2items }}"
   loop_control:
-    label: "{{ item.0.key }}.{{ item.1.key }}"
+    label: "{{ item.key }}"
   when: zfs_dataset_properties is defined
-  tags: [zfs-validate, never]
-
-- name: Report ZFS property drift
-  ansible.builtin.debug:
-    msg: "DRIFT: {{ item.item.0.key }} {{ item.item.1.key }} is '{{ item.stdout }}' (expected '{{ item.item.1.value }}')"
-  loop: "{{ zfs_prop_checks.results | default([]) }}"
-  loop_control:
-    label: "{{ item.item.0.key }}.{{ item.item.1.key }}"
-  when:
-    - zfs_prop_checks is defined
-    - item.stdout is defined
-    - item.stdout != item.item.1.value | string
-  tags: [zfs-validate, never]
+  tags: [zfs-properties]
 
 # --- ZFS ACLs ---
 

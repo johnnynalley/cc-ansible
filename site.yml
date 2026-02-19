@@ -78,8 +78,8 @@
   ansible.builtin.import_playbook: playbooks/mergerfs.yml
   tags: [mergerfs, storage]
 
-- name: Configure ZFS snapshots (sanoid)
-  ansible.builtin.import_playbook: playbooks/zfs-snapshots.yml
+- name: Configure ZFS (snapshots, scrub, tuning, properties, ACLs)
+  ansible.builtin.import_playbook: playbooks/zfs.yml
   tags: [zfs, snapshots, sanoid]
 
 - name: Configure VirtioFS shares

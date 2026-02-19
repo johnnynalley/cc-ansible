@@ -85,6 +85,18 @@ sanoid_datasets:
     use_template: production
     recursive: "no"
 
+  # Media drive 01 - 3TB single drive (replaceable content)
+  media-01:
+    use_template: media
+    recursive: "yes"
+    process_children_only: "no"
+
+  # Media drive 02 - 3TB single drive (replaceable content)
+  media-02:
+    use_template: media
+    recursive: "yes"
+    process_children_only: "no"
+
 # =============================================================================
 # ZFS Scrub Schedule
 # =============================================================================
@@ -92,6 +104,8 @@ sanoid_datasets:
 # Pools to scrub (all pools on the NAS)
 zfs_pools:
   - nas_zfs
+  - media-01
+  - media-02
 
 # Scrub schedule (systemd OnCalendar format)
 zfs_scrub_schedule: "Sun *-*-* 02:00:00"
@@ -108,7 +122,7 @@ zfs_arc_max_bytes: 2147483648
 # ZFS Dataset Properties (documentation + validation)
 # =============================================================================
 # These properties define how each dataset should be configured.
-# Used by the validation task to detect drift - does NOT auto-fix.
+# Enforced by playbooks/zfs.yml - automatically fixes drift via zfs set.
 # On a new NAS, use these values when creating datasets:
 #   zfs create -o compression=lz4 -o acltype=posixacl nas_zfs
 
@@ -137,6 +151,16 @@ zfs_dataset_properties:
   nas_zfs/media/plex:
     recordsize: 1M
     atime: "off"
+  media-01:
+    compression: lz4
+    atime: "off"
+    recordsize: 1M
+    acltype: posixacl
+  media-02:
+    compression: lz4
+    atime: "off"
+    recordsize: 1M
+    acltype: posixacl
   nas_zfs/nextcloud:
     recordsize: 128K
     compression: zstd
