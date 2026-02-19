@@ -126,6 +126,7 @@ cc-ansible/
 │   ├── proxmox-node-firewall.fw.j2       # Node-level firewall rules
 │   └── proxmox-vm-firewall.fw.j2         # VM/CT firewall rules
 ├── scripts/
+│   ├── docker-stack-diff       # Per-service image change detection with version labels
 │   ├── mergerfs-balance        # ZFS-compatible mergerfs branch balancer
 │   └── storage-status          # Storage usage report (ZFS + mergerfs)
 └── bin/
@@ -152,6 +153,8 @@ workstations (jn-desktop, jn-t14s-lin, macbook-pro) ← no auto-recovery/reboots
 nas_server (ts440) ← portable NAS role group
 
 development (dev-vm) ← dev tooling (gh, shellcheck, yq)
+
+docker_hosts (docker-vm, media-vm, nextcloud-vm) ← Docker Compose stacks
 
 backup_clients
 ├── proxmox_nodes
@@ -287,7 +290,7 @@ Packages are merged from multiple sources (all applicable variables combined):
 | `nfs.yml` | `nas_server` + clients | NFS server/client configuration |
 | `filesystem-mounts.yml` | `linux_hosts` | Local filesystem mounts (NTFS, exFAT) |
 | `samba.yml` | `nas_server` | Samba + Time Machine configuration |
-| `docker-stacks.yml` | docker-vm, media-vm, nextcloud-vm | Deploy Docker Compose stacks (only restarts if images changed) |
+| `docker-stacks.yml` | `docker_hosts` | Deploy Docker Compose stacks (per-service update reporting with version diffs) |
 | `gluetun-watchdog.yml` | media-vm | Gluetun VPN crash loop detection, port forwarding monitoring, and auto-restart |
 | `virtiofs.yml` | `proxmox_nodes`, `vms` | Configure VirtioFS shares between Proxmox hosts and VMs |
 | `rclone-sync.yml` | `managed_hosts` | rclone sync from OneDrive to Nextcloud (macbook-pro via launchd, pi5-01 via systemd) |

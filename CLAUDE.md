@@ -130,6 +130,7 @@ Host groups form a hierarchy in `inventory/hosts.ini`:
   - Playbooks like `network-recovery.yml` explicitly exclude this group: `hosts: linux_hosts:!workstations`
 - `nas_server` → **portable NAS role group** (currently ts440). Storage services: NFS, Samba, ZFS, mergerfs, drive mounts. Migrate NAS to new hardware by changing membership in this group.
 - `development` → **cross-platform group** for dev tooling (gh, shellcheck, yq). Currently: dev-vm. ansible-lxc gets these via `packages_host_extra` in host_vars instead. Packages split by OS: `packages_debian_development_extra`, `packages_arch_development_extra`
+- `docker_hosts` → VMs running Docker Compose stacks (docker-vm, media-vm, nextcloud-vm)
 - `backup_clients` → separate group for restic backups (includes `proxmox_nodes`, `vms_lxcs`, `orchestrator`, `workstations`, `arch_hosts`)
 
 VMs and LXCs are split so VMs get `qemu-guest-agent` while LXCs don't need it.
@@ -285,7 +286,7 @@ Diun runs on all three Docker VMs (docker-vm, media-vm, nextcloud-vm) monitoring
 
 Caddy provides HTTPS for all internal services via Cloudflare DNS-01 challenge. Caddyfile at `/opt/caddy/Caddyfile`. docker-vm services are proxied by container name (`caddy-proxy` Docker network); media-vm services by Tailscale IP (`100.66.6.113`). All services require Tailscale to access.
 
-**Image Updates**: The playbook separates pull and update steps — it only runs `docker compose up -d` if images were actually updated (detected via "Pull complete" or "Downloaded newer" in pull output). This avoids unnecessary container restarts when images are already current. Pull has retry logic (3 attempts, 10s delay) to handle transient registry timeouts. Dangling images are pruned after each run.
+**Image Updates**: The playbook separates pull and update steps — it only runs `docker compose up -d` if images were actually updated (detected via "Pull complete" or "Downloaded newer" in pull output). This avoids unnecessary container restarts when images are already current. Pull has retry logic (3 attempts, 10s delay) to handle transient registry timeouts. Dangling images are pruned after each run. Between pull and update, `scripts/docker-stack-diff` runs to report per-service image changes with version labels (`org.opencontainers.image.version`) when available, falling back to truncated image digests. The `up -d` output is also displayed, showing which specific containers were recreated vs. left running.
 
 #### Cloudflare Tunnel (Public Access)
 

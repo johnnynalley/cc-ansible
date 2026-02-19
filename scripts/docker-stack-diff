@@ -1,0 +1,66 @@
+#!/usr/bin/env bash
+# =============================================================================
+# docker-stack-diff - Compare running container images against pulled images
+# =============================================================================
+# Runs AFTER 'docker compose pull' but BEFORE 'docker compose up -d'.
+# For each service, compares the running container's image ID against the
+# locally available image ID. Reports services where images differ, with
+# version labels when available (org.opencontainers.image.version).
+#
+# Usage: docker-stack-diff /path/to/compose/project
+# Exit code: 0 always (informational only)
+# =============================================================================
+
+set -uo pipefail
+
+COMPOSE_DIR="${1:?Usage: docker-stack-diff /path/to/compose/project}"
+cd "$COMPOSE_DIR" || exit 0
+
+updates=()
+
+for svc in $(docker compose config --services 2>/dev/null); do
+    # Get the container ID for this service (may not exist if never started)
+    cid=$(docker compose ps -q "$svc" 2>/dev/null | head -1)
+    [ -z "$cid" ] && continue
+
+    # Get the image name the container was created from
+    image_name=$(docker inspect --format '{{.Config.Image}}' "$cid" 2>/dev/null)
+    [ -z "$image_name" ] && continue
+
+    # Image ID the container is currently running
+    container_image_id=$(docker inspect --format '{{.Image}}' "$cid" 2>/dev/null)
+    # Image ID available locally (after pull)
+    current_image_id=$(docker image inspect --format '{{.Id}}' "$image_name" 2>/dev/null)
+
+    # Skip if either ID is missing or they match (no update)
+    [ -z "$current_image_id" ] && continue
+    [ "$container_image_id" = "$current_image_id" ] && continue
+
+    # Truncated hashes for display
+    old_hash=${container_image_id#sha256:}
+    old_hash=${old_hash:0:12}
+    new_hash=${current_image_id#sha256:}
+    new_hash=${new_hash:0:12}
+
+    # Try to get version labels (OCI standard - used by linuxserver, Immich, etc.)
+    old_version=$(docker inspect --format '{{index .Config.Labels "org.opencontainers.image.version"}}' "$cid" 2>/dev/null)
+    new_version=$(docker image inspect --format '{{index .Config.Labels "org.opencontainers.image.version"}}' "$image_name" 2>/dev/null)
+
+    # Clean up empty/missing labels (Go template returns "<no value>" for missing keys)
+    [[ "$old_version" == "<no value>" || -z "$old_version" ]] && old_version=""
+    [[ "$new_version" == "<no value>" || -z "$new_version" ]] && new_version=""
+
+    if [ -n "$old_version" ] && [ -n "$new_version" ] && [ "$old_version" != "$new_version" ]; then
+        updates+=("  ${svc}: ${old_version} -> ${new_version}  (${old_hash} -> ${new_hash})")
+    elif [ -n "$new_version" ]; then
+        updates+=("  ${svc}: ${new_version}  (${old_hash} -> ${new_hash})")
+    else
+        updates+=("  ${svc}: ${old_hash} -> ${new_hash}  (${image_name})")
+    fi
+done
+
+if [ ${#updates[@]} -eq 0 ]; then
+    echo "(no image changes detected)"
+else
+    printf '%s\n' "${updates[@]}"
+fi

@@ -1,21 +1,18 @@
 # =============================================================================
 # Docker Stacks Playbook - Deploy Docker Compose Services
 # =============================================================================
-# Deploys Docker Compose stacks defined in host_vars docker_stacks variable
+# Deploys Docker Compose stacks defined in host_vars docker_stacks variable.
+# Shows per-service image changes with version labels when available.
 # Usage: ansible-playbook playbooks/docker-stacks.yml
 #        ansible-playbook playbooks/docker-stacks.yml --limit docker-vm
 # =============================================================================
 
 - name: Deploy Docker Compose stacks
-  hosts: linux_hosts
+  hosts: docker_hosts
   become: true
   gather_facts: true
 
   tasks:
-    - name: Skip hosts without docker_stacks defined
-      ansible.builtin.meta: end_host
-      when: docker_stacks is not defined or docker_stacks | length == 0
-
     # Create Docker networks before starting stacks
     - name: Ensure Docker networks exist
       ansible.builtin.import_tasks: ../tasks/docker-network.yml
@@ -51,6 +48,28 @@
       until: build_result.rc == 0
       changed_when: false
 
+    - name: Detect per-service image changes (build stacks)
+      ansible.builtin.script: "{{ playbook_dir }}/../scripts/docker-stack-diff {{ item.item.path }}"
+      args:
+        executable: /bin/bash
+      loop: "{{ build_result.results | default([]) }}"
+      loop_control:
+        label: "{{ item.item.name }}"
+      register: build_diff_result
+      changed_when: false
+      when: build_result.results is defined
+
+    - name: Show pending image updates (build stacks)
+      ansible.builtin.debug:
+        msg: "{{ item.stdout_lines | reject('equalto', '') | list }}"
+      loop: "{{ build_diff_result.results | default([]) }}"
+      loop_control:
+        label: "{{ item.item.item.name }}"
+      when:
+        - item is not skipped
+        - item.stdout_lines | default([]) | reject('equalto', '') | list | length > 0
+        - item.stdout_lines | reject('equalto', '') | list != ['(no image changes detected)']
+
     - name: Update containers (build stacks)
       ansible.builtin.shell: |
         cd "{{ item.item.path }}" && docker compose up -d 2>&1
@@ -60,6 +79,16 @@
       register: up_build_result
       changed_when: "'Recreat' in up_build_result.stdout or 'Creat' in up_build_result.stdout or 'Start' in up_build_result.stdout"
       when: build_result.results is defined
+
+    - name: Show recreated containers (build stacks)
+      ansible.builtin.debug:
+        msg: "{{ item.stdout_lines }}"
+      loop: "{{ up_build_result.results | default([]) }}"
+      loop_control:
+        label: "{{ item.item.item.name }}"
+      when:
+        - item is not skipped
+        - item.changed | default(false)
 
     # -------------------------------------------------------------------------
     # Stacks with build: false - pull prebuilt images only
@@ -76,6 +105,30 @@
       until: pull_result.rc == 0
       changed_when: "'Pull complete' in pull_result.stdout or 'Downloaded newer' in pull_result.stdout"
 
+    - name: Detect per-service image changes (pull-only stacks)
+      ansible.builtin.script: "{{ playbook_dir }}/../scripts/docker-stack-diff {{ item.item.path }}"
+      args:
+        executable: /bin/bash
+      loop: "{{ pull_result.results | default([]) }}"
+      loop_control:
+        label: "{{ item.item.name }}"
+      register: pull_diff_result
+      changed_when: false
+      when:
+        - pull_result.results is defined
+        - item.changed
+
+    - name: Show pending image updates (pull-only stacks)
+      ansible.builtin.debug:
+        msg: "{{ item.stdout_lines | reject('equalto', '') | list }}"
+      loop: "{{ pull_diff_result.results | default([]) }}"
+      loop_control:
+        label: "{{ item.item.item.name }}"
+      when:
+        - item is not skipped
+        - item.stdout_lines | default([]) | reject('equalto', '') | list | length > 0
+        - item.stdout_lines | reject('equalto', '') | list != ['(no image changes detected)']
+
     - name: Update containers if images changed (pull-only stacks)
       ansible.builtin.shell: |
         cd "{{ item.item.path }}" && docker compose up -d 2>&1
@@ -87,6 +140,16 @@
       when:
         - pull_result.results is defined
         - item.changed or item.stdout is search('Pull complete') or item.stdout is search('Downloaded newer')
+
+    - name: Show recreated containers (pull-only stacks)
+      ansible.builtin.debug:
+        msg: "{{ item.stdout_lines }}"
+      loop: "{{ up_pull_result.results | default([]) }}"
+      loop_control:
+        label: "{{ item.item.item.name }}"
+      when:
+        - item is not skipped
+        - item.changed | default(false)
 
     # -------------------------------------------------------------------------
     # Ensure stacks are in desired state (start: true/false, default true)
