@@ -137,12 +137,10 @@ set_portfwd_failure_count() {
 }
 
 check_port_forwarding() {
-    # Query Gluetun's control API for the forwarded port
-    local response
-    response=$(docker exec "$CONTAINER_NAME" wget -qO- --timeout=5 http://127.0.0.1:8000/v1/portforward 2>/dev/null) || return 1
-
+    # Read Gluetun's internal port file (cleared when port forwarding fails).
+    # Avoids the control server API which requires authentication since Gluetun v3.40+.
     local port
-    port=$(echo "$response" | grep -o '"port":[0-9]*' | grep -o '[0-9]*')
+    port=$(docker exec "$CONTAINER_NAME" cat /tmp/gluetun/forwarded_port 2>/dev/null | tr -d '[:space:]')
 
     if [[ -z "$port" || "$port" -eq 0 ]]; then
         return 1
