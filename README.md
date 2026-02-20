@@ -379,7 +379,7 @@ Check status: `journalctl -t network-watchdog -f`
 
 ## Gluetun VPN Watchdog
 
-Gluetun's internal VPN restart doesn't clean up tun0 routes, causing crash loops (`RTNETLINK answers: File exists`). The watchdog (`gluetun-watchdog.yml`) runs every 60 seconds on media-vm, detects the loop via Docker healthcheck, and does a full `docker compose up -d --force-recreate` of Gluetun + qBittorrent after 3 consecutive failures. Force-recreate (not just restart) is required to destroy the network namespace and clear stale routes. Also monitors port forwarding via Gluetun's `/v1/portforward` API — if the forwarded port is `0` for 5 consecutive checks (~5 minutes), force-recreates to get a fresh port assignment. Sends silent Pushover notification on recovery or port forwarding loss (`push-quiet` tag). Rate-limited to 5 restarts/hour.
+Gluetun's internal VPN restart doesn't clean up tun0 routes, causing crash loops (`RTNETLINK answers: File exists`). The watchdog (`gluetun-watchdog.yml`) runs every 60 seconds on media-vm, detects the loop via Docker healthcheck, and does a full `docker compose up -d --force-recreate` of Gluetun + qBittorrent after 3 consecutive failures. Force-recreate (not just restart) is required to destroy the network namespace and clear stale routes. Also monitors port forwarding via Gluetun's internal port file — if the forwarded port is missing for 5 consecutive checks (~5 minutes), force-recreates to get a fresh port assignment. Sends silent Pushover notification on recovery or port forwarding loss (`push-quiet` tag). Rate-limited to 5 restarts/hour.
 
 Check status: `journalctl -t gluetun-watchdog -f`
 
