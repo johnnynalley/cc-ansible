@@ -1,0 +1,229 @@
+# =============================================================================
+# Proxmox Backup Server Playbook
+# =============================================================================
+# Installs and configures PBS inside pbs-lxc, then registers it as storage
+# on all Proxmox nodes with scheduled backup jobs.
+#
+# Usage: ansible-playbook playbooks/proxmox-backup-server.yml
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# Play 1: Install and configure PBS inside the LXC
+# -----------------------------------------------------------------------------
+- name: Install and configure Proxmox Backup Server
+  hosts: pbs-lxc
+  become: true
+  gather_facts: true
+
+  tasks:
+    # =========================================================================
+    # PBS Repository Setup
+    # =========================================================================
+    - name: Install prerequisites
+      ansible.builtin.apt:
+        name:
+          - ca-certificates
+          - curl
+          - gnupg
+        state: present
+        update_cache: true
+
+    - name: Ensure keyrings directory exists
+      ansible.builtin.file:
+        path: /usr/share/keyrings
+        state: directory
+        mode: "0755"
+
+    - name: Download Proxmox release key
+      ansible.builtin.shell: |
+        set -euo pipefail
+        url="https://enterprise.proxmox.com/debian/proxmox-release-bookworm.gpg"
+        dest="/usr/share/keyrings/proxmox-release-bookworm.gpg"
+        tmp="$(mktemp)"
+        curl -fsSL "$url" -o "$tmp"
+        if [ ! -f "$dest" ] || ! cmp -s "$tmp" "$dest"; then
+          install -m 0644 "$tmp" "$dest"
+          echo CHANGED
+        fi
+        rm -f "$tmp"
+      args:
+        executable: /bin/bash
+      register: pbs_key_dl
+      changed_when: "'CHANGED' in pbs_key_dl.stdout"
+
+    - name: Add PBS no-subscription repository
+      ansible.builtin.copy:
+        content: |
+          deb [signed-by=/usr/share/keyrings/proxmox-release-bookworm.gpg] http://download.proxmox.com/debian/pbs bookworm pbs-no-subscription
+        dest: /etc/apt/sources.list.d/pbs-no-subscription.list
+        mode: "0644"
+      register: pbs_repo_added
+
+    - name: Update apt cache after adding PBS repo
+      ansible.builtin.apt:
+        update_cache: true
+      when: pbs_key_dl.changed or pbs_repo_added.changed
+
+    # =========================================================================
+    # PBS Installation
+    # =========================================================================
+    - name: Install proxmox-backup-server
+      ansible.builtin.apt:
+        name: proxmox-backup-server
+        state: present
+
+    - name: Ensure proxmox-backup service is running
+      ansible.builtin.systemd:
+        name: proxmox-backup
+        enabled: true
+        state: started
+
+    # =========================================================================
+    # PBS Datastore
+    # =========================================================================
+    - name: Check if datastore already exists
+      ansible.builtin.command: proxmox-backup-manager datastore list --output-format json
+      register: pbs_datastores
+      changed_when: false
+
+    - name: Create PBS datastore
+      ansible.builtin.command: >
+        proxmox-backup-manager datastore create
+        {{ pbs_datastore_name }}
+        {{ pbs_datastore_path }}
+      when: pbs_datastore_name not in (pbs_datastores.stdout | from_json | map(attribute='name') | list)
+
+    - name: Set datastore retention policy
+      ansible.builtin.command: >
+        proxmox-backup-manager datastore update {{ pbs_datastore_name }}
+        --keep-daily {{ pbs_retention.keep_daily }}
+        --keep-weekly {{ pbs_retention.keep_weekly }}
+        --keep-monthly {{ pbs_retention.keep_monthly }}
+      changed_when: false
+
+    # =========================================================================
+    # PBS API User and Token (for PVE node authentication)
+    # =========================================================================
+    - name: Check if backup user exists
+      ansible.builtin.command: proxmox-backup-manager user list --output-format json
+      register: pbs_users
+      changed_when: false
+
+    - name: Create backup user
+      ansible.builtin.command: proxmox-backup-manager user create {{ pbs_api_user }}
+      when: pbs_api_user not in (pbs_users.stdout | from_json | map(attribute='userid') | list)
+
+    - name: Check if API token exists
+      ansible.builtin.shell: |
+        proxmox-backup-manager user generate-token {{ pbs_api_user }} {{ pbs_api_token_name }} 2>&1 || true
+      register: pbs_token_check
+      changed_when: false
+      failed_when: false
+
+    - name: Generate API token and save secret
+      ansible.builtin.shell: |
+        set -euo pipefail
+        # Generate token — output contains the secret
+        output=$(proxmox-backup-manager user generate-token {{ pbs_api_user }} {{ pbs_api_token_name }} 2>&1)
+        # Extract the secret value
+        secret=$(echo "$output" | grep -oP '(?<=value: ).*' || echo "$output" | tail -1)
+        echo "$secret" > /etc/proxmox-backup/api-token-secret
+        chmod 600 /etc/proxmox-backup/api-token-secret
+        echo "$secret"
+      args:
+        executable: /bin/bash
+        creates: /etc/proxmox-backup/api-token-secret
+      register: pbs_token_generated
+      no_log: false
+
+    - name: Read existing token secret
+      ansible.builtin.slurp:
+        src: /etc/proxmox-backup/api-token-secret
+      register: pbs_token_file
+
+    - name: Set token secret fact
+      ansible.builtin.set_fact:
+        pbs_token_secret: "{{ pbs_token_file.content | b64decode | trim }}"
+
+    # =========================================================================
+    # Set ACL permissions for the backup token
+    # =========================================================================
+    - name: Set datastore permissions for backup token
+      ansible.builtin.command: >
+        proxmox-backup-manager acl update /datastore/{{ pbs_datastore_name }}
+        DatastoreBackup
+        --auth-id {{ pbs_api_user }}!{{ pbs_api_token_name }}
+      changed_when: false
+
+    # =========================================================================
+    # Get PBS certificate fingerprint
+    # =========================================================================
+    - name: Get PBS certificate fingerprint
+      ansible.builtin.shell: |
+        proxmox-backup-manager cert info 2>/dev/null | grep -oP '(?<=Fingerprint \(sha256\): ).*'
+      args:
+        executable: /bin/bash
+      register: pbs_fingerprint_result
+      changed_when: false
+
+    - name: Set fingerprint fact
+      ansible.builtin.set_fact:
+        pbs_fingerprint: "{{ pbs_fingerprint_result.stdout | trim }}"
+
+    - name: Display PBS connection info
+      ansible.builtin.debug:
+        msg:
+          - "PBS Web UI: https://{{ ansible_host }}:8007"
+          - "Datastore: {{ pbs_datastore_name }}"
+          - "API Token: {{ pbs_api_user }}!{{ pbs_api_token_name }}"
+          - "Token Secret: {{ pbs_token_secret }}"
+          - "Fingerprint: {{ pbs_fingerprint }}"
+          - ""
+          - "Save the token secret to vault if you haven't already."
+
+
+# -----------------------------------------------------------------------------
+# Play 2: Register PBS as storage on all Proxmox nodes
+# -----------------------------------------------------------------------------
+- name: Register PBS storage on Proxmox nodes
+  hosts: proxmox_nodes
+  become: true
+  gather_facts: false
+
+  vars:
+    pbs_server: "{{ hostvars['pbs-lxc']['ansible_host'] }}"
+    pbs_storage_name: pbs-main
+    pbs_datastore_name: "{{ hostvars['pbs-lxc']['pbs_datastore_name'] }}"
+    pbs_api_user: "{{ hostvars['pbs-lxc']['pbs_api_user'] }}"
+    pbs_api_token_name: "{{ hostvars['pbs-lxc']['pbs_api_token_name'] }}"
+    pbs_token_secret: "{{ hostvars['pbs-lxc']['pbs_token_secret'] }}"
+    pbs_fingerprint: "{{ hostvars['pbs-lxc']['pbs_fingerprint'] }}"
+
+  tasks:
+    - name: Check if PBS storage already exists
+      ansible.builtin.shell: pvesm status 2>/dev/null | grep -q '^{{ pbs_storage_name }}\s'
+      register: pbs_storage_check
+      changed_when: false
+      failed_when: false
+
+    - name: Add PBS storage
+      ansible.builtin.command: >
+        pvesm add pbs {{ pbs_storage_name }}
+        --server {{ pbs_server }}
+        --port 8007
+        --datastore {{ pbs_datastore_name }}
+        --username {{ pbs_api_user }}!{{ pbs_api_token_name }}
+        --password {{ pbs_token_secret }}
+        --fingerprint {{ pbs_fingerprint }}
+        --content backup
+      when: pbs_storage_check.rc != 0
+      no_log: true
+
+    - name: Verify PBS storage is accessible
+      ansible.builtin.command: pvesm status
+      register: pbs_storage_status
+      changed_when: false
+
+    - name: Show storage status
+      ansible.builtin.debug:
+        msg: "{{ pbs_storage_status.stdout }}"

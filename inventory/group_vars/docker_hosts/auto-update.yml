@@ -1,0 +1,13 @@
+# =============================================================================
+# Docker Auto-Update Configuration
+# =============================================================================
+# Systemd timer that auto-pulls/builds and recreates containers marked with
+# auto_update: true or auto_update_services in host_vars docker_stacks.
+#
+# Override per-host in host_vars/<hostname>/vars.yml if needed.
+# =============================================================================
+
+docker_auto_update_enabled: true
+docker_auto_update_oncalendar: "*-*-* 00/6:30:00"   # 00:30, 06:30, 12:30, 18:30 CT
+docker_auto_update_randomized_delay: "30m"
+docker_auto_update_notify_tag: "push-quiet"

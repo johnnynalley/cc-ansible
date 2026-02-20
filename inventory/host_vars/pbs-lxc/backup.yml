@@ -1,0 +1,7 @@
+# =============================================================================
+# pbs-lxc - Backup Configuration
+# =============================================================================
+
+# Backup PBS config (datastore metadata, not the backup data itself)
+restic_backup_paths_extra:
+  - /etc/proxmox-backup

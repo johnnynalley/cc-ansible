@@ -1,6 +1,6 @@
 # CC-Ansible
 
-> **Last updated:** 2026-02-19
+> **Last updated:** 2026-02-20
 
 Ansible automation for Johnny's homelab infrastructure (4 Proxmox nodes, 7 VMs/LXCs, Ansible controller LXC, gaming workstation, ThinkPad laptop, MacBook).
 
@@ -84,6 +84,7 @@ cc-ansible/
 │   ├── samba.yml               # Samba/Time Machine setup
 │   ├── docker-stacks.yml       # Docker Compose stack deployment
 │   ├── gluetun-watchdog.yml    # Gluetun VPN crash loop watchdog
+│   ├── docker-auto-update.yml  # Auto-update selected Docker containers (timer)
 │   ├── virtiofs.yml            # VirtioFS shares (Proxmox → VMs)
 │   ├── rclone-sync.yml         # rclone OneDrive → Nextcloud sync (macbook-pro/pi5-01)
 │   ├── git-sync.yml            # Auto-pull from GitHub on ts440 (for Nextcloud)
@@ -122,6 +123,7 @@ cc-ansible/
 │   ├── unattended-upgrades-notify.sh.j2  # Post-upgrade Apprise notification
 │   ├── network-watchdog.sh.j2  # Network recovery watchdog with notifications
 │   ├── gluetun-watchdog.sh.j2  # Gluetun VPN crash loop watchdog
+│   ├── docker-auto-update.sh.j2  # Docker auto-update script
 │   ├── proxmox-virtiofs-directory.cfg.j2  # VirtioFS directory mappings
 │   ├── proxmox-cluster-firewall.fw.j2    # Datacenter firewall rules
 │   ├── proxmox-node-firewall.fw.j2       # Node-level firewall rules
@@ -293,6 +295,7 @@ Packages are merged from multiple sources (all applicable variables combined):
 | `samba.yml` | `nas_server` | Samba + Time Machine configuration |
 | `docker-stacks.yml` | `docker_hosts` | Deploy Docker Compose stacks (per-service update reporting with version diffs) |
 | `gluetun-watchdog.yml` | media-vm | Gluetun VPN crash loop detection, port forwarding monitoring, and auto-restart |
+| `docker-auto-update.yml` | `docker_hosts` | Auto-update selected containers every 6h (Caddy, Gluetun, Diun) |
 | `virtiofs.yml` | `proxmox_nodes`, `vms` | Configure VirtioFS shares between Proxmox hosts and VMs |
 | `rclone-sync.yml` | `managed_hosts` | rclone sync from OneDrive to Nextcloud (macbook-pro via launchd, pi5-01 via systemd) |
 | `git-sync.yml` | `nas_server` | Auto-pull from GitHub every 5 minutes (Nextcloud External Storage) |
@@ -379,6 +382,12 @@ Check status: `journalctl -t network-watchdog -f`
 Gluetun's internal VPN restart doesn't clean up tun0 routes, causing crash loops (`RTNETLINK answers: File exists`). The watchdog (`gluetun-watchdog.yml`) runs every 60 seconds on media-vm, detects the loop via Docker healthcheck, and does a full `docker compose up -d --force-recreate` of Gluetun + qBittorrent after 3 consecutive failures. Force-recreate (not just restart) is required to destroy the network namespace and clear stale routes. Also monitors port forwarding via Gluetun's `/v1/portforward` API — if the forwarded port is `0` for 5 consecutive checks (~5 minutes), force-recreates to get a fresh port assignment. Sends silent Pushover notification on recovery or port forwarding loss (`push-quiet` tag). Rate-limited to 5 restarts/hour.
 
 Check status: `journalctl -t gluetun-watchdog -f`
+
+## Docker Auto-Update
+
+Selected containers are auto-updated every 6 hours via systemd timer (`docker-auto-update.yml`). Opt-in per stack with `auto_update: true` or per service with `auto_update_services: [name]` in `host_vars/<hostname>/docker.yml`. Currently auto-updated: Caddy (docker-vm), Gluetun (media-vm), Diun (all 3 VMs). Pulls/builds new images, uses `docker-stack-diff` to detect changes, only recreates if images changed. Gluetun uses `--force-recreate` with qBittorrent. Sends silent Pushover notification (`push-quiet`). Config in `group_vars/docker_hosts/auto-update.yml`.
+
+Check status: `journalctl -u docker-auto-update`, `systemctl list-timers docker-auto-update*`
 
 ## ZFS Configuration
 
@@ -664,6 +673,7 @@ auto-updates (weekly) ─────────┼──→ Apprise API (docke
 unattended-upgrades (daily) ───┤                           → Pushover "Computer Corner" (silent/quiet)
 network-watchdog (recovery) ───┤                           → Email (iCloud SMTP)
 gluetun-watchdog (VPN) ────────┤                           → Pushover "cc-media-feed" (silent)
+docker-auto-update (6h) ───────┤
 Sonarr/Radarr (grabs) ─────────┤
 Jellyseerr (requests) ─────────┘
 

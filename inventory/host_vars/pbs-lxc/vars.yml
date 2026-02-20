@@ -1,0 +1,19 @@
+# =============================================================================
+# pbs-lxc - Host Variables
+# =============================================================================
+
+admin_user: johnny
+
+# PBS datastore configuration
+pbs_datastore_name: main
+pbs_datastore_path: /srv/pbs-data
+
+# PBS retention policy (GFS)
+pbs_retention:
+  keep_daily: 7
+  keep_weekly: 4
+  keep_monthly: 3
+
+# PBS API user for PVE node authentication
+pbs_api_user: backup@pbs
+pbs_api_token_name: ansible

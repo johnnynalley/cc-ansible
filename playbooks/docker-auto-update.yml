@@ -1,0 +1,100 @@
+# =============================================================================
+# Docker Auto-Update Playbook - Systemd timer for container auto-updates
+# =============================================================================
+# Deploys a script and timer that automatically pulls/builds and recreates
+# Docker containers marked with auto_update or auto_update_services in
+# host_vars docker_stacks variable.
+#
+# Usage: ansible-playbook playbooks/docker-auto-update.yml
+#        ansible-playbook playbooks/docker-auto-update.yml --limit docker-vm
+# =============================================================================
+
+- name: Configure Docker container auto-updates
+  hosts: docker_hosts
+  become: true
+  gather_facts: false
+
+  tasks:
+    # --- Disable path: stop timer if auto-update is disabled ---
+    - name: Stop and disable docker-auto-update timer (disabled hosts)
+      ansible.builtin.systemd:
+        name: docker-auto-update.timer
+        enabled: false
+        state: stopped
+        daemon_reload: true
+      when: not (docker_auto_update_enabled | default(true))
+      failed_when: false
+
+    - name: Skip hosts with docker_auto_update_enabled false
+      ansible.builtin.meta: end_host
+      when: not (docker_auto_update_enabled | default(true))
+
+    - name: Deploy docker-stack-diff utility
+      ansible.builtin.copy:
+        src: ../scripts/docker-stack-diff
+        dest: /usr/local/bin/docker-stack-diff
+        owner: root
+        group: root
+        mode: "0755"
+
+    - name: Create docker-auto-update script
+      ansible.builtin.template:
+        src: ../templates/docker-auto-update.sh.j2
+        dest: /usr/local/sbin/docker-auto-update
+        owner: root
+        group: root
+        mode: "0755"
+
+    - name: Create docker-auto-update.service
+      ansible.builtin.copy:
+        dest: /etc/systemd/system/docker-auto-update.service
+        owner: root
+        group: root
+        mode: "0644"
+        content: |
+          [Unit]
+          Description=Docker Container Auto-Update
+          After=docker.service network-online.target
+          Wants=network-online.target
+          Requires=docker.service
+
+          [Service]
+          Type=oneshot
+          ExecStart=/usr/local/sbin/docker-auto-update
+          StandardOutput=journal
+          StandardError=journal
+          TimeoutStartSec=600
+          Nice=10
+          IOSchedulingClass=idle
+      notify: Reload systemd
+
+    - name: Create docker-auto-update.timer
+      ansible.builtin.copy:
+        dest: /etc/systemd/system/docker-auto-update.timer
+        owner: root
+        group: root
+        mode: "0644"
+        content: |
+          [Unit]
+          Description=Run Docker container auto-updates on schedule
+
+          [Timer]
+          OnCalendar={{ docker_auto_update_oncalendar }}
+          RandomizedDelaySec={{ docker_auto_update_randomized_delay }}
+          Persistent=true
+
+          [Install]
+          WantedBy=timers.target
+      notify: Reload systemd
+
+    - name: Enable and start docker-auto-update timer
+      ansible.builtin.systemd:
+        name: docker-auto-update.timer
+        enabled: true
+        state: started
+        daemon_reload: true
+
+  handlers:
+    - name: Reload systemd
+      ansible.builtin.systemd:
+        daemon_reload: true

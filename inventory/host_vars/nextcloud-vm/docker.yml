@@ -11,3 +11,4 @@ docker_stacks:
   - name: diun
     path: /opt/diun
     build: false
+    auto_update: true

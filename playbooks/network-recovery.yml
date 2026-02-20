@@ -225,6 +225,15 @@
         daemon_reload: true
       when: network_watchdog_enabled | default(true)
 
+    - name: Stop and disable network-watchdog timer (disabled hosts)
+      ansible.builtin.systemd:
+        name: network-watchdog.timer
+        enabled: false
+        state: stopped
+        daemon_reload: true
+      when: not (network_watchdog_enabled | default(true))
+      failed_when: false
+
   handlers:
     - name: Reload systemd
       ansible.builtin.systemd:

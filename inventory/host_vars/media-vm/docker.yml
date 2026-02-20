@@ -11,6 +11,8 @@ docker_stacks:
   - name: media-stack
     path: /opt/media-stack
     build: false
+    auto_update_services:
+      - gluetun
   - name: portainer
     path: /opt/portainer
     build: false
@@ -20,3 +22,4 @@ docker_stacks:
   - name: diun
     path: /opt/diun
     build: false
+    auto_update: true

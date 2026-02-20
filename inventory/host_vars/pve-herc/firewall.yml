@@ -13,5 +13,12 @@ pve_node_firewall:
     - { action: ACCEPT, iface: tailscale0, proto: icmp, comment: "Ping (Tailscale)" }
     - { action: DROP, comment: "Default deny" }
 
-# No VMs/CTs currently on pve-herc
-pve_vm_firewalls: {}
+# VM/CT firewall rules
+pve_vm_firewalls:
+  # pbs-lxc (CT 105) - Proxmox Backup Server
+  105:
+    enable: true
+    policy_in: DROP
+    rules:
+      - { action: ACCEPT, proto: tcp, dport: 22, comment: "SSH" }
+      - { action: ACCEPT, proto: tcp, dport: 8007, comment: "PBS API/Web UI" }

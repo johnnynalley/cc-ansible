@@ -10,6 +10,7 @@ docker_stacks:
   - name: caddy
     path: /opt/caddy
     build: true
+    auto_update: true
   - name: vaultwarden
     path: /opt/vaultwarden
     build: false
@@ -37,3 +38,4 @@ docker_stacks:
   - name: diun
     path: /opt/diun
     build: false
+    auto_update: true

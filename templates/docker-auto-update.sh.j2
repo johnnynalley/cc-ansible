@@ -1,0 +1,178 @@
+#!/bin/bash
+# Docker container auto-update script
+# Managed by Ansible - do not edit manually
+#
+# Checks for image updates on stacks marked for auto-update in Ansible,
+# pulls/builds new images, and recreates containers only if images changed.
+#
+# Stacks managed by this script:
+{% for stack in docker_stacks %}
+{% if stack.auto_update | default(false) %}
+#   {{ stack.name }} ({{ stack.path }}) - full stack{% if stack.build | default(false) %} [build]{% endif %}
+
+{% elif stack.auto_update_services is defined and stack.auto_update_services | length > 0 %}
+#   {{ stack.name }} ({{ stack.path }}) - services: {{ stack.auto_update_services | join(', ') }}
+{% endif %}
+{% endfor %}
+
+set -uo pipefail
+
+LOG_TAG="docker-auto-update"
+STACK_DIFF="/usr/local/bin/docker-stack-diff"
+SUMMARY=""
+UPDATE_COUNT=0
+ERRORS=0
+
+log() { logger -t "$LOG_TAG" "$*"; echo "$*"; }
+
+send_notification() {
+    local title="$1"
+    local body="${2:-}"
+    local type="${3:-info}"
+    curl -sf -o /dev/null \
+      -X POST "{{ apprise_endpoint }}/notify/{{ apprise_token }}" \
+      --form-string "title=${title}" \
+      --form-string "body=${body}" \
+      --form-string "tag={{ docker_auto_update_notify_tag | default('push-quiet') }}" \
+      --form-string "type=${type}" \
+      --max-time 10 \
+      --retry 2 \
+      --retry-delay 3 2>/dev/null || true
+}
+
+pull_with_retry() {
+    local compose_dir="$1"
+    shift
+    local services="$*"
+    local attempt=0
+    local max_attempts=3
+    local delay=10
+
+    while [[ $attempt -lt $max_attempts ]]; do
+        attempt=$((attempt + 1))
+        # shellcheck disable=SC2086
+        if cd "$compose_dir" && docker compose pull $services 2>&1; then
+            return 0
+        fi
+        if [[ $attempt -lt $max_attempts ]]; then
+            log "Pull failed (attempt $attempt/$max_attempts), retrying in ${delay}s..."
+            sleep $delay
+        fi
+    done
+    log "ERROR: Pull failed after $max_attempts attempts"
+    return 1
+}
+
+build_with_retry() {
+    local compose_dir="$1"
+    local attempt=0
+    local max_attempts=3
+    local delay=10
+
+    while [[ $attempt -lt $max_attempts ]]; do
+        attempt=$((attempt + 1))
+        if cd "$compose_dir" && docker compose build --pull 2>&1; then
+            return 0
+        fi
+        if [[ $attempt -lt $max_attempts ]]; then
+            log "Build failed (attempt $attempt/$max_attempts), retrying in ${delay}s..."
+            sleep $delay
+        fi
+    done
+    log "ERROR: Build failed after $max_attempts attempts"
+    return 1
+}
+
+# =========================================================================
+# Process stacks
+# =========================================================================
+
+log "Starting Docker auto-update..."
+
+{% for stack in docker_stacks %}
+{% if stack.auto_update | default(false) %}
+# --- {{ stack.name }} (full stack{% if stack.build | default(false) %}, build{% endif %}) ---
+log "Checking {{ stack.name }}..."
+{% if stack.build | default(false) %}
+if build_with_retry "{{ stack.path }}"; then
+{% else %}
+if pull_with_retry "{{ stack.path }}"; then
+{% endif %}
+    diff_output=$("$STACK_DIFF" "{{ stack.path }}" 2>/dev/null || echo "(diff check failed)")
+    if [[ "$diff_output" != *"(no image changes detected)"* && "$diff_output" != *"(diff check failed)"* ]]; then
+        log "{{ stack.name }}: updates available, recreating..."
+        cd "{{ stack.path }}" && docker compose up -d 2>&1 | while read -r line; do
+            log "{{ stack.name }}: $line"
+        done
+        UPDATE_COUNT=$((UPDATE_COUNT + 1))
+        SUMMARY="${SUMMARY}{{ stack.name }}:\n${diff_output}\n\n"
+    else
+        log "{{ stack.name }}: up to date"
+    fi
+else
+    log "ERROR: {{ stack.name }} pull/build failed"
+    ERRORS=$((ERRORS + 1))
+fi
+
+{% elif stack.auto_update_services is defined and stack.auto_update_services | length > 0 %}
+# --- {{ stack.name }} (services: {{ stack.auto_update_services | join(', ') }}) ---
+log "Checking {{ stack.name }} ({{ stack.auto_update_services | join(', ') }})..."
+if pull_with_retry "{{ stack.path }}" "{{ stack.auto_update_services | join(' ') }}"; then
+    diff_output=$("$STACK_DIFF" "{{ stack.path }}" 2>/dev/null || echo "(diff check failed)")
+{% for svc in stack.auto_update_services %}
+    if echo "$diff_output" | grep -q "^  {{ svc }}:"; then
+        svc_diff=$(echo "$diff_output" | grep "^  {{ svc }}:")
+        log "{{ stack.name }}/{{ svc }}: update available ($svc_diff)"
+{% if svc == 'gluetun' %}
+        # Gluetun: force-recreate to clear network namespace (stale tun0 routes)
+        # Dependent containers share the namespace and must be recreated together
+        log "{{ stack.name }}/{{ svc }}: force-recreating with dependents..."
+        cd "{{ stack.path }}" && docker compose up -d --force-recreate {{ svc }} {{ gluetun_watchdog_dependent_containers | default('qbittorrent') }} 2>&1 | while read -r line; do
+            log "{{ stack.name }}: $line"
+        done
+{% else %}
+        cd "{{ stack.path }}" && docker compose up -d {{ svc }} 2>&1 | while read -r line; do
+            log "{{ stack.name }}: $line"
+        done
+{% endif %}
+        UPDATE_COUNT=$((UPDATE_COUNT + 1))
+        SUMMARY="${SUMMARY}{{ stack.name }}/{{ svc }}:\n${svc_diff}\n\n"
+    else
+        log "{{ stack.name }}/{{ svc }}: up to date"
+    fi
+{% endfor %}
+else
+    log "ERROR: {{ stack.name }} pull failed"
+    ERRORS=$((ERRORS + 1))
+fi
+
+{% endif %}
+{% endfor %}
+# =========================================================================
+# Cleanup and notification
+# =========================================================================
+
+# Prune dangling images
+PRUNE_OUTPUT=$(docker image prune -f 2>&1)
+PRUNE_RECLAIMED=$(echo "$PRUNE_OUTPUT" | grep -oP 'reclaimed \K.*' || echo "0B")
+if [[ "$PRUNE_RECLAIMED" != "0B" ]]; then
+    log "Pruned dangling images, reclaimed $PRUNE_RECLAIMED"
+fi
+
+# Send notification if anything was updated
+if [[ "$UPDATE_COUNT" -gt 0 ]]; then
+    BODY=$(echo -e "$SUMMARY" | head -20)
+    send_notification \
+        "[Auto-Update] $(hostname): $UPDATE_COUNT update(s)" \
+        "$BODY" \
+        "info"
+    log "Auto-update complete: $UPDATE_COUNT update(s) applied"
+elif [[ "$ERRORS" -gt 0 ]]; then
+    send_notification \
+        "[Auto-Update] $(hostname): $ERRORS error(s)" \
+        "Auto-update encountered errors. Check: journalctl -u docker-auto-update" \
+        "warning"
+    log "Auto-update complete with $ERRORS error(s)"
+else
+    log "Auto-update complete: all images up to date"
+fi

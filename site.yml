@@ -94,6 +94,10 @@
   ansible.builtin.import_playbook: playbooks/gluetun-watchdog.yml
   tags: [gluetun, watchdog, vpn]
 
+- name: Configure Docker container auto-updates
+  ansible.builtin.import_playbook: playbooks/docker-auto-update.yml
+  tags: [docker, auto-update]
+
 - name: Configure rclone sync jobs
   ansible.builtin.import_playbook: playbooks/rclone-sync.yml
   tags: [rclone, sync]
@@ -113,6 +117,10 @@
 - name: Configure Claude memory sync to NAS
   ansible.builtin.import_playbook: playbooks/claude-memory-sync.yml
   tags: [claude-memory, sync]
+
+- name: Configure Proxmox Backup Server
+  ansible.builtin.import_playbook: playbooks/proxmox-backup-server.yml
+  tags: [pbs, backup]
 
 - name: Configure Proxmox firewall
   ansible.builtin.import_playbook: playbooks/proxmox-firewall.yml

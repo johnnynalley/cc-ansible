@@ -1,6 +1,6 @@
 # CLAUDE.md
 
-> **Last updated:** 2026-02-19
+> **Last updated:** 2026-02-20
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
@@ -253,6 +253,34 @@ qBittorrent uses `network_mode: "service:gluetun"`, so all traffic goes through 
    - If API unreachable (Gluetun restart broke qBittorrent's network), restarts qBittorrent via docker compose
    - Updates listening port via API so qBittorrent saves it correctly
 
+#### Docker Auto-Update
+
+Systemd timer on each Docker VM that auto-pulls/builds and recreates selected containers every 6 hours. Deployed via `playbooks/docker-auto-update.yml`. Containers opt-in via flags in `host_vars/<hostname>/docker.yml`:
+
+```yaml
+docker_stacks:
+  - name: caddy
+    path: /opt/caddy
+    build: true
+    auto_update: true              # Entire stack auto-updates
+  - name: media-stack
+    path: /opt/media-stack
+    build: false
+    auto_update_services:          # Only specific services
+      - gluetun
+```
+
+**Currently auto-updated**: Caddy (docker-vm), Gluetun (media-vm), Diun (all 3 VMs). Change by editing `docker.yml` and re-running the playbook.
+
+**How it works**: The script (`/usr/local/sbin/docker-auto-update`) is templated by Ansible with the auto-update stack list baked in. For each stack, it pulls/builds, runs `docker-stack-diff` to detect changes, and only recreates if images actually changed. Gluetun uses `--force-recreate` with dependent containers (qBittorrent) to clear the network namespace. Sends `push-quiet` Apprise notification summarizing updates. Timer runs at :30 past 00/06/12/18 with 30m random delay.
+
+**Configuration** (in `group_vars/docker_hosts/auto-update.yml`):
+- `docker_auto_update_enabled` (default: `true`) — per-host opt-out
+- `docker_auto_update_oncalendar` (default: `*-*-* 00/6:30:00`) — timer schedule
+- `docker_auto_update_notify_tag` (default: `push-quiet`) — Apprise notification tag
+
+**Troubleshooting**: `journalctl -u docker-auto-update`, `systemctl list-timers docker-auto-update*`, manual trigger: `systemctl start docker-auto-update.service`.
+
 #### Gluetun VPN Watchdog
 
 Gluetun's internal VPN restart (`HEALTH_RESTART_VPN=on`) doesn't properly clean up tun0 routes, causing self-reinforcing crash loops where OpenVPN connects but traffic can't flow (`RTNETLINK answers: File exists`). The watchdog detects this and does a full `docker compose up -d --force-recreate` (not just `restart`) to destroy the container and its network namespace, clearing the stale routes. Dependent containers (qBittorrent) that share Gluetun's network namespace are recreated together.
@@ -274,6 +302,7 @@ auto-updates (weekly) ─────────┼──→ Apprise API ──
 unattended-upgrades (daily) ───┤   (docker-vm)  ───→ Pushover "Computer Corner" app (infrastructure, silent/quiet)
 network-watchdog (recovery) ───┤                ───→ Pushover "cc-media-feed" app (media, silent)
 gluetun-watchdog (VPN) ────────┤                ───→ Email (iCloud SMTP)
+docker-auto-update (6h) ───────┤
 Sonarr/Radarr (grabs) ─────────┤
 Jellyseerr (requests) ─────────┘
 
