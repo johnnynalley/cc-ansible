@@ -23,6 +23,15 @@
     # =========================================================================
     # Skip hosts with unattended_upgrades_enabled: false
     # =========================================================================
+    - name: Stop and disable apt-daily-upgrade timer (disabled hosts)
+      ansible.builtin.systemd:
+        name: apt-daily-upgrade.timer
+        enabled: false
+        state: stopped
+        daemon_reload: true
+      when: not (unattended_upgrades_enabled | default(true))
+      failed_when: false
+
     - name: End play for hosts with unattended-upgrades disabled
       ansible.builtin.meta: end_host
       when: not (unattended_upgrades_enabled | default(true))

@@ -20,6 +20,15 @@
     # =========================================================================
     # Skip hosts without local_restic_enabled
     # =========================================================================
+    - name: Stop and disable restic-local-backup timer (disabled hosts)
+      ansible.builtin.systemd:
+        name: restic-local-backup.timer
+        enabled: false
+        state: stopped
+        daemon_reload: true
+      when: not (local_restic_enabled | default(false))
+      failed_when: false
+
     - name: Check if local restic is enabled
       ansible.builtin.meta: end_host
       when: not (local_restic_enabled | default(false))

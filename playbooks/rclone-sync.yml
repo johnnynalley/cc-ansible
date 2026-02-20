@@ -26,6 +26,15 @@
     # =========================================================================
     # Feature toggle + OS gate
     # =========================================================================
+    - name: Stop and disable rclone-sync timer (disabled hosts)
+      ansible.builtin.systemd:
+        name: rclone-sync.timer
+        enabled: false
+        state: stopped
+        daemon_reload: true
+      when: not (rclone_sync_enabled | default(false)) or ansible_facts.os_family == "Darwin"
+      failed_when: false
+
     - name: Skip if rclone sync is not enabled or not Linux
       ansible.builtin.meta: end_host
       when: not (rclone_sync_enabled | default(false)) or ansible_facts.os_family == "Darwin"

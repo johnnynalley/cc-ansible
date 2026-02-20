@@ -13,6 +13,15 @@
     # =========================================================================
     # Skip hosts with auto_updates_enabled: false
     # =========================================================================
+    - name: Stop and disable auto-updates timer (disabled hosts)
+      ansible.builtin.systemd:
+        name: auto-updates.timer
+        enabled: false
+        state: stopped
+        daemon_reload: true
+      when: auto_updates_enabled is defined and not auto_updates_enabled
+      failed_when: false
+
     - name: End play for hosts with auto-updates disabled
       ansible.builtin.meta: end_host
       when: auto_updates_enabled is defined and not auto_updates_enabled
