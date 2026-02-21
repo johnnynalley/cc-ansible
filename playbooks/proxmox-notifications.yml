@@ -1,0 +1,129 @@
+# =============================================================================
+# Proxmox Notification Webhooks
+# =============================================================================
+# Configures PVE notification system to send alerts via Apprise webhook.
+# Routes warnings/errors to Pushover (Time Sensitive) and info to silent.
+# Cluster-wide config via pmxcfs — runs on one node only.
+#
+# Usage: ansible-playbook playbooks/proxmox-notifications.yml
+# =============================================================================
+
+- name: Configure Proxmox notification webhooks
+  hosts: proxmox_nodes
+  become: true
+  gather_facts: false
+  run_once: true
+
+  vars:
+    pve_webhook_url: "{{ apprise_endpoint }}/notify/{{ apprise_token }}"
+    # Body templates (base64-encoded for pvesh API):
+    # Alert: {"title":"Proxmox: {{escape title}}","body":"{{escape message}}","tag":"push","type":"warning"}
+    pve_webhook_body_alert: "eyJ0aXRsZSI6IlByb3htb3g6IHt7ZXNjYXBlIHRpdGxlfX0iLCJib2R5Ijoie3tlc2NhcGUgbWVzc2FnZX19IiwidGFnIjoicHVzaCIsInR5cGUiOiJ3YXJuaW5nIn0="
+    # Quiet: {"title":"Proxmox: {{escape title}}","body":"{{escape message}}","tag":"push-quiet","type":"info"}
+    pve_webhook_body_quiet: "eyJ0aXRsZSI6IlByb3htb3g6IHt7ZXNjYXBlIHRpdGxlfX0iLCJib2R5Ijoie3tlc2NhcGUgbWVzc2FnZX19IiwidGFnIjoicHVzaC1xdWlldCIsInR5cGUiOiJpbmZvIn0="
+    # Header: Content-Type: application/json (base64-encoded value)
+    pve_webhook_content_type: "name=Content-Type,value=YXBwbGljYXRpb24vanNvbg=="
+
+  tasks:
+    - name: Stop here if notifications not enabled
+      ansible.builtin.meta: end_host
+      when: not (pve_notifications_enabled | default(true))
+
+    # =========================================================================
+    # Webhook Targets
+    # =========================================================================
+    - name: List existing webhook targets
+      ansible.builtin.command: pvesh get /cluster/notifications/endpoints/webhook --output-format json
+      register: pve_webhooks
+      changed_when: false
+      failed_when: false
+
+    - name: Set webhook names fact
+      ansible.builtin.set_fact:
+        existing_webhook_names: >-
+          {{ [] if (pve_webhooks is skipped or pve_webhooks.rc | default(1) != 0)
+             else (pve_webhooks.stdout | from_json | map(attribute='name') | list) }}
+
+    - name: Create apprise-infra webhook target
+      ansible.builtin.command: >
+        pvesh create /cluster/notifications/endpoints/webhook
+        --name apprise-infra
+        --url "{{ pve_webhook_url }}"
+        --method post
+        --body "{{ pve_webhook_body_alert }}"
+        --header "{{ pve_webhook_content_type }}"
+      when: "'apprise-infra' not in existing_webhook_names"
+
+    - name: Create apprise-infra-quiet webhook target
+      ansible.builtin.command: >
+        pvesh create /cluster/notifications/endpoints/webhook
+        --name apprise-infra-quiet
+        --url "{{ pve_webhook_url }}"
+        --method post
+        --body "{{ pve_webhook_body_quiet }}"
+        --header "{{ pve_webhook_content_type }}"
+      when: "'apprise-infra-quiet' not in existing_webhook_names"
+
+    # =========================================================================
+    # Matchers
+    # =========================================================================
+    - name: List existing matchers
+      ansible.builtin.command: pvesh get /cluster/notifications/matchers --output-format json
+      register: pve_matchers
+      changed_when: false
+      failed_when: false
+
+    - name: Set matcher names fact
+      ansible.builtin.set_fact:
+        existing_matcher_names: >-
+          {{ [] if (pve_matchers is skipped or pve_matchers.rc | default(1) != 0)
+             else (pve_matchers.stdout | from_json | map(attribute='name') | list) }}
+
+    - name: Create pve-critical matcher
+      ansible.builtin.command: >
+        pvesh create /cluster/notifications/matchers
+        --name pve-critical
+        --match-severity warning,error
+        --target apprise-infra
+        --comment "Route warnings/errors to Pushover (Time Sensitive)"
+      when: "'pve-critical' not in existing_matcher_names"
+
+    - name: Create pve-info matcher
+      ansible.builtin.command: >
+        pvesh create /cluster/notifications/matchers
+        --name pve-info
+        --match-severity info
+        --target apprise-infra-quiet
+        --comment "Route info to Pushover (silent)"
+      when: "'pve-info' not in existing_matcher_names"
+
+    # =========================================================================
+    # Disable Default Matcher (mail-to-root has no relay configured)
+    # =========================================================================
+    - name: Disable default-matcher
+      ansible.builtin.command: >
+        pvesh set /cluster/notifications/matchers/default-matcher
+        --disable true
+      changed_when: false
+      failed_when: false
+
+    # =========================================================================
+    # Verify
+    # =========================================================================
+    - name: Show configured webhook targets
+      ansible.builtin.command: pvesh get /cluster/notifications/endpoints/webhook --output-format json-pretty
+      register: pve_final_webhooks
+      changed_when: false
+
+    - name: Display webhooks
+      ansible.builtin.debug:
+        msg: "{{ pve_final_webhooks.stdout }}"
+
+    - name: Show configured matchers
+      ansible.builtin.command: pvesh get /cluster/notifications/matchers --output-format json-pretty
+      register: pve_final_matchers
+      changed_when: false
+
+    - name: Display matchers
+      ansible.builtin.debug:
+        msg: "{{ pve_final_matchers.stdout }}"

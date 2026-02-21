@@ -122,6 +122,10 @@
   ansible.builtin.import_playbook: playbooks/proxmox-backup-server.yml
   tags: [pbs, backup]
 
+- name: Configure Proxmox notification webhooks
+  ansible.builtin.import_playbook: playbooks/proxmox-notifications.yml
+  tags: [proxmox, notifications]
+
 - name: Configure Proxmox firewall
   ansible.builtin.import_playbook: playbooks/proxmox-firewall.yml
   tags: [proxmox, firewall]

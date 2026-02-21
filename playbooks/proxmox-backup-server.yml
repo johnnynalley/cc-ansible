@@ -122,10 +122,20 @@
         proxmox-backup-manager prune-job create {{ pbs_datastore_name }}-prune
         --store {{ pbs_datastore_name }}
         --schedule daily
+        --keep-hourly {{ pbs_retention.keep_hourly | default(24) }}
         --keep-daily {{ pbs_retention.keep_daily }}
         --keep-weekly {{ pbs_retention.keep_weekly }}
         --keep-monthly {{ pbs_retention.keep_monthly }}
       when: (pbs_datastore_name ~ '-prune') not in (pbs_prune_jobs.stdout | from_json | map(attribute='id') | list)
+
+    - name: Update prune job retention
+      ansible.builtin.command: >
+        proxmox-backup-manager prune-job update {{ pbs_datastore_name }}-prune
+        --keep-hourly {{ pbs_retention.keep_hourly | default(24) }}
+        --keep-daily {{ pbs_retention.keep_daily }}
+        --keep-weekly {{ pbs_retention.keep_weekly }}
+        --keep-monthly {{ pbs_retention.keep_monthly }}
+      changed_when: false
 
     # =========================================================================
     # PBS API User and Token (for PVE node authentication)
@@ -258,3 +268,62 @@
     - name: Show storage status
       ansible.builtin.debug:
         msg: "{{ pbs_storage_status.stdout }}"
+
+
+# -----------------------------------------------------------------------------
+# Play 3: Configure vzdump backup jobs (cluster-wide)
+# -----------------------------------------------------------------------------
+- name: Configure vzdump backup jobs
+  hosts: proxmox_nodes
+  become: true
+  gather_facts: false
+  run_once: true
+
+  vars:
+    vzdump_notes_template: !unsafe "{{guestname}}"
+
+  tasks:
+    - name: List existing vzdump backup jobs
+      ansible.builtin.command: pvesh get /cluster/backup --output-format json
+      register: pve_backup_jobs
+      changed_when: false
+
+    - name: Set existing job comments fact
+      ansible.builtin.set_fact:
+        existing_job_comments: >-
+          {{ pve_backup_jobs.stdout | from_json | map(attribute='comment', default='') | list }}
+
+    - name: Create hourly backup job
+      ansible.builtin.command:
+        argv:
+          - pvesh
+          - create
+          - /cluster/backup
+          - --all
+          - "1"
+          - --exclude
+          - "{{ pbs_backup_exclude }}"
+          - --schedule
+          - "{{ pbs_backup_schedule }}"
+          - --storage
+          - pbs-main
+          - --mode
+          - snapshot
+          - --compress
+          - zstd
+          - --notification-mode
+          - notification-system
+          - --notes-template
+          - "{{ vzdump_notes_template }}"
+          - --comment
+          - "Ansible-managed: hourly backups to PBS"
+      when: "'Ansible-managed: hourly backups to PBS' not in existing_job_comments"
+
+    - name: List configured backup jobs
+      ansible.builtin.command: pvesh get /cluster/backup --output-format json-pretty
+      register: pve_final_jobs
+      changed_when: false
+
+    - name: Display backup jobs
+      ansible.builtin.debug:
+        msg: "{{ pve_final_jobs.stdout }}"

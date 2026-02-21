@@ -1,6 +1,6 @@
 # CLAUDE.md
 
-> **Last updated:** 2026-02-20
+> **Last updated:** 2026-02-21
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
@@ -295,7 +295,8 @@ Centralized notification system using Apprise API (on docker-vm at `/opt/notific
 
 **Architecture:**
 ```
-Diun (container updates) ──────┐
+PVE notifications (backup) ────┐
+Diun (container updates) ──────┤
 smartd (disk health) ──────────┤
 apcupsd (UPS power) ───────────┤
 auto-updates (weekly) ─────────┼──→ Apprise API ───→ Pushover "Computer Corner" app (infrastructure, Time Sensitive)
@@ -331,7 +332,7 @@ Cloudflare Tunnel (`cloudflared` on docker-vm) provides public access to Nextclo
 
 Four-tier backup strategy:
 
-- **Proxmox Backup Server (PBS)**: VM/CT backups via `proxmox-backup-server.yml`. pbs-lxc (CT 105 on pve-herc, Debian 13) with 2TB ext4 datastore at `/srv/pbs-data`. Registered as `pbs-main` storage on all 4 Proxmox nodes. API token auth (`backup@pbs!ansible`, secret in `host_vars/pbs-lxc/vault.yml`). Daily prune job: 7d/4w/3m. Web UI: `https://100.110.176.37:8007`. PBS tokens use privilege separation — both user AND token ACLs must be set (intersection model).
+- **Proxmox Backup Server (PBS)**: Hourly VM/CT snapshot backups via `proxmox-backup-server.yml`. pbs-lxc (CT 105 on pve-herc, Debian 13) with 2TB ext4 datastore at `/srv/pbs-data`. Registered as `pbs-main` storage on all 4 Proxmox nodes. All guests backed up hourly except pbs-lxc itself (circular); uses `--all --exclude 105`. API token auth (`backup@pbs!ansible`, secret in `host_vars/pbs-lxc/vault.yml`). Daily prune job: 24h/7d/4w/3m. Web UI: `https://100.110.176.37:8007`. PBS dedup makes hourly backups viable — only changed blocks are stored after the initial full backup.
 - **Offsite (Backblaze B2)**: Daily via `restic.yml` at 00:00 UTC +30m random delay. Retention: 7d/4w/6m. ts440 backs up `/srv/nas-zfs` excluding replaceable media.
 - **Local (ts440 ZFS)**: Hourly via `local-restic.yml`. Backs up `/opt` from VMs to `/srv/nas-zfs/backups/<hostname>/`. Retention: 24h/7d/4w/6m. Uses dedicated SSH key in `group_vars/backup_clients/vault.yml`.
 - **ZFS Snapshots (sanoid)**: Every 15 minutes via `zfs.yml`. Policies defined in `group_vars/nas_server/zfs.yml`. Property enforcement (`zfs set`) runs automatically to fix drift.
@@ -343,7 +344,24 @@ Enable local backups: set `local_restic_enabled: true` and `local_restic_backup_
 - PBS 4.x replaced per-datastore retention with prune jobs (`proxmox-backup-manager prune-job`)
 - The enterprise repo is auto-added on install and must be removed (no subscription)
 - Repo and GPG key use `ansible_distribution_release` for automatic Debian version detection
+- PBS tokens use privilege separation — both user AND token ACLs must be set (intersection model)
 - Config: `host_vars/pbs-lxc/vars.yml` (datastore name, retention, API user/token)
+- Vzdump job config: `group_vars/proxmox_nodes/vars.yml` (`pbs_backup_schedule`, `pbs_backup_exclude`)
+
+### Proxmox Notification Webhooks
+
+PVE's notification system routes alerts via webhook to Apprise → Pushover. Deployed by `playbooks/proxmox-notifications.yml`. Config is cluster-wide (pmxcfs) — playbook runs on one node with `run_once: true`.
+
+**Webhook targets** (two, for severity-based routing):
+- `apprise-infra` — warnings/errors → `push` tag (Time Sensitive)
+- `apprise-infra-quiet` — info → `push-quiet` tag (silent)
+
+**Matchers**:
+- `pve-critical` — routes warning/error severity to `apprise-infra`
+- `pve-info` — routes info severity to `apprise-infra-quiet`
+- `default-matcher` — disabled (built-in mail-to-root has no relay)
+
+**Event types**: vzdump (backup success/failure), replication, fencing, package-updates. Body templates use PVE Handlebars syntax (`{{escape title}}`, `{{escape message}}`) and are base64-encoded in the pvesh API. Opt-out: set `pve_notifications_enabled: false` in host_vars.
 
 ### rclone Sync (OneDrive to Nextcloud)
 

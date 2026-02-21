@@ -19,3 +19,7 @@ unattended_upgrades_blacklist:
   - "pve-firmware"
   - "qemu-server"
   - "libpve-*"
+
+# PBS backup job (hourly to pbs-main, all guests except pbs-lxc)
+pbs_backup_schedule: "*:00"
+pbs_backup_exclude: "105"
