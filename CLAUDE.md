@@ -316,7 +316,7 @@ Sonarr/Radarr ──→ Discord (native connection, rich embeds with poster art)
 
 **Apprise email URL gotcha**: When SMTP username contains `@`, use `?user=` query parameter format instead of URL path. Apprise's serialization loses `%40` encoding via API, causing auth failures.
 
-Diun runs on all three Docker VMs (docker-vm, media-vm, nextcloud-vm) monitoring containers for image updates. Config at `/opt/diun/diun.yml` on each. Sonarr/Radarr also send to Discord (native connection) for rich embeds with poster art.
+Diun runs on all three Docker VMs (docker-vm, media-vm, nextcloud-vm) monitoring containers for image updates. Config templated by Ansible (`templates/diun.yml.j2`) and deployed by `docker-auto-update.yml`. Schedule (`0 1/6 * * *` — 01:00, 07:00, 13:00, 19:00) is offset to run after the auto-update timer so already-updated containers don't trigger redundant alerts. Config vars in `group_vars/docker_hosts/diun.yml`. Sonarr/Radarr also send to Discord (native connection) for rich embeds with poster art.
 
 #### Reverse Proxy (Caddy on docker-vm)
 

@@ -1,0 +1,10 @@
+# =============================================================================
+# Diun (Docker Image Update Notifier) Configuration
+# =============================================================================
+# Monitors running containers for image updates and sends Apprise notifications.
+# Schedule is offset to run after docker-auto-update so already-updated
+# containers don't trigger redundant alerts.
+# =============================================================================
+
+diun_schedule: "0 1/6 * * *"  # 01:00, 07:00, 13:00, 19:00 CT (after auto-update)
+diun_notify_tag: "push"

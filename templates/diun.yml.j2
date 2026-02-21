@@ -1,0 +1,19 @@
+# Diun configuration - Managed by Ansible
+# Do not edit manually
+
+watch:
+  schedule: "{{ diun_schedule }}"
+  firstCheckNotif: false
+  jitter: 30s
+
+providers:
+  docker:
+    watchByDefault: true
+    watchStopped: false
+
+notif:
+  apprise:
+    endpoint: {{ apprise_endpoint }}
+    token: {{ apprise_token }}
+    tags:
+      - {{ diun_notify_tag }}

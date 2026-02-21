@@ -127,6 +127,7 @@ cc-ansible/
 │   ├── network-watchdog.sh.j2  # Network recovery watchdog with notifications
 │   ├── gluetun-watchdog.sh.j2  # Gluetun VPN crash loop watchdog
 │   ├── docker-auto-update.sh.j2  # Docker auto-update script
+│   ├── diun.yml.j2              # Diun config (schedule + notifications)
 │   ├── proxmox-virtiofs-directory.cfg.j2  # VirtioFS directory mappings
 │   ├── proxmox-cluster-firewall.fw.j2    # Datacenter firewall rules
 │   ├── proxmox-node-firewall.fw.j2       # Node-level firewall rules
@@ -688,7 +689,7 @@ Sonarr/Radarr ──→ Discord (native connection, rich embeds with poster art)
 - **Apprise API**: Notification router at `/opt/notifications/` on docker-vm. Config uses `pover://` URLs for Pushover
 - **Two Pushover apps**: "Computer Corner" (normal + quiet priority) and "cc-media-feed" (priority -2, silent/in-app only)
 - **Five Apprise tags**: `push` (infrastructure → Computer Corner app, Time Sensitive), `push-quiet` (automated recovery → Computer Corner app, silent), `email` (iCloud SMTP), `media-feed` (Sonarr/Radarr → cc-media-feed app), `media-requests` (Jellyseerr → cc-media-feed app)
-- **Diun**: Container image update notifier on all Docker VMs (`/opt/diun/`), sends with `push` tag
+- **Diun**: Container image update notifier on all Docker VMs. Config managed by Ansible (`docker-auto-update.yml`), schedule offset to run after auto-updates. Sends with `push` tag
 - **smartd/apcupsd**: Infrastructure alerts, send with `push` tag
 - **auto-updates**: Notifies before updates (package count), after completion, and before reboots
 - **unattended-upgrades**: Silent notification (`push-quiet`) when daily security patches are applied

@@ -3,7 +3,8 @@
 # =============================================================================
 # Deploys a script and timer that automatically pulls/builds and recreates
 # Docker containers marked with auto_update or auto_update_services in
-# host_vars docker_stacks variable.
+# host_vars docker_stacks variable. Also manages Diun config (schedule
+# offset to run after auto-updates).
 #
 # Usage: ansible-playbook playbooks/docker-auto-update.yml
 #        ansible-playbook playbooks/docker-auto-update.yml --limit docker-vm
@@ -94,7 +95,23 @@
         state: started
         daemon_reload: true
 
+    # -------------------------------------------------------------------------
+    # Diun config (schedule offset to run after auto-updates)
+    # -------------------------------------------------------------------------
+    - name: Deploy Diun config
+      ansible.builtin.template:
+        src: ../templates/diun.yml.j2
+        dest: /opt/diun/diun.yml
+        owner: root
+        group: root
+        mode: "0644"
+      notify: Restart Diun
+
   handlers:
+    - name: Restart Diun
+      community.docker.docker_compose_v2:
+        project_src: /opt/diun
+        state: restarted
     - name: Reload systemd
       ansible.builtin.systemd:
         daemon_reload: true
