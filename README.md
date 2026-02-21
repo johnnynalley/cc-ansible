@@ -2,7 +2,7 @@
 
 > **Last updated:** 2026-02-20
 
-Ansible automation for Johnny's homelab infrastructure (4 Proxmox nodes, 7 VMs/LXCs, Ansible controller LXC, gaming workstation, ThinkPad laptop, MacBook).
+Ansible automation for Johnny's homelab infrastructure (4 Proxmox nodes, 8 VMs/LXCs, Ansible controller LXC, gaming workstation, ThinkPad laptop, MacBook).
 
 **Repository**: https://github.com/johnnynalley/cc-ansible (public)
 
@@ -59,6 +59,7 @@ cc-ansible/
 │       ├── nextcloud-vm/       # Nextcloud AIO with VirtioFS storage
 │       ├── homebridge-lxc/
 │       ├── syncthing-lxc/
+│       ├── pbs-lxc/              # Proxmox Backup Server (CT 105, pve-herc)
 │       ├── pi5-01/
 │       ├── jn-desktop/         # CachyOS gaming workstation
 │       ├── jn-t14s-lin/       # ThinkPad T14s (Kubuntu)
@@ -91,6 +92,7 @@ cc-ansible/
 │   ├── nextcloud-scan.yml      # Periodic occ files:scan for external storage
 │   ├── claude-memory-sync.yml  # Sync Claude Code memory to NAS for Nextcloud
 │   ├── proxmox-firewall.yml    # Proxmox firewall rules (datacenter/node/VM)
+│   ├── proxmox-backup-server.yml # PBS install, datastore, API token, PVE registration
 │   └── swap.yml                # Swap configuration (zvol for ZFS, file for others)
 ├── tasks/
 │   ├── locale.yml              # Debian locale setup
@@ -145,7 +147,7 @@ managed_hosts
 │   │   ├── proxmox_nodes (ts440, pve-alto, pve-herc, pve-m70q)
 │   │   ├── vms_lxcs
 │   │   │   ├── vms (docker-vm, media-vm, nextcloud-vm, dev-vm) ← gets qemu-guest-agent
-│   │   │   └── lxcs (homebridge-lxc, syncthing-lxc)
+│   │   │   └── lxcs (homebridge-lxc, syncthing-lxc, pbs-lxc)
 │   │   ├── orchestrator (ansible-lxc, pi5-01)
 │   │   └── jn-t14s-lin ← ThinkPad T14s (Kubuntu)
 │   └── arch_hosts (jn-desktop) ← CachyOS gaming workstation
@@ -302,6 +304,7 @@ Packages are merged from multiple sources (all applicable variables combined):
 | `nextcloud-scan.yml` | nextcloud-vm | Periodic `occ files:scan` for external storage (every 10 min) |
 | `claude-memory-sync.yml` | `nas_server`, ansible-lxc | Rsync Claude Code memory to NAS for Nextcloud access (every 10 min) |
 | `proxmox-firewall.yml` | `proxmox_nodes` | Deploy Proxmox firewall rules (datacenter, node, VM/CT) |
+| `proxmox-backup-server.yml` | pbs-lxc, `proxmox_nodes` | Install PBS, configure datastore/prune/API token, register on all PVE nodes |
 
 ## NFS Configuration
 
@@ -704,6 +707,33 @@ curl -s https://apprise.jnalley.me/json/urls/notifications/?privacy=1
 # Edit targets: /opt/notifications/apprise-config/notifications.cfg on docker-vm
 # Then restart: cd /opt/notifications && docker compose restart apprise
 ```
+
+## Proxmox Backup Server (pbs-lxc)
+
+PBS runs in an unprivileged LXC (CT 105) on pve-herc with a dedicated 2TB ext4 drive.
+
+- **Web UI**: `https://100.110.176.37:8007` (login as `root@pam`)
+- **Datastore**: `main` at `/srv/pbs-data` (~1.8TB usable)
+- **Storage name**: `pbs-main` (registered on all 4 Proxmox nodes)
+- **Prune job**: Daily — 7 daily, 4 weekly, 3 monthly
+- **API auth**: Token `backup@pbs!ansible` (secret in vault)
+- **Config**: `host_vars/pbs-lxc/vars.yml`, `host_vars/pbs-lxc/vault.yml`
+
+```bash
+# Deploy/update PBS
+ansible-playbook playbooks/proxmox-backup-server.yml
+
+# Check datastore status
+ansible pbs-lxc -m shell -a "proxmox-backup-manager datastore list" --become
+
+# Check prune jobs
+ansible pbs-lxc -m shell -a "proxmox-backup-manager prune-job list" --become
+
+# Verify storage on PVE nodes
+ansible proxmox_nodes -m shell -a "pvesm status | grep pbs" --become
+```
+
+**Backup jobs** are configured in the Proxmox web UI (Datacenter → Backup) or via `pvesh` — not Ansible-managed. Schedule VM/CT backups to `pbs-main` storage from any node.
 
 ## Planned: WAN Failover
 

@@ -8,7 +8,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Ansible automation for a homelab infrastructure consisting of:
 - 4 Proxmox hypervisors (ts440, pve-alto, pve-herc, pve-m70q)
-- 7 VMs/LXC containers (docker-vm, media-vm, nextcloud-vm, dev-vm, ansible-lxc, homebridge-lxc, syncthing-lxc)
+- 8 VMs/LXC containers (docker-vm, media-vm, nextcloud-vm, dev-vm, ansible-lxc, homebridge-lxc, syncthing-lxc, pbs-lxc)
 - 1 Ansible controller LXC (ansible-lxc, CT 104 on pve-m70q) running Ansible locally
 - 1 Raspberry Pi 5 (pi5-01)
 - 1 CachyOS gaming workstation (jn-desktop)
@@ -329,13 +329,21 @@ Cloudflare Tunnel (`cloudflared` on docker-vm) provides public access to Nextclo
 
 ### Backup Architecture
 
-Three-tier backup strategy:
+Four-tier backup strategy:
 
+- **Proxmox Backup Server (PBS)**: VM/CT backups via `proxmox-backup-server.yml`. pbs-lxc (CT 105 on pve-herc, Debian 13) with 2TB ext4 datastore at `/srv/pbs-data`. Registered as `pbs-main` storage on all 4 Proxmox nodes. API token auth (`backup@pbs!ansible`, secret in `host_vars/pbs-lxc/vault.yml`). Daily prune job: 7d/4w/3m. Web UI: `https://100.110.176.37:8007`. PBS tokens use privilege separation — both user AND token ACLs must be set (intersection model).
 - **Offsite (Backblaze B2)**: Daily via `restic.yml` at 00:00 UTC +30m random delay. Retention: 7d/4w/6m. ts440 backs up `/srv/nas-zfs` excluding replaceable media.
 - **Local (ts440 ZFS)**: Hourly via `local-restic.yml`. Backs up `/opt` from VMs to `/srv/nas-zfs/backups/<hostname>/`. Retention: 24h/7d/4w/6m. Uses dedicated SSH key in `group_vars/backup_clients/vault.yml`.
 - **ZFS Snapshots (sanoid)**: Every 15 minutes via `zfs.yml`. Policies defined in `group_vars/nas_server/zfs.yml`. Property enforcement (`zfs set`) runs automatically to fix drift.
 
 Enable local backups: set `local_restic_enabled: true` and `local_restic_backup_paths` in host_vars. Source env with `set -a` when accessing repos manually: `sudo bash -c 'set -a && source /etc/restic/local-backup.env && restic snapshots'`.
+
+**PBS Notes**:
+- LXC is **unprivileged** — the host-side datastore directory must be owned by UID 100000 (`chown 100000:100000 /srv/pbs-data` on pve-herc)
+- PBS 4.x replaced per-datastore retention with prune jobs (`proxmox-backup-manager prune-job`)
+- The enterprise repo is auto-added on install and must be removed (no subscription)
+- Repo and GPG key use `ansible_distribution_release` for automatic Debian version detection
+- Config: `host_vars/pbs-lxc/vars.yml` (datastore name, retention, API user/token)
 
 ### rclone Sync (OneDrive to Nextcloud)
 

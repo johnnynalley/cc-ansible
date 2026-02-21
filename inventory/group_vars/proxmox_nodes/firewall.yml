@@ -40,7 +40,8 @@ pve_firewall_ipsets:
 
   pbs-lxc:
     comment: "Proxmox Backup Server LXC"
-    entries: []  # TODO: Add Tailscale IP after LXC creation
+    entries:
+      - { ip: "100.110.176.37", comment: "Tailscale IP" }
 
 # Security Groups (referenced as GROUP <name> in node rules)
 pve_firewall_groups:

@@ -19,6 +19,11 @@
     # =========================================================================
     # PBS Repository Setup
     # =========================================================================
+    - name: Remove PBS enterprise repo (requires subscription)
+      ansible.builtin.file:
+        path: /etc/apt/sources.list.d/pbs-enterprise.sources
+        state: absent
+
     - name: Install prerequisites
       ansible.builtin.apt:
         name:
@@ -37,8 +42,8 @@
     - name: Download Proxmox release key
       ansible.builtin.shell: |
         set -euo pipefail
-        url="https://enterprise.proxmox.com/debian/proxmox-release-bookworm.gpg"
-        dest="/usr/share/keyrings/proxmox-release-bookworm.gpg"
+        url="https://enterprise.proxmox.com/debian/proxmox-release-{{ ansible_distribution_release }}.gpg"
+        dest="/usr/share/keyrings/proxmox-release-{{ ansible_distribution_release }}.gpg"
         tmp="$(mktemp)"
         curl -fsSL "$url" -o "$tmp"
         if [ ! -f "$dest" ] || ! cmp -s "$tmp" "$dest"; then
@@ -54,7 +59,7 @@
     - name: Add PBS no-subscription repository
       ansible.builtin.copy:
         content: |
-          deb [signed-by=/usr/share/keyrings/proxmox-release-bookworm.gpg] http://download.proxmox.com/debian/pbs bookworm pbs-no-subscription
+          deb [signed-by=/usr/share/keyrings/proxmox-release-{{ ansible_distribution_release }}.gpg] http://download.proxmox.com/debian/pbs {{ ansible_distribution_release }} pbs-no-subscription
         dest: /etc/apt/sources.list.d/pbs-no-subscription.list
         mode: "0644"
       register: pbs_repo_added
@@ -81,6 +86,20 @@
     # =========================================================================
     # PBS Datastore
     # =========================================================================
+    - name: Check datastore path is writable
+      ansible.builtin.stat:
+        path: "{{ pbs_datastore_path }}"
+      register: pbs_path_stat
+
+    - name: Fail if datastore path is not writable
+      ansible.builtin.assert:
+        that:
+          - pbs_path_stat.stat.exists
+          - pbs_path_stat.stat.writeable
+        fail_msg: >-
+          {{ pbs_datastore_path }} is not writable. For unprivileged LXCs,
+          run on the Proxmox host: chown 100000:100000 {{ pbs_datastore_path }}
+
     - name: Check if datastore already exists
       ansible.builtin.command: proxmox-backup-manager datastore list --output-format json
       register: pbs_datastores
@@ -93,13 +112,20 @@
         {{ pbs_datastore_path }}
       when: pbs_datastore_name not in (pbs_datastores.stdout | from_json | map(attribute='name') | list)
 
-    - name: Set datastore retention policy
+    - name: Check if prune job exists
+      ansible.builtin.command: proxmox-backup-manager prune-job list --output-format json
+      register: pbs_prune_jobs
+      changed_when: false
+
+    - name: Create prune job with retention policy
       ansible.builtin.command: >
-        proxmox-backup-manager datastore update {{ pbs_datastore_name }}
+        proxmox-backup-manager prune-job create {{ pbs_datastore_name }}-prune
+        --store {{ pbs_datastore_name }}
+        --schedule daily
         --keep-daily {{ pbs_retention.keep_daily }}
         --keep-weekly {{ pbs_retention.keep_weekly }}
         --keep-monthly {{ pbs_retention.keep_monthly }}
-      changed_when: false
+      when: (pbs_datastore_name ~ '-prune') not in (pbs_prune_jobs.stdout | from_json | map(attribute='id') | list)
 
     # =========================================================================
     # PBS API User and Token (for PVE node authentication)
@@ -113,27 +139,23 @@
       ansible.builtin.command: proxmox-backup-manager user create {{ pbs_api_user }}
       when: pbs_api_user not in (pbs_users.stdout | from_json | map(attribute='userid') | list)
 
-    - name: Check if API token exists
-      ansible.builtin.shell: |
-        proxmox-backup-manager user generate-token {{ pbs_api_user }} {{ pbs_api_token_name }} 2>&1 || true
-      register: pbs_token_check
+    - name: Check if API token already exists
+      ansible.builtin.command: proxmox-backup-manager user list-tokens {{ pbs_api_user }} --output-format json
+      register: pbs_tokens
       changed_when: false
-      failed_when: false
 
     - name: Generate API token and save secret
       ansible.builtin.shell: |
         set -euo pipefail
-        # Generate token — output contains the secret
         output=$(proxmox-backup-manager user generate-token {{ pbs_api_user }} {{ pbs_api_token_name }} 2>&1)
-        # Extract the secret value
-        secret=$(echo "$output" | grep -oP '(?<=value: ).*' || echo "$output" | tail -1)
+        secret=$(echo "$output" | sed -n 's/.*"value": "\(.*\)"/\1/p')
         echo "$secret" > /etc/proxmox-backup/api-token-secret
         chmod 600 /etc/proxmox-backup/api-token-secret
         echo "$secret"
       args:
         executable: /bin/bash
-        creates: /etc/proxmox-backup/api-token-secret
       register: pbs_token_generated
+      when: pbs_api_token_name not in (pbs_tokens.stdout | from_json | map(attribute='token-name') | list)
       no_log: false
 
     - name: Read existing token secret
@@ -146,12 +168,21 @@
         pbs_token_secret: "{{ pbs_token_file.content | b64decode | trim }}"
 
     # =========================================================================
-    # Set ACL permissions for the backup token
+    # Set ACL permissions for backup user and token
     # =========================================================================
+    # PBS tokens use privilege separation: effective permissions are the
+    # intersection of user ACL and token ACL. Both must be set.
+    - name: Set datastore permissions for backup user
+      ansible.builtin.command: >
+        proxmox-backup-manager acl update /datastore/{{ pbs_datastore_name }}
+        DatastoreAdmin
+        --auth-id {{ pbs_api_user }}
+      changed_when: false
+
     - name: Set datastore permissions for backup token
       ansible.builtin.command: >
         proxmox-backup-manager acl update /datastore/{{ pbs_datastore_name }}
-        DatastoreBackup
+        DatastoreAdmin
         --auth-id {{ pbs_api_user }}!{{ pbs_api_token_name }}
       changed_when: false
 

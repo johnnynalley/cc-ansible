@@ -1,0 +1,10 @@
+# =============================================================================
+# pve-herc - Filesystem Mounts
+# =============================================================================
+
+filesystem_mounts:
+  # 2TB Hitachi HDD - PBS datastore (bind-mounted into pbs-lxc CT 105)
+  - path: /srv/pbs-data
+    src: /dev/disk/by-uuid/a053ae3a-040b-4824-8f9b-a3522251bce3
+    fstype: ext4
+    opts: "defaults,nofail"
