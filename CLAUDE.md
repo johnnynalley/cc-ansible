@@ -270,7 +270,7 @@ docker_stacks:
       - gluetun
 ```
 
-**Currently auto-updated**: Caddy (docker-vm), Gluetun (media-vm), Diun (all 3 VMs). Change by editing `docker.yml` and re-running the playbook.
+**Currently auto-updated**: Caddy and Seerr (docker-vm), Gluetun (media-vm), Diun (all 3 VMs). Change by editing `docker.yml` and re-running the playbook.
 
 **How it works**: The script (`/usr/local/sbin/docker-auto-update`) is templated by Ansible with the auto-update stack list baked in. For each stack, it pulls/builds, runs `docker-stack-diff` to detect changes, and only recreates if images actually changed. Gluetun uses `--force-recreate` with dependent containers (qBittorrent) to clear the network namespace. Sends `push-quiet` Apprise notification summarizing updates. Timer runs at :30 past 00/06/12/18 with 30m random delay.
 
@@ -305,12 +305,12 @@ network-watchdog (recovery) ───┤                ───→ Pushover "c
 gluetun-watchdog (VPN) ────────┤                ───→ Email (iCloud SMTP)
 docker-auto-update (6h) ───────┤
 Sonarr/Radarr (grabs) ─────────┤
-Jellyseerr (requests) ─────────┘
+Seerr (requests) ──────────────┘
 
 Sonarr/Radarr ──→ Discord (native connection, rich embeds with poster art)
 ```
 
-**Apprise tags** control routing: `push` (Pushover infrastructure, Time Sensitive), `push-quiet` (Pushover infrastructure, silent), `email` (iCloud SMTP), `media-feed` (Pushover media, silent), `media-requests` (Pushover media, silent). Services specify tags via `apprise_alert_tags` variable (default: `push` in `group_vars/all/vars.yml`). apcupsd supports per-service override via `apcupsd_alert_tags`. Combine tags like `push,email` for multi-target delivery.
+**Apprise tags** control routing: `push` (Pushover infrastructure, Time Sensitive), `push-quiet` (Pushover infrastructure, silent), `email` (iCloud SMTP), `media-feed` (Pushover media, silent), `media-requests` (Seerr media requests, silent). Services specify tags via `apprise_alert_tags` variable (default: `push` in `group_vars/all/vars.yml`). apcupsd supports per-service override via `apcupsd_alert_tags`. Combine tags like `push,email` for multi-target delivery.
 
 **Why Pushover over ntfy**: ntfy's iOS app does not support per-topic notification control. Pushover allows true silent delivery via priority `-2` and per-app iOS settings. ntfy config preserved (commented out) in docker-compose.
 
@@ -326,7 +326,7 @@ Caddy provides HTTPS for all internal services via Cloudflare DNS-01 challenge. 
 
 #### Cloudflare Tunnel (Public Access)
 
-Cloudflare Tunnel (`cloudflared` on docker-vm) provides public access to Nextcloud (`nextcloud.jnalley.me` → `100.112.46.126:11000`) and Jellyseerr (`requests.jnalley.me` → `jellyseerr:5055`). No router ports exposed; home IP hidden. Geo-blocking restricts to US only (Cloudflare Security Rules: `(not ip.src.country in {"US"})` → Block). Managed via Cloudflare Zero Trust dashboard.
+Cloudflare Tunnel (`cloudflared` on docker-vm) provides public access to Nextcloud (`nextcloud.jnalley.me` → `100.112.46.126:11000`) and Seerr (`requests.jnalley.me` → `seerr:5055`). No router ports exposed; home IP hidden. Geo-blocking restricts to US only (Cloudflare Security Rules: `(not ip.src.country in {"US"})` → Block). Managed via Cloudflare Zero Trust dashboard.
 
 ### Backup Architecture
 
@@ -465,7 +465,7 @@ Ansible config references: VirtioFS mounts in `host_vars/nextcloud-vm/virtiofs.y
 
 **Status**: Planned - waiting on hardware purchase
 
-Automatic WAN failover to maintain Cloudflare Tunnel connectivity (Nextcloud, Jellyseerr) during Spectrum outages.
+Automatic WAN failover to maintain Cloudflare Tunnel connectivity (Nextcloud, Seerr) during Spectrum outages.
 
 **Architecture:**
 ```

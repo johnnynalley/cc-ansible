@@ -23,9 +23,10 @@ docker_stacks:
   - name: gitea
     path: /opt/gitea
     build: false
-  - name: jellyseerr
-    path: /opt/jellyseerr
+  - name: seerr
+    path: /opt/seerr
     build: false
+    auto_update: true
   - name: cloudflared
     path: /opt/cloudflared
     build: false
@@ -37,5 +38,9 @@ docker_stacks:
     build: false
   - name: diun
     path: /opt/diun
+    build: false
+    auto_update: true
+  - name: loki-grafana
+    path: /opt/loki-grafana
     build: false
     auto_update: true

@@ -391,7 +391,7 @@ Check status: `journalctl -t gluetun-watchdog -f`
 
 ## Docker Auto-Update
 
-Selected containers are auto-updated every 6 hours via systemd timer (`docker-auto-update.yml`). Opt-in per stack with `auto_update: true` or per service with `auto_update_services: [name]` in `host_vars/<hostname>/docker.yml`. Currently auto-updated: Caddy (docker-vm), Gluetun (media-vm), Diun (all 3 VMs). Pulls/builds new images, uses `docker-stack-diff` to detect changes, only recreates if images changed. Gluetun uses `--force-recreate` with qBittorrent. Sends silent Pushover notification (`push-quiet`). Config in `group_vars/docker_hosts/auto-update.yml`.
+Selected containers are auto-updated every 6 hours via systemd timer (`docker-auto-update.yml`). Opt-in per stack with `auto_update: true` or per service with `auto_update_services: [name]` in `host_vars/<hostname>/docker.yml`. Currently auto-updated: Caddy and Seerr (docker-vm), Gluetun (media-vm), Diun (all 3 VMs). Pulls/builds new images, uses `docker-stack-diff` to detect changes, only recreates if images changed. Gluetun uses `--force-recreate` with qBittorrent. Sends silent Pushover notification (`push-quiet`). Config in `group_vars/docker_hosts/auto-update.yml`.
 
 Check status: `journalctl -u docker-auto-update`, `systemctl list-timers docker-auto-update*`
 
@@ -531,7 +531,7 @@ docker-vm (VM 110 on pve-m70q) runs infrastructure services:
 | Uptime Kuma | `status.jnalley.me` | Service monitoring |
 | Homepage | `home.jnalley.me` | Dashboard |
 | Gitea | `git.jnalley.me` | Self-hosted Git (SSH on 2222) |
-| Jellyseerr | `requests.jnalley.me` | Media requests (Plex OAuth) |
+| Seerr | `requests.jnalley.me` | Media requests (Plex OAuth) |
 | Cloudflared | - | Cloudflare Tunnel (public access) |
 | Apprise API | `apprise.jnalley.me` | Notification router (Pushover + email) |
 | FreshRSS | `rss.jnalley.me` | RSS aggregator (Google Reader API for Reeder) |
@@ -548,7 +548,7 @@ Public internet access without port forwarding. Tunnel runs on docker-vm.
 | URL | Backend |
 |-----|---------|
 | `nextcloud.jnalley.me` | nextcloud-vm:11000 |
-| `requests.jnalley.me` | jellyseerr:5055 |
+| `requests.jnalley.me` | seerr:5055 |
 
 **Management:** Cloudflare Zero Trust → Networks → Connectors
 
@@ -681,14 +681,14 @@ network-watchdog (recovery) ───┤                           → Email (iC
 gluetun-watchdog (VPN) ────────┤                           → Pushover "cc-media-feed" (silent)
 docker-auto-update (6h) ───────┤
 Sonarr/Radarr (grabs) ─────────┤
-Jellyseerr (requests) ─────────┘
+Seerr (requests) ──────────────┘
 
 Sonarr/Radarr ──→ Discord (native connection, rich embeds with poster art)
 ```
 
 - **Apprise API**: Notification router at `/opt/notifications/` on docker-vm. Config uses `pover://` URLs for Pushover
 - **Two Pushover apps**: "Computer Corner" (normal + quiet priority) and "cc-media-feed" (priority -2, silent/in-app only)
-- **Five Apprise tags**: `push` (infrastructure → Computer Corner app, Time Sensitive), `push-quiet` (automated recovery → Computer Corner app, silent), `email` (iCloud SMTP), `media-feed` (Sonarr/Radarr → cc-media-feed app), `media-requests` (Jellyseerr → cc-media-feed app)
+- **Five Apprise tags**: `push` (infrastructure → Computer Corner app, Time Sensitive), `push-quiet` (automated recovery → Computer Corner app, silent), `email` (iCloud SMTP), `media-feed` (Sonarr/Radarr → cc-media-feed app), `media-requests` (Seerr → cc-media-feed app)
 - **Diun**: Container image update notifier on all Docker VMs. Config managed by Ansible (`docker-auto-update.yml`), schedule offset to run after auto-updates. Sends with `push` tag
 - **smartd/apcupsd**: Infrastructure alerts, send with `push` tag
 - **auto-updates**: Notifies before updates (package count), after completion, and before reboots
@@ -696,7 +696,7 @@ Sonarr/Radarr ──→ Discord (native connection, rich embeds with poster art)
 - **network-watchdog**: Best-effort notifications on gateway/Tailscale recovery, pre-reboot, and max-reboot exceeded
 - **gluetun-watchdog**: Silent notifications on VPN recovery, port forwarding loss, or max-restart exhaustion (`push-quiet` tag)
 - **Sonarr/Radarr**: Dual notifications — Discord (rich embeds) + Apprise `media-feed` tag (silent Pushover)
-- **Jellyseerr**: Webhook to Apprise with `media-requests` tag (silent Pushover)
+- **Seerr**: Webhook to Apprise with `media-requests` tag (silent Pushover)
 - **ntfy**: Commented out in docker-compose, config preserved at `/opt/notifications/ntfy/`. Switched to Pushover because ntfy iOS lacks per-topic push control.
 - **Adding apps**: POST to `https://apprise.jnalley.me/notify/notifications` with `tag` field for routing
 
@@ -757,7 +757,7 @@ ansible-playbook playbooks/proxmox-notifications.yml
 LTE failover on pve-m70q to maintain Cloudflare Tunnel connectivity during Spectrum outages.
 
 - **Hardware**: Netgear LB1120 LTE modem (~$50-80 used) + US Mobile SIM (~$10/mo)
-- **Scope**: Only pve-m70q needs failover (runs cloudflared for Nextcloud/Jellyseerr)
+- **Scope**: Only pve-m70q needs failover (runs cloudflared for Nextcloud/Seerr)
 - **Detection**: ~30 seconds, Recovery: ~50 seconds
 
 See CLAUDE.md "Future Considerations" section for full implementation plan.
