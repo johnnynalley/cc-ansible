@@ -1,6 +1,6 @@
 # CC-Ansible
 
-> **Last updated:** 2026-02-21
+> **Last updated:** 2026-02-22
 
 Ansible automation for Johnny's homelab infrastructure (4 Proxmox nodes, 8 VMs/LXCs, Ansible controller LXC, gaming workstation, ThinkPad laptop, MacBook).
 
@@ -284,9 +284,9 @@ Packages are merged from multiple sources (all applicable variables combined):
 | `smartmontools.yml` | `linux_hosts` | SMART disk monitoring with Apprise push alerts |
 | `e1000e-tuning.yml` | `proxmox_nodes` | Disable EEE/TSO on Intel e1000e NICs to prevent hardware TX hangs |
 | `apcupsd.yml` | `proxmox_nodes` | UPS monitoring with Apprise push alerts (ts440 USB master, others slave). Staggers slave startup to avoid NIS mutex contention |
-| `bootstrap.yml` | `linux_hosts` | Create admin user, SSH keys, sudo setup (Debian + Arch) |
+| `bootstrap.yml` | `linux_hosts` | Create admin user, SSH keys, sudo setup, timezone (Debian + Arch) |
 | `ssh-hardening.yml` | `linux_hosts` | SSH security (key auth, disable password) |
-| `auto-updates.yml` | `linux_hosts` | Configure automatic updates + reboot |
+| `auto-updates.yml` | `linux_hosts` | Configure automatic updates + reboot (Sun 5am CT) |
 | `unattended-upgrades.yml` | `debian_hosts` | Daily security patches (incl. workstations, Proxmox blacklist) |
 | `network-recovery.yml` | `linux_hosts` | Network watchdog for auto-recovery after outages |
 | `wifi.yml` | `linux_hosts` | WiFi powersave disable, optional PCI FLR or module reload resume fix |

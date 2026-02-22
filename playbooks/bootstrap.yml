@@ -19,6 +19,14 @@
 
   tasks:
     # =========================================================================
+    # Set timezone
+    # =========================================================================
+    - name: Set timezone
+      community.general.timezone:
+        name: "{{ global_timezone }}"
+      tags: [timezone]
+
+    # =========================================================================
     # Install sudo (not installed by default on Proxmox)
     # =========================================================================
     - name: Install sudo package (Debian)

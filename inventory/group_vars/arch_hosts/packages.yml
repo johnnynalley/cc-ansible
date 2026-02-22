@@ -10,5 +10,5 @@ packages_arch_extra:
   - inetutils     # ping, traceroute
 
 # Auto-updates schedule (Arch systems)
-# Hosts use UTC timezone — 08:00 UTC = 2:00 AM Central (3:00 AM during CDT)
-auto_updates_oncalendar: "Sun *-*-* 08:00:00"
+# Hosts use America/Chicago — this is local time (5:00 AM Central)
+auto_updates_oncalendar: "Sun *-*-* 05:00:00"

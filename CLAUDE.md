@@ -1,6 +1,6 @@
 # CLAUDE.md
 
-> **Last updated:** 2026-02-21
+> **Last updated:** 2026-02-22
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
@@ -15,7 +15,7 @@ Ansible automation for a homelab infrastructure consisting of:
 - 1 Kubuntu laptop (jn-t14s-lin) — ThinkPad T14s, dual-boot with Windows
 - 1 macOS workstation (macbook-pro)
 
-All hosts communicate via Tailscale VPN (100.x.x.x addresses).
+All hosts communicate via Tailscale VPN (100.x.x.x addresses). All hosts are set to `America/Chicago` timezone (enforced by `bootstrap.yml`).
 
 ## IMPORTANT: Infrastructure as Code First
 
@@ -369,7 +369,7 @@ One-way sync from UTD OneDrive to Nextcloud via `playbooks/rclone-sync.yml`. Run
 
 ### Unattended-Upgrades (Daily Security Patches)
 
-Deployed via `playbooks/unattended-upgrades.yml` to all `debian_hosts` (including workstations — security patches shouldn't wait). Complements the weekly `auto-updates.yml` full-upgrade.
+Deployed via `playbooks/unattended-upgrades.yml` to all `debian_hosts` (including workstations — security patches shouldn't wait). Complements the weekly `auto-updates.yml` full-upgrade (Sundays 5:00 AM CT + 15m random delay).
 
 **How it works**: Uses Debian/Ubuntu's native `unattended-upgrades` package with APT's built-in `apt-daily-upgrade.timer` (daily, randomized 12h window). Only applies security-origin patches — not general updates. A systemd drop-in (`/etc/systemd/system/apt-daily-upgrade.service.d/notify.conf`) hooks an `ExecStartPost` script that sends a silent Apprise notification (`push-quiet` tag) when patches are applied.
 
