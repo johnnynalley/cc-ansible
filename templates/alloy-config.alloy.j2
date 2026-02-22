@@ -1,0 +1,98 @@
+// Alloy configuration
+// Managed by Ansible - do not edit manually
+// Host: {{ inventory_hostname }}
+
+logging {
+  level = "warn"
+}
+
+{% if ansible_facts.os_family != "Darwin" %}
+// =============================================================================
+// Linux: systemd journal
+// =============================================================================
+loki.source.journal "systemd" {
+  forward_to    = [loki.write.default.receiver]
+  relabel_rules = loki.relabel.journal.rules
+  max_age       = "{{ alloy_journal_max_age }}"
+}
+
+loki.relabel "journal" {
+  forward_to = []
+
+  rule {
+    source_labels = ["__journal__systemd_unit"]
+    target_label  = "unit"
+  }
+
+  rule {
+    source_labels = ["__journal__transport"]
+    target_label  = "transport"
+  }
+
+  rule {
+    source_labels = ["__journal_priority_keyword"]
+    target_label  = "level"
+  }
+}
+{% endif %}
+
+{% if ansible_facts.os_family == "Darwin" %}
+// =============================================================================
+// macOS: system log files
+// =============================================================================
+local.file_match "system_logs" {
+  path_targets = [
+    {__path__ = "/var/log/system.log", job = "system_log"},
+    {__path__ = "/var/log/install.log", job = "install_log"},
+  ]
+}
+
+loki.source.file "system_logs" {
+  targets    = local.file_match.system_logs.targets
+  forward_to = [loki.write.default.receiver]
+}
+{% endif %}
+
+{% if inventory_hostname in groups.get('docker_hosts', []) %}
+// =============================================================================
+// Docker: container log discovery
+// =============================================================================
+discovery.docker "containers" {
+  host = "unix:///var/run/docker.sock"
+}
+
+discovery.relabel "docker" {
+  targets = discovery.docker.containers.targets
+
+  rule {
+    source_labels = ["__meta_docker_container_name"]
+    regex         = "/(.*)"
+    target_label  = "container"
+  }
+
+  rule {
+    source_labels = ["__meta_docker_container_log_stream"]
+    target_label  = "stream"
+  }
+}
+
+loki.source.docker "containers" {
+  host       = "unix:///var/run/docker.sock"
+  targets    = discovery.relabel.docker.output
+  forward_to = [loki.write.default.receiver]
+}
+{% endif %}
+
+// =============================================================================
+// Loki write endpoint
+// =============================================================================
+loki.write "default" {
+  endpoint {
+    url = "{{ loki_url }}/loki/api/v1/push"
+  }
+
+  external_labels = {
+    host = "{{ inventory_hostname }}",
+    os   = "{{ ansible_facts.os_family | lower }}",
+  }
+}

@@ -22,3 +22,4 @@ pve_vm_firewalls:
       - { action: ACCEPT, proto: tcp, dport: 22, comment: "SSH" }
       - { action: ACCEPT, proto: tcp, dport: 443, comment: "HTTPS (Caddy)" }
       - { action: ACCEPT, proto: tcp, dport: 80, comment: "HTTP (Caddy redirect)" }
+      - { action: ACCEPT, proto: tcp, dport: 3100, comment: "Loki (log ingestion)" }

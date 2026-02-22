@@ -318,6 +318,31 @@ Sonarr/Radarr ──→ Discord (native connection, rich embeds with poster art)
 
 Diun runs on all three Docker VMs (docker-vm, media-vm, nextcloud-vm) monitoring containers for image updates. Config templated by Ansible (`templates/diun.yml.j2`) and deployed by `docker-auto-update.yml`. Schedule (`0 1/6 * * *` — 01:00, 07:00, 13:00, 19:00) is offset to run after the auto-update timer so already-updated containers don't trigger redundant alerts. Config vars in `group_vars/docker_hosts/diun.yml`. Sonarr/Radarr also send to Discord (native connection) for rich embeds with poster art.
 
+#### Centralized Logging (Loki + Grafana + Alloy)
+
+Centralized log aggregation using Grafana Loki on docker-vm with Alloy agents on all managed hosts.
+
+**Architecture:**
+```
+All hosts (Alloy) ──→ Loki (docker-vm:3100) ←── Grafana (caddy-proxy)
+                         │                            │
+                    Tailscale push              grafana.jnalley.me
+```
+
+**Server** (docker-vm): Loki + Grafana Docker Compose stack at `/opt/loki-grafana/`. Loki stores logs with TSDB schema v13, 30-day retention, filesystem storage. Grafana auto-provisioned with Loki datasource. Grafana accessible at `grafana.jnalley.me` via Caddy (Tailscale only, not publicly exposed). Admin password in `host_vars/docker-vm/vault.yml`.
+
+**Clients**: Alloy agent deployed to all `managed_hosts` by `playbooks/logging.yml`:
+- **Linux**: systemd journal logs with relabeling (unit, transport, level labels). Alloy installed from Grafana APT repo (Debian) or AUR `alloy-bin` (Arch).
+- **Docker hosts**: additionally scrape container logs via Docker socket (`discovery.docker`).
+- **macOS**: tails `/var/log/system.log` via `loki.source.file`. Installed via Homebrew (`grafana-alloy`), runs as LaunchAgent.
+
+**Variables** (in `group_vars/all/loki.yml`):
+- `loki_url` — Loki endpoint (docker-vm Tailscale IP, port 3100)
+- `alloy_enabled` (default: `true`) — per-host opt-out
+- `alloy_journal_max_age` — how far back to read journal on first start
+
+**Querying**: In Grafana, use LogQL: `{host="ts440"}`, `{host="media-vm", container="plex"}`, `{unit="docker.service"} |= "error"`.
+
 #### Reverse Proxy (Caddy on docker-vm)
 
 Caddy provides HTTPS for all internal services via Cloudflare DNS-01 challenge. Caddyfile at `/opt/caddy/Caddyfile`. docker-vm services are proxied by container name (`caddy-proxy` Docker network); media-vm services by Tailscale IP (`100.66.6.113`). All services require Tailscale to access.

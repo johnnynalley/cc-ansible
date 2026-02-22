@@ -711,6 +711,30 @@ curl -s https://apprise.jnalley.me/json/urls/notifications/?privacy=1
 # Then restart: cd /opt/notifications && docker compose restart apprise
 ```
 
+## Centralized Logging (Loki + Grafana + Alloy)
+
+Centralized log aggregation. Loki + Grafana run on docker-vm, Alloy agents on all hosts ship logs over Tailscale.
+
+- **Grafana**: `https://grafana.jnalley.me` (Tailscale only, admin/vault password)
+- **Loki**: `http://100.108.254.100:3100` (internal, Alloy agents push here)
+- **Retention**: 30 days
+- **Config**: `group_vars/all/loki.yml`, `templates/alloy-config.alloy.j2`
+- **Playbook**: `ansible-playbook playbooks/logging.yml`
+
+**What's collected:**
+- All Linux hosts: systemd journal (unit, transport, level labels)
+- Docker hosts: container logs via Docker socket
+- macOS: `/var/log/system.log`
+
+**Querying in Grafana:**
+```
+{host="ts440"}                              # All logs from ts440
+{host="media-vm", container="plex"}         # Plex container logs
+{unit="docker.service"} |= "error"          # Docker errors across all hosts
+```
+
+**Opt out a host:** Set `alloy_enabled: false` in its host_vars.
+
 ## Proxmox Backup Server (pbs-lxc)
 
 PBS runs in an unprivileged LXC (CT 105) on pve-herc with a dedicated 2TB ext4 drive.

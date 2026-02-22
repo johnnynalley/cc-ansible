@@ -98,6 +98,10 @@
   ansible.builtin.import_playbook: playbooks/docker-auto-update.yml
   tags: [docker, auto-update]
 
+- name: Configure centralized logging (Loki + Alloy)
+  ansible.builtin.import_playbook: playbooks/logging.yml
+  tags: [logging, loki, alloy]
+
 - name: Configure rclone sync jobs
   ansible.builtin.import_playbook: playbooks/rclone-sync.yml
   tags: [rclone, sync]

@@ -1,0 +1,15 @@
+# =============================================================================
+# Centralized Logging (Loki + Alloy)
+# =============================================================================
+# Loki runs on docker-vm. Alloy agents on all managed hosts push logs to it.
+# Override per-host in host_vars (e.g. alloy_enabled: false to opt out).
+# =============================================================================
+
+# Loki endpoint (docker-vm Tailscale IP, port 3100)
+loki_url: "http://100.108.254.100:3100"
+
+# Alloy agent toggle (per-host opt-out)
+alloy_enabled: true
+
+# How far back Alloy reads journal on first start
+alloy_journal_max_age: "12h"
