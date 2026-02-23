@@ -124,9 +124,9 @@ zfs_scrub_schedule: "Sun *-*-* 02:00:00"
 # ZFS ARC Tuning
 # =============================================================================
 
-# ARC max size in bytes (2GB - takes effect on reboot)
+# ARC max size in bytes (1GB - reduced from 2GB to ease memory pressure)
 # Monitor with: cat /proc/spl/kstat/zfs/arcstats | grep -E '^size|^c_max'
-zfs_arc_max_bytes: 2147483648
+zfs_arc_max_bytes: 1073741824
 
 # =============================================================================
 # ZFS Dataset Properties (documentation + validation)

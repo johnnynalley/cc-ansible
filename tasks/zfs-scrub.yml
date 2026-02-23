@@ -81,6 +81,13 @@
   when: zfs_arc_max_bytes is defined
   tags: [zfs-scrub, zfs-tuning]
 
+- name: Apply ZFS ARC max live
+  ansible.builtin.shell:
+    cmd: "echo {{ zfs_arc_max_bytes }} > /sys/module/zfs/parameters/zfs_arc_max"
+  when: zfs_arc_max_bytes is defined
+  changed_when: false
+  tags: [zfs-scrub, zfs-tuning]
+
 # --- ZFS Dataset Property Enforcement ---
 
 - name: Enforce ZFS dataset properties
