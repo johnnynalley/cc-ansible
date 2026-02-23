@@ -13,6 +13,7 @@ docker_stacks:
     build: false
     auto_update_services:
       - gluetun
+      - lazylibrarian
   - name: portainer
     path: /opt/portainer
     build: false
