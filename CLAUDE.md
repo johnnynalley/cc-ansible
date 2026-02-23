@@ -781,7 +781,7 @@ They don't conflict - network-watchdog's gateway ping will succeed through eithe
 
 ## Ansible Environment
 
-Ansible runs on ansible-lxc (CT 104 on pve-m70q, Ubuntu 25.10) with `ansible-core` 2.19. The controller uses `ansible_connection=local` in the `orchestrator` group. Key collections: `community.docker` 4.6.1, `community.general` 11.1.0, `kewlfft.aur` 0.13.0.
+Ansible runs on ansible-lxc (CT 104 on pve-m70q, Ubuntu 25.10) with `ansible-core` 2.20 (via Ansible PPA `ppa:ansible/ansible`, managed in `host_vars/ansible-lxc/packages.yml`). Ubuntu 25.10's universe repo ships 2.19 which has a threading bug ([ansible/ansible#85879](https://github.com/ansible/ansible/issues/85879)) that crashes `site.yml` at play boundaries. The controller uses `ansible_connection=local` in the `orchestrator` group. Key collections: `community.docker` 4.6.1, `community.general` 11.1.0, `kewlfft.aur` 0.13.0.
 
 The working repo clone is at `~/cc-ansible` on ansible-lxc.
 

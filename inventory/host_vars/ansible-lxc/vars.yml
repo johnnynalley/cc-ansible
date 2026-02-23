@@ -8,14 +8,3 @@ admin_user: johnny
 # doesn't recognize. -S reads password from stdin instead of tty prompt.
 ansible_become_flags: "-S"
 
-# rsyslog spams AppArmor denials to the Proxmox host console because the
-# LXC AppArmor profile blocks journal socket access across user namespaces.
-# journald handles all logging natively — rsyslog is redundant.
-# Dev tools (formerly via development group)
-packages_host_extra:
-  - gh
-  - shellcheck
-  - yq
-
-packages_remove:
-  - rsyslog

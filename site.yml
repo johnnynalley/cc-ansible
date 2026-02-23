@@ -14,10 +14,6 @@
   ansible.builtin.import_playbook: playbooks/packages.yml
   tags: [packages]
 
-- name: Configure msmtp mail relay
-  ansible.builtin.import_playbook: playbooks/msmtp.yml
-  tags: [msmtp, mail]
-
 - name: Configure SMART disk monitoring
   ansible.builtin.import_playbook: playbooks/smartmontools.yml
   tags: [smartmontools, smart, monitoring]

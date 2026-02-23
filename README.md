@@ -622,7 +622,7 @@ setfacl -R -d -m o::r /srv/nas-zfs/configs
 
 ## Ansible Environment
 
-Ansible runs on ansible-lxc (CT 104 on pve-m70q, Ubuntu 25.10) with `ansible-core` 2.19. The repo clone is at `~/cc-ansible` on ansible-lxc.
+Ansible runs on ansible-lxc (CT 104 on pve-m70q, Ubuntu 25.10) with `ansible-core` 2.20 (via Ansible PPA — Ubuntu's 2.19 has a threading bug). The repo clone is at `~/cc-ansible` on ansible-lxc.
 
 ts440 auto-pulls from GitHub every 5 minutes (`git-sync.timer`) to keep the Nextcloud External Storage copy current. nextcloud-vm runs `occ files:scan` every 10 minutes (`nextcloud-scan.timer`) so external storage changes appear automatically. Claude Code's project memory is synced from ansible-lxc to ts440 every 10 minutes (`claude-memory-sync.timer`) for Nextcloud access.
 

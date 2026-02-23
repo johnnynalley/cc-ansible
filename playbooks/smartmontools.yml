@@ -1,11 +1,9 @@
 # =============================================================================
 # Smartmontools Playbook - SMART Disk Monitoring and Alerting
 # =============================================================================
-# Configures smartd for disk health monitoring with email alerts.
+# Configures smartd for disk health monitoring with Apprise alerts.
 # Targets all physical Linux hosts (VMs/LXCs excluded - virtual disks
 # don't expose SMART data; the Proxmox host monitors real drives).
-#
-# Requires msmtp for email delivery.
 #
 # Usage: ansible-playbook playbooks/smartmontools.yml
 #        ansible-playbook playbooks/smartmontools.yml --limit ts440

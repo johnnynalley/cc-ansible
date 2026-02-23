@@ -1,0 +1,20 @@
+# =============================================================================
+# ansible-lxc - Package Configuration
+# =============================================================================
+
+# Ansible PPA for latest ansible-core (fixes threading bugs in Ubuntu's 2.19)
+apt_ppas:
+  - "ppa:ansible/ansible"
+
+# Dev tools (formerly via development group) + software-properties-common for PPA
+packages_host_extra:
+  - gh
+  - shellcheck
+  - software-properties-common
+  - yq
+
+# rsyslog spams AppArmor denials to the Proxmox host console because the
+# LXC AppArmor profile blocks journal socket access across user namespaces.
+# journald handles all logging natively — rsyslog is redundant.
+packages_remove:
+  - rsyslog

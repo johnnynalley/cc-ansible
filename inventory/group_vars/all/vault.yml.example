@@ -21,8 +21,3 @@ b2_application_key: "YOUR_B2_APPLICATION_KEY"
 
 # Restic repository encryption password
 restic_password: "YOUR_RESTIC_REPO_PASSWORD"
-
-# msmtp SMTP credentials (iCloud app-specific password)
-msmtp_smtp_user: "YOUR_ICLOUD_EMAIL"
-msmtp_smtp_password: "YOUR_ICLOUD_APP_SPECIFIC_PASSWORD"
-msmtp_from_address: "YOUR_FROM_ADDRESS"
