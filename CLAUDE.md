@@ -383,8 +383,10 @@ PVE's notification system routes alerts via webhook to Apprise → Pushover. Dep
 
 **Matchers**:
 - `pve-critical` — routes warning/error severity to `apprise-infra`
-- `pve-info` — routes info severity to `apprise-infra-quiet`
+- `pve-info` — routes non-backup info to `apprise-infra-quiet` (filtered by `match-field regex:type=^(package-updates|fencing|replication)$`)
 - `default-matcher` — disabled (built-in mail-to-root has no relay)
+
+**Vzdump (backup) notifications**: Success notifications are suppressed (vzdump `info` events don't match any matcher). Backup **failures** (warning/error severity) still route to Pushover Time Sensitive via `pve-critical`. Check PBS UI or Loki for backup status. PVE's Rust regex engine doesn't support negative lookahead, so the filter uses a positive match on non-vzdump event types instead.
 
 **Event types**: vzdump (backup success/failure), replication, fencing, package-updates. Body templates use PVE Handlebars syntax (`{{escape title}}`, `{{escape message}}`) and are base64-encoded in the pvesh API. Opt-out: set `pve_notifications_enabled: false` in host_vars.
 

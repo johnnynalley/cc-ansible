@@ -2,7 +2,9 @@
 # Proxmox Notification Webhooks
 # =============================================================================
 # Configures PVE notification system to send alerts via Apprise webhook.
-# Routes warnings/errors to Pushover (Time Sensitive) and info to silent.
+# Routes warnings/errors to Pushover (Time Sensitive) and non-backup info
+# to silent. Backup success notifications (vzdump info) are suppressed —
+# check PBS UI or Loki for backup status.
 # Cluster-wide config via pmxcfs — runs on one node only.
 #
 # Usage: ansible-playbook playbooks/proxmox-notifications.yml
@@ -93,9 +95,16 @@
         pvesh create /cluster/notifications/matchers
         --name pve-info
         --match-severity info
+        --match-field "regex:type=^(package-updates|fencing|replication)$"
         --target apprise-infra-quiet
-        --comment "Route info to Pushover (silent)"
+        --comment "Route non-backup info to Pushover (silent)"
       when: "'pve-info' not in existing_matcher_names"
+
+    - name: Ensure pve-info matcher filters out vzdump
+      ansible.builtin.command: >
+        pvesh set /cluster/notifications/matchers/pve-info
+        --match-field "regex:type=^(package-updates|fencing|replication)$"
+      when: "'pve-info' in existing_matcher_names"
 
     # =========================================================================
     # Disable Default Matcher (mail-to-root has no relay configured)

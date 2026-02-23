@@ -66,7 +66,6 @@ cc-ansible/
 │       └── dev-vm/            # Development VM (Ubuntu 24.04, pve-m70q)
 ├── playbooks/
 │   ├── packages.yml            # Multi-platform package installation
-│   ├── msmtp.yml               # SMTP relay (iCloud) for system email
 │   ├── smartmontools.yml       # SMART disk monitoring (Apprise alerts)
 │   ├── e1000e-tuning.yml        # Intel e1000e NIC tuning (disable EEE/TSO)
 │   ├── apcupsd.yml             # UPS monitoring (Apprise alerts, master/slave)
@@ -111,7 +110,6 @@ cc-ansible/
 │   ├── exports.j2              # NFS exports template
 │   ├── smb.conf.j2             # Samba configuration template
 │   ├── sanoid.conf.j2          # ZFS snapshot policy configuration
-│   ├── msmtprc.j2              # msmtp SMTP relay config
 │   ├── smartd.conf.j2          # smartd monitoring config
 │   ├── apcupsd.conf.j2         # apcupsd daemon config (master/slave)
 │   ├── apcupsd-event-notify.sh.j2  # apcupsd Apprise notification
@@ -280,7 +278,6 @@ Packages are merged from multiple sources (all applicable variables combined):
 |----------|--------|-------------|
 | `site.yml` | varies | Run all playbooks in order |
 | `packages.yml` | `managed_hosts` | Install baseline packages (multi-platform) |
-| `msmtp.yml` | `linux_hosts` | SMTP relay for system email (iCloud) |
 | `smartmontools.yml` | `linux_hosts` | SMART disk monitoring with Apprise push alerts |
 | `e1000e-tuning.yml` | `proxmox_nodes` | Disable EEE/TSO on Intel e1000e NICs to prevent hardware TX hangs |
 | `apcupsd.yml` | `proxmox_nodes` | UPS monitoring with Apprise push alerts (ts440 USB master, others slave). Staggers slave startup to avoid NIS mutex contention |
@@ -768,7 +765,8 @@ ansible proxmox_nodes -m shell -a "pvesm status | grep pbs" --become
 PVE notifications route to Apprise → Pushover via webhook. Deployed by `playbooks/proxmox-notifications.yml`.
 
 - **Warnings/errors** (failed backups, fencing): `push` tag → Time Sensitive
-- **Info** (successful backups): `push-quiet` tag → silent
+- **Info** (package-updates, replication, fencing): `push-quiet` tag → silent
+- **Backup success**: suppressed (vzdump info events filtered out to reduce noise)
 - Built-in `default-matcher` (mail-to-root) is disabled
 
 ```bash
