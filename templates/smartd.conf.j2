@@ -12,6 +12,7 @@
   -S on \
   -n {{ device.standby_check | default('standby,q') }} \
   -W {{ device.temp_diff | default('4') }},{{ device.temp_info | default('45') }},{{ device.temp_crit | default('55') }} \
+  -m root \
   -M exec /usr/local/bin/smartd-notify \
   -M once \
   -s ({{ device.test_schedule | default(smartd_default_test_schedule) }})
@@ -20,6 +21,7 @@
 # Auto-detect all drives
 DEVICESCAN -a \
   -s ({{ smartd_default_test_schedule }}) \
+  -m root \
   -M exec /usr/local/bin/smartd-notify \
   -M once
 {% endif %}
