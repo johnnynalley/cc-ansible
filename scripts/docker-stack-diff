@@ -7,16 +7,53 @@
 # locally available image ID. Reports services where images differ, with
 # version labels when available (org.opencontainers.image.version).
 #
-# Usage: docker-stack-diff /path/to/compose/project
-# Exit code: 0 always (informational only)
+# Usage: docker-stack-diff [--check-major] /path/to/compose/project
+#
+# Options:
+#   --check-major  Flag major version bumps with MAJOR: prefix and exit 2
+#
+# Exit codes:
+#   0  No changes, or only minor/patch changes (safe to auto-update)
+#   2  Major version bump detected (only with --check-major)
 # =============================================================================
 
 set -uo pipefail
 
-COMPOSE_DIR="${1:?Usage: docker-stack-diff /path/to/compose/project}"
+# Parse flags
+CHECK_MAJOR=false
+if [[ "${1:-}" == "--check-major" ]]; then
+    CHECK_MAJOR=true
+    shift
+fi
+
+COMPOSE_DIR="${1:?Usage: docker-stack-diff [--check-major] /path/to/compose/project}"
 cd "$COMPOSE_DIR" || exit 0
 
+# Extract the first numeric component from a version string.
+# Handles: semver (1.2.3), v-prefix (v8.0.0), calver (2026.01), plain (7)
+# Returns empty string if unparseable.
+get_major_version() {
+    local ver="$1"
+    ver="${ver#v}"
+    ver="${ver#V}"
+    ver="${ver#release-}"
+    if [[ "$ver" =~ ^([0-9]+) ]]; then
+        echo "${BASH_REMATCH[1]}"
+    fi
+}
+
+# Compare two version strings and return 0 (true) if major version differs.
+# Returns 1 (false) if either version is missing/unparseable.
+is_major_bump() {
+    local old_major new_major
+    old_major=$(get_major_version "$1")
+    new_major=$(get_major_version "$2")
+    [[ -z "$old_major" || -z "$new_major" ]] && return 1
+    [[ "$old_major" != "$new_major" ]]
+}
+
 updates=()
+has_major_bump=false
 
 for svc in $(docker compose config --services 2>/dev/null); do
     # Get the container ID for this service (may not exist if never started)
@@ -50,10 +87,20 @@ for svc in $(docker compose config --services 2>/dev/null); do
     [[ "$old_version" == "<no value>" || -z "$old_version" ]] && old_version=""
     [[ "$new_version" == "<no value>" || -z "$new_version" ]] && new_version=""
 
+    # Check for major version bump
+    major_prefix=""
+    if $CHECK_MAJOR && [ -n "$old_version" ] && [ -n "$new_version" ] \
+       && [ "$old_version" != "$new_version" ]; then
+        if is_major_bump "$old_version" "$new_version"; then
+            major_prefix="MAJOR:"
+            has_major_bump=true
+        fi
+    fi
+
     if [ -n "$old_version" ] && [ -n "$new_version" ] && [ "$old_version" != "$new_version" ]; then
-        updates+=("  ${svc}: ${old_version} -> ${new_version}  (${old_hash} -> ${new_hash})")
+        updates+=("${major_prefix}  ${svc}: ${old_version} -> ${new_version}  (${old_hash} -> ${new_hash})")
     elif [ -n "$new_version" ]; then
-        updates+=("  ${svc}: ${new_version}  (${old_hash} -> ${new_hash})")
+        updates+=("${major_prefix}  ${svc}: ${new_version}  (${old_hash} -> ${new_hash})")
     else
         updates+=("  ${svc}: ${old_hash} -> ${new_hash}  (${image_name})")
     fi
@@ -63,4 +110,9 @@ if [ ${#updates[@]} -eq 0 ]; then
     echo "(no image changes detected)"
 else
     printf '%s\n' "${updates[@]}"
+fi
+
+# Exit 2 if major bumps detected (only in --check-major mode)
+if $CHECK_MAJOR && $has_major_bump; then
+    exit 2
 fi

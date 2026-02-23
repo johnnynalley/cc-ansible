@@ -270,14 +270,18 @@ docker_stacks:
       - gluetun
 ```
 
-**Currently auto-updated**: Caddy and Seerr (docker-vm), Gluetun (media-vm), Diun (all 3 VMs). Change by editing `docker.yml` and re-running the playbook.
+**Currently auto-updated**: Caddy, Seerr, and Loki-Grafana (docker-vm), Gluetun and LazyLibrarian (media-vm), Diun (all 3 VMs). Change by editing `docker.yml` and re-running the playbook.
 
 **How it works**: The script (`/usr/local/sbin/docker-auto-update`) is templated by Ansible with the auto-update stack list baked in. For each stack, it pulls/builds, runs `docker-stack-diff` to detect changes, and only recreates if images actually changed. Gluetun uses `--force-recreate` with dependent containers (qBittorrent) to clear the network namespace. Sends `push-quiet` Apprise notification summarizing updates. Timer runs at :30 past 00/06/12/18 with 30m random delay.
+
+**Major version guard**: `docker-stack-diff --check-major` compares the `org.opencontainers.image.version` label on running vs pulled images. If the first numeric component differs (e.g., `7.x` → `8.x`), the update is blocked and a Time Sensitive Pushover notification is sent instead. The pulled image stays local for manual update when ready. A state file (`/var/lib/docker-auto-update/`) prevents repeat notifications for the same blocked version. Per-stack opt-out via `major_guard: false` in docker.yml. Safe defaults: missing/unparseable version labels allow the update (guard only blocks when confident).
 
 **Configuration** (in `group_vars/docker_hosts/auto-update.yml`):
 - `docker_auto_update_enabled` (default: `true`) — per-host opt-out
 - `docker_auto_update_oncalendar` (default: `*-*-* 00/6:30:00`) — timer schedule
 - `docker_auto_update_notify_tag` (default: `push-quiet`) — Apprise notification tag
+- `docker_auto_update_major_guard` (default: `true`) — block major version bumps
+- `docker_auto_update_major_notify_tag` (default: `push`) — louder tag for blocked updates
 
 **Troubleshooting**: `journalctl -u docker-auto-update`, `systemctl list-timers docker-auto-update*`, manual trigger: `systemctl start docker-auto-update.service`.
 

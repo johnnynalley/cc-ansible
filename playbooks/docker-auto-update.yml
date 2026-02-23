@@ -30,6 +30,14 @@
       ansible.builtin.meta: end_host
       when: not (docker_auto_update_enabled | default(true))
 
+    - name: Create auto-update state directory
+      ansible.builtin.file:
+        path: /var/lib/docker-auto-update
+        state: directory
+        owner: root
+        group: root
+        mode: "0755"
+
     - name: Deploy docker-stack-diff utility
       ansible.builtin.copy:
         src: ../scripts/docker-stack-diff

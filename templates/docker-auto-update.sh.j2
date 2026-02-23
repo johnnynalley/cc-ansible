@@ -4,6 +4,7 @@
 #
 # Checks for image updates on stacks marked for auto-update in Ansible,
 # pulls/builds new images, and recreates containers only if images changed.
+# Major version bumps are blocked and trigger a louder notification.
 #
 # Stacks managed by this script:
 {% for stack in docker_stacks %}
@@ -19,9 +20,14 @@ set -uo pipefail
 
 LOG_TAG="docker-auto-update"
 STACK_DIFF="/usr/local/bin/docker-stack-diff"
+STATE_DIR="/var/lib/docker-auto-update"
 SUMMARY=""
+BLOCKED_SUMMARY=""
 UPDATE_COUNT=0
+BLOCKED_COUNT=0
 ERRORS=0
+
+mkdir -p "$STATE_DIR"
 
 log() { logger -t "$LOG_TAG" "$*"; echo "$*"; }
 
@@ -29,15 +35,46 @@ send_notification() {
     local title="$1"
     local body="${2:-}"
     local type="${3:-info}"
+    local tag="${4:-{{ docker_auto_update_notify_tag | default('push-quiet') }}}"
     curl -sf -o /dev/null \
       -X POST "{{ apprise_endpoint }}/notify/{{ apprise_token }}" \
       --form-string "title=${title}" \
       --form-string "body=${body}" \
-      --form-string "tag={{ docker_auto_update_notify_tag | default('push-quiet') }}" \
+      --form-string "tag=${tag}" \
       --form-string "type=${type}" \
       --max-time 10 \
       --retry 2 \
       --retry-delay 3 2>/dev/null || true
+}
+
+# Check if a blocked version pair was already notified (prevents repeat alerts)
+is_already_blocked() {
+    local state_file="$1"
+    local entry="$2"
+    [ -f "$state_file" ] && grep -qF "$entry" "$state_file" 2>/dev/null
+}
+
+# Record a blocked version pair to the state file
+record_blocked() {
+    local state_file="$1"
+    local entry="$2"
+    echo "$entry" >> "$state_file"
+}
+
+# Clean up stale entries from state file (services that are now up to date)
+cleanup_state() {
+    local state_file="$1"
+    local diff_output="$2"
+    [ ! -f "$state_file" ] && return
+    local tmp="${state_file}.tmp"
+    while IFS= read -r line; do
+        svc=$(echo "$line" | cut -d: -f1)
+        # Keep entry only if this service still has a MAJOR: line in diff output
+        if echo "$diff_output" | grep -q "^MAJOR:  ${svc}:"; then
+            echo "$line"
+        fi
+    done < "$state_file" > "$tmp"
+    mv "$tmp" "$state_file"
 }
 
 pull_with_retry() {
@@ -91,13 +128,57 @@ log "Starting Docker auto-update..."
 
 {% for stack in docker_stacks %}
 {% if stack.auto_update | default(false) %}
-# --- {{ stack.name }} (full stack{% if stack.build | default(false) %}, build{% endif %}) ---
+{% set use_major_guard = stack.major_guard | default(docker_auto_update_major_guard | default(true)) %}
+# --- {{ stack.name }} (full stack{% if stack.build | default(false) %}, build{% endif %}{% if use_major_guard %}, major guard{% endif %}) ---
 log "Checking {{ stack.name }}..."
 {% if stack.build | default(false) %}
 if build_with_retry "{{ stack.path }}"; then
 {% else %}
 if pull_with_retry "{{ stack.path }}"; then
 {% endif %}
+{% if use_major_guard %}
+    diff_output=$("$STACK_DIFF" --check-major "{{ stack.path }}" 2>/dev/null)
+    diff_exit=$?
+    if [[ -z "$diff_output" || "$diff_output" == *"(no image changes detected)"* ]]; then
+        log "{{ stack.name }}: up to date"
+    elif [[ $diff_exit -eq 2 ]]; then
+        # Major version bump detected — block the entire stack
+        major_lines=$(echo "$diff_output" | grep "^MAJOR:" | sed 's/^MAJOR://')
+        log "{{ stack.name }}: MAJOR VERSION BUMP BLOCKED"
+        log "$major_lines"
+        state_file="${STATE_DIR}/blocked-{{ stack.name }}"
+        cleanup_state "$state_file" "$diff_output"
+        new_blocks=false
+        while IFS= read -r major_line; do
+            entry=$(echo "$major_line" | sed 's/^  //' | awk '{print $1, $2, $3, $4}')
+            if ! is_already_blocked "$state_file" "$entry"; then
+                record_blocked "$state_file" "$entry"
+                new_blocks=true
+            fi
+        done <<< "$major_lines"
+        if $new_blocks; then
+            BLOCKED_COUNT=$((BLOCKED_COUNT + 1))
+            BLOCKED_SUMMARY="${BLOCKED_SUMMARY}{{ stack.name }} (BLOCKED - major version bump):\n${major_lines}\n\n"
+        else
+            log "{{ stack.name }}: already notified for this major bump"
+        fi
+        # Apply non-major updates if any (only for full-stack, skip if any major present)
+        # Skipping entire stack because docker compose up -d would recreate everything
+        non_major=$(echo "$diff_output" | grep -v "^MAJOR:" | grep -v "(no image changes detected)")
+        if [[ -n "$non_major" ]]; then
+            log "{{ stack.name }}: minor updates also available but skipping (stack contains major bump)"
+        fi
+    else
+        log "{{ stack.name }}: updates available, recreating..."
+        cd "{{ stack.path }}" && docker compose up -d 2>&1 | while read -r line; do
+            log "{{ stack.name }}: $line"
+        done
+        UPDATE_COUNT=$((UPDATE_COUNT + 1))
+        SUMMARY="${SUMMARY}{{ stack.name }}:\n${diff_output}\n\n"
+        # Clear any stale state file (stack is now up to date)
+        rm -f "${STATE_DIR}/blocked-{{ stack.name }}"
+    fi
+{% else %}
     diff_output=$("$STACK_DIFF" "{{ stack.path }}" 2>/dev/null || echo "(diff check failed)")
     if [[ "$diff_output" != *"(no image changes detected)"* && "$diff_output" != *"(diff check failed)"* ]]; then
         log "{{ stack.name }}: updates available, recreating..."
@@ -109,18 +190,42 @@ if pull_with_retry "{{ stack.path }}"; then
     else
         log "{{ stack.name }}: up to date"
     fi
+{% endif %}
 else
     log "ERROR: {{ stack.name }} pull/build failed"
     ERRORS=$((ERRORS + 1))
 fi
 
 {% elif stack.auto_update_services is defined and stack.auto_update_services | length > 0 %}
-# --- {{ stack.name }} (services: {{ stack.auto_update_services | join(', ') }}) ---
+{% set use_major_guard = stack.major_guard | default(docker_auto_update_major_guard | default(true)) %}
+# --- {{ stack.name }} (services: {{ stack.auto_update_services | join(', ') }}{% if use_major_guard %}, major guard{% endif %}) ---
 log "Checking {{ stack.name }} ({{ stack.auto_update_services | join(', ') }})..."
 if pull_with_retry "{{ stack.path }}" "{{ stack.auto_update_services | join(' ') }}"; then
+{% if use_major_guard %}
+    diff_output=$("$STACK_DIFF" --check-major "{{ stack.path }}" 2>/dev/null)
+    diff_exit=$?
+    state_file="${STATE_DIR}/blocked-{{ stack.name }}"
+    cleanup_state "$state_file" "$diff_output"
+{% else %}
     diff_output=$("$STACK_DIFF" "{{ stack.path }}" 2>/dev/null || echo "(diff check failed)")
+{% endif %}
 {% for svc in stack.auto_update_services %}
+{% if use_major_guard %}
+    if echo "$diff_output" | grep -q "^MAJOR:  {{ svc }}:"; then
+        svc_diff=$(echo "$diff_output" | grep "^MAJOR:  {{ svc }}:" | sed 's/^MAJOR://')
+        log "{{ stack.name }}/{{ svc }}: MAJOR VERSION BUMP BLOCKED ($svc_diff)"
+        entry=$(echo "$svc_diff" | sed 's/^  //' | awk '{print $1, $2, $3, $4}')
+        if ! is_already_blocked "$state_file" "$entry"; then
+            record_blocked "$state_file" "$entry"
+            BLOCKED_COUNT=$((BLOCKED_COUNT + 1))
+            BLOCKED_SUMMARY="${BLOCKED_SUMMARY}{{ stack.name }}/{{ svc }} (BLOCKED):\n${svc_diff}\n\n"
+        else
+            log "{{ stack.name }}/{{ svc }}: already notified for this major bump"
+        fi
+    elif echo "$diff_output" | grep -q "^  {{ svc }}:"; then
+{% else %}
     if echo "$diff_output" | grep -q "^  {{ svc }}:"; then
+{% endif %}
         svc_diff=$(echo "$diff_output" | grep "^  {{ svc }}:")
         log "{{ stack.name }}/{{ svc }}: update available ($svc_diff)"
 {% if svc == 'gluetun' %}
@@ -159,7 +264,18 @@ if [[ "$PRUNE_RECLAIMED" != "0B" ]]; then
     log "Pruned dangling images, reclaimed $PRUNE_RECLAIMED"
 fi
 
-# Send notification if anything was updated
+# Send notification for blocked major version bumps (louder tag)
+if [[ "$BLOCKED_COUNT" -gt 0 ]]; then
+    BODY=$(echo -e "$BLOCKED_SUMMARY" | head -20)
+    send_notification \
+        "[Auto-Update] $(hostname): $BLOCKED_COUNT major update(s) BLOCKED" \
+        "${BODY}\nReview changelog and manually update when ready." \
+        "warning" \
+        "{{ docker_auto_update_major_notify_tag | default('push') }}"
+    log "Auto-update: $BLOCKED_COUNT major update(s) blocked"
+fi
+
+# Send notification for applied updates
 if [[ "$UPDATE_COUNT" -gt 0 ]]; then
     BODY=$(echo -e "$SUMMARY" | head -20)
     send_notification \
@@ -173,6 +289,6 @@ elif [[ "$ERRORS" -gt 0 ]]; then
         "Auto-update encountered errors. Check: journalctl -u docker-auto-update" \
         "warning"
     log "Auto-update complete with $ERRORS error(s)"
-else
+elif [[ "$BLOCKED_COUNT" -eq 0 ]]; then
     log "Auto-update complete: all images up to date"
 fi

@@ -296,7 +296,7 @@ Packages are merged from multiple sources (all applicable variables combined):
 | `samba.yml` | `nas_server` | Samba + Time Machine configuration |
 | `docker-stacks.yml` | `docker_hosts` | Deploy Docker Compose stacks (per-service update reporting with version diffs) |
 | `gluetun-watchdog.yml` | media-vm | Gluetun VPN crash loop detection, port forwarding monitoring, and auto-restart |
-| `docker-auto-update.yml` | `docker_hosts` | Auto-update selected containers every 6h (Caddy, Gluetun, Diun) |
+| `docker-auto-update.yml` | `docker_hosts` | Auto-update selected containers every 6h with major version guard |
 | `virtiofs.yml` | `proxmox_nodes`, `vms` | Configure VirtioFS shares between Proxmox hosts and VMs |
 | `rclone-sync.yml` | `managed_hosts` | rclone sync from OneDrive to Nextcloud (macbook-pro via launchd, pi5-01 via systemd) |
 | `git-sync.yml` | `nas_server` | Auto-pull from GitHub every 5 minutes (Nextcloud External Storage) |
@@ -388,7 +388,7 @@ Check status: `journalctl -t gluetun-watchdog -f`
 
 ## Docker Auto-Update
 
-Selected containers are auto-updated every 6 hours via systemd timer (`docker-auto-update.yml`). Opt-in per stack with `auto_update: true` or per service with `auto_update_services: [name]` in `host_vars/<hostname>/docker.yml`. Currently auto-updated: Caddy and Seerr (docker-vm), Gluetun (media-vm), Diun (all 3 VMs). Pulls/builds new images, uses `docker-stack-diff` to detect changes, only recreates if images changed. Gluetun uses `--force-recreate` with qBittorrent. Sends silent Pushover notification (`push-quiet`). Config in `group_vars/docker_hosts/auto-update.yml`.
+Selected containers are auto-updated every 6 hours via systemd timer (`docker-auto-update.yml`). Opt-in per stack with `auto_update: true` or per service with `auto_update_services: [name]` in `host_vars/<hostname>/docker.yml`. Currently auto-updated: Caddy, Seerr, and Loki-Grafana (docker-vm), Gluetun and LazyLibrarian (media-vm), Diun (all 3 VMs). Pulls/builds new images, uses `docker-stack-diff` to detect changes, only recreates if images changed. Gluetun uses `--force-recreate` with qBittorrent. **Major version guard**: blocks major version bumps (e.g., `7.x` → `8.x`) and sends a Time Sensitive notification instead of auto-updating. Per-stack opt-out with `major_guard: false`. Config in `group_vars/docker_hosts/auto-update.yml`.
 
 Check status: `journalctl -u docker-auto-update`, `systemctl list-timers docker-auto-update*`
 
