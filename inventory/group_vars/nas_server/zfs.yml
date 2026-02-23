@@ -91,11 +91,21 @@ sanoid_datasets:
     recursive: "yes"
     process_children_only: "no"
 
+  # Plex on media-01 - ignore (replaceable)
+  media-01/media/plex:
+    use_template: ignore
+    recursive: "yes"
+
   # Media drive 02 - 3TB single drive (replaceable content)
   media-02:
     use_template: media
     recursive: "yes"
     process_children_only: "no"
+
+  # Plex on media-02 - ignore (replaceable)
+  media-02/media/plex:
+    use_template: ignore
+    recursive: "yes"
 
 # =============================================================================
 # ZFS Scrub Schedule
