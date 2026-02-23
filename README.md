@@ -1,6 +1,6 @@
 # CC-Ansible
 
-> **Last updated:** 2026-02-22
+> **Last updated:** 2026-02-23
 
 Ansible automation for Johnny's homelab infrastructure (4 Proxmox nodes, 8 VMs/LXCs, Ansible controller LXC, gaming workstation, ThinkPad laptop, MacBook).
 
@@ -399,7 +399,7 @@ Managed by `zfs.yml` — snapshots, scrub, ARC tuning, property enforcement, ACL
 - **Pools**: `nas_zfs` (2x8TB mirror), `media-01` (3TB), `media-02` (3TB)
 - **Snapshots**: Sanoid timer every 15 minutes
 - **Scrub**: Weekly (Sunday 2am) via systemd timer
-- **ARC**: 2GB max (`/etc/modprobe.d/zfs.conf`)
+- **ARC**: 1GB max (`/etc/modprobe.d/zfs.conf`) — sequential streaming barely benefits from ARC
 - **Properties**: Automatically enforced via `zfs set` (compression, acltype, recordsize, atime)
 - **Config**: `group_vars/nas_server/zfs.yml`
 
@@ -618,7 +618,7 @@ Without `cache=never`, virtiofsd daemons cache aggressively (5GB+ each), causing
 setfacl -R -d -m o::r /srv/nas-zfs/configs
 ```
 
-**ts440 memory budget** (15GB total): media-vm 10GB, nextcloud-vm 4GB, ZFS ARC 2GB (`/etc/modprobe.d/zfs.conf`), Proxmox ~1-2GB. ARC was reduced from 5GB to 2GB to give media-vm enough headroom for 20+ containers including Immich CUDA ML.
+**ts440 memory budget** (15GB total): media-vm 8GB, nextcloud-vm 4GB, ZFS ARC 1GB (`/etc/modprobe.d/zfs.conf`), Proxmox ~1-2GB. media-vm reduced from 10GB (actual container usage is ~4.2GB). ARC reduced from 2GB (sequential streaming barely benefits). These changes freed ~3GB, eliminating heavy swap pressure that was causing 13-22% CPU steal in media-vm.
 
 ## Ansible Environment
 
