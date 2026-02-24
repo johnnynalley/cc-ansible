@@ -49,7 +49,7 @@
       changed_when: false
 
     - name: Detect per-service image changes (build stacks)
-      ansible.builtin.script: "{{ playbook_dir }}/../scripts/docker-stack-diff {{ item.item.path }}"
+      ansible.builtin.script: "{{ playbook_dir }}/../scripts/docker-stack-diff --check-major {{ item.item.path }}"
       args:
         executable: /bin/bash
       loop: "{{ build_result.results | default([]) }}"
@@ -57,6 +57,7 @@
         label: "{{ item.item.name }}"
       register: build_diff_result
       changed_when: "'(no image changes detected)' not in build_diff_result.stdout"
+      failed_when: build_diff_result.rc not in [0, 2]
       when: build_result.results is defined
 
     - name: Show pending image updates (build stacks)
@@ -68,6 +69,31 @@
       when:
         - item is not skipped
         - item.changed | default(false)
+
+    - name: Collect major version bumps (build stacks)
+      ansible.builtin.set_fact:
+        _build_major_lines: >-
+          {{ build_diff_result.results | default([])
+             | selectattr('stdout_lines', 'defined')
+             | map(attribute='stdout_lines') | flatten
+             | select('search', 'MAJOR:') | list }}
+
+    - name: Confirm major version updates (build stacks)
+      ansible.builtin.pause:
+        prompt: |-
+
+          *** MAJOR VERSION BUMPS DETECTED ***
+          {{ ansible_play_hosts
+             | map('extract', hostvars, '_build_major_lines')
+             | flatten | join('\n') }}
+
+          Review changelogs for breaking changes before proceeding.
+          Press Enter to continue, or Ctrl+C then A to abort.
+      when: >-
+        ansible_play_hosts
+        | map('extract', hostvars, '_build_major_lines')
+        | flatten | length > 0
+      run_once: true
 
     - name: Determine build stacks needing update
       ansible.builtin.set_fact:
@@ -113,7 +139,7 @@
       changed_when: "'Pull complete' in pull_result.stdout or 'Downloaded newer' in pull_result.stdout"
 
     - name: Detect per-service image changes (pull-only stacks)
-      ansible.builtin.script: "{{ playbook_dir }}/../scripts/docker-stack-diff {{ item.item.path }}"
+      ansible.builtin.script: "{{ playbook_dir }}/../scripts/docker-stack-diff --check-major {{ item.item.path }}"
       args:
         executable: /bin/bash
       loop: "{{ pull_result.results | default([]) }}"
@@ -121,6 +147,7 @@
         label: "{{ item.item.name }}"
       register: pull_diff_result
       changed_when: false
+      failed_when: pull_diff_result.rc not in [0, 2]
       when:
         - pull_result.results is defined
         - item.changed
@@ -135,6 +162,31 @@
         - item is not skipped
         - item.stdout_lines | default([]) | reject('equalto', '') | list | length > 0
         - item.stdout_lines | reject('equalto', '') | list != ['(no image changes detected)']
+
+    - name: Collect major version bumps (pull-only stacks)
+      ansible.builtin.set_fact:
+        _pull_major_lines: >-
+          {{ pull_diff_result.results | default([])
+             | selectattr('stdout_lines', 'defined')
+             | map(attribute='stdout_lines') | flatten
+             | select('search', 'MAJOR:') | list }}
+
+    - name: Confirm major version updates (pull-only stacks)
+      ansible.builtin.pause:
+        prompt: |-
+
+          *** MAJOR VERSION BUMPS DETECTED ***
+          {{ ansible_play_hosts
+             | map('extract', hostvars, '_pull_major_lines')
+             | flatten | join('\n') }}
+
+          Review changelogs for breaking changes before proceeding.
+          Press Enter to continue, or Ctrl+C then A to abort.
+      when: >-
+        ansible_play_hosts
+        | map('extract', hostvars, '_pull_major_lines')
+        | flatten | length > 0
+      run_once: true
 
     - name: Update containers if images changed (pull-only stacks)
       ansible.builtin.shell: |
