@@ -34,3 +34,8 @@ virtiofs_mounts:
     owner: root
     group: root
     mode: "0755"
+  - name: archive
+    mount_point: /srv/archive
+    owner: root
+    group: root
+    mode: "0755"

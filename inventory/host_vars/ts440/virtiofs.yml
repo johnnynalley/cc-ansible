@@ -50,6 +50,11 @@ virtiofs_directory_mappings:
   - name: configs
     path: /srv/nas-zfs/configs
     # Uses ACLs for www-data access (set manually on ts440)
+  - name: archive
+    path: /srv/nas-zfs/archive
+    owner: johnny
+    group: johnny
+    mode: "0775"
   - name: nextcloud_aio_backup
     path: /srv/nas-zfs/backups/nextcloud-aio
     # Borg runs as root inside AIO container
@@ -88,6 +93,12 @@ virtiofs_host_configs:
     host_path: /srv/nas-zfs/media/archive/untitled
     cache: never
 
+  - vmid: 100
+    index: 8
+    name: archive
+    host_path: /srv/nas-zfs/archive
+    cache: never
+
   # nextcloud-vm (VM 101)
   - vmid: 101
     index: 0
@@ -108,4 +119,9 @@ virtiofs_host_configs:
     index: 3
     name: photos
     host_path: /srv/nas-zfs/media/photos
+    cache: never
+  - vmid: 101
+    index: 4
+    name: archive
+    host_path: /srv/nas-zfs/archive
     cache: never

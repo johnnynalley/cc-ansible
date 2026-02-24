@@ -326,8 +326,10 @@ TS440 serves NFS exports via Tailscale. VMs have been migrated to local config s
 
 **Note**: VMs no longer use NFS. All configs are stored locally:
 - docker-vm: `/opt/caddy/`, `/opt/vaultwarden/`, `/opt/uptime-kuma/`, etc.
-- media-vm: `/opt/media-stack/` (uses VirtioFS for media access)
-- nextcloud-vm: `/opt/nextcloud/` (uses VirtioFS for data storage)
+- media-vm: `/opt/media-stack/` (uses VirtioFS for media access + archive)
+- nextcloud-vm: `/opt/nextcloud/` (uses VirtioFS for data storage + archive read-only)
+
+**Archive**: ZFS dataset `nas_zfs/archive` at `/srv/nas-zfs/archive` for ISOs and general archival. Shared via VirtioFS to media-vm (rw) and nextcloud-vm (ro, Nextcloud External Storage at `/srv/external/archive`).
 
 Ansible repo on ansible-lxc: `~/cc-ansible`
 Legacy copy on pi5-01: `/srv/configs/ansible/cc-ansible` (NFS from ts440, auto-synced from GitHub)

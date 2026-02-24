@@ -28,3 +28,11 @@ filesystem_mounts:
     opts: bind,ro
     owner: root
     group: root
+
+  # Bind mount archive into external storage (read-only)
+  - path: /srv/external/archive
+    src: /srv/archive
+    fstype: none
+    opts: bind,ro
+    owner: root
+    group: root
