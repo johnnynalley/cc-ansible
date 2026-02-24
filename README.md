@@ -484,13 +484,15 @@ ansible media-vm -m shell -a "docker exec recyclarr recyclarr sync" --become
 
 Torrents via Nyaa as fallback when Usenet doesn't have a release.
 
-- **VPN**: ProtonVPN via Gluetun container (all torrent traffic tunneled)
-- **qBittorrent**: `network_mode: service:gluetun`, WebUI at `qbit.jnalley.me`
+- **VPN**: ProtonVPN WireGuard via Gluetun container (NL P2P servers, `WIREGUARD_MTU=1420` required)
+- **qBittorrent**: `network_mode: service:gluetun`, WebUI on port 8085 at `qbit.jnalley.me`
 - **Priority**: SABnzbd (1) > qBittorrent (2) - Usenet preferred, torrents fallback
 - **Disk I/O**: POSIX-compliant (required for VirtioFS compatibility)
 - **Incomplete downloads**: Both SABnzbd and qBittorrent use the Lacie SSD for temp storage, isolated in separate subdirs (`usenet/` and `torrents/`)
 - **VirtioFS note**: All containers use `/srv/media/plex:/data` to prevent stale file handles. Hardlinks work across all clients.
 - **Automatic port sync**: systemd path unit watches Gluetun's port file and updates qBittorrent via API when VPN reconnects
+- **Known bad server**: ProtonVPN node-nl-215 (103.69.224.3) has broken port forwarding — gluetun-watchdog should detect and force-recreate
+- **Tuning**: `max_active_downloads: 5` to reduce I/O contention with uploads; `max_active_uploads: 200`
 
 ```bash
 # Verify VPN is working

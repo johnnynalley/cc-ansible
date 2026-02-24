@@ -241,7 +241,13 @@ Sonarr/Radarr → qBittorrent (priority 2) → Gluetun (VPN tunnel)
              → SABnzbd (priority 1, preferred)
 ```
 
-qBittorrent uses `network_mode: "service:gluetun"`, so all traffic goes through Gluetun's network namespace. Gluetun's built-in kill switch blocks all traffic when VPN is down. **Important**: qBittorrent's Disk I/O Type must be set to **POSIX-compliant** (not mmap) for VirtioFS compatibility.
+qBittorrent uses `network_mode: "service:gluetun"`, so all traffic goes through Gluetun's network namespace. Gluetun's built-in kill switch blocks all traffic when VPN is down. **Important**: qBittorrent's Disk I/O Type must be set to **POSIX-compliant** (not mmap) for VirtioFS compatibility. qBittorrent WebUI is on port **8085** (not 8080).
+
+**VPN Protocol**: WireGuard to ProtonVPN Netherlands P2P servers (`SERVER_COUNTRIES=Netherlands`). `WIREGUARD_MTU=1420` is required — Gluetun has an MTU discovery bug that leaves tun0 at 1500 with no MSS clamping, causing TCP fragmentation and throughput loss. WireGuard achieves ~148 Mbits/sec through the tunnel (vs ~71 Mbits/sec with OpenVPN).
+
+**Known Bad Server**: ProtonVPN node-nl-215 (103.69.224.3) has poor port forwarding — peers can't connect, upload stays near zero. node-nl-309 (169.150.196.67) works well. Server pinning is not used (too fragile); the gluetun-watchdog's port forwarding monitor should detect and force-recreate when a bad server is hit.
+
+**qBittorrent Tuning**: `max_active_downloads: 5` (reduced from 10 — active downloads starve uploads of libtorrent I/O resources). `max_active_uploads: 200`, `max_uploads: 200` (global upload slots). `dont_count_slow_torrents: true` lets stalled 0-seed torrents bypass the active download limit so they don't block well-seeded torrents. Queue uses FIFO ordering (by add time, not by seed availability). Seeding upload speed is primarily limited by over-seeded swarms (~17:1 seed:leech ratio on anime torrents), not connection or settings.
 
 **Automatic Port Sync** (not Ansible-managed, deployed manually on media-vm): ProtonVPN assigns dynamic forwarded ports that change on reconnect. A systemd-based automation keeps qBittorrent's listening port in sync:
 
