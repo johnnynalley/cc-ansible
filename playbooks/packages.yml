@@ -56,6 +56,26 @@
       tags: [packages, apt, ppa]
 
     # =========================================================================
+    # APT Release Pin (prevents accidental major version upgrades)
+    # =========================================================================
+    - name: Pin APT to specific release
+      ansible.builtin.copy:
+        dest: /etc/apt/preferences.d/pin-release
+        content: |
+          Package: *
+          Pin: release n={{ apt_pin_release }}
+          Pin-Priority: 900
+
+          Package: *
+          Pin: release n={{ apt_pin_release }}-security
+          Pin-Priority: 900
+        mode: "0644"
+      when:
+        - ansible_facts.os_family == "Debian"
+        - apt_pin_release is defined
+      tags: [packages, apt, pin]
+
+    # =========================================================================
     # Debian/Ubuntu Package Installation
     # =========================================================================
     - name: Update apt cache (Debian)

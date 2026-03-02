@@ -1,8 +1,10 @@
 # =============================================================================
 # Bootstrap Playbook - Create admin user
 # =============================================================================
-# One-time setup for new hosts. Run as root with password auth:
-#   ansible-playbook playbooks/bootstrap.yml -u root --ask-pass --limit new-host
+# One-time setup for new hosts. Uses su (not sudo) since sudo may not be installed yet.
+# Copy the Ansible SSH key to the admin user first, then run:
+#   ssh-copy-id -i ~/.ssh/ansible_ed25519.pub johnny@<LAN_IP>
+#   ansible-playbook playbooks/bootstrap.yml --ask-become-pass --limit new-host
 #
 # After bootstrap, run site.yml to complete configuration (packages, SSH hardening, etc.)
 # The admin_user variable controls which user is created (default: jnalley, legacy hosts: johnny)
@@ -11,6 +13,8 @@
 - name: Bootstrap admin user
   hosts: linux_hosts
   become: true
+  become_method: su
+  become_flags: '-'
   gather_facts: true
 
   vars:
@@ -130,6 +134,16 @@
         line: 'PubkeyAuthentication yes'
         validate: "sshd -t -f %s"
       notify: Reload SSH
+      tags: [ssh]
+
+    # =========================================================================
+    # Clean up root SSH keys (no longer needed after admin user is configured)
+    # =========================================================================
+    - name: Remove Ansible SSH key from root
+      ansible.posix.authorized_key:
+        user: root
+        key: "{{ lookup('file', ansible_pubkey_path) }}"
+        state: absent
       tags: [ssh]
 
   handlers:

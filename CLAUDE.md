@@ -1,6 +1,6 @@
 # CLAUDE.md
 
-> **Last updated:** 2026-02-23
+> **Last updated:** 2026-03-01
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
@@ -8,7 +8,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Ansible automation for a homelab infrastructure consisting of:
 - 4 Proxmox hypervisors (ts440, pve-alto, pve-herc, pve-m70q)
-- 8 VMs/LXC containers (docker-vm, media-vm, nextcloud-vm, dev-vm, ansible-lxc, homebridge-lxc, syncthing-lxc, pbs-lxc)
+- 9 VMs/LXC containers (docker-vm, media-vm, nextcloud-vm, dev-vm, freepbx-vm, ansible-lxc, homebridge-lxc, syncthing-lxc, pbs-lxc)
 - 1 Ansible controller LXC (ansible-lxc, CT 104 on pve-m70q) running Ansible locally
 - 1 Raspberry Pi 5 (pi5-01)
 - 1 CachyOS gaming workstation (jn-desktop)
@@ -77,8 +77,9 @@ ansible-playbook playbooks/packages.yml --tags fastfetch
 # View inventory
 ansible-inventory --list --yaml
 
-# Bootstrap new host (first run as root)
-ansible-playbook playbooks/bootstrap.yml -u root --ask-pass --limit new-host
+# Bootstrap new host (copy key to admin user first, then use su)
+ssh-copy-id -i ~/.ssh/ansible_ed25519.pub johnny@<LAN_IP>
+ansible-playbook playbooks/bootstrap.yml --ask-become-pass --limit new-host
 
 # Run ad-hoc command with sudo (when SSH doesn't have sudo access)
 ansible <hostname> -m shell -a "command here" --become
@@ -158,6 +159,8 @@ Playbooks detect OS via `ansible_facts.os_family` and conditionally execute plat
 - macOS: homebrew (brew/casks)
 
 Package lists follow naming convention: `packages_linux_common`, `packages_debian_extra`, `packages_<group>_extra`, `packages_host_extra`. Cross-platform groups split packages by OS: `packages_arch_workstations_extra`, `packages_debian_workstations_extra` (in `group_vars/workstations/packages.yml`); `packages_debian_development_extra`, `packages_arch_development_extra` (in `group_vars/development/packages.yml`). Apps not in apt repos (Discord, LocalSend) are installed via Flatpak on Debian workstations using `flatpak_workstations` variable; Arch gets them natively via pacman. `tealdeer` (the `tldr` command) is in `packages_linux_common` for all Linux hosts; macOS uses the Homebrew formula `tldr` in `packages_macos_common`.
+
+**APT Release Pin**: Opt-in via `apt_pin_release` variable in host_vars (e.g., `apt_pin_release: bookworm`). Pins both the release and its `-security` companion to priority 900, preventing accidental major version upgrades while allowing normal security patches. Currently used by freepbx-vm to stay on Debian 12.
 
 ### TS440 Storage Architecture
 
@@ -473,6 +476,10 @@ Three-level firewall managed by `playbooks/proxmox-firewall.yml`:
 3. **VM/CT** (`<vmid>.fw`): Per-VM rules — `host_vars/<node>/firewall.yml` under `pve_vm_firewalls`
 
 Security model: default deny (`policy_in: DROP`) on all VMs. Caddy (docker-vm) is the only web entry point. SSH allowed from Tailscale. In VM rules, use `+dc/<ipset>` prefix to reference datacenter-level IP sets.
+
+### freepbx-vm (VM 130 on pve-m70q)
+
+FreePBX 17 PBX server (Asterisk 22, Debian 12 Bookworm). Provides a second phone number via VoIP.ms SIP trunk and Yealink SIP-T54W desk phone, with call forwarding to iPhone. Web GUI: `http://100.97.139.95/admin`. APT pinned to `bookworm` via `apt_pin_release` to prevent accidental Debian 13 upgrades. FreePBX/Asterisk packages are held (`apt-mark hold`) by the install script — module updates done through the web GUI. Sangoma Smart Firewall enabled with Tailscale CGNAT (`100.64.0.0/10`) trusted. Proxmox firewall rules: SIP (UDP 5060 from LAN + VoIP.ms), RTP (UDP 10000-20000), web GUI (TCP 80/443 Tailscale only), SSH. Config: `host_vars/freepbx-vm/` (vars.yml, packages.yml). Local restic backups: `/etc/asterisk`, `/var/lib/asterisk`, `/var/spool/asterisk`.
 
 ### homebridge-lxc (CT 102 on ts440)
 

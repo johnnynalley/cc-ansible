@@ -1,0 +1,10 @@
+# =============================================================================
+# freepbx-vm - Package Configuration
+# =============================================================================
+
+# Pin to Debian 12 (Bookworm) — FreePBX 17 doesn't support Debian 13
+apt_pin_release: bookworm
+
+packages_host_extra:
+  - sox
+  - mpg123

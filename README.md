@@ -1,8 +1,8 @@
 # CC-Ansible
 
-> **Last updated:** 2026-02-23
+> **Last updated:** 2026-03-01
 
-Ansible automation for Johnny's homelab infrastructure (4 Proxmox nodes, 8 VMs/LXCs, Ansible controller LXC, gaming workstation, ThinkPad laptop, MacBook).
+Ansible automation for Johnny's homelab infrastructure (4 Proxmox nodes, 9 VMs/LXCs, Ansible controller LXC, gaming workstation, ThinkPad laptop, MacBook).
 
 **Repository**: https://github.com/johnnynalley/cc-ansible (public)
 
@@ -218,11 +218,14 @@ Ansible uses a dedicated passwordless SSH key (`~/.ssh/ansible_ed25519` on ansib
 ## Bootstrap New Host
 
 ```bash
-# Initial setup (as root)
-ansible-playbook playbooks/bootstrap.yml -u root --ask-pass --limit new-host
+# Copy Ansible SSH key to the admin user first
+ssh-copy-id -i ~/.ssh/ansible_ed25519.pub johnny@<LAN_IP>
 
-# Then run packages
-ansible-playbook playbooks/packages.yml --limit new-host
+# Bootstrap (uses su, not sudo — sudo may not be installed yet)
+ansible-playbook playbooks/bootstrap.yml --ask-become-pass --limit new-host
+
+# Then run full site.yml (installs Tailscale, packages, SSH hardening, etc.)
+ansible-playbook site.yml --limit new-host
 ```
 
 ## Adding New Hosts
@@ -637,6 +640,10 @@ ts440 auto-pulls from GitHub every 5 minutes (`git-sync.timer`) to keep the Next
 - Use `-v` through `-vvvv` for verbosity
 - Tags: `ansible-playbook playbooks/packages.yml --tags fastfetch`
 - Run site.yml for full configuration: `ansible-playbook site.yml`
+
+## FreePBX (freepbx-vm, VM 130 on pve-m70q)
+
+FreePBX 17 / Asterisk 22 PBX server on Debian 12. VoIP.ms SIP trunk with Yealink T54W desk phone. Web GUI: `http://100.97.139.95/admin`. APT pinned to bookworm (`apt_pin_release: bookworm` in host_vars). Sangoma Smart Firewall enabled with Tailscale trusted. Proxmox firewall: SIP, RTP, SSH, web GUI (Tailscale only).
 
 ## HomeKit / Home Assistant
 

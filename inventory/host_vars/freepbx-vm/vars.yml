@@ -1,0 +1,9 @@
+# =============================================================================
+# freepbx-vm - FreePBX 17 PBX Server (VM 130 on pve-m70q)
+# =============================================================================
+
+local_restic_enabled: true
+local_restic_backup_paths:
+  - /etc/asterisk
+  - /var/lib/asterisk
+  - /var/spool/asterisk

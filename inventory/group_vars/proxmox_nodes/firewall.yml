@@ -43,6 +43,11 @@ pve_firewall_ipsets:
     entries:
       - { ip: "100.110.176.37", comment: "Tailscale IP" }
 
+  tailscale:
+    comment: "Tailscale CGNAT range"
+    entries:
+      - { ip: "100.64.0.0/10", comment: "Tailscale CGNAT" }
+
 # Security Groups (referenced as GROUP <name> in node rules)
 pve_firewall_groups:
   corosync-lan:
