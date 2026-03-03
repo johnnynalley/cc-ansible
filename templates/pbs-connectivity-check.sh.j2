@@ -1,0 +1,42 @@
+#!/bin/bash
+# =============================================================================
+# PBS Connectivity Check
+# =============================================================================
+# Runs before each hourly backup job and logs the connection state to pbs-lxc.
+# Output goes to journald (tagged pbs-check) → Loki for analysis.
+#
+# Deployed by: playbooks/proxmox-backup-server.yml (Play 4)
+# Managed by Ansible — do not edit manually.
+# =============================================================================
+
+set -euo pipefail
+
+PBS_HOST="{{ hostvars['pbs-lxc']['ansible_host'] }}"
+PBS_PORT="{{ pbs_storage_port | default(8007) }}"
+TAG="pbs-check"
+
+log() { logger -t "$TAG" "$1"; }
+
+# Tailscale peer status
+ts_status=$(tailscale status 2>/dev/null | grep "$PBS_HOST" || echo "peer not found")
+log "tailscale: $ts_status"
+
+# Tailscale ping (single, 5s timeout)
+ts_ping=$(timeout 5 tailscale ping --c 1 "$PBS_HOST" 2>&1 || echo "ping failed")
+log "ts-ping: $ts_ping"
+
+# TCP connection test
+if timeout 5 bash -c "echo > /dev/tcp/$PBS_HOST/$PBS_PORT" 2>/dev/null; then
+    log "tcp: OK"
+else
+    log "tcp: FAILED"
+fi
+
+# HTTPS API test (skip TLS verify, 5s timeout)
+http_code=$(curl -sSk --connect-timeout 5 --max-time 10 -o /dev/null -w "%{http_code}" \
+    "https://$PBS_HOST:$PBS_PORT/api2/json/version" 2>/dev/null || echo "000")
+log "https: HTTP $http_code"
+
+# Tailscale interface stats
+ts_iface=$(ip -s link show tailscale0 2>/dev/null | grep -A1 "RX\|TX" | tr '\n' ' ' || echo "n/a")
+log "iface: $ts_iface"

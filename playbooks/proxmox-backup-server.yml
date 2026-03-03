@@ -86,24 +86,26 @@
     # =========================================================================
     # PBS Datastore
     # =========================================================================
-    - name: Check datastore path is writable
-      ansible.builtin.stat:
-        path: "{{ pbs_datastore_path }}"
-      register: pbs_path_stat
-
-    - name: Fail if datastore path is not writable
-      ansible.builtin.assert:
-        that:
-          - pbs_path_stat.stat.exists
-          - pbs_path_stat.stat.writeable
-        fail_msg: >-
-          {{ pbs_datastore_path }} is not writable. For unprivileged LXCs,
-          run on the Proxmox host: chown 100000:100000 {{ pbs_datastore_path }}
-
     - name: Check if datastore already exists
       ansible.builtin.command: proxmox-backup-manager datastore list --output-format json
       register: pbs_datastores
       changed_when: false
+
+    - name: Verify datastore path is writable (new datastore only)
+      ansible.builtin.command: test -w {{ pbs_datastore_path }}
+      register: pbs_path_writable
+      failed_when: false
+      changed_when: false
+      when: pbs_datastore_name not in (pbs_datastores.stdout | from_json | map(attribute='name') | list)
+
+    - name: Fail if datastore path is not writable
+      ansible.builtin.fail:
+        msg: >-
+          {{ pbs_datastore_path }} is not writable. For unprivileged LXCs,
+          run on the Proxmox host: chown 100000:100000 {{ pbs_datastore_path }}
+      when:
+        - pbs_path_writable is not skipped
+        - pbs_path_writable.rc != 0
 
     - name: Create PBS datastore
       ansible.builtin.command: >
@@ -327,3 +329,84 @@
     - name: Display backup jobs
       ansible.builtin.debug:
         msg: "{{ pve_final_jobs.stdout }}"
+
+
+# -----------------------------------------------------------------------------
+# Play 4: PBS connectivity monitoring (runs before each backup)
+# -----------------------------------------------------------------------------
+- name: Deploy PBS connectivity check
+  hosts: proxmox_nodes
+  become: true
+  gather_facts: false
+
+  tasks:
+    - name: Stop and disable PBS connectivity check (if disabled)
+      ansible.builtin.systemd:
+        name: "{{ item }}"
+        state: stopped
+        enabled: false
+      loop:
+        - pbs-connectivity-check.timer
+        - pbs-connectivity-check.service
+      failed_when: false
+      when: not (pbs_connectivity_check_enabled | default(true))
+
+    - name: Remove PBS connectivity check files (if disabled)
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: absent
+      loop:
+        - /usr/local/bin/pbs-connectivity-check
+        - /etc/systemd/system/pbs-connectivity-check.service
+        - /etc/systemd/system/pbs-connectivity-check.timer
+      when: not (pbs_connectivity_check_enabled | default(true))
+
+    - name: Skip remaining tasks if disabled
+      ansible.builtin.meta: end_host
+      when: not (pbs_connectivity_check_enabled | default(true))
+
+    - name: Deploy PBS connectivity check script
+      ansible.builtin.template:
+        src: ../templates/pbs-connectivity-check.sh.j2
+        dest: /usr/local/bin/pbs-connectivity-check
+        mode: "0755"
+
+    - name: Deploy PBS connectivity check service
+      ansible.builtin.copy:
+        content: |
+          [Unit]
+          Description=PBS connectivity check (pre-backup diagnostic)
+
+          [Service]
+          Type=oneshot
+          ExecStart=/usr/local/bin/pbs-connectivity-check
+        dest: /etc/systemd/system/pbs-connectivity-check.service
+        mode: "0644"
+      register: pbs_check_service
+
+    - name: Deploy PBS connectivity check timer
+      ansible.builtin.copy:
+        content: |
+          [Unit]
+          Description=Run PBS connectivity check before hourly backups
+
+          [Timer]
+          OnCalendar=*:59
+          Persistent=false
+
+          [Install]
+          WantedBy=timers.target
+        dest: /etc/systemd/system/pbs-connectivity-check.timer
+        mode: "0644"
+      register: pbs_check_timer
+
+    - name: Reload systemd
+      ansible.builtin.systemd:
+        daemon_reload: true
+      when: pbs_check_service.changed or pbs_check_timer.changed
+
+    - name: Enable and start PBS connectivity check timer
+      ansible.builtin.systemd:
+        name: pbs-connectivity-check.timer
+        state: started
+        enabled: true
