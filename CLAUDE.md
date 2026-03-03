@@ -1,6 +1,6 @@
 # CLAUDE.md
 
-> **Last updated:** 2026-03-01
+> **Last updated:** 2026-03-02
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
@@ -372,7 +372,7 @@ Cloudflare Tunnel (`cloudflared` on docker-vm) provides public access to Nextclo
 
 Four-tier backup strategy:
 
-- **Proxmox Backup Server (PBS)**: Hourly VM/CT snapshot backups via `proxmox-backup-server.yml`. pbs-lxc (CT 105 on pve-herc, Debian 13) with 2TB ext4 datastore at `/srv/pbs-data`. Registered as `pbs-main` storage on all 4 Proxmox nodes. All guests backed up hourly except pbs-lxc itself (circular); uses `--all --exclude 105`. API token auth (`backup@pbs!ansible`, secret in `host_vars/pbs-lxc/vault.yml`). Daily prune job: 24h/7d/4w/3m. Web UI: `https://100.110.176.37:8007`. PBS dedup makes hourly backups viable — only changed blocks are stored after the initial full backup.
+- **Proxmox Backup Server (PBS)**: Hourly VM/CT snapshot backups via `proxmox-backup-server.yml`. pbs-lxc (CT 105 on pve-herc, Debian 13, 4 cores, 2GB RAM) with 2TB ext4 datastore at `/srv/pbs-data`. Registered as `pbs-main` storage on all 4 Proxmox nodes. All guests backed up hourly except pbs-lxc itself (circular); uses `--all --exclude 105`. API token auth (`backup@pbs!ansible`, secret in `host_vars/pbs-lxc/vault.yml`). Daily prune job: 24h/7d/4w/3m. Web UI: `https://100.110.176.37:8007`. PBS dedup makes hourly backups viable — only changed blocks are stored after the initial full backup. Connectivity check runs at `:59` on all nodes (Play 4), logging to journald tag `pbs-check` for Loki.
 - **Offsite (Backblaze B2)**: Daily via `restic.yml` at 00:00 UTC +30m random delay. Retention: 7d/4w/6m. ts440 backs up `/srv/nas-zfs` excluding replaceable media.
 - **Local (ts440 ZFS)**: Hourly via `local-restic.yml`. Backs up `/opt` from VMs to `/srv/nas-zfs/backups/<hostname>/`. Retention: 24h/7d/4w/6m. Uses dedicated SSH key in `group_vars/backup_clients/vault.yml`.
 - **ZFS Snapshots (sanoid)**: Every 15 minutes via `zfs.yml`. Policies defined in `group_vars/nas_server/zfs.yml`. Property enforcement (`zfs set`) runs automatically to fix drift.
@@ -387,6 +387,7 @@ Enable local backups: set `local_restic_enabled: true` and `local_restic_backup_
 - PBS tokens use privilege separation — both user AND token ACLs must be set (intersection model)
 - Config: `host_vars/pbs-lxc/vars.yml` (datastore name, retention, API user/token)
 - Vzdump job config: `group_vars/proxmox_nodes/vars.yml` (`pbs_backup_schedule`, `pbs_backup_exclude`)
+- **4 cores required** — pve-herc's AMD GX-415GA is a low-power 1.5GHz SOC. With 2 cores, simultaneous WireGuard+TLS connections from all 4 PVE nodes at `:00` caused intermittent TCP timeouts (first 2 succeed, 3rd/4th fail). 4 cores resolved this.
 
 ### Proxmox Notification Webhooks
 

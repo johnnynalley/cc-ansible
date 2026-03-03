@@ -1,6 +1,6 @@
 # CC-Ansible
 
-> **Last updated:** 2026-03-01
+> **Last updated:** 2026-03-02
 
 Ansible automation for Johnny's homelab infrastructure (4 Proxmox nodes, 9 VMs/LXCs, Ansible controller LXC, gaming workstation, ThinkPad laptop, MacBook).
 
@@ -745,7 +745,7 @@ Centralized log aggregation. Loki + Grafana run on docker-vm, Alloy agents on al
 
 ## Proxmox Backup Server (pbs-lxc)
 
-PBS runs in an unprivileged LXC (CT 105) on pve-herc with a dedicated 2TB ext4 drive.
+PBS runs in an unprivileged LXC (CT 105) on pve-herc with a dedicated 2TB ext4 drive. 4 cores, 2GB RAM.
 
 - **Web UI**: `https://100.110.176.37:8007` (login as `root@pam`)
 - **Datastore**: `main` at `/srv/pbs-data` (~1.8TB usable)
@@ -753,6 +753,7 @@ PBS runs in an unprivileged LXC (CT 105) on pve-herc with a dedicated 2TB ext4 d
 - **Backup schedule**: Hourly, all guests except pbs-lxc (Ansible-managed via Play 3)
 - **Prune job**: Daily — 24 hourly, 7 daily, 4 weekly, 3 monthly
 - **API auth**: Token `backup@pbs!ansible` (secret in vault)
+- **Connectivity check**: Runs at `:59` on all nodes (Play 4), logs to `pbs-check` tag in Loki
 - **Config**: `host_vars/pbs-lxc/vars.yml`, `host_vars/pbs-lxc/vault.yml`
 
 ```bash
