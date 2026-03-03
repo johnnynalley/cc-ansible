@@ -91,7 +91,7 @@ cc-ansible/
 │   ├── nextcloud-scan.yml      # Periodic occ files:scan for external storage
 │   ├── claude-memory-sync.yml  # Sync Claude Code memory to NAS for Nextcloud
 │   ├── proxmox-firewall.yml    # Proxmox firewall rules (datacenter/node/VM)
-│   ├── proxmox-backup-server.yml # PBS install, datastore, API token, PVE registration, backup jobs
+│   ├── proxmox-backup-server.yml # PBS install, datastore, API token, PVE registration, backup jobs, connectivity check
 │   ├── proxmox-notifications.yml # PVE webhook notifications → Apprise → Pushover
 │   └── swap.yml                # Swap configuration (zvol for ZFS, file for others)
 ├── tasks/
@@ -306,7 +306,7 @@ Packages are merged from multiple sources (all applicable variables combined):
 | `nextcloud-scan.yml` | nextcloud-vm | Periodic `occ files:scan` for external storage (every 10 min) |
 | `claude-memory-sync.yml` | `nas_server`, ansible-lxc | Rsync Claude Code memory to NAS for Nextcloud access (every 10 min) |
 | `proxmox-firewall.yml` | `proxmox_nodes` | Deploy Proxmox firewall rules (datacenter, node, VM/CT) |
-| `proxmox-backup-server.yml` | pbs-lxc, `proxmox_nodes` | Install PBS, configure datastore/prune/API token, register on all PVE nodes, create vzdump backup jobs |
+| `proxmox-backup-server.yml` | pbs-lxc, `proxmox_nodes` | Install PBS, configure datastore/prune/API token, register on all PVE nodes, create vzdump backup jobs, deploy connectivity check |
 | `proxmox-notifications.yml` | `proxmox_nodes` | PVE webhook notification targets + matchers → Apprise → Pushover |
 
 ## NFS Configuration
