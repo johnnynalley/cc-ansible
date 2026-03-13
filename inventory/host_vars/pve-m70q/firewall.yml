@@ -34,3 +34,12 @@ pve_vm_firewalls:
       - { action: ACCEPT, proto: udp, dport: 5060, comment: "SIP from VoIP.ms" }
       - { action: ACCEPT, proto: udp, dport: "10000:20000", comment: "RTP media" }
       - { action: ACCEPT, proto: tcp, dport: "80,443", source: "+dc/tailscale", comment: "FreePBX GUI (Tailscale only)" }
+
+  # openclaw-vm (VM 140) - OpenClaw AI Agent
+  140:
+    enable: true
+    policy_in: DROP
+    rules:
+      - { action: ACCEPT, proto: tcp, dport: 22, source: "+dc/tailscale", comment: "SSH from Tailscale" }
+      - { action: ACCEPT, proto: tcp, dport: 18789, source: "100.108.254.100", comment: "OpenClaw gateway from Caddy (docker-vm)" }
+      - { action: ACCEPT, proto: udp, dport: 41641, comment: "Tailscale WireGuard" }

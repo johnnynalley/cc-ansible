@@ -1,0 +1,244 @@
+# =============================================================================
+# OpenClaw Playbook - Deploy OpenClaw AI agent infrastructure
+# =============================================================================
+# Manages the infrastructure for OpenClaw: npm package, systemd services,
+# timers, git repo clone, and linting tools. Application config files
+# (openclaw.json, .env) are created manually on the VM and backed up by restic.
+#
+# Usage: ansible-playbook playbooks/openclaw.yml
+# =============================================================================
+
+- name: Deploy OpenClaw AI agent
+  hosts: linux_hosts
+  become: true
+  gather_facts: true
+
+  tasks:
+    # --- Disable path: stop services if openclaw is disabled ---
+    - name: Stop and disable OpenClaw services (disabled hosts)
+      ansible.builtin.systemd:
+        name: "{{ item }}"
+        enabled: false
+        state: stopped
+        daemon_reload: true
+      loop:
+        - openclaw.service
+        - openclaw-repo-sync.timer
+        - openclaw-update-check.timer
+      when: not (openclaw_enabled | default(false))
+      failed_when: false
+
+    - name: Skip hosts without openclaw_enabled
+      ansible.builtin.meta: end_host
+      when: not (openclaw_enabled | default(false))
+
+    # --- Install OpenClaw via npm ---
+    - name: Install OpenClaw globally via npm
+      community.general.npm:
+        name: openclaw
+        global: true
+        state: latest
+
+    # --- Install linting tools in a venv ---
+    - name: Create OpenClaw venv for linting tools
+      ansible.builtin.pip:
+        name:
+          - ansible-lint
+          - yamllint
+        virtualenv: /opt/openclaw-venv
+        virtualenv_command: python3 -m venv
+
+    - name: Add venv bin to johnny's PATH via profile
+      ansible.builtin.lineinfile:
+        path: /home/{{ admin_user }}/.profile
+        line: 'export PATH="/opt/openclaw-venv/bin:$PATH"'
+        regexp: '^export PATH="/opt/openclaw-venv/bin'
+        owner: "{{ admin_user }}"
+        group: "{{ admin_user }}"
+        create: true
+        mode: "0644"
+
+    # --- Create config directory ---
+    - name: Create OpenClaw config directory
+      ansible.builtin.file:
+        path: /home/{{ admin_user }}/.openclaw
+        state: directory
+        owner: "{{ admin_user }}"
+        group: "{{ admin_user }}"
+        mode: "0700"
+
+    # --- Clone cc-ansible repo ---
+    - name: Clone cc-ansible repo
+      ansible.builtin.git:
+        repo: https://github.com/johnnynalley/cc-ansible.git
+        dest: "{{ openclaw_workspace }}"
+        version: main
+        update: true
+      become_user: "{{ admin_user }}"
+
+    # --- Configure git for push access ---
+    - name: Configure git user name
+      community.general.git_config:
+        name: user.name
+        value: "Johnny Nalley"
+        scope: global
+      become_user: "{{ admin_user }}"
+
+    - name: Configure git user email
+      community.general.git_config:
+        name: user.email
+        value: "johnny@jnalley.me"
+        scope: global
+      become_user: "{{ admin_user }}"
+
+    - name: Configure git credential store
+      community.general.git_config:
+        name: credential.helper
+        value: store
+        scope: global
+      become_user: "{{ admin_user }}"
+
+    # --- Deploy systemd service ---
+    - name: Create openclaw.service
+      ansible.builtin.copy:
+        dest: /etc/systemd/system/openclaw.service
+        mode: "0644"
+        content: |
+          [Unit]
+          Description=OpenClaw AI Gateway
+          After=network-online.target docker.service
+          Wants=network-online.target
+
+          [Service]
+          Type=simple
+          User={{ admin_user }}
+          WorkingDirectory={{ openclaw_workspace }}
+          ExecStart=/usr/bin/openclaw gateway start
+          Restart=on-failure
+          RestartSec=10
+
+          # Hardening
+          NoNewPrivileges=true
+          PrivateTmp=true
+          PrivateDevices=true
+          ProtectKernelModules=true
+          ProtectKernelTunables=true
+          ProtectControlGroups=true
+          ProtectHome=read-only
+          ReadWritePaths=/home/{{ admin_user }}/.openclaw {{ openclaw_workspace }}
+          # NOT MemoryDenyWriteExecute — crashes Node.js V8 JIT
+
+          [Install]
+          WantedBy=multi-user.target
+      notify: Reload systemd
+
+    # --- Deploy repo-sync timer (git pull every 5 min) ---
+    - name: Create openclaw-repo-sync.service
+      ansible.builtin.copy:
+        dest: /etc/systemd/system/openclaw-repo-sync.service
+        mode: "0644"
+        content: |
+          [Unit]
+          Description=Pull latest cc-ansible for OpenClaw
+          After=network-online.target
+          Wants=network-online.target
+
+          [Service]
+          Type=oneshot
+          User={{ admin_user }}
+          Environment=GIT_TERMINAL_PROMPT=0
+          WorkingDirectory={{ openclaw_workspace }}
+          ExecStart=/usr/bin/git pull --ff-only
+      notify: Reload systemd
+
+    - name: Create openclaw-repo-sync.timer
+      ansible.builtin.copy:
+        dest: /etc/systemd/system/openclaw-repo-sync.timer
+        mode: "0644"
+        content: |
+          [Unit]
+          Description=Pull cc-ansible every 5 minutes for OpenClaw
+
+          [Timer]
+          OnCalendar=*-*-* *:0/5
+          RandomizedDelaySec=30
+          Persistent=true
+
+          [Install]
+          WantedBy=timers.target
+      notify: Reload systemd
+
+    # --- Deploy update-check timer (daily at 08:00) ---
+    - name: Create openclaw-update-check script
+      ansible.builtin.template:
+        src: ../templates/openclaw-update-check.sh.j2
+        dest: /usr/local/sbin/openclaw-update-check
+        mode: "0755"
+        owner: root
+        group: root
+
+    - name: Create openclaw-update-check.service
+      ansible.builtin.copy:
+        dest: /etc/systemd/system/openclaw-update-check.service
+        mode: "0644"
+        content: |
+          [Unit]
+          Description=Check for OpenClaw updates
+          After=network-online.target
+          Wants=network-online.target
+
+          [Service]
+          Type=oneshot
+          ExecStart=/usr/local/sbin/openclaw-update-check
+          StandardOutput=journal
+          StandardError=journal
+          TimeoutStartSec=60
+      notify: Reload systemd
+
+    - name: Create openclaw-update-check.timer
+      ansible.builtin.copy:
+        dest: /etc/systemd/system/openclaw-update-check.timer
+        mode: "0644"
+        content: |
+          [Unit]
+          Description=Daily OpenClaw update check
+
+          [Timer]
+          OnCalendar=*-*-* 08:00:00
+          RandomizedDelaySec=900
+          Persistent=true
+
+          [Install]
+          WantedBy=timers.target
+      notify: Reload systemd
+
+    # --- Enable linger for headless persistence ---
+    - name: Enable lingering for {{ admin_user }}
+      ansible.builtin.command:
+        cmd: loginctl enable-linger {{ admin_user }}
+      changed_when: false
+
+    # --- Start and enable services ---
+    - name: Enable and start OpenClaw service
+      ansible.builtin.systemd:
+        name: openclaw.service
+        enabled: true
+        state: started
+        daemon_reload: true
+
+    - name: Enable and start repo-sync timer
+      ansible.builtin.systemd:
+        name: openclaw-repo-sync.timer
+        enabled: true
+        state: started
+
+    - name: Enable and start update-check timer
+      ansible.builtin.systemd:
+        name: openclaw-update-check.timer
+        enabled: true
+        state: started
+
+  handlers:
+    - name: Reload systemd
+      ansible.builtin.systemd:
+        daemon_reload: true

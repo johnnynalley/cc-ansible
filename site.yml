@@ -94,6 +94,10 @@
   ansible.builtin.import_playbook: playbooks/docker-auto-update.yml
   tags: [docker, auto-update]
 
+- name: Deploy OpenClaw AI agent
+  ansible.builtin.import_playbook: playbooks/openclaw.yml
+  tags: [openclaw]
+
 - name: Configure centralized logging (Loki + Alloy)
   ansible.builtin.import_playbook: playbooks/logging.yml
   tags: [logging, loki, alloy]

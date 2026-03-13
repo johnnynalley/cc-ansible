@@ -1,0 +1,13 @@
+# =============================================================================
+# openclaw-vm - Package Configuration
+# =============================================================================
+
+packages_host_extra:
+  - nodejs
+  - npm
+  - python3-pip
+  - python3-venv
+  - git
+
+# Docker for OpenClaw sandbox containers (not in docker_hosts group)
+install_docker: true

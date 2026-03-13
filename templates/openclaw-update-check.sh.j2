@@ -1,0 +1,40 @@
+#!/bin/bash
+# OpenClaw update check script
+# Managed by Ansible - do not edit manually
+#
+# Checks if a newer version of OpenClaw is available on npm and sends
+# an Apprise notification if so.
+
+set -euo pipefail
+
+LOG_TAG="openclaw-update-check"
+
+log() { logger -t "$LOG_TAG" "$*"; echo "$*"; }
+
+CURRENT=$(openclaw --version 2>/dev/null || echo "unknown")
+LATEST=$(npm view openclaw version 2>/dev/null || echo "unknown")
+
+if [[ "$CURRENT" == "unknown" || "$LATEST" == "unknown" ]]; then
+    log "ERROR: Could not determine OpenClaw versions (current=$CURRENT, latest=$LATEST)"
+    exit 1
+fi
+
+if [[ "$CURRENT" == "$LATEST" ]]; then
+    log "OpenClaw is up to date ($CURRENT)"
+    exit 0
+fi
+
+log "OpenClaw update available: $CURRENT -> $LATEST"
+
+curl -sf -o /dev/null \
+    -X POST "{{ apprise_endpoint }}/notify/{{ apprise_token }}" \
+    --form-string "title=[OpenClaw] Update available on $(hostname)" \
+    --form-string "body=Current: $CURRENT → Latest: $LATEST
+Back up config before updating:
+  cp ~/.openclaw/openclaw.json ~/.openclaw/openclaw.json.bak.\$(date +%Y%m%d)
+  npm update -g openclaw" \
+    --form-string "tag=push-quiet" \
+    --form-string "type=info" \
+    --max-time 10 \
+    --retry 2 \
+    --retry-delay 3 2>/dev/null || log "WARNING: Failed to send notification"

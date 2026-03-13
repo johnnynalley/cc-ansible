@@ -1,0 +1,9 @@
+# =============================================================================
+# openclaw-vm - Backup Configuration
+# =============================================================================
+
+# Local backup to ts440 ZFS (hourly)
+local_restic_enabled: true
+local_restic_backup_paths:
+  - /home/johnny/.openclaw
+  - /opt/cc-ansible

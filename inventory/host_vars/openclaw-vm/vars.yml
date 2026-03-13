@@ -1,0 +1,10 @@
+# =============================================================================
+# openclaw-vm - OpenClaw AI Agent Platform (VM 140 on pve-m70q)
+# =============================================================================
+
+admin_user: johnny
+
+# OpenClaw deployment
+openclaw_enabled: true
+openclaw_port: 18789
+openclaw_workspace: /opt/cc-ansible
