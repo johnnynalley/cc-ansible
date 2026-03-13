@@ -44,3 +44,7 @@ docker_stacks:
     path: /opt/loki-grafana
     build: false
     auto_update: true
+  # - name: dispatcharr
+  #   path: /opt/dispatcharr
+  #   build: false
+  #   auto_update: true

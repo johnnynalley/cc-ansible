@@ -1,6 +1,6 @@
 # CC-Ansible
 
-> **Last updated:** 2026-03-02
+> **Last updated:** 2026-03-10
 
 Ansible automation for Johnny's homelab infrastructure (4 Proxmox nodes, 9 VMs/LXCs, Ansible controller LXC, gaming workstation, ThinkPad laptop, MacBook).
 
@@ -540,6 +540,7 @@ docker-vm (VM 110 on pve-m70q) runs infrastructure services:
 | Apprise API | `apprise.jnalley.me` | Notification router (Pushover + email) |
 | FreshRSS | `rss.jnalley.me` | RSS aggregator (Google Reader API for Reeder) |
 | Diun | - | Docker image update notifier |
+| Dispatcharr | `iptv.jnalley.me` | HDHomeRun emulator for Plex Live TV (free IPTV) |
 
 Stacks support `start: true/false` in `docker.yml` to control service state.
 

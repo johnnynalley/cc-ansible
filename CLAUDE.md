@@ -1,6 +1,6 @@
 # CLAUDE.md
 
-> **Last updated:** 2026-03-02
+> **Last updated:** 2026-03-10
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
@@ -219,6 +219,8 @@ docker_stacks:
 #### docker-vm (VM 110 on pve-m70q)
 
 Lightweight VM (6 cores, 6GB RAM) running infrastructure services. Stacks defined in `host_vars/docker-vm/docker.yml`. Services use `caddy-proxy` Docker network (created by Caddy stack; other stacks join as external). Configs stored locally at `/opt/<service>/`, backed up via restic.
+
+**Dispatcharr**: HDHomeRun emulator for free IPTV in Plex. Presents M3U playlists (iptv-org, Pluto TV, etc.) as a virtual tuner so Plex can use its Live TV & DVR features. AIO container (app + Redis + Celery) at `/opt/dispatcharr/`. Web UI at `https://iptv.jnalley.me` (Tailscale only). Plex on media-vm connects to the tuner at `http://100.108.254.100:9191`. No GPU needed — Dispatcharr only proxies streams; Plex handles transcoding.
 
 #### nextcloud-vm (VM 101 on ts440)
 
