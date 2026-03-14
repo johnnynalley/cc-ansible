@@ -68,6 +68,14 @@
         mode: "0700"
 
     # --- Clone cc-ansible repo ---
+    - name: Create workspace directory
+      ansible.builtin.file:
+        path: "{{ openclaw_workspace }}"
+        state: directory
+        owner: "{{ admin_user }}"
+        group: "{{ admin_user }}"
+        mode: "0755"
+
     - name: Clone cc-ansible repo
       ansible.builtin.git:
         repo: https://github.com/johnnynalley/cc-ansible.git
@@ -113,7 +121,7 @@
           Type=simple
           User={{ admin_user }}
           WorkingDirectory={{ openclaw_workspace }}
-          ExecStart=/usr/bin/openclaw gateway start
+          ExecStart=/usr/local/bin/openclaw gateway start
           Restart=on-failure
           RestartSec=10
 

@@ -2,9 +2,11 @@
 # openclaw-vm - Package Configuration
 # =============================================================================
 
+# NodeSource repo for Node.js 22 (OpenClaw requires >= 22)
+# Added manually: curl -fsSL https://deb.nodesource.com/setup_22.x | bash -
+# NodeSource nodejs package includes npm, so separate npm package not needed
 packages_host_extra:
   - nodejs
-  - npm
   - python3-pip
   - python3-venv
   - git
