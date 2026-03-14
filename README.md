@@ -1,8 +1,8 @@
 # CC-Ansible
 
-> **Last updated:** 2026-03-10
+> **Last updated:** 2026-03-13
 
-Ansible automation for Johnny's homelab infrastructure (4 Proxmox nodes, 9 VMs/LXCs, Ansible controller LXC, gaming workstation, ThinkPad laptop, MacBook).
+Ansible automation for Johnny's homelab infrastructure (4 Proxmox nodes, 10 VMs/LXCs, Ansible controller LXC, gaming workstation, ThinkPad laptop, MacBook).
 
 **Repository**: https://github.com/johnnynalley/cc-ansible (public)
 
@@ -63,7 +63,8 @@ cc-ansible/
 │       ├── pi5-01/
 │       ├── jn-desktop/         # CachyOS gaming workstation
 │       ├── jn-t14s-lin/       # ThinkPad T14s (Kubuntu)
-│       └── dev-vm/            # Development VM (Ubuntu 24.04, pve-m70q)
+│       ├── dev-vm/            # Development VM (Ubuntu 24.04, pve-m70q)
+│       └── openclaw-vm/       # OpenClaw AI agent (Ubuntu 25.10, pve-m70q)
 ├── playbooks/
 │   ├── packages.yml            # Multi-platform package installation
 │   ├── smartmontools.yml       # SMART disk monitoring (Apprise alerts)
@@ -93,6 +94,7 @@ cc-ansible/
 │   ├── proxmox-firewall.yml    # Proxmox firewall rules (datacenter/node/VM)
 │   ├── proxmox-backup-server.yml # PBS install, datastore, API token, PVE registration, backup jobs, connectivity check
 │   ├── proxmox-notifications.yml # PVE webhook notifications → Apprise → Pushover
+│   ├── openclaw.yml             # OpenClaw AI agent (npm, gateway, timers)
 │   └── swap.yml                # Swap configuration (zvol for ZFS, file for others)
 ├── tasks/
 │   ├── locale.yml              # Debian locale setup
@@ -129,7 +131,8 @@ cc-ansible/
 │   ├── proxmox-virtiofs-directory.cfg.j2  # VirtioFS directory mappings
 │   ├── proxmox-cluster-firewall.fw.j2    # Datacenter firewall rules
 │   ├── proxmox-node-firewall.fw.j2       # Node-level firewall rules
-│   └── proxmox-vm-firewall.fw.j2         # VM/CT firewall rules
+│   ├── proxmox-vm-firewall.fw.j2         # VM/CT firewall rules
+│   └── openclaw-update-check.sh.j2      # OpenClaw npm update checker
 ├── scripts/
 │   ├── docker-stack-diff       # Per-service image change detection with version labels
 │   ├── mergerfs-balance        # ZFS-compatible mergerfs branch balancer
@@ -146,7 +149,7 @@ managed_hosts
 │   ├── debian_hosts
 │   │   ├── proxmox_nodes (ts440, pve-alto, pve-herc, pve-m70q)
 │   │   ├── vms_lxcs
-│   │   │   ├── vms (docker-vm, media-vm, nextcloud-vm, dev-vm) ← gets qemu-guest-agent
+│   │   │   ├── vms (docker-vm, media-vm, nextcloud-vm, dev-vm, freepbx-vm, openclaw-vm) ← gets qemu-guest-agent
 │   │   │   └── lxcs (homebridge-lxc, syncthing-lxc, pbs-lxc)
 │   │   ├── orchestrator (ansible-lxc, pi5-01)
 │   │   └── jn-t14s-lin ← ThinkPad T14s (Kubuntu)
@@ -308,6 +311,7 @@ Packages are merged from multiple sources (all applicable variables combined):
 | `proxmox-firewall.yml` | `proxmox_nodes` | Deploy Proxmox firewall rules (datacenter, node, VM/CT) |
 | `proxmox-backup-server.yml` | pbs-lxc, `proxmox_nodes` | Install PBS, configure datastore/prune/API token, register on all PVE nodes, create vzdump backup jobs, deploy connectivity check |
 | `proxmox-notifications.yml` | `proxmox_nodes` | PVE webhook notification targets + matchers → Apprise → Pushover |
+| `openclaw.yml` | `linux_hosts` | OpenClaw AI agent (npm install, gateway service, repo-sync/update-check timers) |
 
 ## NFS Configuration
 
@@ -541,6 +545,7 @@ docker-vm (VM 110 on pve-m70q) runs infrastructure services:
 | FreshRSS | `rss.jnalley.me` | RSS aggregator (Google Reader API for Reeder) |
 | Diun | - | Docker image update notifier |
 | Dispatcharr | `iptv.jnalley.me` | HDHomeRun emulator for Plex Live TV (free IPTV) |
+| OpenClaw | `openclaw.jnalley.me` | AI agent gateway (proxied to openclaw-vm:18789) |
 
 Stacks support `start: true/false` in `docker.yml` to control service state.
 
@@ -642,7 +647,7 @@ ts440 auto-pulls from GitHub every 5 minutes (`git-sync.timer`) to keep the Next
 - Tags: `ansible-playbook playbooks/packages.yml --tags fastfetch`
 - Run site.yml for full configuration: `ansible-playbook site.yml`
 
-## FreePBX (freepbx-vm, VM 130 on pve-m70q)
+## FreePBX (freepbx-vm, VM 130 on pve-herc)
 
 FreePBX 17 / Asterisk 22 PBX server on Debian 12. VoIP.ms SIP trunk with Yealink T54W desk phone. Web GUI: `http://100.97.139.95/admin`. APT pinned to bookworm (`apt_pin_release: bookworm` in host_vars). Sangoma Smart Firewall enabled with Tailscale trusted. Proxmox firewall: SIP, RTP, SSH, web GUI (Tailscale only).
 
@@ -785,6 +790,26 @@ PVE notifications route to Apprise → Pushover via webhook. Deployed by `playbo
 ```bash
 # Deploy/update notification webhooks
 ansible-playbook playbooks/proxmox-notifications.yml
+```
+
+## OpenClaw (openclaw-vm, VM 140 on pve-m70q)
+
+OpenClaw AI agent platform — personal homelab admin assistant via web UI and Discord. Can read/edit the Ansible repo but cannot run playbooks or SSH into hosts.
+
+- **Web UI**: `https://openclaw.jnalley.me` (Tailscale only)
+- **Gateway**: Port 18789, token auth, trustedProxies: docker-vm only
+- **VM**: 4 cores, 4GB RAM (balloon 3072MB), Ubuntu 25.10, Node.js 22 (NodeSource)
+- **Service**: User-level systemd via `openclaw gateway install` (NOT a custom system service)
+- **Config**: `~/.openclaw/openclaw.json` + `.env` — manual, backed up by restic
+- **Timers**: repo-sync (5 min), update-check (daily 08:00 → Apprise)
+- **Playbook**: `ansible-playbook playbooks/openclaw.yml` (opt-in via `openclaw_enabled`)
+
+```bash
+# Check gateway status (on openclaw-vm)
+systemctl --user status openclaw-gateway.service
+
+# Check update-check timer
+systemctl list-timers openclaw-update-check*
 ```
 
 ## Planned: WAN Failover

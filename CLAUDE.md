@@ -1,6 +1,6 @@
 # CLAUDE.md
 
-> **Last updated:** 2026-03-10
+> **Last updated:** 2026-03-13
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
@@ -8,7 +8,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Ansible automation for a homelab infrastructure consisting of:
 - 4 Proxmox hypervisors (ts440, pve-alto, pve-herc, pve-m70q)
-- 9 VMs/LXC containers (docker-vm, media-vm, nextcloud-vm, dev-vm, freepbx-vm, ansible-lxc, homebridge-lxc, syncthing-lxc, pbs-lxc)
+- 10 VMs/LXC containers (docker-vm, media-vm, nextcloud-vm, dev-vm, freepbx-vm, openclaw-vm, ansible-lxc, homebridge-lxc, syncthing-lxc, pbs-lxc)
 - 1 Ansible controller LXC (ansible-lxc, CT 104 on pve-m70q) running Ansible locally
 - 1 Raspberry Pi 5 (pi5-01)
 - 1 CachyOS gaming workstation (jn-desktop)
@@ -480,9 +480,26 @@ Three-level firewall managed by `playbooks/proxmox-firewall.yml`:
 
 Security model: default deny (`policy_in: DROP`) on all VMs. Caddy (docker-vm) is the only web entry point. SSH allowed from Tailscale. In VM rules, use `+dc/<ipset>` prefix to reference datacenter-level IP sets.
 
-### freepbx-vm (VM 130 on pve-m70q)
+### freepbx-vm (VM 130 on pve-herc)
 
 FreePBX 17 PBX server (Asterisk 22, Debian 12 Bookworm). Provides a second phone number via VoIP.ms SIP trunk and Yealink SIP-T54W desk phone, with call forwarding to iPhone. Web GUI: `http://100.97.139.95/admin`. APT pinned to `bookworm` via `apt_pin_release` to prevent accidental Debian 13 upgrades. FreePBX/Asterisk packages are held (`apt-mark hold`) by the install script — module updates done through the web GUI. Sangoma Smart Firewall enabled with Tailscale CGNAT (`100.64.0.0/10`) trusted. Proxmox firewall rules: SIP (UDP 5060 from LAN + VoIP.ms), RTP (UDP 10000-20000), web GUI (TCP 80/443 Tailscale only), SSH. Config: `host_vars/freepbx-vm/` (vars.yml, packages.yml). Local restic backups: `/etc/asterisk`, `/var/lib/asterisk`, `/var/spool/asterisk`.
+
+### openclaw-vm (VM 140 on pve-m70q)
+
+OpenClaw AI agent platform (Node.js gateway daemon). Provides a web UI and Discord channel for interacting with Claude as a homelab admin assistant. Can read and edit the Ansible repo (cloned to `/opt/cc-ansible`) but cannot run playbooks or SSH into managed hosts (security boundary).
+
+- **Web UI**: `https://openclaw.jnalley.me` (Tailscale only, via Caddy on docker-vm)
+- **Gateway port**: 18789 (token auth, trustedProxies: docker-vm only)
+- **VM Specs**: 4 cores, 4GB RAM (balloon min 3072MB), 32GB disk, Ubuntu 25.10
+- **Node.js**: 22 via NodeSource repo (OpenClaw requires >= 22)
+- **Docker**: Installed for OpenClaw's internal sandbox containers (NOT in `docker_hosts` group)
+- **Gateway service**: Managed by OpenClaw itself via `openclaw gateway install` (user-level systemd unit)
+- **Config**: `~/.openclaw/openclaw.json` and `~/.openclaw/.env` — created manually, backed up by restic (NOT templated by Ansible)
+- **Linting tools**: `ansible-lint`, `yamllint` in venv at `/opt/openclaw-venv/`
+- **Timers**: repo-sync (git pull every 5 min), update-check (daily at 08:00 with Apprise notification)
+- **Playbook**: `playbooks/openclaw.yml` (opt-in via `openclaw_enabled` variable)
+- **Config**: `host_vars/openclaw-vm/` (vars.yml, packages.yml, backup.yml)
+- **Firewall**: DROP default, port 18789 from docker-vm only, SSH from Tailscale only
 
 ### homebridge-lxc (CT 102 on ts440)
 
