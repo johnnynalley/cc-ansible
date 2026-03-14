@@ -7,3 +7,7 @@ local_restic_enabled: true
 local_restic_backup_paths:
   - /home/johnny/.openclaw
   - /opt/cc-ansible
+
+# Use port 2222 to bypass Tailscale SSH (openclaw-vm lacks tag:backup)
+# Regular OpenSSH on 2222 with forced SFTP-only command for security
+local_restic_ssh_port: 2222
