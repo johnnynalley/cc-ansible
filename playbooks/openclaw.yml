@@ -47,10 +47,16 @@
         state: absent
       notify: Reload systemd
 
-    # --- Install OpenClaw via npm ---
+    # --- Install OpenClaw + ClawHub via npm ---
     - name: Install OpenClaw globally via npm
       community.general.npm:
         name: openclaw
+        global: true
+        state: latest
+
+    - name: Install ClawHub CLI globally via npm
+      community.general.npm:
+        name: clawhub
         global: true
         state: latest
 

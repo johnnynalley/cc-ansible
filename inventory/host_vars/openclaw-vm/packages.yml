@@ -10,6 +10,8 @@ packages_host_extra:
   - python3-pip
   - python3-venv
   - git
+  - vdirsyncer
+  - khal
 
 # Docker for OpenClaw sandbox containers (not in docker_hosts group)
 install_docker: true
