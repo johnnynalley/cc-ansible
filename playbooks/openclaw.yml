@@ -1,9 +1,11 @@
 # =============================================================================
 # OpenClaw Playbook - Deploy OpenClaw AI agent infrastructure
 # =============================================================================
-# Manages the infrastructure for OpenClaw: npm package, systemd services,
-# timers, git repo clone, and linting tools. Application config files
-# (openclaw.json, .env) are created manually on the VM and backed up by restic.
+# Manages the infrastructure for OpenClaw: npm package, systemd timers,
+# git repo clone, and linting tools. The gateway service is managed by
+# OpenClaw itself via `openclaw gateway install` (user-level systemd unit).
+# Application config files (openclaw.json, .env) are created manually on the
+# VM and backed up by restic.
 #
 # Usage: ansible-playbook playbooks/openclaw.yml
 # =============================================================================
@@ -22,15 +24,28 @@
         state: stopped
         daemon_reload: true
       loop:
-        - openclaw.service
         - openclaw-repo-sync.timer
         - openclaw-update-check.timer
       when: not (openclaw_enabled | default(false))
       failed_when: false
 
+    - name: Stop OpenClaw user gateway service (disabled hosts)
+      ansible.builtin.shell:
+        cmd: su - {{ admin_user | default('johnny') }} -c 'openclaw gateway uninstall' || true
+      when: not (openclaw_enabled | default(false))
+      failed_when: false
+      changed_when: false
+
     - name: Skip hosts without openclaw_enabled
       ansible.builtin.meta: end_host
       when: not (openclaw_enabled | default(false))
+
+    # --- Clean up old system-level service (replaced by user-level) ---
+    - name: Remove old system-level openclaw.service
+      ansible.builtin.file:
+        path: /etc/systemd/system/openclaw.service
+        state: absent
+      notify: Reload systemd
 
     # --- Install OpenClaw via npm ---
     - name: Install OpenClaw globally via npm
@@ -106,39 +121,19 @@
         scope: global
       become_user: "{{ admin_user }}"
 
-    # --- Deploy systemd service ---
-    - name: Create openclaw.service
-      ansible.builtin.copy:
-        dest: /etc/systemd/system/openclaw.service
-        mode: "0644"
-        content: |
-          [Unit]
-          Description=OpenClaw AI Gateway
-          After=network-online.target docker.service
-          Wants=network-online.target
+    # --- Install OpenClaw gateway service (user-level systemd) ---
+    - name: Install OpenClaw gateway service
+      ansible.builtin.command:
+        cmd: openclaw gateway install
+      become_user: "{{ admin_user }}"
+      register: gateway_install
+      changed_when: "'Installed' in gateway_install.stdout"
 
-          [Service]
-          Type=simple
-          User={{ admin_user }}
-          WorkingDirectory={{ openclaw_workspace }}
-          ExecStart=/usr/local/bin/openclaw gateway start
-          Restart=on-failure
-          RestartSec=10
-
-          # Hardening
-          NoNewPrivileges=true
-          PrivateTmp=true
-          PrivateDevices=true
-          ProtectKernelModules=true
-          ProtectKernelTunables=true
-          ProtectControlGroups=true
-          ProtectHome=read-only
-          ReadWritePaths=/home/{{ admin_user }}/.openclaw {{ openclaw_workspace }}
-          # NOT MemoryDenyWriteExecute — crashes Node.js V8 JIT
-
-          [Install]
-          WantedBy=multi-user.target
-      notify: Reload systemd
+    # --- Enable linger for headless persistence ---
+    - name: Enable lingering for {{ admin_user }}
+      ansible.builtin.command:
+        cmd: loginctl enable-linger {{ admin_user }}
+      changed_when: false
 
     # --- Deploy repo-sync timer (git pull every 5 min) ---
     - name: Create openclaw-repo-sync.service
@@ -220,20 +215,7 @@
           WantedBy=timers.target
       notify: Reload systemd
 
-    # --- Enable linger for headless persistence ---
-    - name: Enable lingering for {{ admin_user }}
-      ansible.builtin.command:
-        cmd: loginctl enable-linger {{ admin_user }}
-      changed_when: false
-
-    # --- Start and enable services ---
-    - name: Enable and start OpenClaw service
-      ansible.builtin.systemd:
-        name: openclaw.service
-        enabled: true
-        state: started
-        daemon_reload: true
-
+    # --- Start and enable timers ---
     - name: Enable and start repo-sync timer
       ansible.builtin.systemd:
         name: openclaw-repo-sync.timer

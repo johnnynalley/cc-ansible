@@ -24,17 +24,6 @@ pve_vm_firewalls:
       - { action: ACCEPT, proto: tcp, dport: 80, comment: "HTTP (Caddy redirect)" }
       - { action: ACCEPT, proto: tcp, dport: 3100, comment: "Loki (log ingestion)" }
 
-  # freepbx-vm (VM 130) - FreePBX PBX Server
-  130:
-    enable: true
-    policy_in: DROP
-    rules:
-      - { action: ACCEPT, proto: tcp, dport: 22, comment: "SSH" }
-      - { action: ACCEPT, proto: udp, dport: 5060, source: "192.168.1.0/24", comment: "SIP from LAN (desk phone)" }
-      - { action: ACCEPT, proto: udp, dport: 5060, comment: "SIP from VoIP.ms" }
-      - { action: ACCEPT, proto: udp, dport: "10000:20000", comment: "RTP media" }
-      - { action: ACCEPT, proto: tcp, dport: "80,443", source: "+dc/tailscale", comment: "FreePBX GUI (Tailscale only)" }
-
   # openclaw-vm (VM 140) - OpenClaw AI Agent
   140:
     enable: true
