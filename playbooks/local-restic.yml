@@ -96,7 +96,6 @@
         block: |
           Host {{ local_restic_target_host }}
             IdentityFile {{ local_restic_ssh_key }}
-            Port {{ local_restic_ssh_port | default(22) }}
             StrictHostKeyChecking accept-new
             UserKnownHostsFile /root/.ssh/known_hosts
       tags: [ssh]
@@ -296,24 +295,10 @@
   gather_facts: false
 
   tasks:
-    - name: Deploy sshd drop-in for backup port 2222
-      ansible.builtin.copy:
-        dest: /etc/ssh/sshd_config.d/backup-port.conf
-        mode: "0644"
-        content: |
-          # Keep default SSH port (explicit when adding a second port)
-          Port 22
-          # Additional port for restic backups from hosts without Tailscale SSH access
-          # (e.g., openclaw-vm uses port 2222 to bypass Tailscale SSH interception)
-          Port 2222
-      notify: Restart sshd
-      tags: [ssh]
-
-    - name: Ensure backup public key is authorized (SFTP-only)
+    - name: Ensure backup public key is authorized
       ansible.posix.authorized_key:
         user: johnny
         key: "{{ local_restic_ssh_public_key }}"
-        key_options: 'command="/usr/lib/openssh/sftp-server",restrict'
         state: present
         comment: "restic-backup from homelab clients"
       tags: [ssh]
@@ -327,8 +312,95 @@
         mode: "0755"
       tags: [config]
 
-  handlers:
-    - name: Restart sshd
+# =============================================================================
+# Restic REST server on ts440 (for hosts without SSH access)
+# =============================================================================
+# Append-only REST endpoint for openclaw-vm (and future untrusted hosts).
+# No SSH, no shell, no filesystem browsing — only restic protocol.
+- name: Configure restic REST server on ts440
+  hosts: ts440
+  become: true
+  gather_facts: false
+
+  tasks:
+    - name: Install restic-rest-server and apache2-utils
+      ansible.builtin.apt:
+        name:
+          - restic-rest-server
+          - apache2-utils
+        state: present
+      tags: [install]
+
+    - name: Create htpasswd directory
+      ansible.builtin.file:
+        path: /etc/restic-rest-server
+        state: directory
+        owner: root
+        group: root
+        mode: "0755"
+      tags: [config]
+
+    - name: Create htpasswd file for REST server
+      ansible.builtin.command:
+        cmd: >
+          htpasswd -cbB /etc/restic-rest-server/.htpasswd
+          openclaw-vm {{ restic_rest_password }}
+      vars:
+        restic_rest_password: "{{ hostvars['openclaw-vm']['vault_restic_rest_password'] }}"
+      no_log: true
+      changed_when: true
+      notify: Restart restic-rest-server
+      tags: [config]
+
+    - name: Set htpasswd permissions
+      ansible.builtin.file:
+        path: /etc/restic-rest-server/.htpasswd
+        owner: johnny
+        group: johnny
+        mode: "0600"
+      tags: [config]
+
+    - name: Create restic-rest-server systemd service
+      ansible.builtin.copy:
+        dest: /etc/systemd/system/restic-rest-server.service
+        mode: "0644"
+        content: |
+          [Unit]
+          Description=Restic REST Server (append-only)
+          After=network-online.target
+          Wants=network-online.target
+
+          [Service]
+          Type=simple
+          User=johnny
+          ExecStart=/usr/bin/restic-rest-server \
+            --path /srv/nas-zfs/backups \
+            --listen :8500 \
+            --htpasswd-file /etc/restic-rest-server/.htpasswd \
+            --append-only \
+            --private-repos
+          Restart=on-failure
+          RestartSec=5
+
+          [Install]
+          WantedBy=multi-user.target
+      notify: Reload systemd
+      tags: [config]
+
+    - name: Enable and start restic-rest-server
       ansible.builtin.systemd:
-        name: sshd
+        name: restic-rest-server
+        enabled: true
+        state: started
+        daemon_reload: true
+      tags: [config]
+
+  handlers:
+    - name: Reload systemd
+      ansible.builtin.systemd:
+        daemon_reload: true
+
+    - name: Restart restic-rest-server
+      ansible.builtin.systemd:
+        name: restic-rest-server
         state: restarted
