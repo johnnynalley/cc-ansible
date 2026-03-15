@@ -220,7 +220,7 @@ docker_stacks:
 
 Lightweight VM (6 cores, 6GB RAM) running infrastructure services. Stacks defined in `host_vars/docker-vm/docker.yml`. Services use `caddy-proxy` Docker network (created by Caddy stack; other stacks join as external). Configs stored locally at `/opt/<service>/`, backed up via restic.
 
-**Dispatcharr**: HDHomeRun emulator for free IPTV in Plex. Presents M3U playlists (iptv-org, Pluto TV, etc.) as a virtual tuner so Plex can use its Live TV & DVR features. AIO container (app + Redis + Celery) at `/opt/dispatcharr/`. Web UI at `https://iptv.jnalley.me` (Tailscale only). Plex on media-vm connects to the tuner at `http://100.108.254.100:9191`. No GPU needed — Dispatcharr only proxies streams; Plex handles transcoding.
+**Dispatcharr** (disabled): HDHomeRun emulator for free IPTV in Plex. Commented out in `docker.yml` — free M3U playlists had too many dead streams. Compose file and data preserved at `/opt/dispatcharr/` on docker-vm. Uncomment in `docker.yml` and Caddyfile to re-enable. HDHR tuner URL for Plex: `http://100.108.254.100:9191/hdhr` (note the `/hdhr` path — not root).
 
 #### nextcloud-vm (VM 101 on ts440)
 

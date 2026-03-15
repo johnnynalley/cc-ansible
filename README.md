@@ -544,7 +544,7 @@ docker-vm (VM 110 on pve-m70q) runs infrastructure services:
 | Apprise API | `apprise.jnalley.me` | Notification router (Pushover + email) |
 | FreshRSS | `rss.jnalley.me` | RSS aggregator (Google Reader API for Reeder) |
 | Diun | - | Docker image update notifier |
-| Dispatcharr | `iptv.jnalley.me` | HDHomeRun emulator for Plex Live TV (free IPTV) |
+| Dispatcharr | `iptv.jnalley.me` | HDHomeRun emulator for Plex Live TV (disabled — free streams unreliable) |
 | OpenClaw | `openclaw.jnalley.me` | AI agent gateway (proxied to openclaw-vm:18789) |
 
 Stacks support `start: true/false` in `docker.yml` to control service state.
