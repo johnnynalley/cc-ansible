@@ -161,6 +161,134 @@
       tags: [dbc-ansible]
 
 # ============================================================
+# Phase 1d: dbc operational access (Docker hosts)
+# ============================================================
+# Grants dbc narrow write access to specific config files and
+# tightly scoped helper scripts for applying stack changes.
+# dbc is NOT added to the docker group — scripts run via sudo.
+#
+# media-vm: edit docker-compose.yml + .env, apply via helper
+# docker-vm: edit Caddyfile, validate + reload via helper
+# ============================================================
+- name: "Phase 1d: dbc operational access - media-vm"
+  hosts: media-vm
+  become: true
+  gather_facts: false
+
+  tasks:
+    - name: Ensure acl package is installed
+      ansible.builtin.package:
+        name: acl
+        state: present
+      tags: [dbc-ops]
+
+    - name: Grant dbc write ACL on media-stack directory
+      ansible.posix.acl:
+        path: /opt/media-stack
+        entity: dbc
+        etype: user
+        permissions: rwx
+        state: present
+      tags: [dbc-ops]
+
+    - name: Grant dbc write ACL on media-stack config files
+      ansible.posix.acl:
+        path: "{{ item }}"
+        entity: dbc
+        etype: user
+        permissions: rw
+        state: present
+      loop:
+        - /opt/media-stack/docker-compose.yml
+        - /opt/media-stack/.env
+      tags: [dbc-ops]
+
+    - name: Deploy media-stack apply script
+      ansible.builtin.copy:
+        content: |
+          #!/bin/bash
+          # Helper for dbc to apply media-stack changes
+          # Validates compose config, then recreates changed containers
+          set -euo pipefail
+          cd /opt/media-stack
+          docker compose config -q
+          docker compose up -d --remove-orphans
+        dest: /usr/local/sbin/dbc-media-stack-apply
+        owner: root
+        group: root
+        mode: "0755"
+      tags: [dbc-ops]
+
+    - name: Configure sudoers for dbc media-stack apply
+      ansible.builtin.copy:
+        content: |
+          # OpenClaw agent (dbc) - operational stack management
+          dbc ALL=(ALL) NOPASSWD: /usr/local/sbin/dbc-media-stack-apply
+        dest: /etc/sudoers.d/dbc-openclaw-ops
+        owner: root
+        group: root
+        mode: "0440"
+        validate: "visudo -cf %s"
+      tags: [dbc-ops]
+
+- name: "Phase 1d: dbc operational access - docker-vm"
+  hosts: docker-vm
+  become: true
+  gather_facts: false
+
+  tasks:
+    - name: Ensure acl package is installed
+      ansible.builtin.package:
+        name: acl
+        state: present
+      tags: [dbc-ops]
+
+    - name: Grant dbc write ACL on Caddy directory
+      ansible.posix.acl:
+        path: /opt/caddy
+        entity: dbc
+        etype: user
+        permissions: rwx
+        state: present
+      tags: [dbc-ops]
+
+    - name: Grant dbc write ACL on Caddyfile
+      ansible.posix.acl:
+        path: /opt/caddy/Caddyfile
+        entity: dbc
+        etype: user
+        permissions: rw
+        state: present
+      tags: [dbc-ops]
+
+    - name: Deploy caddy apply script
+      ansible.builtin.copy:
+        content: |
+          #!/bin/bash
+          # Helper for dbc to validate and reload Caddy config
+          set -euo pipefail
+          cd /opt/caddy
+          docker compose exec -T caddy caddy validate --config /etc/caddy/Caddyfile
+          docker compose exec -T caddy caddy reload --config /etc/caddy/Caddyfile
+        dest: /usr/local/sbin/dbc-caddy-apply
+        owner: root
+        group: root
+        mode: "0755"
+      tags: [dbc-ops]
+
+    - name: Configure sudoers for dbc caddy apply
+      ansible.builtin.copy:
+        content: |
+          # OpenClaw agent (dbc) - operational stack management
+          dbc ALL=(ALL) NOPASSWD: /usr/local/sbin/dbc-caddy-apply
+        dest: /etc/sudoers.d/dbc-openclaw-ops
+        owner: root
+        group: root
+        mode: "0440"
+        validate: "visudo -cf %s"
+      tags: [dbc-ops]
+
+# ============================================================
 # Phase 2: Secure johnny's sudo (run AFTER verifying ansible user works)
 # ============================================================
 # Removes NOPASSWD from johnny. Johnny falls back to %sudo group rule
