@@ -1,6 +1,6 @@
 # CC-Ansible
 
-> **Last updated:** 2026-03-13
+> **Last updated:** 2026-03-18
 
 Ansible automation for Johnny's homelab infrastructure (4 Proxmox nodes, 10 VMs/LXCs, Ansible controller LXC, gaming workstation, ThinkPad laptop, MacBook).
 
@@ -803,6 +803,7 @@ OpenClaw AI agent platform — personal homelab admin assistant via web UI and D
 - **Config**: `~/.openclaw/openclaw.json` + `.env` — manual, backed up by restic
 - **Timers**: repo-sync (5 min), update-check (daily 08:00 → Apprise)
 - **Playbook**: `ansible-playbook playbooks/openclaw.yml` (opt-in via `openclaw_enabled`)
+- **dbc ops access**: Least-privilege write on media-vm (`docker-compose.yml`, `.env`) and docker-vm (`Caddyfile`) with scoped apply scripts. Deployed by `user-separation.yml` Phase 1d (`--tags dbc-ops`).
 
 ```bash
 # Check gateway status (on openclaw-vm)

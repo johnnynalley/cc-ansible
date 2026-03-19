@@ -1,6 +1,6 @@
 # CLAUDE.md
 
-> **Last updated:** 2026-03-13
+> **Last updated:** 2026-03-18
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
@@ -500,6 +500,18 @@ OpenClaw AI agent platform (Node.js gateway daemon). Provides a web UI and Disco
 - **Playbook**: `playbooks/openclaw.yml` (opt-in via `openclaw_enabled` variable)
 - **Config**: `host_vars/openclaw-vm/` (vars.yml, packages.yml, backup.yml)
 - **Firewall**: DROP default, port 18789 from docker-vm only, SSH from Tailscale only
+
+**dbc operational access** (deployed by `user-separation.yml`, Phase 1d):
+
+The `dbc` user (OpenClaw agent) has least-privilege operational access on managed hosts via Tailscale SSH. Not in the docker group — stack changes go through root-owned helper scripts with sudoers entries.
+
+| Host | Writable Files | Apply Command |
+|------|---------------|---------------|
+| ansible-lxc | `~/cc-ansible` (rwx), `~/.claude` (rwx) | `sudo /usr/local/bin/ansible-dryrun` (dry-run only) |
+| media-vm | `/opt/media-stack/docker-compose.yml`, `.env` | `sudo /usr/local/sbin/dbc-media-stack-apply` |
+| docker-vm | `/opt/caddy/Caddyfile` | `sudo /usr/local/sbin/dbc-caddy-apply` |
+
+Helper scripts validate config before applying (compose config check, Caddy validate+reload). File access is via POSIX ACLs (`setfacl`), not group membership. All hosts also have read-only sudo for `systemctl status`, `journalctl`, `zpool status`, `zfs list`, `findmnt`.
 
 ### homebridge-lxc (CT 102 on ts440)
 
