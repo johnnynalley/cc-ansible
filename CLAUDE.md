@@ -1,6 +1,6 @@
 # CLAUDE.md
 
-> **Last updated:** 2026-03-18
+> **Last updated:** 2026-03-20
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
@@ -131,7 +131,7 @@ Host groups form a hierarchy in `inventory/hosts.ini`:
   - Playbooks like `network-recovery.yml` explicitly exclude this group: `hosts: linux_hosts:!workstations`
 - `nas_server` → **portable NAS role group** (currently ts440). Storage services: NFS, Samba, ZFS, mergerfs, drive mounts. Migrate NAS to new hardware by changing membership in this group.
 - `development` → **cross-platform group** for dev tooling (gh, shellcheck, yq). Currently: dev-vm. ansible-lxc gets these via `packages_host_extra` in host_vars instead. Packages split by OS: `packages_debian_development_extra`, `packages_arch_development_extra`
-- `docker_hosts` → VMs running Docker Compose stacks (docker-vm, media-vm, nextcloud-vm)
+- `docker_hosts` → VMs running Docker Compose stacks (docker-vm, media-vm, nextcloud-vm, openclaw-vm)
 - `backup_clients` → separate group for restic backups (includes `proxmox_nodes`, `vms_lxcs`, `orchestrator`, `workstations`, `arch_hosts`)
 
 VMs and LXCs are split so VMs get `qemu-guest-agent` while LXCs don't need it.
@@ -492,14 +492,23 @@ OpenClaw AI agent platform (Node.js gateway daemon). Provides a web UI and Disco
 - **Gateway port**: 18789 (token auth, trustedProxies: docker-vm only)
 - **VM Specs**: 4 cores, 4GB RAM (balloon min 3072MB), 32GB disk, Ubuntu 25.10
 - **Node.js**: 22 via NodeSource repo (OpenClaw requires >= 22)
-- **Docker**: Installed for OpenClaw's internal sandbox containers (NOT in `docker_hosts` group)
+- **Docker**: Installed for OpenClaw sandbox containers and Qdrant. In `docker_hosts` group — managed by `docker-stacks.yml`.
 - **Gateway service**: Managed by OpenClaw itself via `openclaw gateway install` (user-level systemd unit)
 - **Config**: `~/.openclaw/openclaw.json` and `~/.openclaw/.env` — created manually, backed up by restic (NOT templated by Ansible)
 - **Linting tools**: `ansible-lint`, `yamllint` in venv at `/opt/openclaw-venv/`
 - **Timers**: repo-sync (git pull every 5 min), update-check (daily at 08:00 with Apprise notification)
 - **Playbook**: `playbooks/openclaw.yml` (opt-in via `openclaw_enabled` variable)
-- **Config**: `host_vars/openclaw-vm/` (vars.yml, packages.yml, backup.yml)
+- **Config**: `host_vars/openclaw-vm/` (vars.yml, packages.yml, backup.yml, docker.yml)
 - **Firewall**: DROP default, port 18789 from docker-vm only, SSH from Tailscale only
+
+**Mem0 Memory Plugin** (`@mem0/openclaw-mem0`): Adds automatic fact extraction (auto-capture) and context injection (auto-recall) to DBC sessions. Runs alongside the existing file-based memory system (MEMORY.md, daily notes, Gemini hybrid search).
+
+- **Plugin**: Installed via `openclaw plugins install`, embeds `mem0ai/oss` SDK in-process (no separate server)
+- **Qdrant**: Vector database at `/opt/qdrant/` (Docker, localhost:6333/6334 only). Stores memory embeddings.
+- **Embedder**: Gemini (`gemini-embedding-001`) via `GEMINI_API_KEY`
+- **LLM (fact extraction)**: Claude Haiku via OpenRouter (`OPENROUTER_API_KEY`, `baseURL` pointed at OpenRouter's OpenAI-compatible API)
+- **Plugin updates**: `openclaw plugins update --all` (DBC can schedule via OpenClaw cron)
+- **Tools**: `memory_search`, `memory_store`, `memory_get`, `memory_list`, `memory_forget`
 
 **dbc operational access** (deployed by `user-separation.yml`, Phase 1d):
 

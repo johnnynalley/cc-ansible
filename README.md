@@ -1,6 +1,6 @@
 # CC-Ansible
 
-> **Last updated:** 2026-03-18
+> **Last updated:** 2026-03-20
 
 Ansible automation for Johnny's homelab infrastructure (4 Proxmox nodes, 10 VMs/LXCs, Ansible controller LXC, gaming workstation, ThinkPad laptop, MacBook).
 
@@ -162,7 +162,7 @@ nas_server (ts440) ← portable NAS role group
 
 development (dev-vm) ← dev tooling (gh, shellcheck, yq)
 
-docker_hosts (docker-vm, media-vm, nextcloud-vm) ← Docker Compose stacks
+docker_hosts (docker-vm, media-vm, nextcloud-vm, openclaw-vm) ← Docker Compose stacks
 
 backup_clients
 ├── proxmox_nodes
@@ -803,6 +803,7 @@ OpenClaw AI agent platform — personal homelab admin assistant via web UI and D
 - **Config**: `~/.openclaw/openclaw.json` + `.env` — manual, backed up by restic
 - **Timers**: repo-sync (5 min), update-check (daily 08:00 → Apprise)
 - **Playbook**: `ansible-playbook playbooks/openclaw.yml` (opt-in via `openclaw_enabled`)
+- **Mem0 memory**: `@mem0/openclaw-mem0` plugin with Qdrant (localhost:6333), Gemini embeddings, Claude Haiku via OpenRouter for fact extraction. Auto-capture + auto-recall across sessions.
 - **dbc ops access**: Least-privilege write on media-vm (`docker-compose.yml`, `.env`) and docker-vm (`Caddyfile`) with scoped apply scripts. Deployed by `user-separation.yml` Phase 1d (`--tags dbc-ops`).
 
 ```bash

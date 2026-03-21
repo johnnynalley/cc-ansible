@@ -8,6 +8,7 @@ local_restic_enabled: true
 local_restic_backup_paths:
   - /home/johnny/.openclaw
   - /opt/cc-ansible
+  - /opt/qdrant/storage
 
 # Override repository to use REST server instead of SFTP
 # (openclaw-vm has no SSH access to ts440 by design — security boundary)

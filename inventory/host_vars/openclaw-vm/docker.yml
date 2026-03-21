@@ -1,0 +1,14 @@
+# =============================================================================
+# openclaw-vm - Docker Compose Stacks
+# =============================================================================
+# Qdrant vector database for Mem0 memory plugin. Managed by docker-stacks.yml.
+# No auto_update - vector DB major version bumps should be deliberate.
+# Diun monitors for image updates and sends notifications.
+# =============================================================================
+
+docker_networks: []
+
+docker_stacks:
+  - name: qdrant
+    path: /opt/qdrant
+    build: false

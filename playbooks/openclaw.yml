@@ -127,6 +127,14 @@
         scope: global
       become_user: "{{ admin_user }}"
 
+    # --- Install Mem0 memory plugin ---
+    - name: Install Mem0 plugin
+      ansible.builtin.command:
+        cmd: openclaw plugins install @mem0/openclaw-mem0
+      become_user: "{{ admin_user }}"
+      register: mem0_install
+      changed_when: "'installed' in (mem0_install.stdout | default('') | lower) or 'updated' in (mem0_install.stdout | default('') | lower)"
+
     # --- Install OpenClaw gateway service (user-level systemd) ---
     - name: Install OpenClaw gateway service
       ansible.builtin.command:
