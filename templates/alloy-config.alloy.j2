@@ -82,9 +82,10 @@ discovery.relabel "docker" {
 }
 
 loki.source.docker "containers" {
-  host       = "unix:///var/run/docker.sock"
-  targets    = discovery.relabel.docker.output
-  forward_to = [loki.write.default.receiver]
+  host          = "unix:///var/run/docker.sock"
+  targets       = discovery.docker.containers.targets
+  relabel_rules = discovery.relabel.docker.rules
+  forward_to    = [loki.write.default.receiver]
 }
 {% endif %}
 
