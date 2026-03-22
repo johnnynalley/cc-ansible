@@ -48,3 +48,7 @@ docker_stacks:
   #   path: /opt/dispatcharr
   #   build: false
   #   auto_update: true
+  - name: docker-socket-proxy
+    path: /opt/docker-socket-proxy
+    build: false
+    auto_update: true

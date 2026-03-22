@@ -17,6 +17,25 @@
     - name: Ensure Docker networks exist
       ansible.builtin.import_tasks: ../tasks/docker-network.yml
 
+    # Deploy templated compose files (managed by Ansible, not manually)
+    - name: Ensure docker-socket-proxy directory exists
+      ansible.builtin.file:
+        path: /opt/docker-socket-proxy
+        state: directory
+        owner: root
+        group: root
+        mode: "0755"
+      when: docker_stacks | selectattr('name', 'equalto', 'docker-socket-proxy') | list | length > 0
+
+    - name: Deploy docker-socket-proxy compose file
+      ansible.builtin.copy:
+        src: ../templates/docker-socket-proxy.yml
+        dest: /opt/docker-socket-proxy/docker-compose.yml
+        owner: root
+        group: root
+        mode: "0644"
+      when: docker_stacks | selectattr('name', 'equalto', 'docker-socket-proxy') | list | length > 0
+
     # Create systemd service to start stacks with proper network dependencies
     - name: Create docker-stacks systemd service
       ansible.builtin.template:
