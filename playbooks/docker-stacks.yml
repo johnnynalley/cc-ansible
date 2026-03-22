@@ -17,24 +17,33 @@
     - name: Ensure Docker networks exist
       ansible.builtin.import_tasks: ../tasks/docker-network.yml
 
-    # Deploy templated compose files (managed by Ansible, not manually)
-    - name: Ensure docker-socket-proxy directory exists
+    # Deploy Ansible-managed compose files from templates/
+    # Any stack with a matching templates/<name>.yml gets its compose file
+    # deployed automatically. Stacks without a template are assumed to have
+    # their compose file already on the host (manually managed).
+    - name: Ensure stack directory exists (Ansible-managed stacks)
       ansible.builtin.file:
-        path: /opt/docker-socket-proxy
+        path: "{{ item.path }}"
         state: directory
         owner: root
         group: root
         mode: "0755"
-      when: docker_stacks | selectattr('name', 'equalto', 'docker-socket-proxy') | list | length > 0
+      loop: "{{ docker_stacks | default([]) }}"
+      loop_control:
+        label: "{{ item.name }}"
+      when: lookup('ansible.builtin.fileglob', playbook_dir + '/../templates/' + item.name + '.yml') | length > 0
 
-    - name: Deploy docker-socket-proxy compose file
+    - name: Deploy compose file (Ansible-managed stacks)
       ansible.builtin.copy:
-        src: ../templates/docker-socket-proxy.yml
-        dest: /opt/docker-socket-proxy/docker-compose.yml
+        src: "../templates/{{ item.name }}.yml"
+        dest: "{{ item.path }}/docker-compose.yml"
         owner: root
         group: root
         mode: "0644"
-      when: docker_stacks | selectattr('name', 'equalto', 'docker-socket-proxy') | list | length > 0
+      loop: "{{ docker_stacks | default([]) }}"
+      loop_control:
+        label: "{{ item.name }}"
+      when: lookup('ansible.builtin.fileglob', playbook_dir + '/../templates/' + item.name + '.yml') | length > 0
 
     # Create systemd service to start stacks with proper network dependencies
     - name: Create docker-stacks systemd service
