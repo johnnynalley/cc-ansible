@@ -71,21 +71,15 @@ discovery.relabel "docker" {
   }
 
   rule {
-    source_labels = ["__meta_docker_container_image"]
-    target_label  = "image"
-  }
-
-  rule {
     source_labels = ["__meta_docker_container_log_stream"]
     target_label  = "stream"
   }
 }
 
 loki.source.docker "containers" {
-  host          = "unix:///var/run/docker.sock"
-  targets       = discovery.docker.containers.targets
-  relabel_rules = discovery.relabel.docker.rules
-  forward_to    = [loki.write.default.receiver]
+  host       = "unix:///var/run/docker.sock"
+  targets    = discovery.relabel.docker.output
+  forward_to = [loki.write.default.receiver]
 }
 {% endif %}
 
