@@ -139,8 +139,9 @@
       ansible.builtin.copy:
         content: |
           #!/bin/bash
-          # Wrapper for OpenClaw dry-run access — hardcodes --check --diff
+          # Wrapper for OpenClaw dry-run access - hardcodes --check --diff
           # dbc can run this via sudo as johnny, but cannot run real playbooks
+          cd /home/johnny/cc-ansible || exit 1
           exec ansible-playbook --check --diff "$@"
         dest: /usr/local/bin/ansible-dryrun
         owner: root
@@ -152,6 +153,8 @@
       ansible.builtin.copy:
         content: |
           # OpenClaw agent (dbc) can only dry-run playbooks as johnny
+          # sudo-rs requires separate rules for no-args and with-args
+          dbc ALL=(johnny) NOPASSWD: /usr/local/bin/ansible-dryrun
           dbc ALL=(johnny) NOPASSWD: /usr/local/bin/ansible-dryrun *
         dest: /etc/sudoers.d/dbc-ansible
         owner: root
