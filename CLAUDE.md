@@ -1,6 +1,6 @@
 # CLAUDE.md
 
-> **Last updated:** 2026-03-20
+> **Last updated:** 2026-03-23
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
@@ -320,14 +320,16 @@ auto-updates (weekly) ─────────┼──→ Apprise API ──
 unattended-upgrades (daily) ───┤   (docker-vm)  ───→ Pushover "Computer Corner" app (infrastructure, silent/quiet)
 network-watchdog (recovery) ───┤                ───→ Pushover "cc-media-feed" app (media, silent)
 gluetun-watchdog (VPN) ────────┤                ───→ Email (iCloud SMTP)
-docker-auto-update (6h) ───────┤
+docker-auto-update (6h) ───────┤                ───→ DBC alert receiver (openclaw-vm, triage + morning summary)
 Sonarr/Radarr (grabs) ─────────┤
 Seerr (requests) ──────────────┘
 
 Sonarr/Radarr ──→ Discord (native connection, rich embeds with poster art)
 ```
 
-**Apprise tags** control routing: `push` (Pushover infrastructure, Time Sensitive), `push-quiet` (Pushover infrastructure, silent), `email` (iCloud SMTP), `media-feed` (Pushover media, silent), `media-requests` (Seerr media requests, silent). Services specify tags via `apprise_alert_tags` variable (default: `push` in `group_vars/all/vars.yml`). apcupsd supports per-service override via `apcupsd_alert_tags`. Combine tags like `push,email` for multi-target delivery.
+**Apprise tags** control routing: `push` (Pushover infrastructure, Time Sensitive), `push-quiet` (Pushover infrastructure, silent), `email` (iCloud SMTP), `media-feed` (Pushover media, silent), `media-requests` (Seerr media requests, silent), `dbc` (DBC alert receiver on openclaw-vm). The `dbc` tag is included alongside existing tags in all notification calls so DBC gets a copy of every alert. Services specify tags via `apprise_alert_tags` variable (default: `push,dbc` in `group_vars/all/vars.yml`). apcupsd supports per-service override via `apcupsd_alert_tags`. Combine tags like `push,email` for multi-target delivery.
+
+**DBC alert receiver**: DBC (OpenClaw agent) receives a copy of all infrastructure alerts via `dbc=jsons://openclaw.jnalley.me/alerts` in the Apprise config. Alerts are stored in SQLite on openclaw-vm and triaged: errors get an immediate ping in Discord #dbc-logs, routine alerts are batched into the morning summary. The receiver runs on port 18792, proxied through Caddy. Ansible-managed notifications include the `dbc` tag automatically via variables; Sonarr/Radarr/Seerr have `dbc` added manually to their Apprise tag fields in their web UIs.
 
 **Why Pushover over ntfy**: ntfy's iOS app does not support per-topic notification control. Pushover allows true silent delivery via priority `-2` and per-app iOS settings. ntfy config preserved (commented out) in docker-compose.
 

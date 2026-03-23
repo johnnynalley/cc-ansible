@@ -1,6 +1,6 @@
 # CC-Ansible
 
-> **Last updated:** 2026-03-20
+> **Last updated:** 2026-03-23
 
 Ansible automation for Johnny's homelab infrastructure (4 Proxmox nodes, 10 VMs/LXCs, Ansible controller LXC, gaming workstation, ThinkPad laptop, MacBook).
 
@@ -693,7 +693,7 @@ auto-updates (weekly) ─────────┼──→ Apprise API (docke
 unattended-upgrades (daily) ───┤                           → Pushover "Computer Corner" (silent/quiet)
 network-watchdog (recovery) ───┤                           → Email (iCloud SMTP)
 gluetun-watchdog (VPN) ────────┤                           → Pushover "cc-media-feed" (silent)
-docker-auto-update (6h) ───────┤
+docker-auto-update (6h) ───────┤                           → DBC alert receiver (openclaw-vm)
 Sonarr/Radarr (grabs) ─────────┤
 Seerr (requests) ──────────────┘
 
@@ -702,7 +702,7 @@ Sonarr/Radarr ──→ Discord (native connection, rich embeds with poster art)
 
 - **Apprise API**: Notification router at `/opt/notifications/` on docker-vm. Config uses `pover://` URLs for Pushover
 - **Two Pushover apps**: "Computer Corner" (normal + quiet priority) and "cc-media-feed" (priority -2, silent/in-app only)
-- **Five Apprise tags**: `push` (infrastructure → Computer Corner app, Time Sensitive), `push-quiet` (automated recovery → Computer Corner app, silent), `email` (iCloud SMTP), `media-feed` (Sonarr/Radarr → cc-media-feed app), `media-requests` (Seerr → cc-media-feed app)
+- **Six Apprise tags**: `push` (infrastructure → Computer Corner app, Time Sensitive), `push-quiet` (automated recovery → Computer Corner app, silent), `email` (iCloud SMTP), `media-feed` (Sonarr/Radarr → cc-media-feed app), `media-requests` (Seerr → cc-media-feed app), `dbc` (DBC alert receiver on openclaw-vm). All Ansible-managed notifications include `dbc` automatically via tag variables; Sonarr/Radarr/Seerr have `dbc` added in their web UI Apprise settings
 - **Diun**: Container image update notifier on all Docker VMs. Config managed by Ansible (`docker-auto-update.yml`), schedule offset to run after auto-updates. Sends with `push` tag
 - **smartd/apcupsd**: Infrastructure alerts, send with `push` tag
 - **auto-updates**: Notifies before updates (package count), after completion, and before reboots
