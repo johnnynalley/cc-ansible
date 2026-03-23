@@ -33,7 +33,7 @@ curl -sf -o /dev/null \
 Back up config before updating:
   cp ~/.openclaw/openclaw.json ~/.openclaw/openclaw.json.bak.\$(date +%Y%m%d)
   npm update -g openclaw" \
-    --form-string "tag=push-quiet" \
+    --form-string "tag=push-quiet,dbc" \
     --form-string "type=info" \
     --max-time 10 \
     --retry 2 \

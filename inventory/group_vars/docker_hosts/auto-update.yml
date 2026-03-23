@@ -10,8 +10,8 @@
 docker_auto_update_enabled: true
 docker_auto_update_oncalendar: "*-*-* 00/6:30:00"   # 00:30, 06:30, 12:30, 18:30 CT
 docker_auto_update_randomized_delay: "30m"
-docker_auto_update_notify_tag: "push-quiet"
+docker_auto_update_notify_tag: "push-quiet,dbc"
 
 # Major version bump guard - blocks major version updates and sends louder alert
 docker_auto_update_major_guard: true
-docker_auto_update_major_notify_tag: "push"    # Time Sensitive for blocked updates
+docker_auto_update_major_notify_tag: "push,dbc"    # Time Sensitive for blocked updates
