@@ -353,7 +353,7 @@ The NAS server (currently ts440) serves SMB shares over Tailscale, managed by `p
 | Time Machine | `/mnt/nas-zfs/backups/timemachine` | macOS Time Machine (currently unused) |
 | Backups | `/mnt/nas-zfs/backups` | General backups |
 | NAS-ZFS | `/mnt/nas-zfs` | Full ZFS pool root |
-| NAS-01 to NAS-05 | `/srv/nas-*` | Individual drive access |
+| NAS-01, NAS-02 | `/srv/nas-01`, `/srv/nas-02` | Individual drive access |
 
 ### Connecting from macOS
 

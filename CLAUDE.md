@@ -1,6 +1,6 @@
 # CLAUDE.md
 
-> **Last updated:** 2026-03-23
+> **Last updated:** 2026-03-27
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
@@ -194,7 +194,7 @@ TS440 is the primary NAS server (currently the sole `nas_server` group member). 
 
 ### Samba/SMB Shares (ts440)
 
-Managed by `playbooks/samba.yml`. Shares defined in `inventory/host_vars/ts440/vars.yml` under `smb_shares`. Uses `@smbusers` group for authentication and fruit VFS module (`catia fruit streams_xattr`) for macOS compatibility and Time Machine support. Avahi mDNS advertisement for LAN discovery.
+Managed by `playbooks/samba.yml`. Shares defined in `inventory/group_vars/nas_server/samba.yml` under `smb_shares`. Uses `@smbusers` group for authentication and fruit VFS module (`catia fruit streams_xattr`) for macOS compatibility and Time Machine support. Avahi mDNS advertisement for LAN discovery.
 
 **Discovery over Tailscale**: Time Machine discovery works via SMB's AAPL extensions, NOT mDNS (mDNS doesn't traverse WireGuard tunnels). Connect using the Tailscale IP: `smb://100.71.188.16/<share>`.
 
