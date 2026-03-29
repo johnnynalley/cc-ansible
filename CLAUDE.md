@@ -1,6 +1,6 @@
 # CLAUDE.md
 
-> **Last updated:** 2026-03-27
+> **Last updated:** 2026-03-28
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
@@ -166,7 +166,7 @@ Package lists follow naming convention: `packages_linux_common`, `packages_debia
 
 TS440 is the primary NAS server (currently the sole `nas_server` group member). Key components:
 
-**ZFS Pool**: 2x 8TB mirror at `/srv/nas-zfs` (~7.3TB usable). Keep under 80% capacity. ARC max set to 1GB (in `group_vars/nas_server/zfs.yml`) — reduced from 2GB to ease memory pressure on ts440 (NAS traffic is mostly sequential streaming, which barely benefits from ARC). media-vm has 8GB RAM for 20+ containers including GPU-accelerated Immich ML (reduced from 10GB — actual container usage is ~4.2GB).
+**ZFS Pool**: 2x 8TB mirror at `/srv/nas-zfs` (~7.3TB usable). Keep under 80% capacity. ARC max set to 1GB (in `group_vars/nas_server/zfs.yml`) — reduced from 2GB to ease memory pressure on ts440 (NAS traffic is mostly sequential streaming, which barely benefits from ARC). media-vm has 6GB RAM for 20+ containers including GPU-accelerated Immich ML (reduced from 10GB→8GB→6GB — actual container usage is ~3.5GB). Balloon disabled due to GPU passthrough.
 
 **Archive Dataset**: `nas_zfs/archive` at `/srv/nas-zfs/archive` for ISOs and general-purpose archival storage. Shared via VirtioFS to media-vm (read-write, mounted at `/srv/archive`, mapped as `/archive` in the qBittorrent container) and nextcloud-vm (read-only, at `/srv/external/archive` for Nextcloud External Storage). qBittorrent's `isos` category saves to `/archive/isos` with per-torrent subdirectory overrides (e.g., `/archive/isos/linux/kubuntu`).
 
@@ -228,7 +228,7 @@ Nextcloud AIO with VirtioFS storage access (mounts in `host_vars/nextcloud-vm/vi
 
 #### media-vm (VM 100 on ts440)
 
-Primary media VM (8GB RAM, 4 cores, 200GB disk, Quadro P2200 GPU passthrough). Stacks in `host_vars/media-vm/docker.yml`. GPU shared between Plex (NVENC transcoding) and Immich (CUDA ML inference).
+Primary media VM (6GB RAM, 4 cores, 200GB disk, Quadro P2200 GPU passthrough). Stacks in `host_vars/media-vm/docker.yml`. GPU shared between Plex (NVENC transcoding) and Immich (CUDA ML inference).
 
 **Critical**: All media containers must use the same VirtioFS mount path (`/srv/media/plex:/data`). Using different paths causes stale file handle errors. Hardlinks work because all downloads and media libraries share the same `/data` mount on mergerfs.
 

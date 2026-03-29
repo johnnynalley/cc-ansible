@@ -631,7 +631,7 @@ Without `cache=never`, virtiofsd daemons cache aggressively (5GB+ each), causing
 setfacl -R -d -m o::r /srv/nas-zfs/configs
 ```
 
-**ts440 memory budget** (15GB total): media-vm 8GB, nextcloud-vm 4GB, ZFS ARC 1GB (`/etc/modprobe.d/zfs.conf`), Proxmox ~1-2GB. media-vm reduced from 10GB (actual container usage is ~4.2GB). ARC reduced from 2GB (sequential streaming barely benefits). These changes freed ~3GB, eliminating heavy swap pressure that was causing 13-22% CPU steal in media-vm.
+**ts440 memory budget** (15GB total): media-vm 6GB, nextcloud-vm 4GB, homebridge-lxc 736MB, ZFS ARC 1GB (`/etc/modprobe.d/zfs.conf`), Proxmox ~1-2GB. media-vm reduced from 10GB→8GB→6GB (actual container usage is ~3.5GB, balloon disabled due to GPU passthrough). ARC reduced from 2GB (sequential streaming barely benefits).
 
 ## Ansible Environment
 
