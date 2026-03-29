@@ -52,3 +52,6 @@ docker_stacks:
     path: /opt/docker-socket-proxy
     build: false
     auto_update: true
+  - name: ava
+    path: /opt/ava
+    build: true

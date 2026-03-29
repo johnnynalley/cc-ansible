@@ -25,6 +25,7 @@ pve_vm_firewalls:
       - { action: ACCEPT, proto: udp, dport: 5060, comment: "SIP from VoIP.ms" }
       - { action: ACCEPT, proto: udp, dport: "10000:20000", comment: "RTP media" }
       - { action: ACCEPT, proto: tcp, dport: "80,443", source: "+dc/tailscale", comment: "FreePBX GUI (Tailscale only)" }
+      - { action: ACCEPT, proto: tcp, dport: 8088, source: "+dc/docker-vm", comment: "ARI from docker-vm (AVA)" }
 
   # pbs-lxc (CT 105) - Proxmox Backup Server
   105:
