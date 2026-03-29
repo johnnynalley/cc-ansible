@@ -5,3 +5,4 @@
 # Extra packages for this host
 packages_host_extra:
   - zfsutils-linux
+  - systemd-cryptsetup
