@@ -1,6 +1,6 @@
 # CC-Ansible
 
-> **Last updated:** 2026-03-23
+> **Last updated:** 2026-04-12
 
 Ansible automation for Johnny's homelab infrastructure (4 Proxmox nodes, 10 VMs/LXCs, Ansible controller LXC, gaming workstation, ThinkPad laptop, MacBook).
 
@@ -289,7 +289,7 @@ Packages are merged from multiple sources (all applicable variables combined):
 | `apcupsd.yml` | `proxmox_nodes` | UPS monitoring with Apprise push alerts (ts440 USB master, others slave). Staggers slave startup to avoid NIS mutex contention |
 | `bootstrap.yml` | `linux_hosts` | Create admin user, SSH keys, sudo setup, timezone (Debian + Arch) |
 | `ssh-hardening.yml` | `linux_hosts` | SSH security (key auth, disable password) |
-| `auto-updates.yml` | `linux_hosts` | Configure automatic updates + reboot (Sun 5am CT) |
+| `auto-updates.yml` | `linux_hosts` | Configure automatic updates + reboot (Sun, staggered for Proxmox quorum) |
 | `unattended-upgrades.yml` | `debian_hosts` | Daily security patches (incl. workstations, Proxmox blacklist) |
 | `network-recovery.yml` | `linux_hosts` | Network watchdog for auto-recovery after outages |
 | `wifi.yml` | `linux_hosts` | WiFi powersave disable, optional PCI FLR or module reload resume fix |
@@ -309,7 +309,7 @@ Packages are merged from multiple sources (all applicable variables combined):
 | `nextcloud-scan.yml` | nextcloud-vm | Periodic `occ files:scan` for external storage (every 10 min) |
 | `claude-memory-sync.yml` | `nas_server`, ansible-lxc | Rsync Claude Code memory to NAS for Nextcloud access (every 10 min) |
 | `proxmox-firewall.yml` | `proxmox_nodes` | Deploy Proxmox firewall rules (datacenter, node, VM/CT) |
-| `proxmox-backup-server.yml` | pbs-lxc, `proxmox_nodes` | Install PBS, configure datastore/prune/API token, register on all PVE nodes, create vzdump backup jobs, deploy connectivity check |
+| `proxmox-backup-server.yml` | pbs-lxc, `proxmox_nodes` | Install PBS, configure datastore/prune/GC/API token, register on all PVE nodes, create vzdump backup jobs, deploy connectivity check |
 | `proxmox-notifications.yml` | `proxmox_nodes` | PVE webhook notification targets + matchers → Apprise → Pushover |
 | `openclaw.yml` | `linux_hosts` | OpenClaw AI agent (npm install, gateway service, repo-sync/update-check timers) |
 
@@ -758,6 +758,7 @@ PBS runs in an unprivileged LXC (CT 105) on pve-herc with a dedicated 2TB ext4 d
 - **Storage name**: `pbs-main` (registered on all 4 Proxmox nodes)
 - **Backup schedule**: Hourly, all guests except pbs-lxc (Ansible-managed via Play 3)
 - **Prune job**: Daily — 24 hourly, 7 daily, 4 weekly, 3 monthly
+- **Garbage collection**: Daily (frees space from pruned snapshots — **required**, prune alone doesn't free disk)
 - **API auth**: Token `backup@pbs!ansible` (secret in vault)
 - **Connectivity check**: Runs at `:59` on all nodes (Play 4), logs to `pbs-check` tag in Loki
 - **Config**: `host_vars/pbs-lxc/vars.yml`, `host_vars/pbs-lxc/vault.yml`

@@ -15,6 +15,9 @@ pbs_retention:
   keep_weekly: 4
   keep_monthly: 3
 
+# PBS garbage collection schedule (frees space from pruned snapshots)
+pbs_gc_schedule: "daily"
+
 # PBS API user for PVE node authentication
 pbs_api_user: backup@pbs
 pbs_api_token_name: ansible

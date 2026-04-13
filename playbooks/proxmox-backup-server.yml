@@ -139,6 +139,12 @@
         --keep-monthly {{ pbs_retention.keep_monthly }}
       changed_when: false
 
+    - name: Set garbage collection schedule
+      ansible.builtin.command: >
+        proxmox-backup-manager datastore update {{ pbs_datastore_name }}
+        --gc-schedule {{ pbs_gc_schedule | default('daily') }}
+      changed_when: false
+
     # =========================================================================
     # PBS API User and Token (for PVE node authentication)
     # =========================================================================

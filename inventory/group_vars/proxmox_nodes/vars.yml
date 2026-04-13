@@ -17,6 +17,9 @@ unattended_upgrades_blacklist:
   - "qemu-server"
   - "libpve-*"
 
+# Disable random delay for auto-updates — stagger is per-host in host_vars
+auto_updates_randomized_delay_sec: "0"
+
 # PBS backup job (hourly to pbs-main, all guests except pbs-lxc)
 pbs_backup_schedule: "*:00"
 pbs_backup_exclude: "105"

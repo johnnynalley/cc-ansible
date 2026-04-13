@@ -1,6 +1,6 @@
 # CLAUDE.md
 
-> **Last updated:** 2026-03-28
+> **Last updated:** 2026-04-12
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
@@ -376,7 +376,7 @@ Cloudflare Tunnel (`cloudflared` on docker-vm) provides public access to Nextclo
 
 Four-tier backup strategy:
 
-- **Proxmox Backup Server (PBS)**: Hourly VM/CT snapshot backups via `proxmox-backup-server.yml`. pbs-lxc (CT 105 on pve-herc, Debian 13, 4 cores, 2GB RAM) with 2TB ext4 datastore at `/srv/pbs-data`. Registered as `pbs-main` storage on all 4 Proxmox nodes. All guests backed up hourly except pbs-lxc itself (circular); uses `--all --exclude 105`. API token auth (`backup@pbs!ansible`, secret in `host_vars/pbs-lxc/vault.yml`). Daily prune job: 24h/7d/4w/3m. Web UI: `https://100.110.176.37:8007`. PBS dedup makes hourly backups viable — only changed blocks are stored after the initial full backup. Connectivity check runs at `:59` on all nodes (Play 4), logging to journald tag `pbs-check` for Loki.
+- **Proxmox Backup Server (PBS)**: Hourly VM/CT snapshot backups via `proxmox-backup-server.yml`. pbs-lxc (CT 105 on pve-herc, Debian 13, 4 cores, 2GB RAM) with 2TB ext4 datastore at `/srv/pbs-data`. Registered as `pbs-main` storage on all 4 Proxmox nodes. All guests backed up hourly except pbs-lxc itself (circular); uses `--all --exclude 105`. API token auth (`backup@pbs!ansible`, secret in `host_vars/pbs-lxc/vault.yml`). Daily prune job: 24h/7d/4w/3m. **Daily garbage collection** (frees disk space from pruned snapshots — without GC, orphaned chunks accumulate indefinitely). Web UI: `https://100.110.176.37:8007`. PBS dedup makes hourly backups viable — only changed blocks are stored after the initial full backup. Connectivity check runs at `:59` on all nodes (Play 4), logging to journald tag `pbs-check` for Loki.
 - **Offsite (Backblaze B2)**: Daily via `restic.yml` at 00:00 UTC +30m random delay. Retention: 7d/4w/6m. ts440 backs up `/srv/nas-zfs` excluding replaceable media.
 - **Local (ts440 ZFS)**: Hourly via `local-restic.yml`. Backs up `/opt` from VMs to `/srv/nas-zfs/backups/<hostname>/`. Retention: 24h/7d/4w/6m. Most hosts use SFTP over Tailscale SSH with a dedicated key in `group_vars/backup_clients/vault.yml`. Hosts without Tailscale SSH access (e.g., openclaw-vm) use a **restic REST server** on ts440 (port 8500) with append-only mode — no SSH, no shell, no filesystem browsing, and existing backups cannot be deleted. REST credentials in host vault, htpasswd on ts440. `--private-repos` ensures each user can only access their own repo directory.
 - **ZFS Snapshots (sanoid)**: Every 15 minutes via `zfs.yml`. Policies defined in `group_vars/nas_server/zfs.yml`. Property enforcement (`zfs set`) runs automatically to fix drift.
@@ -389,7 +389,8 @@ Enable local backups: set `local_restic_enabled: true` and `local_restic_backup_
 - The enterprise repo is auto-added on install and must be removed (no subscription)
 - Repo and GPG key use `ansible_distribution_release` for automatic Debian version detection
 - PBS tokens use privilege separation — both user AND token ACLs must be set (intersection model)
-- Config: `host_vars/pbs-lxc/vars.yml` (datastore name, retention, API user/token)
+- **GC is critical**: Prune jobs only remove snapshot metadata. Without daily GC, orphaned chunks fill the datastore. Config: `pbs_gc_schedule` in `host_vars/pbs-lxc/vars.yml`
+- Config: `host_vars/pbs-lxc/vars.yml` (datastore name, retention, GC schedule, API user/token)
 - Vzdump job config: `group_vars/proxmox_nodes/vars.yml` (`pbs_backup_schedule`, `pbs_backup_exclude`)
 - **4 cores required** — pve-herc's AMD GX-415GA is a low-power 1.5GHz SOC. With 2 cores, simultaneous WireGuard+TLS connections from all 4 PVE nodes at `:00` caused intermittent TCP timeouts (first 2 succeed, 3rd/4th fail). 4 cores resolved this.
 
@@ -416,7 +417,9 @@ One-way sync from UTD OneDrive to Nextcloud via `playbooks/rclone-sync.yml`. Run
 
 ### Unattended-Upgrades (Daily Security Patches)
 
-Deployed via `playbooks/unattended-upgrades.yml` to all `debian_hosts` (including workstations — security patches shouldn't wait). Complements the weekly `auto-updates.yml` full-upgrade (Sundays 5:00 AM CT + 15m random delay).
+Deployed via `playbooks/unattended-upgrades.yml` to all `debian_hosts` (including workstations — security patches shouldn't wait). Complements the weekly `auto-updates.yml` full-upgrade (Sundays, staggered per-host).
+
+**Proxmox node stagger**: Reboots are staggered to maintain cluster quorum (3 of 4 nodes required). Per-host `auto_updates_oncalendar` overrides in host_vars with `auto_updates_randomized_delay_sec: "0"` in `group_vars/proxmox_nodes/vars.yml`: ts440 05:00 → pve-alto 05:20 → pve-herc 05:40 → pve-m70q 06:00. pve-m70q goes last because it hosts the most guests (ansible-lxc, docker-vm, openclaw-vm). Other hosts use the default schedule from `group_vars/debian_hosts/packages.yml` (`Sun *-*-* 05:00:00` + 15m random delay).
 
 **How it works**: Uses Debian/Ubuntu's native `unattended-upgrades` package with APT's built-in `apt-daily-upgrade.timer` (daily, randomized 12h window). Only applies security-origin patches — not general updates. A systemd drop-in (`/etc/systemd/system/apt-daily-upgrade.service.d/notify.conf`) hooks an `ExecStartPost` script that sends a silent Apprise notification (`push-quiet` tag) when patches are applied.
 
