@@ -1,6 +1,6 @@
 # CLAUDE.md
 
-> **Last updated:** 2026-04-12
+> **Last updated:** 2026-04-13
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
@@ -220,7 +220,11 @@ docker_stacks:
 
 Lightweight VM (6 cores, 6GB RAM) running infrastructure services. Stacks defined in `host_vars/docker-vm/docker.yml`. Services use `caddy-proxy` Docker network (created by Caddy stack; other stacks join as external). Configs stored locally at `/opt/<service>/`, backed up via restic.
 
+**Portainer CE** (multi-host): Central Docker management UI at `portainer.jnalley.me`. Manages docker-vm locally via socket; media-vm, nextcloud-vm, and openclaw-vm connect via Portainer Edge Agents (`portainer/agent:latest` with `EDGE=1`). Edge Agents connect outbound to Portainer — no inbound ports needed on remote VMs. Agent compose files at `/opt/portainer-agent/` on each VM, with per-environment edge keys from the Portainer API. Admin credentials in Portainer's local database (not vault-managed).
+
 **Dispatcharr** (disabled): HDHomeRun emulator for free IPTV in Plex. Commented out in `docker.yml` — free M3U playlists had too many dead streams. Compose file and data preserved at `/opt/dispatcharr/` on docker-vm. Uncomment in `docker.yml` and Caddyfile to re-enable. HDHR tuner URL for Plex: `http://100.108.254.100:9191/hdhr` (note the `/hdhr` path — not root).
+
+**Removed services** (disabled 2026-04-13, compose files and data preserved at `/opt/` on docker-vm for easy re-enable): Uptime Kuma (`status.jnalley.me`), Homepage (`home.jnalley.me`), Gitea (`git.jnalley.me`). Commented out in `docker.yml` and Caddyfile.
 
 #### nextcloud-vm (VM 101 on ts440)
 
@@ -235,6 +239,8 @@ Primary media VM (6GB RAM, 4 cores, 200GB disk, Quadro P2200 GPU passthrough). S
 **Immich**: Photo/video management at `photos.jnalley.me`. ML container capped at `mem_limit: 2g` to prevent OOM-freezing the VM. External library (`/srv/untitled`) is auto-locked by `immich_folder_album_creator` every 6 hours.
 
 **Recyclarr**: Syncs TRaSH Guides custom formats to Sonarr/Radarr. Config at `/opt/media-stack/recyclarr/recyclarr.yml`. Runs daily at midnight.
+
+**Tdarr** (disabled 2026-04-13): Media transcoding service. Commented out in `/opt/media-stack/docker-compose.yml` and Caddyfile. Compose config and `/opt/media-stack/tdarr/` data preserved for easy re-enable.
 
 #### Torrent Fallback (Gluetun + qBittorrent)
 

@@ -1,6 +1,6 @@
 # CC-Ansible
 
-> **Last updated:** 2026-04-12
+> **Last updated:** 2026-04-13
 
 Ansible automation for Johnny's homelab infrastructure (4 Proxmox nodes, 10 VMs/LXCs, Ansible controller LXC, gaming workstation, ThinkPad laptop, MacBook).
 
@@ -536,16 +536,18 @@ docker-vm (VM 110 on pve-m70q) runs infrastructure services:
 |---------|-----|---------|
 | Caddy | - | Reverse proxy (DNS-01 via Cloudflare) |
 | Vaultwarden | `vaultwarden.jnalley.me` | Password manager |
-| Uptime Kuma | `status.jnalley.me` | Service monitoring |
-| Homepage | `home.jnalley.me` | Dashboard |
-| Gitea | `git.jnalley.me` | Self-hosted Git (SSH on 2222) |
+| Portainer CE | `portainer.jnalley.me` | Multi-host Docker UI (edge agents on media-vm/nextcloud-vm/openclaw-vm) |
 | Seerr | `requests.jnalley.me` | Media requests (Plex OAuth) |
 | Cloudflared | - | Cloudflare Tunnel (public access) |
 | Apprise API | `apprise.jnalley.me` | Notification router (Pushover + email) |
 | FreshRSS | `rss.jnalley.me` | RSS aggregator (Google Reader API for Reeder) |
 | Diun | - | Docker image update notifier |
+| Grafana | `grafana.jnalley.me` | Loki log dashboards |
 | Dispatcharr | `iptv.jnalley.me` | HDHomeRun emulator for Plex Live TV (disabled — free streams unreliable) |
 | OpenClaw | `openclaw.jnalley.me` | AI agent gateway (proxied to openclaw-vm:18789) |
+| ~~Uptime Kuma~~ | ~~`status.jnalley.me`~~ | Disabled 2026-04-13 (unused); compose preserved at `/opt/uptime-kuma/` |
+| ~~Homepage~~ | ~~`home.jnalley.me`~~ | Disabled 2026-04-13 (unused); compose preserved at `/opt/homepage/` |
+| ~~Gitea~~ | ~~`git.jnalley.me`~~ | Disabled 2026-04-13 (unused); compose preserved at `/opt/gitea/` |
 
 Stacks support `start: true/false` in `docker.yml` to control service state.
 

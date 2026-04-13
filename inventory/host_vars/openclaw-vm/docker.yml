@@ -12,3 +12,6 @@ docker_stacks:
   - name: qdrant
     path: /opt/qdrant
     build: false
+  - name: portainer-agent
+    path: /opt/portainer-agent
+    build: false

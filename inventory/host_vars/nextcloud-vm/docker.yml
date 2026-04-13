@@ -8,6 +8,9 @@ docker_stacks:
   - name: nextcloud-aio
     path: /opt/nextcloud
     build: false
+  - name: portainer-agent
+    path: /opt/portainer-agent
+    build: false
   - name: diun
     path: /opt/diun
     build: false

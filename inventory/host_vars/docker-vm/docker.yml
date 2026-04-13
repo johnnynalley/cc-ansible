@@ -14,15 +14,15 @@ docker_stacks:
   - name: vaultwarden
     path: /opt/vaultwarden
     build: false
-  - name: uptime-kuma
-    path: /opt/uptime-kuma
-    build: false
-  - name: homepage
-    path: /opt/homepage
-    build: false
-  - name: gitea
-    path: /opt/gitea
-    build: false
+  # - name: uptime-kuma
+  #   path: /opt/uptime-kuma
+  #   build: false
+  # - name: homepage
+  #   path: /opt/homepage
+  #   build: false
+  # - name: gitea
+  #   path: /opt/gitea
+  #   build: false
   - name: seerr
     path: /opt/seerr
     build: false
@@ -52,6 +52,9 @@ docker_stacks:
     path: /opt/docker-socket-proxy
     build: false
     auto_update: true
+  - name: portainer
+    path: /opt/portainer
+    build: false
   - name: ava
     path: /opt/ava
     build: true
