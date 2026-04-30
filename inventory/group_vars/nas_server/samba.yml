@@ -18,11 +18,6 @@ smb_shares:
   - name: Backups
     path: /mnt/nas-zfs/backups
 
-  # Time Machine backup target
-  - name: Time Machine
-    path: /mnt/nas-zfs/backups/timemachine
-    fruit_time_machine: true
-
   # Individual drive shares (for direct access / troubleshooting)
   - name: NAS-01
     path: /srv/nas-01
