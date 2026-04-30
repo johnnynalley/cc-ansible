@@ -22,13 +22,13 @@ filesystem_mounts:
   - path: /srv/media-03
     src: "/dev/disk/by-id/ata-Hitachi_HDS723020BLA642_MN1270F32VGU1D-part1"
     fstype: ext4
-    opts: "noatime,nofail,x-systemd.device-timeout=5s"
+    opts: "noatime,nofail,x-systemd.device-timeout=60s"
 
   # 2TB ex-PBS drive via USB-SATA (ext4) - mergerfs media branch
   - path: /srv/media-04
     src: "UUID=42a062bb-af07-4cfb-8c80-3250c1c76bfb"
     fstype: ext4
-    opts: "noatime,nofail,x-systemd.device-timeout=5s"
+    opts: "noatime,nofail,x-systemd.device-timeout=60s"
     owner: johnny
     group: smbusers
     mode: "2775"
