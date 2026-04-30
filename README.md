@@ -299,7 +299,7 @@ Packages are merged from multiple sources (all applicable variables combined):
 | `zfs.yml` | `nas_server` | ZFS snapshots (sanoid), scrub, ARC tuning, property enforcement, ACLs |
 | `nfs.yml` | `nas_server` + clients | NFS server/client configuration |
 | `filesystem-mounts.yml` | `linux_hosts` | Local filesystem mounts (NTFS, exFAT) |
-| `samba.yml` | `nas_server` | Samba + Time Machine configuration |
+| `samba.yml` | `linux_hosts` | Samba shares + Time Machine (ts440 + pve-herc) |
 | `docker-stacks.yml` | `docker_hosts` | Deploy Docker Compose stacks (per-service update reporting with version diffs) |
 | `gluetun-watchdog.yml` | media-vm | Gluetun VPN crash loop detection, port forwarding monitoring, and auto-restart |
 | `docker-auto-update.yml` | `docker_hosts` | Auto-update selected containers every 6h with major version guard |
@@ -438,6 +438,24 @@ ansible ts440 -m shell -a "zfs list -t snapshot -o name,creation,used -s creatio
 ls /srv/nas-zfs/.zfs/snapshot/
 cp /srv/nas-zfs/.zfs/snapshot/autosnap_2026-01-26_hourly/configs/file.txt /srv/nas-zfs/configs/
 ```
+
+## mergerfs Pool (ts440)
+
+`/srv/media` is a mergerfs union of 7 branches:
+
+| Branch | Drive | Type |
+|--------|-------|------|
+| `/srv/nas-01/media` | 2TB Lacie SSD | ext4 |
+| `/srv/nas-02/media` | 2TB LUKS | ext4 on dm-crypt |
+| `/srv/nas-zfs/media` | nas_zfs 8TB mirror | ZFS |
+| `/srv/media-01/media` | 3TB | ZFS |
+| `/srv/media-02/media` | 3TB | ZFS |
+| `/srv/media-03/media` | 2TB Hitachi HDD via USB-SATA | ext4 |
+| `/srv/media-04/media` | 2TB ex-PBS drive via USB-SATA | ext4 |
+
+- **Create policy**: `epmfs` (existing path most free space) — new files land on the same branch as the existing show/movie directory, which is critical for Sonarr/Radarr hardlinks. Falls back to mfs when no existing path found.
+- **USB-SATA drives**: `x-systemd.device-timeout=60s` in fstab — USB enumeration requires more time than the default 5s
+- **Config**: `group_vars/nas_server/mergerfs.yml`
 
 ## mergerfs-balance
 
