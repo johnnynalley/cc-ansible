@@ -1,0 +1,12 @@
+# =============================================================================
+# pve-herc - Samba Configuration
+# =============================================================================
+# Serves Time Machine from the 1TB backup drive (/srv/pbs-data)
+# alongside the PBS datastore (PBS ignores non-PBS subdirectories)
+
+smb_workgroup: WORKGROUP
+
+smb_shares:
+  - name: Time Machine
+    path: /srv/pbs-data/timemachine
+    fruit_time_machine: true

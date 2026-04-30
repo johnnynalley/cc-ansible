@@ -16,16 +16,17 @@ mergerfs_branches:
   - /srv/media-01/media
   - /srv/media-02/media
   - /srv/media-03/media
+  - /srv/media-04/media
 
 # Mount options
 # - inodecalc=path-hash: Stable inode numbers for NFS compatibility (prevents ESTALE)
 # - func.getattr=newest: Consistent file attributes across drives for NFS
 # - cache.files=off: Disable file caching (VirtioFS handles caching)
-# - category.create=mfs: Most free space policy for new files
+# - category.create=epmfs: Existing path most free space — keeps related files on the same branch for hardlinks
 # - moveonenospc=true: Move writes to another branch if one is full
 # - minfreespace=50G: Minimum free space per branch before skipping
 # - statfs=full: Report combined space from all branches
-mergerfs_options: "allow_other,inodecalc=path-hash,func.getattr=newest,cache.files=off,dropcacheonclose=true,category.create=mfs,moveonenospc=true,minfreespace=50G,statfs=full,fsname=mergerfs"
+mergerfs_options: "allow_other,inodecalc=path-hash,func.getattr=newest,cache.files=off,dropcacheonclose=true,category.create=epmfs,moveonenospc=true,minfreespace=50G,statfs=full,fsname=mergerfs"
 
 # Systemd dependencies (After= only, NOT Requires= - mixed ZFS/fstab breaks Requires=)
 mergerfs_after_units:
@@ -37,6 +38,7 @@ mergerfs_after_units:
   - srv-media\x2d01-media.mount
   - srv-media\x2d02-media.mount
   - srv-media\x2d03-media.mount
+  - srv-media\x2d04.mount
 
 # Default path excludes for mergerfs-balance
 # These paths should stay on nas_zfs (mirrored) and not be moved to single-drive pools

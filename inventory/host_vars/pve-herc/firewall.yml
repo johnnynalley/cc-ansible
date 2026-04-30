@@ -11,6 +11,7 @@ pve_node_firewall:
     - { action: ACCEPT, iface: tailscale0, proto: tcp, dport: 8006, comment: "Proxmox API (Tailscale)" }
     - { action: ACCEPT, iface: tailscale0, proto: tcp, dport: 22, comment: "SSH (Tailscale)" }
     - { action: ACCEPT, iface: tailscale0, proto: icmp, comment: "Ping (Tailscale)" }
+    - { action: ACCEPT, iface: tailscale0, proto: tcp, dport: 445, comment: "SMB/Time Machine (Tailscale)" }
     - { action: DROP, comment: "Default deny" }
 
 # VM/CT firewall rules

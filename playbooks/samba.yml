@@ -6,7 +6,7 @@
 # =============================================================================
 
 - name: Configure Samba server
-  hosts: nas_server
+  hosts: linux_hosts
   become: true
   gather_facts: true
 

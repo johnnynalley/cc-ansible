@@ -3,8 +3,9 @@
 # =============================================================================
 
 filesystem_mounts:
-  # 2TB Hitachi HDD - PBS datastore (bind-mounted into pbs-lxc CT 105)
+  # 1TB drive - PBS datastore + Time Machine (bind-mounted into pbs-lxc CT 105)
+  # FILL IN: replace UUID after formatting with mkfs.ext4 -L pbs-data /dev/sdX && blkid /dev/sdX
   - path: /srv/pbs-data
-    src: /dev/disk/by-uuid/a053ae3a-040b-4824-8f9b-a3522251bce3
+    src: /dev/disk/by-uuid/4b8f1479-bebe-4cc0-a9bd-778023087595
     fstype: ext4
     opts: "defaults,nofail"

@@ -1,6 +1,6 @@
 # CC-Ansible
 
-> **Last updated:** 2026-04-13
+> **Last updated:** 2026-04-29
 
 Ansible automation for Johnny's homelab infrastructure (4 Proxmox nodes, 10 VMs/LXCs, Ansible controller LXC, gaming workstation, ThinkPad laptop, MacBook).
 
@@ -343,25 +343,30 @@ Legacy copy on pi5-01: `/srv/configs/ansible/cc-ansible` (NFS from ts440, auto-s
 
 ## Samba Configuration
 
-The NAS server (currently ts440) serves SMB shares over Tailscale, managed by `playbooks/samba.yml`. Shares are defined in `group_vars/nas_server/samba.yml` under `smb_shares`.
+Samba is managed by `playbooks/samba.yml` and runs on any `linux_hosts` host with `smb_shares` defined — currently ts440 (nas_server) and pve-herc.
 
-### Shares
+### ts440 Shares
 
 | Share | Path | Purpose |
 |-------|------|---------|
 | Configs | `/mnt/nas-zfs/configs` | Ansible repo only (app configs migrated to VMs) |
-| Time Machine | `/mnt/nas-zfs/backups/timemachine` | macOS Time Machine (currently unused) |
+| Time Machine | `/mnt/nas-zfs/backups/timemachine` | Legacy TM path (no longer active) |
 | Backups | `/mnt/nas-zfs/backups` | General backups |
 | NAS-ZFS | `/mnt/nas-zfs` | Full ZFS pool root |
 | NAS-01, NAS-02 | `/srv/nas-01`, `/srv/nas-02` | Individual drive access |
+
+### pve-herc Shares
+
+| Share | Path | Purpose |
+|-------|------|---------|
+| Time Machine | `/srv/pbs-data/timemachine` | macOS Time Machine (active, 1TB drive) |
 
 ### Connecting from macOS
 
 ```bash
 # In Finder: Cmd+K, then enter:
-smb://100.71.188.16/Configs
-
-# For ansible repo, navigate to: ansible/cc-ansible
+smb://100.71.188.16/Configs          # ts440
+smb://100.97.139.95/Time Machine     # pve-herc (Time Machine destination)
 ```
 
 ### Samba User Management
@@ -369,9 +374,10 @@ smb://100.71.188.16/Configs
 ```bash
 # Set Samba password (interactive)
 ansible ts440 -m shell -a "smbpasswd -a johnny" --become
+ansible pve-herc -m shell -a "smbpasswd -a johnny" --become
 
 # List Samba users
-ansible ts440 -m shell -a "pdbedit -L" --become
+ansible pve-herc -m shell -a "pdbedit -L" --become
 ```
 
 ## Network Recovery
@@ -753,10 +759,10 @@ Centralized log aggregation. Loki + Grafana run on docker-vm, Alloy agents on al
 
 ## Proxmox Backup Server (pbs-lxc)
 
-PBS runs in an unprivileged LXC (CT 105) on pve-herc with a dedicated 2TB ext4 drive. 4 cores, 2GB RAM.
+PBS runs in an unprivileged LXC (CT 105) on pve-herc with a dedicated 1TB ext4 drive. 4 cores, 2GB RAM.
 
 - **Web UI**: `https://100.110.176.37:8007` (login as `root@pam`)
-- **Datastore**: `main` at `/srv/pbs-data` (~1.8TB usable)
+- **Datastore**: `main` at `/srv/pbs-data` (~900GB usable)
 - **Storage name**: `pbs-main` (registered on all 4 Proxmox nodes)
 - **Backup schedule**: Hourly, all guests except pbs-lxc (Ansible-managed via Play 3)
 - **Prune job**: Daily — 24 hourly, 7 daily, 4 weekly, 3 monthly

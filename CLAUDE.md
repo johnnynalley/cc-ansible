@@ -1,6 +1,6 @@
 # CLAUDE.md
 
-> **Last updated:** 2026-04-13
+> **Last updated:** 2026-04-29
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
@@ -172,9 +172,11 @@ TS440 is the primary NAS server (currently the sole `nas_server` group member). 
 
 **Media ZFS Pools**: Two 3TB single-drive pools (`media-01`, `media-02`) for plex/podcast overflow. Properties enforced by `playbooks/zfs.yml` (compression=lz4, atime=off, recordsize=1M, acltype=posixacl). Sanoid snapshots: daily:7, weekly:4, monthly:3.
 
-**MergerFS**: `/srv/media` aggregates 6 branches into a unified media pool: nas-01 (2TB SSD), nas-02 (2TB LUKS), nas_zfs, media-01 (3TB ZFS), media-02 (3TB ZFS), media-03 (2TB ext4 via USB-SATA). Branches and options defined in `group_vars/nas_server/mergerfs.yml`. Boot ordering uses `After=` directives only — `Requires=` and `RequiresMountsFor=` caused dependency failures with the mixed ZFS/fstab setup.
+**MergerFS**: `/srv/media` aggregates 7 branches into a unified media pool: nas-01 (2TB SSD), nas-02 (2TB LUKS), nas_zfs, media-01 (3TB ZFS), media-02 (3TB ZFS), media-03 (2TB ext4 via USB-SATA), media-04 (2TB ext4 via USB-SATA, ex-PBS drive). Create policy: `epmfs` (existing path most free space) — keeps files in the same directory on the same branch, which is critical for Sonarr/Radarr hardlinks. Falls back to mfs when no existing path found. Branches and options defined in `group_vars/nas_server/mergerfs.yml`. Boot ordering uses `After=` directives only — `Requires=` and `RequiresMountsFor=` caused dependency failures with the mixed ZFS/fstab setup.
 
 **media-03 (USB-SATA)**: 2TB Hitachi HDD connected via USB-SATA adapter, formatted ext4 (not ZFS — USB disconnects would fault a ZFS pool). Powered by UPS via power strip. Mount managed in `group_vars/nas_server/mounts.yml` with `nofail` so ts440 boots even if the drive is disconnected.
+
+**media-04 (USB-SATA)**: 2TB ext4 drive added via USB-SATA adapter — the former PBS drive from pve-herc, repurposed for additional media storage. Same nofail pattern as media-03.
 
 **mergerfs-balance**: Balances files across mergerfs branches by moving from the fullest to the emptiest. Default path excludes in `/etc/mergerfs-balance.conf` (deployed by `playbooks/mergerfs.yml` from `mergerfs_balance_exclude_paths` variable) protect irreplaceable data on mirrored nas_zfs (photos, archive, books) from being moved to single-drive pools. CLI `-E` flags are merged with config excludes.
 
@@ -194,9 +196,13 @@ TS440 is the primary NAS server (currently the sole `nas_server` group member). 
 
 ### Samba/SMB Shares (ts440)
 
-Managed by `playbooks/samba.yml`. Shares defined in `inventory/group_vars/nas_server/samba.yml` under `smb_shares`. Uses `@smbusers` group for authentication and fruit VFS module (`catia fruit streams_xattr`) for macOS compatibility and Time Machine support. Avahi mDNS advertisement for LAN discovery.
+Managed by `playbooks/samba.yml`, which runs on any `linux_hosts` host with `smb_shares` defined — currently ts440 (nas_server) and pve-herc. Uses `@smbusers` group for authentication and fruit VFS module (`catia fruit streams_xattr`) for macOS compatibility and Time Machine support. Avahi mDNS advertisement runs on each Samba host.
 
-**Discovery over Tailscale**: Time Machine discovery works via SMB's AAPL extensions, NOT mDNS (mDNS doesn't traverse WireGuard tunnels). Connect using the Tailscale IP: `smb://100.71.188.16/<share>`.
+**ts440 shares**: NAS-ZFS, Configs, Backups, NAS-01, NAS-02 — defined in `group_vars/nas_server/samba.yml`.
+
+**pve-herc shares**: Time Machine (`/srv/pbs-data/timemachine` on the 1TB PBS drive) — defined in `host_vars/pve-herc/samba.yml`. Active macOS Time Machine destination. SMB port 445 allowed from tailscale0 in pve-herc's firewall.
+
+**Discovery over Tailscale**: Time Machine discovery works via SMB's AAPL extensions, NOT mDNS. Connect: `smb://100.97.139.95/Time Machine` (pve-herc Tailscale IP).
 
 ### Docker Container Management
 
@@ -382,7 +388,7 @@ Cloudflare Tunnel (`cloudflared` on docker-vm) provides public access to Nextclo
 
 Four-tier backup strategy:
 
-- **Proxmox Backup Server (PBS)**: Hourly VM/CT snapshot backups via `proxmox-backup-server.yml`. pbs-lxc (CT 105 on pve-herc, Debian 13, 4 cores, 2GB RAM) with 2TB ext4 datastore at `/srv/pbs-data`. Registered as `pbs-main` storage on all 4 Proxmox nodes. All guests backed up hourly except pbs-lxc itself (circular); uses `--all --exclude 105`. API token auth (`backup@pbs!ansible`, secret in `host_vars/pbs-lxc/vault.yml`). Daily prune job: 24h/7d/4w/3m. **Daily garbage collection** (frees disk space from pruned snapshots — without GC, orphaned chunks accumulate indefinitely). Web UI: `https://100.110.176.37:8007`. PBS dedup makes hourly backups viable — only changed blocks are stored after the initial full backup. Connectivity check runs at `:59` on all nodes (Play 4), logging to journald tag `pbs-check` for Loki.
+- **Proxmox Backup Server (PBS)**: Hourly VM/CT snapshot backups via `proxmox-backup-server.yml`. pbs-lxc (CT 105 on pve-herc, Debian 13, 4 cores, 2GB RAM) with 1TB ext4 datastore at `/srv/pbs-data`. The same 1TB drive also hosts `/srv/pbs-data/timemachine/` for macOS Time Machine (served by Samba on pve-herc). Registered as `pbs-main` storage on all 4 Proxmox nodes. All guests backed up hourly except pbs-lxc itself (circular); uses `--all --exclude 105`. API token auth (`backup@pbs!ansible`, secret in `host_vars/pbs-lxc/vault.yml`). Daily prune job: 24h/7d/4w/3m. **Daily garbage collection** (frees disk space from pruned snapshots — without GC, orphaned chunks accumulate indefinitely). Web UI: `https://100.110.176.37:8007`. PBS dedup makes hourly backups viable — only changed blocks are stored after the initial full backup. Connectivity check runs at `:59` on all nodes (Play 4), logging to journald tag `pbs-check` for Loki.
 - **Offsite (Backblaze B2)**: Daily via `restic.yml` at 00:00 UTC +30m random delay. Retention: 7d/4w/6m. ts440 backs up `/srv/nas-zfs` excluding replaceable media.
 - **Local (ts440 ZFS)**: Hourly via `local-restic.yml`. Backs up `/opt` from VMs to `/srv/nas-zfs/backups/<hostname>/`. Retention: 24h/7d/4w/6m. Most hosts use SFTP over Tailscale SSH with a dedicated key in `group_vars/backup_clients/vault.yml`. Hosts without Tailscale SSH access (e.g., openclaw-vm) use a **restic REST server** on ts440 (port 8500) with append-only mode — no SSH, no shell, no filesystem browsing, and existing backups cannot be deleted. REST credentials in host vault, htpasswd on ts440. `--private-repos` ensures each user can only access their own repo directory.
 - **ZFS Snapshots (sanoid)**: Every 15 minutes via `zfs.yml`. Policies defined in `group_vars/nas_server/zfs.yml`. Property enforcement (`zfs set`) runs automatically to fix drift.
