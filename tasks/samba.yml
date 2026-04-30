@@ -19,6 +19,12 @@
     name: smbusers
     state: present
 
+- name: Add admin user to smbusers group
+  ansible.builtin.user:
+    name: "{{ ansible_user }}"
+    groups: smbusers
+    append: true
+
 - name: Ensure share directories exist
   ansible.builtin.file:
     path: "{{ item.path }}"
