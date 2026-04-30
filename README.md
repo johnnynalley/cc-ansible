@@ -1,6 +1,6 @@
 # CC-Ansible
 
-> **Last updated:** 2026-04-29
+> **Last updated:** 2026-04-30
 
 Ansible automation for Johnny's homelab infrastructure (4 Proxmox nodes, 10 VMs/LXCs, Ansible controller LXC, gaming workstation, ThinkPad laptop, MacBook).
 
@@ -350,7 +350,6 @@ Samba is managed by `playbooks/samba.yml` and runs on any `linux_hosts` host wit
 | Share | Path | Purpose |
 |-------|------|---------|
 | Configs | `/mnt/nas-zfs/configs` | Ansible repo only (app configs migrated to VMs) |
-| Time Machine | `/mnt/nas-zfs/backups/timemachine` | Legacy TM path (no longer active) |
 | Backups | `/mnt/nas-zfs/backups` | General backups |
 | NAS-ZFS | `/mnt/nas-zfs` | Full ZFS pool root |
 | NAS-01, NAS-02 | `/srv/nas-01`, `/srv/nas-02` | Individual drive access |
