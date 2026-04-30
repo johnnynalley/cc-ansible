@@ -25,9 +25,8 @@ filesystem_mounts:
     opts: "noatime,nofail,x-systemd.device-timeout=5s"
 
   # 2TB ex-PBS drive via USB-SATA (ext4) - mergerfs media branch
-  # FILL IN: replace UUID after formatting with mkfs.ext4 -L media-04 /dev/sdX && blkid /dev/sdX
   - path: /srv/media-04
-    src: "UUID=PLACEHOLDER_media04_uuid"
+    src: "UUID=42a062bb-af07-4cfb-8c80-3250c1c76bfb"
     fstype: ext4
     opts: "noatime,nofail,x-systemd.device-timeout=5s"
     owner: johnny
