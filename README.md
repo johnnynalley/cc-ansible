@@ -1,6 +1,6 @@
 # CC-Ansible
 
-> **Last updated:** 2026-04-30
+> **Last updated:** 2026-05-02
 
 Ansible automation for Johnny's homelab infrastructure (4 Proxmox nodes, 10 VMs/LXCs, Ansible controller LXC, gaming workstation, ThinkPad laptop, MacBook).
 
@@ -824,7 +824,7 @@ OpenClaw AI agent platform — personal homelab admin assistant via web UI and D
 
 - **Web UI**: `https://openclaw.jnalley.me` (Tailscale only)
 - **Gateway**: Port 18789, token auth, trustedProxies: docker-vm only
-- **VM**: 4 cores, 4GB RAM (balloon 3072MB), Ubuntu 25.10, Node.js 22 (NodeSource)
+- **VM**: 4 cores, 8GB RAM (balloon 4096MB), Ubuntu 25.10, Node.js 22 (NodeSource)
 - **Service**: User-level systemd via `openclaw gateway install` (NOT a custom system service)
 - **Config**: `~/.openclaw/openclaw.json` + `.env` — manual, backed up by restic
 - **Timers**: repo-sync (5 min), update-check (daily 08:00 → Apprise)

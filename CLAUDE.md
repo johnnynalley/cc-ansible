@@ -1,6 +1,6 @@
 # CLAUDE.md
 
-> **Last updated:** 2026-04-30
+> **Last updated:** 2026-05-02
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
@@ -507,7 +507,7 @@ OpenClaw AI agent platform (Node.js gateway daemon). Provides a web UI and Disco
 
 - **Web UI**: `https://openclaw.jnalley.me` (Tailscale only, via Caddy on docker-vm)
 - **Gateway port**: 18789 (token auth, trustedProxies: docker-vm only)
-- **VM Specs**: 4 cores, 4GB RAM (balloon min 3072MB), 75GB disk, Ubuntu 25.10
+- **VM Specs**: 4 cores, 8GB RAM (balloon min 4096MB), 75GB disk, Ubuntu 25.10
 - **Node.js**: 22 via NodeSource repo (OpenClaw requires >= 22)
 - **Docker**: Installed for OpenClaw sandbox containers and Qdrant. In `docker_hosts` group — managed by `docker-stacks.yml`.
 - **Gateway service**: Managed by OpenClaw itself via `openclaw gateway install` (user-level systemd unit)
