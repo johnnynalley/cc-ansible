@@ -507,6 +507,29 @@ Three-level firewall managed by `playbooks/proxmox-firewall.yml`:
 
 Security model: default deny (`policy_in: DROP`) on all VMs. Caddy (docker-vm) is the only web entry point. SSH allowed from Tailscale. In VM rules, use `+dc/<ipset>` prefix to reference datacenter-level IP sets.
 
+### Proxmox HA (disabled)
+
+`pve-ha-lrm` and `pve-ha-crm` are stopped, disabled, and **masked** cluster-wide via `playbooks/proxmox-ha.yml`. Driven by `pve_ha_enabled` in `group_vars/proxmox_nodes/vars.yml` (default `false`). HA had zero resources configured anyway, so its only effect was unnecessary watchdog/fencing risk during boot or transient cluster blips. To re-enable later: set `pve_ha_enabled: true` and re-run the playbook.
+
+### Per-VM Storage Gate (Ansible-Managed)
+
+A Proxmox hookscript refuses to start a VM/CT until that VM's declared host mountpoints are present, so VMs that depend on broken storage stay off (no stale VirtioFS handles, no Sonarr/Radarr "missing files" cascades) while unrelated VMs (e.g., docker-vm with no host storage deps) start normally.
+
+- Hookscript binary: `templates/wait-for-mounts.sh.j2` → `/var/lib/vz/snippets/wait-for-mounts.sh` on every Proxmox node
+- Per-VM declarations: `host_vars/<vm>/storage.yml` with `vmid` and `required_host_mounts: [/srv/...]`
+- Aggregated cluster-wide config: `/etc/pve/wait-for-mounts.json` (lives on pmxcfs, so it travels with VM migrations automatically)
+- Wired per-VM via `qm set <vmid> --hookscript local:snippets/wait-for-mounts.sh`
+- Playbook: `playbooks/vm-storage-gate.yml`
+
+To gate a new VM:
+1. Add `host_vars/<vm>/storage.yml` with `vmid` + `required_host_mounts` list.
+2. Run `ansible-playbook playbooks/vm-storage-gate.yml`.
+3. The next time that VM starts (auto or manual), the hookscript checks all required paths via `mountpoint -q` first. Missing → start aborted, Apprise `push,dbc` alert fired. All present → start proceeds.
+
+Initial gates: `media-vm` → `[/srv/media, /srv/nas-zfs]`, `nextcloud-vm` → `[/srv/nas-zfs]`. `homebridge-lxc` and the dev/openclaw/docker-vm class have no host storage dependency and are unaffected.
+
+USB drive timeout standard: all USB drives in `group_vars/nas_server/mounts.yml` use `noatime,nofail,x-systemd.device-timeout=60s` so a slightly slower cold enumeration (e.g., after a UPS swap) doesn't drop ts440 into emergency mode. The `/srv/nas-01` Lacie was previously at 5s; the gate above is the safety net for when timeouts are still exceeded.
+
 ### freepbx-vm (VM 130 on pve-herc)
 
 FreePBX 17 PBX server (Asterisk 22, Debian 12 Bookworm). Provides a second phone number via VoIP.ms SIP trunk and Yealink SIP-T54W desk phone, with call forwarding to iPhone. Web GUI: `http://100.97.139.95/admin`. APT pinned to `bookworm` via `apt_pin_release` to prevent accidental Debian 13 upgrades. FreePBX/Asterisk packages are held (`apt-mark hold`) by the install script — module updates done through the web GUI. Sangoma Smart Firewall enabled with Tailscale CGNAT (`100.64.0.0/10`) trusted. Proxmox firewall rules: SIP (UDP 5060 from LAN + VoIP.ms), RTP (UDP 10000-20000), web GUI (TCP 80/443 Tailscale only), SSH. Config: `host_vars/freepbx-vm/` (vars.yml, packages.yml). Local restic backups: `/etc/asterisk`, `/var/lib/asterisk`, `/var/spool/asterisk`.
