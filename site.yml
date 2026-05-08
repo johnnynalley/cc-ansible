@@ -74,6 +74,10 @@
   ansible.builtin.import_playbook: playbooks/mergerfs.yml
   tags: [mergerfs, storage]
 
+- name: Configure MergerFS branch recovery (udev + watchdog + media-app refresh)
+  ansible.builtin.import_playbook: playbooks/mergerfs-recovery.yml
+  tags: [mergerfs, recovery, watchdog, storage]
+
 - name: Configure ZFS (snapshots, scrub, tuning, properties, ACLs)
   ansible.builtin.import_playbook: playbooks/zfs.yml
   tags: [zfs, snapshots, sanoid]

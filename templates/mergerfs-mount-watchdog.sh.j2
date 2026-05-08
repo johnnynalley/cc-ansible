@@ -1,0 +1,111 @@
+#!/bin/bash
+# MergerFS branch mount watchdog
+# Periodically verifies each protected branch is mounted; attempts remount
+# and alerts if it stays missing past threshold.
+# Managed by Ansible — do not edit manually.
+
+set -uo pipefail
+
+LOG_TAG="mergerfs-mount-watchdog"
+STATE_DIR="/var/lib/mergerfs-mount-watchdog"
+RECOVERY_HOOK="/usr/local/sbin/mergerfs-branch-recovered"
+
+FAILURE_THRESHOLD={{ mergerfs_recovery_failure_threshold | default(3) }}
+ALERT_DEDUP_SECONDS=$(( {{ mergerfs_recovery_alert_dedup_hours | default(6) }} * 3600 ))
+
+log() { logger -t "$LOG_TAG" "$*"; }
+
+send_alert() {
+    local title="$1"
+    local body="$2"
+    local tag="${3:-{{ mergerfs_recovery_alert_tag | default('push,dbc') }}}"
+    curl -sf -o /dev/null \
+      -X POST "{{ apprise_endpoint }}/notify/{{ apprise_token }}" \
+      --form-string "title=${title}" \
+      --form-string "body=${body}" \
+      --form-string "tag=${tag}" \
+      --form-string "type=warning" \
+      --max-time 10 \
+      --retry 2 \
+      --retry-delay 3 2>/dev/null || true
+}
+
+mkdir -p "$STATE_DIR"
+
+get_count() {
+    local f="${STATE_DIR}/${1}.count"
+    [[ -f "$f" ]] && cat "$f" || echo 0
+}
+
+set_count() {
+    echo "$2" > "${STATE_DIR}/${1}.count"
+}
+
+reset_count() {
+    rm -f "${STATE_DIR}/${1}.count"
+}
+
+last_alert_age_seconds() {
+    local f="${STATE_DIR}/${1}.last_alert"
+    if [[ -f "$f" ]]; then
+        local then now
+        then=$(cat "$f")
+        now=$(date +%s)
+        echo $(( now - then ))
+    else
+        echo 999999999
+    fi
+}
+
+mark_alerted() {
+    date +%s > "${STATE_DIR}/${1}.last_alert"
+}
+
+# Check each protected branch
+{% for branch in mergerfs_recovery_branches %}
+
+# --- {{ branch.name }} ({{ branch.mount_path }}) ---
+if findmnt -n "{{ branch.mount_path }}" >/dev/null 2>&1; then
+    # Mount is healthy. If we'd been failing, log recovery and call hook.
+    prev=$(get_count "{{ branch.name }}")
+    if [[ "$prev" -gt 0 ]]; then
+        log "{{ branch.name }} recovered after ${prev} failed checks"
+        reset_count "{{ branch.name }}"
+        "$RECOVERY_HOOK" "{{ branch.name }}" || true
+    fi
+else
+    # Mount is missing — increment counter, attempt remount
+    new_count=$(( $(get_count "{{ branch.name }}") + 1 ))
+    set_count "{{ branch.name }}" "$new_count"
+    log "{{ branch.name }} missing (failure ${new_count}/${FAILURE_THRESHOLD}) — attempting systemctl start {{ branch.mount_unit }}"
+
+    if systemctl start "{{ branch.mount_unit }}" 2>/dev/null; then
+        # Verify it actually mounted
+        sleep 2
+        if findmnt -n "{{ branch.mount_path }}" >/dev/null 2>&1; then
+            log "{{ branch.name }} remounted successfully"
+            reset_count "{{ branch.name }}"
+            "$RECOVERY_HOOK" "{{ branch.name }}" || true
+        else
+            log "{{ branch.name }} systemctl start succeeded but findmnt still empty"
+        fi
+    else
+        log "{{ branch.name }} systemctl start failed — device probably absent"
+    fi
+
+    # Alert if past threshold AND not recently alerted
+    if [[ "$new_count" -ge "$FAILURE_THRESHOLD" ]]; then
+        if [[ $(last_alert_age_seconds "{{ branch.name }}") -ge "$ALERT_DEDUP_SECONDS" ]]; then
+            send_alert \
+              "MergerFS branch missing: {{ branch.name }}" \
+              "{{ branch.mount_path }} has been unmounted for ${new_count} consecutive checks ({{ branch.mount_unit }}). Device may be physically disconnected. See diagnostic runbook in Claude Code memory."
+            mark_alerted "{{ branch.name }}"
+            log "{{ branch.name }} alert sent"
+        else
+            log "{{ branch.name }} past threshold but alert deduped (last alert <{{ mergerfs_recovery_alert_dedup_hours | default(6) }}h ago)"
+        fi
+    fi
+fi
+{% endfor %}
+
+exit 0

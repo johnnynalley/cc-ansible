@@ -1,0 +1,16 @@
+# MergerFS branch auto-remount on USB-SATA reattach
+# Managed by Ansible via playbooks/mergerfs-recovery.yml — do not edit manually
+#
+# When a known UUID re-attaches to the system, systemd starts the corresponding
+# fstab mount unit and runs the recovery hook to refresh media app libraries.
+#
+# This handles the common failure mode where a USB-SATA bridge briefly drops
+# off the bus (causing a clean ext4 unmount + USB re-enumeration as a new
+# device name) and systemd has no built-in trigger to remount on re-add.
+#
+# `--no-block` so udev returns immediately; mount happens asynchronously.
+# Mount unit is idempotent — if the device is already mounted, no-op.
+
+{% for branch in mergerfs_recovery_branches %}
+ACTION=="add", SUBSYSTEM=="block", ENV{ID_FS_UUID}=="{{ branch.device_uuid }}", RUN+="/bin/systemctl --no-block start {{ branch.mount_unit }}", RUN+="/usr/local/sbin/mergerfs-branch-recovered {{ branch.name }}"
+{% endfor %}

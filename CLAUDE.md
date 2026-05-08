@@ -1,6 +1,6 @@
 # CLAUDE.md
 
-> **Last updated:** 2026-05-02
+> **Last updated:** 2026-05-08
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
@@ -177,6 +177,16 @@ TS440 is the primary NAS server (currently the sole `nas_server` group member). 
 **media-03 (USB-SATA)**: 2TB Hitachi HDD connected via USB-SATA adapter, formatted ext4 (not ZFS — USB disconnects would fault a ZFS pool). Powered by UPS via power strip. Mount managed in `group_vars/nas_server/mounts.yml` with `nofail` so ts440 boots even if the drive is disconnected.
 
 **media-04 (USB-SATA)**: 2TB ext4 drive added via USB-SATA adapter — the former PBS drive from pve-herc, repurposed for additional media storage. Same nofail pattern as media-03.
+
+**MergerFS Recovery (auto-remount + watchdog + media-app refresh)**: Deployed by `playbooks/mergerfs-recovery.yml`. Three layers handle USB-SATA branch disconnects automatically so users don't see "missing files" in Plex:
+
+1. **udev auto-remount** (`/etc/udev/rules.d/99-mergerfs-remount.rules`) — when a known UUID re-attaches, systemd-mounts the corresponding fstab unit within seconds. Configured per-branch via `mergerfs_recovery_branches` in `group_vars/nas_server/mergerfs-recovery.yml`.
+2. **Mount watchdog** (`mergerfs-mount-watchdog.timer`, every 60s) — backstop that checks every protected branch via `findmnt`. If missing, attempts `systemctl start <mount-unit>`. After 3 consecutive failures (~3 min), sends a loud Apprise alert (`push,dbc`). State in `/var/lib/mergerfs-mount-watchdog/`. 6-hour alert dedup so it doesn't spam.
+3. **Recovery hook** (`/usr/local/sbin/mergerfs-branch-recovered <name>`) — called by both udev and watchdog after a successful remount. Refreshes Plex (`/library/sections/all/refresh`), Sonarr (`RescanSeries` command), Radarr (`RescanMovie` command). Bazarr auto-follows. Sends a quiet Apprise notification (`push-quiet,dbc`) with per-API result. ts440 reaches media-vm services directly over Tailscale (`100.66.6.113`).
+
+API tokens live in `inventory/group_vars/nas_server/vault.yml` (encrypted): `vault_media_api_plex_token`, `vault_media_api_sonarr_key`, `vault_media_api_radarr_key`. See `vault.yml.example` for how to obtain them. Opt-out per host with `mergerfs_recovery_enabled: false`.
+
+This addresses the recurring USB-SATA disconnect class of failure (see `~/.claude/projects/-home-johnny-cc-ansible/memory/project_media_04_disconnect_diagnostic.md` for the hardware swap-test runbook to identify the actual bad component).
 
 **mergerfs-balance**: Balances files across mergerfs branches by moving from the fullest to the emptiest. Default path excludes in `/etc/mergerfs-balance.conf` (deployed by `playbooks/mergerfs.yml` from `mergerfs_balance_exclude_paths` variable) protect irreplaceable data on mirrored nas_zfs (photos, archive, books) from being moved to single-drive pools. CLI `-E` flags are merged with config excludes.
 

@@ -1,0 +1,29 @@
+# =============================================================================
+# NAS_SERVER GROUP VAULT TEMPLATE - Media app API tokens for mergerfs-recovery
+# =============================================================================
+#
+# These tokens are used by the mergerfs-recovery playbook so that ts440 can
+# refresh Plex/Sonarr/Radarr libraries automatically after a USB drive remount.
+#
+# To create the actual encrypted vault file:
+#   1. Copy this file:
+#        cp inventory/group_vars/nas_server/vault.yml.example \
+#           inventory/group_vars/nas_server/vault.yml
+#   2. Edit it and fill in the real values (see "How to obtain" below)
+#   3. Encrypt:
+#        ansible-vault encrypt inventory/group_vars/nas_server/vault.yml
+#
+# How to obtain each token:
+#   - Plex token:
+#       ssh openclaw-vm "grep '^PLEX_TOKEN=' ~/.openclaw/.env | cut -d= -f2"
+#       (already exists for OpenClaw's Plex skill — reuse the same value)
+#   - Sonarr API key:
+#       Sonarr web UI → Settings → General → Security → API Key
+#   - Radarr API key:
+#       Radarr web UI → Settings → General → Security → API Key
+#
+# =============================================================================
+
+vault_media_api_plex_token: "REPLACE_WITH_PLEX_TOKEN"
+vault_media_api_sonarr_key: "REPLACE_WITH_SONARR_API_KEY"
+vault_media_api_radarr_key: "REPLACE_WITH_RADARR_API_KEY"

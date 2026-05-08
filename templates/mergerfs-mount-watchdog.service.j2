@@ -1,0 +1,11 @@
+[Unit]
+Description=MergerFS Branch Mount Watchdog
+After=multi-user.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/mergerfs-mount-watchdog
+StandardOutput=journal
+StandardError=journal
+User=root
+TimeoutStartSec=120

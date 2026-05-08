@@ -1,0 +1,10 @@
+[Unit]
+Description=Run MergerFS mount watchdog periodically
+
+[Timer]
+OnBootSec={{ mergerfs_recovery_check_interval | default(60) }}
+OnUnitActiveSec={{ mergerfs_recovery_check_interval | default(60) }}
+AccuracySec=10
+
+[Install]
+WantedBy=timers.target

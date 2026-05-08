@@ -1,0 +1,86 @@
+#!/bin/bash
+# mergerfs-branch-recovered - run after a mergerfs branch is successfully (re)mounted
+# Refreshes media app libraries so users don't see stale "missing files".
+# Managed by Ansible - do not edit manually.
+#
+# Usage: mergerfs-branch-recovered <branch-name>
+#   <branch-name> matches the 'name' field in mergerfs_recovery_branches
+#
+# Idempotent and fault-tolerant: every API call has a timeout and never fails
+# the whole script. Logs results to journal via logger(1).
+
+set -uo pipefail
+
+BRANCH_NAME="${1:-unknown}"
+LOG_TAG="mergerfs-recovery"
+
+log() { logger -t "$LOG_TAG" "$*"; }
+
+send_notification() {
+    local title="$1"
+    local body="${2:-}"
+    local tag="${3:-{{ mergerfs_recovery_recovered_tag | default('push-quiet,dbc') }}}"
+    curl -sf -o /dev/null \
+      -X POST "{{ apprise_endpoint }}/notify/{{ apprise_token }}" \
+      --form-string "title=${title}" \
+      --form-string "body=${body}" \
+      --form-string "tag=${tag}" \
+      --form-string "type=info" \
+      --max-time 10 \
+      --retry 2 \
+      --retry-delay 3 2>/dev/null || true
+}
+
+# API endpoints + tokens are templated in from the vault
+PLEX_URL="{{ mergerfs_recovery_api_targets.plex.url }}"
+PLEX_TOKEN="{{ mergerfs_recovery_api_targets.plex.token }}"
+SONARR_URL="{{ mergerfs_recovery_api_targets.sonarr.url }}"
+SONARR_KEY="{{ mergerfs_recovery_api_targets.sonarr.api_key }}"
+RADARR_URL="{{ mergerfs_recovery_api_targets.radarr.url }}"
+RADARR_KEY="{{ mergerfs_recovery_api_targets.radarr.api_key }}"
+
+results=()
+
+call_plex_refresh() {
+    local code
+    code=$(curl -sS -o /dev/null -w "%{http_code}" --max-time 10 \
+        "${PLEX_URL}/library/sections/all/refresh?X-Plex-Token=${PLEX_TOKEN}" 2>/dev/null || echo "000")
+    if [[ "$code" =~ ^2[0-9][0-9]$ ]]; then
+        log "Plex section refresh: OK ($code)"
+        results+=("plex=ok")
+    else
+        log "Plex section refresh: FAILED (HTTP $code)"
+        results+=("plex=fail($code)")
+    fi
+}
+
+call_arr_command() {
+    local app="$1" url="$2" key="$3" command="$4"
+    local code
+    code=$(curl -sS -o /dev/null -w "%{http_code}" --max-time 10 \
+        -X POST -H "X-Api-Key: ${key}" -H "Content-Type: application/json" \
+        "${url}/api/v3/command" -d "{\"name\":\"${command}\"}" 2>/dev/null || echo "000")
+    if [[ "$code" =~ ^2[0-9][0-9]$ ]]; then
+        log "${app} ${command}: OK ($code)"
+        results+=("${app}=ok")
+    else
+        log "${app} ${command}: FAILED (HTTP $code)"
+        results+=("${app}=fail($code)")
+    fi
+}
+
+log "branch '${BRANCH_NAME}' recovered — refreshing media app libraries"
+
+call_plex_refresh
+call_arr_command "sonarr" "$SONARR_URL" "$SONARR_KEY" "RescanSeries"
+call_arr_command "radarr" "$RADARR_URL" "$RADARR_KEY" "RescanMovie"
+
+summary="$(IFS=, ; echo "${results[*]}")"
+log "recovery hook complete for '${BRANCH_NAME}': ${summary}"
+
+send_notification \
+    "MergerFS branch recovered: ${BRANCH_NAME}" \
+    "Library refresh triggered. Result: ${summary}"
+
+# Always exit 0 — this is a notification hook, not a gate.
+exit 0

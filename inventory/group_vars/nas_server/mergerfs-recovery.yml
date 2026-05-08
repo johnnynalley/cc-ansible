@@ -1,0 +1,46 @@
+---
+# MergerFS branch recovery — auto-remount + watchdog + media-app refresh
+# Deployed by playbooks/mergerfs-recovery.yml (opt-in via mergerfs_recovery_enabled).
+
+mergerfs_recovery_enabled: true
+
+# Watchdog timing
+mergerfs_recovery_check_interval: 60          # seconds between checks
+mergerfs_recovery_failure_threshold: 3        # alert after N consecutive missing checks (~3 min)
+mergerfs_recovery_alert_dedup_hours: 6        # don't re-alert for the same branch within N hours
+mergerfs_recovery_alert_tag: "push,dbc"       # loud alert tag — branch persistently missing
+mergerfs_recovery_recovered_tag: "push-quiet,dbc"  # quiet tag — branch came back
+
+# Branches to guard. Each entry needs:
+#   name        — short identifier used in logs/alerts/state file
+#   mount_path  — fstab mount point (matches inventory/group_vars/nas_server/mounts.yml)
+#   mount_unit  — systemd-escaped unit name (\x2d for hyphens in path)
+#   device_uuid — ext4 UUID, used by udev rule to trigger remount on device add
+mergerfs_recovery_branches:
+  - name: media-03
+    mount_path: /srv/media-03
+    mount_unit: 'srv-media\x2d03.mount'
+    device_uuid: "4f58aca3-3732-4cbb-bad7-b023c76dad9e"
+  - name: media-04
+    mount_path: /srv/media-04
+    mount_unit: 'srv-media\x2d04.mount'
+    device_uuid: "42a062bb-af07-4cfb-8c80-3250c1c76bfb"
+  - name: nas-01
+    mount_path: /srv/nas-01
+    mount_unit: 'srv-nas\x2d01.mount'
+    device_uuid: "f356a268-d53b-41fa-95a7-3df47c1c22bc"
+
+# Media app endpoints — reachable from ts440 over Tailscale.
+# 100.66.6.113 is media-vm. Ports are the standard *arr defaults (verify against
+# /opt/media-stack/docker-compose.yml on media-vm if changed).
+# API tokens come from inventory/group_vars/nas_server/vault.yml (encrypted).
+mergerfs_recovery_api_targets:
+  plex:
+    url: "http://100.66.6.113:32400"
+    token: "{{ vault_media_api_plex_token }}"
+  sonarr:
+    url: "http://100.66.6.113:8989"
+    api_key: "{{ vault_media_api_sonarr_key }}"
+  radarr:
+    url: "http://100.66.6.113:7878"
+    api_key: "{{ vault_media_api_radarr_key }}"

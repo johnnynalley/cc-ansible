@@ -1,6 +1,6 @@
 # CC-Ansible
 
-> **Last updated:** 2026-05-02
+> **Last updated:** 2026-05-08
 
 Ansible automation for Johnny's homelab infrastructure (4 Proxmox nodes, 10 VMs/LXCs, Ansible controller LXC, gaming workstation, ThinkPad laptop, MacBook).
 
@@ -79,6 +79,7 @@ cc-ansible/
 │   ├── restic.yml              # B2 offsite backup configuration
 │   ├── local-restic.yml        # Local backups to ts440 ZFS
 │   ├── mergerfs.yml            # MergerFS media pool + balance script (nas_server)
+│   ├── mergerfs-recovery.yml   # USB-SATA auto-remount + watchdog + media-app refresh (nas_server)
 │   ├── zfs.yml                 # ZFS snapshots, scrub, ARC tuning, property enforcement
 │   ├── nfs.yml                 # NFS server/client setup
 │   ├── filesystem-mounts.yml   # Local NTFS/exFAT mounts
@@ -296,6 +297,7 @@ Packages are merged from multiple sources (all applicable variables combined):
 | `restic.yml` | `backup_clients` | B2 offsite backup with systemd timer |
 | `local-restic.yml` | `backup_clients` | Hourly backups to ts440 ZFS |
 | `mergerfs.yml` | `nas_server` | MergerFS media pool mount + balance script + config excludes |
+| `mergerfs-recovery.yml` | `nas_server` | USB-SATA branch auto-remount (udev) + mount watchdog + Plex/Sonarr/Radarr API refresh on recovery |
 | `zfs.yml` | `nas_server` | ZFS snapshots (sanoid), scrub, ARC tuning, property enforcement, ACLs |
 | `nfs.yml` | `nas_server` + clients | NFS server/client configuration |
 | `filesystem-mounts.yml` | `linux_hosts` | Local filesystem mounts (NTFS, exFAT) |
