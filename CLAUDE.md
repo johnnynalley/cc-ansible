@@ -513,7 +513,7 @@ FreePBX 17 PBX server (Asterisk 22, Debian 12 Bookworm). Provides a second phone
 
 ### openclaw-vm (VM 140 on pve-m70q)
 
-OpenClaw AI agent platform (Node.js gateway daemon). Provides a web UI and Discord channel for interacting with Claude as a homelab admin assistant. Can read and edit the Ansible repo (cloned to `/opt/cc-ansible`) but cannot run playbooks or SSH into managed hosts (security boundary).
+OpenClaw AI agent platform (Node.js gateway daemon). Provides a web UI and Discord channel for interacting with the agent fleet (DBC + Fleet of Stars: main, dubble, vega, antares, rigel) — primarily backed by GPT-5.5 via OpenAI Codex, with OpenRouter and Ollama Cloud fallbacks. Can read and edit the Ansible repo (cloned to `/opt/cc-ansible`) but cannot run playbooks or SSH into managed hosts (security boundary).
 
 - **Web UI**: `https://openclaw.jnalley.me` (Tailscale only, via Caddy on docker-vm)
 - **Gateway port**: 18789 (token auth, trustedProxies: docker-vm only)
