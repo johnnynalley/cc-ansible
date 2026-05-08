@@ -1,0 +1,11 @@
+# =============================================================================
+# nextcloud-vm - Per-VM Storage Gate
+# =============================================================================
+# All VirtioFS shares for nextcloud-vm source from /srv/nas-zfs subtrees, so a
+# single gate on the ZFS pool covers configs, photos, archive, AIO backup, etc.
+# =============================================================================
+
+vmid: 101
+
+required_host_mounts:
+  - /srv/nas-zfs

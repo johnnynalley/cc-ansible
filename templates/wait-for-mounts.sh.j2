@@ -1,0 +1,51 @@
+#!/bin/bash
+# {{ ansible_managed }}
+# Proxmox VM/CT pre-start gate: refuse to start if required host mountpoints
+# aren't mounted. Per-VM mount lists live in /etc/pve/wait-for-mounts.json
+# (cluster-shared via pmxcfs, so config travels with VM migration).
+#
+# Args:  $1 = vmid    $2 = phase (pre-start|post-start|pre-stop|post-stop)
+# Exit:  non-zero on pre-start aborts the VM start.
+
+set -euo pipefail
+
+VMID="$1"
+PHASE="$2"
+GATES_FILE="/etc/pve/wait-for-mounts.json"
+LOG_TAG="wait-for-mounts[$VMID]"
+
+# Only act on pre-start.
+[[ "$PHASE" == "pre-start" ]] || exit 0
+
+# No gates file? No gating. Allow start.
+[[ -f "$GATES_FILE" ]] || exit 0
+
+# Pull this VM's required mounts out of the JSON object.
+mounts=$(jq -r --arg vmid "$VMID" '.[$vmid] // [] | .[]' "$GATES_FILE" 2>/dev/null || true)
+
+# No mounts declared for this VM? Allow start.
+[[ -n "$mounts" ]] || exit 0
+
+# Check each required mountpoint.
+missing=()
+while IFS= read -r mp; do
+    [[ -z "$mp" ]] && continue
+    if ! mountpoint -q "$mp"; then
+        missing+=("$mp")
+    fi
+done <<< "$mounts"
+
+if [ -n "${missing[*]:-}" ]; then
+    msg="VM $VMID start aborted — missing host mountpoints: ${missing[*]}"
+    logger -t "$LOG_TAG" -p daemon.err "$msg"
+    echo "$msg" >&2
+    # Fire an alert via Apprise if it's reachable. Best effort, never block start fail.
+    curl -fsS --max-time 5 \
+        -H 'Content-Type: application/json' \
+        -d "{\"title\":\"VM $VMID start blocked\",\"body\":\"$msg\",\"tag\":\"{{ apprise_alert_tags | default('push,dbc') }}\"}" \
+        "{{ apprise_endpoint }}/notify/{{ apprise_token }}" >/dev/null 2>&1 || true
+    exit 1
+fi
+
+logger -t "$LOG_TAG" "VM $VMID start allowed — all required mounts present (${mounts//$'\n'/ })"
+exit 0

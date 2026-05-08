@@ -23,3 +23,7 @@ auto_updates_randomized_delay_sec: "0"
 # PBS backup job (hourly to pbs-main, all guests except pbs-lxc)
 pbs_backup_schedule: "*:00"
 pbs_backup_exclude: "105"
+
+# HA disabled cluster-wide. Provides no value (no HA resources configured) and
+# adds risk (watchdog fencing). Re-enable: set true and re-run playbooks/proxmox-ha.yml.
+pve_ha_enabled: false

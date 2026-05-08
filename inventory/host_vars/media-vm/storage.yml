@@ -1,0 +1,16 @@
+# =============================================================================
+# media-vm - Per-VM Storage Gate
+# =============================================================================
+# Tells the wait-for-mounts hookscript on the host that this VM cannot start
+# until these host mountpoints are present. Enforced by Proxmox at VM start.
+#
+# vmid: needed because Proxmox identifies VMs by ID (not hostname).
+# required_host_mounts: list of paths on the Proxmox host that must be
+#   mountpoints (per `mountpoint -q`) before this VM is allowed to start.
+# =============================================================================
+
+vmid: 100
+
+required_host_mounts:
+  - /srv/media       # mergerfs pool — Plex/*arr libraries live here
+  - /srv/nas-zfs     # ZFS pool — books, photos, archive subtrees

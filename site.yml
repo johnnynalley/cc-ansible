@@ -137,3 +137,11 @@
 - name: Configure Proxmox firewall
   ansible.builtin.import_playbook: playbooks/proxmox-firewall.yml
   tags: [proxmox, firewall]
+
+- name: Manage Proxmox HA service state
+  ansible.builtin.import_playbook: playbooks/proxmox-ha.yml
+  tags: [proxmox, ha]
+
+- name: Deploy per-VM storage gate hookscript
+  ansible.builtin.import_playbook: playbooks/vm-storage-gate.yml
+  tags: [proxmox, vm-gate, storage]

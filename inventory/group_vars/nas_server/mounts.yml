@@ -10,10 +10,12 @@ filesystem_mounts:
   # --- Physical Drives ---
 
   # 2TB Lacie SSD (ext4) - media storage + SABnzbd incomplete downloads
+  # Timeout matches other USB drives (60s). 5s was the original value and
+  # caused emergency-mode boot when the new UPS slowed cold enumeration past 5s.
   - path: /srv/nas-01
     src: "UUID=f356a268-d53b-41fa-95a7-3df47c1c22bc"
     fstype: ext4
-    opts: "noatime,nofail,x-systemd.device-timeout=5s"
+    opts: "noatime,nofail,x-systemd.device-timeout=60s"
     owner: johnny
     group: smbusers
     mode: "2775"
