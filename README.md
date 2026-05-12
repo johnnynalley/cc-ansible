@@ -1,6 +1,6 @@
 # CC-Ansible
 
-> **Last updated:** 2026-05-08
+> **Last updated:** 2026-05-12
 
 Ansible automation for Johnny's homelab infrastructure (4 Proxmox nodes, 10 VMs/LXCs, Ansible controller LXC, gaming workstation, ThinkPad laptop, MacBook).
 
@@ -417,7 +417,7 @@ Managed by `zfs.yml` — snapshots, scrub, ARC tuning, property enforcement, ACL
 - **Pools**: `nas_zfs` (2x8TB mirror), `media-01` (3TB), `media-02` (3TB)
 - **Snapshots**: Sanoid timer every 15 minutes
 - **Scrub**: Weekly (Sunday 2am) via systemd timer
-- **ARC**: 1GB max (`/etc/modprobe.d/zfs.conf`) — sequential streaming barely benefits from ARC
+- **ARC**: 4GB max (`/etc/modprobe.d/zfs.conf`) — bumped from 1GB after ts440 RAM upgrade to 32GB (2026-05-12)
 - **Properties**: Automatically enforced via `zfs set` (compression, acltype, recordsize, atime)
 - **Config**: `group_vars/nas_server/zfs.yml`
 
@@ -660,7 +660,7 @@ Without `cache=never`, virtiofsd daemons cache aggressively (5GB+ each), causing
 setfacl -R -d -m o::r /srv/nas-zfs/configs
 ```
 
-**ts440 memory budget** (15GB total): media-vm 6GB, nextcloud-vm 4GB, homebridge-lxc 736MB, ZFS ARC 1GB (`/etc/modprobe.d/zfs.conf`), Proxmox ~1-2GB. media-vm reduced from 10GB→8GB→6GB (actual container usage is ~3.5GB, balloon disabled due to GPU passthrough). ARC reduced from 2GB (sequential streaming barely benefits).
+**ts440 memory budget** (32GB total, upgraded from 16GB on 2026-05-12): media-vm 8GB, nextcloud-vm 6GB, homebridge-lxc 736MB, ZFS ARC 4GB (`/etc/modprobe.d/zfs.conf`), Proxmox ~2-3GB. Balloon disabled on media-vm due to GPU passthrough. VM memory bumps require restart to take effect (no memory hotplug configured).
 
 ## Ansible Environment
 
