@@ -26,13 +26,41 @@
         state: present
       when: ansible_facts.os_family == "Debian"
 
-    - name: Create mount point
+    - name: Check mergerfs mount point
+      ansible.builtin.command:
+        cmd: findmnt -n {{ mergerfs_mount_path }}
+      register: mergerfs_mount_check
+      changed_when: false
+      failed_when: false
+      check_mode: false
+
+    # Do not chmod/chown the live mergerfs root when the pool is mounted.
+    - name: Create mount point when not mounted
       ansible.builtin.file:
         path: "{{ mergerfs_mount_path }}"
         state: directory
         owner: root
         group: root
         mode: "0755"
+      when: mergerfs_mount_check.rc != 0
+
+    - name: Check mergerfs branch directories
+      ansible.builtin.stat:
+        path: "{{ item }}"
+      register: mergerfs_branch_dir_stat
+      loop: "{{ mergerfs_branches }}"
+
+    - name: Create missing mergerfs branch directories
+      ansible.builtin.file:
+        path: "{{ item.item }}"
+        state: directory
+        owner: johnny
+        group: smbusers
+        mode: "2775"
+      loop: "{{ mergerfs_branch_dir_stat.results }}"
+      loop_control:
+        label: "{{ item.item }}"
+      when: not item.stat.exists
 
     - name: Deploy mergerfs systemd mount unit
       ansible.builtin.template:

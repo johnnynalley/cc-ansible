@@ -126,6 +126,10 @@
   ansible.builtin.import_playbook: playbooks/claude-memory-sync.yml
   tags: [claude-memory, sync]
 
+- name: Configure Codex memory sync to NAS
+  ansible.builtin.import_playbook: playbooks/codex-memory-sync.yml
+  tags: [codex-memory, sync]
+
 - name: Configure Proxmox Backup Server
   ansible.builtin.import_playbook: playbooks/proxmox-backup-server.yml
   tags: [pbs, backup]

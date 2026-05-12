@@ -91,7 +91,8 @@ cc-ansible/
 │   ├── rclone-sync.yml         # rclone OneDrive → Nextcloud sync (macbook-pro/pi5-01)
 │   ├── git-sync.yml            # Auto-pull from GitHub on ts440 (for Nextcloud)
 │   ├── nextcloud-scan.yml      # Periodic occ files:scan for external storage
-│   ├── claude-memory-sync.yml  # Sync Claude Code memory to NAS for Nextcloud
+│   ├── claude-memory-sync.yml  # Sync Claude Code memory archive to NAS for Nextcloud
+│   ├── codex-memory-sync.yml   # Sync Codex CLI memory to NAS for Nextcloud
 │   ├── proxmox-firewall.yml    # Proxmox firewall rules (datacenter/node/VM)
 │   ├── proxmox-backup-server.yml # PBS install, datastore, API token, PVE registration, backup jobs, connectivity check
 │   ├── proxmox-notifications.yml # PVE webhook notifications → Apprise → Pushover
@@ -309,7 +310,8 @@ Packages are merged from multiple sources (all applicable variables combined):
 | `rclone-sync.yml` | `managed_hosts` | rclone sync from OneDrive to Nextcloud (macbook-pro via launchd, pi5-01 via systemd) |
 | `git-sync.yml` | `nas_server` | Auto-pull from GitHub every 5 minutes (Nextcloud External Storage) |
 | `nextcloud-scan.yml` | nextcloud-vm | Periodic `occ files:scan` for external storage (every 10 min) |
-| `claude-memory-sync.yml` | `nas_server`, ansible-lxc | Rsync Claude Code memory to NAS for Nextcloud access (every 10 min) |
+| `claude-memory-sync.yml` | `nas_server`, ansible-lxc | Rsync Claude Code memory archive to NAS for Nextcloud access (every 10 min) |
+| `codex-memory-sync.yml` | `nas_server`, ansible-lxc | Rsync Codex CLI memory to NAS for Nextcloud access (every 10 min) |
 | `proxmox-firewall.yml` | `proxmox_nodes` | Deploy Proxmox firewall rules (datacenter, node, VM/CT) |
 | `proxmox-backup-server.yml` | pbs-lxc, `proxmox_nodes` | Install PBS, configure datastore/prune/GC/API token, register on all PVE nodes, create vzdump backup jobs, deploy connectivity check |
 | `proxmox-notifications.yml` | `proxmox_nodes` | PVE webhook notification targets + matchers → Apprise → Pushover |
@@ -666,7 +668,7 @@ setfacl -R -d -m o::r /srv/nas-zfs/configs
 
 Ansible runs on ansible-lxc (CT 104 on pve-m70q, Ubuntu 25.10) with `ansible-core` 2.20 (via Ansible PPA — Ubuntu's 2.19 has a threading bug). The repo clone is at `~/cc-ansible` on ansible-lxc.
 
-ts440 auto-pulls from GitHub every 5 minutes (`git-sync.timer`) to keep the Nextcloud External Storage copy current. nextcloud-vm runs `occ files:scan` every 10 minutes (`nextcloud-scan.timer`) so external storage changes appear automatically. Claude Code's project memory is synced from ansible-lxc to ts440 every 10 minutes (`claude-memory-sync.timer`) for Nextcloud access.
+ts440 auto-pulls from GitHub every 5 minutes (`git-sync.timer`) to keep the Nextcloud External Storage copy current. nextcloud-vm runs `occ files:scan` every 10 minutes (`nextcloud-scan.timer`) so external storage changes appear automatically. Codex CLI's project memory is synced from ansible-lxc to ts440 every 10 minutes (`codex-memory-sync.timer`) for active Nextcloud access; Claude Code's memory archive continues syncing via `claude-memory-sync.timer` as a dated fallback.
 
 ## Tips
 
@@ -852,4 +854,4 @@ LTE failover on pve-m70q to maintain Cloudflare Tunnel connectivity during Spect
 - **Scope**: Only pve-m70q needs failover (runs cloudflared for Nextcloud/Seerr)
 - **Detection**: ~30 seconds, Recovery: ~50 seconds
 
-See CLAUDE.md "Future Considerations" section for full implementation plan.
+See AGENTS.md "Future Considerations" section for full implementation plan.

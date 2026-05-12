@@ -35,6 +35,16 @@ filesystem_mounts:
     group: smbusers
     mode: "2775"
 
+  # 2TB WD My Passport via USB-SATA (ext4) - mergerfs media branch
+  # WD20NMVW-11EDZS6, ex-Xbox One game drive
+  - path: /srv/media-05
+    src: "UUID=0678c124-151a-4db6-aa91-fde4d6400833"
+    fstype: ext4
+    opts: "noatime,nofail,x-systemd.device-timeout=60s"
+    owner: johnny
+    group: smbusers
+    mode: "2775"
+
   # LUKS-encrypted drive (ext4 on dm-crypt)
   - path: /srv/nas-02
     src: /dev/mapper/nas02_crypt

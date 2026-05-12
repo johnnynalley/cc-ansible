@@ -17,6 +17,7 @@ mergerfs_branches:
   - /srv/media-02/media
   - /srv/media-03/media
   - /srv/media-04/media
+  - /srv/media-05/media
 
 # Mount options
 # - inodecalc=path-hash: Stable inode numbers for NFS compatibility (prevents ESTALE)
@@ -39,6 +40,7 @@ mergerfs_after_units:
   - srv-media\x2d02-media.mount
   - srv-media\x2d03-media.mount
   - srv-media\x2d04.mount
+  - srv-media\x2d05.mount
 
 # Default path excludes for mergerfs-balance
 # These paths should stay on nas_zfs (mirrored) and not be moved to single-drive pools
