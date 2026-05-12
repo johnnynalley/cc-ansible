@@ -124,9 +124,10 @@ zfs_scrub_schedule: "Sun *-*-* 02:00:00"
 # ZFS ARC Tuning
 # =============================================================================
 
-# ARC max size in bytes (4GB - bumped after ts440 RAM upgrade from 16GB → 32GB)
+# ARC max size in bytes (8GB - rule of thumb 1GB ARC per TB pool; nas_zfs is 7.3TB)
+# Bumped after ts440 RAM upgrade from 16GB → 32GB
 # Monitor with: cat /proc/spl/kstat/zfs/arcstats | grep -E '^size|^c_max'
-zfs_arc_max_bytes: 4294967296
+zfs_arc_max_bytes: 8589934592
 
 # =============================================================================
 # ZFS Dataset Properties (documentation + validation)
