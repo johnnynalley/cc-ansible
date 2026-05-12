@@ -31,7 +31,7 @@
       when: pve_node_firewall is defined
 
     - name: Copy node firewall to pmxcfs
-      ansible.builtin.shell: "cp /tmp/host.fw /etc/pve/nodes/{{ ansible_hostname }}/host.fw"
+      ansible.builtin.shell: "cp /tmp/host.fw /etc/pve/nodes/{{ ansible_facts.hostname }}/host.fw"
       when: pve_node_firewall is defined
 
     # VM/CT firewalls
