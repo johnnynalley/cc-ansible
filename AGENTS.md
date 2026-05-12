@@ -148,6 +148,8 @@ Ansible on ansible-lxc uses a **dedicated passwordless SSH key** (`~/.ssh/ansibl
 
 **Linux hosts** also accept Tailscale SSH (no keys needed), which Ansible uses by default when available. The dedicated key is the fallback if Tailscale is down.
 
+**Proxmox migration SSH**: Proxmox migrations use root SSH between cluster nodes. `ssh-hardening.yml` sets `PermitRootLogin no` for `proxmox_nodes`, then appends a `Match Address` exception allowing key-only root login (`prohibit-password`) from the Proxmox LAN peer IPs defined in `inventory/group_vars/proxmox_nodes/vars.yml`. The same playbook manages `/etc/hosts` entries for cluster names so migration SSH resolves over LAN instead of Tailscale MagicDNS/Tailscale SSH. Do not broaden root SSH on ts440; add or update the LAN peer list if cluster nodes change.
+
 **macOS (macbook-pro)** cannot use Tailscale SSH (App Store build is sandboxed). It relies exclusively on the dedicated Ansible key over regular SSH. SSH on macbook-pro is restricted to the Tailscale interface only:
 - `ListenAddress 100.119.197.17` in `/etc/ssh/sshd_config`
 - Remote Login enabled for user `johnny` only (System Settings → Sharing)

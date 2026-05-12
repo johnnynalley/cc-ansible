@@ -2,6 +2,28 @@
 # Proxmox Nodes - Shared Variables
 # =============================================================================
 
+# Proxmox migrations use root SSH between cluster nodes. Keep root SSH disabled
+# by default, then allow key-only root login from cluster LAN peers via
+# ssh-hardening.yml's Match Address block.
+ssh_permit_root_login: "no"
+ssh_root_login_match_policy: prohibit-password
+ssh_root_login_match_addresses: "{{ pve_cluster_nodes | map(attribute='address') | list }}"
+
+pve_cluster_nodes:
+  - address: 192.168.1.146
+    names:
+      - johnnys-ts440
+      - Johnnys-TS440
+  - address: 192.168.1.134
+    names:
+      - pve-m70q
+  - address: 192.168.1.220
+    names:
+      - pve-alto
+  - address: 192.168.1.120
+    names:
+      - pve-herc
+
 # Enable SMART disk monitoring
 smartd_enabled: true
 

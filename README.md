@@ -214,6 +214,7 @@ backup_clients
 Ansible uses a dedicated passwordless SSH key (`~/.ssh/ansible_ed25519` on ansible-lxc) for all hosts, configured in `ansible.cfg` as `private_key_file`.
 
 - **Linux hosts**: Tailscale SSH is the primary transport; the dedicated key is a fallback if Tailscale is down
+- **Proxmox nodes**: root SSH is disabled by default, with a `Match Address` exception for key-only migration SSH from the Proxmox LAN peer IPs in `inventory/group_vars/proxmox_nodes/vars.yml`
 - **macOS (macbook-pro)**: Tailscale SSH doesn't work (App Store sandboxed build), so it uses the dedicated key exclusively. SSH is restricted to Tailscale only via `ListenAddress` in sshd_config
 
 `bootstrap.yml` deploys both the personal key (passphrase-protected, for manual SSH) and the Ansible automation key (passwordless) to new hosts.
