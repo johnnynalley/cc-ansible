@@ -1,6 +1,12 @@
 # =============================================================================
 # ts440 - apcupsd Master Configuration (USB-connected UPS)
 # =============================================================================
+# UPS: APC Back-UPS Pro BR1500MS2 (1500 VA / 900 W, pure sine wave, AVR,
+#      10x NEMA 5-15R, LCD, USB-A + USB-C downstream charging ports).
+# Battery installed 2025-11-19 — plan to replace ~2028-2030.
+# Data link uses the standard USB-HID interface (vendor 051d / product 0002),
+# so no driver changes needed when swapping APC models.
+#
 # USB cable physically connected to this host.
 # Serves UPS status to all other Proxmox nodes via NIS (port 3551).
 # Higher shutdown thresholds than default so storage server shuts down
