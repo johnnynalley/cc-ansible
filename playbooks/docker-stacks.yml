@@ -4,7 +4,6 @@
 # Deploys Docker Compose stacks defined in host_vars docker_stacks variable.
 # Shows per-service image changes with version labels when available.
 # Usage: ansible-playbook playbooks/docker-stacks.yml
-#        ansible-playbook playbooks/docker-stacks.yml --limit docker-vm
 # =============================================================================
 
 - name: Deploy Docker Compose stacks

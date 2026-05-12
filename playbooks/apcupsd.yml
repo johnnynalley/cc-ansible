@@ -8,7 +8,6 @@
 # VMs don't need apcupsd - the Proxmox host handles VM shutdown.
 #
 # Usage: ansible-playbook playbooks/apcupsd.yml
-#        ansible-playbook playbooks/apcupsd.yml --limit pve-m70q
 # =============================================================================
 
 - name: Configure apcupsd UPS monitoring

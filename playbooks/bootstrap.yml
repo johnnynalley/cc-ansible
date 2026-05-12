@@ -4,7 +4,7 @@
 # One-time setup for new hosts. Uses su (not sudo) since sudo may not be installed yet.
 # Copy the Ansible SSH key to the admin user first, then run:
 #   ssh-copy-id -i ~/.ssh/ansible_ed25519.pub johnny@<LAN_IP>
-#   ansible-playbook playbooks/bootstrap.yml --ask-become-pass --limit new-host
+#   ansible-playbook playbooks/bootstrap.yml --ask-become-pass
 #
 # After bootstrap, run site.yml to complete configuration (packages, SSH hardening, etc.)
 # The admin_user variable controls which user is created (default: jnalley, legacy hosts: johnny)

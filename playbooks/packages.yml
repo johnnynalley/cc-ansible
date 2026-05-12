@@ -3,7 +3,6 @@
 # =============================================================================
 # Supports: Debian/Ubuntu, Arch Linux, macOS
 # Usage: ansible-playbook playbooks/packages.yml
-#        ansible-playbook playbooks/packages.yml --limit proxmox_nodes
 # =============================================================================
 
 # -----------------------------------------------------------------------------

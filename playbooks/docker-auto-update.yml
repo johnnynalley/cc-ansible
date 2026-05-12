@@ -7,7 +7,6 @@
 # offset to run after auto-updates).
 #
 # Usage: ansible-playbook playbooks/docker-auto-update.yml
-#        ansible-playbook playbooks/docker-auto-update.yml --limit docker-vm
 # =============================================================================
 
 - name: Configure Docker container auto-updates

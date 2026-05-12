@@ -6,7 +6,6 @@
 # detects the loop and does a full container restart to clear stale state.
 #
 # Usage: ansible-playbook playbooks/gluetun-watchdog.yml
-#        ansible-playbook playbooks/gluetun-watchdog.yml --limit media-vm
 # =============================================================================
 
 - name: Configure Gluetun VPN watchdog

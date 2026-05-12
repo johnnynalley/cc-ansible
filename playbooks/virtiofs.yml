@@ -3,7 +3,7 @@
 # VirtioFS Playbook - Configure VirtioFS shares between Proxmox and VMs
 # =============================================================================
 # Configures VirtioFS on both Proxmox host and guest VM
-# Usage: ansible-playbook playbooks/virtiofs.yml --limit nextcloud-vm
+# Usage: ansible-playbook playbooks/virtiofs.yml
 # =============================================================================
 
 # -----------------------------------------------------------------------------

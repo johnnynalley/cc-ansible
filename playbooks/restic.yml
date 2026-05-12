@@ -2,7 +2,6 @@
 # Restic Backup Playbook - Backblaze B2 Offsite Backups
 # =============================================================================
 # Usage: ansible-playbook playbooks/restic.yml
-#        ansible-playbook playbooks/restic.yml --limit ts440
 # =============================================================================
 
 - name: Configure restic backups to Backblaze B2

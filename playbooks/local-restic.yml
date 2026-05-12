@@ -2,7 +2,6 @@
 # Local Restic Backup Playbook - Backups to ts440 ZFS
 # =============================================================================
 # Usage: ansible-playbook playbooks/local-restic.yml
-#        ansible-playbook playbooks/local-restic.yml --limit docker-vm
 # =============================================================================
 
 - name: Configure local restic backups to ts440 ZFS

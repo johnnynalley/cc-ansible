@@ -15,11 +15,10 @@ cd ~/cc-ansible
 # Run a specific playbook
 ansible-playbook playbooks/packages.yml
 
-# Run with limit
-ansible-playbook playbooks/packages.yml --limit proxmox_nodes
-
 # Run all playbooks
 ansible-playbook site.yml
+
+# Do not use --limit; playbooks should be safe across their configured target
 
 # Interactive menu
 ./bin/ansible-menu
@@ -64,7 +63,7 @@ cc-ansible/
 │       ├── jn-desktop/         # CachyOS gaming workstation
 │       ├── jn-t14s-lin/       # ThinkPad T14s (Kubuntu)
 │       ├── dev-vm/            # Development VM (Ubuntu 24.04, pve-m70q)
-│       └── openclaw-vm/       # OpenClaw AI agent (Ubuntu 25.10, pve-m70q)
+│       └── openclaw-vm/       # OpenClaw AI agent (Ubuntu 25.10, ts440)
 ├── playbooks/
 │   ├── packages.yml            # Multi-platform package installation
 │   ├── smartmontools.yml       # SMART disk monitoring (Apprise alerts)
@@ -228,10 +227,10 @@ Ansible uses a dedicated passwordless SSH key (`~/.ssh/ansible_ed25519` on ansib
 ssh-copy-id -i ~/.ssh/ansible_ed25519.pub johnny@<LAN_IP>
 
 # Bootstrap (uses su, not sudo — sudo may not be installed yet)
-ansible-playbook playbooks/bootstrap.yml --ask-become-pass --limit new-host
+ansible-playbook playbooks/bootstrap.yml --ask-become-pass
 
 # Then run full site.yml (installs Tailscale, packages, SSH hardening, etc.)
-ansible-playbook site.yml --limit new-host
+ansible-playbook site.yml
 ```
 
 ## Adding New Hosts
@@ -701,7 +700,7 @@ Scheduled sync from school OneDrive to Nextcloud via `rclone-sync.yml` on macboo
 
 ```bash
 # Deploy
-ansible-playbook playbooks/rclone-sync.yml --limit macbook-pro
+ansible-playbook playbooks/rclone-sync.yml
 
 # Manual trigger (on MacBook)
 ~/.local/bin/rclone-sync
@@ -825,7 +824,7 @@ PVE notifications route to Apprise → Pushover via webhook. Deployed by `playbo
 ansible-playbook playbooks/proxmox-notifications.yml
 ```
 
-## OpenClaw (openclaw-vm, VM 140 on pve-m70q)
+## OpenClaw (openclaw-vm, VM 140 on ts440)
 
 OpenClaw AI agent platform — personal homelab admin assistant via web UI and Discord. Can read/edit the Ansible repo but cannot run playbooks or SSH into hosts.
 

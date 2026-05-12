@@ -6,7 +6,6 @@
 #   - Mask ModemManager for laptops without cellular (opt-in via disable_modem_manager)
 #
 # Usage: ansible-playbook playbooks/power-management.yml
-#        ansible-playbook playbooks/power-management.yml --limit jn-t14s-lin
 # =============================================================================
 
 - name: Configure power management

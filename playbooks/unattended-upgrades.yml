@@ -11,7 +11,6 @@
 # breaking cluster operations.
 #
 # Usage: ansible-playbook playbooks/unattended-upgrades.yml
-#        ansible-playbook playbooks/unattended-upgrades.yml --limit proxmox_nodes
 # =============================================================================
 
 - name: Configure unattended-upgrades for security patches

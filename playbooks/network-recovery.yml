@@ -6,7 +6,6 @@
 #   - tailscale-online.target: systemd target for actual Tailscale connectivity
 #
 # Usage: ansible-playbook playbooks/network-recovery.yml
-#        ansible-playbook playbooks/network-recovery.yml --limit proxmox_nodes
 # =============================================================================
 
 - name: Configure network recovery mechanisms

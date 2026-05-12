@@ -13,8 +13,7 @@
 #   4. Run Phase 2 to secure johnny's sudo (separate run after verification)
 #
 # Usage:
-#   ansible-playbook playbooks/user-separation.yml --limit ts440  # test on one host
-#   ansible-playbook playbooks/user-separation.yml                # all hosts
+#   ansible-playbook playbooks/user-separation.yml
 # =============================================================================
 
 # ============================================================

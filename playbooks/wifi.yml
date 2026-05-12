@@ -7,7 +7,6 @@
 #   - Module reload on resume — full driver teardown/reload (opt-in, heavier)
 #
 # Usage: ansible-playbook playbooks/wifi.yml
-#        ansible-playbook playbooks/wifi.yml --limit jn-t14s-lin
 # =============================================================================
 
 - name: Configure WiFi power management and suspend/resume fixes

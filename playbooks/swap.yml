@@ -9,7 +9,6 @@
 # ZFS hosts also need swap_zfs_pool (defaults to "rpool").
 #
 # Usage: ansible-playbook playbooks/swap.yml
-#        ansible-playbook playbooks/swap.yml --limit pve-m70q,pve-herc
 # =============================================================================
 
 - name: Configure swap

@@ -15,7 +15,6 @@ This repository manages homelab infrastructure with Ansible. `site.yml` is the t
 
 - `ansible-galaxy collection install -r requirements.yml`: install required collections.
 - `ansible-playbook site.yml`: apply the full configuration.
-- `ansible-playbook playbooks/packages.yml --limit proxmox_nodes`: run one playbook against one inventory group.
 - `ansible-playbook playbooks/samba.yml --check --diff`: dry-run a change and show rendered diffs before applying.
 - `ansible-playbook playbooks/packages.yml --tags fastfetch`: run a tagged subset.
 - `./bin/ansible-menu`: launch the interactive playbook runner.
@@ -26,7 +25,7 @@ Write YAML with two-space indentation and descriptive task names. Keep playbooks
 
 ### Testing Guidelines
 
-There is no dedicated unit-test suite. Validate changes with Ansible dry runs before applying them: `ansible-playbook <playbook> --check --diff --limit <host-or-group>`. For YAML and Ansible quality checks, use `yamllint` and `ansible-lint` when available. For shell helpers or shell templates, run `shellcheck` on the rendered or source script when practical.
+There is no dedicated unit-test suite. Validate changes with full-playbook Ansible dry runs before applying them: `ansible-playbook <playbook> --check --diff`. Do not use `--limit`; playbooks should be safe across their configured `hosts:` target, and if a full run is not safe, fix the playbook or inventory instead of narrowing execution. For YAML and Ansible quality checks, use `yamllint` and `ansible-lint` when available. For shell helpers or shell templates, run `shellcheck` on the rendered or source script when practical.
 
 ### Commit & Pull Request Guidelines
 
@@ -34,7 +33,7 @@ Git history uses short Conventional Commit-style subjects such as `feat: ...` an
 
 ### Security & Configuration Tips
 
-Do not commit real secrets. Encrypted values belong in `vault.yml` files beside the relevant `vars.yml`; examples may use `vault.yml.example`. The configured vault password path is `~/.ansible/vault_pass.txt`. Prefer `--check --diff` and narrow `--limit` runs for changes touching Proxmox, storage, firewall, backup, or Docker automation.
+Do not commit real secrets. Encrypted values belong in `vault.yml` files beside the relevant `vars.yml`; examples may use `vault.yml.example`. The configured vault password path is `~/.ansible/vault_pass.txt`. Prefer full-playbook `--check --diff` runs for changes touching Proxmox, storage, firewall, backup, or Docker automation.
 
 ## Historical Claude Reference
 
@@ -110,8 +109,7 @@ ansible-playbook site.yml
 # Run a specific playbook
 ansible-playbook playbooks/packages.yml
 
-# Run with host/group limit
-ansible-playbook playbooks/packages.yml --limit proxmox_nodes
+# Do not use --limit; fix playbooks/inventory so full target runs are safe
 
 # Dry run with diff
 ansible-playbook playbooks/packages.yml --check --diff
@@ -127,7 +125,7 @@ ansible-inventory --list --yaml
 
 # Bootstrap new host (copy key to admin user first, then use su)
 ssh-copy-id -i ~/.ssh/ansible_ed25519.pub johnny@<LAN_IP>
-ansible-playbook playbooks/bootstrap.yml --ask-become-pass --limit new-host
+ansible-playbook playbooks/bootstrap.yml --ask-become-pass
 
 # Run ad-hoc command with sudo (when SSH doesn't have sudo access)
 ansible <hostname> -m shell -a "command here" --become
@@ -159,7 +157,7 @@ Ansible on ansible-lxc uses a **dedicated passwordless SSH key** (`~/.ssh/ansibl
 **Deploying the key to a new host:**
 ```bash
 # For Linux hosts (via Tailscale SSH or bootstrap)
-ansible-playbook playbooks/bootstrap.yml -u root --ask-pass --limit new-host
+ansible-playbook playbooks/bootstrap.yml -u root --ask-pass
 
 # For macOS (manual first-time copy, then bootstrap handles future hosts)
 ssh-copy-id -i ~/.ssh/ansible_ed25519.pub johnny@<tailscale-ip>
@@ -491,7 +489,7 @@ One-way sync from UTD OneDrive to Nextcloud via `playbooks/rclone-sync.yml`. Run
 
 Deployed via `playbooks/unattended-upgrades.yml` to all `debian_hosts` (including workstations — security patches shouldn't wait). Complements the weekly `auto-updates.yml` full-upgrade (Sundays, staggered per-host).
 
-**Proxmox node stagger**: Reboots are staggered to maintain cluster quorum (3 of 4 nodes required). Per-host `auto_updates_oncalendar` overrides in host_vars with `auto_updates_randomized_delay_sec: "0"` in `group_vars/proxmox_nodes/vars.yml`: ts440 05:00 → pve-alto 05:20 → pve-herc 05:40 → pve-m70q 06:00. pve-m70q goes last because it hosts the most guests (ansible-lxc, docker-vm, openclaw-vm). Other hosts use the default schedule from `group_vars/debian_hosts/packages.yml` (`Sun *-*-* 05:00:00` + 15m random delay).
+**Proxmox node stagger**: Reboots are staggered to maintain cluster quorum (3 of 4 nodes required). Per-host `auto_updates_oncalendar` overrides in host_vars with `auto_updates_randomized_delay_sec: "0"` in `group_vars/proxmox_nodes/vars.yml`: ts440 05:00 → pve-alto 05:20 → pve-herc 05:40 → pve-m70q 06:00. pve-m70q goes last because it hosts ansible-lxc and docker-vm. Other hosts use the default schedule from `group_vars/debian_hosts/packages.yml` (`Sun *-*-* 05:00:00` + 15m random delay).
 
 **How it works**: Uses Debian/Ubuntu's native `unattended-upgrades` package with APT's built-in `apt-daily-upgrade.timer` (daily, randomized 12h window). Only applies security-origin patches — not general updates. A systemd drop-in (`/etc/systemd/system/apt-daily-upgrade.service.d/notify.conf`) hooks an `ExecStartPost` script that sends a silent Apprise notification (`push-quiet` tag) when patches are applied.
 
@@ -584,7 +582,7 @@ USB drive timeout standard: all USB drives in `group_vars/nas_server/mounts.yml`
 
 FreePBX 17 PBX server (Asterisk 22, Debian 12 Bookworm). Provides a second phone number via VoIP.ms SIP trunk and Yealink SIP-T54W desk phone, with call forwarding to iPhone. Web GUI: `http://100.97.139.95/admin`. APT pinned to `bookworm` via `apt_pin_release` to prevent accidental Debian 13 upgrades. FreePBX/Asterisk packages are held (`apt-mark hold`) by the install script — module updates done through the web GUI. Sangoma Smart Firewall enabled with Tailscale CGNAT (`100.64.0.0/10`) trusted. Proxmox firewall rules: SIP (UDP 5060 from LAN + VoIP.ms), RTP (UDP 10000-20000), web GUI (TCP 80/443 Tailscale only), SSH. Config: `host_vars/freepbx-vm/` (vars.yml, packages.yml). Local restic backups: `/etc/asterisk`, `/var/lib/asterisk`, `/var/spool/asterisk`.
 
-### openclaw-vm (VM 140 on pve-m70q)
+### openclaw-vm (VM 140 on ts440)
 
 OpenClaw AI agent platform (Node.js gateway daemon). Provides a web UI and Discord channel for interacting with the agent fleet (DBC + Fleet of Stars: main, dubble, vega, antares, rigel) — primarily backed by GPT-5.5 via OpenAI Codex, with OpenRouter and Ollama Cloud fallbacks. Can read and edit the Ansible repo (cloned to `/opt/cc-ansible`) but cannot run playbooks or SSH into managed hosts (security boundary).
 

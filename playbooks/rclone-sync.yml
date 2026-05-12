@@ -7,7 +7,6 @@
 # Linux: systemd timer | macOS: launchd LaunchAgent
 #
 # Usage: ansible-playbook playbooks/rclone-sync.yml
-#        ansible-playbook playbooks/rclone-sync.yml --limit macbook-pro
 # =============================================================================
 
 # =============================================================================

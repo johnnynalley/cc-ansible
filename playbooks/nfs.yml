@@ -2,7 +2,6 @@
 # NFS Playbook - Server and Client Configuration
 # =============================================================================
 # Usage: ansible-playbook playbooks/nfs.yml
-#        ansible-playbook playbooks/nfs.yml --limit ts440
 #        ansible-playbook playbooks/nfs.yml --tags client
 # =============================================================================
 

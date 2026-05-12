@@ -6,7 +6,6 @@
 # don't expose SMART data; the Proxmox host monitors real drives).
 #
 # Usage: ansible-playbook playbooks/smartmontools.yml
-#        ansible-playbook playbooks/smartmontools.yml --limit ts440
 # =============================================================================
 
 - name: Configure SMART disk monitoring
