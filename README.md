@@ -659,7 +659,7 @@ Without `cache=never`, virtiofsd daemons cache aggressively (5GB+ each), causing
 
 **VirtioFS ACL Limitation**: VirtioFS does **not** pass through POSIX ACLs to guest VMs. Files accessed via VirtioFS must have adequate base permissions (`chmod`) — ACLs set via `setfacl` on the host are invisible to guests. ZFS ACLs are managed by `playbooks/zfs.yml`; normal runs set dataset-root ACLs and default ACLs for new files. Existing-tree recursive ACL repair is intentionally opt-in with `zfs_acl_recursive_repair: true` because it can walk large datasets.
 
-**ts440 memory budget** (32GB total, upgraded from 16GB on 2026-05-12): media-vm 8GB, nextcloud-vm 8GB, openclaw-vm 8GB max / 4GB balloon minimum, homebridge-lxc 736MB, ZFS ARC 6GB (`/etc/modprobe.d/zfs.conf`), Proxmox ~2-3GB. Balloon disabled on media-vm due to GPU passthrough.
+**ts440 memory budget** (32GB total, upgraded from 16GB on 2026-05-12): media-vm 10GB, nextcloud-vm 8GB, openclaw-vm 8GB max / 4GB balloon minimum, homebridge-lxc 736MB, ZFS ARC 6GB (`/etc/modprobe.d/zfs.conf`), Proxmox ~2-3GB. Balloon disabled on media-vm due to GPU passthrough; memory changes apply on VM restart.
 
 ## Ansible Environment
 
