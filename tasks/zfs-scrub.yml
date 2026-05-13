@@ -112,7 +112,22 @@
 
 # --- ZFS ACLs ---
 
-- name: Apply ZFS POSIX ACLs
+- name: Apply ZFS POSIX ACLs to dataset roots
+  ansible.posix.acl:
+    path: "{{ item.0.path }}"
+    entity: "{{ item.1.entity }}"
+    etype: "{{ item.1.etype }}"
+    permissions: "{{ item.1.permissions }}"
+    default: "{{ item.1.default | default(false) }}"
+    recursive: false
+    state: "{{ item.1.state | default('present') }}"
+  loop: "{{ zfs_acls | subelements('entries') + zfs_acls | subelements('default_entries') }}"
+  loop_control:
+    label: "{{ item.0.path }} {{ item.1.etype }}:{{ item.1.entity }}"
+  when: zfs_acls is defined
+  tags: [zfs-acl]
+
+- name: Repair existing ZFS POSIX ACLs recursively
   ansible.posix.acl:
     path: "{{ item.0.path }}"
     entity: "{{ item.1.entity }}"
@@ -124,5 +139,7 @@
   loop: "{{ zfs_acls | subelements('entries') + zfs_acls | subelements('default_entries') }}"
   loop_control:
     label: "{{ item.0.path }} {{ item.1.etype }}:{{ item.1.entity }}"
-  when: zfs_acls is defined
+  when:
+    - zfs_acls is defined
+    - zfs_acl_recursive_repair | default(false)
   tags: [zfs-acl]

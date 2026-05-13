@@ -166,7 +166,7 @@ Package lists follow naming convention: `packages_linux_common`, `packages_debia
 
 TS440 is the primary NAS server (currently the sole `nas_server` group member). Key components:
 
-**ZFS Pool**: 2x 8TB mirror at `/srv/nas-zfs` (~7.3TB usable). Keep under 80% capacity. ARC max set to 8GB (in `group_vars/nas_server/zfs.yml`) — bumped from 1GB after ts440 RAM upgrade to 32GB on 2026-05-12. Rule of thumb: 1GB ARC per TB of pool. media-vm has 8GB RAM for 20+ containers including GPU-accelerated Immich ML. Balloon disabled due to GPU passthrough.
+**ZFS Pool**: 2x 8TB mirror at `/srv/nas-zfs` (~7.3TB usable). Keep under 80% capacity. ARC max set to 6GB (in `group_vars/nas_server/zfs.yml`) — bumped from 1GB after ts440 RAM upgrade to 32GB on 2026-05-12, then trimmed from 8GB after openclaw-vm moved to ts440 because the 8GB cap caused host swap/PSI during balance + backups. media-vm has 8GB RAM for 20+ containers including GPU-accelerated Immich ML. Balloon disabled due to GPU passthrough.
 
 **Archive Dataset**: `nas_zfs/archive` at `/srv/nas-zfs/archive` for ISOs and general-purpose archival storage. Shared via VirtioFS to media-vm (read-write, mounted at `/srv/archive`, mapped as `/archive` in the qBittorrent container) and nextcloud-vm (read-only, at `/srv/external/archive` for Nextcloud External Storage). qBittorrent's `isos` category saves to `/archive/isos` with per-torrent subdirectory overrides (e.g., `/archive/isos/linux/kubuntu`).
 
@@ -194,7 +194,7 @@ This addresses the recurring USB-SATA disconnect class of failure (see `~/.claud
 
 **VirtioFS**: media-vm and nextcloud-vm access storage via VirtioFS (not NFS). Config in `host_vars/ts440/virtiofs.yml` (host side) and `host_vars/<vm>/virtiofs.yml` (guest side). All mounts use `cache=never` to prevent virtiofsd from consuming 5GB+ per mount on the host. Guest page cache still works, so streaming performance is unaffected.
 
-**VirtioFS ACL Limitation**: VirtioFS does **not** pass through POSIX ACLs to guests. Files must have adequate **base permissions** (`chmod`) — ACLs set via `setfacl` on the host are invisible inside VMs. Default ACL `setfacl -R -d -m o::r /srv/nas-zfs/configs` ensures new files get `o+r` for Nextcloud access through VirtioFS.
+**VirtioFS ACL Limitation**: VirtioFS does **not** pass through POSIX ACLs to guests. Files must have adequate **base permissions** (`chmod`) — ACLs set via `setfacl` on the host are invisible inside VMs. ZFS ACLs are managed by `playbooks/zfs.yml`; normal runs set dataset-root ACLs and default ACLs for new files. Existing-tree recursive ACL repair is intentionally opt-in with `zfs_acl_recursive_repair: true` because it can walk large datasets.
 
 **Config Storage**: Application configs are stored locally at `/opt/` on each VM (not NFS). This eliminates NFS boot dependencies and improves performance. Configs are backed up hourly to ts440 ZFS via `local-restic.yml`.
 
@@ -534,7 +534,7 @@ USB drive timeout standard: all USB drives in `group_vars/nas_server/mounts.yml`
 
 FreePBX 17 PBX server (Asterisk 22, Debian 12 Bookworm). Provides a second phone number via VoIP.ms SIP trunk and Yealink SIP-T54W desk phone, with call forwarding to iPhone. Web GUI: `http://100.97.139.95/admin`. APT pinned to `bookworm` via `apt_pin_release` to prevent accidental Debian 13 upgrades. FreePBX/Asterisk packages are held (`apt-mark hold`) by the install script — module updates done through the web GUI. Sangoma Smart Firewall enabled with Tailscale CGNAT (`100.64.0.0/10`) trusted. Proxmox firewall rules: SIP (UDP 5060 from LAN + VoIP.ms), RTP (UDP 10000-20000), web GUI (TCP 80/443 Tailscale only), SSH. Config: `host_vars/freepbx-vm/` (vars.yml, packages.yml). Local restic backups: `/etc/asterisk`, `/var/lib/asterisk`, `/var/spool/asterisk`.
 
-### openclaw-vm (VM 140 on pve-m70q)
+### openclaw-vm (VM 140 on ts440)
 
 OpenClaw AI agent platform (Node.js gateway daemon). Provides a web UI and Discord channel for interacting with the agent fleet (DBC + Fleet of Stars: main, dubble, vega, antares, rigel) — primarily backed by GPT-5.5 via OpenAI Codex, with OpenRouter and Ollama Cloud fallbacks. Can read and edit the Ansible repo (cloned to `/opt/cc-ansible`) but cannot run playbooks or SSH into managed hosts (security boundary).
 
