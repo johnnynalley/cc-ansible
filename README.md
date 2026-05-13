@@ -447,7 +447,7 @@ cp /srv/nas-zfs/.zfs/snapshot/autosnap_2026-01-26_hourly/configs/file.txt /srv/n
 
 ## mergerfs Pool (ts440)
 
-`/srv/media` is a mergerfs union of 7 branches:
+`/srv/media` is a mergerfs union of 8 branches:
 
 | Branch | Drive | Type |
 |--------|-------|------|
@@ -458,6 +458,7 @@ cp /srv/nas-zfs/.zfs/snapshot/autosnap_2026-01-26_hourly/configs/file.txt /srv/n
 | `/srv/media-02/media` | 3TB | ZFS |
 | `/srv/media-03/media` | 2TB Hitachi HDD via USB-SATA | ext4 |
 | `/srv/media-04/media` | 2TB ex-PBS drive via USB-SATA | ext4 |
+| `/srv/media-05/media` | 2TB WD My Passport (ex-Xbox) via USB | ext4 |
 
 - **Create policy**: `epmfs` (existing path most free space) — new files land on the same branch as the existing show/movie directory, which is critical for Sonarr/Radarr hardlinks. Falls back to mfs when no existing path found.
 - **USB-SATA drives**: `x-systemd.device-timeout=60s` in fstab — USB enumeration requires more time than the default 5s

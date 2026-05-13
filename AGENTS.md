@@ -220,11 +220,13 @@ TS440 is the primary NAS server (currently the sole `nas_server` group member). 
 
 **Media ZFS Pools**: Two 3TB single-drive pools (`media-01`, `media-02`) for plex/podcast overflow. Properties enforced by `playbooks/zfs.yml` (compression=lz4, atime=off, recordsize=1M, acltype=posixacl). Sanoid snapshots: daily:7, weekly:4, monthly:3.
 
-**MergerFS**: `/srv/media` aggregates 7 branches into a unified media pool: nas-01 (2TB SSD), nas-02 (2TB LUKS), nas_zfs, media-01 (3TB ZFS), media-02 (3TB ZFS), media-03 (2TB ext4 via USB-SATA), media-04 (2TB ext4 via USB-SATA, ex-PBS drive). Create policy: `epmfs` (existing path most free space) — keeps files in the same directory on the same branch, which is critical for Sonarr/Radarr hardlinks. Falls back to mfs when no existing path found. Branches and options defined in `group_vars/nas_server/mergerfs.yml`. Boot ordering uses `After=` directives only — `Requires=` and `RequiresMountsFor=` caused dependency failures with the mixed ZFS/fstab setup.
+**MergerFS**: `/srv/media` aggregates 8 branches into a unified media pool: nas-01 (2TB SSD), nas-02 (2TB LUKS), nas_zfs, media-01 (3TB ZFS), media-02 (3TB ZFS), media-03 (2TB ext4 via USB-SATA), media-04 (2TB ext4 via USB-SATA, ex-PBS drive), media-05 (2TB ext4 via USB, ex-Xbox WD My Passport). Create policy: `epmfs` (existing path most free space) — keeps files in the same directory on the same branch, which is critical for Sonarr/Radarr hardlinks. Falls back to mfs when no existing path found. Branches and options defined in `group_vars/nas_server/mergerfs.yml`. Boot ordering uses `After=` directives only — `Requires=` and `RequiresMountsFor=` caused dependency failures with the mixed ZFS/fstab setup.
 
 **media-03 (USB-SATA)**: 2TB Hitachi HDD connected via USB-SATA adapter, formatted ext4 (not ZFS — USB disconnects would fault a ZFS pool). Powered by UPS via power strip. Mount managed in `group_vars/nas_server/mounts.yml` with `nofail` so ts440 boots even if the drive is disconnected.
 
 **media-04 (USB-SATA)**: 2TB ext4 drive added via USB-SATA adapter — the former PBS drive from pve-herc, repurposed for additional media storage. Same nofail pattern as media-03.
+
+**media-05 (USB My Passport)**: 2TB WD My Passport (WD20NMVW-11EDZS6, ex-Xbox One game drive) added 2026-05-12 via USB. Integrated USB-on-PCB, not shuckable. SMART clean (0 reallocated/pending/UDMA-CRC). Same `nofail`/`x-systemd.device-timeout=60s` pattern. Added to mergerfs to drain nas_zfs/media (which had filled to 96% from non-media pool consumers); first balance moved 1.4 TiB across 858 files, freed 750 GiB on nas_zfs, ended at 4.9% spread.
 
 **MergerFS Recovery (auto-remount + watchdog + media-app refresh)**: Deployed by `playbooks/mergerfs-recovery.yml`. Three layers handle USB-SATA branch disconnects automatically so users don't see "missing files" in Plex:
 
