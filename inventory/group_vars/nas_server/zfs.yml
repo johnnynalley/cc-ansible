@@ -124,10 +124,10 @@ zfs_scrub_schedule: "Sun *-*-* 02:00:00"
 # ZFS ARC Tuning
 # =============================================================================
 
-# ARC max size in bytes (6GB - 8GB caused host swap/PSI during balance + backups)
-# Bumped after ts440 RAM upgrade from 16GB -> 32GB, then trimmed after openclaw-vm moved to ts440.
+# ARC max size in bytes (4GB - leaves room for VMs on ts440 after openclaw moved over)
+# Bumped after ts440 RAM upgrade from 16GB -> 32GB, then trimmed as VM footprint grew.
 # Monitor with: cat /proc/spl/kstat/zfs/arcstats | grep -E '^size|^c_max'
-zfs_arc_max_bytes: 6442450944
+zfs_arc_max_bytes: 4294967296
 
 # =============================================================================
 # ZFS Dataset Properties (documentation + validation)

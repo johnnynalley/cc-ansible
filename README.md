@@ -286,6 +286,7 @@ Packages are merged from multiple sources (all applicable variables combined):
 |----------|--------|-------------|
 | `site.yml` | varies | Run all playbooks in order |
 | `packages.yml` | `managed_hosts` | Install baseline packages (multi-platform) |
+| `sysctl.yml` | `proxmox_nodes` | Kernel VM tuning for Proxmox hosts |
 | `smartmontools.yml` | `linux_hosts` | SMART disk monitoring with Apprise push alerts |
 | `e1000e-tuning.yml` | `proxmox_nodes` | Disable EEE/TSO on Intel e1000e NICs to prevent hardware TX hangs |
 | `apcupsd.yml` | `proxmox_nodes` | UPS monitoring with Apprise push alerts (ts440 USB master, others slave). Staggers slave startup to avoid NIS mutex contention |
@@ -419,7 +420,7 @@ Managed by `zfs.yml` — snapshots, scrub, ARC tuning, property enforcement, ACL
 - **Pools**: `nas_zfs` (2x8TB mirror), `media-01` (3TB), `media-02` (3TB)
 - **Snapshots**: Sanoid timer every 15 minutes
 - **Scrub**: Weekly (Sunday 2am) via systemd timer
-- **ARC**: 6GB max (`/etc/modprobe.d/zfs.conf`) — bumped from 1GB after ts440 RAM upgrade to 32GB (2026-05-12), then trimmed from 8GB after openclaw-vm moved to ts440 because 8GB caused host swap/PSI during balance + backups
+- **ARC**: 4GB max (`/etc/modprobe.d/zfs.conf`) — bumped from 1GB after ts440 RAM upgrade to 32GB (2026-05-12), then trimmed as VM footprint grew on ts440
 - **Properties**: Automatically enforced via `zfs set` (compression, acltype, recordsize, atime)
 - **Config**: `group_vars/nas_server/zfs.yml`
 
@@ -660,7 +661,7 @@ Without `cache=never`, virtiofsd daemons cache aggressively (5GB+ each), causing
 
 **VirtioFS ACL Limitation**: VirtioFS does **not** pass through POSIX ACLs to guest VMs. Files accessed via VirtioFS must have adequate base permissions (`chmod`) — ACLs set via `setfacl` on the host are invisible to guests. ZFS ACLs are managed by `playbooks/zfs.yml`; normal runs set dataset-root ACLs and default ACLs for new files. Existing-tree recursive ACL repair is intentionally opt-in with `zfs_acl_recursive_repair: true` because it can walk large datasets.
 
-**ts440 memory budget** (32GB total, upgraded from 16GB on 2026-05-12): media-vm 10GB, nextcloud-vm 8GB, openclaw-vm 8GB max / 4GB balloon minimum, homebridge-lxc 736MB, ZFS ARC 6GB (`/etc/modprobe.d/zfs.conf`), Proxmox ~2-3GB. Balloon disabled on media-vm due to GPU passthrough; memory changes apply on VM restart.
+**ts440 memory budget** (32GB total, upgraded from 16GB on 2026-05-12): media-vm 10GB, nextcloud-vm 8GB, openclaw-vm 8GB max / 4GB balloon minimum, homebridge-lxc 736MB, ZFS ARC 4GB (`/etc/modprobe.d/zfs.conf`), Proxmox ~2-3GB. Proxmox nodes use `vm.swappiness=10` to avoid swapping QEMU guest RAM too eagerly. Balloon disabled on media-vm due to GPU passthrough; memory changes apply on VM restart.
 
 ## Ansible Environment
 

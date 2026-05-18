@@ -214,7 +214,7 @@ Package lists follow naming convention: `packages_linux_common`, `packages_debia
 
 TS440 is the primary NAS server (currently the sole `nas_server` group member). Key components:
 
-**ZFS Pool**: 2x 8TB mirror at `/srv/nas-zfs` (~7.3TB usable). Keep under 80% capacity. ARC max set to 6GB (in `group_vars/nas_server/zfs.yml`) — bumped from 1GB after ts440 RAM upgrade to 32GB on 2026-05-12, then trimmed from 8GB after openclaw-vm moved to ts440 because the 8GB cap caused host swap/PSI during balance + backups. media-vm has 10GB RAM for 20+ containers including GPU-accelerated Immich ML. Balloon disabled due to GPU passthrough.
+**ZFS Pool**: 2x 8TB mirror at `/srv/nas-zfs` (~7.3TB usable). Keep under 80% capacity. ARC max set to 4GB (in `group_vars/nas_server/zfs.yml`) — bumped from 1GB after ts440 RAM upgrade to 32GB on 2026-05-12, then trimmed as VM footprint grew on ts440. media-vm has 10GB RAM for 20+ containers including GPU-accelerated Immich ML. Proxmox nodes use `vm.swappiness=10` to avoid swapping QEMU guest RAM too eagerly. Balloon disabled on media-vm due to GPU passthrough.
 
 **Archive Dataset**: `nas_zfs/archive` at `/srv/nas-zfs/archive` for ISOs and general-purpose archival storage. Shared via VirtioFS to media-vm (read-write, mounted at `/srv/archive`, mapped as `/archive` in the qBittorrent container) and nextcloud-vm (read-only, at `/srv/external/archive` for Nextcloud External Storage). qBittorrent's `isos` category saves to `/archive/isos` with per-torrent subdirectory overrides (e.g., `/archive/isos/linux/kubuntu`).
 

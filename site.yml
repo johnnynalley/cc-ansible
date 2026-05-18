@@ -2,13 +2,16 @@
 # Site Playbook - Run all configuration playbooks
 # =============================================================================
 # Usage: ansible-playbook site.yml
-#        ansible-playbook site.yml --limit proxmox_nodes
 #        ansible-playbook site.yml --tags packages
 # =============================================================================
 
 - name: Configure swap files
   ansible.builtin.import_playbook: playbooks/swap.yml
   tags: [swap]
+
+- name: Configure kernel sysctl settings
+  ansible.builtin.import_playbook: playbooks/sysctl.yml
+  tags: [sysctl, kernel]
 
 - name: Install baseline packages
   ansible.builtin.import_playbook: playbooks/packages.yml
