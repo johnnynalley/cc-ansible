@@ -1,0 +1,9 @@
+# =============================================================================
+# VMs & LXC Containers - Shared Settings
+# =============================================================================
+
+# Run guest OS upgrades after the Proxmox host reboot window.
+# Proxmox nodes are staggered from 05:00-06:00; guests need to avoid being
+# shut down by host reboots while dpkg is mid-transaction.
+auto_updates_oncalendar: "Sun *-*-* 07:00:00"
+auto_updates_randomized_delay_sec: "30m"

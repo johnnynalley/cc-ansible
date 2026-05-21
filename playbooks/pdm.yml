@@ -1,0 +1,128 @@
+---
+# =============================================================================
+# Proxmox Datacenter Manager
+# =============================================================================
+# Installs PDM on pdm_servers. Remote enrollment is intentionally left to the
+# PDM UI during evaluation so remote/API secrets do not enter plaintext logs.
+#
+# Usage: ansible-playbook playbooks/pdm.yml
+# =============================================================================
+
+- name: Configure Proxmox Datacenter Manager
+  hosts: pdm_servers
+  become: true
+  gather_facts: true
+
+  tasks:
+    - name: Disable PDM enterprise repository
+      ansible.builtin.copy:
+        dest: /etc/apt/sources.list.d/pdm-enterprise.sources
+        owner: root
+        group: root
+        mode: "0644"
+        content: |
+          Types: deb
+          URIs: https://enterprise.proxmox.com/debian/pdm
+          Suites: trixie
+          Components: pdm-enterprise
+          Signed-By: /usr/share/keyrings/proxmox-archive-keyring.gpg
+          Enabled: false
+
+    - name: Ensure PDM prerequisites are installed
+      ansible.builtin.apt:
+        name:
+          - ca-certificates
+          - curl
+          - gnupg
+        state: present
+        update_cache: true
+
+    - name: Ensure Tailscale is installed and authenticated
+      ansible.builtin.import_tasks: ../tasks/tailscale.yml
+
+    - name: Preseed GRUB for Debian cloud images
+      ansible.builtin.debconf:
+        name: grub-pc
+        question: "{{ item.question }}"
+        value: "{{ item.value }}"
+        vtype: "{{ item.vtype }}"
+      loop:
+        - question: grub-pc/install_devices_empty
+          value: "true"
+          vtype: boolean
+        - question: grub-pc/install_devices
+          value: ""
+          vtype: multiselect
+        - question: grub-pc/install_devices_disks_changed
+          value: ""
+          vtype: multiselect
+
+    - name: Check for pending dpkg configuration
+      ansible.builtin.command: dpkg --audit
+      register: pdm_dpkg_audit
+      changed_when: false
+      failed_when: false
+
+    - name: Finish pending package configuration
+      ansible.builtin.command: dpkg --configure -a
+      environment:
+        DEBIAN_FRONTEND: noninteractive
+      when: pdm_dpkg_audit.stdout | length > 0
+
+    - name: Download Proxmox archive keyring
+      ansible.builtin.shell: |
+        set -euo pipefail
+        url="https://enterprise.proxmox.com/debian/proxmox-archive-keyring-trixie.gpg"
+        dest="/usr/share/keyrings/proxmox-archive-keyring.gpg"
+        tmp="$(mktemp)"
+        curl -fsSL "$url" -o "$tmp"
+        if [ ! -f "$dest" ] || ! cmp -s "$tmp" "$dest"; then
+          install -m 0644 "$tmp" "$dest"
+          echo CHANGED
+        fi
+        rm -f "$tmp"
+      args:
+        executable: /bin/bash
+      register: pdm_keyring
+      changed_when: "'CHANGED' in pdm_keyring.stdout"
+
+    - name: Configure PDM no-subscription repository
+      ansible.builtin.copy:
+        dest: /etc/apt/sources.list.d/proxmox.sources
+        owner: root
+        group: root
+        mode: "0644"
+        content: |
+          Types: deb
+          URIs: http://download.proxmox.com/debian/pdm
+          Suites: trixie
+          Components: pdm-no-subscription
+          Signed-By: /usr/share/keyrings/proxmox-archive-keyring.gpg
+      register: pdm_repo
+
+    - name: Update apt cache for PDM repo
+      ansible.builtin.apt:
+        update_cache: true
+      when: pdm_keyring.changed or pdm_repo.changed
+
+    - name: Install Proxmox Datacenter Manager
+      ansible.builtin.apt:
+        name:
+          - proxmox-datacenter-manager
+          - proxmox-datacenter-manager-ui
+        state: present
+      environment:
+        DEBIAN_FRONTEND: noninteractive
+
+    - name: Ensure PDM API services are running
+      ansible.builtin.systemd:
+        name: "{{ item }}"
+        enabled: true
+        state: started
+      loop:
+        - proxmox-datacenter-api
+        - proxmox-datacenter-privileged-api
+
+    - name: Show PDM access URL
+      ansible.builtin.debug:
+        msg: "PDM should be available at https://{{ ansible_host | default(inventory_hostname) }}:8443"

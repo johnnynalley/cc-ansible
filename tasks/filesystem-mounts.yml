@@ -50,3 +50,30 @@
     opts: "{{ item.opts | default('defaults,nofail') }}"
     state: mounted
   loop: "{{ filesystem_mounts }}"
+
+- name: Check ext filesystem reserved block settings
+  ansible.builtin.command:
+    cmd: "tune2fs -l {{ item.src }}"
+  register: ext_reserved_block_info
+  loop: "{{ filesystem_mounts | selectattr('reserved_blocks_percentage', 'defined') | list }}"
+  loop_control:
+    label: "{{ item.path }}"
+  changed_when: false
+  failed_when: false
+  when: item.fstype is match('ext.*')
+
+- name: Set ext filesystem reserved block percentage
+  ansible.builtin.command:
+    cmd: "tune2fs -m {{ item.item.reserved_blocks_percentage }} {{ item.item.src }}"
+  loop: "{{ ext_reserved_block_info.results | default([]) }}"
+  loop_control:
+    label: "{{ item.item.path }}"
+  when:
+    - item.rc == 0
+    - item.item.fstype is match('ext.*')
+    - >-
+      (item.stdout | regex_search('Reserved block count:\\s+(\\d+)', '\\1') | first | int)
+      !=
+      (((item.stdout | regex_search('Block count:\\s+(\\d+)', '\\1') | first | int)
+      * (item.item.reserved_blocks_percentage | float) / 100)
+      | round(0, 'floor') | int)

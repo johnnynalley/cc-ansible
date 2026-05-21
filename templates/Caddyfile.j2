@@ -1,0 +1,201 @@
+{
+	acme_dns cloudflare {env.CLOUDFLARE_API_TOKEN}
+}
+
+# Services on docker-vm (container names)
+vaultwarden.jnalley.me {
+	reverse_proxy vaultwarden:80
+}
+
+# Services on media-vm (Tailscale IP)
+audiobookshelf.jnalley.me {
+	reverse_proxy 100.66.6.113:13378
+}
+
+
+sonarr.jnalley.me {
+	reverse_proxy 100.66.6.113:8989
+}
+
+radarr.jnalley.me {
+	reverse_proxy 100.66.6.113:7878
+}
+
+prowlarr.jnalley.me {
+	reverse_proxy 100.66.6.113:9696
+}
+
+bazarr.jnalley.me {
+	reverse_proxy 100.66.6.113:6767
+}
+
+tautulli.jnalley.me {
+	reverse_proxy 100.66.6.113:8181
+}
+
+sabnzbd.jnalley.me {
+	reverse_proxy 100.66.6.113:8080
+}
+
+# tdarr.jnalley.me {
+# 	reverse_proxy 100.66.6.113:8265
+# }
+
+plex.jnalley.me {
+	reverse_proxy 100.66.6.113:32400
+}
+
+qbit.jnalley.me {
+	reverse_proxy 100.66.6.113:8085
+}
+
+# booklore.jnalley.me {
+# 	reverse_proxy 100.66.6.113:6060
+# }
+
+bookshelf.jnalley.me {
+	reverse_proxy 100.66.6.113:8787
+}
+
+lazylibrarian.jnalley.me {
+	reverse_proxy 100.66.6.113:5299
+}
+
+# Nextcloud on nextcloud-vm
+nextcloud.jnalley.me {
+	reverse_proxy 100.112.46.126:11000 {
+		header_up Host nextcloud.jnalley.me
+	}
+}
+
+# New services on docker-vm
+# status.jnalley.me {
+# 	reverse_proxy uptime-kuma:3001
+# }
+
+# home.jnalley.me {
+# 	reverse_proxy homepage:3000
+# }
+
+# git.jnalley.me {
+# 	reverse_proxy gitea:3000
+# }
+
+rss.jnalley.me {
+	reverse_proxy freshrss:80
+}
+
+requests.jnalley.me {
+	reverse_proxy seerr:5055
+}
+
+# Nextcloud via Tailscale (bypasses Cloudflare, Let's Encrypt cert for CalDAV clients)
+nextcloud-ts.jnalley.me {
+	reverse_proxy 100.112.46.126:11000 {
+		header_up Host nextcloud.jnalley.me
+	}
+}
+
+photos.jnalley.me {
+	reverse_proxy 100.66.6.113:2283
+}
+# BEGIN NOTIFICATION SERVICES
+ntfy.jnalley.me {
+	reverse_proxy ntfy:1025
+}
+
+apprise.jnalley.me {
+	reverse_proxy apprise:8000
+}
+# END NOTIFICATION SERVICES
+
+# Monitoring
+grafana.jnalley.me {
+	reverse_proxy grafana:3000
+}
+
+# iptv.jnalley.me {
+# 	reverse_proxy dispatcharr:9191
+# }
+
+# OpenClaw AI Gateway + Siri Relay + Health Receiver on openclaw-vm
+openclaw.jnalley.me {
+	handle /ask {
+		reverse_proxy 100.113.234.36:18790
+	}
+	handle /health {
+		reverse_proxy 100.113.234.36:18791
+	}
+	handle /alerts {
+		reverse_proxy 100.113.234.36:18792
+	}
+	handle /nct-main {
+		reverse_proxy 100.113.234.36:8788
+	}
+	handle /nct-rigel {
+		reverse_proxy 100.113.234.36:8789
+	}
+	handle /nct-dubble {
+		reverse_proxy 100.113.234.36:8790
+	}
+	handle {
+		reverse_proxy 100.113.234.36:18789
+	}
+}
+# test
+
+portainer.jnalley.me {
+	reverse_proxy portainer:9000
+}
+# BEGIN PROXMOX MANAGEMENT UIS
+# Proxmox VE nodes
+pve-ts440.jnalley.me {
+	reverse_proxy https://100.71.188.16:8006 {
+		transport http {
+			tls_insecure_skip_verify
+		}
+	}
+}
+
+pve-alto.jnalley.me {
+	reverse_proxy https://100.86.219.71:8006 {
+		transport http {
+			tls_insecure_skip_verify
+		}
+	}
+}
+
+pve-herc.jnalley.me {
+	reverse_proxy https://100.80.124.20:8006 {
+		transport http {
+			tls_insecure_skip_verify
+		}
+	}
+}
+
+pve-m70q.jnalley.me {
+	reverse_proxy https://100.75.110.105:8006 {
+		transport http {
+			tls_insecure_skip_verify
+		}
+	}
+}
+
+# Proxmox Backup Server
+pbs.jnalley.me {
+	reverse_proxy https://100.110.176.37:8007 {
+		transport http {
+			tls_insecure_skip_verify
+		}
+	}
+}
+
+# Proxmox Datacenter Manager
+pdm.jnalley.me {
+	reverse_proxy https://192.168.1.52:8443 {
+		transport http {
+			tls_insecure_skip_verify
+		}
+	}
+}
+# END PROXMOX MANAGEMENT UIS

@@ -89,6 +89,10 @@
   ansible.builtin.import_playbook: playbooks/virtiofs.yml
   tags: [virtiofs, mounts]
 
+- name: Configure Proxmox VM hardware settings
+  ansible.builtin.import_playbook: playbooks/proxmox-vm-hardware.yml
+  tags: [proxmox, vm-hardware]
+
 - name: Deploy Docker Compose stacks
   ansible.builtin.import_playbook: playbooks/docker-stacks.yml
   tags: [docker, stacks]
@@ -96,6 +100,10 @@
 - name: Configure Gluetun VPN watchdog
   ansible.builtin.import_playbook: playbooks/gluetun-watchdog.yml
   tags: [gluetun, watchdog, vpn]
+
+- name: Configure stream relay
+  ansible.builtin.import_playbook: playbooks/stream-relay.yml
+  tags: [stream-relay, streaming, twitch]
 
 - name: Configure Docker container auto-updates
   ansible.builtin.import_playbook: playbooks/docker-auto-update.yml

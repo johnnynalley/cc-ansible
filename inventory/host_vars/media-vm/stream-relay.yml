@@ -1,0 +1,53 @@
+# =============================================================================
+# media-vm - Stream Relay Configuration
+# =============================================================================
+
+# OBS stream offload:
+#   gaming PC OBS -> SRT over Tailscale -> media-vm FFmpeg/NVENC -> platform RTMP outputs
+#
+# The service is managed as enabled after the OBS/Twitch relay POC succeeded.
+# Real platform stream keys stay live-only in /etc/stream-relay/stream-relay.env.
+stream_relay_enabled: true
+
+stream_relay_name: stream
+stream_relay_env_file: /etc/stream-relay/stream-relay.env
+
+# Park the separate Aitum-to-YouTube vertical relay for now. YouTube's automatic
+# dual-stream mode is the active vertical path while SleepyChat only tracks one
+# YouTube live chat cleanly.
+stream_relay_vertical_enabled: false
+stream_relay_vertical_ingest_bind: "100.66.6.113"
+stream_relay_vertical_ingest_port: 1936
+stream_relay_vertical_ingest_app: live
+stream_relay_vertical_ingest_stream: vertical
+
+# Bind to media-vm's Tailscale address for the first test. Change this to the
+# LAN address only after adding the gaming PC's LAN IP to the Proxmox firewall.
+stream_relay_ingest_bind: "100.66.6.113"
+stream_relay_ingest_port: 9000
+stream_relay_ingest_latency_us: 200000
+
+stream_relay_twitch_rtmp_base: "rtmp://live.twitch.tv/app"
+stream_relay_twitch_bandwidth_test: false
+stream_relay_youtube_rtmp_base: "rtmp://a.rtmp.youtube.com/live2"
+stream_relay_youtube_backup_rtmp_base: "rtmp://b.rtmp.youtube.com/live2"
+
+stream_relay_video_encoder: h264_nvenc
+stream_relay_video_preset: p6
+stream_relay_video_tune: ll
+stream_relay_video_profile: high
+stream_relay_video_fps: 60
+stream_relay_keyframe_interval_seconds: 2
+stream_relay_video_bframes: 2
+stream_relay_video_bitrate: 6000k
+stream_relay_video_maxrate: 6000k
+stream_relay_video_bufsize: 12000k
+
+stream_relay_audio_bitrate: 160k
+stream_relay_audio_sample_rate: 48000
+
+stream_relay_vertical_video_width: 1080
+stream_relay_vertical_video_height: 1920
+stream_relay_vertical_video_bitrate: 6000k
+stream_relay_vertical_video_maxrate: 6000k
+stream_relay_vertical_video_bufsize: 12000k

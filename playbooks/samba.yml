@@ -6,7 +6,7 @@
 # =============================================================================
 
 - name: Configure Samba server
-  hosts: linux_hosts
+  hosts: samba_hosts
   become: true
   gather_facts: true
 

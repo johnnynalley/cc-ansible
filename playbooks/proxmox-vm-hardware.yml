@@ -1,0 +1,40 @@
+# =============================================================================
+# Proxmox VM Hardware Settings
+# =============================================================================
+# Applies selected VM hardware settings that should be durable in IaC.
+# Changes such as CPU model updates require a VM stop/start to take effect.
+# =============================================================================
+
+- name: Configure Proxmox VM hardware settings
+  hosts: proxmox_nodes
+  become: true
+  gather_facts: false
+
+  tasks:
+    - name: Configure VM CPU model
+      ansible.builtin.shell: |
+        set -eu
+        current="$(qm config {{ item.vmid }} | awk -F': ' '/^cpu:/ { print $2; exit }')"
+        desired="{{ item.cpu }}"
+        if [ "$current" = "$desired" ]; then
+          echo "unchanged cpu=$current"
+          exit 0
+        fi
+        qm set {{ item.vmid }} --cpu "$desired"
+        echo "updated=1 cpu=$current->$desired"
+      loop: "{{ proxmox_vm_hardware | default([]) }}"
+      loop_control:
+        label: "vmid={{ item.vmid }} {{ item.name | default('') }} cpu={{ item.cpu | default('') }}"
+      when: item.cpu is defined
+      register: proxmox_vm_cpu_result
+      changed_when: "'updated=1' in proxmox_vm_cpu_result.stdout"
+
+    - name: Report VM hardware changes requiring restart
+      ansible.builtin.debug:
+        msg: "{{ item.stdout_lines }}"
+      loop: "{{ proxmox_vm_cpu_result.results | default([]) }}"
+      loop_control:
+        label: "{{ item.item.name | default(item.item.vmid) }}"
+      when:
+        - item is not skipped
+        - item.changed | default(false)

@@ -1,0 +1,90 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+STREAM_RELAY_OUTPUTS="${STREAM_RELAY_OUTPUTS:-twitch}"
+TWITCH_RTMP_URL="${TWITCH_RTMP_URL:-${TWITCH_RTMP_BASE:-{{ stream_relay_twitch_rtmp_base }}}}"
+YOUTUBE_RTMP_URL="${YOUTUBE_RTMP_URL:-{{ stream_relay_youtube_rtmp_base }}}"
+YOUTUBE_BACKUP_RTMP_URL="${YOUTUBE_BACKUP_RTMP_URL:-{{ stream_relay_youtube_backup_rtmp_base }}}"
+
+case "${TWITCH_BANDWIDTH_TEST:-{{ stream_relay_twitch_bandwidth_test | lower }}}" in
+  1|true|TRUE|yes|YES|on|ON)
+    TWITCH_RTMP_QUERY="${TWITCH_RTMP_QUERY:-bandwidthtest=true}"
+    ;;
+esac
+
+srt_url="srt://{{ stream_relay_ingest_bind }}:{{ stream_relay_ingest_port }}?mode=listener&transtype=live&latency={{ stream_relay_ingest_latency_us }}"
+keyframe_frames=$(( {{ stream_relay_video_fps }} * {{ stream_relay_keyframe_interval_seconds }} ))
+tee_outputs=()
+tee_output_count=0
+
+add_output() {
+  local name="$1"
+  local prefix url_var key_var query_var url key query full_url
+
+  prefix="$(tr '[:lower:]-' '[:upper:]_' <<< "$name")"
+  url_var="${prefix}_RTMP_URL"
+  key_var="${prefix}_STREAM_KEY"
+  query_var="${prefix}_RTMP_QUERY"
+  url="${!url_var:-}"
+  key="${!key_var:-}"
+  query="${!query_var:-}"
+
+  if [[ -z "$url" || -z "$key" ]]; then
+    echo "stream-relay: skipping ${name}; missing ${url_var} or ${key_var}" >&2
+    return
+  fi
+
+  full_url="${url%/}/${key}"
+  if [[ -n "$query" ]]; then
+    if [[ "$full_url" == *\?* ]]; then
+      full_url="${full_url}&${query}"
+    else
+      full_url="${full_url}?${query}"
+    fi
+  fi
+
+  tee_outputs+=("[f=flv:onfail=abort]${full_url}")
+  tee_output_count=$((tee_output_count + 1))
+}
+
+for output in $STREAM_RELAY_OUTPUTS; do
+  add_output "$output"
+done
+
+if [[ "$tee_output_count" -eq 0 ]]; then
+  echo "stream-relay: no RTMP outputs configured" >&2
+  exit 1
+fi
+
+unset TWITCH_STREAM_KEY YOUTUBE_STREAM_KEY YOUTUBE_BACKUP_STREAM_KEY
+tee_spec="$(IFS='|'; printf '%s' "${tee_outputs[*]}")"
+
+exec /usr/bin/ffmpeg \
+  -hide_banner \
+  -nostdin \
+  -loglevel warning \
+  -stats_period 30 \
+  -fflags nobuffer \
+  -flags low_delay \
+  -i "$srt_url" \
+  -map 0:v:0 \
+  -map 0:a:0? \
+  -c:v {{ stream_relay_video_encoder }} \
+  -preset {{ stream_relay_video_preset }} \
+  -tune {{ stream_relay_video_tune }} \
+  -profile:v {{ stream_relay_video_profile }} \
+  -pix_fmt yuv420p \
+  -r {{ stream_relay_video_fps }} \
+  -g "$keyframe_frames" \
+  -keyint_min "$keyframe_frames" \
+  -bf {{ stream_relay_video_bframes }} \
+  -rc cbr \
+  -b:v {{ stream_relay_video_bitrate }} \
+  -maxrate {{ stream_relay_video_maxrate }} \
+  -bufsize {{ stream_relay_video_bufsize }} \
+  -c:a aac \
+  -b:a {{ stream_relay_audio_bitrate }} \
+  -ar {{ stream_relay_audio_sample_rate }} \
+  -ac 2 \
+  -f tee \
+  "$tee_spec"

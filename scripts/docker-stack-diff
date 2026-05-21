@@ -5,7 +5,9 @@
 # Runs AFTER 'docker compose pull' but BEFORE 'docker compose up -d'.
 # For each service, compares the running container's image ID against the
 # locally available image ID. Reports services where images differ, with
-# version labels when available (org.opencontainers.image.version).
+# version labels when available (org.opencontainers.image.version). When OCI
+# source/revision labels are present, it also prints a compare URL so update
+# notifications point at the exact image-build changes.
 #
 # Usage: docker-stack-diff [--check-major] /path/to/compose/project
 #
@@ -40,6 +42,33 @@ get_major_version() {
     if [[ "$ver" =~ ^([0-9]+) ]]; then
         echo "${BASH_REMATCH[1]}"
     fi
+}
+
+clean_label() {
+    local value="$1"
+    [[ "$value" == "<no value>" ]] && value=""
+    echo "$value"
+}
+
+github_compare_url() {
+    local source="$1"
+    local old_rev="$2"
+    local new_rev="$3"
+
+    [ -z "$source" ] && return 1
+    [ -z "$old_rev" ] && return 1
+    [ -z "$new_rev" ] && return 1
+    [ "$old_rev" = "$new_rev" ] && return 1
+
+    source="${source%.git}"
+    case "$source" in
+        https://github.com/*)
+            echo "${source}/compare/${old_rev}...${new_rev}"
+            ;;
+        *)
+            return 1
+            ;;
+    esac
 }
 
 # Compare two version strings and return 0 (true) if major version differs.
@@ -83,9 +112,15 @@ for svc in $(docker compose config --services 2>/dev/null); do
     old_version=$(docker inspect --format '{{index .Config.Labels "org.opencontainers.image.version"}}' "$cid" 2>/dev/null)
     new_version=$(docker image inspect --format '{{index .Config.Labels "org.opencontainers.image.version"}}' "$image_name" 2>/dev/null)
 
-    # Clean up empty/missing labels (Go template returns "<no value>" for missing keys)
-    [[ "$old_version" == "<no value>" || -z "$old_version" ]] && old_version=""
-    [[ "$new_version" == "<no value>" || -z "$new_version" ]] && new_version=""
+    old_version=$(clean_label "$old_version")
+    new_version=$(clean_label "$new_version")
+
+    old_revision=$(clean_label "$(docker inspect --format '{{index .Config.Labels "org.opencontainers.image.revision"}}' "$cid" 2>/dev/null)")
+    new_revision=$(clean_label "$(docker image inspect --format '{{index .Config.Labels "org.opencontainers.image.revision"}}' "$image_name" 2>/dev/null)")
+    old_source=$(clean_label "$(docker inspect --format '{{index .Config.Labels "org.opencontainers.image.source"}}' "$cid" 2>/dev/null)")
+    new_source=$(clean_label "$(docker image inspect --format '{{index .Config.Labels "org.opencontainers.image.source"}}' "$image_name" 2>/dev/null)")
+    old_created=$(clean_label "$(docker inspect --format '{{index .Config.Labels "org.opencontainers.image.created"}}' "$cid" 2>/dev/null)")
+    new_created=$(clean_label "$(docker image inspect --format '{{index .Config.Labels "org.opencontainers.image.created"}}' "$image_name" 2>/dev/null)")
 
     # Check for major version bump
     major_prefix=""
@@ -103,6 +138,17 @@ for svc in $(docker compose config --services 2>/dev/null); do
         updates+=("${major_prefix}  ${svc}: ${new_version}  (${old_hash} -> ${new_hash})")
     else
         updates+=("  ${svc}: ${old_hash} -> ${new_hash}  (${image_name})")
+    fi
+
+    source="${new_source:-$old_source}"
+    if compare_url=$(github_compare_url "$source" "$old_revision" "$new_revision"); then
+        updates+=("    image changes: ${compare_url}")
+    elif [ -n "$old_revision" ] && [ -n "$new_revision" ] && [ "$old_revision" != "$new_revision" ]; then
+        updates+=("    image revision: ${old_revision} -> ${new_revision}")
+    fi
+
+    if [ -n "$old_created" ] && [ -n "$new_created" ] && [ "$old_created" != "$new_created" ]; then
+        updates+=("    image created: ${old_created} -> ${new_created}")
     fi
 done
 

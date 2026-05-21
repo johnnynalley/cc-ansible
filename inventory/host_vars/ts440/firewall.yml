@@ -51,6 +51,8 @@ pve_vm_firewalls:
       - { action: ACCEPT, proto: tcp, dport: 22, comment: "SSH" }
       - { action: ACCEPT, proto: tcp, dport: 32400, comment: "Plex direct" }
       - { action: ACCEPT, source: "+dc/haos-vm", proto: tcp, dport: 8181, comment: "Tautulli from HA" }
+      - { action: ACCEPT, source: "+dc/streaming-pc", proto: udp, dport: 9000, comment: "OBS SRT ingest for Twitch relay" }
+      - { action: ACCEPT, source: "+dc/streaming-pc", proto: tcp, dport: 1936, comment: "Aitum Vertical RTMP ingest for YouTube Shorts relay" }
 
   # nextcloud-vm (VM 101) - Nextcloud AIO
   101:

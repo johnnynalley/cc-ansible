@@ -9,3 +9,4 @@ filesystem_mounts:
     src: /dev/disk/by-uuid/4b8f1479-bebe-4cc0-a9bd-778023087595
     fstype: ext4
     opts: "defaults,nofail"
+    reserved_blocks_percentage: 1

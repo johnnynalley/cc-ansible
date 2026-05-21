@@ -1,0 +1,9 @@
+# =============================================================================
+# ts440 - Proxmox VM Hardware Settings
+# =============================================================================
+
+proxmox_vm_hardware:
+  - name: nextcloud-vm
+    vmid: 101
+    # Nextcloud AIO fulltextsearch requires AVX/AVX2/FMA-capable CPU flags.
+    cpu: host

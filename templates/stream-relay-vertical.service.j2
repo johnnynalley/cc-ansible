@@ -1,0 +1,22 @@
+[Unit]
+Description=Aitum Vertical RTMP to YouTube relay
+Documentation=file:/etc/stream-relay/stream-relay.env.example
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+EnvironmentFile=-{{ stream_relay_env_file }}
+ExecStartPre=/bin/sh -c 'test -r "{{ stream_relay_env_file }}"'
+ExecStart=/usr/local/sbin/stream-relay-vertical
+Restart=always
+RestartSec=5
+TimeoutStartSec=30
+TimeoutStopSec=10
+KillSignal=SIGTERM
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=stream-relay-vertical
+
+[Install]
+WantedBy=multi-user.target

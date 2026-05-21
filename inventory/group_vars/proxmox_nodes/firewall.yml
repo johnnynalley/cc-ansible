@@ -48,6 +48,14 @@ pve_firewall_ipsets:
     entries:
       - { ip: "100.64.0.0/10", comment: "Tailscale CGNAT" }
 
+  streaming-pc:
+    comment: "Gaming PC stream relay source"
+    entries:
+      # jn-desktop Linux and Windows Tailscale identities. Add the gaming PC
+      # 192.168.1.x address here once confirmed for direct same-switch SRT.
+      - { ip: "100.123.248.34", comment: "jn-desktop Linux Tailscale IP" }
+      - { ip: "100.78.248.44", comment: "lj-gaming-pc Windows Tailscale IP" }
+
 # Security Groups (referenced as GROUP <name> in node rules)
 pve_firewall_groups:
   corosync-lan:

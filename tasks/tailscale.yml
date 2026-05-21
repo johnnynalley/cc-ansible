@@ -92,6 +92,90 @@
     state: started
   when: ansible_facts.os_family != "Darwin"
 
+- name: Check Tailscale backend state
+  ansible.builtin.shell: |
+    set -o pipefail
+    tailscale status --json 2>/dev/null | sed -n 's/.*"BackendState":"\([^"]*\)".*/\1/p'
+  args:
+    executable: /bin/bash
+  register: tailscale_backend_state
+  changed_when: false
+  failed_when: false
+  when: ansible_facts.os_family != "Darwin"
+
+- name: Collect Tailscale auth inputs
+  ansible.builtin.set_fact:
+    tailscale_direct_auth_key: "{{ tailscale_auth_key | default(vault_tailscale_auth_key | default('')) }}"
+    tailscale_oauth_secret: "{{ tailscale_oauth_client_secret | default(vault_tailscale_oauth_client_secret | default('')) }}"
+    tailscale_auth_tags_value: "{{ tailscale_advertise_tags | default(tailscale_auth_key_tags | default([])) }}"
+  no_log: true
+  when: ansible_facts.os_family != "Darwin"
+
+- name: Normalize Tailscale auth mode
+  ansible.builtin.set_fact:
+    tailscale_auth_mode: >-
+      {{
+        'direct' if (tailscale_direct_auth_key | default('') | length > 0)
+        else ('oauth' if (tailscale_oauth_secret | default('') | length > 0) else 'none')
+      }}
+    tailscale_auth_tags_csv: >-
+      {{
+        tailscale_auth_tags_value | join(',')
+        if (tailscale_auth_tags_value is sequence and tailscale_auth_tags_value is not string)
+        else tailscale_auth_tags_value
+      }}
+  no_log: true
+  when: ansible_facts.os_family != "Darwin"
+
+- name: Use configured Tailscale auth key
+  ansible.builtin.set_fact:
+    tailscale_effective_auth_key: "{{ tailscale_direct_auth_key }}"
+  no_log: true
+  when:
+    - ansible_facts.os_family != "Darwin"
+    - tailscale_auth_mode == "direct"
+
+- name: Use Tailscale OAuth client secret for unattended auth
+  ansible.builtin.set_fact:
+    tailscale_effective_auth_key: >-
+      {{ tailscale_oauth_secret }}?ephemeral={{ tailscale_auth_key_ephemeral | default(false) | bool | string | lower }}&preauthorized={{ tailscale_auth_key_preauthorized | default(true) | bool | string | lower }}
+  no_log: true
+  when:
+    - ansible_facts.os_family != "Darwin"
+    - tailscale_auth_mode == "oauth"
+
+- name: Require tags for OAuth-based Tailscale auth
+  ansible.builtin.fail:
+    msg: "Set tailscale_advertise_tags or tailscale_auth_key_tags when using a Tailscale OAuth client secret."
+  when:
+    - ansible_facts.os_family != "Darwin"
+    - (tailscale_backend_state.stdout | default('')) != 'Running'
+    - tailscale_auth_mode == "oauth"
+    - (tailscale_auth_tags_csv | default('') | string | length) == 0
+
+- name: Authenticate Tailscale without browser login
+  ansible.builtin.shell: >-
+    tailscale up
+    --auth-key={{ tailscale_effective_auth_key | quote }}
+    --hostname={{ (tailscale_hostname | default(inventory_hostname)) | quote }}
+    {% if tailscale_ssh_enabled | default(true) %}--ssh{% endif %}
+    {% if (tailscale_auth_tags_csv | default('') | string | length) > 0 %}--advertise-tags={{ tailscale_auth_tags_csv | quote }}{% endif %}
+  args:
+    executable: /bin/bash
+  no_log: true
+  when:
+    - ansible_facts.os_family != "Darwin"
+    - (tailscale_backend_state.stdout | default('')) != 'Running'
+    - tailscale_auth_mode in ["direct", "oauth"]
+
+- name: Report missing Tailscale unattended auth
+  ansible.builtin.debug:
+    msg: "Tailscale is not authenticated and no unattended auth variable is configured. Add vault_tailscale_oauth_client_secret plus tailscale_advertise_tags, or add vault_tailscale_auth_key."
+  when:
+    - ansible_facts.os_family != "Darwin"
+    - (tailscale_backend_state.stdout | default('')) != 'Running'
+    - tailscale_auth_mode == "none"
+
 - name: Create tailscaled systemd override directory
   ansible.builtin.file:
     path: /etc/systemd/system/tailscaled.service.d

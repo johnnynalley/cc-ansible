@@ -154,6 +154,17 @@
         local_restic_all_paths: "{{ local_restic_backup_paths | default(['/opt']) }}"
       tags: [script]
 
+    - name: Build local backup excludes list
+      ansible.builtin.set_fact:
+        local_restic_all_excludes: >-
+          {{
+            (restic_excludes | default([]))
+            + (restic_excludes_extra | default([]))
+            + (local_restic_excludes | default([]))
+            + (local_restic_excludes_extra | default([]))
+          }}
+      tags: [script]
+
     - name: Create local restic backup script
       ansible.builtin.copy:
         content: |
@@ -171,20 +182,21 @@
           # Ensure HOME is set for restic
           export HOME=/root
 
-          log "Starting local backup to {{ local_restic_repository }}..."
+          log "Starting local backup for {{ inventory_hostname }}..."
 
           # Run backup
-          restic backup \
+          restic --cleanup-cache --retry-lock 15m backup \
             --verbose \
             --tag "{{ inventory_hostname }}" \
             --tag "local" \
-          {% for exclude in restic_excludes | default([]) %}
+          {% for exclude in local_restic_all_excludes %}
             --exclude "{{ exclude }}" \
           {% endfor %}
           {% for path in local_restic_all_paths %}
             "{{ path }}" \
           {% endfor %}
 
+          {% if local_restic_run_retention | default(true) %}
           log "Backup complete. Running retention policy..."
 
           # Apply retention policy
@@ -197,6 +209,9 @@
             --keep-monthly {{ local_restic_retention.keep_monthly }}
 
           log "Local backup and maintenance complete"
+          {% else %}
+          log "Backup complete. Skipping client-side retention for append-only repository."
+          {% endif %}
         dest: "{{ local_restic_script }}"
         owner: root
         group: root
@@ -394,6 +409,115 @@
         daemon_reload: true
       tags: [config]
 
+    - name: Create restic REST maintenance cache directory
+      ansible.builtin.file:
+        path: /var/cache/restic-rest-maintenance/openclaw-vm
+        state: directory
+        owner: johnny
+        group: johnny
+        mode: "0700"
+      tags: [maintenance]
+
+    - name: Create restic REST maintenance environment file
+      ansible.builtin.copy:
+        dest: /etc/restic/openclaw-vm-rest-maintenance.env
+        owner: johnny
+        group: johnny
+        mode: "0600"
+        content: |
+          # Managed by Ansible - do not edit manually
+          RESTIC_REPOSITORY=/srv/nas-zfs/backups/openclaw-vm
+          RESTIC_PASSWORD={{ restic_password }}
+          RESTIC_CACHE_DIR=/var/cache/restic-rest-maintenance/openclaw-vm
+      no_log: true
+      tags: [maintenance]
+
+    - name: Create restic REST maintenance script for openclaw-vm repo
+      ansible.builtin.copy:
+        dest: /usr/local/sbin/restic-rest-maintenance-openclaw-vm
+        owner: root
+        group: root
+        mode: "0700"
+        content: |
+          #!/bin/bash
+          set -euo pipefail
+
+          LOG_TAG="restic-rest-maintenance-openclaw-vm"
+          log() { logger -t "$LOG_TAG" "$*"; echo "$*"; }
+
+          set -a
+          source /etc/restic/openclaw-vm-rest-maintenance.env
+          set +a
+          export HOME=/root
+
+          log "Starting server-side restic maintenance for openclaw-vm"
+          restic unlock
+          restic --retry-lock 15m forget \
+            --verbose \
+            --prune \
+            --keep-hourly {{ hostvars['openclaw-vm']['local_restic_retention']['keep_hourly'] | default(local_restic_retention.keep_hourly) }} \
+            --keep-daily {{ hostvars['openclaw-vm']['local_restic_retention']['keep_daily'] | default(local_restic_retention.keep_daily) }} \
+            --keep-weekly {{ hostvars['openclaw-vm']['local_restic_retention']['keep_weekly'] | default(local_restic_retention.keep_weekly) }} \
+            --keep-monthly {{ hostvars['openclaw-vm']['local_restic_retention']['keep_monthly'] | default(local_restic_retention.keep_monthly) }}
+          log "Server-side restic maintenance complete for openclaw-vm"
+      tags: [maintenance]
+
+    - name: Create restic REST maintenance systemd service for openclaw-vm repo
+      ansible.builtin.copy:
+        dest: /etc/systemd/system/restic-rest-maintenance-openclaw-vm.service
+        owner: root
+        group: root
+        mode: "0644"
+        content: |
+          [Unit]
+          Description=Restic REST maintenance for openclaw-vm append-only repository
+          After=restic-rest-server.service
+          ConditionPathExists=/srv/nas-zfs/backups/openclaw-vm/config
+
+          [Service]
+          Type=oneshot
+          ExecStart=/usr/local/sbin/restic-rest-maintenance-openclaw-vm
+          StandardOutput=journal
+          StandardError=journal
+          User=johnny
+          Environment=HOME=/home/johnny
+          Environment=RESTIC_CACHE_DIR=/var/cache/restic-rest-maintenance/openclaw-vm
+          Nice=19
+          IOSchedulingClass=idle
+          TimeoutStartSec=7200
+      notify: Reload systemd
+      tags: [maintenance]
+
+    - name: Create restic REST maintenance systemd timer for openclaw-vm repo
+      ansible.builtin.copy:
+        dest: /etc/systemd/system/restic-rest-maintenance-openclaw-vm.timer
+        owner: root
+        group: root
+        mode: "0644"
+        content: |
+          [Unit]
+          Description=Daily restic REST maintenance for openclaw-vm append-only repository
+
+          [Timer]
+          OnCalendar={{ hostvars['openclaw-vm']['local_restic_server_retention_oncalendar'] | default('*-*-* 03:20:00') }}
+          Persistent=true
+
+          [Install]
+          WantedBy=timers.target
+      notify:
+        - Reload systemd
+        - Enable restic REST maintenance timer for openclaw-vm
+      tags: [maintenance]
+
+    - name: Ensure restic REST maintenance timer is enabled and started for openclaw-vm repo
+      ansible.builtin.systemd:
+        name: restic-rest-maintenance-openclaw-vm.timer
+        enabled: true
+        state: started
+        daemon_reload: true
+      when: not ansible_check_mode
+      tags: [maintenance]
+
   handlers:
     - name: Reload systemd
       ansible.builtin.systemd:
@@ -403,3 +527,10 @@
       ansible.builtin.systemd:
         name: restic-rest-server
         state: restarted
+
+    - name: Enable restic REST maintenance timer for openclaw-vm
+      ansible.builtin.systemd:
+        name: restic-rest-maintenance-openclaw-vm.timer
+        enabled: true
+        state: started
+      when: not ansible_check_mode

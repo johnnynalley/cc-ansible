@@ -1,0 +1,23 @@
+services:
+  caddy:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: caddy
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./data:/data
+      - ./config:/config
+    environment:
+      - CLOUDFLARE_API_TOKEN=${CLOUDFLARE_API_TOKEN}
+    networks:
+      - caddy-proxy
+
+networks:
+  caddy-proxy:
+    name: caddy-proxy
+    driver: bridge

@@ -11,7 +11,7 @@
 # =============================================================================
 
 - name: Deploy OpenClaw AI agent
-  hosts: linux_hosts
+  hosts: openclaw_hosts
   become: true
   gather_facts: true
 
@@ -47,18 +47,35 @@
         state: absent
       notify: Reload systemd
 
-    # --- Install OpenClaw + ClawHub via npm ---
-    - name: Install OpenClaw globally via npm
-      community.general.npm:
-        name: openclaw
-        global: true
-        state: latest
+    # --- Install OpenClaw + ClawHub via johnny's npm prefix ---
+    - name: Install or update OpenClaw globally via npm
+      ansible.builtin.command:
+        cmd: sudo -iu {{ admin_user }} npm install -g openclaw@latest
+      register: openclaw_npm_install
+      changed_when: >-
+        'changed' in (openclaw_npm_install.stdout | default(''))
+        or 'added' in (openclaw_npm_install.stdout | default(''))
+        or 'removed' in (openclaw_npm_install.stdout | default(''))
+      when: not ansible_check_mode
+      notify: Restart OpenClaw gateway
 
-    - name: Install ClawHub CLI globally via npm
-      community.general.npm:
-        name: clawhub
-        global: true
-        state: latest
+    - name: Check OpenClaw update status
+      ansible.builtin.command:
+        cmd: sudo -iu {{ admin_user }} openclaw update --dry-run --json --timeout 300
+      register: openclaw_update_status
+      check_mode: false
+      changed_when: false
+      when: ansible_check_mode
+
+    - name: Install or update ClawHub CLI globally via npm
+      ansible.builtin.command:
+        cmd: sudo -iu {{ admin_user }} npm install -g clawhub@latest
+      register: clawhub_npm_install
+      changed_when: >-
+        'changed' in (clawhub_npm_install.stdout | default(''))
+        or 'added' in (clawhub_npm_install.stdout | default(''))
+        or 'removed' in (clawhub_npm_install.stdout | default(''))
+      when: not ansible_check_mode
 
     # --- Install linting tools in a venv ---
     - name: Create OpenClaw venv for linting tools
@@ -97,51 +114,107 @@
         group: "{{ admin_user }}"
         mode: "0755"
 
+    - name: Check whether cc-ansible repo is already cloned
+      ansible.builtin.stat:
+        path: "{{ openclaw_workspace }}/.git"
+      register: openclaw_workspace_git
+
     - name: Clone cc-ansible repo
-      ansible.builtin.git:
-        repo: https://github.com/johnnynalley/cc-ansible.git
-        dest: "{{ openclaw_workspace }}"
-        version: main
-        update: true
-      become_user: "{{ admin_user }}"
+      ansible.builtin.command:
+        cmd: sudo -iu {{ admin_user }} git clone https://github.com/johnnynalley/cc-ansible.git {{ openclaw_workspace }}
+        creates: "{{ openclaw_workspace }}/.git"
+      when: not openclaw_workspace_git.stat.exists
+
+    - name: Update cc-ansible repo
+      ansible.builtin.command:
+        cmd: sudo -iu {{ admin_user }} git -C {{ openclaw_workspace }} pull --ff-only
+      register: openclaw_git_pull
+      changed_when: >-
+        openclaw_git_pull.rc == 0
+        and 'Already up to date.' not in (openclaw_git_pull.stdout | default(''))
+      failed_when: false
+      when: openclaw_workspace_git.stat.exists
+
+    - name: Report cc-ansible workspace sync warning
+      ansible.builtin.debug:
+        msg: >-
+          OpenClaw workspace sync did not fast-forward cleanly at {{ openclaw_workspace }}.
+          This does not block OpenClaw package maintenance, but repo-sync may need manual
+          reconciliation. Error: {{ openclaw_git_pull.stderr | default(openclaw_git_pull.stdout, true) }}
+      when:
+        - openclaw_workspace_git.stat.exists
+        - openclaw_git_pull.rc | default(0) != 0
 
     # --- Configure git for push access ---
     - name: Configure git user name
-      community.general.git_config:
-        name: user.name
-        value: "Johnny Nalley"
-        scope: global
-      become_user: "{{ admin_user }}"
+      ansible.builtin.command:
+        cmd: sudo -iu {{ admin_user }} git config --global user.name "Johnny Nalley"
+      changed_when: false
 
     - name: Configure git user email
-      community.general.git_config:
-        name: user.email
-        value: "johnny@jnalley.me"
-        scope: global
-      become_user: "{{ admin_user }}"
+      ansible.builtin.command:
+        cmd: sudo -iu {{ admin_user }} git config --global user.email johnny@jnalley.me
+      changed_when: false
 
     - name: Configure git credential store
-      community.general.git_config:
-        name: credential.helper
-        value: store
-        scope: global
-      become_user: "{{ admin_user }}"
+      ansible.builtin.command:
+        cmd: sudo -iu {{ admin_user }} git config --global credential.helper store
+      changed_when: false
 
     # --- Install Mem0 memory plugin ---
     - name: Install Mem0 plugin
       ansible.builtin.command:
-        cmd: openclaw plugins install @mem0/openclaw-mem0
-      become_user: "{{ admin_user }}"
+        cmd: sudo -iu {{ admin_user }} openclaw plugins install @mem0/openclaw-mem0
       register: mem0_install
       changed_when: "'installed' in (mem0_install.stdout | default('') | lower) or 'updated' in (mem0_install.stdout | default('') | lower)"
+
+    - name: Sync OpenClaw managed plugins after core update
+      ansible.builtin.command:
+        cmd: sudo -iu {{ admin_user }} openclaw plugins update --all
+      register: openclaw_plugins_update
+      changed_when: >-
+        'updated' in (openclaw_plugins_update.stdout | default('') | lower)
+        or 'installed' in (openclaw_plugins_update.stdout | default('') | lower)
+      when: openclaw_npm_install.changed | default(false)
+      notify: Restart OpenClaw gateway
 
     # --- Install OpenClaw gateway service (user-level systemd) ---
     - name: Install OpenClaw gateway service
       ansible.builtin.command:
-        cmd: openclaw gateway install
-      become_user: "{{ admin_user }}"
+        cmd: sudo -iu {{ admin_user }} openclaw gateway install
       register: gateway_install
       changed_when: "'Installed' in gateway_install.stdout"
+      notify: Restart OpenClaw gateway
+
+    - name: Create OpenClaw compile cache directory
+      ansible.builtin.file:
+        path: /var/tmp/openclaw-compile-cache
+        state: directory
+        owner: "{{ admin_user }}"
+        group: "{{ admin_user }}"
+        mode: "0700"
+
+    - name: Create OpenClaw gateway user service override directory
+      ansible.builtin.file:
+        path: /home/{{ admin_user }}/.config/systemd/user/openclaw-gateway.service.d
+        state: directory
+        owner: "{{ admin_user }}"
+        group: "{{ admin_user }}"
+        mode: "0755"
+
+    - name: Configure OpenClaw gateway startup optimization environment
+      ansible.builtin.copy:
+        dest: /home/{{ admin_user }}/.config/systemd/user/openclaw-gateway.service.d/performance.conf
+        owner: "{{ admin_user }}"
+        group: "{{ admin_user }}"
+        mode: "0644"
+        content: |
+          [Service]
+          Environment=NODE_COMPILE_CACHE=/var/tmp/openclaw-compile-cache
+          Environment=OPENCLAW_NO_RESPAWN=1
+      notify:
+        - Reload OpenClaw user systemd
+        - Restart OpenClaw gateway
 
     # --- Enable linger for headless persistence ---
     - name: Enable lingering for {{ admin_user }}
@@ -246,3 +319,19 @@
     - name: Reload systemd
       ansible.builtin.systemd:
         daemon_reload: true
+
+    - name: Reload OpenClaw user systemd
+      ansible.builtin.shell:
+        cmd: |
+          uid=$(id -u {{ admin_user }})
+          XDG_RUNTIME_DIR=/run/user/$uid \
+          DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/$uid/bus \
+            runuser -u {{ admin_user }} -- systemctl --user daemon-reload
+
+    - name: Restart OpenClaw gateway
+      ansible.builtin.shell:
+        cmd: |
+          uid=$(id -u {{ admin_user }})
+          XDG_RUNTIME_DIR=/run/user/$uid \
+          DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/$uid/bus \
+            runuser -u {{ admin_user }} -- systemctl --user restart openclaw-gateway.service

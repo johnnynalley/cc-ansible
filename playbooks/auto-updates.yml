@@ -73,7 +73,7 @@
           User=root
 
           # Safety limits
-          TimeoutStartSec=1800
+          TimeoutStartSec={{ auto_updates_timeout_start_sec | default('7200') }}
           Nice=19
           IOSchedulingClass=idle
         dest: /etc/systemd/system/auto-updates.service

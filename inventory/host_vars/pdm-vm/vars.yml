@@ -1,0 +1,16 @@
+# =============================================================================
+# pdm-vm - Proxmox Datacenter Manager (VM 150 on pve-alto)
+# =============================================================================
+
+admin_user: johnny
+tailscale_hostname: pdm-vm
+tailscale_ssh_enabled: true
+
+# PDM evaluation host. Remote enrollment is done in the PDM UI so remote/API
+# secrets do not enter plaintext logs.
+pdm_enabled: true
+
+# Local backup to ts440 ZFS for quick restore of PDM configuration.
+local_restic_enabled: true
+local_restic_backup_paths:
+  - /etc/proxmox-datacenter-manager

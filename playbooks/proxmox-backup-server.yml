@@ -225,7 +225,7 @@
           - "PBS Web UI: https://{{ ansible_host }}:8007"
           - "Datastore: {{ pbs_datastore_name }}"
           - "API Token: {{ pbs_api_user }}!{{ pbs_api_token_name }}"
-          - "Token Secret: {{ pbs_token_secret }}"
+          - "Token Secret: (redacted)"
           - "Fingerprint: {{ pbs_fingerprint }}"
           - ""
           - "Save the token secret to vault if you haven't already."
@@ -289,6 +289,8 @@
 
   vars:
     vzdump_notes_template: !unsafe "{{guestname}}"
+    pbs_backup_job_comment: "Ansible-managed: backups to PBS"
+    pbs_backup_legacy_job_comment: "Ansible-managed: hourly backups to PBS"
 
   tasks:
     - name: List existing vzdump backup jobs
@@ -300,8 +302,23 @@
       ansible.builtin.set_fact:
         existing_job_comments: >-
           {{ pve_backup_jobs.stdout | from_json | map(attribute='comment', default='') | list }}
+        existing_backup_jobs: "{{ pve_backup_jobs.stdout | from_json }}"
 
-    - name: Create hourly backup job
+    - name: Set managed PBS backup job fact
+      ansible.builtin.set_fact:
+        managed_pbs_backup_job: >-
+          {{
+            ((
+              existing_backup_jobs | selectattr('comment', 'equalto', pbs_backup_job_comment) | list
+            )
+            +
+            (
+              existing_backup_jobs | selectattr('comment', 'equalto', pbs_backup_legacy_job_comment) | list
+            ))
+            | first | default({})
+          }}
+
+    - name: Create scheduled backup job
       ansible.builtin.command:
         argv:
           - pvesh
@@ -324,8 +341,45 @@
           - --notes-template
           - "{{ vzdump_notes_template }}"
           - --comment
-          - "Ansible-managed: hourly backups to PBS"
-      when: "'Ansible-managed: hourly backups to PBS' not in existing_job_comments"
+          - "{{ pbs_backup_job_comment }}"
+      when: managed_pbs_backup_job | length == 0
+
+    - name: Update scheduled backup job
+      ansible.builtin.command:
+        argv:
+          - pvesh
+          - set
+          - "/cluster/backup/{{ managed_pbs_backup_job.id }}"
+          - --all
+          - "1"
+          - --exclude
+          - "{{ pbs_backup_exclude }}"
+          - --schedule
+          - "{{ pbs_backup_schedule }}"
+          - --storage
+          - pbs-main
+          - --mode
+          - snapshot
+          - --compress
+          - zstd
+          - --notification-mode
+          - notification-system
+          - --notes-template
+          - "{{ vzdump_notes_template }}"
+          - --comment
+          - "{{ pbs_backup_job_comment }}"
+      when:
+        - managed_pbs_backup_job | length > 0
+        - >-
+          (managed_pbs_backup_job.all | default(0) | int) != 1
+          or (managed_pbs_backup_job.exclude | default('')) != pbs_backup_exclude
+          or (managed_pbs_backup_job.schedule | default('')) != pbs_backup_schedule
+          or (managed_pbs_backup_job.storage | default('')) != 'pbs-main'
+          or (managed_pbs_backup_job.mode | default('')) != 'snapshot'
+          or (managed_pbs_backup_job.compress | default('')) != 'zstd'
+          or (managed_pbs_backup_job['notification-mode'] | default('')) != 'notification-system'
+          or (managed_pbs_backup_job['notes-template'] | default('')) != vzdump_notes_template
+          or (managed_pbs_backup_job.comment | default('')) != pbs_backup_job_comment
 
     - name: List configured backup jobs
       ansible.builtin.command: pvesh get /cluster/backup --output-format json-pretty

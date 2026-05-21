@@ -170,7 +170,8 @@
 # dbc is NOT added to the docker group — scripts run via sudo.
 #
 # media-vm: edit docker-compose.yml + .env, apply via helper
-# docker-vm: edit Caddyfile, validate + reload via helper
+# docker-vm: emergency live Caddyfile edits, validate + reload via helper.
+# Normal Caddy changes belong in templates/Caddyfile.j2 and docker-stacks.yml.
 # ============================================================
 - name: "Phase 1d: dbc operational access - media-vm"
   hosts: media-vm

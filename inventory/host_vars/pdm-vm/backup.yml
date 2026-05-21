@@ -1,10 +1,6 @@
 # =============================================================================
-# media-vm - Package Configuration
+# pdm-vm - Backup Configuration
 # =============================================================================
 
-# Extra packages for this host
-packages_host_extra:
-  - ffmpeg
-
-# Install Docker from official repo
-install_docker: true
+restic_backup_paths_extra:
+  - /etc/proxmox-datacenter-manager

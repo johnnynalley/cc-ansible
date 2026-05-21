@@ -1,0 +1,50 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+YOUTUBE_VERTICAL_RTMP_URL="${YOUTUBE_VERTICAL_RTMP_URL:-{{ stream_relay_youtube_rtmp_base }}}"
+YOUTUBE_VERTICAL_STREAM_KEY="${YOUTUBE_VERTICAL_STREAM_KEY:-}"
+
+if [[ -z "$YOUTUBE_VERTICAL_STREAM_KEY" ]]; then
+  echo "stream-relay-vertical: missing YOUTUBE_VERTICAL_STREAM_KEY" >&2
+  sleep 60
+  exit 1
+fi
+
+input_url="rtmp://{{ stream_relay_vertical_ingest_bind }}:{{ stream_relay_vertical_ingest_port }}/{{ stream_relay_vertical_ingest_app }}/{{ stream_relay_vertical_ingest_stream }}"
+output_url="${YOUTUBE_VERTICAL_RTMP_URL%/}/${YOUTUBE_VERTICAL_STREAM_KEY}"
+keyframe_frames=$(( {{ stream_relay_video_fps }} * {{ stream_relay_keyframe_interval_seconds }} ))
+vertical_filter="scale={{ stream_relay_vertical_video_width }}:{{ stream_relay_vertical_video_height }}:force_original_aspect_ratio=decrease,pad={{ stream_relay_vertical_video_width }}:{{ stream_relay_vertical_video_height }}:(ow-iw)/2:(oh-ih)/2"
+
+unset YOUTUBE_VERTICAL_STREAM_KEY
+
+exec /usr/bin/ffmpeg \
+  -hide_banner \
+  -nostdin \
+  -loglevel warning \
+  -stats_period 30 \
+  -rtmp_listen 1 \
+  -rtmp_live live \
+  -timeout -1 \
+  -i "$input_url" \
+  -map 0:v:0 \
+  -map 0:a:0? \
+  -c:v {{ stream_relay_video_encoder }} \
+  -preset {{ stream_relay_video_preset }} \
+  -tune {{ stream_relay_video_tune }} \
+  -profile:v {{ stream_relay_video_profile }} \
+  -vf "$vertical_filter" \
+  -pix_fmt yuv420p \
+  -r {{ stream_relay_video_fps }} \
+  -g "$keyframe_frames" \
+  -keyint_min "$keyframe_frames" \
+  -bf {{ stream_relay_video_bframes }} \
+  -rc cbr \
+  -b:v {{ stream_relay_vertical_video_bitrate }} \
+  -maxrate {{ stream_relay_vertical_video_maxrate }} \
+  -bufsize {{ stream_relay_vertical_video_bufsize }} \
+  -c:a aac \
+  -b:a {{ stream_relay_audio_bitrate }} \
+  -ar {{ stream_relay_audio_sample_rate }} \
+  -ac 2 \
+  -f flv \
+  "$output_url"

@@ -10,3 +10,4 @@ smb_shares:
   - name: Time Machine
     path: /srv/pbs-data/timemachine
     fruit_time_machine: true
+    fruit_time_machine_max_size: 500G

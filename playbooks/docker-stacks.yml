@@ -16,6 +16,15 @@
     - name: Ensure Docker networks exist
       ansible.builtin.import_tasks: ../tasks/docker-network.yml
 
+    - name: Remove unmanaged Portainer server from edge-agent hosts
+      community.docker.docker_container:
+        name: portainer
+        state: absent
+      when:
+        - inventory_hostname != 'docker-vm'
+        - docker_stacks | default([]) | selectattr('name', 'equalto', 'portainer-agent') | list | length > 0
+        - docker_stacks | default([]) | selectattr('name', 'equalto', 'portainer') | list | length == 0
+
     # Deploy Ansible-managed compose files from templates/
     # Any stack with a matching templates/<name>.yml gets its compose file
     # deployed automatically. Stacks without a template are assumed to have
@@ -30,7 +39,9 @@
       loop: "{{ docker_stacks | default([]) }}"
       loop_control:
         label: "{{ item.name }}"
-      when: lookup('ansible.builtin.fileglob', playbook_dir + '/../templates/' + item.name + '.yml') | length > 0
+      when:
+        - item.name != 'caddy'
+        - lookup('ansible.builtin.fileglob', playbook_dir + '/../templates/' + item.name + '.yml') | length > 0
 
     - name: Deploy compose file (Ansible-managed stacks)
       ansible.builtin.copy:
@@ -42,7 +53,65 @@
       loop: "{{ docker_stacks | default([]) }}"
       loop_control:
         label: "{{ item.name }}"
-      when: lookup('ansible.builtin.fileglob', playbook_dir + '/../templates/' + item.name + '.yml') | length > 0
+      when:
+        - item.name != 'caddy'
+        - lookup('ansible.builtin.fileglob', playbook_dir + '/../templates/' + item.name + '.yml') | length > 0
+
+    - name: Find Caddy stack path
+      ansible.builtin.set_fact:
+        caddy_stack_paths: >-
+          {{ docker_stacks | default([])
+             | selectattr('name', 'equalto', 'caddy')
+             | map(attribute='path')
+             | list }}
+      tags: [caddy]
+
+    - name: Ensure Caddy stack directory exists
+      ansible.builtin.file:
+        path: "{{ caddy_stack_paths[0] }}"
+        state: directory
+        owner: johnny
+        group: johnny
+        mode: "0775"
+      when: caddy_stack_paths | length > 0
+      tags: [caddy]
+
+    - name: Deploy Caddy compose file
+      ansible.builtin.copy:
+        src: ../templates/caddy.yml
+        dest: "{{ caddy_stack_paths[0] }}/docker-compose.yml"
+        owner: johnny
+        group: ansible
+        mode: "0664"
+      when:
+        - caddy_stack_paths | length > 0
+        - lookup('ansible.builtin.fileglob', playbook_dir + '/../templates/caddy.yml') | length > 0
+      tags: [caddy]
+
+    - name: Deploy Caddyfile
+      ansible.builtin.template:
+        src: ../templates/Caddyfile.j2
+        dest: "{{ caddy_stack_paths[0] }}/Caddyfile"
+        owner: root
+        group: root
+        mode: "0644"
+      register: caddyfile_deploy
+      when:
+        - caddy_stack_paths | length > 0
+        - lookup('ansible.builtin.fileglob', playbook_dir + '/../templates/Caddyfile.j2') | length > 0
+      tags: [caddy]
+
+    - name: Deploy Caddy Dockerfile
+      ansible.builtin.copy:
+        src: ../templates/caddy.Dockerfile
+        dest: "{{ caddy_stack_paths[0] }}/Dockerfile"
+        owner: johnny
+        group: ansible
+        mode: "0664"
+      when:
+        - caddy_stack_paths | length > 0
+        - lookup('ansible.builtin.fileglob', playbook_dir + '/../templates/caddy.Dockerfile') | length > 0
+      tags: [caddy]
 
     # Create systemd service to start stacks with proper network dependencies
     - name: Create docker-stacks systemd service
@@ -130,6 +199,17 @@
              | selectattr('changed', 'equalto', true)
              | map(attribute='item.item')
              | list }}
+
+    - name: Validate Caddyfile before applying
+      ansible.builtin.command: docker compose run --rm --no-deps caddy caddy validate --config /etc/caddy/Caddyfile
+      args:
+        chdir: "{{ caddy_stack_paths[0] }}"
+      changed_when: false
+      when:
+        - caddy_stack_paths | length > 0
+        - caddyfile_deploy is defined
+        - caddyfile_deploy.changed
+      tags: [caddy]
 
     - name: Update containers if images changed (build stacks)
       ansible.builtin.shell: |
@@ -226,6 +306,24 @@
       when:
         - pull_result.results is defined
         - item.changed or item.stdout is search('Pull complete') or item.stdout is search('Downloaded newer')
+
+    - name: Recreate Caddy container if Caddyfile changed
+      ansible.builtin.command: docker compose up -d --force-recreate caddy
+      args:
+        chdir: "{{ caddy_stack_paths[0] }}"
+      when:
+        - caddy_stack_paths | length > 0
+        - caddyfile_deploy is defined
+        - caddyfile_deploy.changed
+      tags: [caddy]
+
+    - name: Verify running Caddy config
+      ansible.builtin.command: docker compose exec -T caddy caddy validate --config /etc/caddy/Caddyfile
+      args:
+        chdir: "{{ caddy_stack_paths[0] }}"
+      changed_when: false
+      when: caddy_stack_paths | length > 0
+      tags: [caddy]
 
     - name: Show recreated containers (pull-only stacks)
       ansible.builtin.debug:

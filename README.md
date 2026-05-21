@@ -292,7 +292,7 @@ Packages are merged from multiple sources (all applicable variables combined):
 | `apcupsd.yml` | `proxmox_nodes` | UPS monitoring with Apprise push alerts (ts440 USB master, others slave). Staggers slave startup to avoid NIS mutex contention |
 | `bootstrap.yml` | `linux_hosts` | Create admin user, SSH keys, sudo setup, timezone (Debian + Arch) |
 | `ssh-hardening.yml` | `linux_hosts` | SSH security (key auth, disable password) |
-| `auto-updates.yml` | `linux_hosts` | Configure automatic updates + reboot (Sun, staggered for Proxmox quorum) |
+| `auto-updates.yml` | `linux_hosts` | Configure automatic updates (Sun; Proxmox nodes notify on reboot-required instead of auto-rebooting) |
 | `unattended-upgrades.yml` | `debian_hosts` | Daily security patches (incl. workstations, Proxmox blacklist) |
 | `network-recovery.yml` | `linux_hosts` | Network watchdog for auto-recovery after outages |
 | `wifi.yml` | `linux_hosts` | WiFi powersave disable, optional PCI FLR or module reload resume fix |
@@ -304,10 +304,12 @@ Packages are merged from multiple sources (all applicable variables combined):
 | `nfs.yml` | `nas_server` + clients | NFS server/client configuration |
 | `filesystem-mounts.yml` | `linux_hosts` | Local filesystem mounts (NTFS, exFAT) |
 | `samba.yml` | `linux_hosts` | Samba shares + Time Machine (ts440 + pve-herc) |
-| `docker-stacks.yml` | `docker_hosts` | Deploy Docker Compose stacks (per-service update reporting with version diffs) |
+| `docker-stacks.yml` | `docker_hosts` | Deploy Docker Compose stacks and the managed Caddyfile (per-service update reporting with version diffs) |
 | `gluetun-watchdog.yml` | media-vm | Gluetun VPN crash loop detection, port forwarding monitoring, and auto-restart |
+| `stream-relay.yml` | media-vm | OBS SRT ingest to Twitch RTMP relay using the Quadro NVENC encoder |
 | `docker-auto-update.yml` | `docker_hosts` | Auto-update selected containers every 6h with major version guard |
 | `virtiofs.yml` | `proxmox_nodes`, `vms` | Configure VirtioFS shares between Proxmox hosts and VMs |
+| `proxmox-vm-hardware.yml` | `proxmox_nodes` | Apply durable Proxmox VM hardware settings such as CPU model overrides |
 | `rclone-sync.yml` | `managed_hosts` | rclone sync from OneDrive to Nextcloud (macbook-pro via launchd, pi5-01 via systemd) |
 | `git-sync.yml` | `nas_server` | Auto-pull from GitHub every 5 minutes (Nextcloud External Storage) |
 | `nextcloud-scan.yml` | nextcloud-vm | Periodic `occ files:scan` for external storage (every 10 min) |
@@ -318,7 +320,7 @@ Packages are merged from multiple sources (all applicable variables combined):
 | `proxmox-notifications.yml` | `proxmox_nodes` | PVE webhook notification targets + matchers → Apprise → Pushover |
 | `proxmox-ha.yml` | `proxmox_nodes` | Stop/disable/mask `pve-ha-{lrm,crm}` cluster-wide (no HA resources configured; removes fencing risk). Driven by `pve_ha_enabled` (default `false`) |
 | `vm-storage-gate.yml` | `proxmox_nodes` | Per-VM start gate: hookscript blocks `qm start`/`pct start` if VM's declared host mountpoints aren't mounted. Per-VM declarations in `host_vars/<vm>/storage.yml` |
-| `openclaw.yml` | `linux_hosts` | OpenClaw AI agent (npm install, gateway service, repo-sync/update-check timers) |
+| `openclaw.yml` | `openclaw_hosts` | OpenClaw AI agent (npm install, gateway service, repo-sync/update-check timers) |
 
 ## NFS Configuration
 
@@ -506,6 +508,29 @@ ansible media-vm -m shell -a "docker exec immich_machine_learning nvidia-smi" --
 ansible media-vm -m shell -a "docker exec immich_folder_album_creator python3 -m immich_auto_album" --become
 ```
 
+## Stream Relay (OBS to platforms via media-vm)
+
+`playbooks/stream-relay.yml` deploys `stream-relay.service` on media-vm. It receives one OBS SRT feed on UDP 9000, encodes once with `h264_nvenc` on the Quadro P2200, then fans out to the configured RTMP platforms. Stream keys are live-only in `/etc/stream-relay/stream-relay.env`; do not commit them.
+
+```bash
+# Deploy relay files and apply the configured service state
+ansible-playbook playbooks/stream-relay.yml
+
+# On media-vm, create the live env file from the root-only example
+sudo cp /etc/stream-relay/stream-relay.env.example /etc/stream-relay/stream-relay.env
+sudo nano /etc/stream-relay/stream-relay.env
+
+# Start the listener before OBS
+sudo systemctl start stream-relay.service
+sudo journalctl -u stream-relay.service -f
+```
+
+Set `STREAM_RELAY_OUTPUTS="twitch youtube"` to add platforms. OBS sender settings: Custom service, server `srt://100.66.6.113:9000?mode=caller&transtype=live&latency=200000`, stream key `obs`. The relay binds to media-vm's Tailscale address by default. If any configured RTMP platform output closes, FFmpeg aborts and systemd restarts the relay so failed platform legs do not remain silently dead.
+
+`stream-relay-vertical.service` is the separate Aitum Vertical path for a standalone YouTube vertical/Shorts live stream. It listens for Aitum on `rtmp://100.66.6.113:1936/live` with stream key `vertical`, then sends the 9:16 feed to `YOUTUBE_VERTICAL_STREAM_KEY` from `/etc/stream-relay/stream-relay.env`. This is currently parked in favor of YouTube's automatic dual-stream mode because the unified chat workflow only tracks one YouTube live chat cleanly. Leave the Aitum layout intact for TikTok/virtual-camera use later.
+
+The Proxmox firewall uses the `streaming-pc` datacenter IP set. Current entries include jn-desktop's Linux Tailscale IP and lj-gaming-pc's Windows Tailscale IP. Add the gaming PC's `192.168.1.x` address only if switching the relay bind address to media-vm's LAN IP for a direct same-switch path.
+
 ## Recyclarr Configuration
 
 Recyclarr syncs TRaSH Guides custom formats to Sonarr/Radarr on media-vm.
@@ -546,13 +571,15 @@ journalctl -t qbit-port-sync -n 10
 
 Nextcloud All-in-One running on VM 101 (ts440) with VirtioFS storage access.
 
-- **VM Specs**: 4GB RAM, 2 cores, 32GB local disk
+- **VM Specs**: 8GB RAM, 2 cores, 32GB local disk, Proxmox CPU model `host`
 - **VirtioFS Mount**: `/srv/nextcloud` → `/srv/nas-zfs/nextcloud` on ts440
 - **Data Directory**: `/srv/nas-zfs/nextcloud/data` (owned by www-data, UID 33)
 - **Access**:
   - Admin: `https://100.112.46.126:8080` (Tailscale only)
   - Web: `https://nextcloud.jnalley.me` (via Caddy on docker-vm)
 - **Public Access**: Cloudflare Tunnel (no port forwarding, hides home IP)
+
+The `host` CPU model is managed by `playbooks/proxmox-vm-hardware.yml` so Nextcloud AIO fulltextsearch sees AVX/AVX2/FMA CPU flags. Hardware changes require a Proxmox-level VM stop/start, not just a guest reboot.
 
 ```bash
 # Check Nextcloud containers
@@ -574,6 +601,9 @@ docker-vm (VM 110 on pve-m70q) runs infrastructure services:
 | FreshRSS | `rss.jnalley.me` | RSS aggregator (Google Reader API for Reeder) |
 | Diun | - | Docker image update notifier |
 | Grafana | `grafana.jnalley.me` | Loki log dashboards |
+| Proxmox UIs | `pve-ts440.jnalley.me`, `pve-alto.jnalley.me`, `pve-herc.jnalley.me`, `pve-m70q.jnalley.me` | Proxmox node web UIs via Caddy |
+| Proxmox Backup Server | `pbs.jnalley.me` | PBS web UI via Caddy |
+| Proxmox Datacenter Manager | `pdm.jnalley.me` | PDM web UI via Caddy |
 | Dispatcharr | `iptv.jnalley.me` | HDHomeRun emulator for Plex Live TV (disabled — free streams unreliable) |
 | OpenClaw | `openclaw.jnalley.me` | AI agent gateway (proxied to openclaw-vm:18789) |
 | ~~Uptime Kuma~~ | ~~`status.jnalley.me`~~ | Disabled 2026-04-13 (unused); compose preserved at `/opt/uptime-kuma/` |
@@ -581,6 +611,8 @@ docker-vm (VM 110 on pve-m70q) runs infrastructure services:
 | ~~Gitea~~ | ~~`git.jnalley.me`~~ | Disabled 2026-04-13 (unused); compose preserved at `/opt/gitea/` |
 
 Stacks support `start: true/false` in `docker.yml` to control service state.
+
+Caddy is now Ansible-managed. Edit `templates/Caddyfile.j2` for routes, `templates/caddy.yml` for compose, and `templates/caddy.Dockerfile` for the Cloudflare DNS build. Apply with `ansible-playbook playbooks/docker-stacks.yml --tags caddy`. The live files under `/opt/caddy/` are generated except `.env`, which stays live because it contains the Cloudflare API token. Emergency live edits should be backported to the templates or they will be overwritten.
 
 ## Cloudflare Tunnel
 
@@ -661,7 +693,7 @@ Without `cache=never`, virtiofsd daemons cache aggressively (5GB+ each), causing
 
 **VirtioFS ACL Limitation**: VirtioFS does **not** pass through POSIX ACLs to guest VMs. Files accessed via VirtioFS must have adequate base permissions (`chmod`) — ACLs set via `setfacl` on the host are invisible to guests. ZFS ACLs are managed by `playbooks/zfs.yml`; normal runs set dataset-root ACLs and default ACLs for new files. Existing-tree recursive ACL repair is intentionally opt-in with `zfs_acl_recursive_repair: true` because it can walk large datasets.
 
-**ts440 memory budget** (32GB total, upgraded from 16GB on 2026-05-12): media-vm 10GB, nextcloud-vm 8GB, openclaw-vm 8GB max / 4GB balloon minimum, homebridge-lxc 736MB, ZFS ARC 4GB (`/etc/modprobe.d/zfs.conf`), Proxmox ~2-3GB. Proxmox nodes use `vm.swappiness=10` to avoid swapping QEMU guest RAM too eagerly. Balloon disabled on media-vm due to GPU passthrough; memory changes apply on VM restart.
+**ts440 memory budget** (32GB total, upgraded from 16GB on 2026-05-12): media-vm 10GB, nextcloud-vm 8GB, openclaw-vm 8GB max / 6GB balloon minimum, homebridge-lxc 736MB, ZFS ARC 4GB (`/etc/modprobe.d/zfs.conf`), Proxmox ~2-3GB. Proxmox nodes use `vm.swappiness=10` to avoid swapping QEMU guest RAM too eagerly. Balloon disabled on media-vm due to GPU passthrough; memory changes apply on VM restart.
 
 ## Ansible Environment
 
@@ -783,7 +815,7 @@ Centralized log aggregation. Loki + Grafana run on docker-vm, Alloy agents on al
 
 PBS runs in an unprivileged LXC (CT 105) on pve-herc with a dedicated 1TB ext4 drive. 4 cores, 2GB RAM.
 
-- **Web UI**: `https://100.110.176.37:8007` (login as `root@pam`)
+- **Web UI**: `https://pbs.jnalley.me` or `https://100.110.176.37:8007` (login as `root@pam`)
 - **Datastore**: `main` at `/srv/pbs-data` (~900GB usable)
 - **Storage name**: `pbs-main` (registered on all 4 Proxmox nodes)
 - **Backup schedule**: Hourly, all guests except pbs-lxc (Ansible-managed via Play 3)
@@ -829,13 +861,13 @@ OpenClaw AI agent platform — personal homelab admin assistant via web UI and D
 
 - **Web UI**: `https://openclaw.jnalley.me` (Tailscale only)
 - **Gateway**: Port 18789, token auth, trustedProxies: docker-vm only
-- **VM**: 4 cores, 8GB RAM (balloon 4096MB), Ubuntu 25.10, Node.js 22 (NodeSource)
+- **VM**: 4 cores, 8GB RAM (balloon 6144MB), Ubuntu 25.10, Node.js 22 (NodeSource)
 - **Service**: User-level systemd via `openclaw gateway install` (NOT a custom system service)
 - **Config**: `~/.openclaw/openclaw.json` + `.env` — manual, backed up by restic
 - **Timers**: repo-sync (5 min), update-check (daily 08:00 → Apprise)
 - **Playbook**: `ansible-playbook playbooks/openclaw.yml` (opt-in via `openclaw_enabled`)
-- **Mem0 memory**: `@mem0/openclaw-mem0` plugin with Qdrant (localhost:6333), Gemini embeddings, Claude Haiku via OpenRouter for fact extraction. Auto-capture + auto-recall across sessions.
-- **dbc ops access**: Least-privilege write on media-vm (`docker-compose.yml`, `.env`) and docker-vm (`Caddyfile`) with scoped apply scripts. Deployed by `user-separation.yml` Phase 1d (`--tags dbc-ops`).
+- **Mem0 memory**: `@mem0/openclaw-mem0` plugin with Qdrant (localhost:6333), Gemini embeddings, and the configured OpenAI-compatible LLM for fact extraction. Auto-capture + auto-recall across sessions.
+- **dbc ops access**: Least-privilege write on media-vm (`docker-compose.yml`, `.env`) and emergency live Caddy access on docker-vm. The canonical Caddy source is `templates/Caddyfile.j2`; live edits must be backported. Deployed by `user-separation.yml` Phase 1d (`--tags dbc-ops`).
 
 ```bash
 # Check gateway status (on openclaw-vm)

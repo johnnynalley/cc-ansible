@@ -8,6 +8,9 @@ pve_node_firewall:
     - { type: group, name: "corosync-lan", comment: "Cluster heartbeat" }
     - { action: ACCEPT, iface: vmbr0, proto: tcp, dport: 8006, comment: "Proxmox API (LAN)" }
     - { action: ACCEPT, iface: vmbr0, proto: tcp, dport: 22, comment: "SSH (LAN)" }
+    - { action: ACCEPT, iface: vmbr0, proto: udp, dport: 5353, comment: "mDNS/Bonjour Time Machine discovery (LAN)" }
+    - { action: ACCEPT, iface: vmbr0, proto: tcp, dport: 445, source: "192.168.1.0/24", comment: "SMB/Time Machine (LAN/mDNS)" }
+    - { action: ACCEPT, iface: vmbr0, proto: tcp, dport: 445, source: "fe80::/10", comment: "SMB/Time Machine (IPv6 link-local mDNS)" }
     - { action: ACCEPT, iface: tailscale0, proto: tcp, dport: 8006, comment: "Proxmox API (Tailscale)" }
     - { action: ACCEPT, iface: tailscale0, proto: tcp, dport: 22, comment: "SSH (Tailscale)" }
     - { action: ACCEPT, iface: tailscale0, proto: icmp, comment: "Ping (Tailscale)" }

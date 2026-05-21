@@ -13,3 +13,7 @@ local_restic_backup_paths:
 # Override repository to use REST server instead of SFTP
 # (openclaw-vm has no SSH access to ts440 by design — security boundary)
 local_restic_repository: "rest:http://openclaw-vm:{{ vault_restic_rest_password }}@100.71.188.16:8500/openclaw-vm/"
+
+# The REST server is append-only, so this client cannot safely delete or prune
+# repository data. Retention for this repo must be performed from the backup host.
+local_restic_run_retention: false

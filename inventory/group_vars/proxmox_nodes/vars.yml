@@ -42,12 +42,17 @@ unattended_upgrades_blacklist:
 # Disable random delay for auto-updates — stagger is per-host in host_vars
 auto_updates_randomized_delay_sec: "0"
 
+# Proxmox nodes should not reboot themselves after package/kernel updates. A
+# host reboot can interrupt PBS/Samba clients and temporarily reduce cluster
+# quorum; notify instead so reboots can be coordinated.
+auto_updates_reboot_if_required: false
+
 # Proxmox hosts should prefer reclaiming page cache over swapping QEMU guest RAM.
 proxmox_sysctl_settings:
   vm.swappiness: 10
 
-# PBS backup job (hourly to pbs-main, all guests except pbs-lxc)
-pbs_backup_schedule: "*:00"
+# PBS backup job (every 6 hours to pbs-main, all guests except pbs-lxc)
+pbs_backup_schedule: "*/6:00"
 pbs_backup_exclude: "105"
 
 # HA disabled cluster-wide. Provides no value (no HA resources configured) and

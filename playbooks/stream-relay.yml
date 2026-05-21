@@ -1,0 +1,116 @@
+# =============================================================================
+# Stream Relay Playbook - OBS SRT ingest to streaming RTMP via media-vm NVENC
+# =============================================================================
+# Usage:
+#   ansible-playbook playbooks/stream-relay.yml
+#   ansible-playbook playbooks/stream-relay.yml --check --diff
+# =============================================================================
+
+- name: Configure stream relay
+  hosts: media-vm
+  become: true
+  gather_facts: true
+
+  handlers:
+    - name: Reload systemd
+      ansible.builtin.systemd:
+        daemon_reload: true
+
+  tasks:
+    - name: Ensure stream relay package dependencies are installed
+      ansible.builtin.apt:
+        name:
+          - ffmpeg
+        state: present
+        update_cache: true
+        cache_valid_time: 3600
+      when: ansible_facts.os_family == "Debian"
+
+    - name: Create stream relay config directory
+      ansible.builtin.file:
+        path: /etc/stream-relay
+        state: directory
+        owner: root
+        group: root
+        mode: "0700"
+
+    - name: Check for generic stream relay env
+      ansible.builtin.stat:
+        path: "{{ stream_relay_env_file }}"
+      register: stream_relay_env_stat
+
+    - name: Create stream relay env example
+      ansible.builtin.copy:
+        dest: /etc/stream-relay/stream-relay.env.example
+        owner: root
+        group: root
+        mode: "0600"
+        content: |
+          # Copy to {{ stream_relay_env_file }} and set the real key there.
+          # Keep this file and the live env file root-readable only.
+          STREAM_RELAY_OUTPUTS="twitch"
+          TWITCH_RTMP_URL={{ stream_relay_twitch_rtmp_base }}
+          TWITCH_STREAM_KEY=live_000000000_placeholder
+          TWITCH_BANDWIDTH_TEST={{ stream_relay_twitch_bandwidth_test | lower }}
+          YOUTUBE_RTMP_URL={{ stream_relay_youtube_rtmp_base }}
+          YOUTUBE_STREAM_KEY=xxxx-xxxx-xxxx-xxxx-xxxx
+          YOUTUBE_BACKUP_RTMP_URL={{ stream_relay_youtube_backup_rtmp_base }}
+          YOUTUBE_BACKUP_RTMP_QUERY=backup=1
+          YOUTUBE_VERTICAL_RTMP_URL={{ stream_relay_youtube_rtmp_base }}
+          YOUTUBE_VERTICAL_STREAM_KEY=xxxx-xxxx-xxxx-xxxx-xxxx
+
+    - name: Deploy generic stream relay script
+      ansible.builtin.template:
+        src: ../templates/stream-relay.sh.j2
+        dest: /usr/local/sbin/stream-relay
+        owner: root
+        group: root
+        mode: "0755"
+
+    - name: Deploy vertical stream relay script
+      ansible.builtin.template:
+        src: ../templates/stream-relay-vertical.sh.j2
+        dest: /usr/local/sbin/stream-relay-vertical
+        owner: root
+        group: root
+        mode: "0755"
+
+    - name: Deploy stream relay service
+      ansible.builtin.template:
+        src: ../templates/stream-relay.service.j2
+        dest: /etc/systemd/system/stream-relay.service
+        owner: root
+        group: root
+        mode: "0644"
+      notify: Reload systemd
+
+    - name: Deploy vertical stream relay service
+      ansible.builtin.template:
+        src: ../templates/stream-relay-vertical.service.j2
+        dest: /etc/systemd/system/stream-relay-vertical.service
+        owner: root
+        group: root
+        mode: "0644"
+      notify: Reload systemd
+
+    - name: Set stream relay service state
+      ansible.builtin.systemd:
+        name: stream-relay.service
+        enabled: "{{ stream_relay_enabled | default(false) }}"
+        state: "{{ (stream_relay_enabled | default(false)) | ternary('started', 'stopped') }}"
+        daemon_reload: true
+      failed_when: false
+
+    - name: Set vertical stream relay service state
+      ansible.builtin.systemd:
+        name: stream-relay-vertical.service
+        enabled: "{{ stream_relay_vertical_enabled | default(false) }}"
+        state: "{{ (stream_relay_vertical_enabled | default(false)) | ternary('started', 'stopped') }}"
+        daemon_reload: true
+      failed_when: false
+
+    - name: Clear parked vertical stream relay failed state
+      ansible.builtin.command: systemctl reset-failed stream-relay-vertical.service
+      when: not (stream_relay_vertical_enabled | default(false) | bool)
+      changed_when: false
+      failed_when: false

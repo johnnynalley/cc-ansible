@@ -35,6 +35,10 @@ Git history uses short Conventional Commit-style subjects such as `feat: ...` an
 
 Do not commit real secrets. Encrypted values belong in `vault.yml` files beside the relevant `vars.yml`; examples may use `vault.yml.example`. The configured vault password path is `~/.ansible/vault_pass.txt`. Prefer full-playbook `--check --diff` runs for changes touching Proxmox, storage, firewall, backup, or Docker automation.
 
+### Troubleshooting Assumptions
+
+Do not assume a symptom is an upstream software bug or regression unless there is an exact documented issue, release note, or vendor advisory matching the observed failure. Default to diagnosing local configuration, runtime state, logs, resource pressure, integration drift, and recent local changes first. Avoid update-fragile local patches unless the user explicitly approves a temporary workaround.
+
 ## Historical Claude Reference
 
 This repository was migrated from Claude Code to Codex CLI on 2026-05-12. The active Codex guidance is this `AGENTS.md` file and the active project memory is `~/.codex/projects/cc-ansible/memory/`.
@@ -288,13 +292,13 @@ Lightweight VM (6 cores, 6GB RAM) running infrastructure services. Stacks define
 
 **Portainer CE** (multi-host): Central Docker management UI at `portainer.jnalley.me`. Manages docker-vm locally via socket; media-vm, nextcloud-vm, and openclaw-vm connect via Portainer Edge Agents (`portainer/agent:latest` with `EDGE=1`). Edge Agents connect outbound to Portainer — no inbound ports needed on remote VMs. Agent compose files at `/opt/portainer-agent/` on each VM, with per-environment edge keys from the Portainer API. Admin credentials in Portainer's local database (not vault-managed).
 
-**Dispatcharr** (disabled): HDHomeRun emulator for free IPTV in Plex. Commented out in `docker.yml` — free M3U playlists had too many dead streams. Compose file and data preserved at `/opt/dispatcharr/` on docker-vm. Uncomment in `docker.yml` and Caddyfile to re-enable. HDHR tuner URL for Plex: `http://100.108.254.100:9191/hdhr` (note the `/hdhr` path — not root).
+**Dispatcharr** (disabled): HDHomeRun emulator for free IPTV in Plex. Commented out in `docker.yml` — free M3U playlists had too many dead streams. Compose file and data preserved at `/opt/dispatcharr/` on docker-vm. Uncomment in `docker.yml` and `templates/Caddyfile.j2` to re-enable. HDHR tuner URL for Plex: `http://100.108.254.100:9191/hdhr` (note the `/hdhr` path — not root).
 
-**Removed services** (disabled 2026-04-13, compose files and data preserved at `/opt/` on docker-vm for easy re-enable): Uptime Kuma (`status.jnalley.me`), Homepage (`home.jnalley.me`), Gitea (`git.jnalley.me`). Commented out in `docker.yml` and Caddyfile.
+**Removed services** (disabled 2026-04-13, compose files and data preserved at `/opt/` on docker-vm for easy re-enable): Uptime Kuma (`status.jnalley.me`), Homepage (`home.jnalley.me`), Gitea (`git.jnalley.me`). Commented out in `docker.yml` and `templates/Caddyfile.j2`.
 
 #### nextcloud-vm (VM 101 on ts440)
 
-Nextcloud AIO with VirtioFS storage access (mounts in `host_vars/nextcloud-vm/virtiofs.yml`). Public via Cloudflare Tunnel at `nextcloud.jnalley.me`. Email via iCloud SMTP (same account as smartmontools alerts; credentials in vault). Stacks: Nextcloud AIO, Diun.
+Nextcloud AIO with VirtioFS storage access (mounts in `host_vars/nextcloud-vm/virtiofs.yml`). Public via Cloudflare Tunnel at `nextcloud.jnalley.me`. Email via iCloud SMTP (same account as smartmontools alerts; credentials in vault). Stacks: Nextcloud AIO, Diun. VM 101 uses Proxmox CPU model `host`, managed by `playbooks/proxmox-vm-hardware.yml`, so fulltextsearch receives AVX/AVX2/FMA CPU flags. CPU model changes require a Proxmox-level VM stop/start, not just a guest reboot.
 
 #### media-vm (VM 100 on ts440)
 
@@ -302,11 +306,13 @@ Primary media VM (10GB RAM, 4 cores, 200GB disk, Quadro P2200 GPU passthrough). 
 
 **Critical**: All media containers must use the same VirtioFS mount path (`/srv/media/plex:/data`). Using different paths causes stale file handle errors. Hardlinks work because all downloads and media libraries share the same `/data` mount on mergerfs.
 
+**Stream relay**: `playbooks/stream-relay.yml` deploys `stream-relay.service`, which receives OBS SRT on UDP 9000, encodes once with the Quadro's `h264_nvenc`, and fans out to the configured RTMP platforms. The same playbook also deploys `stream-relay-vertical.service`, a disabled-by-default Aitum Vertical RTMP ingest on TCP 1936 for a standalone YouTube vertical/Shorts stream. Both services use the live-only root-readable `/etc/stream-relay/stream-relay.env` with platform stream keys; never commit stream keys. Platform RTMP output failures abort FFmpeg so systemd can restart the relay instead of leaving a dead platform leg hidden behind a still-running ingest. By default the relays bind to media-vm's Tailscale IP and firewall access is through the Proxmox datacenter `streaming-pc` IP set. Add the gaming PC's LAN IP only when intentionally switching to direct LAN bind addresses.
+
 **Immich**: Photo/video management at `photos.jnalley.me`. ML container capped at `mem_limit: 3g` to prevent OOM-freezing the VM. External library (`/srv/untitled`) is auto-locked by `immich_folder_album_creator` every 6 hours.
 
 **Recyclarr**: Syncs TRaSH Guides custom formats to Sonarr/Radarr. Config at `/opt/media-stack/recyclarr/recyclarr.yml`. Runs daily at midnight.
 
-**Tdarr** (disabled 2026-04-13): Media transcoding service. Commented out in `/opt/media-stack/docker-compose.yml` and Caddyfile. Compose config and `/opt/media-stack/tdarr/` data preserved for easy re-enable.
+**Tdarr** (disabled 2026-04-13): Media transcoding service. Commented out in `/opt/media-stack/docker-compose.yml` and `templates/Caddyfile.j2`. Compose config and `/opt/media-stack/tdarr/` data preserved for easy re-enable.
 
 #### Torrent Fallback (Gluetun + qBittorrent)
 
@@ -436,7 +442,7 @@ All hosts (Alloy) ──→ Loki (docker-vm:3100) ←── Grafana (caddy-proxy
 
 #### Reverse Proxy (Caddy on docker-vm)
 
-Caddy provides HTTPS for all internal services via Cloudflare DNS-01 challenge. Caddyfile at `/opt/caddy/Caddyfile`. docker-vm services are proxied by container name (`caddy-proxy` Docker network); media-vm services by Tailscale IP (`100.66.6.113`). All services require Tailscale to access.
+Caddy provides HTTPS for all internal services via Cloudflare DNS-01 challenge. The canonical sources are `templates/Caddyfile.j2` for routes, `templates/caddy.yml` for compose, and `templates/caddy.Dockerfile` for the Cloudflare DNS build. `docker-stacks.yml --tags caddy` renders them under `/opt/caddy/`, validates the Caddyfile, and recreates the Caddy container when the Caddyfile changes. `/opt/caddy/.env` remains live-only because it contains the Cloudflare API token. docker-vm services are proxied by container name (`caddy-proxy` Docker network); media-vm services by Tailscale IP (`100.66.6.113`). Proxmox/PBS/PDM management UIs are proxied at `pve-ts440.jnalley.me`, `pve-alto.jnalley.me`, `pve-herc.jnalley.me`, `pve-m70q.jnalley.me`, `pbs.jnalley.me`, and `pdm.jnalley.me`. All services require Tailscale to access.
 
 **Image Updates**: The playbook separates pull and update steps — it only runs `docker compose up -d` if images were actually updated (detected via "Pull complete" or "Downloaded newer" in pull output). This avoids unnecessary container restarts when images are already current. Pull has retry logic (3 attempts, 10s delay) to handle transient registry timeouts. Dangling images are pruned after each run. Between pull and update, `scripts/docker-stack-diff` runs to report per-service image changes with version labels (`org.opencontainers.image.version`) when available, falling back to truncated image digests. The `up -d` output is also displayed, showing which specific containers were recreated vs. left running.
 
@@ -450,7 +456,7 @@ Four-tier backup strategy:
 
 - **Proxmox Backup Server (PBS)**: Hourly VM/CT snapshot backups via `proxmox-backup-server.yml`. pbs-lxc (CT 105 on pve-herc, Debian 13, 4 cores, 2GB RAM) with 1TB ext4 datastore at `/srv/pbs-data`. The same 1TB drive also hosts `/srv/pbs-data/timemachine/` for macOS Time Machine (served by Samba on pve-herc). Registered as `pbs-main` storage on all 4 Proxmox nodes. All guests backed up hourly except pbs-lxc itself (circular); uses `--all --exclude 105`. API token auth (`backup@pbs!ansible`, secret in `host_vars/pbs-lxc/vault.yml`). Daily prune job: 24h/7d/4w/3m. **Daily garbage collection** (frees disk space from pruned snapshots — without GC, orphaned chunks accumulate indefinitely). Web UI: `https://100.110.176.37:8007`. PBS dedup makes hourly backups viable — only changed blocks are stored after the initial full backup. Connectivity check runs at `:59` on all nodes (Play 4), logging to journald tag `pbs-check` for Loki.
 - **Offsite (Backblaze B2)**: Daily via `restic.yml` at 00:00 UTC +30m random delay. Retention: 7d/4w/6m. ts440 backs up `/srv/nas-zfs` excluding replaceable media.
-- **Local (ts440 ZFS)**: Hourly via `local-restic.yml`. Backs up `/opt` from VMs to `/srv/nas-zfs/backups/<hostname>/`. Retention: 24h/7d/4w/6m. Most hosts use SFTP over Tailscale SSH with a dedicated key in `group_vars/backup_clients/vault.yml`. Hosts without Tailscale SSH access (e.g., openclaw-vm) use a **restic REST server** on ts440 (port 8500) with append-only mode — no SSH, no shell, no filesystem browsing, and existing backups cannot be deleted. REST credentials in host vault, htpasswd on ts440. `--private-repos` ensures each user can only access their own repo directory.
+- **Local (ts440 ZFS)**: Hourly via `local-restic.yml`. Backs up `/opt` from VMs to `/srv/nas-zfs/backups/<hostname>/`. Retention: 24h/7d/4w/6m. Most hosts use SFTP over Tailscale SSH with a dedicated key in `group_vars/backup_clients/vault.yml`. Hosts without Tailscale SSH access (e.g., openclaw-vm) use a **restic REST server** on ts440 (port 8500) with append-only mode — no SSH, no shell, no filesystem browsing, and existing backups cannot be deleted. REST credentials live in host vault, htpasswd lives on ts440, and `--private-repos` ensures each user can only access their own repo directory. Append-only clients skip client-side retention; ts440 runs `restic-rest-maintenance-openclaw-vm.timer` daily at 03:20 to prune the openclaw-vm repository server-side.
 - **ZFS Snapshots (sanoid)**: Every 15 minutes via `zfs.yml`. Policies defined in `group_vars/nas_server/zfs.yml`. Property enforcement (`zfs set`) runs automatically to fix drift.
 
 Enable local backups: set `local_restic_enabled: true` and `local_restic_backup_paths` in host_vars. Source env with `set -a` when accessing repos manually: `sudo bash -c 'set -a && source /etc/restic/local-backup.env && restic snapshots'`.
@@ -491,7 +497,7 @@ One-way sync from UTD OneDrive to Nextcloud via `playbooks/rclone-sync.yml`. Run
 
 Deployed via `playbooks/unattended-upgrades.yml` to all `debian_hosts` (including workstations — security patches shouldn't wait). Complements the weekly `auto-updates.yml` full-upgrade (Sundays, staggered per-host).
 
-**Proxmox node stagger**: Reboots are staggered to maintain cluster quorum (3 of 4 nodes required). Per-host `auto_updates_oncalendar` overrides in host_vars with `auto_updates_randomized_delay_sec: "0"` in `group_vars/proxmox_nodes/vars.yml`: ts440 05:00 → pve-alto 05:20 → pve-herc 05:40 → pve-m70q 06:00. pve-m70q goes last because it hosts ansible-lxc and docker-vm. Other hosts use the default schedule from `group_vars/debian_hosts/packages.yml` (`Sun *-*-* 05:00:00` + 15m random delay).
+**Proxmox update window**: Proxmox nodes run the weekly full-upgrade on a staggered schedule, but `group_vars/proxmox_nodes/vars.yml` sets `auto_updates_reboot_if_required: false`, so they notify on reboot-required instead of rebooting themselves. Per-host `auto_updates_oncalendar` overrides in host_vars with `auto_updates_randomized_delay_sec: "0"`: ts440 05:00 → pve-alto 05:20 → pve-herc 05:40 → pve-m70q 06:00. pve-m70q goes last because it hosts ansible-lxc and docker-vm. VMs/LXCs use `group_vars/vms_lxcs/vars.yml` to run after the Proxmox update window (`Sun *-*-* 07:00:00` + 30m random delay), so host updates do not interrupt guest dpkg transactions. Other Debian hosts use the default schedule from `group_vars/debian_hosts/packages.yml` (`Sun *-*-* 05:00:00` + 15m random delay).
 
 **How it works**: Uses Debian/Ubuntu's native `unattended-upgrades` package with APT's built-in `apt-daily-upgrade.timer` (daily, randomized 12h window). Only applies security-origin patches — not general updates. A systemd drop-in (`/etc/systemd/system/apt-daily-upgrade.service.d/notify.conf`) hooks an `ExecStartPost` script that sends a silent Apprise notification (`push-quiet` tag) when patches are applied.
 
@@ -546,7 +552,7 @@ Currently enabled on pve-m70q and pve-herc (8GB each). Pool name configurable vi
 
 Playbooks are imported via `site.yml` (with tags). Browse with: `ls playbooks/ tasks/ templates/ scripts/ bin/`. Each file has a descriptive header comment. Docker stacks and VirtioFS configs are defined in `host_vars/<hostname>/docker.yml` and `virtiofs.yml`.
 
-**media-vm specific files** (not Ansible-managed): qBittorrent port sync (`/usr/local/bin/qbit-port-sync`, systemd path unit `qbit-port-sync.path`).
+**media-vm specific files**: stream relay is Ansible-managed (`/usr/local/sbin/stream-relay`, `stream-relay.service`); qBittorrent port sync is not Ansible-managed (`/usr/local/bin/qbit-port-sync`, systemd path unit `qbit-port-sync.path`).
 
 ### Proxmox Firewall (Ansible-Managed)
 
@@ -590,7 +596,7 @@ OpenClaw AI agent platform (Node.js gateway daemon). Provides a web UI and Disco
 
 - **Web UI**: `https://openclaw.jnalley.me` (Tailscale only, via Caddy on docker-vm)
 - **Gateway port**: 18789 (token auth, trustedProxies: docker-vm only)
-- **VM Specs**: 4 cores, 8GB RAM (balloon min 4096MB), 75GB disk, Ubuntu 25.10
+- **VM Specs**: 4 cores, 8GB RAM (balloon min 6144MB), 75GB disk, Ubuntu 25.10
 - **Node.js**: 22 via NodeSource repo (OpenClaw requires >= 22)
 - **Docker**: Installed for OpenClaw sandbox containers and Qdrant. In `docker_hosts` group — managed by `docker-stacks.yml`.
 - **Gateway service**: Managed by OpenClaw itself via `openclaw gateway install` (user-level systemd unit)
@@ -601,12 +607,14 @@ OpenClaw AI agent platform (Node.js gateway daemon). Provides a web UI and Disco
 - **Config**: `host_vars/openclaw-vm/` (vars.yml, packages.yml, backup.yml, docker.yml)
 - **Firewall**: DROP default, port 18789 from docker-vm only, SSH from Tailscale only
 
+**OpenClaw troubleshooting rule**: Do not assume an OpenClaw symptom is an upstream software bug or regression unless there is an exact documented GitHub issue or release note matching the observed failure. Default to diagnosing local configuration, plugin state, runtime health, gateway load, memory/LCM/mem0 state, and update drift first. Avoid update-fragile local plugin patches unless the user explicitly approves a temporary workaround.
+
 **Mem0 Memory Plugin** (`@mem0/openclaw-mem0`): Adds automatic fact extraction (auto-capture) and context injection (auto-recall) to DBC sessions. Runs alongside the existing file-based memory system (MEMORY.md, daily notes, Gemini hybrid search).
 
 - **Plugin**: Installed via `openclaw plugins install`, embeds `mem0ai/oss` SDK in-process (no separate server)
 - **Qdrant**: Vector database at `/opt/qdrant/` (Docker, localhost:6333/6334 only). Stores memory embeddings.
 - **Embedder**: Gemini (`gemini-embedding-001`) via `GEMINI_API_KEY`
-- **LLM (fact extraction)**: Claude Haiku via OpenRouter (`OPENROUTER_API_KEY`, `baseURL` pointed at OpenRouter's OpenAI-compatible API)
+- **LLM (fact extraction)**: Configured through mem0 OSS settings. Current live config uses the OpenAI-compatible LLM provider.
 - **Plugin updates**: `openclaw plugins update --all` (DBC can schedule via OpenClaw cron)
 - **Tools**: `memory_search`, `memory_store`, `memory_get`, `memory_list`, `memory_forget`
 
@@ -618,7 +626,7 @@ The `dbc` user (OpenClaw agent) has least-privilege operational access on manage
 |------|---------------|---------------|
 | ansible-lxc | `~/cc-ansible` (rwx), `~/.claude` (rwx) | `sudo /usr/local/bin/ansible-dryrun` (dry-run only) |
 | media-vm | `/opt/media-stack/docker-compose.yml`, `.env` | `sudo /usr/local/sbin/dbc-media-stack-apply` |
-| docker-vm | `/opt/caddy/Caddyfile` | `sudo /usr/local/sbin/dbc-caddy-apply` |
+| docker-vm | `/opt/caddy/Caddyfile` for emergency live fixes only; backport to `templates/Caddyfile.j2` | `sudo /usr/local/sbin/dbc-caddy-apply` |
 
 Helper scripts validate config before applying (compose config check, Caddy validate+reload). File access is via POSIX ACLs (`setfacl`), not group membership. All hosts also have read-only sudo for `systemctl status`, `journalctl`, `zpool status`, `zfs list`, `findmnt`.
 
