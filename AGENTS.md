@@ -31,6 +31,8 @@ There is no dedicated unit-test suite. Validate changes with full-playbook Ansib
 
 Git history uses short Conventional Commit-style subjects such as `feat: ...` and `docs: ...`. Follow that pattern with a concise imperative summary. Pull requests should describe the affected hosts or groups, list the playbooks tested, and include dry-run output or a summary of expected changes for infrastructure-impacting updates. Link related issues when available.
 
+When completing repo work, inspect the diff, verify no plaintext secrets or unrelated dirty files are being staged, then commit the completed scoped change without waiting for a separate reminder. If the work should not be committed immediately, state why. Do not leave finished, verified repo changes uncommitted silently.
+
 ### Security & Configuration Tips
 
 Do not commit real secrets. Encrypted values belong in `vault.yml` files beside the relevant `vars.yml`; examples may use `vault.yml.example`. The configured vault password path is `~/.ansible/vault_pass.txt`. Prefer full-playbook `--check --diff` runs for changes touching Proxmox, storage, firewall, backup, or Docker automation.
@@ -147,6 +149,10 @@ Ansible on ansible-lxc uses a **dedicated passwordless SSH key** (`~/.ssh/ansibl
 |-----|---------|------------|
 | `~/.ssh/id_ed25519.pub` | Personal/manual SSH | Yes |
 | `~/.ssh/ansible_ed25519.pub` | Ansible automation | No (passwordless) |
+
+**Tailscale SSH preference**: Prefer Tailscale SSH for managed Linux hosts whenever the tailnet policy allows it. Regular OpenSSH over a Tailscale IP is for bootstrap, break-glass, or hosts where Tailscale SSH is explicitly disabled. If OAuth enrollment uses advertised tags, keep host-side `tailscale_advertise_tags` and tailnet `tagOwners`/`ssh` policy aligned through Ansible-managed configuration instead of fixing tagged-device SSH manually in the admin console.
+
+**Tailscale client safety**: Do not run `tailscale up`, `tailscale set`, tag changes, hostname changes, SSH preference changes, or automatic re-enrollment against an existing Tailscale host unless that host explicitly opts into that exact behavior. Existing stable Tailscale identities and IPs are live infrastructure dependencies. The shared Tailscale task may install/start `tailscaled`, but it must leave already-authenticated hosts' identity/preferences alone by default. New unattended enrollment requires an explicit inventory opt-in such as temporary `bootstrap_hosts` membership with `tailscale_auto_enroll: true`; remove hosts from that bootstrap scope after onboarding.
 
 **Linux hosts** also accept Tailscale SSH (no keys needed), which Ansible uses by default when available. The dedicated key is the fallback if Tailscale is down.
 

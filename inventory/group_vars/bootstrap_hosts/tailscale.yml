@@ -1,0 +1,9 @@
+# =============================================================================
+# Bootstrap Hosts - Tailscale Enrollment
+# =============================================================================
+
+# Only hosts explicitly parked in bootstrap_hosts may create a new Tailscale node
+# during normal package convergence. Remove hosts from bootstrap_hosts after
+# initial onboarding so later site.yml runs do not re-enroll expired nodes.
+tailscale_auto_enroll: true
+tailscale_manage_service_policy: true

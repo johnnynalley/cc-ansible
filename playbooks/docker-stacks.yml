@@ -10,6 +10,7 @@
   hosts: docker_hosts
   become: true
   gather_facts: true
+  serial: 1
 
   tasks:
     # Create Docker networks before starting stacks
@@ -179,14 +180,14 @@
         prompt: |-
 
           *** MAJOR VERSION BUMPS DETECTED ***
-          {{ ansible_play_hosts
+          {{ ansible_play_batch
              | map('extract', hostvars, '_build_major_lines')
              | flatten | join('\n') }}
 
           Review changelogs for breaking changes before proceeding.
           Press Enter to continue, or Ctrl+C then A to abort.
       when: >-
-        ansible_play_hosts
+        ansible_play_batch
         | map('extract', hostvars, '_build_major_lines')
         | flatten | length > 0
       run_once: true
@@ -283,14 +284,14 @@
         prompt: |-
 
           *** MAJOR VERSION BUMPS DETECTED ***
-          {{ ansible_play_hosts
+          {{ ansible_play_batch
              | map('extract', hostvars, '_pull_major_lines')
              | flatten | join('\n') }}
 
           Review changelogs for breaking changes before proceeding.
           Press Enter to continue, or Ctrl+C then A to abort.
       when: >-
-        ansible_play_hosts
+        ansible_play_batch
         | map('extract', hostvars, '_pull_major_lines')
         | flatten | length > 0
       run_once: true

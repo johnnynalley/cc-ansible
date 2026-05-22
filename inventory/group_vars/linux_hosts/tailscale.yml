@@ -1,0 +1,16 @@
+# =============================================================================
+# Linux Hosts - Tailscale Authentication Defaults
+# =============================================================================
+
+# OAuth-based unattended enrollment requires a tag. The OAuth client secret lives
+# in the global vault, but normal Linux hosts must not enroll, re-enroll, retag,
+# rename, or change Tailscale SSH preferences just because site.yml ran.
+# Prefer Tailscale SSH for managed Linux hosts. Tailnet SSH policy must allow
+# the advertised tags; use regular OpenSSH only for bootstrap or break-glass.
+tailscale_auto_enroll: false
+tailscale_manage_preferences: false
+tailscale_manage_service_policy: false
+tailscale_ssh_enabled: true
+
+tailscale_advertise_tags:
+  - tag:tagged-devices

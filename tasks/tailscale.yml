@@ -117,6 +117,7 @@
   register: tailscale_backend_state
   changed_when: false
   failed_when: false
+  check_mode: false
   when: ansible_facts.os_family != "Darwin"
 
 - name: Collect Tailscale auth inputs
@@ -179,6 +180,7 @@
   when:
     - ansible_facts.os_family != "Darwin"
     - (tailscale_backend_state.stdout | default('')) != 'Running'
+    - tailscale_auto_enroll | default(false) | bool
     - tailscale_auth_mode == "oauth"
     - (tailscale_auth_tags_csv | default('') | string | length) == 0
 
@@ -195,6 +197,7 @@
   when:
     - ansible_facts.os_family != "Darwin"
     - (tailscale_backend_state.stdout | default('')) != 'Running'
+    - tailscale_auto_enroll | default(false) | bool
     - tailscale_auth_mode in ["direct", "oauth"]
 
 - name: Report missing Tailscale unattended auth
@@ -203,7 +206,16 @@
   when:
     - ansible_facts.os_family != "Darwin"
     - (tailscale_backend_state.stdout | default('')) != 'Running'
+    - tailscale_auto_enroll | default(false) | bool
     - tailscale_auth_mode == "none"
+
+- name: Report skipped Tailscale auto-enrollment
+  ansible.builtin.debug:
+    msg: "Tailscale is not authenticated/running; leaving this host's Tailscale identity alone because tailscale_auto_enroll is false."
+  when:
+    - ansible_facts.os_family != "Darwin"
+    - (tailscale_backend_state.stdout | default('')) != 'Running'
+    - not (tailscale_auto_enroll | default(false) | bool)
 
 - name: Refresh Tailscale backend state after auth
   ansible.builtin.shell: |
@@ -214,6 +226,7 @@
   register: tailscale_backend_state_after_auth
   changed_when: false
   failed_when: false
+  check_mode: false
   when: ansible_facts.os_family != "Darwin"
 
 - name: Check Tailscale advertised tags
@@ -225,8 +238,10 @@
   register: tailscale_advertise_tags_current
   changed_when: false
   failed_when: false
+  check_mode: false
   when:
     - ansible_facts.os_family != "Darwin"
+    - tailscale_manage_preferences | default(false) | bool
     - (tailscale_backend_state_after_auth.stdout | default(tailscale_backend_state.stdout | default(''))) == "Running"
 
 - name: Check Tailscale hostname preference
@@ -238,8 +253,10 @@
   register: tailscale_hostname_current
   changed_when: false
   failed_when: false
+  check_mode: false
   when:
     - ansible_facts.os_family != "Darwin"
+    - tailscale_manage_preferences | default(false) | bool
     - tailscale_hostname is defined
     - (tailscale_backend_state_after_auth.stdout | default(tailscale_backend_state.stdout | default(''))) == "Running"
 
@@ -256,6 +273,7 @@
   changed_when: true
   when:
     - ansible_facts.os_family != "Darwin"
+    - tailscale_manage_preferences | default(false) | bool
     - (tailscale_backend_state_after_auth.stdout | default(tailscale_backend_state.stdout | default(''))) == "Running"
     - (tailscale_auth_tags_csv | default('') | string | length) > 0
     - >-
@@ -275,8 +293,10 @@
   register: tailscale_ssh_preference
   changed_when: false
   failed_when: false
+  check_mode: false
   when:
     - ansible_facts.os_family != "Darwin"
+    - tailscale_manage_preferences | default(false) | bool
     - (tailscale_backend_state_after_auth.stdout | default(tailscale_backend_state.stdout | default(''))) == "Running"
 
 - name: Configure Tailscale SSH preference
@@ -286,6 +306,7 @@
   changed_when: true
   when:
     - ansible_facts.os_family != "Darwin"
+    - tailscale_manage_preferences | default(false) | bool
     - (tailscale_backend_state_after_auth.stdout | default(tailscale_backend_state.stdout | default(''))) == "Running"
     - (tailscale_ssh_preference.stdout | default('')) != ((tailscale_ssh_enabled | default(true) | bool) | ternary('true', 'false'))
 
@@ -294,7 +315,9 @@
     path: /etc/systemd/system/tailscaled.service.d
     state: directory
     mode: "0755"
-  when: ansible_facts.os_family != "Darwin"
+  when:
+    - ansible_facts.os_family != "Darwin"
+    - tailscale_manage_service_policy | default(false) | bool
 
 - name: Configure tailscaled restart policy
   ansible.builtin.copy:
@@ -305,7 +328,9 @@
       RestartSec=5
       TimeoutStartSec=90
     mode: "0644"
-  when: ansible_facts.os_family != "Darwin"
+  when:
+    - ansible_facts.os_family != "Darwin"
+    - tailscale_manage_service_policy | default(false) | bool
   register: tailscale_restart_policy
 
 - name: Reload systemd if restart policy changed
@@ -320,6 +345,7 @@
   register: tailscale_version
   changed_when: false
   failed_when: false
+  check_mode: false
 
 - name: Print tailscale status
   ansible.builtin.debug:
