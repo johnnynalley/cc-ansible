@@ -7,8 +7,8 @@
   ansible.builtin.set_fact:
     tailscale_repo_os: >-
       {{
-        'ubuntu' if ansible_distribution == 'Ubuntu'
-        else 'raspbian' if (ansible_distribution | lower) in ['raspbian', 'raspberry pi os']
+        'ubuntu' if ansible_facts.distribution == 'Ubuntu'
+        else 'raspbian' if (ansible_facts.distribution | lower) in ['raspbian', 'raspberry pi os']
         else 'debian'
       }}
   when: ansible_facts.os_family == "Debian"
@@ -33,7 +33,7 @@
 - name: Download Tailscale keyring (Debian)
   ansible.builtin.shell: |
     set -euo pipefail
-    url="https://pkgs.tailscale.com/stable/{{ tailscale_repo_os }}/{{ ansible_distribution_release }}.noarmor.gpg"
+    url="https://pkgs.tailscale.com/stable/{{ tailscale_repo_os }}/{{ ansible_facts.distribution_release }}.noarmor.gpg"
     dest="/usr/share/keyrings/tailscale-archive-keyring.gpg"
     tmp="$(mktemp)"
     curl -fsSL "$url" -o "$tmp"
@@ -51,7 +51,7 @@
 - name: Download Tailscale apt source list (Debian)
   ansible.builtin.shell: |
     set -euo pipefail
-    url="https://pkgs.tailscale.com/stable/{{ tailscale_repo_os }}/{{ ansible_distribution_release }}.tailscale-keyring.list"
+    url="https://pkgs.tailscale.com/stable/{{ tailscale_repo_os }}/{{ ansible_facts.distribution_release }}.tailscale-keyring.list"
     dest="/etc/apt/sources.list.d/tailscale.list"
     tmp="$(mktemp)"
     curl -fsSL "$url" -o "$tmp"
@@ -73,11 +73,27 @@
     - ansible_facts.os_family == "Debian"
     - tailscale_key_dl.changed or tailscale_list_dl.changed
 
+- name: Check Tailscale apt source availability (Debian)
+  ansible.builtin.stat:
+    path: /etc/apt/sources.list.d/tailscale.list
+  register: tailscale_apt_source
+  when: ansible_facts.os_family == "Debian"
+
 - name: Install/Update tailscale package (Debian)
   ansible.builtin.apt:
     name: tailscale
     state: "{{ tailscale_pkg_state | default('present') }}"
-  when: ansible_facts.os_family == "Debian"
+  when:
+    - ansible_facts.os_family == "Debian"
+    - not ansible_check_mode or tailscale_apt_source.stat.exists
+
+- name: Report skipped Tailscale package check (Debian check mode)
+  ansible.builtin.debug:
+    msg: "Skipping tailscale package validation in check mode because the Tailscale apt source is not installed yet."
+  when:
+    - ansible_facts.os_family == "Debian"
+    - ansible_check_mode
+    - not tailscale_apt_source.stat.exists
 
 - name: Install tailscale (Arch)
   community.general.pacman:
@@ -95,7 +111,7 @@
 - name: Check Tailscale backend state
   ansible.builtin.shell: |
     set -o pipefail
-    tailscale status --json 2>/dev/null | sed -n 's/.*"BackendState":"\([^"]*\)".*/\1/p'
+    tailscale status --json 2>/dev/null | python3 -c 'import json,sys; print(json.load(sys.stdin).get("BackendState", ""))'
   args:
     executable: /bin/bash
   register: tailscale_backend_state
@@ -126,6 +142,19 @@
       }}
   no_log: true
   when: ansible_facts.os_family != "Darwin"
+- name: Normalize Tailscale advertised tag order
+  ansible.builtin.set_fact:
+    tailscale_auth_tags_sorted_csv: >-
+      {{
+        (tailscale_auth_tags_csv | string).split(',')
+        | map('trim')
+        | reject('equalto', '')
+        | sort
+        | join(',')
+      }}
+  no_log: true
+  when: ansible_facts.os_family != "Darwin"
+
 
 - name: Use configured Tailscale auth key
   ansible.builtin.set_fact:
@@ -176,6 +205,90 @@
     - (tailscale_backend_state.stdout | default('')) != 'Running'
     - tailscale_auth_mode == "none"
 
+- name: Refresh Tailscale backend state after auth
+  ansible.builtin.shell: |
+    set -o pipefail
+    tailscale status --json 2>/dev/null | python3 -c 'import json,sys; print(json.load(sys.stdin).get("BackendState", ""))'
+  args:
+    executable: /bin/bash
+  register: tailscale_backend_state_after_auth
+  changed_when: false
+  failed_when: false
+  when: ansible_facts.os_family != "Darwin"
+
+- name: Check Tailscale advertised tags
+  ansible.builtin.shell: |
+    set -o pipefail
+    tailscale debug prefs | python3 -c 'import json,sys; print(",".join(sorted(json.load(sys.stdin).get("AdvertiseTags", []))))'
+  args:
+    executable: /bin/bash
+  register: tailscale_advertise_tags_current
+  changed_when: false
+  failed_when: false
+  when:
+    - ansible_facts.os_family != "Darwin"
+    - (tailscale_backend_state_after_auth.stdout | default(tailscale_backend_state.stdout | default(''))) == "Running"
+
+- name: Check Tailscale hostname preference
+  ansible.builtin.shell: |
+    set -o pipefail
+    tailscale debug prefs | python3 -c 'import json,sys; print(json.load(sys.stdin).get("Hostname", ""))'
+  args:
+    executable: /bin/bash
+  register: tailscale_hostname_current
+  changed_when: false
+  failed_when: false
+  when:
+    - ansible_facts.os_family != "Darwin"
+    - tailscale_hostname is defined
+    - (tailscale_backend_state_after_auth.stdout | default(tailscale_backend_state.stdout | default(''))) == "Running"
+
+- name: Configure Tailscale advertised tags and hostname
+  ansible.builtin.command: >-
+    tailscale up
+    --hostname={{ (tailscale_hostname | default(inventory_hostname)) | quote }}
+    --accept-dns={{ (tailscale_accept_dns | default(true) | bool) | ternary('true', 'false') }}
+    --accept-routes={{ (tailscale_accept_routes | default(false) | bool) | ternary('true', 'false') }}
+    --advertise-tags={{ tailscale_auth_tags_csv | quote }}
+    --ssh={{ (tailscale_ssh_enabled | default(true) | bool) | ternary('true', 'false') }}
+    {% if tailscale_ssh_enabled | default(true) | bool %}--accept-risk=lose-ssh{% endif %}
+  register: tailscale_advertise_tags_set
+  changed_when: true
+  when:
+    - ansible_facts.os_family != "Darwin"
+    - (tailscale_backend_state_after_auth.stdout | default(tailscale_backend_state.stdout | default(''))) == "Running"
+    - (tailscale_auth_tags_csv | default('') | string | length) > 0
+    - >-
+      (tailscale_advertise_tags_current.stdout | default('')) != (tailscale_auth_tags_sorted_csv | default(''))
+      or
+      (
+        tailscale_hostname is defined
+        and (tailscale_hostname_current.stdout | default('')) != tailscale_hostname
+      )
+
+- name: Check Tailscale SSH preference
+  ansible.builtin.shell: |
+    set -o pipefail
+    tailscale debug prefs | python3 -c 'import json,sys; print(str(json.load(sys.stdin).get("RunSSH", False)).lower())'
+  args:
+    executable: /bin/bash
+  register: tailscale_ssh_preference
+  changed_when: false
+  failed_when: false
+  when:
+    - ansible_facts.os_family != "Darwin"
+    - (tailscale_backend_state_after_auth.stdout | default(tailscale_backend_state.stdout | default(''))) == "Running"
+
+- name: Configure Tailscale SSH preference
+  ansible.builtin.command: >-
+    tailscale set --ssh={{ (tailscale_ssh_enabled | default(true) | bool) | ternary('true', 'false') }} {% if tailscale_ssh_enabled | default(true) | bool %}--accept-risk=lose-ssh{% endif %}
+  register: tailscale_ssh_set
+  changed_when: true
+  when:
+    - ansible_facts.os_family != "Darwin"
+    - (tailscale_backend_state_after_auth.stdout | default(tailscale_backend_state.stdout | default(''))) == "Running"
+    - (tailscale_ssh_preference.stdout | default('')) != ((tailscale_ssh_enabled | default(true) | bool) | ternary('true', 'false'))
+
 - name: Create tailscaled systemd override directory
   ansible.builtin.file:
     path: /etc/systemd/system/tailscaled.service.d
@@ -212,6 +325,6 @@
   ansible.builtin.debug:
     msg:
       - "repo_os={{ tailscale_repo_os | default('N/A') }}"
-      - "release={{ ansible_distribution_release | default('N/A') }}"
+      - "release={{ ansible_facts.distribution_release | default('N/A') }}"
       - "pkg_state={{ tailscale_pkg_state | default('present') }}"
       - "version={{ tailscale_version.stdout | default('unknown') }}"

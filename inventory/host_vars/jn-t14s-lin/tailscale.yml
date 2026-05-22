@@ -1,0 +1,11 @@
+# =============================================================================
+# jn-t14s-lin - Tailscale Tags
+# =============================================================================
+
+tailscale_hostname: t14s
+
+tailscale_advertise_tags:
+  - tag:tagged-devices
+  - tag:workstation
+  - tag:backup
+  - tag:orchestrators
