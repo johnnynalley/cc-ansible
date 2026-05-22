@@ -1,8 +1,8 @@
 # =============================================================================
 # Codex Memory Sync - Sync Codex CLI memory files to NAS for Nextcloud
 # =============================================================================
-# Codex CLI's project memory lives on ansible-lxc outside the git repo.
-# This timer rsync's it to ts440 so it appears in Nextcloud External Storage
+# Codex CLI's project memory lives on the Ansible controller outside the git repo.
+# This timer rsyncs it to ts440 so it appears in Nextcloud External Storage
 # (Configs/codex-memory/) and syncs to the Mac via Nextcloud desktop app.
 #
 # Usage: ansible-playbook playbooks/codex-memory-sync.yml
@@ -22,11 +22,11 @@
         mode: "0775"
 
 - name: Configure Codex memory sync timer
-  hosts: ansible-lxc
+  hosts: orchestrator
   become: true
 
   vars:
-    codex_memory_sync_source: /home/johnny/.codex/projects/cc-ansible/memory/
+    codex_memory_sync_source: /home/johnny/.codex/memories/
     codex_memory_sync_dest: johnny@100.71.188.16:/srv/nas-zfs/configs/codex-memory/
     codex_memory_sync_key: /home/johnny/.ssh/ansible_ed25519
     codex_memory_sync_interval: "*-*-* *:2/10"  # every 10 min, offset by 2 min

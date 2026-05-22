@@ -43,7 +43,7 @@ Do not assume a symptom is an upstream software bug or regression unless there i
 
 ## Historical Claude Reference
 
-This repository was migrated from Claude Code to Codex CLI on 2026-05-12. The active Codex guidance is this `AGENTS.md` file and the active project memory is `~/.codex/projects/cc-ansible/memory/`.
+This repository was migrated from Claude Code to Codex CLI on 2026-05-12. The active Codex guidance is this `AGENTS.md` file and the active project memory is `~/.codex/memories/`.
 
 The original Claude-era sources are intentionally retained as dated fallback references:
 
@@ -246,7 +246,7 @@ TS440 is the primary NAS server (currently the sole `nas_server` group member). 
 
 API tokens live in `inventory/group_vars/nas_server/vault.yml` (encrypted): `vault_media_api_plex_token`, `vault_media_api_sonarr_key`, `vault_media_api_radarr_key`. See `vault.yml.example` for how to obtain them. Opt-out per host with `mergerfs_recovery_enabled: false`.
 
-This addresses the recurring USB-SATA disconnect class of failure (see `~/.codex/projects/cc-ansible/memory/project_media_04_disconnect_diagnostic.md` for the hardware swap-test runbook to identify the actual bad component).
+This addresses the recurring USB-SATA disconnect class of failure. Diagnostic memory and retained runbooks live under `~/.codex/memories/`.
 
 **mergerfs-balance**: Balances files across mergerfs branches by moving from the fullest to the emptiest. Default path excludes in `/etc/mergerfs-balance.conf` (deployed by `playbooks/mergerfs.yml` from `mergerfs_balance_exclude_paths` variable) protect irreplaceable data on mirrored nas_zfs (photos, archive, books) from being moved to single-drive pools. CLI `-E` flags are merged with config excludes.
 
@@ -658,7 +658,7 @@ Ansible config references: VirtioFS mounts in `host_vars/nextcloud-vm/virtiofs.y
 
 **External Storage Scanning**: Nextcloud's `filesystem_check_changes: 1` only detects changes when a user browses into the folder — there's no proactive background scan. `playbooks/nextcloud-scan.yml` deploys a systemd timer on nextcloud-vm that runs `occ files:scan` every 10 minutes (offset by 3 min from git-sync) for the Configs and Photo Library external storage paths. This ensures git-sync changes and photo uploads appear in Nextcloud automatically.
 
-**Codex Memory Sync**: Codex CLI's project memory (`~/.codex/projects/cc-ansible/memory/`) lives on ansible-lxc outside the git repo (kept private — repo is public). `playbooks/codex-memory-sync.yml` deploys a timer on ansible-lxc that rsync's the memory directory to `ts440:/srv/nas-zfs/configs/codex-memory/` every 10 minutes (offset by 2 min). The sync normalizes destination permissions to directories `0775` and files `0664` so Nextcloud can read them through VirtioFS. This appears in Nextcloud at `Configs/codex-memory/` and syncs to the Mac via Nextcloud desktop app for use with Codex on the Mac.
+**Codex Memory Sync**: Codex CLI's project memory (`~/.codex/memories/`) lives on the Ansible controller outside the git repo (kept private because the repo is public). `playbooks/codex-memory-sync.yml` deploys a timer on `orchestrator` that rsyncs the memory directory to `ts440:/srv/nas-zfs/configs/codex-memory/` every 10 minutes (offset by 2 min). The sync normalizes destination permissions to directories `0775` and files `0664` so Nextcloud can read them through VirtioFS. This appears in Nextcloud at `Configs/codex-memory/` and syncs to the Mac via Nextcloud desktop app for use with Codex on the Mac.
 
 ## Future Considerations
 
