@@ -2,6 +2,7 @@
 """Start the Plex TV player on a dedicated VT while HDMI is connected."""
 
 import os
+import pwd
 import re
 import signal
 import shlex
@@ -59,6 +60,8 @@ EDID_PATH = os.environ.get("PLEX_APPLIANCE_HDMI_EDID_PATH", "").strip()
 RESTORE_GETTY = os.environ.get("PLEX_APPLIANCE_HDMI_RESTORE_GETTY", "true").lower() == "true"
 RESTART_DISPLAY_MANAGER = os.environ.get("PLEX_APPLIANCE_HDMI_RESTART_DISPLAY_MANAGER", "false").lower() == "true"
 DISPLAY_MANAGER_SERVICE = os.environ.get("PLEX_APPLIANCE_HDMI_DISPLAY_MANAGER_SERVICE", "sddm.service").strip()
+RESET_PLASMA_USER_SERVICES = os.environ.get("PLEX_APPLIANCE_HDMI_RESET_PLASMA_USER_SERVICES", "false").lower() == "true"
+APPLIANCE_USER = os.environ.get("PLEX_APPLIANCE_USER", "").strip()
 
 TV_VT = tty_number(HDMI_TTY)
 FALLBACK_RETURN_VT = tty_number(FALLBACK_RETURN_TTY)
@@ -169,6 +172,7 @@ def restart_display_manager_if_safe() -> None:
         log("Local user seat is active; leaving display manager alone")
         return
 
+    reset_plasma_user_services()
     log(f"Restarting {DISPLAY_MANAGER_SERVICE} to recover the local display")
     completed = run(["systemctl", "restart", DISPLAY_MANAGER_SERVICE], timeout=30)
     if completed.returncode != 0:
@@ -176,6 +180,58 @@ def restart_display_manager_if_safe() -> None:
         return
     time.sleep(2)
     switch_vt(FALLBACK_RETURN_VT)
+
+
+def run_user_systemctl(arguments: list[str], timeout: int = 20) -> subprocess.CompletedProcess[str]:
+    user_info = pwd.getpwnam(APPLIANCE_USER)
+    runtime_dir = f"/run/user/{user_info.pw_uid}"
+    bus_address = f"unix:path={runtime_dir}/bus"
+    return run(
+        [
+            "runuser",
+            "-u",
+            APPLIANCE_USER,
+            "--",
+            "env",
+            f"XDG_RUNTIME_DIR={runtime_dir}",
+            f"DBUS_SESSION_BUS_ADDRESS={bus_address}",
+            "systemctl",
+            "--user",
+            *arguments,
+        ],
+        timeout=timeout,
+    )
+
+
+def reset_plasma_user_services() -> None:
+    if not RESET_PLASMA_USER_SERVICES or not APPLIANCE_USER:
+        return
+
+    try:
+        user_info = pwd.getpwnam(APPLIANCE_USER)
+    except KeyError:
+        log(f"Cannot reset Plasma services; user {APPLIANCE_USER!r} does not exist")
+        return
+
+    if not os.path.exists(f"/run/user/{user_info.pw_uid}/bus"):
+        return
+
+    log(f"Resetting stale Plasma user services for {APPLIANCE_USER}")
+    units = [
+        "plasma-workspace-wayland.target",
+        "plasma-workspace.target",
+        "plasma-core.target",
+        "plasma-plasmashell.service",
+        "plasma-kwin_wayland.service",
+        "plasma-kded6.service",
+        "plasma-polkit-agent.service",
+        "plasma-powerdevil.service",
+        "plasma-ksplash.service",
+    ]
+    completed = run_user_systemctl(["stop", *units], timeout=30)
+    if completed.returncode != 0:
+        log(f"Failed to stop stale Plasma services: {completed.stderr.strip()}")
+    run_user_systemctl(["reset-failed"], timeout=10)
 
 
 def start_player() -> bool:

@@ -44,6 +44,7 @@ plex_appliance_hdmi_edid_path: /sys/class/drm/card1-HDMI-A-1/edid
 plex_appliance_hdmi_restore_getty: true
 plex_appliance_hdmi_restart_display_manager: true
 plex_appliance_hdmi_display_manager_service: sddm.service
+plex_appliance_hdmi_reset_plasma_user_services: true
 plex_appliance_hdmi_poll_seconds: 5
 plex_appliance_hdmi_configure_display: true
 plex_appliance_hdmi_make_primary: true
