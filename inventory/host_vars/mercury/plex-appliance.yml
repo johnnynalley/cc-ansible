@@ -47,6 +47,7 @@ plex_appliance_mpv_args:
   - --vo=gpu
   - --gpu-context=drm
   - --hwdec=auto-safe
+  - --af=lavfi=[dynaudnorm=f=250:g=15:p=0.95:m=8]
   - --volume-max=400
   - --volume=300
   - --ad-lavc-ac3drc=1

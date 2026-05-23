@@ -70,6 +70,7 @@ plex_appliance_mpv_args:
   - --drm-mode=1920x1080@60
   - --ao=alsa
   - --hwdec=auto-safe
+  - --af=lavfi=[dynaudnorm=f=250:g=15:p=0.95:m=8]
   - --volume-max=200
   - --volume=100
   - --keep-open=no
