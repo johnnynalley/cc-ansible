@@ -79,7 +79,11 @@
     block: |
       if [ -t 1 ] && command -v fastfetch >/dev/null && [ -z "$FASTFETCH_SHOWN" ]; then
         export FASTFETCH_SHOWN=1
-        fastfetch
+        if command -v timeout >/dev/null; then
+          timeout "${FASTFETCH_TIMEOUT:-8s}" fastfetch || true
+        else
+          fastfetch
+        fi
       fi
     create: true
     owner: "{{ admin_user }}"
