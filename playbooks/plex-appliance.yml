@@ -9,7 +9,29 @@
 - name: Configure Plex collection appliance
   hosts: plex_appliances
   become: true
-  gather_facts: true
+  gather_facts: false
+
+  pre_tasks:
+    - name: Check Plex appliance SSH port
+      ansible.builtin.wait_for:
+        host: "{{ ansible_host | default(inventory_hostname) }}"
+        port: "{{ ansible_port | default(22) }}"
+        timeout: "{{ plex_appliance_connection_timeout | default(8) }}"
+        connect_timeout: "{{ plex_appliance_connection_attempt_timeout | default(3) }}"
+        state: started
+      check_mode: false
+      ignore_errors: true
+      become: false
+      delegate_to: localhost
+      register: plex_appliance_connection
+
+    - name: Skip unreachable Plex appliance
+      ansible.builtin.meta: end_host
+      when:
+        - plex_appliance_connection.failed | default(false)
+
+    - name: Gather facts for reachable Plex appliance
+      ansible.builtin.setup:
 
   handlers:
     - name: Reload systemd
