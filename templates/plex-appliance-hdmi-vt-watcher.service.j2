@@ -1,0 +1,15 @@
+[Unit]
+Description=Plex HDMI VT appliance watcher
+After=multi-user.target
+
+[Service]
+Type=simple
+Environment=PYTHONUNBUFFERED=1
+EnvironmentFile=/etc/plex-appliance/plex-appliance.env
+ExecStart=/usr/local/bin/plex-appliance-hdmi-vt-watcher
+Restart=always
+RestartSec=5
+SyslogIdentifier=plex-appliance-hdmi-vt-watcher
+
+[Install]
+WantedBy=multi-user.target

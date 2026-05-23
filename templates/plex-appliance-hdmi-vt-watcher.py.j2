@@ -1,0 +1,150 @@
+#!/usr/bin/env python3
+"""Start the Plex TV player on a dedicated VT while HDMI is connected."""
+
+import os
+import re
+import shlex
+import subprocess
+import time
+from typing import Dict, Optional
+
+
+ENV_FILE = "/etc/plex-appliance/plex-appliance.env"
+PLAYER_SERVICE = "plex-appliance-tv.service"
+
+
+def log(message: str) -> None:
+    print(time.strftime("%Y-%m-%d %H:%M:%S"), message, flush=True)
+
+
+def parse_env_value(value: str) -> str:
+    parts = shlex.split(value, comments=False, posix=True)
+    return parts[0] if parts else ""
+
+
+def load_env_file(path: str = ENV_FILE) -> Dict[str, str]:
+    values: Dict[str, str] = {}
+    with open(path, "r", encoding="utf-8") as env_file:
+        for raw_line in env_file:
+            line = raw_line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            key, value = line.split("=", 1)
+            values[key.strip()] = parse_env_value(value.strip())
+    return values
+
+
+def run(command: list[str], timeout: int = 15) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(command, check=False, capture_output=True, text=True, timeout=timeout)
+
+
+def tty_number(path: str) -> str:
+    match = re.search(r"(\d+)$", path)
+    if not match:
+        raise ValueError(f"Cannot derive VT number from {path!r}")
+    return match.group(1)
+
+
+ENV = load_env_file()
+os.environ.update({key: value for key, value in ENV.items() if key not in os.environ})
+
+POLL_SECONDS = int(os.environ.get("PLEX_APPLIANCE_HDMI_POLL_SECONDS", "5"))
+HDMI_TTY = os.environ.get("PLEX_APPLIANCE_HDMI_TTY", "/dev/tty3")
+FALLBACK_RETURN_TTY = os.environ.get("PLEX_APPLIANCE_HDMI_RETURN_TTY", "/dev/tty1")
+SYSFS_CONNECTOR = os.environ.get("PLEX_APPLIANCE_HDMI_SYSFS_CONNECTOR", "").strip()
+DRM_CONNECTOR = os.environ.get("PLEX_APPLIANCE_HDMI_DRM_CONNECTOR", "").strip()
+RESTORE_GETTY = os.environ.get("PLEX_APPLIANCE_HDMI_RESTORE_GETTY", "true").lower() == "true"
+
+TV_VT = tty_number(HDMI_TTY)
+FALLBACK_RETURN_VT = tty_number(FALLBACK_RETURN_TTY)
+CONNECTOR_STATUS = f"/sys/class/drm/{SYSFS_CONNECTOR}/status" if SYSFS_CONNECTOR else ""
+GETTY_SERVICE = f"getty@tty{TV_VT}.service"
+
+
+def hdmi_connected() -> bool:
+    if CONNECTOR_STATUS:
+        try:
+            with open(CONNECTOR_STATUS, "r", encoding="utf-8") as status_file:
+                return status_file.read().strip() == "connected"
+        except FileNotFoundError:
+            return False
+
+    if not DRM_CONNECTOR:
+        return False
+    completed = run(["kscreen-doctor", "--outputs"], timeout=10)
+    return completed.returncode == 0 and DRM_CONNECTOR in completed.stdout and "connected" in completed.stdout
+
+
+def service_active(name: str) -> bool:
+    return run(["systemctl", "is-active", "--quiet", name], timeout=10).returncode == 0
+
+
+def active_vt() -> Optional[str]:
+    completed = run(["fgconsole"], timeout=10)
+    if completed.returncode != 0:
+        return None
+    value = completed.stdout.strip()
+    return value if value else None
+
+
+def switch_vt(vt: str) -> None:
+    completed = run(["chvt", vt], timeout=10)
+    if completed.returncode != 0:
+        log(f"Failed to switch to VT {vt}: {completed.stderr.strip()}")
+
+
+def stop_getty() -> None:
+    run(["systemctl", "stop", GETTY_SERVICE], timeout=10)
+
+
+def restore_getty() -> None:
+    if RESTORE_GETTY:
+        run(["systemctl", "start", GETTY_SERVICE], timeout=10)
+
+
+def start_player() -> bool:
+    completed = run(["systemctl", "start", PLAYER_SERVICE], timeout=30)
+    if completed.returncode != 0:
+        log(f"Failed to start {PLAYER_SERVICE}: {completed.stderr.strip()}")
+        return False
+    return True
+
+
+def stop_player() -> None:
+    completed = run(["systemctl", "stop", PLAYER_SERVICE], timeout=30)
+    if completed.returncode != 0:
+        log(f"Failed to stop {PLAYER_SERVICE}: {completed.stderr.strip()}")
+
+
+def main() -> int:
+    return_vt: Optional[str] = None
+    was_connected = False
+
+    while True:
+        connected = hdmi_connected()
+
+        if connected:
+            if not was_connected:
+                current_vt = active_vt()
+                if current_vt and current_vt != TV_VT:
+                    return_vt = current_vt
+                log(f"HDMI connected; using VT {TV_VT} for Plex TV playback")
+                stop_getty()
+                switch_vt(TV_VT)
+
+            if not service_active(PLAYER_SERVICE):
+                start_player()
+
+        elif was_connected:
+            log("HDMI disconnected; stopping Plex TV playback")
+            stop_player()
+            switch_vt(return_vt or FALLBACK_RETURN_VT)
+            restore_getty()
+            return_vt = None
+
+        was_connected = connected
+        time.sleep(POLL_SECONDS)
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

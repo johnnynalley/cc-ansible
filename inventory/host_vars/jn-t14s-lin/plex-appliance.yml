@@ -9,8 +9,8 @@ plex_appliance_server_url: "http://100.66.6.113:32400"
 plex_appliance_library: "Shows"
 plex_appliance_collection: "Adult Swim Collection"
 
-# This mode is session-bound: the watcher starts with Plasma, and the player
-# only runs while a non-internal HDMI-style output is connected.
+# This uses a dedicated VT while HDMI is attached, so playback does not depend
+# on Plasma/KScreen and cannot silently fall back to the laptop panel.
 plex_appliance_audio_languages:
   - eng
 plex_appliance_subtitle_languages:
@@ -34,12 +34,18 @@ plex_appliance_hdmi_ignore_patterns:
   - eDP
   - LVDS
   - DSI
+plex_appliance_hdmi_backend: vt
+plex_appliance_hdmi_tty: /dev/tty3
+plex_appliance_hdmi_return_tty: /dev/tty1
+plex_appliance_hdmi_drm_connector: HDMI-A-1
+plex_appliance_hdmi_sysfs_connector: card1-HDMI-A-1
+plex_appliance_hdmi_restore_getty: true
 plex_appliance_hdmi_poll_seconds: 5
 plex_appliance_hdmi_configure_display: true
 plex_appliance_hdmi_make_primary: true
 plex_appliance_hdmi_tv_only: true
-plex_appliance_hdmi_autostart_enabled: false
-plex_appliance_audio_device: "pulse/alsa_output.pci-0000_04_00.1.HiFi__HDMI2__sink"
+plex_appliance_hdmi_autostart_enabled: true
+plex_appliance_audio_device: "alsa/hdmi:CARD=Generic,DEV=1"
 plex_appliance_page_size: 100
 plex_appliance_server_retry_seconds: 30
 plex_appliance_item_failure_delay_seconds: 10
@@ -51,9 +57,12 @@ plex_appliance_mpv_args:
   - --no-input-default-bindings
   - --really-quiet
   - --profile=fast
-  - --vo=gpu-next
+  - --vo=gpu
+  - --gpu-context=drm
+  - --drm-connector=HDMI-A-1
+  - --drm-mode=1920x1080@60
+  - --ao=alsa
   - --hwdec=auto-safe
-  - --volume-max=400
-  - --volume=300
-  - --ad-lavc-ac3drc=1
+  - --volume-max=200
+  - --volume=100
   - --keep-open=no
