@@ -150,7 +150,12 @@ def local_user_seat_active() -> bool:
 
     for line in completed.stdout.splitlines():
         fields = line.split()
-        if len(fields) >= 6 and fields[3] == "seat0" and fields[5] != "greeter":
+        if len(fields) < 7:
+            continue
+        seat = fields[3]
+        session_class = fields[5]
+        tty = fields[6]
+        if seat == "seat0" and session_class != "greeter" and tty != f"tty{TV_VT}":
             return True
 
     return False
