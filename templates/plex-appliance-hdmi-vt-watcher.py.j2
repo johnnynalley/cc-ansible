@@ -61,6 +61,7 @@ RESTORE_GETTY = os.environ.get("PLEX_APPLIANCE_HDMI_RESTORE_GETTY", "true").lowe
 RESTART_DISPLAY_MANAGER = os.environ.get("PLEX_APPLIANCE_HDMI_RESTART_DISPLAY_MANAGER", "false").lower() == "true"
 DISPLAY_MANAGER_SERVICE = os.environ.get("PLEX_APPLIANCE_HDMI_DISPLAY_MANAGER_SERVICE", "sddm.service").strip()
 RESET_PLASMA_USER_SERVICES = os.environ.get("PLEX_APPLIANCE_HDMI_RESET_PLASMA_USER_SERVICES", "false").lower() == "true"
+SKIP_WHEN_LOCAL_USER_ACTIVE = os.environ.get("PLEX_APPLIANCE_HDMI_SKIP_WHEN_LOCAL_USER_ACTIVE", "false").lower() == "true"
 APPLIANCE_USER = os.environ.get("PLEX_APPLIANCE_USER", "").strip()
 
 TV_VT = tty_number(HDMI_TTY)
@@ -278,9 +279,23 @@ def main() -> int:
 
     signal.signal(signal.SIGINT, handle_shutdown)
     signal.signal(signal.SIGTERM, handle_shutdown)
+    skipped_for_local_user = False
 
     while True:
         connected = hdmi_connected()
+
+        if connected and SKIP_WHEN_LOCAL_USER_ACTIVE and local_user_seat_active():
+            if was_connected or service_active(PLAYER_SERVICE):
+                log("HDMI connected while local user seat is active; stopping Plex TV playback")
+                cleanup_display(recover_display=False)
+            elif not skipped_for_local_user:
+                log("HDMI connected while local user seat is active; leaving Plasma session alone")
+            skipped_for_local_user = True
+            was_connected = False
+            time.sleep(POLL_SECONDS)
+            continue
+
+        skipped_for_local_user = False
 
         if connected:
             if not was_connected:
