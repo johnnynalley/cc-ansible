@@ -3,6 +3,20 @@
 # =============================================================================
 
 packages_host_extra:
+  # Ansible controller runtime
+  - ansible
+  - gh
+  - nodejs
+  - npm
+  - python3-passlib
+  - python3-pip
+  - python3-venv
+  - shellcheck
+  - software-properties-common
+  - sshpass
+  - vdirsyncer
+  - yq
+  - khal
   # KDE Flatpak integration
   - plasma-discover-backend-flatpak
   - kde-config-flatpak

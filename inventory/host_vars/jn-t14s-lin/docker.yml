@@ -1,0 +1,15 @@
+# =============================================================================
+# jn-t14s-lin - Docker Compose Stacks
+# =============================================================================
+# Workstation/controller Docker usage stays explicit. OpenClaw's vector store
+# is managed here so Docker Compose state has one owner: docker-stacks.yml.
+# =============================================================================
+
+install_docker: true
+docker_networks: []
+docker_auto_update_enabled: false
+
+docker_stacks:
+  - name: qdrant
+    path: /opt/qdrant
+    build: false

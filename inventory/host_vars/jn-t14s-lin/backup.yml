@@ -5,11 +5,15 @@
 # B2 offsite backup paths
 restic_backup_paths_extra:
   - /home/johnny
+  - /opt/cc-ansible
+  - /opt/qdrant/storage
 
 # Local backup to ts440 ZFS (for quick restore)
 local_restic_enabled: true
 local_restic_backup_paths:
   - /home/johnny
+  - /opt/cc-ansible
+  - /opt/qdrant/storage
 
 # Skip backups when on battery power (systemd ConditionACPower=true)
 restic_require_ac_power: true

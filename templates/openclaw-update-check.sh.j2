@@ -8,11 +8,13 @@
 set -euo pipefail
 
 LOG_TAG="openclaw-update-check"
+OPENCLAW_NPM_PREFIX="{{ openclaw_npm_prefix | default('/home/' ~ admin_user ~ '/.npm-global') }}"
+OPENCLAW_BIN="${OPENCLAW_NPM_PREFIX}/bin/openclaw"
 
 log() { logger -t "$LOG_TAG" "$*"; echo "$*"; }
 
-CURRENT=$(openclaw --version 2>/dev/null || echo "unknown")
-LATEST=$(npm view openclaw version 2>/dev/null || echo "unknown")
+CURRENT=$("$OPENCLAW_BIN" --version 2>/dev/null || echo "unknown")
+LATEST=$(sudo -iu {{ admin_user }} npm --prefix "$OPENCLAW_NPM_PREFIX" view openclaw version 2>/dev/null || echo "unknown")
 
 if [[ "$CURRENT" == "unknown" || "$LATEST" == "unknown" ]]; then
     log "ERROR: Could not determine OpenClaw versions (current=$CURRENT, latest=$LATEST)"
@@ -32,7 +34,7 @@ curl -sf -o /dev/null \
     --form-string "body=Current: $CURRENT → Latest: $LATEST
 Back up config before updating:
   cp ~/.openclaw/openclaw.json ~/.openclaw/openclaw.json.bak.\$(date +%Y%m%d)
-  npm update -g openclaw" \
+  npm --prefix $OPENCLAW_NPM_PREFIX update -g openclaw" \
     --form-string "tag=push-quiet,dbc" \
     --form-string "type=info" \
     --max-time 10 \

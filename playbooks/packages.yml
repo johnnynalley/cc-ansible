@@ -196,7 +196,12 @@
     # Docker (Official Repo) - for hosts with install_docker: true
     # =========================================================================
     - name: Install Docker from official repo
-      ansible.builtin.include_tasks: ../tasks/docker.yml
+      ansible.builtin.include_tasks:
+        file: ../tasks/docker.yml
+        apply:
+          tags:
+            - packages
+            - docker
       when:
         - ansible_facts.os_family == "Debian"
         - install_docker | default(false)

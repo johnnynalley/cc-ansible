@@ -16,3 +16,15 @@ collections:
   # General modules (homebrew, pacman, etc.)
   - name: community.general
     version: ">=10.0.0"
+
+  # POSIX host modules (sysctl, mount helpers, etc.)
+  - name: ansible.posix
+    version: ">=2.0.0"
+
+  # Windows host management over SSH/PowerShell
+  - name: ansible.windows
+    version: ">=3.0.0"
+
+  # Windows scheduled task management
+  - name: community.windows
+    version: ">=3.0.0"

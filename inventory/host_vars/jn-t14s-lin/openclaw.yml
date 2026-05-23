@@ -1,0 +1,10 @@
+# =============================================================================
+# jn-t14s-lin - OpenClaw AI Agent Platform
+# =============================================================================
+
+openclaw_enabled: true
+openclaw_port: 18789
+openclaw_workspace: /opt/cc-ansible
+openclaw_npm_prefix: /home/johnny/.npm-global
+openclaw_cleanup_npm_prefixes:
+  - /home/johnny/.local

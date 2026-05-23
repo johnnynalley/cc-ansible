@@ -14,3 +14,10 @@ vmid: 100
 required_host_mounts:
   - /srv/media       # mergerfs pool — Plex/*arr libraries live here
   - /srv/nas-zfs     # ZFS pool — books, photos, archive subtrees
+
+guest_lvm_root_expansion:
+  disk: /dev/sda
+  partition_number: 3
+  pv: /dev/sda3
+  vg: ubuntu-vg
+  lv: /dev/ubuntu-vg/ubuntu-lv

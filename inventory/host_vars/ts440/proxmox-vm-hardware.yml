@@ -3,7 +3,41 @@
 # =============================================================================
 
 proxmox_vm_hardware:
+  - name: media-vm
+    vmid: 100
+    # TS440 currently rejects more than 4 vCPUs for this VM.
+    cores: 4
+    memory: 16384
+    balloon: 0
+
   - name: nextcloud-vm
     vmid: 101
     # Nextcloud AIO fulltextsearch requires AVX/AVX2/FMA-capable CPU flags.
     cpu: host
+
+proxmox_storage_definitions:
+  - name: nas-zfs-vm
+    type: zfspool
+    pool: nas_zfs/vmdata
+    content: images,rootdir
+    nodes: Johnnys-TS440
+    sparse: true
+
+proxmox_vm_disks:
+  - name: media-vm stream VOD spool
+    vmid: 100
+    slot: scsi9
+    storage: nas-zfs-vm
+    size: 150
+    serial: streamvodspool
+    options:
+      backup: 0
+      discard: "on"
+      iothread: 1
+      ssd: 1
+
+proxmox_vm_disk_resizes:
+  - name: media-vm root disk
+    vmid: 100
+    slot: scsi0
+    size: 275G

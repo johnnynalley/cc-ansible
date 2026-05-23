@@ -48,9 +48,63 @@
       notify: Reload systemd
 
     # --- Install OpenClaw + ClawHub via johnny's npm prefix ---
+    - name: Ensure OpenClaw npm prefix directories exist
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: directory
+        owner: "{{ admin_user }}"
+        group: "{{ admin_user }}"
+        mode: "0755"
+      loop:
+        - "{{ openclaw_npm_prefix | default('/home/' ~ admin_user ~ '/.npm-global') }}"
+        - "{{ openclaw_npm_prefix | default('/home/' ~ admin_user ~ '/.npm-global') }}/bin"
+        - "{{ openclaw_npm_prefix | default('/home/' ~ admin_user ~ '/.npm-global') }}/lib"
+        - "{{ openclaw_npm_prefix | default('/home/' ~ admin_user ~ '/.npm-global') }}/lib/node_modules"
+
+    - name: Configure npm global prefix for OpenClaw user
+      ansible.builtin.lineinfile:
+        path: "/home/{{ admin_user }}/.npmrc"
+        regexp: "^prefix="
+        line: "prefix={{ openclaw_npm_prefix | default('/home/' ~ admin_user ~ '/.npm-global') }}"
+        create: true
+        owner: "{{ admin_user }}"
+        group: "{{ admin_user }}"
+        mode: "0644"
+
+    - name: Add OpenClaw npm bin to shell PATH
+      ansible.builtin.blockinfile:
+        path: "{{ item }}"
+        create: true
+        owner: "{{ admin_user }}"
+        group: "{{ admin_user }}"
+        mode: "0644"
+        marker: "# {mark} ANSIBLE MANAGED BLOCK - OpenClaw npm prefix"
+        block: |
+          case ":$PATH:" in
+            *":{{ openclaw_npm_prefix | default('/home/' ~ admin_user ~ '/.npm-global') }}/bin:"*) ;;
+            *) export PATH="{{ openclaw_npm_prefix | default('/home/' ~ admin_user ~ '/.npm-global') }}/bin:$PATH" ;;
+          esac
+      loop:
+        - "/home/{{ admin_user }}/.profile"
+        - "/home/{{ admin_user }}/.bashrc"
+
+    - name: Remove OpenClaw packages from non-OpenClaw npm prefixes
+      ansible.builtin.command:
+        cmd: "sudo -iu {{ admin_user }} npm --prefix {{ item }} uninstall -g openclaw clawhub"
+      loop: "{{ openclaw_cleanup_npm_prefixes | default([]) }}"
+      loop_control:
+        label: "{{ item }}"
+      register: openclaw_cleanup_npm
+      changed_when: >-
+        'removed' in (openclaw_cleanup_npm.stdout | default(''))
+        or 'changed' in (openclaw_cleanup_npm.stdout | default(''))
+      when:
+        - item != (openclaw_npm_prefix | default('/home/' ~ admin_user ~ '/.npm-global'))
+        - not ansible_check_mode
+
     - name: Install or update OpenClaw globally via npm
       ansible.builtin.command:
-        cmd: sudo -iu {{ admin_user }} npm install -g openclaw@latest
+        cmd: sudo -iu {{ admin_user }} npm --prefix {{ openclaw_npm_prefix | default('/home/' ~ admin_user ~ '/.npm-global') }} install -g openclaw@latest
       register: openclaw_npm_install
       changed_when: >-
         'changed' in (openclaw_npm_install.stdout | default(''))
@@ -59,17 +113,27 @@
       when: not ansible_check_mode
       notify: Restart OpenClaw gateway
 
+    - name: Check whether OpenClaw CLI is available
+      ansible.builtin.shell:
+        cmd: test -x "{{ openclaw_npm_prefix | default('/home/' ~ admin_user ~ '/.npm-global') }}/bin/openclaw"
+      register: openclaw_cli_check
+      check_mode: false
+      failed_when: false
+      changed_when: false
+
     - name: Check OpenClaw update status
       ansible.builtin.command:
-        cmd: sudo -iu {{ admin_user }} openclaw update --dry-run --json --timeout 300
+        cmd: sudo -iu {{ admin_user }} {{ openclaw_npm_prefix | default('/home/' ~ admin_user ~ '/.npm-global') }}/bin/openclaw update --dry-run --json --timeout 300
       register: openclaw_update_status
       check_mode: false
       changed_when: false
-      when: ansible_check_mode
+      when:
+        - ansible_check_mode
+        - openclaw_cli_check.rc == 0
 
     - name: Install or update ClawHub CLI globally via npm
       ansible.builtin.command:
-        cmd: sudo -iu {{ admin_user }} npm install -g clawhub@latest
+        cmd: sudo -iu {{ admin_user }} npm --prefix {{ openclaw_npm_prefix | default('/home/' ~ admin_user ~ '/.npm-global') }} install -g clawhub@latest
       register: clawhub_npm_install
       changed_when: >-
         'changed' in (clawhub_npm_install.stdout | default(''))
@@ -161,16 +225,80 @@
         cmd: sudo -iu {{ admin_user }} git config --global credential.helper store
       changed_when: false
 
+    - name: Repair migrated OpenClaw npm workspace package namespace
+      ansible.builtin.shell:
+        cmd: |
+          sudo -iu {{ admin_user }} node <<'NODE'
+          const fs = require('fs');
+          const path = '/home/{{ admin_user }}/.openclaw/npm/package.json';
+          const prefix = "{{ openclaw_npm_prefix | default('/home/' ~ admin_user ~ '/.npm-global') }}";
+          if (!fs.existsSync(path)) {
+            console.log('package-missing');
+            process.exit(0);
+          }
+
+          const pkg = JSON.parse(fs.readFileSync(path, 'utf8'));
+          pkg.dependencies = pkg.dependencies || {};
+
+          const replacements = {
+            '@mariozechner/pi-agent-core': '@earendil-works/pi-agent-core',
+            '@mariozechner/pi-ai': '@earendil-works/pi-ai',
+            '@mariozechner/pi-coding-agent': '@earendil-works/pi-coding-agent',
+          };
+
+          let changed = false;
+          for (const [oldName, newName] of Object.entries(replacements)) {
+            if (Object.prototype.hasOwnProperty.call(pkg.dependencies, oldName)) {
+              delete pkg.dependencies[oldName];
+              changed = true;
+            }
+            const desired = `file:${prefix}/lib/node_modules/openclaw/node_modules/${newName}`;
+            if (pkg.dependencies[newName] !== desired) {
+              pkg.dependencies[newName] = desired;
+              changed = true;
+            }
+          }
+
+          if (changed) {
+            const stamp = new Date().toISOString().replace(/[-:TZ.]/g, '').slice(0, 14);
+            fs.copyFileSync(path, `${path}.pre-namespace-repair-${stamp}`);
+            fs.writeFileSync(path, JSON.stringify(pkg, null, 2) + '\n');
+            console.log('changed');
+          } else {
+            console.log('ok');
+          }
+          NODE
+      register: openclaw_namespace_repair
+      changed_when: "'changed' in (openclaw_namespace_repair.stdout | default(''))"
+      when: not ansible_check_mode
+
     # --- Install Mem0 memory plugin ---
+    - name: Check whether Mem0 plugin is already installed
+      ansible.builtin.stat:
+        path: /home/{{ admin_user }}/.openclaw/npm/node_modules/@mem0/openclaw-mem0/package.json
+      register: openclaw_mem0_plugin
+
     - name: Install Mem0 plugin
       ansible.builtin.command:
-        cmd: sudo -iu {{ admin_user }} openclaw plugins install @mem0/openclaw-mem0
+        cmd: sudo -iu {{ admin_user }} {{ openclaw_npm_prefix | default('/home/' ~ admin_user ~ '/.npm-global') }}/bin/openclaw plugins install @mem0/openclaw-mem0
       register: mem0_install
       changed_when: "'installed' in (mem0_install.stdout | default('') | lower) or 'updated' in (mem0_install.stdout | default('') | lower)"
+      when: not openclaw_mem0_plugin.stat.exists
+
+    - name: Update existing Mem0 plugin
+      ansible.builtin.command:
+        cmd: sudo -iu {{ admin_user }} {{ openclaw_npm_prefix | default('/home/' ~ admin_user ~ '/.npm-global') }}/bin/openclaw plugins update @mem0/openclaw-mem0
+      register: mem0_update
+      changed_when: >-
+        'updated' in (mem0_update.stdout | default('') | lower)
+        or 'installed' in (mem0_update.stdout | default('') | lower)
+      when:
+        - openclaw_mem0_plugin.stat.exists
+        - not ansible_check_mode
 
     - name: Sync OpenClaw managed plugins after core update
       ansible.builtin.command:
-        cmd: sudo -iu {{ admin_user }} openclaw plugins update --all
+        cmd: sudo -iu {{ admin_user }} {{ openclaw_npm_prefix | default('/home/' ~ admin_user ~ '/.npm-global') }}/bin/openclaw plugins update --all
       register: openclaw_plugins_update
       changed_when: >-
         'updated' in (openclaw_plugins_update.stdout | default('') | lower)
@@ -181,7 +309,7 @@
     # --- Install OpenClaw gateway service (user-level systemd) ---
     - name: Install OpenClaw gateway service
       ansible.builtin.command:
-        cmd: sudo -iu {{ admin_user }} openclaw gateway install
+        cmd: sudo -iu {{ admin_user }} {{ openclaw_npm_prefix | default('/home/' ~ admin_user ~ '/.npm-global') }}/bin/openclaw gateway install
       register: gateway_install
       changed_when: "'Installed' in gateway_install.stdout"
       notify: Restart OpenClaw gateway
@@ -308,12 +436,14 @@
         name: openclaw-repo-sync.timer
         enabled: true
         state: started
+      when: not ansible_check_mode
 
     - name: Enable and start update-check timer
       ansible.builtin.systemd:
         name: openclaw-update-check.timer
         enabled: true
         state: started
+      when: not ansible_check_mode
 
   handlers:
     - name: Reload systemd

@@ -129,6 +129,7 @@
         name: docker-stacks
         enabled: true
         daemon_reload: true
+      when: not ansible_check_mode
 
     # -------------------------------------------------------------------------
     # Stacks with build: true - rebuild images from Dockerfile

@@ -51,6 +51,10 @@ Do not commit real secrets. Encrypted values belong in `vault.yml` files beside 
 
 Before mutating live infrastructure state, application configs, databases, service data, or generated controller/runtime files, take a targeted timestamped backup, snapshot, export, or app-native backup of the affected state unless the change is trivial and fully reproducible or the user explicitly waives backups for that operation. Record the backup path in the working notes, docs, or final response when it matters for rollback. Treat these as temporary rollback aids: keep them while the rollout is being validated, then document or perform cleanup/retention once the change is proven. Read-only diagnostics and dry runs do not need backups.
 
+### Migration Cleanup
+
+When migrating a managed script, service, scheduled task, config path, binary, or generated artifact, include Ansible-managed cleanup for the legacy path in the same change whenever it is safe. Verify all consumers such as scheduled tasks, startup entries, service units, OBS hooks, wrapper scripts, or documented operator commands point at the new path before considering the migration complete.
+
 ### Troubleshooting Assumptions
 
 Do not assume a symptom is an upstream software bug or regression unless there is an exact documented issue, release note, or vendor advisory matching the observed failure. Default to diagnosing local configuration, runtime state, logs, resource pressure, integration drift, and recent local changes first. Avoid update-fragile local patches unless the user explicitly approves a temporary workaround.
@@ -62,6 +66,10 @@ Before live `lj-gaming-pc` work or repeated Windows playbook runs, check Ansible
 For Ansible controller and homelab control-plane reliability, prioritize stability over resource minimalism. If the controller or another core automation host shows resource-related instability, prefer overprovisioning CPU/RAM/swap/disk or migrating the workload to stronger idle hardware before accepting flaky sessions or failed convergence. Surface tradeoffs clearly, but do not be stingy with available hardware when stability is the goal.
 
 When a Windows `win_shell`/PowerShell probe is interrupted or times out, killing the local Ansible process is not enough. Immediately verify the remote `powershell.exe` command line on the target and terminate only the abandoned diagnostic worker if it is still running, then recheck target memory/process state before continuing.
+
+For `lj-gaming-pc` Windows OpenSSH, do not pin `C:\ProgramData\ssh\sshd_config` to the Tailscale IP with an active `ListenAddress 100.x.x.x` line. OpenSSH can start before Tailscale owns that address, which creates a boot race where `sshd` terminates or listens only after recovery actions. Keep SSH listening on `0.0.0.0:22` and use Windows Firewall/Tailscale policy for reachability control.
+
+For `lj-gaming-pc` Ansible-managed Windows scripts, deploy local managed copies under `C:\ProgramData\Johnny\...`, not `C:\Users\jn\Nextcloud\Scripts\...`. The repo and Ansible/controller backups are the source of truth; Nextcloud script copies are legacy drift and should be removed by the relevant playbook after local deployment.
 
 Do not launch visible Windows GUI applications such as OBS through SSH/Ansible on `lj-gaming-pc`; Windows session isolation can put them in a hidden or non-interactive desktop. For visible app launches, use an interactive scheduled task/watcher that is known to target the logged-in user session, or ask the user to open the app locally.
 
@@ -89,7 +97,7 @@ The reference below was migrated from `CLAUDE.md` on 2026-05-12 and rewritten on
 
 Ansible automation for a homelab infrastructure consisting of:
 - 4 Proxmox hypervisors (ts440, pve-alto, pve-herc, pve-m70q)
-- VMs/LXC containers (docker-vm, media-vm, nextcloud-vm, freepbx-vm, openclaw-vm, pdm-vm, homebridge-lxc, syncthing-lxc, pbs-lxc)
+- VMs/LXC containers (docker-vm, media-vm, nextcloud-vm, freepbx-vm, pdm-vm, homebridge-lxc, syncthing-lxc, pbs-lxc; retired records such as openclaw-vm stay in `retired_hosts`)
 - 1 flat Ansible controller on jn-t14s-lin (Kubuntu)
 - 1 Raspberry Pi 5 (mercury)
 - 1 Kubuntu laptop (jn-t14s-lin) — ThinkPad T14s, dual-boot with Windows
@@ -224,7 +232,7 @@ Host groups form a hierarchy in `inventory/hosts.ini`:
   - Playbooks like `network-recovery.yml` explicitly exclude this group: `hosts: linux_hosts:!workstations`
 - `nas_server` → **portable NAS role group** (currently ts440). Storage services: NFS, Samba, ZFS, mergerfs, drive mounts. Migrate NAS to new hardware by changing membership in this group.
 - `development` → **cross-platform group** for dev tooling (gh, shellcheck, yq). Currently empty; the orchestrator gets controller/dev tools via its own host vars and the `orchestrator` group. Packages split by OS: `packages_debian_development_extra`, `packages_arch_development_extra`
-- `docker_hosts` → VMs running Docker Compose stacks (docker-vm, media-vm, nextcloud-vm, openclaw-vm)
+- `docker_hosts` → systems running Docker Compose stacks (docker-vm, media-vm, nextcloud-vm, jn-t14s-lin)
 - `gluetun_hosts` → hosts with Gluetun/qBittorrent VPN automation (currently media-vm)
 - `backup_clients` → separate group for restic backups (includes `proxmox_nodes`, `vms_lxcs`, `orchestrator`, `raspberry_pis`, `workstations`, `arch_hosts`)
 - `retired_hosts` → stale/offline inventory records retained for reference; these hosts are not children of `managed_hosts` and must not be targeted by normal convergence.
@@ -313,10 +321,11 @@ Managed by `playbooks/samba.yml`, which runs on any `linux_hosts` host with `smb
 
 ### Docker Container Management
 
-Docker Compose stacks are managed via the `docker-stacks.yml` playbook. Services are split between two VMs:
+Docker Compose stacks are managed via the `docker-stacks.yml` playbook. Services are split between dedicated VMs and explicitly opted-in workstation/controller hosts:
 - **docker-vm (VM 110 on pve-m70q)**: Infrastructure services (Caddy, Vaultwarden, monitoring, etc.)
 - **nextcloud-vm (VM 101 on ts440)**: Nextcloud AIO with VirtioFS storage
 - **media-vm (VM 100 on ts440)**: All media services (Plex, *arr stack, etc.)
+- **jn-t14s-lin (Kubuntu workstation/controller)**: OpenClaw support services such as the local Qdrant vector store
 
 **Stack Configuration**: Define stacks in `host_vars/<hostname>/docker.yml`:
 ```yaml
@@ -333,7 +342,7 @@ docker_stacks:
 
 Lightweight VM (6 cores, 6GB RAM) running infrastructure services. Stacks defined in `host_vars/docker-vm/docker.yml`. Services use `caddy-proxy` Docker network (created by Caddy stack; other stacks join as external). Configs stored locally at `/opt/<service>/`, backed up via restic.
 
-**Portainer CE** (multi-host): Central Docker management UI at `portainer.jnalley.me`. Manages docker-vm locally via socket; media-vm, nextcloud-vm, and openclaw-vm connect via Portainer Edge Agents (`portainer/agent:latest` with `EDGE=1`). Edge Agents connect outbound to Portainer — no inbound ports needed on remote VMs. Agent compose files at `/opt/portainer-agent/` on each VM, with per-environment edge keys from the Portainer API. Admin credentials in Portainer's local database (not vault-managed).
+**Portainer CE** (multi-host): Central Docker management UI at `portainer.jnalley.me`. Manages docker-vm locally via socket; media-vm and nextcloud-vm connect via Portainer Edge Agents (`portainer/agent:latest` with `EDGE=1`). Edge Agents connect outbound to Portainer — no inbound ports needed on remote hosts. Agent compose files at `/opt/portainer-agent/` where enabled, with per-environment edge keys from the Portainer API. Admin credentials in Portainer's local database (not vault-managed).
 
 **Dispatcharr** (disabled): HDHomeRun emulator for free IPTV in Plex. Commented out in `docker.yml` — free M3U playlists had too many dead streams. Compose file and data preserved at `/opt/dispatcharr/` on docker-vm. Uncomment in `docker.yml` and `templates/Caddyfile.j2` to re-enable. HDHR tuner URL for Plex: `http://100.108.254.100:9191/hdhr` (note the `/hdhr` path — not root).
 
@@ -349,7 +358,7 @@ Primary media VM (10GB RAM, 4 cores, 200GB disk, Quadro P2200 GPU passthrough). 
 
 **Critical**: All media containers must use the same VirtioFS mount path (`/srv/media/plex:/data`). Using different paths causes stale file handle errors. Hardlinks work because all downloads and media libraries share the same `/data` mount on mergerfs.
 
-**Stream relay**: `playbooks/stream-relay.yml` deploys `stream-relay.service`, which receives OBS SRT on UDP 9000, encodes once with the Quadro's `h264_nvenc`, and fans out to the configured RTMP platforms. The same playbook also deploys `stream-relay-vertical.service`, a disabled-by-default Aitum Vertical RTMP ingest on TCP 1936 for a standalone YouTube vertical/Shorts stream. Both services use the live-only root-readable `/etc/stream-relay/stream-relay.env` with platform stream keys; never commit stream keys. Platform RTMP output failures abort FFmpeg so systemd can restart the relay instead of leaving a dead platform leg hidden behind a still-running ingest. By default the relays bind to media-vm's Tailscale IP and firewall access is through the Proxmox datacenter `streaming-pc` IP set. Add the gaming PC's LAN IP only when intentionally switching to direct LAN bind addresses. The operator-facing Twitch/YouTube/TikTok/Mac OBS/Aitum/SleepyChat runbook is `docs/streaming-runbook.md`; start there before changing or troubleshooting the streaming setup.
+**Stream relay**: `playbooks/stream-relay.yml` deploys `stream-relay.service`, which receives OBS SRT on UDP 9000, encodes once with the Quadro's `h264_nvenc`, and fans out to the configured RTMP platforms. The same playbook also deploys `stream-relay-vertical.service`, a disabled-by-default Aitum Vertical RTMP ingest on TCP 1936 for a standalone YouTube vertical/Shorts stream. Both services use the live-only root-readable `/etc/stream-relay/stream-relay.env` with platform stream keys; never commit stream keys. Platform RTMP output failures abort FFmpeg so systemd can restart the relay instead of leaving a dead platform leg hidden behind a still-running ingest. By default the relays bind to media-vm's Tailscale IP and firewall access is through the Proxmox datacenter `streaming-pc` IP set. Add the gaming PC's LAN IP only when intentionally switching to direct LAN bind addresses. The operator-facing Twitch/YouTube/TikTok/Mac OBS/Aitum/SleepyChat runbook is `docs/streaming-runbook.md`; start there before changing or troubleshooting the streaming setup. Hands-off streaming automation has two health layers: `stream-relay-health.timer` on media-vm for local Apprise/DBC alerts, and Astra's live OpenClaw heartbeat file `/home/johnny/.openclaw/workspace/HEARTBEAT.md` on the OpenClaw host for external checks. Do not say Astra is wired unless that live heartbeat file contains the stream relay/VOD section and the OpenClaw host can run `ssh dbc@100.66.6.113 '/usr/local/sbin/stream-relay-health --no-alert'` successfully.
 
 **Immich**: Photo/video management at `photos.jnalley.me`. ML container capped at `mem_limit: 3g` to prevent OOM-freezing the VM. External library (`/srv/untitled`) is auto-locked by `immich_folder_album_creator` every 6 hours.
 
@@ -357,9 +366,11 @@ Primary media VM (10GB RAM, 4 cores, 200GB disk, Quadro P2200 GPU passthrough). 
 
 **Anime policy checks**: `scripts/sonarr_release_expectation_check.py` and `scripts/radarr_release_expectation_check.py` are the read-only live checks for the active `shows-anime` and `movies-anime` profiles. Run them on `media-vm` after anime release-policy changes to verify DA/x265 scores, native quality grouping, quality-rank CFs, rename-format preservation of audio languages/video codec, DA/x265 title-side matching, profile assignment counts, and score math such as `1080p DA > 720p DA + x265 + top tier` and `lowest DA > strongest single-tier non-DA`. Radarr's checker also verifies `x265 (HD)` excludes 2160p.
 
-**Sonarr queue regression check**: `scripts/sonarr_grab_diagnostics.py` compares queued Sonarr downloads against the current imported episode files. It is read-only by default. Use `--remove-current-better --remove-from-client` only after inspecting output; that removes queue downloads where the current file score is already higher, through Sonarr with `blocklist=false`.
+**Profilarr candidate checks**: `scripts/arr_stage_profilarr_test_profiles.py` snapshots live Sonarr/Radarr release-policy state under `/opt/media-stack/release-policy-snapshots/` and creates/refreshed unassigned Profilarr test profiles. `scripts/profilarr_state_audit.py` checks linked Profilarr databases, upgrade configs, and queued/running scheduler jobs. `scripts/profilarr_candidate_audit.py` materializes linked PCD repositories in memory and compares candidate CF/profile material with live Arr names. `scripts/profilarr_selective_cf_import.py` is the controlled Profilarr-to-Arr bridge: it reads Profilarr's locally synced Dictionarry/Dumpstarr data, copies only curated CF definitions as `Dumpstarr ...` formats, and scores only the unassigned anime test profiles. Profilarr can keep pulling upstream databases, but copied Arr CFs update only when this importer is rerun; do not import upstream full profiles or stock x265 penalties unless the user explicitly changes the policy. Use these before assigning media to a Profilarr-derived test profile or syncing candidate CFs.
 
-**Release metadata stamper**: `playbooks/media-release-stamper.yml` deploys SABnzbd and qBittorrent post-download stampers that preserve DA/x265 evidence before Sonarr/Radarr import. qBittorrent renames payload files through its Web API to keep seeding state intact. DA evidence is stamped as language-combo tags such as `[JA+EN]`, `[KO+EN]`, or `[JA+KO+EN]`, per file only when audio metadata shows English plus the configured original language; qBittorrent can optionally get that original language from Sonarr/Radarr by torrent hash/download ID, and SABnzbd can optionally get it by release/job title. Arr lookup must stay bounded and non-fatal; fallback default is `jpn`, so `eng+kor` does not qualify when context is unavailable. `[x265]` is stamped per file only after the payload itself contains HEVC markers. Document behavior changes in `docs/media-release-policy.md`.
+**Sonarr queue regression check**: `scripts/sonarr_grab_forensics.py` is the first-line read-only classifier for queued grabs: it groups queue rows by download, compares queued vs current custom-format scores, and flags likely payload score loss, pack collateral/mapping issues, stalled/warning downloads, and active valid upgrades. Run it before deleting anything so repeated non-better grabs are fixed at the cause instead of cleaned up after bandwidth is spent. `scripts/sonarr_grab_diagnostics.py` compares queued Sonarr downloads against current imported episode files and can remove inspected current-better queue rows with `--remove-current-better --remove-from-client`; it uses Sonarr deletion with `blocklist=false`. Use removal only after inspecting output. `scripts/sonarr_series_audit.py <series>` is the read-only per-series state check for monitoring, season/file/missing counts, queue items, recent history, and active/recent commands.
+
+**Release metadata stamper**: `playbooks/media-release-stamper.yml` deploys SABnzbd and qBittorrent post-download stampers that preserve grab-time evidence before Sonarr/Radarr import. qBittorrent renames payload files through its Web API to keep seeding state intact. DA evidence is stamped as language-combo tags such as `[JA+EN]`, `[KO+EN]`, or `[JA+KO+EN]`, per file only when audio metadata shows English plus the configured original language; qBittorrent can optionally get that original language from Sonarr/Radarr by torrent hash/download ID, and SABnzbd can optionally get it by release/job title. Arr lookup must stay bounded and non-fatal; fallback default is `jpn`, so `eng+kor` does not qualify when context is unavailable. `[x265]` is stamped per file only after the payload itself contains HEVC markers. Platform/source tags and release-group suffixes may be copied from the parent release/job/torrent title to preserve release-context custom formats at import, but generic quality/resolution/source labels are not copied. Document behavior changes in `docs/media-release-policy.md`.
 
 **Tdarr** (disabled 2026-04-13): Media transcoding service. Commented out in `/opt/media-stack/docker-compose.yml` and `templates/Caddyfile.j2`. Compose config and `/opt/media-stack/tdarr/` data preserved for easy re-enable.
 
@@ -449,16 +460,16 @@ auto-updates (weekly) ─────────┼──→ Apprise API ──
 unattended-upgrades (daily) ───┤   (docker-vm)  ───→ Pushover "Computer Corner" app (infrastructure, silent/quiet)
 network-watchdog (recovery) ───┤                ───→ Pushover "cc-media-feed" app (media, silent)
 gluetun-watchdog (VPN) ────────┤                ───→ Email (iCloud SMTP)
-docker-auto-update (6h) ───────┤                ───→ DBC alert receiver (openclaw-vm, triage + morning summary)
+docker-auto-update (6h) ───────┤                ───→ DBC alert receiver (OpenClaw host, triage + morning summary)
 Sonarr/Radarr (grabs) ─────────┤
 Seerr (requests) ──────────────┘
 
 Sonarr/Radarr ──→ Discord (native connection, rich embeds with poster art)
 ```
 
-**Apprise tags** control routing: `push` (Pushover infrastructure, Time Sensitive), `push-quiet` (Pushover infrastructure, silent), `email` (iCloud SMTP), `media-feed` (Pushover media, silent), `media-requests` (Seerr media requests, silent), `dbc` (DBC alert receiver on openclaw-vm). The `dbc` tag is included alongside existing tags in all notification calls so DBC gets a copy of every alert. Services specify tags via `apprise_alert_tags` variable (default: `push,dbc` in `group_vars/all/vars.yml`). apcupsd supports per-service override via `apcupsd_alert_tags`. Combine tags like `push,email` for multi-target delivery.
+**Apprise tags** control routing: `push` (Pushover infrastructure, Time Sensitive), `push-quiet` (Pushover infrastructure, silent), `email` (iCloud SMTP), `media-feed` (Pushover media, silent), `media-requests` (Seerr media requests, silent), `dbc` (DBC alert receiver on the OpenClaw host). The `dbc` tag is included alongside existing tags in all notification calls so DBC gets a copy of every alert. Services specify tags via `apprise_alert_tags` variable (default: `push,dbc` in `group_vars/all/vars.yml`). apcupsd supports per-service override via `apcupsd_alert_tags`. Combine tags like `push,email` for multi-target delivery.
 
-**DBC alert receiver**: DBC (OpenClaw agent) receives a copy of all infrastructure alerts via `dbc=jsons://openclaw.jnalley.me/alerts` in the Apprise config. Alerts are stored in SQLite on openclaw-vm and triaged: errors get an immediate ping in Discord #dbc-logs, routine alerts are batched into the morning summary. The receiver runs on port 18792, proxied through Caddy. Ansible-managed notifications include the `dbc` tag automatically via variables; Sonarr/Radarr/Seerr have `dbc` added manually to their Apprise tag fields in their web UIs.
+**DBC alert receiver**: DBC (OpenClaw agent) receives a copy of all infrastructure alerts via `dbc=jsons://openclaw.jnalley.me/alerts` in the Apprise config. Alerts are stored in SQLite on the OpenClaw host and triaged: errors get an immediate ping in Discord #dbc-logs, routine alerts are batched into the morning summary. The receiver runs on port 18792, proxied through Caddy. Ansible-managed notifications include the `dbc` tag automatically via variables; Sonarr/Radarr/Seerr have `dbc` added manually to their Apprise tag fields in their web UIs.
 
 **Why Pushover over ntfy**: ntfy's iOS app does not support per-topic notification control. Pushover allows true silent delivery via priority `-2` and per-app iOS settings. ntfy config preserved (commented out) in docker-compose.
 
@@ -507,7 +518,7 @@ Four-tier backup strategy:
 
 - **Proxmox Backup Server (PBS)**: Hourly VM/CT snapshot backups via `proxmox-backup-server.yml`. pbs-lxc (CT 105 on pve-herc, Debian 13, 4 cores, 2GB RAM) with 1TB ext4 datastore at `/srv/pbs-data`. The same 1TB drive also hosts `/srv/pbs-data/timemachine/` for macOS Time Machine (served by Samba on pve-herc). Registered as `pbs-main` storage on all 4 Proxmox nodes. All guests backed up hourly except pbs-lxc itself (circular); uses `--all --exclude 105`. API token auth (`backup@pbs!ansible`, secret in `host_vars/pbs-lxc/vault.yml`). Daily prune job: 24h/7d/4w/3m. **Daily garbage collection** (frees disk space from pruned snapshots — without GC, orphaned chunks accumulate indefinitely). Web UI: `https://100.110.176.37:8007`. PBS dedup makes hourly backups viable — only changed blocks are stored after the initial full backup. Connectivity check runs at `:59` on all nodes (Play 4), logging to journald tag `pbs-check` for Loki.
 - **Offsite (Backblaze B2)**: Daily via `restic.yml` at 00:00 UTC +30m random delay. Retention: 7d/4w/6m. ts440 backs up `/srv/nas-zfs` excluding replaceable media.
-- **Local (ts440 ZFS)**: Hourly via `local-restic.yml`. Backs up `/opt` from VMs to `/srv/nas-zfs/backups/<hostname>/`. Retention: 24h/7d/4w/6m. Most hosts use SFTP over Tailscale SSH with a dedicated key in `group_vars/backup_clients/vault.yml`. Hosts without Tailscale SSH access (e.g., openclaw-vm) use a **restic REST server** on ts440 (port 8500) with append-only mode — no SSH, no shell, no filesystem browsing, and existing backups cannot be deleted. REST credentials live in host vault, htpasswd lives on ts440, and `--private-repos` ensures each user can only access their own repo directory. Append-only clients skip client-side retention; ts440 runs `restic-rest-maintenance-openclaw-vm.timer` daily at 03:20 to prune the openclaw-vm repository server-side.
+- **Local (ts440 ZFS)**: Hourly via `local-restic.yml`. Backs up configured local paths to `/srv/nas-zfs/backups/<hostname>/`. Retention: 24h/7d/4w/6m. Most hosts use SFTP over Tailscale SSH with a dedicated key in `group_vars/backup_clients/vault.yml`. Hosts without Tailscale SSH access can use a **restic REST server** on ts440 (port 8500) with append-only mode — no SSH, no shell, no filesystem browsing, and existing backups cannot be deleted. REST credentials live in host vault, htpasswd lives on ts440, and `--private-repos` ensures each user can only access their own repo directory. Append-only clients skip client-side retention and need server-side maintenance timers on ts440.
 - **ZFS Snapshots (sanoid)**: Every 15 minutes via `zfs.yml`. Policies defined in `group_vars/nas_server/zfs.yml`. Property enforcement (`zfs set`) runs automatically to fix drift.
 
 Enable local backups: set `local_restic_enabled: true` and `local_restic_backup_paths` in host_vars. Source env with `set -a` when accessing repos manually: `sudo bash -c 'set -a && source /etc/restic/local-backup.env && restic snapshots'`.
@@ -587,7 +598,7 @@ Deployed via `playbooks/network-recovery.yml` to `linux_hosts:!workstations`.
 
 The old `jn-desktop` CachyOS install is retained in `retired_hosts` only because it has been offline long enough to break normal `site.yml` convergence. Do not add retired hosts back to active groups unless they are reachable and intentionally managed again.
 
-**jn-t14s-lin** (Kubuntu): ThinkPad T14s laptop in `orchestrator`, `debian_hosts`, `workstations`, and `backup_clients`. Requires `ansible_become_flags: "-S"` in host vars due to sudo-rs (Ubuntu 25.10+ default). WiFi powersave disabled; optional ath11k resume hooks available in `host_vars/jn-t14s-lin/wifi.yml`. As the flat controller, it advertises `tag:orchestrators` and stays awake on AC power.
+**jn-t14s-lin** (Kubuntu): ThinkPad T14s laptop in `orchestrator`, `debian_hosts`, `workstations`, `docker_hosts`, `openclaw_hosts`, and `backup_clients`. Requires `ansible_become_flags: "-S"` in host vars due to sudo-rs (Ubuntu 25.10+ default). WiFi powersave disabled; optional ath11k resume hooks available in `host_vars/jn-t14s-lin/wifi.yml`. As the flat controller, it advertises `tag:orchestrators`, stays awake on AC power, and runs explicit Docker stacks from `host_vars/jn-t14s-lin/docker.yml`.
 
 Workstations inherit `network_watchdog_enabled: false` and `auto_updates_enabled: false` from `group_vars/workstations/vars.yml`. Linux workstations still receive daily security patches via `unattended-upgrades`.
 
@@ -641,22 +652,23 @@ USB drive timeout standard: all USB drives in `group_vars/nas_server/mounts.yml`
 
 FreePBX 17 PBX server (Asterisk 22, Debian 12 Bookworm). Provides a second phone number via VoIP.ms SIP trunk and Yealink SIP-T54W desk phone, with call forwarding to iPhone. Web GUI: `http://100.97.139.95/admin`. APT pinned to `bookworm` via `apt_pin_release` to prevent accidental Debian 13 upgrades. FreePBX/Asterisk packages are held (`apt-mark hold`) by the install script — module updates done through the web GUI. Sangoma Smart Firewall enabled with Tailscale CGNAT (`100.64.0.0/10`) trusted. Proxmox firewall rules: SIP (UDP 5060 from LAN + VoIP.ms), RTP (UDP 10000-20000), web GUI (TCP 80/443 Tailscale only), SSH. Config: `host_vars/freepbx-vm/` (vars.yml, packages.yml). Local restic backups: `/etc/asterisk`, `/var/lib/asterisk`, `/var/spool/asterisk`.
 
-### openclaw-vm (VM 140 on ts440)
+### OpenClaw Host (jn-t14s-lin)
 
-OpenClaw AI agent platform (Node.js gateway daemon). Provides a web UI and Discord channel for interacting with the agent fleet (DBC + Fleet of Stars: main, dubble, vega, antares, rigel) — primarily backed by GPT-5.5 via OpenAI Codex, with OpenRouter and Ollama Cloud fallbacks. Can read and edit the Ansible repo (cloned to `/opt/cc-ansible`) but cannot run playbooks or SSH into managed hosts (security boundary).
+OpenClaw AI agent platform (Node.js gateway daemon). Provides a web UI and Discord channel for interacting with the agent fleet (DBC + Fleet of Stars: main, dubble, vega, antares, rigel) — primarily backed by GPT-5.5 via OpenAI Codex, with OpenRouter and Ollama Cloud fallbacks. It runs on the T14s controller/workstation, so treat its repo and host access as controller-adjacent rather than as the old isolated VM boundary. The former `openclaw-vm` inventory record is retained only in `retired_hosts`.
 
 - **Web UI**: `https://openclaw.jnalley.me` (Tailscale only, via Caddy on docker-vm)
 - **Gateway port**: 18789 (token auth, trustedProxies: docker-vm only)
-- **VM Specs**: 4 cores, 8GB RAM (balloon min 6144MB), 75GB disk, Ubuntu 25.10
+- **Host**: `jn-t14s-lin` (Kubuntu workstation/controller)
 - **Node.js**: 22 via NodeSource repo (OpenClaw requires >= 22)
-- **Docker**: Installed for OpenClaw sandbox containers and Qdrant. In `docker_hosts` group — managed by `docker-stacks.yml`.
+- **Docker**: Installed for OpenClaw sandbox containers and Qdrant. In `docker_hosts` group — Qdrant is managed by `docker-stacks.yml`.
 - **Gateway service**: Managed by OpenClaw itself via `openclaw gateway install` (user-level systemd unit)
 - **Config**: `~/.openclaw/openclaw.json` and `~/.openclaw/.env` — created manually, backed up by restic (NOT templated by Ansible)
+- **Astra heartbeat**: The active heartbeat prompt is `/home/johnny/.openclaw/workspace/HEARTBEAT.md` on the OpenClaw host. Treat it as live OpenClaw workspace content that Astra may edit; update it directly when changing heartbeat behavior and document the expectation in this repo. Do not create an OpenClaw cron when the right primitive is the heartbeat file.
 - **Linting tools**: `ansible-lint`, `yamllint` in venv at `/opt/openclaw-venv/`
 - **Timers**: repo-sync (git pull every 5 min), update-check (daily at 08:00 with Apprise notification)
 - **Playbook**: `playbooks/openclaw.yml` (opt-in via `openclaw_enabled` variable)
-- **Config**: `host_vars/openclaw-vm/` (vars.yml, packages.yml, backup.yml, docker.yml)
-- **Firewall**: DROP default, port 18789 from docker-vm only, SSH from Tailscale only
+- **Config**: `host_vars/jn-t14s-lin/openclaw.yml`, `packages.yml`, `backup.yml`, and `docker.yml`
+- **Firewall**: Caddy proxies OpenClaw through the T14s Tailscale address; avoid opening LAN access unless explicitly required.
 
 **OpenClaw troubleshooting rule**: Do not assume an OpenClaw symptom is an upstream software bug or regression unless there is an exact documented GitHub issue or release note matching the observed failure. Default to diagnosing local configuration, plugin state, runtime health, gateway load, memory/LCM/mem0 state, and update drift first. Avoid update-fragile local plugin patches unless the user explicitly approves a temporary workaround.
 
