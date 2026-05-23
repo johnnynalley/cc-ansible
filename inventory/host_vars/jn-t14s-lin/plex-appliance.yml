@@ -9,8 +9,8 @@ plex_appliance_server_url: "http://100.66.6.113:32400"
 plex_appliance_library: "Shows"
 plex_appliance_collection: "Adult Swim Collection"
 
-# This uses a high dedicated VT while HDMI is attached. If Plasma is active,
-# lock it first, then use the same appliance VT path as the greeter.
+# T14s uses the Plasma/KScreen backend so mpv runs inside the logged-in Wayland
+# session. Direct DRM VT playback can leave KWin unable to modeset after unplug.
 plex_appliance_audio_languages:
   - eng
 plex_appliance_subtitle_languages:
@@ -34,24 +34,11 @@ plex_appliance_hdmi_ignore_patterns:
   - eDP
   - LVDS
   - DSI
-plex_appliance_hdmi_backend: vt
-plex_appliance_hdmi_tty: /dev/tty8
-plex_appliance_hdmi_return_tty: /dev/tty1
-plex_appliance_hdmi_drm_connector: HDMI-A-1
-plex_appliance_hdmi_sysfs_connector: card1-HDMI-A-1
-plex_appliance_hdmi_eld_path: "/proc/asound/card0/eld#0.1"
-plex_appliance_hdmi_edid_path: /sys/class/drm/card1-HDMI-A-1/edid
-plex_appliance_hdmi_restore_getty: true
-plex_appliance_hdmi_restart_display_manager: true
-plex_appliance_hdmi_display_manager_service: sddm.service
-plex_appliance_hdmi_reset_plasma_user_services: true
-plex_appliance_hdmi_skip_when_local_user_active: false
-plex_appliance_hdmi_lock_local_user_session: true
-plex_appliance_hdmi_lock_settle_seconds: 2
+plex_appliance_hdmi_backend: kscreen
 plex_appliance_hdmi_poll_seconds: 5
 plex_appliance_hdmi_configure_display: true
 plex_appliance_hdmi_make_primary: true
-plex_appliance_hdmi_tv_only: true
+plex_appliance_hdmi_tv_only: false
 plex_appliance_hdmi_autostart_enabled: true
 plex_appliance_audio_device: "alsa/hdmi:CARD=Generic,DEV=1"
 plex_appliance_page_size: 100
@@ -66,10 +53,6 @@ plex_appliance_mpv_args:
   - --really-quiet
   - --profile=fast
   - --vo=gpu
-  - --gpu-context=drm
-  - --drm-connector=HDMI-A-1
-  - --drm-mode=1920x1080@60
-  - --ao=alsa
   - --hwdec=auto-safe
   - --volume-max=200
   - --volume=100
