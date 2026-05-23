@@ -54,7 +54,7 @@ plex_appliance_hdmi_tv_only: true
 plex_appliance_hdmi_autostart_enabled: true
 plex_appliance_audio_device: "alsa/hdmi:CARD=Generic,DEV=1"
 plex_appliance_page_size: 100
-plex_appliance_server_retry_seconds: 30
+plex_appliance_server_retry_seconds: 3
 plex_appliance_item_failure_delay_seconds: 10
 plex_appliance_collection_refresh_seconds: 3600
 plex_appliance_mpv_args:
