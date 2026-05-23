@@ -1,0 +1,161 @@
+# =============================================================================
+# Plex Appliance Playbook - dedicated fullscreen shuffled Plex collection player
+# =============================================================================
+# Usage:
+#   ansible-playbook playbooks/plex-appliance.yml --check --diff
+#   ansible-playbook playbooks/plex-appliance.yml
+# =============================================================================
+
+- name: Configure Plex collection appliance
+  hosts: plex_appliances
+  become: true
+  gather_facts: true
+
+  handlers:
+    - name: Reload systemd
+      ansible.builtin.systemd:
+        daemon_reload: true
+      when: not ansible_check_mode
+
+    - name: Restart plex appliance
+      ansible.builtin.systemd:
+        name: plex-appliance.service
+        state: restarted
+      when:
+        - plex_appliance_enabled | default(false)
+        - not ansible_check_mode
+
+  tasks:
+    - name: Stop and disable Plex appliance service (disabled hosts)
+      ansible.builtin.systemd:
+        name: plex-appliance.service
+        enabled: false
+        state: stopped
+        daemon_reload: true
+      when:
+        - not ansible_check_mode
+        - not (plex_appliance_enabled | default(false))
+      failed_when: false
+
+    - name: Skip remaining tasks (not a Plex appliance host)
+      ansible.builtin.meta: end_host
+      when: not (plex_appliance_enabled | default(false))
+
+    - name: Assert supported OS family
+      ansible.builtin.assert:
+        that:
+          - ansible_facts.os_family == "Debian"
+        fail_msg: "plex-appliance currently supports Debian-family hosts only."
+
+    - name: Assert Plex appliance token is configured
+      ansible.builtin.assert:
+        that:
+          - plex_appliance_token is defined
+          - plex_appliance_token | length > 0
+          - plex_appliance_token != "replace-with-plex-token"
+        fail_msg: "Set vault_plex_appliance_token in the host's encrypted vault.yml."
+
+    - name: Install Plex appliance packages
+      ansible.builtin.apt:
+        name: "{{ plex_appliance_packages }}"
+        state: present
+        update_cache: true
+        cache_valid_time: 3600
+
+    - name: Ensure media access groups exist
+      ansible.builtin.group:
+        name: "{{ item }}"
+        state: present
+        system: true
+      loop:
+        - audio
+        - video
+        - render
+        - input
+
+    - name: Ensure appliance user can access display/audio devices
+      ansible.builtin.user:
+        name: "{{ plex_appliance_user }}"
+        groups:
+          - audio
+          - video
+          - render
+          - input
+        append: true
+
+    - name: Set appliance boot target
+      ansible.builtin.file:
+        src: /lib/systemd/system/multi-user.target
+        dest: /etc/systemd/system/default.target
+        state: link
+        force: true
+      when: plex_appliance_disable_desktop | default(false)
+
+    - name: Collect service facts for desktop services
+      ansible.builtin.service_facts:
+      when: plex_appliance_disable_desktop | default(false)
+
+    - name: Stop and disable desktop display services
+      ansible.builtin.systemd:
+        name: "{{ item }}"
+        enabled: false
+        state: stopped
+      loop: "{{ plex_appliance_desktop_services | default([]) }}"
+      when:
+        - plex_appliance_disable_desktop | default(false)
+        - item in ansible_facts.services
+      notify: Restart plex appliance
+
+    - name: Create Plex appliance config directory
+      ansible.builtin.file:
+        path: /etc/plex-appliance
+        state: directory
+        owner: root
+        group: root
+        mode: "0700"
+
+    - name: Create Plex appliance state directory
+      ansible.builtin.file:
+        path: /var/lib/plex-appliance
+        state: directory
+        owner: "{{ plex_appliance_user }}"
+        group: "{{ plex_appliance_user }}"
+        mode: "0750"
+
+    - name: Deploy Plex appliance environment
+      ansible.builtin.template:
+        src: ../templates/plex-appliance.env.j2
+        dest: /etc/plex-appliance/plex-appliance.env
+        owner: root
+        group: root
+        mode: "0600"
+      no_log: true
+      notify: Restart plex appliance
+
+    - name: Deploy Plex appliance player
+      ansible.builtin.template:
+        src: ../templates/plex-appliance-player.py.j2
+        dest: /usr/local/bin/plex-appliance-player
+        owner: root
+        group: root
+        mode: "0755"
+      notify: Restart plex appliance
+
+    - name: Deploy Plex appliance systemd service
+      ansible.builtin.template:
+        src: ../templates/plex-appliance.service.j2
+        dest: /etc/systemd/system/plex-appliance.service
+        owner: root
+        group: root
+        mode: "0644"
+      notify:
+        - Reload systemd
+        - Restart plex appliance
+
+    - name: Enable and start Plex appliance service
+      ansible.builtin.systemd:
+        name: plex-appliance.service
+        enabled: true
+        state: started
+        daemon_reload: true
+      when: not ansible_check_mode

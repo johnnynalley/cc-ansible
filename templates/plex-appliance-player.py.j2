@@ -1,0 +1,226 @@
+#!/usr/bin/env python3
+"""Fullscreen Plex collection shuffle player for a dedicated TV appliance."""
+
+import os
+import random
+import shlex
+import subprocess
+import sys
+import time
+from typing import Dict, Iterable, List, Optional
+from urllib.parse import urlencode
+import xml.etree.ElementTree as ET
+
+import requests
+
+
+PLEX_URL = os.environ["PLEX_APPLIANCE_SERVER_URL"].rstrip("/")
+TOKEN = os.environ["PLEX_APPLIANCE_TOKEN"]
+LIBRARY = os.environ["PLEX_APPLIANCE_LIBRARY"]
+COLLECTION = os.environ["PLEX_APPLIANCE_COLLECTION"]
+AUDIO_LANGUAGES = [lang.strip() for lang in os.environ.get("PLEX_APPLIANCE_AUDIO_LANGUAGES", "").split(",") if lang.strip()]
+SUBTITLE_LANGUAGES = [lang.strip() for lang in os.environ.get("PLEX_APPLIANCE_SUBTITLE_LANGUAGES", "").split(",") if lang.strip()]
+SUBTITLE_MODE = os.environ.get("PLEX_APPLIANCE_SUBTITLES", "auto").strip().lower()
+PAGE_SIZE = int(os.environ.get("PLEX_APPLIANCE_PAGE_SIZE", "100"))
+SERVER_RETRY_SECONDS = int(os.environ.get("PLEX_APPLIANCE_SERVER_RETRY_SECONDS", "30"))
+ITEM_FAILURE_DELAY_SECONDS = int(os.environ.get("PLEX_APPLIANCE_ITEM_FAILURE_DELAY_SECONDS", "10"))
+COLLECTION_REFRESH_SECONDS = int(os.environ.get("PLEX_APPLIANCE_COLLECTION_REFRESH_SECONDS", "3600"))
+MPV_ARGS = shlex.split(os.environ.get("PLEX_APPLIANCE_MPV_ARGS", "--fs --no-terminal"))
+
+SESSION = requests.Session()
+SESSION.headers.update({
+    "Accept": "application/xml",
+    "X-Plex-Product": "Plex Appliance",
+    "X-Plex-Version": "1.0",
+    "X-Plex-Client-Identifier": "cc-ansible-plex-appliance",
+    "X-Plex-Device-Name": "Living Room Plex Appliance",
+})
+
+
+def log(message: str) -> None:
+    print(time.strftime("%Y-%m-%d %H:%M:%S"), message, flush=True)
+
+
+def plex_url(path: str, params: Optional[Dict[str, object]] = None) -> str:
+    query = dict(params or {})
+    query["X-Plex-Token"] = TOKEN
+    return f"{PLEX_URL}{path}?{urlencode(query)}"
+
+
+def plex_get(path: str, params: Optional[Dict[str, object]] = None, timeout: int = 20) -> ET.Element:
+    response = SESSION.get(plex_url(path, params), timeout=timeout)
+    response.raise_for_status()
+    return ET.fromstring(response.content)
+
+
+def wait_for_server() -> None:
+    while True:
+        try:
+            plex_get("/identity", timeout=5)
+            return
+        except Exception as exc:
+            log(f"Plex unavailable: {exc}; retrying in {SERVER_RETRY_SECONDS}s")
+            time.sleep(SERVER_RETRY_SECONDS)
+
+
+def children(root: ET.Element) -> List[ET.Element]:
+    return list(root.findall("Directory")) + list(root.findall("Video"))
+
+
+def fetch_paged(path: str, params: Optional[Dict[str, object]] = None) -> List[ET.Element]:
+    items: List[ET.Element] = []
+    offset = 0
+    while True:
+        page_params = dict(params or {})
+        page_params["X-Plex-Container-Start"] = offset
+        page_params["X-Plex-Container-Size"] = PAGE_SIZE
+        root = plex_get(path, page_params)
+        page_items = children(root)
+        items.extend(page_items)
+
+        size = int(root.attrib.get("size", len(page_items)))
+        total = int(root.attrib.get("totalSize", offset + size))
+        offset += size
+        if size <= 0 or offset >= total:
+            return items
+
+
+def find_section_key() -> str:
+    root = plex_get("/library/sections/all")
+    for directory in root.findall("Directory"):
+        if directory.attrib.get("title") == LIBRARY:
+            return directory.attrib["key"]
+    raise RuntimeError(f"Library not found: {LIBRARY}")
+
+
+def find_collection_id(section_key: str) -> str:
+    collections = fetch_paged(f"/library/sections/{section_key}/collections")
+    for collection in collections:
+        if collection.attrib.get("title") == COLLECTION:
+            return collection.attrib["ratingKey"]
+    raise RuntimeError(f"Collection not found in {LIBRARY}: {COLLECTION}")
+
+
+def fetch_metadata(rating_key: str) -> Optional[ET.Element]:
+    root = plex_get(f"/library/metadata/{rating_key}")
+    metadata = children(root)
+    return metadata[0] if metadata else None
+
+
+def expand_video_item(item: ET.Element) -> Iterable[ET.Element]:
+    item_type = item.attrib.get("type")
+    rating_key = item.attrib.get("ratingKey")
+    if item_type in {"episode", "movie"}:
+        yield item
+    elif item_type == "show" and rating_key:
+        yield from fetch_paged(f"/library/metadata/{rating_key}/allLeaves")
+    elif item_type == "season" and rating_key:
+        yield from fetch_paged(f"/library/metadata/{rating_key}/children")
+
+
+def load_collection_items() -> List[ET.Element]:
+    section_key = find_section_key()
+    collection_id = find_collection_id(section_key)
+    raw_items = fetch_paged(f"/library/collections/{collection_id}/items")
+    expanded: List[ET.Element] = []
+    for item in raw_items:
+        expanded.extend(expand_video_item(item))
+
+    playable = [item for item in expanded if stream_url_for_item(item)]
+    if not playable:
+        raise RuntimeError(f"No playable items found in collection: {COLLECTION}")
+    log(f"Loaded {len(playable)} playable items from {COLLECTION}")
+    return playable
+
+
+def stream_url_for_item(item: ET.Element) -> Optional[str]:
+    media_parent = item
+    if not item.findall("Media") and item.attrib.get("ratingKey"):
+        fetched = fetch_metadata(item.attrib["ratingKey"])
+        if fetched is not None:
+            media_parent = fetched
+
+    for media in media_parent.findall("Media"):
+        for part in media.findall("Part"):
+            key = part.attrib.get("key")
+            if key:
+                return plex_url(key)
+    return None
+
+
+def item_title(item: ET.Element) -> str:
+    parts = [
+        item.attrib.get("grandparentTitle"),
+        item.attrib.get("parentTitle"),
+        item.attrib.get("title"),
+    ]
+    return " - ".join(part for part in parts if part)
+
+
+def shuffled_queue(items: List[ET.Element]) -> List[ET.Element]:
+    queue = list(items)
+    random.shuffle(queue)
+    return queue
+
+
+def playback_args() -> List[str]:
+    args = list(MPV_ARGS)
+    if AUDIO_LANGUAGES:
+        args.append("--alang=" + ",".join(AUDIO_LANGUAGES))
+    if SUBTITLE_LANGUAGES:
+        args.append("--slang=" + ",".join(SUBTITLE_LANGUAGES))
+    if SUBTITLE_MODE == "off":
+        args.append("--sid=no")
+    elif SUBTITLE_MODE != "auto":
+        log(f"Unknown subtitle mode {SUBTITLE_MODE!r}; using mpv default")
+    return args
+
+
+def play(item: ET.Element) -> int:
+    url = stream_url_for_item(item)
+    if not url:
+        log(f"Skipping item without stream URL: {item_title(item)}")
+        return 0
+
+    log(f"Playing: {item_title(item)}")
+    command = ["mpv", *playback_args(), url]
+    completed = subprocess.run(command, check=False)
+    log(f"Player exited with code {completed.returncode}")
+    return completed.returncode
+
+
+def main() -> int:
+    queue: List[ET.Element] = []
+    collection_items: List[ET.Element] = []
+    next_refresh = 0.0
+
+    while True:
+        wait_for_server()
+
+        now = time.monotonic()
+        if not queue or now >= next_refresh:
+            try:
+                collection_items = load_collection_items()
+                queue = shuffled_queue(collection_items)
+                next_refresh = now + COLLECTION_REFRESH_SECONDS
+            except Exception as exc:
+                log(f"Failed to refresh collection: {exc}; retrying in {SERVER_RETRY_SECONDS}s")
+                time.sleep(SERVER_RETRY_SECONDS)
+                continue
+
+        item = queue.pop(0)
+        try:
+            return_code = play(item)
+        except Exception as exc:
+            log(f"Playback launch failed: {exc}")
+            return_code = 1
+
+        if return_code != 0:
+            time.sleep(ITEM_FAILURE_DELAY_SECONDS)
+
+
+if __name__ == "__main__":
+    try:
+        sys.exit(main())
+    except KeyboardInterrupt:
+        sys.exit(0)

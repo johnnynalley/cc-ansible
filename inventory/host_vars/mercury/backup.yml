@@ -1,0 +1,24 @@
+# =============================================================================
+# mercury - Backup Configuration
+# =============================================================================
+
+restic_backup_paths_extra:
+  - /home/johnny
+  - /opt
+  - /var/lib/plex-appliance
+
+restic_excludes_extra:
+  - /home/johnny/.cache
+  - /home/johnny/.local/share/Trash
+  - /var/lib/plex-appliance/cache
+
+local_restic_enabled: true
+# Mercury sits on the same wired LAN as ts440. Use regular SSH over LAN for the
+# local backup path so backups do not require mutating Mercury's Tailscale tags.
+local_restic_target_host: "192.168.1.146"
+local_restic_backup_paths:
+  - /etc
+  - /root
+  - /home/johnny
+  - /opt
+  - /var/lib/plex-appliance

@@ -1,0 +1,78 @@
+# =============================================================================
+# Tailscale Tailnet Policy Management
+# =============================================================================
+
+- name: Require Tailscale policy API credentials
+  ansible.builtin.assert:
+    that:
+      - (vault_tailscale_oauth_client_id | default('') | length) > 0
+      - (vault_tailscale_oauth_client_secret | default('') | length) > 0
+    fail_msg: "Set vault_tailscale_oauth_client_id and vault_tailscale_oauth_client_secret to manage the Tailscale tailnet policy."
+    quiet: true
+  no_log: true
+
+- name: Load desired Tailscale tailnet policy
+  ansible.builtin.set_fact:
+    tailscale_policy_desired: "{{ lookup('ansible.builtin.file', tailscale_policy_file) }}"
+
+- name: Request Tailscale policy OAuth token
+  ansible.builtin.uri:
+    url: https://api.tailscale.com/api/v2/oauth/token
+    method: POST
+    body_format: form-urlencoded
+    body:
+      client_id: "{{ vault_tailscale_oauth_client_id }}"
+      client_secret: "{{ vault_tailscale_oauth_client_secret }}"
+      scope: "{{ tailscale_policy_oauth_scope | default('policy_file') }}"
+    return_content: true
+  register: tailscale_policy_oauth_token
+  check_mode: false
+  no_log: true
+
+- name: Fetch current Tailscale tailnet policy
+  ansible.builtin.uri:
+    url: "https://api.tailscale.com/api/v2/tailnet/{{ tailscale_tailnet | default('-') }}/acl"
+    method: GET
+    headers:
+      Authorization: "Bearer {{ tailscale_policy_oauth_token.json.access_token }}"
+    return_content: true
+  register: tailscale_policy_current
+  check_mode: false
+  no_log: true
+
+- name: Validate desired Tailscale tailnet policy
+  ansible.builtin.uri:
+    url: "https://api.tailscale.com/api/v2/tailnet/{{ tailscale_tailnet | default('-') }}/acl/validate"
+    method: POST
+    headers:
+      Authorization: "Bearer {{ tailscale_policy_oauth_token.json.access_token }}"
+      Content-Type: application/hujson
+    body: "{{ tailscale_policy_desired }}"
+    status_code: 200
+    return_content: true
+  check_mode: false
+  no_log: true
+
+- name: Apply desired Tailscale tailnet policy
+  ansible.builtin.uri:
+    url: "https://api.tailscale.com/api/v2/tailnet/{{ tailscale_tailnet | default('-') }}/acl"
+    method: POST
+    headers:
+      Authorization: "Bearer {{ tailscale_policy_oauth_token.json.access_token }}"
+      Content-Type: application/hujson
+    body: "{{ tailscale_policy_desired }}"
+    status_code: 200
+    return_content: true
+  changed_when: true
+  when:
+    - not ansible_check_mode
+    - (tailscale_policy_current.content | trim) != (tailscale_policy_desired | trim)
+  no_log: true
+
+- name: Report pending Tailscale tailnet policy change
+  ansible.builtin.debug:
+    msg: "Tailscale tailnet policy differs from repo-managed policy; rerun without --check to apply it."
+  changed_when: true
+  when:
+    - ansible_check_mode
+    - (tailscale_policy_current.content | trim) != (tailscale_policy_desired | trim)

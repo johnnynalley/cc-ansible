@@ -1,0 +1,53 @@
+# =============================================================================
+# mercury - Plex Living Room Appliance
+# =============================================================================
+
+plex_appliance_enabled: true
+plex_appliance_user: "{{ admin_user }}"
+plex_appliance_server_url: "http://100.66.6.113:32400"
+plex_appliance_library: "Shows"
+plex_appliance_collection: "Adult Swim Collection"
+
+# This appliance has no Plex UI; track selection is global and automatic.
+plex_appliance_audio_languages:
+  - eng
+plex_appliance_subtitle_languages:
+  - eng
+plex_appliance_subtitles: auto
+
+# Store the real token in inventory/host_vars/mercury/vault.yml.
+plex_appliance_token: "{{ vault_plex_appliance_token | default('') }}"
+
+# Raspberry Pi OS Lite 64-bit is the intended base, but this also works on
+# Ubuntu/Debian as long as the packages below are available.
+plex_appliance_packages:
+  - mpv
+  - python3
+  - python3-requests
+  - alsa-utils
+
+plex_appliance_tty: /dev/tty1
+plex_appliance_disable_desktop: true
+plex_appliance_desktop_services:
+  - lightdm.service
+  - gdm.service
+  - gdm3.service
+  - sddm.service
+plex_appliance_page_size: 100
+plex_appliance_server_retry_seconds: 30
+plex_appliance_item_failure_delay_seconds: 10
+plex_appliance_collection_refresh_seconds: 3600
+plex_appliance_mpv_args:
+  - --fs
+  - --no-terminal
+  - --no-osc
+  - --no-input-default-bindings
+  - --really-quiet
+  - --profile=fast
+  - --vo=gpu
+  - --gpu-context=drm
+  - --hwdec=auto-safe
+  - --volume-max=200
+  - --volume=150
+  - --ad-lavc-ac3drc=1
+  - --keep-open=no

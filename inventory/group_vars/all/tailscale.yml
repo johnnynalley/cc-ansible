@@ -1,0 +1,8 @@
+# =============================================================================
+# Global Tailscale Management
+# =============================================================================
+
+tailscale_tailnet: "-"
+tailscale_policy_enabled: true
+tailscale_policy_file: "{{ playbook_dir }}/../files/tailscale-policy.hujson"
+tailscale_policy_oauth_scope: policy_file

@@ -9,6 +9,7 @@
 # the advertised tags; use regular OpenSSH only for bootstrap or break-glass.
 tailscale_auto_enroll: false
 tailscale_manage_preferences: false
+tailscale_manage_advertise_tags: false
 tailscale_manage_service_policy: false
 tailscale_ssh_enabled: true
 

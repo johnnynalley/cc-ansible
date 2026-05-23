@@ -1,0 +1,30 @@
+[Unit]
+Description=Plex living room shuffled collection appliance
+After=network-online.target sound.target
+Wants=network-online.target
+Conflicts=getty@tty1.service
+
+[Service]
+Type=simple
+User={{ plex_appliance_user }}
+PAMName=login
+TTYPath={{ plex_appliance_tty | default('/dev/tty1') }}
+TTYReset=yes
+TTYVHangup=yes
+TTYVTDisallocate=yes
+StandardInput=tty
+StandardOutput=journal
+StandardError=journal
+Environment=PYTHONUNBUFFERED=1
+Environment=XDG_RUNTIME_DIR=/run/user/%U
+Environment=HOME=/home/{{ plex_appliance_user }}
+EnvironmentFile=/etc/plex-appliance/plex-appliance.env
+WorkingDirectory=/var/lib/plex-appliance
+ExecStart=/usr/local/bin/plex-appliance-player
+Restart=always
+RestartSec=10
+TimeoutStopSec=15
+SyslogIdentifier=plex-appliance
+
+[Install]
+WantedBy=multi-user.target

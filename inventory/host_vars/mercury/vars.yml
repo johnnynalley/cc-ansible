@@ -1,0 +1,8 @@
+# =============================================================================
+# mercury - Raspberry Pi 5 Host Variables
+# =============================================================================
+
+admin_user: johnny
+tailscale_hostname: mercury
+bootstrap_become_method: sudo
+bootstrap_become_flags: ""

@@ -1,6 +1,6 @@
 # Repository Guidelines
 
-> **Last updated:** 2026-05-12
+> **Last updated:** 2026-05-21
 
 This file provides guidance to Codex CLI when working with code in this repository. It combines a quick contributor guide with the full operational reference migrated from Claude Code.
 
@@ -10,6 +10,10 @@ This file provides guidance to Codex CLI when working with code in this reposito
 ### Project Structure & Module Organization
 
 This repository manages homelab infrastructure with Ansible. `site.yml` is the top-level playbook and `playbooks/` contains targeted runs such as `packages.yml`, `docker-stacks.yml`, and `proxmox-firewall.yml`. Shared task files live in `tasks/`, Jinja2 templates in `templates/`, helper executables in `scripts/` and `bin/`, and all host/group configuration under `inventory/`. Use `inventory/group_vars/` for group defaults and `inventory/host_vars/<hostname>/` for host-specific overrides.
+
+### Documentation Cross-References
+
+When creating or materially updating operator docs, policy docs, runbooks, or troubleshooting guides under `docs/`, add or update the matching pointer in `AGENTS.md` in the relevant operational section. The point is discoverability: future agents should know where to find the source of truth without guessing filenames or relying on memory. If a new doc captures behavior that should persist across sessions, also add a concise Codex memory note when the user explicitly asks for memory persistence.
 
 ### Build, Test, and Development Commands
 
@@ -21,11 +25,17 @@ This repository manages homelab infrastructure with Ansible. `site.yml` is the t
 
 ### Coding Style & Naming Conventions
 
-Write YAML with two-space indentation and descriptive task names. Keep playbooks focused on orchestration and move reusable logic into `tasks/*.yml`. Name playbooks and task files with lowercase hyphenated names, for example `network-recovery.yml`. Keep variables lowercase snake_case and scope host-specific settings in `host_vars/<hostname>/vars.yml`. Templates should use `.j2` suffixes and render service/config names clearly, such as `templates/smb.conf.j2`.
+Write YAML with two-space indentation and descriptive task names. Keep playbooks focused on orchestration and move reusable logic into `tasks/*.yml`. Name playbooks and task files with lowercase hyphenated names, for example `network-recovery.yml`. Keep variables lowercase snake_case. Prefer modular variable files named for their concern, such as `host_vars/<hostname>/backup.yml`, `docker.yml`, `firewall.yml`, or `performance-mode.yml`; do not pile unrelated settings into a monolithic `vars.yml`. Templates should use `.j2` suffixes and render service/config names clearly, such as `templates/smb.conf.j2`.
 
 ### Testing Guidelines
 
 There is no dedicated unit-test suite. Validate changes with full-playbook Ansible dry runs before applying them: `ansible-playbook <playbook> --check --diff`. Do not use `--limit`; playbooks should be safe across their configured `hosts:` target, and if a full run is not safe, fix the playbook or inventory instead of narrowing execution. For YAML and Ansible quality checks, use `yamllint` and `ansible-lint` when available. For shell helpers or shell templates, run `shellcheck` on the rendered or source script when practical.
+
+### Playbook Scope & Site Safety
+
+Prefer integrating behavior into existing playbooks, shared task files, host/group variables, tags, or inventory groups instead of creating host-specific one-off playbooks. Add a new playbook only when it is a reusable feature boundary that matches the repo's flat-playbook structure. When adding one, import it from `site.yml` when it belongs in normal convergence.
+
+`site.yml` must be safe to run at any point. Every playbook should be scoped so it can run across its configured `hosts:` target without `--limit` and without destructive side effects on unrelated hosts. Use explicit inventory opt-ins, groups, and variables; skip unrelated hosts without changing them. Do not disable, remove, or reset services on hosts unless that host explicitly opts into that state.
 
 ### Commit & Pull Request Guidelines
 
@@ -37,9 +47,27 @@ When completing repo work, inspect the diff, verify no plaintext secrets or unre
 
 Do not commit real secrets. Encrypted values belong in `vault.yml` files beside the relevant `vars.yml`; examples may use `vault.yml.example`. The configured vault password path is `~/.ansible/vault_pass.txt`. Prefer full-playbook `--check --diff` runs for changes touching Proxmox, storage, firewall, backup, or Docker automation.
 
+### Live Change Backups
+
+Before mutating live infrastructure state, application configs, databases, service data, or generated controller/runtime files, take a targeted timestamped backup, snapshot, export, or app-native backup of the affected state unless the change is trivial and fully reproducible or the user explicitly waives backups for that operation. Record the backup path in the working notes, docs, or final response when it matters for rollback. Treat these as temporary rollback aids: keep them while the rollout is being validated, then document or perform cleanup/retention once the change is proven. Read-only diagnostics and dry runs do not need backups.
+
 ### Troubleshooting Assumptions
 
 Do not assume a symptom is an upstream software bug or regression unless there is an exact documented issue, release note, or vendor advisory matching the observed failure. Default to diagnosing local configuration, runtime state, logs, resource pressure, integration drift, and recent local changes first. Avoid update-fragile local patches unless the user explicitly approves a temporary workaround.
+
+For live Windows gaming PC diagnostics, especially on `lj-gaming-pc` while the user is gaming or streaming, use narrow, bounded probes only. Do not run broad PowerShell/Ansible inspections that enumerate large process/log/state data and serialize deep JSON, and do not leave diagnostic probes running. If a probe hangs or looks expensive, stop it and verify no stale remote PowerShell workers remain before continuing. Ask first before any broad inspection that could consume noticeable CPU, memory, disk, or foreground responsiveness.
+
+Before live `lj-gaming-pc` work or repeated Windows playbook runs, check Ansible controller health with `./bin/ansible-controller-guard check`; run it outside the Codex sandbox or with escalation when process visibility across sessions matters. Normal concurrent sessions should be supported through controller capacity and per-run pressure control, not by killing unrelated playbooks. If the controller is already under swap or IO pressure, prefer resource fixes, lower-priority execution, or a narrower managed playbook instead of adding more heavy work. If an Ansible run is interrupted, run the guard again and use its cleanup mode only when no playbook is active.
+
+For Ansible controller and homelab control-plane reliability, prioritize stability over resource minimalism. If the controller or another core automation host shows resource-related instability, prefer overprovisioning CPU/RAM/swap/disk or migrating the workload to stronger idle hardware before accepting flaky sessions or failed convergence. Surface tradeoffs clearly, but do not be stingy with available hardware when stability is the goal.
+
+When a Windows `win_shell`/PowerShell probe is interrupted or times out, killing the local Ansible process is not enough. Immediately verify the remote `powershell.exe` command line on the target and terminate only the abandoned diagnostic worker if it is still running, then recheck target memory/process state before continuing.
+
+Do not launch visible Windows GUI applications such as OBS through SSH/Ansible on `lj-gaming-pc`; Windows session isolation can put them in a hidden or non-interactive desktop. For visible app launches, use an interactive scheduled task/watcher that is known to target the logged-in user session, or ask the user to open the app locally.
+
+Even if the client has a persisted approval for `ansible lj-gaming-pc -m win_shell`, do not treat that prefix as broadly pre-approved. Ask for explicit user approval before using that exact ad-hoc PowerShell path unless the user has just requested the specific command/action in the current exchange. Prefer managed playbooks or narrower non-shell modules where practical.
+
+Do not make empty future-behavior assurances. Avoid phrases like "this won't happen again", "I won't do that again", or "I'll make sure" unless the behavior change is immediately backed by a durable note or an `AGENTS.md` rule. If a promise cannot be persisted or should not be persisted, say that plainly and do not frame it as a future guarantee.
 
 ## Historical Claude Reference
 
@@ -61,18 +89,21 @@ The reference below was migrated from `CLAUDE.md` on 2026-05-12 and rewritten on
 
 Ansible automation for a homelab infrastructure consisting of:
 - 4 Proxmox hypervisors (ts440, pve-alto, pve-herc, pve-m70q)
-- 10 VMs/LXC containers (docker-vm, media-vm, nextcloud-vm, dev-vm, freepbx-vm, openclaw-vm, ansible-lxc, homebridge-lxc, syncthing-lxc, pbs-lxc)
-- 1 Ansible controller LXC (ansible-lxc, CT 104 on pve-m70q) running Ansible locally
-- 1 Raspberry Pi 5 (pi5-01)
-- 1 CachyOS gaming workstation (jn-desktop)
+- VMs/LXC containers (docker-vm, media-vm, nextcloud-vm, freepbx-vm, openclaw-vm, pdm-vm, homebridge-lxc, syncthing-lxc, pbs-lxc)
+- 1 flat Ansible controller on jn-t14s-lin (Kubuntu)
+- 1 Raspberry Pi 5 (mercury)
 - 1 Kubuntu laptop (jn-t14s-lin) — ThinkPad T14s, dual-boot with Windows
+- 1 Windows gaming workstation (lj-gaming-pc)
 - 1 macOS workstation (macbook-pro)
+- Retired inventory records for dev-vm and the old jn-desktop Linux install are kept in `retired_hosts` only and excluded from normal convergence.
 
 All hosts communicate via Tailscale VPN (100.x.x.x addresses). All hosts are set to `America/Chicago` timezone (enforced by `bootstrap.yml`).
 
 ## IMPORTANT: Infrastructure as Code First
 
 **ALWAYS prioritize Infrastructure as Code (IaC) over ad-hoc commands.** When asked to install packages, configure services, or make any changes to managed hosts:
+
+Infrastructure changes should converge through the normal playbook graph. Before adding a new playbook, check whether an existing playbook plus variables, tags, or shared tasks can express the change. Host-specific bootstrap/baseline work should usually be inventory and existing playbook changes, not a new one-off playbook.
 
 1. **Check if it can be managed via Ansible** - Add to host_vars, group_vars, or playbooks
 2. **Update the appropriate configuration files** - packages.yml, vars.yml, etc.
@@ -86,17 +117,21 @@ All hosts communicate via Tailscale VPN (100.x.x.x addresses). All hosts are set
 
 If a package exists in the system repos, add it to the appropriate `packages_*` variable. If a service needs configuration, create or update the relevant playbook/task file.
 
+### New Host Onboarding
+
+A new managed device is not complete when its feature-specific playbook works. Add it to the correct OS/platform group plus functional groups such as `backup_clients`, `bootstrap_hosts`, service-specific groups, and any relevant role groups. Add modular host_vars such as `vars.yml`, `packages.yml`, `backup.yml`, and service-specific files rather than a broad catch-all file. Bootstrap the host, then validate and apply through `ansible-playbook site.yml --syntax-check`, `ansible-playbook site.yml --check --diff`, and `ansible-playbook site.yml` without `--limit`.
+
 ## Git Workflow
 
 The repository is hosted on GitHub (public): https://github.com/johnnynalley/cc-ansible
 
-**ansible-lxc** (CT 104 on pve-m70q, Ubuntu 25.04) is the Ansible controller. The working clone lives at `~/cc-ansible` on ansible-lxc. All Ansible commands should be run from there.
+**jn-t14s-lin** (ThinkPad T14s, Kubuntu) is the flat Ansible controller. The working clone lives at `~/cc-ansible` on jn-t14s-lin. All Ansible commands should be run from there. It is also a workstation, but controller availability takes priority while plugged into AC power.
 
 **Workflow:**
-1. Make changes on ansible-lxc (`~/cc-ansible`)
+1. Make changes on jn-t14s-lin (`~/cc-ansible`)
 2. Commit and push to GitHub
 3. ts440 automatically pulls every 5 minutes via `git-sync.timer` (deployed by `playbooks/git-sync.yml`), keeping `/srv/nas-zfs/configs/ansible/cc-ansible` in sync for Nextcloud External Storage access
-4. pi5-01 still has a copy at `/srv/configs/ansible/cc-ansible` (via NFS mount from ts440), but it is no longer the controller
+4. Raspberry Pi hosts are regular managed clients. They should not be treated as Ansible controllers or given a separate repo-copy workflow.
 
 **git-sync on ts440:**
 - Systemd timer runs every 5 minutes
@@ -106,7 +141,7 @@ The repository is hosted on GitHub (public): https://github.com/johnnynalley/cc-
 
 ## Common Commands
 
-All commands should be run from ansible-lxc (`~/cc-ansible`).
+All commands should be run from jn-t14s-lin (`~/cc-ansible`).
 
 ```bash
 # Run all playbooks via site.yml
@@ -141,7 +176,7 @@ ansible <hostname> -m shell -a "command here" --become
 
 ## SSH Authentication
 
-Ansible on ansible-lxc uses a **dedicated passwordless SSH key** (`~/.ssh/ansible_ed25519`) for all host connections. This is configured as the default in `ansible.cfg` via `private_key_file`.
+Ansible on jn-t14s-lin uses a **dedicated passwordless SSH key** (`~/.ssh/ansible_ed25519`) for fallback host connections. Tailscale SSH is preferred for managed Linux hosts when the tailnet policy allows it. The key is configured as the default in `ansible.cfg` via `private_key_file`.
 
 **Two keys are deployed by `bootstrap.yml`:**
 
@@ -180,30 +215,32 @@ ssh-copy-id -i ~/.ssh/ansible_ed25519.pub johnny@<tailscale-ip>
 Host groups form a hierarchy in `inventory/hosts.ini`:
 - `managed_hosts` → all managed systems
   - `linux_hosts` → `debian_hosts` + `arch_hosts`
-    - `debian_hosts`: `proxmox_nodes`, `vms_lxcs` (child groups: `vms` + `lxcs`), `orchestrator` (ansible-lxc, pi5-01), jn-t14s-lin
-    - `arch_hosts`: jn-desktop (CachyOS gaming workstation)
+    - `debian_hosts`: `proxmox_nodes`, `vms_lxcs` (child groups: `vms` + `lxcs`), `orchestrator` (jn-t14s-lin), `raspberry_pis` (mercury)
+    - `arch_hosts`: currently empty; add active Arch Linux hosts here only when they should participate in `site.yml`
   - `macos_hosts`: macbook-pro
-- `workstations` → **cross-platform group** for desktops/laptops (jn-desktop, jn-t14s-lin, macbook-pro)
+- `workstations` → **cross-platform group** for desktops/laptops (jn-t14s-lin, macbook-pro)
   - Hosts in this group are ALSO in their OS-specific group (debian_hosts, arch_hosts, macos_hosts)
   - Group vars disable automated recovery: `network_watchdog_enabled: false`, `auto_updates_enabled: false`
   - Playbooks like `network-recovery.yml` explicitly exclude this group: `hosts: linux_hosts:!workstations`
 - `nas_server` → **portable NAS role group** (currently ts440). Storage services: NFS, Samba, ZFS, mergerfs, drive mounts. Migrate NAS to new hardware by changing membership in this group.
-- `development` → **cross-platform group** for dev tooling (gh, shellcheck, yq). Currently: dev-vm. ansible-lxc gets these via `packages_host_extra` in host_vars instead. Packages split by OS: `packages_debian_development_extra`, `packages_arch_development_extra`
+- `development` → **cross-platform group** for dev tooling (gh, shellcheck, yq). Currently empty; the orchestrator gets controller/dev tools via its own host vars and the `orchestrator` group. Packages split by OS: `packages_debian_development_extra`, `packages_arch_development_extra`
 - `docker_hosts` → VMs running Docker Compose stacks (docker-vm, media-vm, nextcloud-vm, openclaw-vm)
-- `backup_clients` → separate group for restic backups (includes `proxmox_nodes`, `vms_lxcs`, `orchestrator`, `workstations`, `arch_hosts`)
+- `gluetun_hosts` → hosts with Gluetun/qBittorrent VPN automation (currently media-vm)
+- `backup_clients` → separate group for restic backups (includes `proxmox_nodes`, `vms_lxcs`, `orchestrator`, `raspberry_pis`, `workstations`, `arch_hosts`)
+- `retired_hosts` → stale/offline inventory records retained for reference; these hosts are not children of `managed_hosts` and must not be targeted by normal convergence.
 
 VMs and LXCs are split so VMs get `qemu-guest-agent` while LXCs don't need it.
 
 ### Variable Precedence
 
 Variables merge from multiple sources (highest to lowest precedence):
-1. `inventory/host_vars/<hostname>/vars.yml` - per-host overrides
+1. Files under `inventory/host_vars/<hostname>/` - per-host overrides, split by concern when more than one domain is configured
 2. Group-specific files in `inventory/group_vars/<group>/`
-3. `inventory/group_vars/all/vars.yml` - global defaults
+3. `inventory/group_vars/all/` - global defaults
 
 **Important**: All group_vars and host_vars are under `inventory/`, not at the project root. This is Ansible's recommended structure for inventory-based configurations.
 
-Encrypted secrets go in `vault.yml` files alongside `vars.yml`.
+Encrypted secrets go in `vault.yml` files alongside the relevant variable files.
 
 ### Playbooks vs Roles
 
@@ -246,7 +283,7 @@ TS440 is the primary NAS server (currently the sole `nas_server` group member). 
 
 API tokens live in `inventory/group_vars/nas_server/vault.yml` (encrypted): `vault_media_api_plex_token`, `vault_media_api_sonarr_key`, `vault_media_api_radarr_key`. See `vault.yml.example` for how to obtain them. Opt-out per host with `mergerfs_recovery_enabled: false`.
 
-This addresses the recurring USB-SATA disconnect class of failure. Diagnostic memory and retained runbooks live under `~/.codex/memories/`.
+This addresses the recurring USB-SATA disconnect class of failure (see `~/.codex/memories/` for retained diagnostic memory and runbooks) and the hardware swap-test runbook to identify the actual bad component.
 
 **mergerfs-balance**: Balances files across mergerfs branches by moving from the fullest to the emptiest. Default path excludes in `/etc/mergerfs-balance.conf` (deployed by `playbooks/mergerfs.yml` from `mergerfs_balance_exclude_paths` variable) protect irreplaceable data on mirrored nas_zfs (photos, archive, books) from being moved to single-drive pools. CLI `-E` flags are merged with config excludes.
 
@@ -312,11 +349,17 @@ Primary media VM (10GB RAM, 4 cores, 200GB disk, Quadro P2200 GPU passthrough). 
 
 **Critical**: All media containers must use the same VirtioFS mount path (`/srv/media/plex:/data`). Using different paths causes stale file handle errors. Hardlinks work because all downloads and media libraries share the same `/data` mount on mergerfs.
 
-**Stream relay**: `playbooks/stream-relay.yml` deploys `stream-relay.service`, which receives OBS SRT on UDP 9000, encodes once with the Quadro's `h264_nvenc`, and fans out to the configured RTMP platforms. The same playbook also deploys `stream-relay-vertical.service`, a disabled-by-default Aitum Vertical RTMP ingest on TCP 1936 for a standalone YouTube vertical/Shorts stream. Both services use the live-only root-readable `/etc/stream-relay/stream-relay.env` with platform stream keys; never commit stream keys. Platform RTMP output failures abort FFmpeg so systemd can restart the relay instead of leaving a dead platform leg hidden behind a still-running ingest. By default the relays bind to media-vm's Tailscale IP and firewall access is through the Proxmox datacenter `streaming-pc` IP set. Add the gaming PC's LAN IP only when intentionally switching to direct LAN bind addresses.
+**Stream relay**: `playbooks/stream-relay.yml` deploys `stream-relay.service`, which receives OBS SRT on UDP 9000, encodes once with the Quadro's `h264_nvenc`, and fans out to the configured RTMP platforms. The same playbook also deploys `stream-relay-vertical.service`, a disabled-by-default Aitum Vertical RTMP ingest on TCP 1936 for a standalone YouTube vertical/Shorts stream. Both services use the live-only root-readable `/etc/stream-relay/stream-relay.env` with platform stream keys; never commit stream keys. Platform RTMP output failures abort FFmpeg so systemd can restart the relay instead of leaving a dead platform leg hidden behind a still-running ingest. By default the relays bind to media-vm's Tailscale IP and firewall access is through the Proxmox datacenter `streaming-pc` IP set. Add the gaming PC's LAN IP only when intentionally switching to direct LAN bind addresses. The operator-facing Twitch/YouTube/TikTok/Mac OBS/Aitum/SleepyChat runbook is `docs/streaming-runbook.md`; start there before changing or troubleshooting the streaming setup.
 
 **Immich**: Photo/video management at `photos.jnalley.me`. ML container capped at `mem_limit: 3g` to prevent OOM-freezing the VM. External library (`/srv/untitled`) is auto-locked by `immich_folder_album_creator` every 6 hours.
 
-**Recyclarr**: Syncs TRaSH Guides custom formats to Sonarr/Radarr. Config at `/opt/media-stack/recyclarr/recyclarr.yml`. Runs daily at midnight.
+**Recyclarr / Profilarr**: Recyclarr syncs TRaSH Guides custom formats to Sonarr/Radarr. Config at `/opt/media-stack/recyclarr/recyclarr.yml`. Runs daily at midnight. Profilarr is staged as a managed stack at `/opt/profilarr` for profile/CF evaluation and paced proactive upgrade searches. The media release-selection policy is documented in `docs/media-release-policy.md`; update that document whenever changing Sonarr/Radarr quality profiles, custom-format scores, Recyclarr/Profilarr assignments, local/manual CFs, recycle-bin behavior, proactive upgrade-search behavior, or grab regression monitoring. Before mutating live Sonarr/Radarr/Recyclarr/Profilarr release-selection state, take timestamped exports or app-native backups of the affected live configs unless the user explicitly waives backups for that operation. For anime policy changes, audit all existing profile CF scores before changing score bands, because the `+100000` dual-audio model makes old `-10000` penalties too small for hard rejects and too large for soft avoids.
+
+**Anime policy checks**: `scripts/sonarr_release_expectation_check.py` and `scripts/radarr_release_expectation_check.py` are the read-only live checks for the active `shows-anime` and `movies-anime` profiles. Run them on `media-vm` after anime release-policy changes to verify DA/x265 scores, native quality grouping, quality-rank CFs, rename-format preservation of audio languages/video codec, DA/x265 title-side matching, profile assignment counts, and score math such as `1080p DA > 720p DA + x265 + top tier` and `lowest DA > strongest single-tier non-DA`. Radarr's checker also verifies `x265 (HD)` excludes 2160p.
+
+**Sonarr queue regression check**: `scripts/sonarr_grab_diagnostics.py` compares queued Sonarr downloads against the current imported episode files. It is read-only by default. Use `--remove-current-better --remove-from-client` only after inspecting output; that removes queue downloads where the current file score is already higher, through Sonarr with `blocklist=false`.
+
+**Release metadata stamper**: `playbooks/media-release-stamper.yml` deploys SABnzbd and qBittorrent post-download stampers that preserve DA/x265 evidence before Sonarr/Radarr import. qBittorrent renames payload files through its Web API to keep seeding state intact. DA evidence is stamped as language-combo tags such as `[JA+EN]`, `[KO+EN]`, or `[JA+KO+EN]`, per file only when audio metadata shows English plus the configured original language; qBittorrent can optionally get that original language from Sonarr/Radarr by torrent hash/download ID, and SABnzbd can optionally get it by release/job title. Arr lookup must stay bounded and non-fatal; fallback default is `jpn`, so `eng+kor` does not qualify when context is unavailable. `[x265]` is stamped per file only after the payload itself contains HEVC markers. Document behavior changes in `docs/media-release-policy.md`.
 
 **Tdarr** (disabled 2026-04-13): Media transcoding service. Commented out in `/opt/media-stack/docker-compose.yml` and `templates/Caddyfile.j2`. Compose config and `/opt/media-stack/tdarr/` data preserved for easy re-enable.
 
@@ -340,7 +383,7 @@ qBittorrent uses `network_mode: "service:gluetun"`, so all traffic goes through 
 
 **qBittorrent Tuning**: `max_active_downloads: 5` (reduced from 10 — active downloads starve uploads of libtorrent I/O resources). `max_active_uploads: 200`, `max_uploads: 200` (global upload slots). `dont_count_slow_torrents: true` lets stalled 0-seed torrents bypass the active download limit so they don't block well-seeded torrents. Queue uses FIFO ordering (by add time, not by seed availability). Seeding upload speed is primarily limited by over-seeded swarms (~17:1 seed:leech ratio on anime torrents), not connection or settings.
 
-**Automatic Port Sync** (not Ansible-managed, deployed manually on media-vm): ProtonVPN assigns dynamic forwarded ports that change on reconnect. A systemd-based automation keeps qBittorrent's listening port in sync:
+**Automatic Port Sync** (Ansible-managed by `playbooks/gluetun-watchdog.yml`): ProtonVPN assigns dynamic forwarded ports that change on reconnect. A systemd-based automation keeps qBittorrent's listening port in sync:
 
 1. **Gluetun** writes the forwarded port to `/opt/media-stack/gluetun/forwarded_port` via `VPN_PORT_FORWARDING_UP_COMMAND`
 2. **systemd path unit** (`qbit-port-sync.path`) watches that file for changes
@@ -349,6 +392,8 @@ qBittorrent uses `network_mode: "service:gluetun"`, so all traffic goes through 
    - Connects to qBittorrent API (with retries)
    - If API unreachable (Gluetun restart broke qBittorrent's network), restarts qBittorrent via docker compose
    - Updates listening port via API so qBittorrent saves it correctly
+
+**2026-05-22 repair note**: `qbit-port-sync.path` is enabled on media-vm. qBittorrent 5.2.0 returns HTTP 204 on successful API login, so the local script must treat either the legacy `Ok.` body or HTTP 204 as success. If qBittorrent shows `Recv failure: Connection reset by peer` on port 8085 after a restart, check `/opt/media-stack/qbittorrent/qBittorrent/lockfile`; moving that stale lockfile aside and recreating qBittorrent recovered the service during the 2026-05-22 incident. The port-sync script's recreate path now stops qBittorrent, moves a stale lockfile aside, and starts qBittorrent again instead of using a plain restart.
 
 #### Docker Auto-Update
 
@@ -503,7 +548,7 @@ One-way sync from UTD OneDrive to Nextcloud via `playbooks/rclone-sync.yml`. Run
 
 Deployed via `playbooks/unattended-upgrades.yml` to all `debian_hosts` (including workstations — security patches shouldn't wait). Complements the weekly `auto-updates.yml` full-upgrade (Sundays, staggered per-host).
 
-**Proxmox update window**: Proxmox nodes run the weekly full-upgrade on a staggered schedule, but `group_vars/proxmox_nodes/vars.yml` sets `auto_updates_reboot_if_required: false`, so they notify on reboot-required instead of rebooting themselves. Per-host `auto_updates_oncalendar` overrides in host_vars with `auto_updates_randomized_delay_sec: "0"`: ts440 05:00 → pve-alto 05:20 → pve-herc 05:40 → pve-m70q 06:00. pve-m70q goes last because it hosts ansible-lxc and docker-vm. VMs/LXCs use `group_vars/vms_lxcs/vars.yml` to run after the Proxmox update window (`Sun *-*-* 07:00:00` + 30m random delay), so host updates do not interrupt guest dpkg transactions. Other Debian hosts use the default schedule from `group_vars/debian_hosts/packages.yml` (`Sun *-*-* 05:00:00` + 15m random delay).
+**Proxmox update window**: Proxmox nodes run the weekly full-upgrade on a staggered schedule, but `group_vars/proxmox_nodes/vars.yml` sets `auto_updates_reboot_if_required: false`, so they notify on reboot-required instead of rebooting themselves. Per-host `auto_updates_oncalendar` overrides in host_vars with `auto_updates_randomized_delay_sec: "0"`: ts440 05:00 → pve-alto 05:20 → pve-herc 05:40 → pve-m70q 06:00. pve-m70q goes last because it hosts docker-vm and several control-plane guests. VMs/LXCs use `group_vars/vms_lxcs/vars.yml` to run after the Proxmox update window (`Sun *-*-* 07:00:00` + 30m random delay), so host updates do not interrupt guest dpkg transactions. Other Debian hosts use the default schedule from `group_vars/debian_hosts/packages.yml` (`Sun *-*-* 05:00:00` + 15m random delay).
 
 **How it works**: Uses Debian/Ubuntu's native `unattended-upgrades` package with APT's built-in `apt-daily-upgrade.timer` (daily, randomized 12h window). Only applies security-origin patches — not general updates. A systemd drop-in (`/etc/systemd/system/apt-daily-upgrade.service.d/notify.conf`) hooks an `ExecStartPost` script that sends a silent Apprise notification (`push-quiet` tag) when patches are applied.
 
@@ -540,11 +585,11 @@ Deployed via `playbooks/network-recovery.yml` to `linux_hosts:!workstations`.
 
 ### Workstation Hosts
 
-**jn-desktop** (CachyOS/Arch): Gaming workstation in `arch_hosts` + `workstations` groups. NTFS games drive at `/mnt/games` (uses `ntfs3` kernel driver, not FUSE). NFS mount to ts440 at `/mnt/nas-zfs`. Config in `host_vars/jn-desktop/`. Gaming packages (Steam, Proton) handled by CachyOS meta-package; Ansible only manages OpenRGB, liquidctl, and flatpak. RGB config and BeamMP launcher are not Ansible-managed (backed up via restic).
+The old `jn-desktop` CachyOS install is retained in `retired_hosts` only because it has been offline long enough to break normal `site.yml` convergence. Do not add retired hosts back to active groups unless they are reachable and intentionally managed again.
 
-**jn-t14s-lin** (Kubuntu): ThinkPad T14s laptop in `debian_hosts` + `workstations` groups. Requires `ansible_become_flags: "-S"` in host_vars due to sudo-rs (Ubuntu 25.10+ default). WiFi powersave disabled; optional ath11k resume hooks available in `host_vars/jn-t14s-lin/wifi.yml`.
+**jn-t14s-lin** (Kubuntu): ThinkPad T14s laptop in `orchestrator`, `debian_hosts`, `workstations`, and `backup_clients`. Requires `ansible_become_flags: "-S"` in host vars due to sudo-rs (Ubuntu 25.10+ default). WiFi powersave disabled; optional ath11k resume hooks available in `host_vars/jn-t14s-lin/wifi.yml`. As the flat controller, it advertises `tag:orchestrators` and stays awake on AC power.
 
-Both hosts inherit `network_watchdog_enabled: false` and `auto_updates_enabled: false` from `group_vars/workstations/vars.yml`. They still receive daily security patches via `unattended-upgrades`.
+Workstations inherit `network_watchdog_enabled: false` and `auto_updates_enabled: false` from `group_vars/workstations/vars.yml`. Linux workstations still receive daily security patches via `unattended-upgrades`.
 
 ### Swap Configuration
 
@@ -558,7 +603,7 @@ Currently enabled on pve-m70q and pve-herc (8GB each). Pool name configurable vi
 
 Playbooks are imported via `site.yml` (with tags). Browse with: `ls playbooks/ tasks/ templates/ scripts/ bin/`. Each file has a descriptive header comment. Docker stacks and VirtioFS configs are defined in `host_vars/<hostname>/docker.yml` and `virtiofs.yml`.
 
-**media-vm specific files**: stream relay is Ansible-managed (`/usr/local/sbin/stream-relay`, `stream-relay.service`); qBittorrent port sync is not Ansible-managed (`/usr/local/bin/qbit-port-sync`, systemd path unit `qbit-port-sync.path`).
+**media-vm specific files**: stream relay is Ansible-managed (`/usr/local/sbin/stream-relay`, `stream-relay.service`); qBittorrent port sync is Ansible-managed by `playbooks/gluetun-watchdog.yml` (`/usr/local/bin/qbit-port-sync`, `/etc/qbit-port-sync.env`, systemd path unit `qbit-port-sync.path`); release metadata stamping is Ansible-managed by `playbooks/media-release-stamper.yml` (`/opt/media-stack/qbittorrent/scripts/qbit-release-stamper.py`, `/opt/media-stack/sabnzbd/scripts/sab-release-stamper.py`).
 
 ### Proxmox Firewall (Ansible-Managed)
 
@@ -630,7 +675,7 @@ The `dbc` user (OpenClaw agent) has least-privilege operational access on manage
 
 | Host | Writable Files | Apply Command |
 |------|---------------|---------------|
-| ansible-lxc | `~/cc-ansible` (rwx), `~/.claude` (rwx) | `sudo /usr/local/bin/ansible-dryrun` (dry-run only) |
+| jn-t14s-lin | `~/cc-ansible` (rwx), `~/.claude` (rwx) | `sudo /usr/local/bin/ansible-dryrun` (dry-run only) |
 | media-vm | `/opt/media-stack/docker-compose.yml`, `.env` | `sudo /usr/local/sbin/dbc-media-stack-apply` |
 | docker-vm | `/opt/caddy/Caddyfile` for emergency live fixes only; backport to `templates/Caddyfile.j2` | `sudo /usr/local/sbin/dbc-caddy-apply` |
 
@@ -951,13 +996,11 @@ They don't conflict - network-watchdog's gateway ping will succeed through eithe
 
 ## Ansible Environment
 
-Ansible runs on ansible-lxc (CT 104 on pve-m70q, Ubuntu 25.10) with `ansible-core` 2.20 (via Ansible PPA `ppa:ansible/ansible`, managed in `host_vars/ansible-lxc/packages.yml`). Ubuntu 25.10's universe repo ships 2.19 which has a threading bug ([ansible/ansible#85879](https://github.com/ansible/ansible/issues/85879)) that crashes `site.yml` at play boundaries. The controller uses `ansible_connection=local` in the `orchestrator` group. Key collections: `community.docker` 4.6.1, `community.general` 11.1.0, `kewlfft.aur` 0.13.0.
+Ansible runs flat on jn-t14s-lin (ThinkPad T14s, Kubuntu/Ubuntu 26.04) with Ubuntu's packaged `ansible-core` 2.20+. jn-t14s-lin is the only active controller in the `orchestrator` group. Key collections: `community.docker`, `community.general`, `kewlfft.aur`, `ansible.windows`, and `community.windows`.
 
-The working repo clone is at `~/cc-ansible` on ansible-lxc.
+The working repo clone is at `~/cc-ansible` on jn-t14s-lin.
 
-**Codex command runner note**: When a playbook needs `become` on `ansible-lxc`, run it with `-e ansible_connection=ssh`. The inventory's local connection path can time out on sudo-rs prompts from Codex's command environment, while SSH as the `ansible` user handles become correctly.
-
-**Legacy**: pi5-01 previously served as the Ansible controller using Debian 12's packaged `ansible-core` 2.14. It is now a regular managed host. The repo copy at `/srv/configs/ansible/cc-ansible` (via NFS from ts440) remains accessible but is read-only (auto-synced from GitHub by git-sync timer).
+**Legacy**: pi5-01 previously served as the Ansible controller using Debian 12's packaged `ansible-core` 2.14. That Pi workflow is retired. mercury is a regular managed Raspberry Pi client, and the old NFS-backed repo-copy workflow is no longer managed.
 
 ## Vault Setup
 

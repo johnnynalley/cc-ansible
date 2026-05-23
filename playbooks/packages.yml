@@ -5,15 +5,45 @@
 # Usage: ansible-playbook playbooks/packages.yml
 # =============================================================================
 
+
+# -----------------------------------------------------------------------------
+# Tailnet policy (controller-local API call)
+# -----------------------------------------------------------------------------
+- name: Manage Tailscale tailnet policy
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  tasks:
+    - name: Ensure Tailscale tailnet policy
+      ansible.builtin.import_tasks: ../tasks/tailscale-policy.yml
+      when: tailscale_policy_enabled | default(false)
+      tags: [tailscale, tailscale-policy]
 # -----------------------------------------------------------------------------
 # Linux hosts (with become/sudo)
 # -----------------------------------------------------------------------------
 - name: Install baseline packages (Linux hosts)
   hosts: linux_hosts
   become: true
-  gather_facts: true
+  gather_facts: false
+  serial: 1
 
   tasks:
+    - name: Gather Linux package facts
+      ansible.builtin.setup:
+      tags:
+        - locale
+        - tailscale
+        - packages
+        - apt
+        - ppa
+        - pin
+        - deb
+        - flatpak
+        - docker
+        - pacman
+        - aur
+        - fastfetch
     # =========================================================================
     # Locale baseline (Debian only)
     # =========================================================================
@@ -77,11 +107,32 @@
     # =========================================================================
     # Debian/Ubuntu Package Installation
     # =========================================================================
+    - name: Check python3-apt availability (Debian)
+      ansible.builtin.command:
+        cmd: dpkg-query -W -f='${Status}' python3-apt
+      register: packages_python3_apt_check
+      changed_when: false
+      failed_when: false
+      check_mode: false
+      when: ansible_facts.os_family == "Debian"
+      tags: [packages, apt]
+
+    - name: Report skipped apt cache refresh in check mode
+      ansible.builtin.debug:
+        msg: "Skipping apt cache refresh in check mode because python3-apt is not installed yet; the real packages run will install it."
+      when:
+        - ansible_facts.os_family == "Debian"
+        - ansible_check_mode
+        - packages_python3_apt_check.rc != 0
+      tags: [packages, apt]
+
     - name: Update apt cache (Debian)
       ansible.builtin.apt:
         update_cache: true
         cache_valid_time: 3600
-      when: ansible_facts.os_family == "Debian"
+      when:
+        - ansible_facts.os_family == "Debian"
+        - not ansible_check_mode or packages_python3_apt_check.rc == 0
       tags: [packages, apt]
 
     - name: Build Debian package list
@@ -220,9 +271,17 @@
 - name: Install baseline packages (macOS hosts)
   hosts: macos_hosts
   become: false
-  gather_facts: true
+  gather_facts: false
+  serial: 1
 
   tasks:
+    - name: Gather macOS package facts
+      ansible.builtin.setup:
+      tags:
+        - packages
+        - homebrew
+        - casks
+        - fastfetch
     # =========================================================================
     # macOS Package Installation (Homebrew)
     # =========================================================================

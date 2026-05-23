@@ -1,0 +1,9 @@
+# =============================================================================
+# Backup Clients - Tailscale Tags
+# =============================================================================
+
+# Backup clients need Tailscale SSH/SFTP access to ts440 for local-restic.
+# Keep the default onboarding tag so newly enrolled systems remain reachable by admins.
+tailscale_advertise_tags:
+  - tag:tagged-devices
+  - tag:backup

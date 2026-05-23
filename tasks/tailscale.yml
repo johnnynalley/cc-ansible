@@ -260,7 +260,30 @@
     - tailscale_hostname is defined
     - (tailscale_backend_state_after_auth.stdout | default(tailscale_backend_state.stdout | default(''))) == "Running"
 
-- name: Configure Tailscale advertised tags and hostname
+- name: Configure Tailscale hostname preference
+  ansible.builtin.command: >-
+    tailscale set --hostname={{ (tailscale_hostname | default(inventory_hostname)) | quote }}
+  register: tailscale_hostname_set
+  changed_when: true
+  when:
+    - ansible_facts.os_family != "Darwin"
+    - tailscale_manage_preferences | default(false) | bool
+    - tailscale_hostname is defined
+    - (tailscale_backend_state_after_auth.stdout | default(tailscale_backend_state.stdout | default(''))) == "Running"
+    - (tailscale_hostname_current.stdout | default('')) != tailscale_hostname
+
+- name: Report skipped live Tailscale tag update
+  ansible.builtin.debug:
+    msg: "Configured Tailscale advertised tags differ, but live tag mutation is disabled. Set tailscale_manage_advertise_tags=true only for hosts that should be retagged in-place."
+  when:
+    - ansible_facts.os_family != "Darwin"
+    - tailscale_manage_preferences | default(false) | bool
+    - not (tailscale_manage_advertise_tags | default(false) | bool)
+    - (tailscale_backend_state_after_auth.stdout | default(tailscale_backend_state.stdout | default(''))) == "Running"
+    - (tailscale_auth_tags_csv | default('') | string | length) > 0
+    - (tailscale_advertise_tags_current.stdout | default('')) != (tailscale_auth_tags_sorted_csv | default(''))
+
+- name: Configure Tailscale advertised tags
   ansible.builtin.command: >-
     tailscale up
     --hostname={{ (tailscale_hostname | default(inventory_hostname)) | quote }}
@@ -274,15 +297,10 @@
   when:
     - ansible_facts.os_family != "Darwin"
     - tailscale_manage_preferences | default(false) | bool
+    - tailscale_manage_advertise_tags | default(false) | bool
     - (tailscale_backend_state_after_auth.stdout | default(tailscale_backend_state.stdout | default(''))) == "Running"
     - (tailscale_auth_tags_csv | default('') | string | length) > 0
-    - >-
-      (tailscale_advertise_tags_current.stdout | default('')) != (tailscale_auth_tags_sorted_csv | default(''))
-      or
-      (
-        tailscale_hostname is defined
-        and (tailscale_hostname_current.stdout | default('')) != tailscale_hostname
-      )
+    - (tailscale_advertise_tags_current.stdout | default('')) != (tailscale_auth_tags_sorted_csv | default(''))
 
 - name: Check Tailscale SSH preference
   ansible.builtin.shell: |
