@@ -39,6 +39,7 @@ plex_appliance_hdmi_tty: /dev/tty3
 plex_appliance_hdmi_return_tty: /dev/tty1
 plex_appliance_hdmi_drm_connector: HDMI-A-1
 plex_appliance_hdmi_sysfs_connector: card1-HDMI-A-1
+plex_appliance_hdmi_eld_path: "/proc/asound/card0/eld#0.1"
 plex_appliance_hdmi_restore_getty: true
 plex_appliance_hdmi_poll_seconds: 5
 plex_appliance_hdmi_configure_display: true

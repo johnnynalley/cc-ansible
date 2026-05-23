@@ -3,6 +3,7 @@
 
 import os
 import re
+import signal
 import shlex
 import subprocess
 import time
@@ -53,26 +54,52 @@ HDMI_TTY = os.environ.get("PLEX_APPLIANCE_HDMI_TTY", "/dev/tty3")
 FALLBACK_RETURN_TTY = os.environ.get("PLEX_APPLIANCE_HDMI_RETURN_TTY", "/dev/tty1")
 SYSFS_CONNECTOR = os.environ.get("PLEX_APPLIANCE_HDMI_SYSFS_CONNECTOR", "").strip()
 DRM_CONNECTOR = os.environ.get("PLEX_APPLIANCE_HDMI_DRM_CONNECTOR", "").strip()
+ELD_PATH = os.environ.get("PLEX_APPLIANCE_HDMI_ELD_PATH", "").strip()
 RESTORE_GETTY = os.environ.get("PLEX_APPLIANCE_HDMI_RESTORE_GETTY", "true").lower() == "true"
 
 TV_VT = tty_number(HDMI_TTY)
 FALLBACK_RETURN_VT = tty_number(FALLBACK_RETURN_TTY)
 CONNECTOR_STATUS = f"/sys/class/drm/{SYSFS_CONNECTOR}/status" if SYSFS_CONNECTOR else ""
 GETTY_SERVICE = f"getty@tty{TV_VT}.service"
+return_vt: Optional[str] = None
+was_connected = False
 
 
 def hdmi_connected() -> bool:
+    connector_connected = False
+
     if CONNECTOR_STATUS:
         try:
             with open(CONNECTOR_STATUS, "r", encoding="utf-8") as status_file:
-                return status_file.read().strip() == "connected"
+                connector_connected = status_file.read().strip() == "connected"
         except FileNotFoundError:
             return False
 
-    if not DRM_CONNECTOR:
+    elif DRM_CONNECTOR:
+        completed = run(["kscreen-doctor", "--outputs"], timeout=10)
+        connector_connected = (
+            completed.returncode == 0
+            and DRM_CONNECTOR in completed.stdout
+            and "connected" in completed.stdout
+        )
+
+    if not connector_connected:
         return False
-    completed = run(["kscreen-doctor", "--outputs"], timeout=10)
-    return completed.returncode == 0 and DRM_CONNECTOR in completed.stdout and "connected" in completed.stdout
+
+    if ELD_PATH:
+        return eld_valid()
+
+    return True
+
+
+def eld_valid() -> bool:
+    try:
+        with open(ELD_PATH, "r", encoding="utf-8") as eld_file:
+            eld = eld_file.read()
+    except FileNotFoundError:
+        return False
+
+    return re.search(r"(?m)^\s*eld_valid\s+1\b", eld) is not None
 
 
 def service_active(name: str) -> bool:
@@ -116,9 +143,33 @@ def stop_player() -> None:
         log(f"Failed to stop {PLAYER_SERVICE}: {completed.stderr.strip()}")
 
 
-def main() -> int:
-    return_vt: Optional[str] = None
+def cleanup_display() -> None:
+    global return_vt, was_connected
+
+    if service_active(PLAYER_SERVICE):
+        stop_player()
+
+    current_vt = active_vt()
+    target_vt = return_vt or FALLBACK_RETURN_VT
+    if current_vt == TV_VT or return_vt:
+        switch_vt(target_vt)
+
+    restore_getty()
+    return_vt = None
     was_connected = False
+
+
+def handle_shutdown(signum: int, _frame: object) -> None:
+    log(f"Received signal {signum}; stopping Plex TV playback")
+    cleanup_display()
+    raise SystemExit(0)
+
+
+def main() -> int:
+    global return_vt, was_connected
+
+    signal.signal(signal.SIGINT, handle_shutdown)
+    signal.signal(signal.SIGTERM, handle_shutdown)
 
     while True:
         connected = hdmi_connected()
@@ -137,10 +188,11 @@ def main() -> int:
 
         elif was_connected:
             log("HDMI disconnected; stopping Plex TV playback")
-            stop_player()
-            switch_vt(return_vt or FALLBACK_RETURN_VT)
-            restore_getty()
-            return_vt = None
+            cleanup_display()
+
+        elif service_active(PLAYER_SERVICE):
+            log("HDMI unavailable; stopping stray Plex TV playback")
+            cleanup_display()
 
         was_connected = connected
         time.sleep(POLL_SECONDS)
