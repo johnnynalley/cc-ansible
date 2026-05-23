@@ -2,12 +2,13 @@
 """Fullscreen Plex collection shuffle player for a dedicated TV appliance."""
 
 import os
+import json
 import random
 import shlex
 import subprocess
 import sys
 import time
-from typing import Dict, Iterable, List, Optional
+from typing import Dict, Iterable, List, Optional, Set, Tuple
 from urllib.parse import urlencode
 import xml.etree.ElementTree as ET
 
@@ -25,6 +26,7 @@ PAGE_SIZE = int(os.environ.get("PLEX_APPLIANCE_PAGE_SIZE", "100"))
 SERVER_RETRY_SECONDS = int(os.environ.get("PLEX_APPLIANCE_SERVER_RETRY_SECONDS", "30"))
 ITEM_FAILURE_DELAY_SECONDS = int(os.environ.get("PLEX_APPLIANCE_ITEM_FAILURE_DELAY_SECONDS", "10"))
 COLLECTION_REFRESH_SECONDS = int(os.environ.get("PLEX_APPLIANCE_COLLECTION_REFRESH_SECONDS", "3600"))
+SHUFFLE_STATE_PATH = os.environ.get("PLEX_APPLIANCE_SHUFFLE_STATE_PATH", "/var/lib/plex-appliance/shuffle-state.json")
 MPV_ARGS = shlex.split(os.environ.get("PLEX_APPLIANCE_MPV_ARGS", "--fs --no-terminal"))
 MPV_EXTRA_ARGS = shlex.split(os.environ.get("PLEX_APPLIANCE_MPV_EXTRA_ARGS", ""))
 MPV_SCREEN_NAME = os.environ.get("PLEX_APPLIANCE_MPV_SCREEN_NAME", "").strip()
@@ -38,6 +40,7 @@ SESSION.headers.update({
     "X-Plex-Client-Identifier": "cc-ansible-plex-appliance",
     "X-Plex-Device-Name": "Living Room Plex Appliance",
 })
+RNG = random.SystemRandom()
 
 
 def log(message: str) -> None:
@@ -160,10 +163,91 @@ def item_title(item: ET.Element) -> str:
     return " - ".join(part for part in parts if part)
 
 
-def shuffled_queue(items: List[ET.Element]) -> List[ET.Element]:
-    queue = list(items)
-    random.shuffle(queue)
+def item_key(item: ET.Element) -> str:
+    return item.attrib.get("ratingKey") or item.attrib.get("key") or item_title(item)
+
+
+def items_by_key(items: List[ET.Element]) -> Dict[str, ET.Element]:
+    keyed: Dict[str, ET.Element] = {}
+    for item in items:
+        key = item_key(item)
+        if key and key not in keyed:
+            keyed[key] = item
+    return keyed
+
+
+def shuffled_keys(keys: Iterable[str]) -> List[str]:
+    queue = list(keys)
+    RNG.shuffle(queue)
     return queue
+
+
+def load_shuffle_state() -> Tuple[List[str], List[str]]:
+    try:
+        with open(SHUFFLE_STATE_PATH, "r", encoding="utf-8") as state_file:
+            payload = json.load(state_file)
+    except FileNotFoundError:
+        return [], []
+    except Exception as exc:
+        log(f"Could not load shuffle state {SHUFFLE_STATE_PATH}: {exc}")
+        return [], []
+
+    queue = payload.get("queue", [])
+    played = payload.get("played", [])
+    if not isinstance(queue, list) or not isinstance(played, list):
+        return [], []
+    return [str(key) for key in queue], [str(key) for key in played]
+
+
+def save_shuffle_state(queue_keys: List[str], played_keys: List[str]) -> None:
+    state_dir = os.path.dirname(SHUFFLE_STATE_PATH)
+    if state_dir:
+        os.makedirs(state_dir, exist_ok=True)
+    tmp_path = f"{SHUFFLE_STATE_PATH}.tmp"
+    payload = {
+        "collection": COLLECTION,
+        "queue": queue_keys,
+        "played": played_keys,
+        "updated_at": int(time.time()),
+    }
+    with open(tmp_path, "w", encoding="utf-8") as state_file:
+        json.dump(payload, state_file, separators=(",", ":"))
+    os.replace(tmp_path, SHUFFLE_STATE_PATH)
+
+
+def insert_randomly(queue_keys: List[str], new_keys: List[str]) -> None:
+    for key in shuffled_keys(new_keys):
+        queue_keys.insert(RNG.randrange(len(queue_keys) + 1), key)
+
+
+def reconcile_shuffle_state(
+    queue_keys: List[str],
+    played_keys: List[str],
+    item_keys: Set[str],
+) -> Tuple[List[str], List[str]]:
+    queue_keys = [key for key in queue_keys if key in item_keys]
+    queue_set = set(queue_keys)
+    played_keys = [key for key in played_keys if key in item_keys and key not in queue_set]
+    known_keys = queue_set | set(played_keys)
+    new_keys = sorted(item_keys - known_keys)
+
+    if new_keys and queue_keys:
+        insert_randomly(queue_keys, new_keys)
+        log(f"Added {len(new_keys)} new items to the current shuffle cycle")
+    elif new_keys:
+        queue_keys = shuffled_keys(new_keys)
+
+    if not queue_keys:
+        last_played = played_keys[-1] if played_keys else ""
+        queue_keys = shuffled_keys(item_keys)
+        if last_played and len(queue_keys) > 1 and queue_keys[0] == last_played:
+            swap_index = RNG.randrange(1, len(queue_keys))
+            queue_keys[0], queue_keys[swap_index] = queue_keys[swap_index], queue_keys[0]
+        played_keys = []
+        log(f"Started a new shuffle cycle with {len(queue_keys)} items")
+
+    log(f"Shuffle state: {len(queue_keys)} queued, {len(played_keys)} already played this cycle")
+    return queue_keys, played_keys
 
 
 def playback_args() -> List[str]:
@@ -199,30 +283,41 @@ def play(item: ET.Element) -> int:
 
 
 def main() -> int:
-    queue: List[ET.Element] = []
-    collection_items: List[ET.Element] = []
+    queue_keys, played_keys = load_shuffle_state()
+    item_map: Dict[str, ET.Element] = {}
     next_refresh = 0.0
 
     while True:
         wait_for_server()
 
         now = time.monotonic()
-        if not queue or now >= next_refresh:
+        if not item_map or not queue_keys or now >= next_refresh:
             try:
-                collection_items = load_collection_items()
-                queue = shuffled_queue(collection_items)
+                item_map = items_by_key(load_collection_items())
+                if not item_map:
+                    raise RuntimeError(f"No playable items found in collection: {COLLECTION}")
+                queue_keys, played_keys = reconcile_shuffle_state(queue_keys, played_keys, set(item_map))
+                save_shuffle_state(queue_keys, played_keys)
                 next_refresh = now + COLLECTION_REFRESH_SECONDS
             except Exception as exc:
                 log(f"Failed to refresh collection: {exc}; retrying in {SERVER_RETRY_SECONDS}s")
                 time.sleep(SERVER_RETRY_SECONDS)
                 continue
 
-        item = queue.pop(0)
+        item_key_to_play = queue_keys.pop(0)
+        item = item_map.get(item_key_to_play)
+        if item is None:
+            save_shuffle_state(queue_keys, played_keys)
+            continue
+
         try:
             return_code = play(item)
         except Exception as exc:
             log(f"Playback launch failed: {exc}")
             return_code = 1
+
+        played_keys.append(item_key_to_play)
+        save_shuffle_state(queue_keys, played_keys)
 
         if return_code != 0:
             time.sleep(ITEM_FAILURE_DELAY_SECONDS)
