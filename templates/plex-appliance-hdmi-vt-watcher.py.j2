@@ -62,6 +62,8 @@ RESTART_DISPLAY_MANAGER = os.environ.get("PLEX_APPLIANCE_HDMI_RESTART_DISPLAY_MA
 DISPLAY_MANAGER_SERVICE = os.environ.get("PLEX_APPLIANCE_HDMI_DISPLAY_MANAGER_SERVICE", "sddm.service").strip()
 RESET_PLASMA_USER_SERVICES = os.environ.get("PLEX_APPLIANCE_HDMI_RESET_PLASMA_USER_SERVICES", "false").lower() == "true"
 SKIP_WHEN_LOCAL_USER_ACTIVE = os.environ.get("PLEX_APPLIANCE_HDMI_SKIP_WHEN_LOCAL_USER_ACTIVE", "false").lower() == "true"
+LOCK_LOCAL_USER_SESSION = os.environ.get("PLEX_APPLIANCE_HDMI_LOCK_LOCAL_USER_SESSION", "false").lower() == "true"
+LOCK_SETTLE_SECONDS = int(os.environ.get("PLEX_APPLIANCE_HDMI_LOCK_SETTLE_SECONDS", "2"))
 APPLIANCE_USER = os.environ.get("PLEX_APPLIANCE_USER", "").strip()
 
 TV_VT = tty_number(HDMI_TTY)
@@ -163,6 +165,15 @@ def local_user_seat_active() -> bool:
             return True
 
     return False
+
+
+def lock_local_user_sessions() -> None:
+    completed = run(["loginctl", "lock-sessions"], timeout=10)
+    if completed.returncode != 0:
+        log(f"Failed to lock local user sessions: {completed.stderr.strip()}")
+        return
+    if LOCK_SETTLE_SECONDS > 0:
+        time.sleep(LOCK_SETTLE_SECONDS)
 
 
 def restart_display_manager_if_safe() -> None:
@@ -284,16 +295,21 @@ def main() -> int:
     while True:
         connected = hdmi_connected()
 
-        if connected and SKIP_WHEN_LOCAL_USER_ACTIVE and local_user_seat_active():
-            if was_connected or service_active(PLAYER_SERVICE):
-                log("HDMI connected while local user seat is active; stopping Plex TV playback")
-                cleanup_display(recover_display=False)
-            elif not skipped_for_local_user:
-                log("HDMI connected while local user seat is active; leaving Plasma session alone")
-            skipped_for_local_user = True
-            was_connected = False
-            time.sleep(POLL_SECONDS)
-            continue
+        if connected and local_user_seat_active():
+            if LOCK_LOCAL_USER_SESSION:
+                if not was_connected and not service_active(PLAYER_SERVICE):
+                    log("HDMI connected while local user seat is active; locking session before Plex TV playback")
+                    lock_local_user_sessions()
+            elif SKIP_WHEN_LOCAL_USER_ACTIVE:
+                if was_connected or service_active(PLAYER_SERVICE):
+                    log("HDMI connected while local user seat is active; stopping Plex TV playback")
+                    cleanup_display(recover_display=False)
+                elif not skipped_for_local_user:
+                    log("HDMI connected while local user seat is active; leaving Plasma session alone")
+                skipped_for_local_user = True
+                was_connected = False
+                time.sleep(POLL_SECONDS)
+                continue
 
         skipped_for_local_user = False
 
