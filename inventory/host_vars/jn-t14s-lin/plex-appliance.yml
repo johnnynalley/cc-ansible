@@ -9,8 +9,8 @@ plex_appliance_server_url: "http://100.66.6.113:32400"
 plex_appliance_library: "Shows"
 plex_appliance_collection: "Adult Swim Collection"
 
-# This uses a dedicated VT while HDMI is attached, so playback does not depend
-# on Plasma/KScreen and cannot silently fall back to the laptop panel.
+# This uses a high dedicated VT while HDMI is attached, so playback does not
+# depend on Plasma/KScreen and does not collide with SDDM or a logged-in session.
 plex_appliance_audio_languages:
   - eng
 plex_appliance_subtitle_languages:
@@ -35,12 +35,15 @@ plex_appliance_hdmi_ignore_patterns:
   - LVDS
   - DSI
 plex_appliance_hdmi_backend: vt
-plex_appliance_hdmi_tty: /dev/tty3
+plex_appliance_hdmi_tty: /dev/tty8
 plex_appliance_hdmi_return_tty: /dev/tty1
 plex_appliance_hdmi_drm_connector: HDMI-A-1
 plex_appliance_hdmi_sysfs_connector: card1-HDMI-A-1
 plex_appliance_hdmi_eld_path: "/proc/asound/card0/eld#0.1"
+plex_appliance_hdmi_edid_path: /sys/class/drm/card1-HDMI-A-1/edid
 plex_appliance_hdmi_restore_getty: true
+plex_appliance_hdmi_restart_display_manager: true
+plex_appliance_hdmi_display_manager_service: sddm.service
 plex_appliance_hdmi_poll_seconds: 5
 plex_appliance_hdmi_configure_display: true
 plex_appliance_hdmi_make_primary: true
