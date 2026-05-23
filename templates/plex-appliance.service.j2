@@ -16,7 +16,8 @@ StandardInput=tty
 StandardOutput=journal
 StandardError=journal
 Environment=PYTHONUNBUFFERED=1
-Environment=XDG_RUNTIME_DIR=/run/user/%U
+{% set plex_appliance_runtime_uid = plex_appliance_user_uid | default(ansible_facts.getent_passwd[plex_appliance_user][1]) %}
+Environment=XDG_RUNTIME_DIR=/run/user/{{ plex_appliance_runtime_uid }}
 Environment=HOME=/home/{{ plex_appliance_user }}
 EnvironmentFile=/etc/plex-appliance/plex-appliance.env
 WorkingDirectory=/var/lib/plex-appliance

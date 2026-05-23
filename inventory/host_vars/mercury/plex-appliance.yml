@@ -34,7 +34,7 @@ plex_appliance_desktop_services:
   - gdm3.service
   - sddm.service
 plex_appliance_page_size: 100
-plex_appliance_server_retry_seconds: 30
+plex_appliance_server_retry_seconds: 3
 plex_appliance_item_failure_delay_seconds: 10
 plex_appliance_collection_refresh_seconds: 3600
 plex_appliance_mpv_args:
@@ -46,6 +46,8 @@ plex_appliance_mpv_args:
   - --profile=fast
   - --vo=gpu
   - --gpu-context=drm
+  - --drm-device=/dev/dri/card1
+  - --drm-connector=HDMI-A-1
   - --hwdec=auto-safe
   - --af=lavfi=[dynaudnorm=f=250:g=15:p=0.95:m=8]
   - --volume-max=400

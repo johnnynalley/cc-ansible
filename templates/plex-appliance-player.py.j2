@@ -4,11 +4,14 @@
 import os
 import json
 import random
+import re
 import shlex
+import socket
 import subprocess
 import sys
+import tempfile
 import time
-from typing import Dict, Iterable, List, Optional, Set, Tuple
+from typing import Any, Dict, Iterable, List, Optional, Set, Tuple
 from urllib.parse import urlencode
 import xml.etree.ElementTree as ET
 
@@ -27,6 +30,11 @@ SERVER_RETRY_SECONDS = int(os.environ.get("PLEX_APPLIANCE_SERVER_RETRY_SECONDS",
 ITEM_FAILURE_DELAY_SECONDS = int(os.environ.get("PLEX_APPLIANCE_ITEM_FAILURE_DELAY_SECONDS", "10"))
 COLLECTION_REFRESH_SECONDS = int(os.environ.get("PLEX_APPLIANCE_COLLECTION_REFRESH_SECONDS", "3600"))
 SHUFFLE_STATE_PATH = os.environ.get("PLEX_APPLIANCE_SHUFFLE_STATE_PATH", "/var/lib/plex-appliance/shuffle-state.json")
+PLAYBACK_PROGRESS_SECONDS = max(1, int(os.environ.get("PLEX_APPLIANCE_PLAYBACK_PROGRESS_SECONDS", "5")))
+RESUME_REWIND_SECONDS = max(0, int(os.environ.get("PLEX_APPLIANCE_RESUME_REWIND_SECONDS", "10")))
+RESUME_END_THRESHOLD_SECONDS = max(0, int(os.environ.get("PLEX_APPLIANCE_RESUME_END_THRESHOLD_SECONDS", "30")))
+STATUS_SCREEN_ENABLED = os.environ.get("PLEX_APPLIANCE_STATUS_SCREEN", "true").lower() == "true"
+STATUS_TTY = os.environ.get("PLEX_APPLIANCE_STATUS_TTY", "/dev/tty").strip() or "/dev/tty"
 MPV_ARGS = shlex.split(os.environ.get("PLEX_APPLIANCE_MPV_ARGS", "--fs --no-terminal"))
 MPV_EXTRA_ARGS = shlex.split(os.environ.get("PLEX_APPLIANCE_MPV_EXTRA_ARGS", ""))
 MPV_SCREEN_NAME = os.environ.get("PLEX_APPLIANCE_MPV_SCREEN_NAME", "").strip()
@@ -41,10 +49,58 @@ SESSION.headers.update({
     "X-Plex-Device-Name": "Living Room Plex Appliance",
 })
 RNG = random.SystemRandom()
+STATUS_SCREEN_AVAILABLE = True
 
 
 def log(message: str) -> None:
     print(time.strftime("%Y-%m-%d %H:%M:%S"), message, flush=True)
+
+
+def redact_token(message: object) -> str:
+    text = str(message)
+    if TOKEN:
+        text = text.replace(TOKEN, "<redacted>")
+    return re.sub(r"X-Plex-Token=[^&\s]+", "X-Plex-Token=<redacted>", text)
+
+
+def draw_status_screen(lines: List[str]) -> None:
+    global STATUS_SCREEN_AVAILABLE
+    if not STATUS_SCREEN_ENABLED or not STATUS_SCREEN_AVAILABLE:
+        return
+
+    width = 80
+    height = 24
+    vertical_padding = max(0, (height - len(lines)) // 2)
+    body = "\033[?25l\033[H\033[2J" + ("\n" * vertical_padding)
+    body += "\n".join(line[:width].center(width) for line in lines)
+    body += "\n"
+
+    try:
+        with open(STATUS_TTY, "w", encoding="utf-8", buffering=1) as status_tty:
+            status_tty.write(body)
+    except Exception as exc:
+        STATUS_SCREEN_AVAILABLE = False
+        log(f"Could not write status screen to {STATUS_TTY}: {redact_token(exc)}")
+
+
+def clear_status_screen() -> None:
+    draw_status_screen([])
+
+
+def retry_wait(context: str, exc: object, attempt: int, seconds: int) -> None:
+    detail = redact_token(exc)
+    if detail:
+        log(f"{context}: {detail}; retrying in {seconds}s")
+    else:
+        log(f"{context}; retrying in {seconds}s")
+
+    for remaining in range(seconds, 0, -1):
+        draw_status_screen([
+            "Connection to Plex Media Server failed.",
+            f"Retrying in {remaining} sec (attempt {attempt})",
+            "Playback will resume automatically.",
+        ])
+        time.sleep(1)
 
 
 def plex_url(path: str, params: Optional[Dict[str, object]] = None) -> str:
@@ -60,13 +116,20 @@ def plex_get(path: str, params: Optional[Dict[str, object]] = None, timeout: int
 
 
 def wait_for_server() -> None:
+    attempt = 1
+    failed_once = False
     while True:
         try:
             plex_get("/identity", timeout=5)
+            if failed_once:
+                draw_status_screen(["Plex Media Server connected.", "Resuming playback..."])
+                time.sleep(1)
+                clear_status_screen()
             return
         except Exception as exc:
-            log(f"Plex unavailable: {exc}; retrying in {SERVER_RETRY_SECONDS}s")
-            time.sleep(SERVER_RETRY_SECONDS)
+            failed_once = True
+            retry_wait("Plex unavailable", exc, attempt, SERVER_RETRY_SECONDS)
+            attempt += 1
 
 
 def children(root: ET.Element) -> List[ET.Element]:
@@ -182,24 +245,31 @@ def shuffled_keys(keys: Iterable[str]) -> List[str]:
     return queue
 
 
-def load_shuffle_state() -> Tuple[List[str], List[str]]:
+def load_shuffle_state() -> Tuple[List[str], List[str], Optional[Dict[str, Any]]]:
     try:
         with open(SHUFFLE_STATE_PATH, "r", encoding="utf-8") as state_file:
             payload = json.load(state_file)
     except FileNotFoundError:
-        return [], []
+        return [], [], None
     except Exception as exc:
-        log(f"Could not load shuffle state {SHUFFLE_STATE_PATH}: {exc}")
-        return [], []
+        log(f"Could not load shuffle state {SHUFFLE_STATE_PATH}: {redact_token(exc)}")
+        return [], [], None
 
     queue = payload.get("queue", [])
     played = payload.get("played", [])
+    active = payload.get("active")
     if not isinstance(queue, list) or not isinstance(played, list):
-        return [], []
-    return [str(key) for key in queue], [str(key) for key in played]
+        return [], [], None
+    if not isinstance(active, dict) or not active.get("key"):
+        active = None
+    return [str(key) for key in queue], [str(key) for key in played], active
 
 
-def save_shuffle_state(queue_keys: List[str], played_keys: List[str]) -> None:
+def save_shuffle_state(
+    queue_keys: List[str],
+    played_keys: List[str],
+    active: Optional[Dict[str, Any]] = None,
+) -> None:
     state_dir = os.path.dirname(SHUFFLE_STATE_PATH)
     if state_dir:
         os.makedirs(state_dir, exist_ok=True)
@@ -210,6 +280,8 @@ def save_shuffle_state(queue_keys: List[str], played_keys: List[str]) -> None:
         "played": played_keys,
         "updated_at": int(time.time()),
     }
+    if active:
+        payload["active"] = active
     with open(tmp_path, "w", encoding="utf-8") as state_file:
         json.dump(payload, state_file, separators=(",", ":"))
     os.replace(tmp_path, SHUFFLE_STATE_PATH)
@@ -224,11 +296,16 @@ def reconcile_shuffle_state(
     queue_keys: List[str],
     played_keys: List[str],
     item_keys: Set[str],
+    active_key: str = "",
 ) -> Tuple[List[str], List[str]]:
     queue_keys = [key for key in queue_keys if key in item_keys]
+    if active_key:
+        queue_keys = [key for key in queue_keys if key != active_key]
     queue_set = set(queue_keys)
     played_keys = [key for key in played_keys if key in item_keys and key not in queue_set]
     known_keys = queue_set | set(played_keys)
+    if active_key in item_keys:
+        known_keys.add(active_key)
     new_keys = sorted(item_keys - known_keys)
 
     if new_keys and queue_keys:
@@ -237,7 +314,7 @@ def reconcile_shuffle_state(
     elif new_keys:
         queue_keys = shuffled_keys(new_keys)
 
-    if not queue_keys:
+    if not queue_keys and not active_key:
         last_played = played_keys[-1] if played_keys else ""
         queue_keys = shuffled_keys(item_keys)
         if last_played and len(queue_keys) > 1 and queue_keys[0] == last_played:
@@ -248,6 +325,44 @@ def reconcile_shuffle_state(
 
     log(f"Shuffle state: {len(queue_keys)} queued, {len(played_keys)} already played this cycle")
     return queue_keys, played_keys
+
+
+def active_item_key(active: Optional[Dict[str, Any]]) -> str:
+    if not active:
+        return ""
+    return str(active.get("key", ""))
+
+
+def numeric(value: object, default: float = 0.0) -> float:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def active_checkpoint(item_key_to_play: str, item: ET.Element, position: float, duration: float) -> Dict[str, Any]:
+    return {
+        "key": item_key_to_play,
+        "title": item_title(item),
+        "position": max(0.0, position),
+        "duration": max(0.0, duration),
+        "updated_at": int(time.time()),
+    }
+
+
+def resume_position(active: Optional[Dict[str, Any]]) -> float:
+    if not active:
+        return 0.0
+    position = max(0.0, numeric(active.get("position")))
+    return max(0.0, position - RESUME_REWIND_SECONDS)
+
+
+def playback_completed(return_code: int, position: float, duration: float) -> bool:
+    if return_code != 0:
+        return False
+    if duration <= 0:
+        return True
+    return position >= max(0.0, duration - RESUME_END_THRESHOLD_SECONDS)
 
 
 def playback_args() -> List[str]:
@@ -269,23 +384,95 @@ def playback_args() -> List[str]:
     return args
 
 
-def play(item: ET.Element) -> int:
+def wait_for_ipc_socket(socket_path: str, timeout: float = 5.0) -> bool:
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if os.path.exists(socket_path):
+            return True
+        time.sleep(0.1)
+    return os.path.exists(socket_path)
+
+
+def mpv_property(socket_path: str, name: str) -> Optional[float]:
+    try:
+        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:
+            client.settimeout(1.0)
+            client.connect(socket_path)
+            client.sendall(json.dumps({"command": ["get_property", name]}).encode("utf-8") + b"\n")
+            response = b""
+            while not response.endswith(b"\n"):
+                chunk = client.recv(4096)
+                if not chunk:
+                    break
+                response += chunk
+    except OSError:
+        return None
+
+    try:
+        payload = json.loads(response.decode("utf-8"))
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        return None
+    value = payload.get("data")
+    return numeric(value) if isinstance(value, (int, float)) else None
+
+
+def play(
+    item_key_to_play: str,
+    item: ET.Element,
+    start_position: float,
+    progress_callback,
+) -> Tuple[int, float, float]:
     url = stream_url_for_item(item)
     if not url:
         log(f"Skipping item without stream URL: {item_title(item)}")
-        return 0
+        return 0, 0.0, 0.0
 
-    log(f"Playing: {item_title(item)}")
-    command = ["mpv", *playback_args(), url]
-    completed = subprocess.run(command, check=False)
-    log(f"Player exited with code {completed.returncode}")
-    return completed.returncode
+    title = item_title(item)
+    if start_position > 0:
+        log(f"Resuming: {title} at {int(start_position)}s")
+    else:
+        log(f"Playing: {title}")
+
+    last_position = max(0.0, start_position)
+    duration = 0.0
+    with tempfile.TemporaryDirectory(prefix="plex-appliance-mpv-") as runtime_dir:
+        socket_path = os.path.join(runtime_dir, "mpv.sock")
+        command = ["mpv", *playback_args(), f"--input-ipc-server={socket_path}"]
+        if start_position > 0:
+            command.append(f"--start={start_position}")
+        command.append(url)
+
+        process = subprocess.Popen(command)
+        wait_for_ipc_socket(socket_path)
+        progress_callback(last_position, duration)
+
+        while process.poll() is None:
+            time.sleep(PLAYBACK_PROGRESS_SECONDS)
+            position_value = mpv_property(socket_path, "time-pos")
+            duration_value = mpv_property(socket_path, "duration")
+            if position_value is not None:
+                last_position = max(0.0, position_value)
+            if duration_value is not None:
+                duration = max(0.0, duration_value)
+            progress_callback(last_position, duration)
+
+        return_code = process.wait()
+        position_value = mpv_property(socket_path, "time-pos")
+        duration_value = mpv_property(socket_path, "duration")
+        if position_value is not None:
+            last_position = max(last_position, position_value)
+        if duration_value is not None:
+            duration = max(duration, duration_value)
+
+    log(f"Player exited with code {return_code}")
+    return return_code, last_position, duration
 
 
 def main() -> int:
-    queue_keys, played_keys = load_shuffle_state()
+    queue_keys, played_keys, active = load_shuffle_state()
     item_map: Dict[str, ET.Element] = {}
     next_refresh = 0.0
+    refresh_attempt = 1
 
     while True:
         wait_for_server()
@@ -296,28 +483,57 @@ def main() -> int:
                 item_map = items_by_key(load_collection_items())
                 if not item_map:
                     raise RuntimeError(f"No playable items found in collection: {COLLECTION}")
-                queue_keys, played_keys = reconcile_shuffle_state(queue_keys, played_keys, set(item_map))
-                save_shuffle_state(queue_keys, played_keys)
+                if active_item_key(active) and active_item_key(active) not in item_map:
+                    active = None
+                queue_keys, played_keys = reconcile_shuffle_state(
+                    queue_keys,
+                    played_keys,
+                    set(item_map),
+                    active_item_key(active),
+                )
+                save_shuffle_state(queue_keys, played_keys, active)
                 next_refresh = now + COLLECTION_REFRESH_SECONDS
+                refresh_attempt = 1
             except Exception as exc:
-                log(f"Failed to refresh collection: {exc}; retrying in {SERVER_RETRY_SECONDS}s")
-                time.sleep(SERVER_RETRY_SECONDS)
+                retry_wait("Failed to refresh collection", exc, refresh_attempt, SERVER_RETRY_SECONDS)
+                refresh_attempt += 1
                 continue
 
-        item_key_to_play = queue_keys.pop(0)
+        item_key_to_play = active_item_key(active)
+        start_position = resume_position(active)
+        if not item_key_to_play:
+            item_key_to_play = queue_keys.pop(0)
+            start_position = 0.0
+
         item = item_map.get(item_key_to_play)
         if item is None:
+            active = None
             save_shuffle_state(queue_keys, played_keys)
             continue
 
-        try:
-            return_code = play(item)
-        except Exception as exc:
-            log(f"Playback launch failed: {exc}")
-            return_code = 1
+        def save_progress(position: float, duration: float) -> None:
+            save_shuffle_state(
+                queue_keys,
+                played_keys,
+                active_checkpoint(item_key_to_play, item, position, duration),
+            )
 
-        played_keys.append(item_key_to_play)
-        save_shuffle_state(queue_keys, played_keys)
+        save_progress(start_position, numeric(active.get("duration")) if active else 0.0)
+        try:
+            return_code, last_position, duration = play(item_key_to_play, item, start_position, save_progress)
+        except Exception as exc:
+            log(f"Playback launch failed: {redact_token(exc)}")
+            return_code = 1
+            last_position = start_position
+            duration = numeric(active.get("duration")) if active else 0.0
+
+        if playback_completed(return_code, last_position, duration):
+            played_keys.append(item_key_to_play)
+            active = None
+            save_shuffle_state(queue_keys, played_keys)
+        else:
+            active = active_checkpoint(item_key_to_play, item, last_position, duration)
+            save_shuffle_state(queue_keys, played_keys, active)
 
         if return_code != 0:
             time.sleep(ITEM_FAILURE_DELAY_SECONDS)

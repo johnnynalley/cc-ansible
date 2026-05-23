@@ -121,6 +121,11 @@
           - input
         append: true
 
+    - name: Look up Plex appliance user account
+      ansible.builtin.getent:
+        database: passwd
+        key: "{{ plex_appliance_user }}"
+
     - name: Set appliance boot target
       ansible.builtin.file:
         src: /lib/systemd/system/multi-user.target
