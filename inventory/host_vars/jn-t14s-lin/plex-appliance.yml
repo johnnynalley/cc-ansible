@@ -1,38 +1,45 @@
 # =============================================================================
-# mercury - Plex Living Room Appliance
+# jn-t14s-lin - Plex HDMI Appliance
 # =============================================================================
 
 plex_appliance_enabled: true
+plex_appliance_mode: hdmi
 plex_appliance_user: "{{ admin_user }}"
 plex_appliance_server_url: "http://100.66.6.113:32400"
 plex_appliance_library: "Shows"
 plex_appliance_collection: "Adult Swim Collection"
 
-# This appliance has no Plex UI; track selection is global and automatic.
+# This mode is session-bound: the watcher starts with Plasma, and the player
+# only runs while a non-internal HDMI-style output is connected.
 plex_appliance_audio_languages:
   - eng
 plex_appliance_subtitle_languages:
   - eng
 plex_appliance_subtitles: auto
 
-# Store the real token in inventory/host_vars/mercury/vault.yml.
+# Store the real token in inventory/host_vars/jn-t14s-lin/vault.yml.
 plex_appliance_token: "{{ vault_plex_appliance_token | default('') }}"
 
-# Raspberry Pi OS Lite 64-bit is the intended base, but this also works on
-# Ubuntu/Debian as long as the packages below are available.
 plex_appliance_packages:
   - mpv
   - python3
   - python3-requests
-  - alsa-utils
+  - kscreen
+  - libxcb-cursor0
 
-plex_appliance_tty: /dev/tty1
-plex_appliance_disable_desktop: true
-plex_appliance_desktop_services:
-  - lightdm.service
-  - gdm.service
-  - gdm3.service
-  - sddm.service
+plex_appliance_disable_desktop: false
+plex_appliance_hdmi_output_patterns:
+  - HDMI
+plex_appliance_hdmi_ignore_patterns:
+  - eDP
+  - LVDS
+  - DSI
+plex_appliance_hdmi_poll_seconds: 5
+plex_appliance_hdmi_configure_display: true
+plex_appliance_hdmi_make_primary: true
+plex_appliance_hdmi_tv_only: true
+plex_appliance_hdmi_autostart_enabled: false
+plex_appliance_audio_device: "pulse/alsa_output.pci-0000_04_00.1.HiFi__HDMI2__sink"
 plex_appliance_page_size: 100
 plex_appliance_server_retry_seconds: 30
 plex_appliance_item_failure_delay_seconds: 10
@@ -44,8 +51,7 @@ plex_appliance_mpv_args:
   - --no-input-default-bindings
   - --really-quiet
   - --profile=fast
-  - --vo=gpu
-  - --gpu-context=drm
+  - --vo=gpu-next
   - --hwdec=auto-safe
   - --volume-max=400
   - --volume=300

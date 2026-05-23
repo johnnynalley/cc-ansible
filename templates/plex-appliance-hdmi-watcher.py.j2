@@ -1,0 +1,234 @@
+#!/usr/bin/env python3
+"""Start the Plex appliance player only while an external TV output is connected."""
+
+import json
+import os
+import re
+import shlex
+import signal
+import subprocess
+import time
+from dataclasses import dataclass
+from typing import Dict, Iterable, List, Optional
+
+
+ENV_FILE = "/etc/plex-appliance/plex-appliance.env"
+PLAYER = "/usr/local/bin/plex-appliance-player"
+
+
+@dataclass(frozen=True)
+class Output:
+    output_id: str
+    name: str
+    connected: bool
+    enabled: bool
+    preferred_mode: str = ""
+
+
+def log(message: str) -> None:
+    print(time.strftime("%Y-%m-%d %H:%M:%S"), message, flush=True)
+
+
+def parse_env_value(value: str) -> str:
+    parts = shlex.split(value, comments=False, posix=True)
+    return parts[0] if parts else ""
+
+
+def load_env_file(path: str = ENV_FILE) -> Dict[str, str]:
+    values: Dict[str, str] = {}
+    with open(path, "r", encoding="utf-8") as env_file:
+        for raw_line in env_file:
+            line = raw_line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            key, value = line.split("=", 1)
+            values[key.strip()] = parse_env_value(value.strip())
+    return values
+
+
+ENV = load_env_file()
+os.environ.update({key: value for key, value in ENV.items() if key not in os.environ})
+
+OUTPUT_PATTERNS = [
+    re.compile(pattern, re.IGNORECASE)
+    for pattern in os.environ.get("PLEX_APPLIANCE_HDMI_OUTPUT_PATTERNS", "HDMI").split(",")
+    if pattern.strip()
+]
+IGNORE_PATTERNS = [
+    re.compile(pattern, re.IGNORECASE)
+    for pattern in os.environ.get("PLEX_APPLIANCE_HDMI_IGNORE_PATTERNS", "eDP,LVDS,DSI").split(",")
+    if pattern.strip()
+]
+POLL_SECONDS = int(os.environ.get("PLEX_APPLIANCE_HDMI_POLL_SECONDS", "5"))
+CONFIGURE_DISPLAY = os.environ.get("PLEX_APPLIANCE_HDMI_CONFIGURE_DISPLAY", "true").lower() == "true"
+MAKE_PRIMARY = os.environ.get("PLEX_APPLIANCE_HDMI_MAKE_PRIMARY", "true").lower() == "true"
+TV_ONLY = os.environ.get("PLEX_APPLIANCE_HDMI_TV_ONLY", "false").lower() == "true"
+
+
+def run(command: List[str], timeout: int = 10) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(command, check=False, capture_output=True, text=True, timeout=timeout)
+
+
+def output_matches(output: Output) -> bool:
+    haystack = f"{output.output_id} {output.name}"
+    if any(pattern.search(haystack) for pattern in IGNORE_PATTERNS):
+        return False
+    return any(pattern.search(haystack) for pattern in OUTPUT_PATTERNS)
+
+
+def outputs_from_json() -> List[Output]:
+    completed = run(["kscreen-doctor", "-j"])
+    if completed.returncode != 0:
+        return []
+
+    try:
+        payload = json.loads(completed.stdout)
+    except json.JSONDecodeError:
+        return []
+
+    raw_outputs = payload.get("outputs", [])
+    if isinstance(raw_outputs, dict):
+        iterable: Iterable[object] = raw_outputs.values()
+    else:
+        iterable = raw_outputs
+
+    outputs: List[Output] = []
+    for raw_output in iterable:
+        if not isinstance(raw_output, dict):
+            continue
+        output_id = str(raw_output.get("id") or raw_output.get("name") or "")
+        name = str(raw_output.get("name") or output_id)
+        connected = bool(raw_output.get("connected"))
+        enabled = bool(raw_output.get("enabled"))
+        preferred_modes = raw_output.get("preferredModes", [])
+        preferred_mode = str(preferred_modes[0]) if preferred_modes else ""
+        if output_id:
+            outputs.append(Output(output_id, name, connected, enabled, preferred_mode))
+    return outputs
+
+
+def outputs_from_text() -> List[Output]:
+    completed = run(["kscreen-doctor", "--outputs"])
+    if completed.returncode != 0:
+        return []
+
+    outputs: List[Output] = []
+    current: Optional[Dict[str, object]] = None
+
+    def flush_current() -> None:
+        if not current:
+            return
+        output_id = str(current["output_id"])
+        name = str(current["name"])
+        text = str(current["text"]).lower()
+        outputs.append(
+            Output(
+                output_id=output_id,
+                name=name,
+                connected="connected" in text and "disconnected" not in text,
+                enabled="enabled" in text and "disabled" not in text,
+            )
+        )
+
+    for line in completed.stdout.splitlines():
+        if line.startswith("Output:"):
+            flush_current()
+            fields = line.split()
+            output_id = fields[1] if len(fields) > 1 else ""
+            name = fields[2].strip("'\"") if len(fields) > 2 else output_id
+            current = {"output_id": output_id, "name": name, "text": line}
+        elif current:
+            current["text"] = str(current["text"]) + " " + line
+
+    flush_current()
+    return outputs
+
+
+def list_outputs() -> List[Output]:
+    outputs = outputs_from_json()
+    return outputs if outputs else outputs_from_text()
+
+
+def connected_external_output() -> Optional[Output]:
+    for output in list_outputs():
+        if output.connected and output_matches(output):
+            return output
+    return None
+
+
+def configure_output(output: Output) -> bool:
+    if not CONFIGURE_DISPLAY:
+        return output.enabled
+    command = ["kscreen-doctor", f"output.{output.output_id}.enable"]
+    if output.preferred_mode:
+        command.append(f"output.{output.output_id}.mode.{output.preferred_mode}")
+    command.append(f"output.{output.output_id}.position.0,0")
+    if MAKE_PRIMARY:
+        command.append(f"output.{output.output_id}.primary")
+    if TV_ONLY:
+        command.extend(
+            f"output.{other.output_id}.disable"
+            for other in list_outputs()
+            if other.connected and other.output_id != output.output_id and any(pattern.search(f"{other.output_id} {other.name}") for pattern in IGNORE_PATTERNS)
+        )
+    completed = run(command)
+    if completed.returncode != 0:
+        log(f"Display configure failed for {output.name}: {completed.stderr.strip()}")
+        return False
+
+    for _ in range(10):
+        for current in list_outputs():
+            if current.name == output.name and current.connected and current.enabled:
+                return True
+        time.sleep(1)
+
+    log(f"Display configure did not enable {output.name}; refusing to start Plex player")
+    return False
+
+
+def start_player(output: Output) -> subprocess.Popen[str]:
+    env = os.environ.copy()
+    env["PLEX_APPLIANCE_MPV_SCREEN_NAME"] = output.name
+    log(f"HDMI output connected: {output.name}; starting Plex player")
+    return subprocess.Popen([PLAYER], env=env, text=True)
+
+
+def stop_player(player: Optional[subprocess.Popen[str]]) -> None:
+    if not player or player.poll() is not None:
+        return
+    log("HDMI output disconnected; stopping Plex player")
+    player.terminate()
+    try:
+        player.wait(timeout=10)
+    except subprocess.TimeoutExpired:
+        player.send_signal(signal.SIGKILL)
+        player.wait(timeout=5)
+
+
+def main() -> int:
+    player: Optional[subprocess.Popen[str]] = None
+    active_output_name = ""
+
+    while True:
+        output = connected_external_output()
+
+        if output:
+            if player and player.poll() is not None:
+                log(f"Plex player exited with code {player.returncode}")
+                player = None
+                active_output_name = ""
+            if not player or active_output_name != output.name:
+                stop_player(player)
+                if configure_output(output):
+                    player = start_player(output)
+                    active_output_name = output.name
+        else:
+            stop_player(player)
+            player = None
+            active_output_name = ""
+
+        time.sleep(POLL_SECONDS)
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

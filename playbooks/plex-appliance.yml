@@ -23,6 +23,7 @@
         state: restarted
       when:
         - plex_appliance_enabled | default(false)
+        - (plex_appliance_effective_mode | default(plex_appliance_mode | default('dedicated'))) == "dedicated"
         - not ansible_check_mode
 
   tasks:
@@ -41,11 +42,21 @@
       ansible.builtin.meta: end_host
       when: not (plex_appliance_enabled | default(false))
 
+    - name: Normalize Plex appliance mode
+      ansible.builtin.set_fact:
+        plex_appliance_effective_mode: "{{ plex_appliance_mode | default('dedicated') }}"
+
     - name: Assert supported OS family
       ansible.builtin.assert:
         that:
           - ansible_facts.os_family == "Debian"
         fail_msg: "plex-appliance currently supports Debian-family hosts only."
+
+    - name: Assert supported Plex appliance mode
+      ansible.builtin.assert:
+        that:
+          - plex_appliance_effective_mode in ["dedicated", "hdmi"]
+        fail_msg: "plex_appliance_mode must be dedicated or hdmi."
 
     - name: Assert Plex appliance token is configured
       ansible.builtin.assert:
@@ -106,13 +117,24 @@
         - item in ansible_facts.services
       notify: Restart plex appliance
 
+    - name: Stop dedicated Plex appliance service outside dedicated mode
+      ansible.builtin.systemd:
+        name: plex-appliance.service
+        enabled: false
+        state: stopped
+        daemon_reload: true
+      when:
+        - not ansible_check_mode
+        - plex_appliance_effective_mode != "dedicated"
+      failed_when: false
+
     - name: Create Plex appliance config directory
       ansible.builtin.file:
         path: /etc/plex-appliance
         state: directory
         owner: root
-        group: root
-        mode: "0700"
+        group: "{{ (plex_appliance_effective_mode == 'hdmi') | ternary(plex_appliance_user, 'root') }}"
+        mode: "{{ (plex_appliance_effective_mode == 'hdmi') | ternary('0750', '0700') }}"
 
     - name: Create Plex appliance state directory
       ansible.builtin.file:
@@ -127,8 +149,8 @@
         src: ../templates/plex-appliance.env.j2
         dest: /etc/plex-appliance/plex-appliance.env
         owner: root
-        group: root
-        mode: "0600"
+        group: "{{ (plex_appliance_effective_mode == 'hdmi') | ternary(plex_appliance_user, 'root') }}"
+        mode: "{{ (plex_appliance_effective_mode == 'hdmi') | ternary('0640', '0600') }}"
       no_log: true
       notify: Restart plex appliance
 
@@ -141,6 +163,68 @@
         mode: "0755"
       notify: Restart plex appliance
 
+    - name: Deploy Plex HDMI watcher
+      ansible.builtin.template:
+        src: ../templates/plex-appliance-hdmi-watcher.py.j2
+        dest: /usr/local/bin/plex-appliance-hdmi-watcher
+        owner: root
+        group: root
+        mode: "0755"
+      when: plex_appliance_effective_mode == "hdmi"
+
+    - name: Deploy Plex HDMI autostart helper
+      ansible.builtin.template:
+        src: ../templates/plex-appliance-hdmi-autostart.sh.j2
+        dest: /usr/local/bin/plex-appliance-hdmi-autostart
+        owner: root
+        group: root
+        mode: "0755"
+      when: plex_appliance_effective_mode == "hdmi"
+
+    - name: Create user systemd directory for Plex HDMI watcher
+      ansible.builtin.file:
+        path: "/home/{{ plex_appliance_user }}/.config/systemd/user"
+        state: directory
+        owner: "{{ plex_appliance_user }}"
+        group: "{{ plex_appliance_user }}"
+      when: plex_appliance_effective_mode == "hdmi"
+
+    - name: Create KDE autostart directory for Plex HDMI watcher
+      ansible.builtin.file:
+        path: "/home/{{ plex_appliance_user }}/.config/autostart"
+        state: directory
+        owner: "{{ plex_appliance_user }}"
+        group: "{{ plex_appliance_user }}"
+      when: plex_appliance_effective_mode == "hdmi"
+
+    - name: Deploy Plex HDMI watcher user service
+      ansible.builtin.template:
+        src: ../templates/plex-appliance-hdmi.service.j2
+        dest: "/home/{{ plex_appliance_user }}/.config/systemd/user/plex-appliance-hdmi.service"
+        owner: "{{ plex_appliance_user }}"
+        group: "{{ plex_appliance_user }}"
+        mode: "0644"
+      when: plex_appliance_effective_mode == "hdmi"
+
+    - name: Deploy Plex HDMI watcher KDE autostart
+      ansible.builtin.template:
+        src: ../templates/plex-appliance-hdmi.desktop.j2
+        dest: "/home/{{ plex_appliance_user }}/.config/autostart/plex-appliance-hdmi.desktop"
+        owner: "{{ plex_appliance_user }}"
+        group: "{{ plex_appliance_user }}"
+        mode: "0644"
+      when:
+        - plex_appliance_effective_mode == "hdmi"
+        - plex_appliance_hdmi_autostart_enabled | default(true)
+
+    - name: Remove Plex HDMI watcher KDE autostart when disabled
+      ansible.builtin.file:
+        path: "/home/{{ plex_appliance_user }}/.config/autostart/plex-appliance-hdmi.desktop"
+        state: absent
+      when:
+        - plex_appliance_effective_mode == "hdmi"
+        - not (plex_appliance_hdmi_autostart_enabled | default(true))
+
     - name: Deploy Plex appliance systemd service
       ansible.builtin.template:
         src: ../templates/plex-appliance.service.j2
@@ -151,6 +235,7 @@
       notify:
         - Reload systemd
         - Restart plex appliance
+      when: plex_appliance_effective_mode == "dedicated"
 
     - name: Enable and start Plex appliance service
       ansible.builtin.systemd:
@@ -158,4 +243,6 @@
         enabled: true
         state: started
         daemon_reload: true
-      when: not ansible_check_mode
+      when:
+        - not ansible_check_mode
+        - plex_appliance_effective_mode == "dedicated"

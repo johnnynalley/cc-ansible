@@ -1,0 +1,14 @@
+[Unit]
+Description=Plex HDMI appliance watcher
+PartOf=graphical-session.target
+After=graphical-session.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/plex-appliance-hdmi-watcher
+Restart=always
+RestartSec=5
+Environment=PYTHONUNBUFFERED=1
+
+[Install]
+WantedBy=default.target

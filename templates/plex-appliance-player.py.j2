@@ -26,6 +26,9 @@ SERVER_RETRY_SECONDS = int(os.environ.get("PLEX_APPLIANCE_SERVER_RETRY_SECONDS",
 ITEM_FAILURE_DELAY_SECONDS = int(os.environ.get("PLEX_APPLIANCE_ITEM_FAILURE_DELAY_SECONDS", "10"))
 COLLECTION_REFRESH_SECONDS = int(os.environ.get("PLEX_APPLIANCE_COLLECTION_REFRESH_SECONDS", "3600"))
 MPV_ARGS = shlex.split(os.environ.get("PLEX_APPLIANCE_MPV_ARGS", "--fs --no-terminal"))
+MPV_EXTRA_ARGS = shlex.split(os.environ.get("PLEX_APPLIANCE_MPV_EXTRA_ARGS", ""))
+MPV_SCREEN_NAME = os.environ.get("PLEX_APPLIANCE_MPV_SCREEN_NAME", "").strip()
+MPV_AUDIO_DEVICE = os.environ.get("PLEX_APPLIANCE_AUDIO_DEVICE", "").strip()
 
 SESSION = requests.Session()
 SESSION.headers.update({
@@ -165,6 +168,11 @@ def shuffled_queue(items: List[ET.Element]) -> List[ET.Element]:
 
 def playback_args() -> List[str]:
     args = list(MPV_ARGS)
+    if MPV_SCREEN_NAME:
+        args.append("--screen-name=" + MPV_SCREEN_NAME)
+        args.append("--fs-screen-name=" + MPV_SCREEN_NAME)
+    if MPV_AUDIO_DEVICE:
+        args.append("--audio-device=" + MPV_AUDIO_DEVICE)
     if AUDIO_LANGUAGES:
         args.append("--alang=" + ",".join(AUDIO_LANGUAGES))
     if SUBTITLE_LANGUAGES:
@@ -173,6 +181,7 @@ def playback_args() -> List[str]:
         args.append("--sid=no")
     elif SUBTITLE_MODE != "auto":
         log(f"Unknown subtitle mode {SUBTITLE_MODE!r}; using mpv default")
+    args.extend(MPV_EXTRA_ARGS)
     return args
 
 
