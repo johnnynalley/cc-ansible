@@ -1,0 +1,11 @@
+[Unit]
+Description=Run scheduled mergerfs balance - {{ item.name }}
+
+[Timer]
+OnCalendar=*-*-* {{ (item.schedule_window.split('-')[0] | trim) }}:00
+AccuracySec=1min
+Persistent=true
+Unit=mergerfs-balance-{{ item.name }}.service
+
+[Install]
+WantedBy=timers.target

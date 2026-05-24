@@ -1,0 +1,19 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ACTION="${1:-}"
+case "$ACTION" in
+  start|stop) ;;
+  *)
+    echo "usage: $0 {start|stop}" >&2
+    exit 2
+    ;;
+esac
+
+exec ssh \
+  -i {{ mergerfs_balance_media_stack_ssh_key_path | default('/root/.ssh/mergerfs_balance_media_stack_ed25519') | quote }} \
+  -o BatchMode=yes \
+  -o ConnectTimeout={{ mergerfs_balance_media_stack_ssh_connect_timeout | default(15) }} \
+  -o StrictHostKeyChecking=accept-new \
+  {{ ((mergerfs_balance_media_stack_ssh_user | default('johnny')) ~ '@' ~ mergerfs_balance_media_stack_ssh_host) | quote }} \
+  "$ACTION"

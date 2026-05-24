@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ACTION="${SSH_ORIGINAL_COMMAND:-${1:-}}"
+case "$ACTION" in
+  start|stop) ;;
+  *)
+    echo "allowed commands: start, stop" >&2
+    exit 2
+    ;;
+esac
+
+{% for target in mergerfs_balance_media_stack_compose_targets | default([]) %}
+(
+  cd {{ target.path | quote }}
+  docker compose "$ACTION"{% for service in target.services | default([]) %} {{ service | quote }}{% endfor %}
+)
+{% endfor %}

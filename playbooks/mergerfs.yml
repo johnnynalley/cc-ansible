@@ -107,3 +107,165 @@
         group: root
         mode: "0644"
       when: mergerfs_balance_exclude_paths is defined
+
+    - name: Ensure mergerfs-balance state directory exists
+      ansible.builtin.file:
+        path: /var/lib/mergerfs-balance
+        state: directory
+        owner: root
+        group: root
+        mode: "0755"
+      when: mergerfs_balance_schedules | default([]) | length > 0
+
+    - name: Generate mergerfs-balance media stack SSH key
+      ansible.builtin.command:
+        cmd: >-
+          ssh-keygen -t ed25519 -N '' -f
+          {{ mergerfs_balance_media_stack_ssh_key_path | default('/root/.ssh/mergerfs_balance_media_stack_ed25519') }}
+          -C mergerfs-balance-media-stack
+        creates: "{{ mergerfs_balance_media_stack_ssh_key_path | default('/root/.ssh/mergerfs_balance_media_stack_ed25519') }}"
+      when: mergerfs_balance_media_stack_control_enabled | default(false)
+
+    - name: Check mergerfs-balance media stack public key
+      ansible.builtin.stat:
+        path: "{{ mergerfs_balance_media_stack_ssh_key_path | default('/root/.ssh/mergerfs_balance_media_stack_ed25519') }}.pub"
+      register: mergerfs_balance_media_stack_public_key_stat
+      when: mergerfs_balance_media_stack_control_enabled | default(false)
+
+    - name: Read mergerfs-balance media stack public key
+      ansible.builtin.slurp:
+        src: "{{ mergerfs_balance_media_stack_ssh_key_path | default('/root/.ssh/mergerfs_balance_media_stack_ed25519') }}.pub"
+      register: mergerfs_balance_media_stack_public_key_file
+      when:
+        - mergerfs_balance_media_stack_control_enabled | default(false)
+        - mergerfs_balance_media_stack_public_key_stat.stat.exists | default(false)
+
+    - name: Store mergerfs-balance media stack public key
+      ansible.builtin.set_fact:
+        mergerfs_balance_media_stack_public_key: >-
+          {{ mergerfs_balance_media_stack_public_key_file.content | b64decode | trim }}
+      when:
+        - mergerfs_balance_media_stack_control_enabled | default(false)
+        - mergerfs_balance_media_stack_public_key_file.content is defined
+
+    - name: Deploy mergerfs-balance media stack SSH client
+      ansible.builtin.template:
+        src: ../templates/mergerfs-balance-media-stack-client.sh.j2
+        dest: /usr/local/sbin/mergerfs-balance-media-stack
+        owner: root
+        group: root
+        mode: "0755"
+      when: mergerfs_balance_media_stack_control_enabled | default(false)
+
+    - name: Deploy scheduled mergerfs-balance services
+      ansible.builtin.template:
+        src: ../templates/mergerfs-balance-scheduled.service.j2
+        dest: "/etc/systemd/system/mergerfs-balance-{{ item.name }}.service"
+        owner: root
+        group: root
+        mode: "0644"
+      loop: "{{ mergerfs_balance_schedules | default([]) }}"
+      loop_control:
+        label: "{{ item.name }}"
+      when: item.enabled | default(true)
+      notify: Reload systemd
+
+    - name: Deploy scheduled mergerfs-balance timers
+      ansible.builtin.template:
+        src: ../templates/mergerfs-balance-scheduled.timer.j2
+        dest: "/etc/systemd/system/mergerfs-balance-{{ item.name }}.timer"
+        owner: root
+        group: root
+        mode: "0644"
+      loop: "{{ mergerfs_balance_schedules | default([]) }}"
+      loop_control:
+        label: "{{ item.name }}"
+      when: item.enabled | default(true)
+      notify: Reload systemd
+
+    - name: Deploy mergerfs-balance media stack restore services
+      ansible.builtin.template:
+        src: ../templates/mergerfs-balance-media-stack-restore.service.j2
+        dest: "/etc/systemd/system/mergerfs-balance-{{ item.name }}-media-stack-restore.service"
+        owner: root
+        group: root
+        mode: "0644"
+      loop: "{{ mergerfs_balance_schedules | default([]) }}"
+      loop_control:
+        label: "{{ item.name }}"
+      when:
+        - item.enabled | default(true)
+        - item.pause_media_stack | default(false)
+      notify: Reload systemd
+
+    - name: Deploy mergerfs-balance media stack restore timers
+      ansible.builtin.template:
+        src: ../templates/mergerfs-balance-media-stack-restore.timer.j2
+        dest: "/etc/systemd/system/mergerfs-balance-{{ item.name }}-media-stack-restore.timer"
+        owner: root
+        group: root
+        mode: "0644"
+      loop: "{{ mergerfs_balance_schedules | default([]) }}"
+      loop_control:
+        label: "{{ item.name }}"
+      when:
+        - item.enabled | default(true)
+        - item.pause_media_stack | default(false)
+      notify: Reload systemd
+
+    - name: Flush handlers after scheduled unit deployment
+      ansible.builtin.meta: flush_handlers
+
+    - name: Enable scheduled mergerfs-balance timers
+      ansible.builtin.systemd:
+        name: "mergerfs-balance-{{ item.name }}.timer"
+        enabled: true
+        state: started
+      loop: "{{ mergerfs_balance_schedules | default([]) }}"
+      loop_control:
+        label: "{{ item.name }}"
+      when:
+        - item.enabled | default(true)
+        - not ansible_check_mode
+
+    - name: Enable mergerfs-balance media stack restore timers
+      ansible.builtin.systemd:
+        name: "mergerfs-balance-{{ item.name }}-media-stack-restore.timer"
+        enabled: true
+        state: started
+      loop: "{{ mergerfs_balance_schedules | default([]) }}"
+      loop_control:
+        label: "{{ item.name }}"
+      when:
+        - item.enabled | default(true)
+        - item.pause_media_stack | default(false)
+        - not ansible_check_mode
+
+- name: Configure mergerfs-balance media stack control endpoint
+  hosts: media-vm
+  become: true
+  gather_facts: false
+
+  tasks:
+    - name: Skip when nas_server did not publish a media stack control key
+      ansible.builtin.meta: end_host
+      when: >-
+        hostvars[groups['nas_server'][0]].mergerfs_balance_media_stack_public_key
+        is not defined
+
+    - name: Deploy mergerfs-balance media stack control wrapper
+      ansible.builtin.template:
+        src: ../templates/mergerfs-balance-media-stack-control.sh.j2
+        dest: /usr/local/sbin/mergerfs-balance-media-stack-control
+        owner: root
+        group: root
+        mode: "0755"
+      when: mergerfs_balance_media_stack_control_enabled | default(false)
+
+    - name: Authorize mergerfs-balance media stack control key
+      ansible.posix.authorized_key:
+        user: "{{ mergerfs_balance_media_stack_ssh_user | default('johnny') }}"
+        key: "{{ hostvars[groups['nas_server'][0]].mergerfs_balance_media_stack_public_key }}"
+        key_options: 'command="/usr/local/sbin/mergerfs-balance-media-stack-control",no-agent-forwarding,no-X11-forwarding,no-port-forwarding,no-pty'
+        state: present
+      when: mergerfs_balance_media_stack_control_enabled | default(false)

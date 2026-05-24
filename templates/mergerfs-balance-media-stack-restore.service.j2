@@ -1,0 +1,8 @@
+[Unit]
+Description=Restore media stack services after scheduled mergerfs balance - {{ item.name }}
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/mergerfs-balance-media-stack start

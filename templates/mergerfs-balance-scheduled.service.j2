@@ -1,0 +1,14 @@
+[Unit]
+Description=Scheduled mergerfs balance - {{ item.name }}
+After=network-online.target {{ (mergerfs_mount_path | regex_replace('^/', '') | regex_replace('/', '-')) }}.mount
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+Nice=15
+IOSchedulingClass=idle
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/usr/local/bin/mergerfs-balance {{ item.mount_path | default(mergerfs_mount_path) | quote }}{% if item.percentage is defined %} -p {{ item.percentage }}{% endif %}{% if item.evacuate is defined %} --evacuate {{ item.evacuate | quote }}{% endif %}{% for destination in item.destinations | default([]) %} --destination {{ destination | quote }}{% endfor %}{% if item.min_free is defined %} --min-free {{ item.min_free | quote }}{% endif %}{% if item.max_moves is defined %} --max-moves {{ item.max_moves }}{% endif %}{% for exclude in item.exclude_paths | default([]) %} -E {{ exclude | quote }}{% endfor %} --schedule-window {{ item.schedule_window | quote }} --state-file {{ item.state_file | default('/var/lib/mergerfs-balance/' ~ item.name ~ '.json') | quote }}{% if item.pause_media_stack | default(false) %} --pause-command {{ '/usr/local/sbin/mergerfs-balance-media-stack stop' | quote }} --resume-command {{ '/usr/local/sbin/mergerfs-balance-media-stack start' | quote }}{% endif %}
+
+[Install]
+WantedBy=multi-user.target

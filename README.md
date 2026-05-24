@@ -485,6 +485,8 @@ Balances files across mergerfs branches by moving from fullest to emptiest. ZFS-
 - **Config variable**: `mergerfs_balance_exclude_paths` in `group_vars/nas_server/mergerfs.yml`
 - **CLI excludes**: `-E` flags merge with config excludes (additive)
 - **Evacuation mode**: `--evacuate <branch>` drains one branch to the least-used eligible branches before planned removal or reformat. Dry-run first.
+- **Scheduled mode**: `mergerfs_balance_schedules` in `group_vars/nas_server/mergerfs.yml` creates systemd timers. The script enforces its own `--schedule-window`, writes JSON state under `/var/lib/mergerfs-balance/`, and uses rsync partial files so interrupted moves can resume during the next window.
+- **Media stack pause/resume**: scheduled jobs can run `/usr/local/sbin/mergerfs-balance-media-stack stop|start` through a forced SSH key to `media-vm`. Current `nas02-evac` pauses Sonarr, Radarr, Prowlarr, Bazarr, Recyclarr, Byparr, qBittorrent, SABnzbd, and Profilarr while Plex stays up.
 - **VirtioFS caveat**: After balancing, media-vm needs a full stop/start (`qm stop`/`qm start`) to clear virtiofsd's stale directory cache
 
 ```bash
@@ -502,6 +504,9 @@ mergerfs-balance /srv/media --evacuate nas-02 --dry-run
 
 # Drain nas-02, leaving at least 100G free on destination branches
 mergerfs-balance /srv/media --evacuate nas-02 --min-free 100G
+
+# Managed overnight evacuation: nas-02 -> media-01..04, midnight-7 AM
+ansible-playbook playbooks/mergerfs.yml
 ```
 
 ## Immich (Photo/Video Management)

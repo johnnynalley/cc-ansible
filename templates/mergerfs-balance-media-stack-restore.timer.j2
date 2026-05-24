@@ -1,0 +1,11 @@
+[Unit]
+Description=Restore media stack services after scheduled mergerfs balance - {{ item.name }}
+
+[Timer]
+OnCalendar=*-*-* {{ (item.schedule_window.split('-')[1] | trim) }}:00
+AccuracySec=1min
+Persistent=true
+Unit=mergerfs-balance-{{ item.name }}-media-stack-restore.service
+
+[Install]
+WantedBy=timers.target

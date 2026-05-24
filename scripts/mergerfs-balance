@@ -15,8 +15,11 @@ import ctypes
 import errno
 import fnmatch
 import io
+import datetime as dt
+import json
 import os
 import shlex
+import signal
 import subprocess
 import sys
 import time
@@ -27,6 +30,8 @@ _lgetxattr = _libc.lgetxattr
 _lgetxattr.argtypes = [
     ctypes.c_char_p, ctypes.c_char_p, ctypes.c_void_p, ctypes.c_size_t
 ]
+STOP_REQUESTED = False
+CURRENT_PROCESS = None
 
 
 def lgetxattr(path, name):
@@ -292,6 +297,126 @@ def prune_empty_dirs(basepath):
     return removed
 
 
+# ── Scheduling and hooks ─────────────────────────────────────────────
+
+
+def parse_clock(value):
+    try:
+        return dt.datetime.strptime(value, "%H:%M").time()
+    except ValueError:
+        raise argparse.ArgumentTypeError(
+            f"{value!r} must be in HH:MM 24-hour format")
+
+
+def schedule_bounds(window, now=None):
+    now = now or dt.datetime.now()
+    try:
+        start_text, end_text = window.split('-', 1)
+    except ValueError:
+        raise argparse.ArgumentTypeError(
+            f"{window!r} must look like HH:MM-HH:MM")
+
+    start_time = parse_clock(start_text.strip())
+    end_time = parse_clock(end_text.strip())
+    today = now.date()
+    start = dt.datetime.combine(today, start_time)
+    end = dt.datetime.combine(today, end_time)
+
+    if end_time <= start_time:
+        if now.time() < end_time:
+            start -= dt.timedelta(days=1)
+        else:
+            end += dt.timedelta(days=1)
+
+    return start, end
+
+
+def in_schedule_window(window):
+    now = dt.datetime.now()
+    start, end = schedule_bounds(window, now)
+    return start <= now < end, start, end
+
+
+def write_state(path, payload):
+    if not path:
+        return
+    state_dir = os.path.dirname(path)
+    if state_dir:
+        os.makedirs(state_dir, exist_ok=True)
+    tmp_path = f"{path}.tmp"
+    payload = dict(payload)
+    payload["updated_at"] = int(time.time())
+    with open(tmp_path, "w", encoding="utf-8") as state_file:
+        json.dump(payload, state_file, sort_keys=True, separators=(",", ":"))
+    os.replace(tmp_path, path)
+
+
+def run_hook(command, label, timeout):
+    if not command:
+        return True
+
+    print(f'{label}: {command}')
+    try:
+        completed = subprocess.run(
+            command,
+            shell=True,
+            check=False,
+            text=True,
+            capture_output=True,
+            timeout=timeout,
+        )
+    except subprocess.TimeoutExpired:
+        print(f'{label} timed out after {timeout}s')
+        return False
+
+    if completed.stdout:
+        print(completed.stdout.rstrip())
+    if completed.stderr:
+        print(completed.stderr.rstrip(), file=sys.stderr)
+    if completed.returncode:
+        print(f'{label} exited with code {completed.returncode}')
+        return False
+    return True
+
+
+def handle_signal(signum, _frame):
+    global STOP_REQUESTED, CURRENT_PROCESS
+    STOP_REQUESTED = True
+    print(f'\nReceived signal {signum}; stopping after cleanup.', flush=True)
+    if CURRENT_PROCESS and CURRENT_PROCESS.poll() is None:
+        CURRENT_PROCESS.terminate()
+
+
+def run_rsync(cmd, deadline):
+    global CURRENT_PROCESS
+    deadline_hit = False
+    CURRENT_PROCESS = subprocess.Popen(cmd)
+    try:
+        while True:
+            rv = CURRENT_PROCESS.poll()
+            if rv is not None:
+                return rv, deadline_hit
+
+            if STOP_REQUESTED:
+                CURRENT_PROCESS.terminate()
+                return CURRENT_PROCESS.wait(timeout=30), deadline_hit
+
+            if deadline and time.time() >= deadline:
+                deadline_hit = True
+                print('Schedule window ended; terminating current rsync.')
+                CURRENT_PROCESS.terminate()
+                try:
+                    return CURRENT_PROCESS.wait(timeout=30), deadline_hit
+                except subprocess.TimeoutExpired:
+                    print('rsync did not terminate cleanly; killing it')
+                    CURRENT_PROCESS.kill()
+                    return CURRENT_PROCESS.wait(timeout=30), deadline_hit
+
+            time.sleep(1)
+    finally:
+        CURRENT_PROCESS = None
+
+
 # ── Main ─────────────────────────────────────────────────────────────
 
 
@@ -329,6 +454,18 @@ def buildargparser():
                         help='minimum free space to leave on evacuation destinations (default: 50G)')
     parser.add_argument('--max-moves', dest='maxmoves', type=int, default=0,
                         help='stop after this many moved files; 0 means unlimited')
+    parser.add_argument('--schedule-window', metavar='HH:MM-HH:MM', type=str,
+                        help='only move files during this local time window')
+    parser.add_argument('--pause-command', metavar='CMD', type=str,
+                        help='shell command to run before the first actual move')
+    parser.add_argument('--resume-command', metavar='CMD', type=str,
+                        help='shell command to run after a pause-command was run')
+    parser.add_argument('--hook-timeout', metavar='SECONDS', type=int, default=300,
+                        help='timeout for pause/resume hook commands (default: 300)')
+    parser.add_argument('--state-file', metavar='PATH', type=str,
+                        help='write JSON run state for scheduled/resumable jobs')
+    parser.add_argument('--partial-dir', metavar='NAME', type=str, default='.rsync-partial',
+                        help='rsync partial directory name; empty disables partials')
     return parser
 
 
@@ -340,6 +477,8 @@ def main():
 
     parser = buildargparser()
     args = parser.parse_args()
+    signal.signal(signal.SIGINT, handle_signal)
+    signal.signal(signal.SIGTERM, handle_signal)
     args.dir = os.path.realpath(args.dir)
 
     ctrlfile = mergerfs_control_file(args.dir)
@@ -357,6 +496,8 @@ def main():
     path_includes = ['*'] if not args.includepath else args.includepath
     config_excludes = load_config_excludes()
     path_excludes = config_excludes + args.excludepath
+    if args.partial_dir:
+        path_excludes.append(f'*/{args.partial_dir}/*')
     exclude_lt = human_to_bytes(args.excludelt)
     exclude_gt = human_to_bytes(args.excludegt)
     srcmounts = mergerfs_srcmounts(ctrlfile)
@@ -371,6 +512,27 @@ def main():
     if evacuate_branch and evacuate_branch in evacuation_destinations:
         print('--evacuate branch cannot also be an evacuation destination')
         sys.exit(1)
+    if (args.pause_command or args.resume_command) and not args.state_file:
+        print('Warning: pause/resume hooks are safer with --state-file for reboot recovery.')
+
+    deadline = None
+    if args.schedule_window:
+        in_window, window_start, window_end = in_schedule_window(args.schedule_window)
+        print(f'Schedule window: {window_start:%Y-%m-%d %H:%M} -> {window_end:%Y-%m-%d %H:%M}')
+        if not in_window:
+            print('Outside schedule window; nothing to do now.')
+            write_state(args.state_file, {
+                "status": "outside-window",
+                "window": args.schedule_window,
+                "paused": False,
+            })
+            sys.exit(0)
+        deadline = window_end.timestamp()
+        write_state(args.state_file, {
+            "status": "running",
+            "window": args.schedule_window,
+            "paused": False,
+        })
 
     # Show initial state
     print('Branches:')
@@ -401,14 +563,26 @@ def main():
     planned_count = 0
     session_bytes = 0
     session_start = time.time()
+    paused = False
+    stop_reason = ''
     try:
         while True:
+            if STOP_REQUESTED:
+                stop_reason = 'stop-requested'
+                break
+            if deadline and time.time() >= deadline:
+                print('Schedule window ended before the next move.')
+                stop_reason = 'window-ended'
+                break
+
             stats = branch_stats(srcmounts)
             if args.maxmoves and move_count >= args.maxmoves:
                 print(f'Max move count reached: {args.maxmoves}')
+                stop_reason = 'max-moves'
                 break
 
             if not evacuate_branch and all_within_range(stats, threshold):
+                stop_reason = 'balanced'
                 break
 
             # fullest = first (highest pct_used), emptiest = last
@@ -482,17 +656,50 @@ def main():
                 # Can't loop in dry-run since nothing changes — show first move only
                 break
 
+            if args.partial_dir:
+                cmd[1:1] = ['--partial', f'--partial-dir={args.partial_dir}']
+
+            if args.pause_command and not paused:
+                if not run_hook(args.pause_command, 'Pause hook', args.hook_timeout):
+                    write_state(args.state_file, {
+                        "status": "pause-failed",
+                        "window": args.schedule_window,
+                        "paused": False,
+                    })
+                    sys.exit(1)
+                paused = True
+                write_state(args.state_file, {
+                    "status": "paused",
+                    "window": args.schedule_window,
+                    "paused": True,
+                })
+
             print_cmd(cmd)
-            rv = subprocess.call(cmd)
+            rv, deadline_hit = run_rsync(cmd, deadline)
             if rv:
                 print(f'rsync exited with code {rv}')
+                stop_reason = 'window-ended' if deadline_hit else 'rsync-error'
                 break
             move_count += 1
             session_bytes += fsize
+            write_state(args.state_file, {
+                "status": "running",
+                "window": args.schedule_window,
+                "paused": paused,
+                "moved": move_count,
+                "bytes": session_bytes,
+            })
             print('\n-\n')
 
     except KeyboardInterrupt:
         print(f'\nStopped.')
+        stop_reason = 'interrupted'
+    finally:
+        if paused and args.resume_command:
+            if run_hook(args.resume_command, 'Resume hook', args.hook_timeout):
+                paused = False
+            else:
+                print('Resume hook failed; manual service recovery may be required.')
 
     if evacuate_branch and not args.dry_run:
         prune_root = os.path.join(evacuate_branch, relpath)
@@ -514,6 +721,14 @@ def main():
         print(f'Elapsed: {mins:.1f} min, average: {human_size(rate)}/s')
     print(f'Spread: {spread:.1f}%')
     print_status(stats)
+    write_state(args.state_file, {
+        "status": stop_reason or ('dry-run' if args.dry_run else 'complete'),
+        "window": args.schedule_window,
+        "paused": paused,
+        "moved": move_count,
+        "bytes": session_bytes,
+        "spread": spread,
+    })
 
 
 if __name__ == '__main__':

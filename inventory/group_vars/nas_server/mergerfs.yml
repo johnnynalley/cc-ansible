@@ -59,3 +59,25 @@ mergerfs_balance_exclude_paths:
   - "/srv/nas-zfs/media/photos/*"
   - "/srv/nas-zfs/media/archive/*"
   - "/srv/nas-zfs/media/books/*"
+
+# Overnight scheduled evacuations/balances.
+# The script enforces the window itself, so Persistent=true timers can safely
+# catch up after reboots without running outside the configured downtime.
+mergerfs_balance_schedules:
+  - name: nas02-evac
+    enabled: true
+    mount_path: /srv/media
+    evacuate: nas-02
+    destinations:
+      - media-01
+      - media-02
+      - media-03
+      - media-04
+    min_free: 100G
+    schedule_window: "00:00-07:00"
+    pause_media_stack: true
+
+mergerfs_balance_media_stack_control_enabled: true
+mergerfs_balance_media_stack_ssh_host: "192.168.1.136"
+mergerfs_balance_media_stack_ssh_user: johnny
+mergerfs_balance_media_stack_ssh_key_path: /root/.ssh/mergerfs_balance_media_stack_ed25519
