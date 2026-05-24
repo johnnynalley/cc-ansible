@@ -93,6 +93,15 @@
 			"action": "accept",
 		},
 		{
+			// OpenClaw now runs on orchestrator/controller hosts such as t14s.
+			// Allow its dbc operational account to run narrow health checks on
+			// managed servers and VMs without re-tagging stable devices.
+			"src":    ["tag:orchestrators"],
+			"dst":    ["tag:vms-lxcs", "tag:servers"],
+			"users":  ["dbc"],
+			"action": "accept",
+		},
+		{
 			"src": ["tag:openclaw"],
 
 			"dst": [
