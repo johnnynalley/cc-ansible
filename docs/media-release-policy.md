@@ -20,6 +20,7 @@ a separate policy because dual audio is the highest priority there.
   - Radarr: `movies-anime-profilarr-test` id `8`
 - Release metadata stamper: `playbooks/media-release-stamper.yml`
 - Sonarr grab/import forensics: `scripts/sonarr_grab_forensics.py`
+- Sonarr transaction audit report: `scripts/sonarr_transaction_audit.py`
 - Sonarr transaction monitor: `sonarr-transaction-monitor.timer` writes
   `/var/log/sonarr-transaction-monitor/events.jsonl`, rotated daily
 - Sonarr recycle bin: disabled
@@ -117,6 +118,15 @@ is mode `0640` and rotated daily with 90 retained rotations. Keep it enabled
 while Profilarr upgrade searches are active so later reviews can compare
 grab-time, queue-time, and import/delete outcomes without relying on memory.
 
+`scripts/sonarr_transaction_audit.py` is the compact report over that monitor
+log plus the live Sonarr queue. It summarizes recent history event types,
+queue-count movement, recent grabbed/imported/deleted groups, and the current
+queue's grouped classifications. Use it for periodic Profilarr review:
+
+```bash
+ansible media-vm --become -m script -a "scripts/sonarr_transaction_audit.py --hours 24 --limit 25"
+```
+
 `scripts/arr_stage_profilarr_test_profiles.py` snapshots live Arr policy state
 and creates or refreshes the Profilarr test profiles by cloning the current
 anime profiles. It does not assign any series or movies to the test profiles.
@@ -126,6 +136,12 @@ It refuses to stage if the live CF count exceeds the configured CF limit.
 linked PCD databases, upgrade configs, recent sync/link/upgrade jobs, and
 scheduler health. It treats queued and running jobs as active. Use it after
 Profilarr restarts or scheduled upgrade runs.
+
+`scripts/profilarr_sonarr_upgrade_strategy.py` updates the supported stored
+settings for the Sonarr Profilarr upgrade filter without patching Profilarr
+application code. It creates a SQLite backup before live mutation. Current use:
+set the Sonarr selector to `random` so one old/problem series does not
+monopolize every scheduled run.
 
 `scripts/profilarr_candidate_audit.py` materializes the linked Profilarr PCD
 repositories in memory and compares candidate CF/profile names with live
@@ -355,6 +371,7 @@ Before assigning any series/movie to a Profilarr-derived profile, run:
 ansible media-vm --become -m script -a "scripts/arr_stage_profilarr_test_profiles.py --dry-run"
 ansible media-vm -m script -a scripts/profilarr_candidate_audit.py
 ansible media-vm --become -m script -a "scripts/profilarr_selective_cf_import.py --dry-run"
+ansible media-vm --become -m script -a "scripts/sonarr_transaction_audit.py --hours 24 --limit 25"
 ansible media-vm -m script -a scripts/sonarr_release_expectation_check.py
 ansible media-vm -m script -a scripts/radarr_release_expectation_check.py
 ```
@@ -377,6 +394,8 @@ rollback artifacts from the Profilarr staging pass:
   `/opt/media-stack/release-policy-snapshots/20260523T063216Z-selective-profilarr-cfs-dry-run`
 - Selective Profilarr CF applied snapshot:
   `/opt/media-stack/release-policy-snapshots/20260523T063425Z-selective-profilarr-cfs`
+- Profilarr DB backup before Sonarr selector change:
+  `/opt/profilarr/config/data/backups/profilarr-pre-sonarr-upgrade-strategy-20260524T192516Z.db`
 
 Keep these while the Profilarr candidate path is still being validated. After
 the final profile migration is accepted or abandoned, clean up the temporary
@@ -714,6 +733,16 @@ Current reasons to evaluate it:
 - Current Profilarr source shows Sonarr live upgrades triggering `SeriesSearch`
   one series at a time, while Radarr uses movie search batches. That matches the
   intended workflow better than episode-level search churn.
+- Current Profilarr source and the deployed `/app/server.js` both show Arr
+  command waiting hard-capped at 60 minutes. The public issue tracker did not
+  show a confirmed Sonarr `SeriesSearch` timeout issue or a documented timeout
+  setting during the 2026-05-24 check. Related Profilarr issue
+  <https://github.com/Dictionarry-Hub/profilarr/issues/616> and PR
+  <https://github.com/Dictionarry-Hub/profilarr/pull/617> cover a different
+  Radarr library-fetch timeout, not the Sonarr command wait. Open issue
+  <https://github.com/Dictionarry-Hub/profilarr/issues/398> tracks future
+  adaptive backoff for upgrade filters, but it is not a current fix for
+  long-running Sonarr `SeriesSearch` waits.
 - Dumpstarr is a community-maintained database intended for Profilarr and
   advertises Radarr/Sonarr-tested custom formats and profiles.
 
@@ -774,6 +803,39 @@ Current deployed state on 2026-05-22:
   minutes`). This is not currently exposed in the Profilarr compose/template as
   a normal setting. Do not patch `/app/server.js` in-place unless the user
   explicitly approves an update-fragile local workaround.
+- Follow-up verification on 2026-05-24 found no `TIMEOUT`, `UPGRADE`,
+  `COMMAND`, `POLL`, or `SEARCH` environment variable in the Profilarr
+  container that controls this wait. The deployed source has
+  `waitForCommand(commandId)` using `MAX_TIMEOUT_MS = 3600 * 1000`, and Sonarr
+  live upgrades call `sonarr.searchSeries(item.id)` followed by
+  `sonarr.waitForCommand(cmd.id)`.
+- Supported upgrade-filter knobs are still useful, but they do not extend the
+  60-minute command wait. Selectors include `random`, `oldest`, `newest`,
+  `lowest_score`, popularity, and alphabetical modes. Sonarr filters can use
+  fields such as `season_count` and `episode_count`, but Profilarr currently
+  normalizes Sonarr series `score` to `0` and `cutoff_met` to `false`, so
+  `lowest_score` and the `cutoff_met=false` rule cannot truly rank Sonarr
+  series by current episode custom-format score.
+- On 2026-05-24, the Sonarr Profilarr filter was changed from selector
+  `oldest` to `random` with backup
+  `/opt/profilarr/config/data/backups/profilarr-pre-sonarr-upgrade-strategy-20260524T192516Z.db`.
+  The filter remains enabled, hourly, and `count=1`; this is not a patch and
+  does not reduce Profilarr's search count. It prevents a single old series
+  whose `SeriesSearch` runs longer than an hour from being the deterministic
+  next target every run.
+- Live status at 2026-05-24 19:25 UTC: Profilarr had one Sonarr upgrade job
+  running and one Radarr upgrade job queued. Recent Sonarr upgrade failures were
+  `Command 561401 timed out after 60 minutes` and then `Command 561401
+  disappeared`; the active Sonarr command was `SeriesSearch` for KonoSuba
+  series id `10`, processing `1322` release candidates. Radarr upgrade runs
+  were succeeding.
+- First `scripts/sonarr_transaction_audit.py --hours 2 --limit 8` run after
+  monitor deployment skipped `10000` bootstrap history records and showed `11`
+  real post-monitor events: `grabbed=10`, `downloadFolderImported=1`. The live
+  queue was `203` records across `59` download groups with no
+  `current_file_score_higher` groups; the main current blockers were Bleach
+  Judas packs rejected by parent-folder/title mismatch and JoJo Stardust
+  Crusaders SAB leftovers rejected by Sonarr/XEM season-number mapping.
 - NZBFinder was left enabled after its `5000/5000` quota exhaustion warning.
   Prowlarr's temporary disabled-until cooldown is expected in that state and is
   not a reason to remove or park the indexer.
@@ -786,4 +848,6 @@ Reference links:
 
 - <https://github.com/Dictionarry-Hub/profilarr>
 - <https://github.com/Dictionarry-Hub/profilarr/releases>
+- <https://github.com/Dictionarry-Hub/profilarr/blob/33d73a36de8206e79928ecb1ed82556875206b1c/src/lib/server/utils/arr/base.ts>
+- <https://github.com/Dictionarry-Hub/profilarr/blob/33d73a36de8206e79928ecb1ed82556875206b1c/src/lib/server/upgrades/processor.ts>
 - <https://www.dumpstarr.dev/>

@@ -140,6 +140,21 @@ def print_text(report: dict[str, Any]) -> None:
             "  - {arr} enabled={enabled} cron={cron} next={next_run_at} "
             "last={last_run_at}".format(**row)
         )
+        try:
+            filters = json.loads(row.get("filters") or "[]")
+        except (TypeError, json.JSONDecodeError):
+            filters = []
+        for filter_config in filters:
+            print(
+                "    filter={name} enabled={enabled} selector={selector} "
+                "count={count} tag={tag}".format(
+                    name=filter_config.get("name") or filter_config.get("id"),
+                    enabled=filter_config.get("enabled"),
+                    selector=filter_config.get("selector"),
+                    count=filter_config.get("count"),
+                    tag=filter_config.get("tag") or "",
+                )
+            )
 
     print("Recent queued jobs:")
     for row in report["job_queue"][:10]:
@@ -155,6 +170,14 @@ def print_text(report: dict[str, Any]) -> None:
             "searched={searches_triggered} ok={successful} failed={failed} "
             "filter={filter_name}".format(**row)
         )
+        errors = row.get("errors")
+        if errors:
+            try:
+                parsed_errors = json.loads(errors)
+            except (TypeError, json.JSONDecodeError):
+                parsed_errors = [str(errors)]
+            for error in parsed_errors[:3]:
+                print(f"    error={error}")
 
 
 def parse_args() -> argparse.Namespace:
