@@ -9,3 +9,9 @@ proxmox_lxc_hardware:
     memory: 8192
     swap: 512
     onboot: false
+
+proxmox_vm_disk_resizes:
+  - name: docker-vm root disk
+    vmid: 110
+    slot: scsi0
+    size: 80G

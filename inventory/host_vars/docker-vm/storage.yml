@@ -1,0 +1,10 @@
+# =============================================================================
+# docker-vm - Storage Configuration
+# =============================================================================
+
+guest_lvm_root_expansion:
+  disk: /dev/sda
+  partition_number: 3
+  pv: /dev/sda3
+  vg: ubuntu-vg
+  lv: /dev/ubuntu-vg/ubuntu-lv

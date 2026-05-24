@@ -51,9 +51,11 @@ auto_updates_reboot_if_required: false
 proxmox_sysctl_settings:
   vm.swappiness: 10
 
-# PBS backup job (every 6 hours to pbs-main, all guests except pbs-lxc)
+# PBS backup job (every 6 hours to pbs-main).
+# Exclude PBS itself plus stopped/retired guests that should not consume the
+# small shared PBS/Time Machine datastore.
 pbs_backup_schedule: "*/6:00"
-pbs_backup_exclude: "105"
+pbs_backup_exclude: "103,104,105,142"
 
 # HA disabled cluster-wide. Provides no value (no HA resources configured) and
 # adds risk (watchdog fencing). Re-enable: set true and re-run playbooks/proxmox-ha.yml.
