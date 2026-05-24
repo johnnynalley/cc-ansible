@@ -1,7 +1,5 @@
 # =============================================================================
-# pi5-01 - Host Variables
+# jn-t14s-lin - Swap Configuration
 # =============================================================================
 
-# Legacy host uses johnny user
-admin_user: johnny
-
+swap_size_gb: 8

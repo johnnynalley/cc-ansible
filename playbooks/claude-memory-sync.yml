@@ -1,8 +1,8 @@
 # =============================================================================
 # Claude Memory Sync - Sync Claude Code memory files to NAS for Nextcloud
 # =============================================================================
-# Claude Code's project memory lives on ansible-lxc outside the git repo.
-# This timer rsync's it to ts440 so it appears in Nextcloud External Storage
+# Claude Code's project memory lives on the Ansible controller outside the git repo.
+# This timer rsyncs it to ts440 so it appears in Nextcloud External Storage
 # (Configs/claude-memory/) and syncs to the Mac via Nextcloud desktop app.
 #
 # Usage: ansible-playbook playbooks/claude-memory-sync.yml
@@ -19,10 +19,10 @@
         state: directory
         owner: johnny
         group: johnny
-        mode: "0755"
+        mode: "0775"
 
 - name: Configure Claude memory sync timer
-  hosts: ansible-lxc
+  hosts: orchestrator
   become: true
 
   vars:
@@ -65,11 +65,16 @@
           WantedBy=timers.target
       notify: Reload systemd
 
+    - name: Reload systemd before enabling new timer
+      ansible.builtin.meta: flush_handlers
+      when: not ansible_check_mode
+
     - name: Enable and start claude-memory-sync timer
       ansible.builtin.systemd:
         name: claude-memory-sync.timer
         enabled: true
         state: started
+      when: not ansible_check_mode
 
   handlers:
     - name: Reload systemd

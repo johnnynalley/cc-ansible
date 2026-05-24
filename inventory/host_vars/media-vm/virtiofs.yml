@@ -39,3 +39,10 @@ virtiofs_mounts:
     owner: root
     group: root
     mode: "0755"
+  - name: nextcloud_media
+    mount_point: /srv/nextcloud-media
+    owner: root
+    group: root
+    mode: "0755"
+    # Newly attached VirtioFS devices are not visible until the VM restarts.
+    allow_unavailable: true

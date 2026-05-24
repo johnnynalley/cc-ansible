@@ -43,6 +43,8 @@ Git history uses short Conventional Commit-style subjects such as `feat: ...` an
 
 When completing repo work, inspect the diff, verify no plaintext secrets or unrelated dirty files are being staged, then commit the completed scoped change without waiting for a separate reminder. If the work should not be committed immediately, state why. Do not leave finished, verified repo changes uncommitted silently. If you touch a file that already has unrelated dirty hunks, surface that immediately, avoid mixing them into your scoped commit unless the user explicitly approves, and either commit the approved prior hunks separately or document why they remain. Never let shared guidance files such as `AGENTS.md` accumulate invisible "someone should commit this later" edits.
 
+Before closing any repo-mutating session, run `git status --short --branch`. If the branch is ahead or has completed local changes, commit and push the scoped work; if anything remains dirty, explicitly identify it as generated junk, unrelated in-progress work, or a concrete blocker.
+
 ### Security & Configuration Tips
 
 Do not commit real secrets. Encrypted values belong in `vault.yml` files beside the relevant `vars.yml`; examples may use `vault.yml.example`. The configured vault password path is `~/.ansible/vault_pass.txt`. Prefer full-playbook `--check --diff` runs for changes touching Proxmox, storage, firewall, backup, or Docker automation.

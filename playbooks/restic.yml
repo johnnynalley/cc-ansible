@@ -5,9 +5,10 @@
 # =============================================================================
 
 - name: Configure restic backups to Backblaze B2
-  hosts: backup_clients
+  hosts: backup_clients:!macos_hosts
   become: true
   gather_facts: true
+  serial: 1
 
   vars:
     restic_repo: "b2:{{ restic_bucket }}:{{ restic_prefix }}"
@@ -236,6 +237,7 @@
         enabled: true
         state: started
         daemon_reload: true
+      when: not ansible_check_mode
       tags: [systemd]
 
   handlers:
@@ -248,3 +250,4 @@
         name: restic-backup.timer
         enabled: true
         state: started
+      when: not ansible_check_mode

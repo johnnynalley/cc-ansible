@@ -13,9 +13,9 @@
   become: true
 
   vars:
-    nextcloud_scan_container: nextcloud-aio-nextcloud
-    nextcloud_scan_oncalendar: "*-*-* *:3/10"  # every 10 minutes, offset by 3 min
-    nextcloud_scan_paths:
+    nextcloud_scan_container_default: nextcloud-aio-nextcloud
+    nextcloud_scan_oncalendar_default: "*-*-* *:3/10"  # every 10 minutes, offset by 3 min
+    nextcloud_scan_paths_default:
       - /Johnny/files/Configs
       - /Johnny/files/Photo Library
 
@@ -32,8 +32,8 @@
 
           [Service]
           Type=oneshot
-          {% for path in nextcloud_scan_paths %}
-          ExecStart=/usr/bin/docker exec -u www-data {{ nextcloud_scan_container }} php occ files:scan --path="{{ path }}"
+          {% for path in nextcloud_scan_paths | default(nextcloud_scan_paths_default) %}
+          ExecStart=/usr/bin/docker exec -u www-data {{ nextcloud_scan_container | default(nextcloud_scan_container_default) }} php occ files:scan --path="{{ path }}"
           {% endfor %}
       notify: Reload systemd
 
@@ -46,7 +46,7 @@
           Description=Scan Nextcloud external storage every 10 minutes
 
           [Timer]
-          OnCalendar={{ nextcloud_scan_oncalendar }}
+          OnCalendar={{ nextcloud_scan_oncalendar | default(nextcloud_scan_oncalendar_default) }}
           Persistent=true
 
           [Install]

@@ -1,8 +1,10 @@
 # =============================================================================
 # Bootstrap Playbook - Create admin user
 # =============================================================================
-# One-time setup for new hosts. Uses su (not sudo) since sudo may not be installed yet.
-# Copy the Ansible SSH key to the admin user first, then run:
+# One-time setup for new Linux hosts. Add hosts to [bootstrap_hosts] in inventory.
+# Default privilege escalation uses su because sudo may not be installed yet;
+# already-reachable hosts can set bootstrap_become_method: sudo in host_vars.
+# Copy the Ansible SSH key to the admin user first when needed, then run:
 #   ssh-copy-id -i ~/.ssh/ansible_ed25519.pub johnny@<LAN_IP>
 #   ansible-playbook playbooks/bootstrap.yml --ask-become-pass
 #
@@ -11,10 +13,10 @@
 # =============================================================================
 
 - name: Bootstrap admin user
-  hosts: linux_hosts
+  hosts: bootstrap_hosts
   become: true
-  become_method: su
-  become_flags: '-'
+  become_method: "{{ bootstrap_become_method | default('su') }}"
+  become_flags: "{{ bootstrap_become_flags | default('-') }}"
   gather_facts: true
 
   vars:

@@ -90,12 +90,14 @@
       ansible.builtin.command: proxmox-backup-manager datastore list --output-format json
       register: pbs_datastores
       changed_when: false
+      check_mode: false
 
     - name: Verify datastore path is writable (new datastore only)
       ansible.builtin.command: test -w {{ pbs_datastore_path }}
       register: pbs_path_writable
       failed_when: false
       changed_when: false
+      check_mode: false
       when: pbs_datastore_name not in (pbs_datastores.stdout | from_json | map(attribute='name') | list)
 
     - name: Fail if datastore path is not writable
@@ -118,6 +120,7 @@
       ansible.builtin.command: proxmox-backup-manager prune-job list --output-format json
       register: pbs_prune_jobs
       changed_when: false
+      check_mode: false
 
     - name: Create prune job with retention policy
       ansible.builtin.command: >
@@ -152,6 +155,7 @@
       ansible.builtin.command: proxmox-backup-manager user list --output-format json
       register: pbs_users
       changed_when: false
+      check_mode: false
 
     - name: Create backup user
       ansible.builtin.command: proxmox-backup-manager user create {{ pbs_api_user }}
@@ -161,6 +165,7 @@
       ansible.builtin.command: proxmox-backup-manager user list-tokens {{ pbs_api_user }} --output-format json
       register: pbs_tokens
       changed_when: false
+      check_mode: false
 
     - name: Generate API token and save secret
       ansible.builtin.shell: |
@@ -174,7 +179,7 @@
         executable: /bin/bash
       register: pbs_token_generated
       when: pbs_api_token_name not in (pbs_tokens.stdout | from_json | map(attribute='token-name') | list)
-      no_log: false
+      no_log: true
 
     - name: Read existing token secret
       ansible.builtin.slurp:
@@ -214,6 +219,7 @@
         executable: /bin/bash
       register: pbs_fingerprint_result
       changed_when: false
+      check_mode: false
 
     - name: Set fingerprint fact
       ansible.builtin.set_fact:
@@ -254,6 +260,7 @@
       register: pbs_storage_check
       changed_when: false
       failed_when: false
+      check_mode: false
 
     - name: Add PBS storage
       ansible.builtin.command: >
@@ -272,6 +279,7 @@
       ansible.builtin.command: pvesm status
       register: pbs_storage_status
       changed_when: false
+      check_mode: false
 
     - name: Show storage status
       ansible.builtin.debug:
@@ -297,6 +305,7 @@
       ansible.builtin.command: pvesh get /cluster/backup --output-format json
       register: pve_backup_jobs
       changed_when: false
+      check_mode: false
 
     - name: Set existing job comments fact
       ansible.builtin.set_fact:

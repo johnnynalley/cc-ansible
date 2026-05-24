@@ -9,6 +9,8 @@ apt_ppas:
 # Dev tools (formerly via development group) + software-properties-common for PPA
 packages_host_extra:
   - gh
+  - nodejs
+  - npm
   - python3-passlib
   - shellcheck
   - software-properties-common

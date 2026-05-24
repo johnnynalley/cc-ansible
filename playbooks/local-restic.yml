@@ -5,9 +5,10 @@
 # =============================================================================
 
 - name: Configure local restic backups to ts440 ZFS
-  hosts: backup_clients
+  hosts: backup_clients:!macos_hosts
   become: true
   gather_facts: true
+  serial: 1
 
   vars:
     local_restic_env_file: /etc/restic/local-backup.env
@@ -129,7 +130,7 @@
     - name: Check if local restic repo exists
       ansible.builtin.shell: |
         set -a; . {{ local_restic_env_file }}; set +a
-        restic cat config > /dev/null 2>&1
+        restic --no-lock cat config > /dev/null 2>&1
       args:
         executable: /bin/bash
       register: local_restic_repo_check
@@ -143,6 +144,11 @@
         restic init
       args:
         executable: /bin/bash
+      register: local_restic_init
+      changed_when: local_restic_init.rc == 0
+      failed_when:
+        - local_restic_init.rc != 0
+        - "'config file already exists' not in local_restic_init.stderr"
       when: local_restic_repo_check.rc != 0
       tags: [init]
 
@@ -286,6 +292,7 @@
         enabled: true
         state: started
         daemon_reload: true
+      when: not ansible_check_mode
       tags: [systemd]
 
   handlers:
@@ -298,6 +305,7 @@
         name: restic-local-backup.timer
         enabled: true
         state: started
+      when: not ansible_check_mode
 
 
 # =============================================================================

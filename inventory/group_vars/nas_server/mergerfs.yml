@@ -19,6 +19,16 @@ mergerfs_branches:
   - /srv/media-04/media
   - /srv/media-05/media
 
+mergerfs_branch_subdirectories:
+  - path: plex/.sonarr-recycle-bin
+    owner: johnny
+    group: johnny
+    mode: "0775"
+  - path: plex/.radarr-recycle-bin
+    owner: johnny
+    group: johnny
+    mode: "0775"
+
 # Mount options
 # - inodecalc=path-hash: Stable inode numbers for NFS compatibility (prevents ESTALE)
 # - func.getattr=newest: Consistent file attributes across drives for NFS

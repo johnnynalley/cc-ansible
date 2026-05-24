@@ -11,6 +11,24 @@
   gather_facts: true
 
   tasks:
+    - name: Check systemd SSH client proxy config type
+      ansible.builtin.stat:
+        path: /etc/ssh/ssh_config.d/20-systemd-ssh-proxy.conf
+        follow: false
+      register: systemd_ssh_proxy_config
+      tags: [ssh, harden]
+
+    - name: Materialize systemd SSH client proxy config
+      ansible.builtin.copy:
+        remote_src: true
+        src: /usr/lib/systemd/ssh_config.d/20-systemd-ssh-proxy.conf
+        dest: /etc/ssh/ssh_config.d/20-systemd-ssh-proxy.conf
+        owner: root
+        group: root
+        mode: "0644"
+      when: systemd_ssh_proxy_config.stat.islnk | default(false)
+      tags: [ssh, harden]
+
     - name: Enable SSH public key authentication
       ansible.builtin.lineinfile:
         path: /etc/ssh/sshd_config

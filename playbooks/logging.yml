@@ -15,6 +15,7 @@
   hosts: linux_hosts
   become: true
   gather_facts: true
+  serial: 1
 
   tasks:
     # =========================================================================
@@ -86,6 +87,24 @@
         update_cache: true
       when: ansible_facts.os_family == "Debian"
 
+    - name: Check Alloy package availability (Debian)
+      ansible.builtin.command:
+        cmd: apt-cache policy alloy
+      register: alloy_package_policy
+      changed_when: false
+      failed_when: false
+      check_mode: false
+      when: ansible_facts.os_family == "Debian"
+
+    - name: Skip new Debian hosts before Grafana repo exists in check mode
+      ansible.builtin.meta: end_host
+      when:
+        - ansible_check_mode
+        - ansible_facts.os_family == "Debian"
+        - >-
+          "Candidate:" not in alloy_package_policy.stdout
+          or "Candidate: (none)" in alloy_package_policy.stdout
+
     - name: Install alloy package (Debian)
       ansible.builtin.apt:
         name: alloy
@@ -126,8 +145,8 @@
         path: /etc/alloy
         state: directory
         owner: root
-        group: root
-        mode: "0755"
+        group: alloy
+        mode: "0770"
 
     - name: Deploy Alloy configuration
       ansible.builtin.template:
@@ -160,6 +179,7 @@
   hosts: macos_hosts
   become: false
   gather_facts: true
+  serial: 1
 
   vars:
     alloy_config_dir: "{{ ansible_env.HOME }}/.config/alloy"

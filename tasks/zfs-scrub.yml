@@ -90,6 +90,22 @@
 
 # --- ZFS Dataset Property Enforcement ---
 
+- name: Ensure ZFS datasets exist
+  ansible.builtin.shell: |
+    set -eu
+    if zfs list -H "{{ item.name }}" >/dev/null 2>&1; then
+      echo "unchanged"
+      exit 0
+    fi
+    zfs create{% for prop, val in (item.properties | default({})).items() %} -o {{ prop }}={{ val }}{% endfor %} "{{ item.name }}"
+    echo "updated=1"
+  register: zfs_dataset_create_result
+  changed_when: "'updated=1' in zfs_dataset_create_result.stdout"
+  loop: "{{ zfs_datasets_present | default([]) }}"
+  loop_control:
+    label: "{{ item.name }}"
+  tags: [zfs-properties]
+
 - name: Enforce ZFS dataset properties
   ansible.builtin.shell: |
     changed=0

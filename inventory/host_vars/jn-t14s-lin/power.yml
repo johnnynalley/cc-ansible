@@ -7,3 +7,6 @@ powertop_autotune_enabled: true
 
 # Mask ModemManager (no cellular modem in this laptop)
 disable_modem_manager: true
+
+# Keep the flat Ansible controller online while plugged in.
+controller_ac_always_on_enabled: true

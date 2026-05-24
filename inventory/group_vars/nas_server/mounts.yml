@@ -70,20 +70,7 @@ filesystem_mounts:
     owner: johnny
     group: johnny
 
-  # NFS export: configs directory
-  - path: /srv/exports/configs
-    src: /srv/nas-zfs/configs
-    fstype: none
-    opts: "bind,nofail"
 
-  # NFS export: ansible directory
-  - path: /srv/exports/ansible
-    src: /srv/nas-zfs/configs/ansible
-    fstype: none
-    opts: "bind,nofail"
-    owner: johnny
-    group: johnny
-    mode: "0775"
 
   # SABnzbd incomplete downloads (Lacie SSD fast storage)
   # Source is on the Lacie SSD (/srv/nas-01) but OUTSIDE the mergerfs branch
@@ -95,3 +82,8 @@ filesystem_mounts:
     owner: johnny
     group: johnny
     mode: "0775"
+
+# Retired bind mounts from the old Pi NFS configs workflow.
+filesystem_mounts_absent:
+  - path: /srv/exports/configs
+  - path: /srv/exports/ansible

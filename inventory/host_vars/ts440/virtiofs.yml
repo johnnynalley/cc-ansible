@@ -55,9 +55,20 @@ virtiofs_directory_mappings:
     owner: johnny
     group: johnny
     mode: "0775"
+  - name: nextcloud_media
+    path: /srv/nas-zfs/nextcloud/data/Johnny/files/Media
+    owner: "33"
+    group: "33"
+    mode: "0775"
   - name: nextcloud_aio_backup
     path: /srv/nas-zfs/backups/nextcloud-aio
     # Borg runs as root inside AIO container
+
+virtiofs_extra_directories:
+  - path: /srv/nas-zfs/nextcloud/data/Johnny/files/Media/Stream VODs
+    owner: "33"
+    group: "33"
+    mode: "0775"
 
 virtiofs_host_configs:
   # media-vm (VM 100) - indices match existing VM config (0, 3, 4, 5)
@@ -97,6 +108,12 @@ virtiofs_host_configs:
     index: 8
     name: archive
     host_path: /srv/nas-zfs/archive
+    cache: never
+
+  - vmid: 100
+    index: 9
+    name: nextcloud_media
+    host_path: /srv/nas-zfs/nextcloud/data/Johnny/files/Media
     cache: never
 
   # nextcloud-vm (VM 101)

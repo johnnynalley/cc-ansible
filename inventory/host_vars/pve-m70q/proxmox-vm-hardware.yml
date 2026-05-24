@@ -1,0 +1,11 @@
+# =============================================================================
+# pve-m70q - Proxmox Guest Hardware Settings
+# =============================================================================
+
+proxmox_lxc_hardware:
+  - name: ansible-lxc
+    vmid: 104
+    cores: 4
+    memory: 8192
+    swap: 512
+    onboot: false

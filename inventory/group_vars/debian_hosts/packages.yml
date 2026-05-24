@@ -9,6 +9,7 @@ packages_debian_extra:
   - dnsutils        # dig, nslookup (called bind-tools on Arch)
   - iputils-ping    # ping (usually included on Arch)
   - locales
+  - python3-apt     # required by Ansible apt module for reliable check mode
 
 # Ubuntu-only packages (not available on Debian/Proxmox)
 packages_ubuntu_extra:

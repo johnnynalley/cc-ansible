@@ -1,0 +1,7 @@
+---
+# nextcloud-vm - scan paths for externally written files
+
+nextcloud_scan_paths:
+  - /Johnny/files/Configs
+  - /Johnny/files/Photo Library
+  - /Johnny/files/Media/Stream VODs

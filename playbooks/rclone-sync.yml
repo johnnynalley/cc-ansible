@@ -16,6 +16,7 @@
   hosts: managed_hosts
   become: true
   gather_facts: true
+  serial: 1
 
   vars:
     rclone_sync_script: /usr/local/sbin/rclone-sync
@@ -212,6 +213,7 @@
   hosts: managed_hosts
   become: false
   gather_facts: true
+  serial: 1
 
   vars:
     rclone_sync_script: "{{ ansible_env.HOME }}/.local/bin/rclone-sync"

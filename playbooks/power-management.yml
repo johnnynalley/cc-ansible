@@ -4,6 +4,7 @@
 # Deploys:
 #   - powertop auto-tune at boot (opt-in via powertop_autotune_enabled)
 #   - Mask ModemManager for laptops without cellular (opt-in via disable_modem_manager)
+#   - Controller AC always-on policy (opt-in via controller_ac_always_on_enabled)
 #
 # Usage: ansible-playbook playbooks/power-management.yml
 # =============================================================================
@@ -62,6 +63,59 @@
         state: stopped
       when: disable_modem_manager | default(false)
 
+    # =========================================================================
+    # Controller AC always-on policy
+    # =========================================================================
+    - name: Create logind override directory
+      ansible.builtin.file:
+        path: /etc/systemd/logind.conf.d
+        state: directory
+        mode: "0755"
+      when: controller_ac_always_on_enabled | default(false)
+
+    - name: Configure logind controller AC policy
+      ansible.builtin.copy:
+        dest: /etc/systemd/logind.conf.d/99-ansible-controller.conf
+        content: |
+          # Managed by Ansible - playbooks/power-management.yml
+          [Login]
+          HandleLidSwitchExternalPower=ignore
+          HandleLidSwitchDocked=ignore
+          IdleAction=ignore
+        owner: root
+        group: root
+        mode: "0644"
+      when: controller_ac_always_on_enabled | default(false)
+      notify: Restart systemd-logind
+
+    - name: Ensure controller user KDE config directory exists
+      ansible.builtin.file:
+        path: "/home/{{ controller_ac_always_on_user | default(admin_user | default(ansible_user)) }}/.config"
+        state: directory
+        owner: "{{ controller_ac_always_on_user | default(admin_user | default(ansible_user)) }}"
+        group: "{{ controller_ac_always_on_user | default(admin_user | default(ansible_user)) }}"
+        mode: "0755"
+      when: controller_ac_always_on_enabled | default(false)
+
+    - name: Disable KDE AC idle suspend for controller user
+      community.general.ini_file:
+        path: "/home/{{ controller_ac_always_on_user | default(admin_user | default(ansible_user)) }}/.config/powermanagementprofilesrc"
+        section: "AC][SuspendSession"
+        option: "{{ item.option }}"
+        value: "{{ item.value }}"
+        owner: "{{ controller_ac_always_on_user | default(admin_user | default(ansible_user)) }}"
+        group: "{{ controller_ac_always_on_user | default(admin_user | default(ansible_user)) }}"
+        mode: "0644"
+        no_extra_spaces: true
+      loop:
+        - option: idleTime
+          value: "0"
+        - option: suspendType
+          value: "0"
+        - option: suspendThenHibernate
+          value: "false"
+      when: controller_ac_always_on_enabled | default(false)
+
   handlers:
     - name: Reload systemd
       ansible.builtin.systemd:
@@ -72,3 +126,8 @@
         name: powertop-auto-tune.service
         enabled: true
         state: started
+
+    - name: Restart systemd-logind
+      ansible.builtin.systemd:
+        name: systemd-logind.service
+        state: restarted

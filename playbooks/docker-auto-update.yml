@@ -13,6 +13,7 @@
   hosts: docker_hosts
   become: true
   gather_facts: false
+  serial: 1
 
   tasks:
     # --- Disable path: stop timer if auto-update is disabled ---

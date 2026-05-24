@@ -126,10 +126,10 @@
       tags: [dbc-user]
 
 # ============================================================
-# Phase 1c: Ansible dry-run wrapper (ansible-lxc only)
+# Phase 1c: Ansible dry-run wrapper (orchestrator only)
 # ============================================================
 - name: "Phase 1c: Deploy ansible dry-run wrapper"
-  hosts: ansible-lxc
+  hosts: orchestrator
   become: true
   gather_facts: false
 
@@ -296,7 +296,7 @@
 # ============================================================
 # Removes NOPASSWD from johnny. Johnny falls back to %sudo group rule
 # which requires a password. Ansible no longer connects as johnny
-# (except ansible-lxc local + macbook-pro, both use vault password).
+# (except local orchestrator + macbook-pro, both use vault password).
 #
 # Run with: ansible-playbook playbooks/user-separation.yml --tags secure-johnny
 # ============================================================

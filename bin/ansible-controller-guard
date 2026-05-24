@@ -1,0 +1,111 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+mode="${1:-check}"
+cpu_count="$(nproc 2>/dev/null || echo 1)"
+default_load_limit="$((cpu_count > 4 ? cpu_count * 2 : 6))"
+load_limit="${ANSIBLE_GUARD_LOAD_LIMIT:-$default_load_limit}"
+swap_limit_mb="${ANSIBLE_GUARD_SWAP_LIMIT_MB:-1024}"
+
+running_ansible() {
+  ps -eo pid=,ppid=,stat=,cmd= |
+    awk '
+      /[a]nsible-playbook/ || /[\/ ]ansible / {
+        print
+      }
+    '
+}
+
+stale_ansible_ssh() {
+  ps -eo pid=,ppid=,stat=,cmd= |
+    awk '
+      $2 == 1 && /ssh/ && (/\/ansible-cp\// || /\/\.ansible\/cp\// || /ssh: .*ansible.*\\[mux\\]/) {
+        print
+      }
+    '
+}
+
+warn_if_pid_namespace_isolated() {
+  if tr '\0' ' ' < /proc/1/cmdline | grep -Eq 'codex-linux-sandbox|bwrap'; then
+    echo "WARN: running in an isolated Codex PID namespace; process lists may not include other sessions." >&2
+    echo
+  fi
+}
+
+print_health() {
+  warn_if_pid_namespace_isolated
+  echo "== uptime =="
+  uptime
+  echo
+  echo "== cpu =="
+  echo "logical_cpus=${cpu_count} load_limit=${load_limit}"
+  echo
+  echo "== memory =="
+  free -h
+  echo
+  if [[ -r /proc/pressure/io ]]; then
+    echo "== io pressure =="
+    cat /proc/pressure/io
+    echo
+  fi
+  echo "== running ansible =="
+  running_ansible || true
+  echo
+  echo "== orphaned ansible ssh/control sockets =="
+  stale_ansible_ssh || true
+}
+
+load_1m="$(awk '{print $1}' /proc/loadavg)"
+swap_used_mb="$(awk '/Swap:/ { printf "%d", $3 / 1024 }' /proc/meminfo)"
+
+check_pressure() {
+  pressure_rc=0
+  if awk -v load="$load_1m" -v limit="$load_limit" 'BEGIN { exit !(load > limit) }'; then
+    echo
+    echo "WARN: controller 1-minute load ${load_1m} is above guard limit ${load_limit}." >&2
+    pressure_rc=2
+  fi
+  if (( swap_used_mb > swap_limit_mb )); then
+    echo
+    echo "WARN: controller swap usage ${swap_used_mb} MiB is above guard limit ${swap_limit_mb} MiB." >&2
+    pressure_rc=3
+  fi
+  if (( pressure_rc == 0 )); then
+    echo
+    echo "OK: controller pressure is below guard limits."
+  fi
+  return "$pressure_rc"
+}
+
+case "$mode" in
+  check)
+    print_health
+    check_pressure || true
+    ;;
+  strict)
+    print_health
+    check_pressure || exit $?
+    ;;
+  cleanup)
+    active="$(running_ansible || true)"
+    if [[ -n "$active" ]]; then
+      echo "Refusing cleanup while Ansible commands are active:" >&2
+      echo "$active" >&2
+      exit 4
+    fi
+
+    stale="$(stale_ansible_ssh || true)"
+    if [[ -z "$stale" ]]; then
+      echo "No orphaned Ansible SSH/control processes found."
+      exit 0
+    fi
+
+    echo "$stale"
+    echo "$stale" | awk '{print $1}' | xargs -r kill
+    echo "Requested termination for orphaned Ansible SSH/control processes."
+    ;;
+  *)
+    echo "usage: $0 [check|strict|cleanup]" >&2
+    exit 64
+    ;;
+esac

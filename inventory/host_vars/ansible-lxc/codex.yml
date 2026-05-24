@@ -1,8 +1,7 @@
 # =============================================================================
-# pi5-01 - Backup Configuration (Ansible Controller)
+# ansible-lxc - Codex CLI Configuration
 # =============================================================================
 
-# Backup paths
-restic_backup_paths_extra:
-  - /home/johnny
-  - /root/.config/rclone
+codex_cli_user: johnny
+codex_npm_prefix: /home/johnny/.local
+codex_npm_package: "@openai/codex"

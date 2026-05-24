@@ -1,15 +1,15 @@
 # CC-Ansible
 
-> **Last updated:** 2026-05-12
+> **Last updated:** 2026-05-22
 
-Ansible automation for Johnny's homelab infrastructure (4 Proxmox nodes, 10 VMs/LXCs, Ansible controller LXC, gaming workstation, ThinkPad laptop, MacBook).
+Ansible automation for Johnny's homelab infrastructure (4 Proxmox nodes, VMs/LXCs, flat T14s Ansible controller, Raspberry Pi Plex appliance, Windows gaming workstation, ThinkPad laptop, MacBook).
 
 **Repository**: https://github.com/johnnynalley/cc-ansible (public)
 
 ## Quick Start
 
 ```bash
-# From the repo directory (on ansible-lxc)
+# From the repo directory (on jn-t14s-lin)
 cd ~/cc-ansible
 
 # Run a specific playbook
@@ -23,6 +23,10 @@ ansible-playbook site.yml
 # Interactive menu
 ./bin/ansible-menu
 ```
+
+## Streaming Runbook
+
+The current Twitch, YouTube, TikTok, Mac OBS, Aitum Vertical, SleepyChat, and experimental Apple Music routing setup is documented in [docs/streaming-runbook.md](docs/streaming-runbook.md).
 
 ## Directory Structure
 
@@ -45,8 +49,8 @@ cc-ansible/
 │   │   ├── vms/                # Virtual machines (qemu-guest-agent)
 │   │   ├── lxcs/               # LXC containers
 │   │   ├── vms_lxcs/           # Shared VM+LXC configs
-│   │   ├── orchestrator/       # Ansible controller (ansible-lxc)
-│   │   ├── development/        # Dev tooling (gh, shellcheck, yq)
+│   │   ├── orchestrator/       # Ansible controller (jn-t14s-lin)
+│   │   ├── development/        # Dev tooling defaults
 │   │   └── backup_clients/     # Hosts with restic backups
 │   └── host_vars/
 │       ├── ts440/              # Per-host overrides
@@ -59,10 +63,9 @@ cc-ansible/
 │       ├── homebridge-lxc/
 │       ├── syncthing-lxc/
 │       ├── pbs-lxc/              # Proxmox Backup Server (CT 105, pve-herc)
-│       ├── pi5-01/
-│       ├── jn-desktop/         # CachyOS gaming workstation
-│       ├── jn-t14s-lin/       # ThinkPad T14s (Kubuntu)
-│       ├── dev-vm/            # Development VM (Ubuntu 24.04, pve-m70q)
+│       ├── mercury/           # Raspberry Pi 5 Plex appliance
+│       ├── jn-t14s-lin/       # ThinkPad T14s (Kubuntu/controller)
+│       ├── lj-gaming-pc/      # Windows gaming workstation
 │       └── openclaw-vm/       # OpenClaw AI agent (Ubuntu 25.10, ts440)
 ├── playbooks/
 │   ├── packages.yml            # Multi-platform package installation
@@ -87,7 +90,7 @@ cc-ansible/
 │   ├── gluetun-watchdog.yml    # Gluetun VPN crash loop watchdog
 │   ├── docker-auto-update.yml  # Auto-update selected Docker containers (timer)
 │   ├── virtiofs.yml            # VirtioFS shares (Proxmox → VMs)
-│   ├── rclone-sync.yml         # rclone OneDrive → Nextcloud sync (macbook-pro/pi5-01)
+│   ├── rclone-sync.yml         # rclone sync jobs for opted-in managed hosts
 │   ├── git-sync.yml            # Auto-pull from GitHub on ts440 (for Nextcloud)
 │   ├── nextcloud-scan.yml      # Periodic occ files:scan for external storage
 │   ├── claude-memory-sync.yml  # Sync Claude Code memory archive to NAS for Nextcloud
@@ -150,27 +153,32 @@ managed_hosts
 │   ├── debian_hosts
 │   │   ├── proxmox_nodes (ts440, pve-alto, pve-herc, pve-m70q)
 │   │   ├── vms_lxcs
-│   │   │   ├── vms (docker-vm, media-vm, nextcloud-vm, dev-vm, freepbx-vm, openclaw-vm) ← gets qemu-guest-agent
+│   │   │   ├── vms (docker-vm, media-vm, nextcloud-vm, freepbx-vm, openclaw-vm, pdm-vm) ← gets qemu-guest-agent
 │   │   │   └── lxcs (homebridge-lxc, syncthing-lxc, pbs-lxc)
-│   │   ├── orchestrator (ansible-lxc, pi5-01)
-│   │   └── jn-t14s-lin ← ThinkPad T14s (Kubuntu)
-│   └── arch_hosts (jn-desktop) ← CachyOS gaming workstation
+│   │   ├── raspberry_pis (mercury)
+│   │   └── orchestrator (jn-t14s-lin) ← ThinkPad T14s (Kubuntu)
+│   └── arch_hosts (currently empty)
 └── macos_hosts (macbook-pro)
 
-workstations (jn-desktop, jn-t14s-lin, macbook-pro) ← no auto-recovery/reboots
+workstations (jn-t14s-lin, macbook-pro) ← no auto-recovery/reboots
 
 nas_server (ts440) ← portable NAS role group
 
-development (dev-vm) ← dev tooling (gh, shellcheck, yq)
+development (currently empty) ← dev tooling (gh, shellcheck, yq)
 
 docker_hosts (docker-vm, media-vm, nextcloud-vm, openclaw-vm) ← Docker Compose stacks
+
+gluetun_hosts (media-vm) ← Gluetun/qBittorrent VPN automation
 
 backup_clients
 ├── proxmox_nodes
 ├── vms_lxcs
+├── raspberry_pis
 ├── orchestrator
 ├── workstations
 └── arch_hosts
+
+retired_hosts (dev-vm, jn-desktop) ← retained records, excluded from site.yml
 ```
 
 ## Vault Setup
@@ -210,7 +218,7 @@ backup_clients
 
 ## SSH Authentication
 
-Ansible uses a dedicated passwordless SSH key (`~/.ssh/ansible_ed25519` on ansible-lxc) for all hosts, configured in `ansible.cfg` as `private_key_file`.
+Ansible uses a dedicated passwordless SSH key (`~/.ssh/ansible_ed25519` on jn-t14s-lin) as a fallback for managed hosts, configured in `ansible.cfg` as `private_key_file`. Tailscale SSH is preferred for managed Linux hosts when tailnet policy allows it.
 
 - **Linux hosts**: Tailscale SSH is the primary transport; the dedicated key is a fallback if Tailscale is down
 - **Proxmox nodes**: root SSH is disabled by default, with a `Match Address` exception for key-only migration SSH from the Proxmox LAN peer IPs in `inventory/group_vars/proxmox_nodes/vars.yml`
@@ -296,6 +304,9 @@ Packages are merged from multiple sources (all applicable variables combined):
 | `unattended-upgrades.yml` | `debian_hosts` | Daily security patches (incl. workstations, Proxmox blacklist) |
 | `network-recovery.yml` | `linux_hosts` | Network watchdog for auto-recovery after outages |
 | `wifi.yml` | `linux_hosts` | WiFi powersave disable, optional PCI FLR or module reload resume fix |
+| `windows-signalrgb.yml` | `windows_hosts` | SignalRGB logon/lock/unlock lighting automation on lj-gaming-pc |
+| `windows-gaming-tuning.yml` | `windows_hosts` | Low-latency Realtek NIC tuning for the Windows gaming PC |
+| `windows-windows-performance-mode.yml` | `windows_hosts` | Windows performance mode triggers for competitive games and OBS streaming/recording |
 | `restic.yml` | `backup_clients` | B2 offsite backup with systemd timer |
 | `local-restic.yml` | `backup_clients` | Hourly backups to ts440 ZFS |
 | `mergerfs.yml` | `nas_server` | MergerFS media pool mount + balance script + config excludes |
@@ -305,16 +316,16 @@ Packages are merged from multiple sources (all applicable variables combined):
 | `filesystem-mounts.yml` | `linux_hosts` | Local filesystem mounts (NTFS, exFAT) |
 | `samba.yml` | `linux_hosts` | Samba shares + Time Machine (ts440 + pve-herc) |
 | `docker-stacks.yml` | `docker_hosts` | Deploy Docker Compose stacks and the managed Caddyfile (per-service update reporting with version diffs) |
-| `gluetun-watchdog.yml` | media-vm | Gluetun VPN crash loop detection, port forwarding monitoring, and auto-restart |
+| `gluetun-watchdog.yml` | media-vm | Gluetun VPN crash loop detection, port forwarding monitoring, auto-restart, and qBittorrent port sync |
 | `stream-relay.yml` | media-vm | OBS SRT ingest to Twitch RTMP relay using the Quadro NVENC encoder |
 | `docker-auto-update.yml` | `docker_hosts` | Auto-update selected containers every 6h with major version guard |
 | `virtiofs.yml` | `proxmox_nodes`, `vms` | Configure VirtioFS shares between Proxmox hosts and VMs |
 | `proxmox-vm-hardware.yml` | `proxmox_nodes` | Apply durable Proxmox VM hardware settings such as CPU model overrides |
-| `rclone-sync.yml` | `managed_hosts` | rclone sync from OneDrive to Nextcloud (macbook-pro via launchd, pi5-01 via systemd) |
+| `rclone-sync.yml` | `managed_hosts` | rclone sync jobs for opted-in managed hosts |
 | `git-sync.yml` | `nas_server` | Auto-pull from GitHub every 5 minutes (Nextcloud External Storage) |
 | `nextcloud-scan.yml` | nextcloud-vm | Periodic `occ files:scan` for external storage (every 10 min) |
-| `claude-memory-sync.yml` | `nas_server`, ansible-lxc | Rsync Claude Code memory archive to NAS for Nextcloud access (every 10 min) |
-| `codex-memory-sync.yml` | `nas_server`, ansible-lxc | Rsync Codex CLI memory to NAS for Nextcloud access (every 10 min) |
+| `claude-memory-sync.yml` | `nas_server`, `orchestrator` | Rsync Claude Code memory archive to NAS for Nextcloud access (every 10 min) |
+| `codex-memory-sync.yml` | `nas_server`, `orchestrator` | Rsync Codex CLI memory to NAS for Nextcloud access (every 10 min) |
 | `proxmox-firewall.yml` | `proxmox_nodes` | Deploy Proxmox firewall rules (datacenter, node, VM/CT) |
 | `proxmox-backup-server.yml` | pbs-lxc, `proxmox_nodes` | Install PBS, configure datastore/prune/GC/API token, register on all PVE nodes, create vzdump backup jobs, deploy connectivity check |
 | `proxmox-notifications.yml` | `proxmox_nodes` | PVE webhook notification targets + matchers → Apprise → Pushover |
@@ -330,15 +341,14 @@ TS440 serves NFS exports via Tailscale. VMs have been migrated to local config s
 
 | Export Path | Bind Source | Client | Purpose |
 |-------------|-------------|--------|---------|
-| `/srv/exports/configs` | `/srv/nas-zfs/configs` | pi5-01 | Ansible repo only |
-| `/srv/nas-zfs` | (direct, no bind) | jn-desktop | Full NAS access with `crossmnt` |
+| `/srv/media` | `/srv/media` | docker-vm | Media pool access |
+| `/srv/media-downloads` | `/srv/media-downloads` | docker-vm | Download staging access |
 
 ### Client Mounts
 
 | Host | Mount Point | Remote Path |
 |------|-------------|-------------|
-| pi5-01 | `/srv/configs` | `100.71.188.16:/exports/configs` |
-| jn-desktop | `/mnt/nas-zfs` | `100.71.188.16:/nas-zfs` |
+No active managed clients mount NFS for repo/config storage. The retired Pi and old Linux desktop NFS paths were removed from normal convergence.
 
 **Note**: VMs no longer use NFS. All configs are stored locally:
 - docker-vm: `/opt/caddy/`, `/opt/vaultwarden/`, `/opt/uptime-kuma/`, etc.
@@ -347,8 +357,8 @@ TS440 serves NFS exports via Tailscale. VMs have been migrated to local config s
 
 **Archive**: ZFS dataset `nas_zfs/archive` at `/srv/nas-zfs/archive` for ISOs and general archival. Shared via VirtioFS to media-vm (rw) and nextcloud-vm (ro, Nextcloud External Storage at `/srv/external/archive`).
 
-Ansible repo on ansible-lxc: `~/cc-ansible`
-Legacy copy on pi5-01: `/srv/configs/ansible/cc-ansible` (NFS from ts440, auto-synced from GitHub)
+Ansible repo on jn-t14s-lin: `~/cc-ansible`
+Retired Pi repo-copy workflow: removed from normal convergence.
 
 ## Samba Configuration
 
@@ -527,23 +537,143 @@ sudo journalctl -u stream-relay.service -f
 
 Set `STREAM_RELAY_OUTPUTS="twitch youtube"` to add platforms. OBS sender settings: Custom service, server `srt://100.66.6.113:9000?mode=caller&transtype=live&latency=200000`, stream key `obs`. The relay binds to media-vm's Tailscale address by default. If any configured RTMP platform output closes, FFmpeg aborts and systemd restarts the relay so failed platform legs do not remain silently dead.
 
-`stream-relay-vertical.service` is the separate Aitum Vertical path for a standalone YouTube vertical/Shorts live stream. It listens for Aitum on `rtmp://100.66.6.113:1936/live` with stream key `vertical`, then sends the 9:16 feed to `YOUTUBE_VERTICAL_STREAM_KEY` from `/etc/stream-relay/stream-relay.env`. This is currently parked in favor of YouTube's automatic dual-stream mode because the unified chat workflow only tracks one YouTube live chat cleanly. Leave the Aitum layout intact for TikTok/virtual-camera use later.
+`stream-relay-vertical.service` is the separate Aitum Vertical path for a standalone YouTube vertical/Shorts live stream. It listens for Aitum on `rtmp://100.66.6.113:1936/live` with stream key `vertical`, then sends the 9:16 feed to `YOUTUBE_VERTICAL_STREAM_KEY` from `/etc/stream-relay/stream-relay.env`. This is currently parked in favor of YouTube's automatic dual-stream mode because the unified chat workflow only tracks one YouTube live chat cleanly. Leave the Aitum layout intact for TikTok/virtual-camera use later, but keep Aitum's separate stream output disabled while this relay is parked.
 
-The Proxmox firewall uses the `streaming-pc` datacenter IP set. Current entries include jn-desktop's Linux Tailscale IP and lj-gaming-pc's Windows Tailscale IP. Add the gaming PC's `192.168.1.x` address only if switching the relay bind address to media-vm's LAN IP for a direct same-switch path.
+The Proxmox firewall uses the `streaming-pc` datacenter IP set. Current entries include lj-gaming-pc's Windows Tailscale IP. Add the gaming PC's `192.168.1.x` address only if switching the relay bind address to media-vm's LAN IP for a direct same-switch path.
 
 ## Recyclarr Configuration
 
 Recyclarr syncs TRaSH Guides custom formats to Sonarr/Radarr on media-vm.
+The detailed release-selection policy and score-band rules are documented in
+[docs/media-release-policy.md](docs/media-release-policy.md).
 
 - **Config**: `/opt/media-stack/recyclarr/recyclarr.yml`
 - **Profiles**: `1080p-Anime`, `1080p`
-- **Anime scoring**: Dual Audio +3000, LQ Groups -10000 (default), x265 +50
-- **Manual CFs**: 2160p (-1500), Portuguese Releases (-10000) - created directly in Sonarr
+- **Anime scoring**: Dual Audio +100000, quality-rank CFs
+  +10000/+20000/+30000/+40000 by enabled resolution tier, x265 +2000,
+  release-group tiers unchanged, hard rejects -1000000, soft avoids kept small
+  enough not to outrank quality
+- **Live check**: run
+  `ansible media-vm -m script -a scripts/sonarr_release_expectation_check.py`
+  and
+  `ansible media-vm -m script -a scripts/radarr_release_expectation_check.py`
+  to verify the active anime scores, native quality grouping, DA/x265
+  title-side custom-format matching, rename-format preservation of audio
+  languages and video codec, and profile assignment counts
+- **Queue check**: run
+  `ansible media-vm -m script -a scripts/sonarr_grab_forensics.py` first to
+  classify queued grabs as valid upgrades, payload score loss, pack
+  collateral/mapping issues, or client warnings. Then run
+  `ansible media-vm -m script -a scripts/sonarr_grab_diagnostics.py` before
+  clearing suspected bad grabs; cleanup requires explicit flags and does not
+  blocklist by default
+- **Import metadata stamping**: `playbooks/media-release-stamper.yml` deploys
+  qBittorrent/SABnzbd stampers so DA/x265/platform/release-group evidence seen
+  at grab time survives into payload filenames before Sonarr/Radarr import.
+  DA/x265 are per-file media-verified; platform tags and release-group suffixes
+  are copied only as parent-title release context. If Sonarr context is
+  available, bare `SxxEyy` TV payload names can be prefixed with the canonical
+  series title so multi-file packs stay parseable at import.
+- **Series check**: run
+  `ansible media-vm -m script -a "scripts/sonarr_series_audit.py Bleach"` to
+  inspect one show's monitored seasons, missing episode counts, queue, recent
+  history, and active commands
+- **Profilarr staging**: run
+  `ansible media-vm --become -m script -a "scripts/arr_stage_profilarr_test_profiles.py --dry-run"`
+  before changing candidate profiles; the script snapshots live Arr policy and
+  enforces the current CF limit
+- **Selective Profilarr CF sync**: run
+  `ansible media-vm --become -m script -a "scripts/profilarr_selective_cf_import.py --dry-run"`
+  before applying curated Dictionarry/Dumpstarr CF definition refreshes; this
+  imports selected CFs as `Dumpstarr ...` formats and scores only the
+  unassigned anime test profiles, not production profiles
+- **Manual/local CFs**: Local anime quality-rank CFs, Local Anime Raw Group -
+  DBD-Raws (-1000000), Portuguese (No English) (-1000000), 2160p guards
+  (-1000000) - created directly in Sonarr/Radarr
 
 ```bash
 # Manual sync
 ansible media-vm -m shell -a "docker exec recyclarr recyclarr sync" --become
 ```
+
+## Profilarr Upgrade Automation
+
+Profilarr is staged on media-vm as a managed Docker stack at `/opt/profilarr`
+and is published at `profilarr.jnalley.me`. It is being evaluated as the
+proactive library-upgrade layer: scheduled upgrade jobs with filters, selectors,
+cooldowns, dry runs, and live searches. Live scheduled upgrades are enabled
+only when Sonarr/Radarr queue health is clean enough to absorb new searches.
+
+Operational rules:
+
+- Keep Sonarr/Radarr failed-download auto-redownload disabled; Profilarr should
+  own paced proactive upgrade searches.
+- For Sonarr, prefer Profilarr upgrade filters that trigger `SeriesSearch`
+  one series at a time; do not use episode-level upgrade churn.
+- Keep Prowlarr's automatic-search indexer set clean before enabling live
+  upgrade jobs. Broken broad public indexers should be disabled or removed
+  instead of left to time out every search.
+- NZBFinder quota exhaustion is not a disable/remove condition by itself; leave
+  it enabled and let Prowlarr's temporary cooldown skip it until quota resets.
+- Run Profilarr dry-run jobs first and compare results against the DA-first,
+  quality-rank-second anime policy before enabling live jobs.
+- Keep Recyclarr until Profilarr has proven it can preserve local custom
+  formats, the CF limit, and rollback paths.
+- Evaluate linked Profilarr databases with
+  `ansible media-vm -m script -a scripts/profilarr_candidate_audit.py` before
+  syncing any candidate CF/profile into Sonarr or Radarr.
+- For curated CF sync, use
+  `ansible media-vm --become -m script -a "scripts/profilarr_selective_cf_import.py --dry-run"`
+  first, then rerun without `--dry-run` only if the CF count remains under the
+  limit and the upstream profile scores are not being imported.
+- Check scheduler health with
+  `ansible media-vm -m script -a scripts/profilarr_state_audit.py` after
+  Profilarr restarts or hourly upgrade runs.
+
+Current deployment notes:
+
+- Profilarr's first admin was created through the setup form endpoint. The
+  generated password is not in the repo; it is root-only on `media-vm` at
+  `/root/profilarr-admin.initial-password`.
+- Profilarr API status is available at `/api/v1/status`; `/api/v1/arr` is
+  read-only in the current build. Arr creation and upgrade-filter saves are
+  automated through authenticated form endpoints.
+- Sonarr and Radarr upgrade filters are enabled hourly. Sonarr uses one
+  cutoff-unmet monitored-series search per run; Radarr uses up to five
+  cutoff-unmet monitored-movie searches per run.
+- Test profiles currently exist but are not assigned to media:
+  `shows-anime-profilarr-test` id 9 and `movies-anime-profilarr-test` id 8.
+- Dictionarry and Dumpstarr are linked in Profilarr. Dumpstarr is candidate
+  material only for now; its stock `TV 1080p` profile penalizes `x265 (HD)` at
+  `-10000`, which conflicts with this library's preferred HD x265/HEVC policy.
+
+## Download Client Release Metadata Stamping
+
+SABnzbd and qBittorrent use managed post-download metadata stamping to preserve
+release-title evidence before Sonarr/Radarr import multi-file packs.
+
+- **Playbook**: `playbooks/media-release-stamper.yml`
+- **qBittorrent**: completion hook calls `/config/scripts/qbit-release-stamper.py`
+  with torrent hash/name/category, then renames payload files through
+  qBittorrent's Web API so seeding state stays intact.
+- **SABnzbd**: `shows` and `movies` categories run
+  `sab-release-stamper.py` from the configured `scripts` folder.
+- **DA rule**: language-combo tags such as `[JA+EN]`, `[KO+EN]`, or
+  `[JA+KO+EN]` are only stamped per file after the script sees audio-language
+  metadata for English plus the configured original language. qBittorrent can
+  optionally get the original language from Sonarr/Radarr by torrent
+  hash/download ID; SABnzbd can optionally get it by release/job title. If Arr
+  lookup fails, both fall back to `jpn`; title text alone is not enough.
+- **x265 rule**: `[x265]` is only stamped per file after the script sees HEVC
+  markers in that individual payload.
+- **Mixed packs**: no bulk labels. Each video file must qualify for each tag.
+- **Arr dependency**: Sonarr/Radarr lookup is optional and bounded. If either is
+  down, stamping continues with the configured fallback language.
+- **Bare episode names**: when Sonarr context is available, TV payload files
+  that start with only `SxxEyy` are prefixed with the canonical series title
+  before tagging so Sonarr can map them during import.
+- **Env ownership**: stamper env files are mode `0600` and owned by UID/GID
+  `1000`, matching the media containers' `PUID`/`PGID`.
 
 ## Torrent Fallback (Gluetun + qBittorrent)
 
@@ -555,7 +685,7 @@ Torrents via Nyaa as fallback when Usenet doesn't have a release.
 - **Disk I/O**: POSIX-compliant (required for VirtioFS compatibility)
 - **Incomplete downloads**: Both SABnzbd and qBittorrent use the Lacie SSD for temp storage, isolated in separate subdirs (`usenet/` and `torrents/`)
 - **VirtioFS note**: All containers use `/srv/media/plex:/data` to prevent stale file handles. Hardlinks work across all clients.
-- **Automatic port sync**: systemd path unit watches Gluetun's port file and updates qBittorrent via API when VPN reconnects
+- **Automatic port sync**: managed by `playbooks/gluetun-watchdog.yml`. The systemd path unit watches Gluetun's port file and updates qBittorrent via API when VPN reconnects. Repaired on media-vm on 2026-05-22 to accept qBittorrent 5.2.0's HTTP 204 login success response and to clean up stale lockfiles before recreating qBittorrent.
 - **Known bad server**: ProtonVPN node-nl-215 (103.69.224.3) has broken port forwarding — gluetun-watchdog should detect and force-recreate
 - **Tuning**: `max_active_downloads: 5` to reduce I/O contention with uploads; `max_active_uploads: 200`
 
@@ -565,6 +695,14 @@ ansible media-vm -m shell -a "docker exec gluetun wget -qO- https://ipinfo.io/js
 
 # Check port sync logs
 journalctl -t qbit-port-sync -n 10
+
+# qBittorrent 5.2.0 stale-lockfile symptom: WebUI port resets/refuses after restart.
+# Recovery used on 2026-05-22: move aside the stale lockfile and recreate qBittorrent.
+if [ -f /opt/media-stack/qbittorrent/qBittorrent/lockfile ]; then
+  sudo mv /opt/media-stack/qbittorrent/qBittorrent/lockfile /opt/media-stack/qbittorrent/qBittorrent/lockfile.stale
+fi
+cd /opt/media-stack && sudo docker compose up -d qbittorrent
+sudo systemctl enable --now qbit-port-sync.path
 ```
 
 ## Nextcloud AIO (nextcloud-vm)
@@ -697,9 +835,9 @@ Without `cache=never`, virtiofsd daemons cache aggressively (5GB+ each), causing
 
 ## Ansible Environment
 
-Ansible runs on ansible-lxc (CT 104 on pve-m70q, Ubuntu 25.10) with `ansible-core` 2.20 (via Ansible PPA — Ubuntu's 2.19 has a threading bug). The repo clone is at `~/cc-ansible` on ansible-lxc.
+Ansible runs flat on jn-t14s-lin (ThinkPad T14s, Kubuntu/Ubuntu 26.04) with Ubuntu's packaged `ansible-core` 2.20+. The repo clone is at `~/cc-ansible` on jn-t14s-lin.
 
-ts440 auto-pulls from GitHub every 5 minutes (`git-sync.timer`) to keep the Nextcloud External Storage copy current. nextcloud-vm runs `occ files:scan` every 10 minutes (`nextcloud-scan.timer`) so external storage changes appear automatically. Codex CLI's project memory is synced from ansible-lxc to ts440 every 10 minutes (`codex-memory-sync.timer`) for active Nextcloud access; Claude Code's memory archive continues syncing via `claude-memory-sync.timer` as a dated fallback.
+ts440 auto-pulls from GitHub every 5 minutes (`git-sync.timer`) to keep the Nextcloud External Storage copy current. nextcloud-vm runs `occ files:scan` every 10 minutes (`nextcloud-scan.timer`) so external storage changes appear automatically. Codex CLI's project memory is synced from jn-t14s-lin to ts440 every 10 minutes (`codex-memory-sync.timer`) for active Nextcloud access; Claude Code's memory archive continues syncing via `claude-memory-sync.timer` as a dated fallback.
 
 ## Tips
 

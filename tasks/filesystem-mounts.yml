@@ -51,6 +51,14 @@
     state: mounted
   loop: "{{ filesystem_mounts }}"
 
+- name: Remove retired filesystem mounts
+  ansible.posix.mount:
+    path: "{{ item.path }}"
+    state: absent
+  loop: "{{ filesystem_mounts_absent | default([]) }}"
+  loop_control:
+    label: "{{ item.path }}"
+
 - name: Check ext filesystem reserved block settings
   ansible.builtin.command:
     cmd: "tune2fs -l {{ item.src }}"
@@ -60,6 +68,7 @@
     label: "{{ item.path }}"
   changed_when: false
   failed_when: false
+  check_mode: false
   when: item.fstype is match('ext.*')
 
 - name: Set ext filesystem reserved block percentage
@@ -72,8 +81,8 @@
     - item.rc == 0
     - item.item.fstype is match('ext.*')
     - >-
-      (item.stdout | regex_search('Reserved block count:\\s+(\\d+)', '\\1') | first | int)
+      (item.stdout | regex_search('Reserved block count:\\s+(\\d+)', '\\1') | default(['0'], true) | first | int)
       !=
-      (((item.stdout | regex_search('Block count:\\s+(\\d+)', '\\1') | first | int)
+      (((item.stdout | regex_search('Block count:\\s+(\\d+)', '\\1') | default(['0'], true) | first | int)
       * (item.item.reserved_blocks_percentage | float) / 100)
       | round(0, 'floor') | int)

@@ -22,10 +22,22 @@
           ansible.builtin.file:
             path: "{{ item.path }}"
             state: directory
-            owner: "{{ item.owner | default('root') }}"
-            group: "{{ item.group | default('root') }}"
-            mode: "{{ item.mode | default('0755') }}"
+            owner: "{{ item.owner | default(omit) }}"
+            group: "{{ item.group | default(omit) }}"
+            mode: "{{ item.mode | default(omit) }}"
           loop: "{{ virtiofs_directory_mappings | default([]) }}"
+          loop_control:
+            label: "{{ item.path }}"
+          when: item.path is defined
+
+        - name: Ensure extra VirtioFS host directories exist
+          ansible.builtin.file:
+            path: "{{ item.path }}"
+            state: directory
+            owner: "{{ item.owner | default(omit) }}"
+            group: "{{ item.group | default(omit) }}"
+            mode: "{{ item.mode | default(omit) }}"
+          loop: "{{ virtiofs_extra_directories | default([]) }}"
           loop_control:
             label: "{{ item.path }}"
           when: item.path is defined
@@ -103,6 +115,10 @@
             fstype: virtiofs
             opts: "{{ item.options | default('defaults') }}"
             state: mounted
+          register: virtiofs_mount_result
+          failed_when:
+            - virtiofs_mount_result is failed
+            - not (item.allow_unavailable | default(false) | bool)
           loop: "{{ virtiofs_mounts }}"
           loop_control:
             label: "{{ item.mount_point }}"

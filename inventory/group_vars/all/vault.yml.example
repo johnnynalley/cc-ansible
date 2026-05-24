@@ -23,8 +23,9 @@ b2_application_key: "YOUR_B2_APPLICATION_KEY"
 restic_password: "YOUR_RESTIC_REPO_PASSWORD"
 
 # Optional Tailscale unattended auth for new hosts.
-# Preferred: create an OAuth client with auth_keys scope and allowed server tags,
+# Preferred: create an OAuth client with auth_keys and policy_file scopes plus allowed server tags,
 # then set tailscale_advertise_tags on hosts/groups that should auto-enroll.
+vault_tailscale_oauth_client_id: "YOUR_OAUTH_CLIENT_ID"
 vault_tailscale_oauth_client_secret: "tskey-client-YOUR_OAUTH_CLIENT_SECRET"
 
 # Fallback: direct pre-auth key. Useful for one-off bootstrap, but direct auth

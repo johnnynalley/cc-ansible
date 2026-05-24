@@ -58,6 +58,11 @@ sanoid_datasets:
     use_template: production
     recursive: "no"
 
+  # VM-local transient disks - no snapshots; contents are generated/retryable.
+  nas_zfs/vmdata:
+    use_template: ignore
+    recursive: "yes"
+
   # Backups dataset - less frequent (contains Time Machine with own versioning)
   nas_zfs/backups:
     use_template: media
@@ -176,6 +181,17 @@ zfs_dataset_properties:
     recordsize: 128K
     compression: zstd
     acltype: posixacl
+  nas_zfs/vmdata:
+    mountpoint: none
+    compression: lz4
+    atime: "off"
+
+zfs_datasets_present:
+  - name: nas_zfs/vmdata
+    properties:
+      mountpoint: none
+      compression: lz4
+      atime: "off"
 
 # =============================================================================
 # ZFS ACLs (POSIX ACLs for shared access)

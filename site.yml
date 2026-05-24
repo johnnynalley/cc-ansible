@@ -17,13 +17,17 @@
   ansible.builtin.import_playbook: playbooks/packages.yml
   tags: [packages]
 
-- name: Configure Plex appliance
-  ansible.builtin.import_playbook: playbooks/plex-appliance.yml
-  tags: [plex-appliance, plex]
+- name: Configure Codex CLI
+  ansible.builtin.import_playbook: playbooks/codex-cli.yml
+  tags: [codex, codex-cli, npm]
 
 - name: Configure SMART disk monitoring
   ansible.builtin.import_playbook: playbooks/smartmontools.yml
   tags: [smartmontools, smart, monitoring]
+
+- name: Configure Plex appliance
+  ansible.builtin.import_playbook: playbooks/plex-appliance.yml
+  tags: [plex-appliance, plex]
 
 - name: Tune e1000e NICs (disable EEE/TSO)
   ansible.builtin.import_playbook: playbooks/e1000e-tuning.yml
@@ -56,6 +60,26 @@
 - name: Configure power management
   ansible.builtin.import_playbook: playbooks/power-management.yml
   tags: [power]
+
+- name: Configure Windows gaming tuning
+  ansible.builtin.import_playbook: playbooks/windows-gaming-tuning.yml
+  tags: [windows, gaming, tuning]
+
+- name: Configure Windows Performance Mode automation
+  ansible.builtin.import_playbook: playbooks/windows-performance-mode.yml
+  tags: [windows, gaming, performance-mode]
+
+- name: Configure Windows SignalRGB lock and unlock automation
+  ansible.builtin.import_playbook: playbooks/windows-signalrgb.yml
+  tags: [windows, signalrgb]
+
+- name: Configure Windows gaming monitoring
+  ansible.builtin.import_playbook: playbooks/windows-gaming-monitoring.yml
+  tags: [windows, gaming, monitoring]
+
+- name: Configure Windows gaming benchmark capture
+  ansible.builtin.import_playbook: playbooks/windows-gaming-benchmark.yml
+  tags: [windows, gaming, benchmark]
 
 - name: Configure restic backups (B2 offsite)
   ansible.builtin.import_playbook: playbooks/restic.yml
@@ -93,9 +117,9 @@
   ansible.builtin.import_playbook: playbooks/virtiofs.yml
   tags: [virtiofs, mounts]
 
-- name: Configure Proxmox VM hardware settings
+- name: Configure Proxmox guest hardware settings
   ansible.builtin.import_playbook: playbooks/proxmox-vm-hardware.yml
-  tags: [proxmox, vm-hardware]
+  tags: [proxmox, vm-hardware, guest-hardware]
 
 - name: Deploy Docker Compose stacks
   ansible.builtin.import_playbook: playbooks/docker-stacks.yml
@@ -104,6 +128,10 @@
 - name: Configure Gluetun VPN watchdog
   ansible.builtin.import_playbook: playbooks/gluetun-watchdog.yml
   tags: [gluetun, watchdog, vpn]
+
+- name: Configure media release metadata stamping
+  ansible.builtin.import_playbook: playbooks/media-release-stamper.yml
+  tags: [media-release, release-stamper]
 
 - name: Configure stream relay
   ansible.builtin.import_playbook: playbooks/stream-relay.yml

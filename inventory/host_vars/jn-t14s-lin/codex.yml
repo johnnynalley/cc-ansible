@@ -1,7 +1,7 @@
 # =============================================================================
-# pi5-01 - Package Configuration (Ansible Controller)
+# jn-t14s-lin - Codex CLI Configuration
 # =============================================================================
 
-# Extra packages for this host
-packages_host_extra:
-  - rclone
+codex_cli_user: johnny
+codex_npm_prefix: /home/johnny/.local
+codex_npm_package: "@openai/codex"

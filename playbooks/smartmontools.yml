@@ -12,6 +12,7 @@
   hosts: linux_hosts
   become: true
   gather_facts: true
+  serial: 1
 
   tasks:
     - name: Skip hosts without smartd enabled
