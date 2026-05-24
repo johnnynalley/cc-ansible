@@ -1,0 +1,20 @@
+[Unit]
+Description=MediaMTX vertical RTMP broker for TikTok offload
+After=network-online.target
+Wants=network-online.target
+Documentation=https://mediamtx.org/
+
+[Service]
+Type=simple
+User=mediamtx
+Group=mediamtx
+ExecStart=/usr/local/sbin/mediamtx /etc/mediamtx/vertical-broker.yml
+Restart=always
+RestartSec=5
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

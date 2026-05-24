@@ -1,0 +1,10 @@
+[Unit]
+Description=Retry stream VOD delivery to Nextcloud storage
+
+[Timer]
+OnBootSec=2m
+OnUnitInactiveSec=5m
+Persistent=true
+
+[Install]
+WantedBy=timers.target

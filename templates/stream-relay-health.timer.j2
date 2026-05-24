@@ -1,0 +1,10 @@
+[Unit]
+Description=Run stream relay health checks
+
+[Timer]
+OnBootSec=2m
+OnCalendar={{ stream_relay_health_oncalendar | default('*-*-* *:0/5') }}
+Persistent=true
+
+[Install]
+WantedBy=timers.target

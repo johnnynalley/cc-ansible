@@ -21,6 +21,14 @@ stream_relay_vertical_ingest_port: 1936
 stream_relay_vertical_ingest_app: live
 stream_relay_vertical_ingest_stream: vertical
 
+# Broker the parked Aitum vertical feed for TikTok LIVE Studio on the MacBook:
+#   gaming PC Aitum -> RTMP media-vm:1936/live/vertical
+#   Mac OBS         -> RTMP media-vm:1936/live/vertical
+# Mac OBS then exposes the feed to TikTok LIVE Studio as a virtual camera.
+stream_relay_vertical_broker_enabled: true
+stream_relay_vertical_broker_version: "1.18.2"
+stream_relay_vertical_broker_arch: linux_amd64
+
 # Bind to media-vm's Tailscale address for the first test. Change this to the
 # LAN address only after adding the gaming PC's LAN IP to the Proxmox firewall.
 stream_relay_ingest_bind: "100.66.6.113"
@@ -45,6 +53,24 @@ stream_relay_video_bufsize: 12000k
 
 stream_relay_audio_bitrate: 160k
 stream_relay_audio_sample_rate: 48000
+
+stream_relay_recording_enabled: true
+stream_relay_recording_spool_mount: /srv/stream-vod-spool
+stream_relay_recording_spool_label: stream-vod-spool
+stream_relay_recording_spool_device_glob: "/dev/disk/by-id/*streamvodspool*"
+stream_relay_recording_final_dir: /srv/nextcloud-media/Stream VODs
+stream_relay_recording_transfer_tmp_dir: /srv/nextcloud-media/.stream-vod-tmp
+stream_relay_recording_nextcloud_scan_path: "/Johnny/files/Media/Stream VODs"
+stream_relay_recording_file_prefix: stream
+stream_relay_recording_uid: 33
+stream_relay_recording_gid: 33
+
+stream_relay_health_enabled: true
+stream_relay_health_oncalendar: "*-*-* *:0/5"
+stream_relay_health_state_dir: /var/lib/stream-relay-health
+stream_relay_health_alert_cooldown_seconds: 1800
+stream_relay_health_min_spool_free_gb: 20
+stream_relay_health_max_backlog_age_minutes: 30
 
 stream_relay_vertical_video_width: 1080
 stream_relay_vertical_video_height: 1920

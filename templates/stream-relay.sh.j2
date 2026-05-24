@@ -16,6 +16,8 @@ srt_url="srt://{{ stream_relay_ingest_bind }}:{{ stream_relay_ingest_port }}?mod
 keyframe_frames=$(( {{ stream_relay_video_fps }} * {{ stream_relay_keyframe_interval_seconds }} ))
 tee_outputs=()
 tee_output_count=0
+recording_incoming=""
+recording_ready=""
 
 add_output() {
   local name="$1"
@@ -51,6 +53,25 @@ for output in $STREAM_RELAY_OUTPUTS; do
   add_output "$output"
 done
 
+{% if stream_relay_recording_enabled | default(false) | bool %}
+recording_spool="{{ stream_relay_recording_spool_mount }}"
+if mountpoint -q "$recording_spool"; then
+  recording_base="{{ stream_relay_recording_file_prefix | default('stream') }}-$(date '+%Y-%m-%d_%H-%M-%S')"
+  mkdir -p \
+    "$recording_spool/incoming" \
+    "$recording_spool/ready" \
+    "$recording_spool/remuxing" \
+    "$recording_spool/remuxed" \
+    "$recording_spool/failed"
+  recording_incoming="$recording_spool/incoming/${recording_base}.mkv.recording"
+  recording_ready="$recording_spool/ready/${recording_base}.mkv"
+  tee_outputs+=("[f=matroska:onfail=ignore]${recording_incoming}")
+  echo "stream-relay: recording local VOD spool ${recording_incoming}" >&2
+else
+  echo "stream-relay: recording enabled but spool mount unavailable: ${recording_spool}" >&2
+fi
+{% endif %}
+
 if [[ "$tee_output_count" -eq 0 ]]; then
   echo "stream-relay: no RTMP outputs configured" >&2
   exit 1
@@ -59,7 +80,8 @@ fi
 unset TWITCH_STREAM_KEY YOUTUBE_STREAM_KEY YOUTUBE_BACKUP_STREAM_KEY
 tee_spec="$(IFS='|'; printf '%s' "${tee_outputs[*]}")"
 
-exec /usr/bin/ffmpeg \
+set +e
+/usr/bin/ffmpeg \
   -hide_banner \
   -nostdin \
   -loglevel warning \
@@ -88,3 +110,15 @@ exec /usr/bin/ffmpeg \
   -ac 2 \
   -f tee \
   "$tee_spec"
+ffmpeg_status=$?
+set -e
+
+if [[ -n "$recording_incoming" && -s "$recording_incoming" ]]; then
+  mv -f "$recording_incoming" "$recording_ready"
+  echo "stream-relay: queued VOD for remux ${recording_ready}" >&2
+  systemctl start stream-vod-mover.service >/dev/null 2>&1 || true
+elif [[ -n "$recording_incoming" && -e "$recording_incoming" ]]; then
+  rm -f "$recording_incoming"
+fi
+
+exit "$ffmpeg_status"

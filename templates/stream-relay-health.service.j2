@@ -1,0 +1,11 @@
+[Unit]
+Description=Check stream relay recording and delivery health
+After=network-online.target stream-relay.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/stream-relay-health
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=stream-relay-health

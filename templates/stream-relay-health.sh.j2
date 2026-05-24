@@ -1,0 +1,139 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ALERT_MODE=1
+if [[ "${1:-}" == "--no-alert" ]]; then
+  ALERT_MODE=0
+fi
+
+HOSTNAME="$(hostname)"
+STATE_DIR="{{ stream_relay_health_state_dir | default('/var/lib/stream-relay-health') }}"
+ALERT_COOLDOWN_SECONDS="{{ stream_relay_health_alert_cooldown_seconds | default(1800) }}"
+APPRISE_ENDPOINT="{{ apprise_endpoint }}"
+APPRISE_TOKEN="{{ apprise_token }}"
+APPRISE_TAGS="{{ stream_relay_health_alert_tags | default(apprise_alert_tags) }}"
+
+SPOOL_ROOT="{{ stream_relay_recording_spool_mount | default('/srv/stream-vod-spool') }}"
+DEST_DIR="{{ stream_relay_recording_final_dir | default('/srv/nextcloud-media/Stream VODs') }}"
+DEST_PARENT="$(dirname "$DEST_DIR")"
+MIN_SPOOL_FREE_GB="{{ stream_relay_health_min_spool_free_gb | default(20) }}"
+MAX_BACKLOG_AGE_MINUTES="{{ stream_relay_health_max_backlog_age_minutes | default(30) }}"
+
+mkdir -p "$STATE_DIR"
+
+problems=()
+problem_count=0
+
+add_problem() {
+  problems+=("$1")
+  problem_count=$((problem_count + 1))
+}
+
+count_files() {
+  local path="$1"
+  local pattern="$2"
+  find "$path" -maxdepth 1 -type f -name "$pattern" 2>/dev/null | wc -l
+}
+
+count_old_files() {
+  local path="$1"
+  local pattern="$2"
+  find "$path" -maxdepth 1 -type f -name "$pattern" -mmin "+${MAX_BACKLOG_AGE_MINUTES}" 2>/dev/null | wc -l
+}
+
+check_service_active() {
+  local service="$1"
+  if ! systemctl is-active --quiet "$service"; then
+    add_problem "$service is not active"
+  fi
+}
+
+check_service_not_failed() {
+  local service="$1"
+  if systemctl is-failed --quiet "$service"; then
+    add_problem "$service is failed"
+  fi
+}
+
+check_service_active stream-relay.service
+check_service_not_failed stream-relay.service
+
+{% if stream_relay_vertical_broker_enabled | default(false) | bool %}
+check_service_active stream-relay-vertical-broker.service
+check_service_not_failed stream-relay-vertical-broker.service
+{% endif %}
+
+{% if stream_relay_recording_enabled | default(false) | bool %}
+check_service_active stream-vod-mover.timer
+check_service_not_failed stream-vod-mover.service
+
+if ! mountpoint -q "$SPOOL_ROOT"; then
+  add_problem "stream VOD spool is not mounted at $SPOOL_ROOT"
+else
+  spool_free_kb="$(df -Pk "$SPOOL_ROOT" | awk 'NR == 2 { print $4 }')"
+  min_free_kb=$((MIN_SPOOL_FREE_GB * 1024 * 1024))
+  if [[ "$spool_free_kb" -lt "$min_free_kb" ]]; then
+    add_problem "stream VOD spool has less than ${MIN_SPOOL_FREE_GB}G free"
+  fi
+
+  failed_count="$(count_files "$SPOOL_ROOT/failed" '*')"
+  ready_old_count="$(count_old_files "$SPOOL_ROOT/ready" '*.mkv')"
+  remuxed_old_count="$(count_old_files "$SPOOL_ROOT/remuxed" '*.mp4')"
+
+  if [[ "$failed_count" -gt 0 ]]; then
+    add_problem "stream VOD failed queue has ${failed_count} file(s)"
+  fi
+  if [[ "$ready_old_count" -gt 0 ]]; then
+    add_problem "stream VOD ready queue has ${ready_old_count} file(s) older than ${MAX_BACKLOG_AGE_MINUTES} minutes"
+  fi
+  if [[ "$remuxed_old_count" -gt 0 ]]; then
+    add_problem "stream VOD remuxed queue has ${remuxed_old_count} file(s) older than ${MAX_BACKLOG_AGE_MINUTES} minutes"
+  fi
+fi
+
+if ! mountpoint -q "$DEST_PARENT"; then
+  add_problem "Nextcloud media mount is not mounted at $DEST_PARENT"
+elif [[ ! -d "$DEST_DIR" ]]; then
+  add_problem "Stream VOD destination is missing: $DEST_DIR"
+elif [[ "$(id -u)" -eq 0 ]]; then
+  write_test="${DEST_DIR}/.stream-relay-health-write-test.$$"
+  if ! touch "$write_test" 2>/dev/null; then
+    add_problem "Stream VOD destination is not writable: $DEST_DIR"
+  else
+    rm -f "$write_test"
+  fi
+fi
+{% endif %}
+
+if [[ "$problem_count" -eq 0 ]]; then
+  rm -f "$STATE_DIR/last-alert"
+  printf 'OK: stream relay health checks passed\n'
+  exit 0
+fi
+
+body="$(printf '%s\n' "${problems[@]}")"
+printf 'CRITICAL: stream relay health check failed\n%s\n' "$body" >&2
+
+if [[ "$ALERT_MODE" -eq 1 ]]; then
+  now="$(date +%s)"
+  last_alert=0
+  if [[ -f "$STATE_DIR/last-alert" ]]; then
+    last_alert="$(cat "$STATE_DIR/last-alert" 2>/dev/null || echo 0)"
+  fi
+
+  if (( now - last_alert >= ALERT_COOLDOWN_SECONDS )); then
+    if curl -sf -o /dev/null \
+      -X POST "${APPRISE_ENDPOINT}/notify/${APPRISE_TOKEN}" \
+      --form-string "title=[Stream Relay] ${HOSTNAME}: health check failed" \
+      --form-string "body=${body}" \
+      --form-string "tag=${APPRISE_TAGS}" \
+      --form-string "type=warning" \
+      --max-time 30 \
+      --retry 3 \
+      --retry-delay 5; then
+      printf '%s\n' "$now" > "$STATE_DIR/last-alert"
+    fi
+  fi
+fi
+
+exit 2

@@ -1,0 +1,13 @@
+[Unit]
+Description=Remux and deliver stream relay VODs to Nextcloud storage
+After=local-fs.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/stream-vod-mover
+Nice=10
+IOSchedulingClass=best-effort
+IOSchedulingPriority=7
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=stream-vod-mover

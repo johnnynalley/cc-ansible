@@ -1,0 +1,105 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SPOOL_ROOT="{{ stream_relay_recording_spool_mount }}"
+INCOMING_DIR="${SPOOL_ROOT}/incoming"
+READY_DIR="${SPOOL_ROOT}/ready"
+REMUXING_DIR="${SPOOL_ROOT}/remuxing"
+REMUXED_DIR="${SPOOL_ROOT}/remuxed"
+FAILED_DIR="${SPOOL_ROOT}/failed"
+DEST_DIR="{{ stream_relay_recording_final_dir }}"
+TRANSFER_TMP_DIR="{{ stream_relay_recording_transfer_tmp_dir | default(stream_relay_recording_final_dir ~ '/.stream-vod-tmp') }}"
+DEST_UID="{{ stream_relay_recording_uid | default(33) }}"
+DEST_GID="{{ stream_relay_recording_gid | default(33) }}"
+LOCK_FILE="/run/stream-vod-mover.lock"
+
+log() {
+  logger -t stream-vod-mover "$*"
+  printf '%s %s\n' "$(date --iso-8601=seconds)" "$*"
+}
+
+if ! mountpoint -q "$SPOOL_ROOT"; then
+  log "spool mount is unavailable: $SPOOL_ROOT"
+  exit 1
+fi
+
+mkdir -p "$INCOMING_DIR" "$READY_DIR" "$REMUXING_DIR" "$REMUXED_DIR" "$FAILED_DIR"
+
+exec 9>"$LOCK_FILE"
+if ! flock -n 9; then
+  log "another mover run is active"
+  exit 0
+fi
+
+shopt -s nullglob
+
+for mkv in "$READY_DIR"/*.mkv; do
+  base="$(basename "$mkv" .mkv)"
+  work_mkv="${REMUXING_DIR}/${base}.mkv"
+  tmp_mp4="${REMUXING_DIR}/${base}.mp4.tmp"
+  done_mp4="${REMUXED_DIR}/${base}.mp4"
+
+  if [[ -e "$done_mp4" ]]; then
+    log "remux target already exists; moving duplicate to failed: $mkv"
+    mv -f "$mkv" "${FAILED_DIR}/${base}.duplicate.mkv"
+    continue
+  fi
+
+  mv -f "$mkv" "$work_mkv"
+  rm -f "$tmp_mp4"
+  log "remuxing $work_mkv -> $done_mp4"
+  if /usr/bin/ffmpeg -hide_banner -nostdin -loglevel warning -y \
+      -i "$work_mkv" \
+      -map 0 \
+      -c copy \
+      -movflags +faststart \
+      -f mp4 \
+      "$tmp_mp4"; then
+    mv -f "$tmp_mp4" "$done_mp4"
+    rm -f "$work_mkv"
+  else
+    log "remux failed for $work_mkv"
+    rm -f "$tmp_mp4"
+    mv -f "$work_mkv" "${FAILED_DIR}/${base}.mkv"
+  fi
+done
+
+DEST_PARENT="$(dirname "$DEST_DIR")"
+if ! mountpoint -q "$DEST_PARENT"; then
+  log "destination mount is unavailable: $DEST_PARENT"
+  exit 1
+fi
+
+mkdir -p "$DEST_DIR" "$TRANSFER_TMP_DIR"
+chown "$DEST_UID:$DEST_GID" "$DEST_DIR" "$TRANSFER_TMP_DIR" || true
+chmod 0775 "$DEST_DIR" "$TRANSFER_TMP_DIR" || true
+
+transferred=0
+for mp4 in "$REMUXED_DIR"/*.mp4; do
+  file="$(basename "$mp4")"
+  tmp_dest="${TRANSFER_TMP_DIR}/.${file}.partial"
+  final_dest="${DEST_DIR}/${file}"
+
+  if [[ -e "$final_dest" ]]; then
+    log "destination already exists; keeping local copy: $final_dest"
+    continue
+  fi
+
+  log "rsyncing $mp4 -> $tmp_dest"
+  /usr/bin/rsync -a --partial --append-verify --fsync \
+    --chmod=F664 \
+    --chown="${DEST_UID}:${DEST_GID}" \
+    "$mp4" "$tmp_dest"
+  chown "$DEST_UID:$DEST_GID" "$tmp_dest" || true
+  chmod 0664 "$tmp_dest" || true
+  mv -f "$tmp_dest" "$final_dest"
+  chown "$DEST_UID:$DEST_GID" "$final_dest" || true
+  chmod 0664 "$final_dest" || true
+  rm -f "$mp4"
+  transferred=1
+  log "delivered $final_dest"
+done
+
+if [[ "$transferred" -eq 1 ]]; then
+  log "delivered stream VODs; Nextcloud scan timer will index {{ stream_relay_recording_nextcloud_scan_path }}"
+fi

@@ -1,0 +1,17 @@
+logLevel: info
+logDestinations: [stdout]
+
+api: false
+metrics: false
+pprof: false
+
+rtsp: false
+rtmp: true
+rtmpAddress: "{{ stream_relay_vertical_ingest_bind }}:{{ stream_relay_vertical_ingest_port }}"
+hls: false
+webrtc: false
+srt: false
+
+paths:
+  "{{ stream_relay_vertical_ingest_app }}/{{ stream_relay_vertical_ingest_stream }}":
+    source: publisher
