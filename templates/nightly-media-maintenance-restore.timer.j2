@@ -1,0 +1,11 @@
+[Unit]
+Description=Restore media services after nightly maintenance window
+
+[Timer]
+OnCalendar=*-*-* 07:00:00
+AccuracySec=1min
+Persistent=true
+Unit=nightly-media-maintenance-restore.service
+
+[Install]
+WantedBy=timers.target

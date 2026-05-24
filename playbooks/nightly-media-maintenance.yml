@@ -1,0 +1,148 @@
+# =============================================================================
+# Nightly Media Maintenance - Profilarr / MergerFS coordination
+# =============================================================================
+# Usage: ansible-playbook playbooks/nightly-media-maintenance.yml
+#        ansible-playbook playbooks/nightly-media-maintenance.yml --check --diff
+# =============================================================================
+
+- name: Configure nightly media maintenance coordinator
+  hosts: nas_server
+  become: true
+  gather_facts: false
+
+  handlers:
+    - name: Reload systemd
+      ansible.builtin.systemd:
+        daemon_reload: true
+
+  tasks:
+    - name: End play when nightly media maintenance is disabled
+      ansible.builtin.meta: end_host
+      when: not (nightly_media_maintenance_enabled | default(false))
+
+    - name: Ensure nightly media maintenance state directories exist
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: directory
+        owner: root
+        group: root
+        mode: "0755"
+      loop:
+        - "{{ nightly_media_maintenance_state_dir }}"
+        - /var/lib/mergerfs-balance
+
+    - name: Deploy nightly media maintenance coordinator
+      ansible.builtin.copy:
+        src: ../scripts/nightly-media-maintenance
+        dest: /usr/local/bin/nightly-media-maintenance
+        owner: root
+        group: root
+        mode: "0755"
+
+    - name: Generate nightly media maintenance SSH key
+      ansible.builtin.command:
+        cmd: >-
+          ssh-keygen -t ed25519 -N '' -f
+          {{ nightly_media_maintenance_ssh_key_path }}
+          -C nightly-media-maintenance
+        creates: "{{ nightly_media_maintenance_ssh_key_path }}"
+
+    - name: Check nightly media maintenance public key
+      ansible.builtin.stat:
+        path: "{{ nightly_media_maintenance_ssh_key_path }}.pub"
+      register: nightly_media_maintenance_public_key_stat
+
+    - name: Read nightly media maintenance public key
+      ansible.builtin.slurp:
+        src: "{{ nightly_media_maintenance_ssh_key_path }}.pub"
+      register: nightly_media_maintenance_public_key_file
+      when: nightly_media_maintenance_public_key_stat.stat.exists | default(false)
+
+    - name: Store nightly media maintenance public key
+      ansible.builtin.set_fact:
+        nightly_media_maintenance_public_key: >-
+          {{ nightly_media_maintenance_public_key_file.content | b64decode | trim }}
+      when: nightly_media_maintenance_public_key_file.content is defined
+
+    - name: Deploy nightly Profilarr SSH client
+      ansible.builtin.template:
+        src: ../templates/nightly-media-profilarr-client.sh.j2
+        dest: /usr/local/sbin/nightly-media-profilarr
+        owner: root
+        group: root
+        mode: "0755"
+
+    - name: Deploy nightly media maintenance services
+      ansible.builtin.template:
+        src: "../templates/{{ item }}.j2"
+        dest: "/etc/systemd/system/{{ item }}"
+        owner: root
+        group: root
+        mode: "0644"
+      loop:
+        - nightly-media-maintenance.service
+        - nightly-media-maintenance.timer
+        - nightly-media-maintenance-restore.service
+        - nightly-media-maintenance-restore.timer
+      notify: Reload systemd
+
+    - name: Disable legacy mergerfs balance timers
+      ansible.builtin.systemd:
+        name: "{{ item }}"
+        enabled: false
+        state: stopped
+      loop: "{{ nightly_media_maintenance_legacy_units | default([]) }}"
+      failed_when: false
+      when: nightly_media_maintenance_disable_legacy_units | default(true)
+
+    - name: Remove legacy mergerfs balance units
+      ansible.builtin.file:
+        path: "/etc/systemd/system/{{ item }}"
+        state: absent
+      loop: "{{ nightly_media_maintenance_legacy_units | default([]) }}"
+      when: nightly_media_maintenance_disable_legacy_units | default(true)
+      notify: Reload systemd
+
+    - name: Flush handlers after unit deployment
+      ansible.builtin.meta: flush_handlers
+
+    - name: Enable nightly media maintenance timers
+      ansible.builtin.systemd:
+        name: "{{ item }}"
+        enabled: true
+        state: started
+      loop:
+        - nightly-media-maintenance.timer
+        - nightly-media-maintenance-restore.timer
+      when: not ansible_check_mode
+
+- name: Configure Profilarr nightly upgrade endpoint
+  hosts: media-vm
+  become: true
+  gather_facts: false
+
+  tasks:
+    - name: End play when nightly media maintenance key is not available
+      ansible.builtin.meta: end_host
+      when: >-
+        hostvars[groups['nas_server'][0]].nightly_media_maintenance_public_key
+        is not defined
+
+    - name: End play when Profilarr nightly endpoint is disabled
+      ansible.builtin.meta: end_host
+      when: not (nightly_media_maintenance_profilarr_endpoint_enabled | default(false))
+
+    - name: Deploy Profilarr nightly upgrade helper
+      ansible.builtin.copy:
+        src: ../scripts/profilarr_nightly_upgrade.py
+        dest: /usr/local/sbin/profilarr-nightly-upgrade
+        owner: root
+        group: root
+        mode: "0755"
+
+    - name: Authorize nightly media maintenance key for Profilarr helper
+      ansible.posix.authorized_key:
+        user: "{{ nightly_media_maintenance_profilarr_ssh_user | default('johnny') }}"
+        key: "{{ hostvars[groups['nas_server'][0]].nightly_media_maintenance_public_key }}"
+        key_options: 'command="/usr/local/sbin/profilarr-nightly-upgrade",no-agent-forwarding,no-X11-forwarding,no-port-forwarding,no-pty'
+        state: present

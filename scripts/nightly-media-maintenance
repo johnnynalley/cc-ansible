@@ -1,0 +1,413 @@
+#!/usr/bin/env python3
+"""Coordinate overnight media maintenance.
+
+Runs on the NAS host. Balance jobs take the whole overnight window; if no
+balance job is pending, this queues controlled Profilarr upgrade work.
+"""
+
+from __future__ import annotations
+
+import argparse
+import datetime as dt
+import fcntl
+import json
+import os
+import re
+import shlex
+import subprocess
+import sys
+import time
+from pathlib import Path
+from typing import Any
+
+
+DEFAULT_STATE_DIR = Path("/var/lib/nightly-media-maintenance")
+DEFAULT_WINDOW = "00:00-07:00"
+DEFAULT_MOUNT_PATH = "/srv/media"
+DEFAULT_MIN_FREE = "100G"
+DEFAULT_MEDIA_STACK_COMMAND = "/usr/local/sbin/mergerfs-balance-media-stack"
+DEFAULT_PROFILARR_COMMAND = "/usr/local/sbin/nightly-media-profilarr enqueue"
+LOCK_PATH = Path("/run/nightly-media-maintenance.lock")
+SAFE_NAME = re.compile(r"^[A-Za-z0-9_.-]+$")
+
+
+def now_iso() -> str:
+    return dt.datetime.now(dt.UTC).isoformat(timespec="seconds").replace("+00:00", "Z")
+
+
+def parse_clock(value: str) -> dt.time:
+    try:
+        return dt.datetime.strptime(value, "%H:%M").time()
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(f"{value!r} must be HH:MM") from exc
+
+
+def schedule_bounds(window: str, now: dt.datetime | None = None) -> tuple[dt.datetime, dt.datetime]:
+    now = now or dt.datetime.now()
+    try:
+        start_text, end_text = window.split("-", 1)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(f"{window!r} must look like HH:MM-HH:MM") from exc
+
+    start_time = parse_clock(start_text.strip())
+    end_time = parse_clock(end_text.strip())
+    start = dt.datetime.combine(now.date(), start_time)
+    end = dt.datetime.combine(now.date(), end_time)
+    if end_time <= start_time:
+        if now.time() < end_time:
+            start -= dt.timedelta(days=1)
+        else:
+            end += dt.timedelta(days=1)
+    return start, end
+
+
+def in_window(window: str) -> tuple[bool, dt.datetime, dt.datetime]:
+    now = dt.datetime.now()
+    start, end = schedule_bounds(window, now)
+    return start <= now < end, start, end
+
+
+def atomic_write_json(path: Path, payload: dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    with tmp.open("w", encoding="utf-8") as fh:
+        json.dump(payload, fh, indent=2, sort_keys=True)
+        fh.write("\n")
+    os.replace(tmp, path)
+
+
+def read_json(path: Path, default: dict[str, Any]) -> dict[str, Any]:
+    if not path.exists():
+        return default
+    with path.open("r", encoding="utf-8") as fh:
+        return json.load(fh)
+
+
+def queue_path(state_dir: Path) -> Path:
+    return state_dir / "balance-queue.json"
+
+
+def state_path(state_dir: Path) -> Path:
+    return state_dir / "state.json"
+
+
+def load_queue(state_dir: Path) -> dict[str, Any]:
+    data = read_json(queue_path(state_dir), {"version": 1, "jobs": []})
+    data.setdefault("version", 1)
+    data.setdefault("jobs", [])
+    return data
+
+
+def save_queue(state_dir: Path, queue: dict[str, Any]) -> None:
+    atomic_write_json(queue_path(state_dir), queue)
+
+
+def load_state(state_dir: Path) -> dict[str, Any]:
+    return read_json(state_path(state_dir), {"version": 1})
+
+
+def save_state(state_dir: Path, state: dict[str, Any]) -> None:
+    state["updated_at"] = now_iso()
+    atomic_write_json(state_path(state_dir), state)
+
+
+def run_shell(command: str, timeout: int | None = None) -> int:
+    print(f"+ {command}")
+    completed = subprocess.run(command, shell=True, text=True, timeout=timeout)
+    return completed.returncode
+
+
+class LockHeld(RuntimeError):
+    pass
+
+
+class MaintenanceLock:
+    def __enter__(self) -> "MaintenanceLock":
+        LOCK_PATH.parent.mkdir(parents=True, exist_ok=True)
+        self._fh = LOCK_PATH.open("w", encoding="utf-8")
+        try:
+            fcntl.flock(self._fh.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError as exc:
+            raise LockHeld("nightly media maintenance is already running") from exc
+        self._fh.write(str(os.getpid()))
+        self._fh.truncate()
+        self._fh.flush()
+        return self
+
+    def __exit__(self, *_exc: object) -> None:
+        fcntl.flock(self._fh.fileno(), fcntl.LOCK_UN)
+        self._fh.close()
+
+
+def validate_name(name: str) -> None:
+    if not SAFE_NAME.match(name):
+        raise SystemExit(f"unsafe job name {name!r}; use letters, numbers, dot, dash, underscore")
+
+
+def pending_jobs(queue: dict[str, Any]) -> list[dict[str, Any]]:
+    return [
+        job for job in queue.get("jobs", [])
+        if job.get("status") not in {"complete", "disabled", "removed"}
+    ]
+
+
+def default_job_name(evacuate: str) -> str:
+    return f"{evacuate.replace('/', '-').strip('-')}-evac"
+
+
+def cmd_balance_add(args: argparse.Namespace) -> int:
+    state_dir = Path(args.state_dir)
+    state_dir.mkdir(parents=True, exist_ok=True)
+    name = args.name or default_job_name(args.evacuate)
+    validate_name(name)
+    queue = load_queue(state_dir)
+    existing = next((job for job in queue["jobs"] if job.get("name") == name), None)
+    if existing and not args.replace:
+        print(f"Balance job {name!r} already exists with status={existing.get('status')}.")
+        return 0
+
+    job = {
+        "name": name,
+        "status": "pending",
+        "mount_path": args.mount_path,
+        "evacuate": args.evacuate,
+        "destinations": args.destination,
+        "min_free": args.min_free,
+        "schedule_window": args.window,
+        "pause_media_stack": not args.no_pause_media_stack,
+        "created_at": existing.get("created_at") if existing else now_iso(),
+        "updated_at": now_iso(),
+        "last_result": None,
+    }
+    if existing:
+        existing.update(job)
+    else:
+        queue["jobs"].append(job)
+    save_queue(state_dir, queue)
+    print(f"Queued balance job {name}: evacuate {args.evacuate} -> {', '.join(args.destination)}")
+    return 0
+
+
+def cmd_balance_list(args: argparse.Namespace) -> int:
+    queue = load_queue(Path(args.state_dir))
+    if args.json:
+        json.dump(queue, sys.stdout, indent=2, sort_keys=True)
+        print()
+        return 0
+    if not queue.get("jobs"):
+        print("No balance jobs.")
+        return 0
+    for job in queue["jobs"]:
+        destinations = ", ".join(job.get("destinations", []))
+        print(
+            f"{job.get('name')}: status={job.get('status')} "
+            f"evacuate={job.get('evacuate')} destinations=[{destinations}] "
+            f"last={job.get('last_result')}"
+        )
+    return 0
+
+
+def cmd_balance_remove(args: argparse.Namespace) -> int:
+    queue = load_queue(Path(args.state_dir))
+    before = len(queue["jobs"])
+    queue["jobs"] = [job for job in queue["jobs"] if job.get("name") != args.name]
+    if len(queue["jobs"]) == before:
+        print(f"No balance job named {args.name!r}.")
+    else:
+        save_queue(Path(args.state_dir), queue)
+        print(f"Removed balance job {args.name!r}.")
+    return 0
+
+
+def current_window_state(state: dict[str, Any], window_id: str) -> dict[str, Any]:
+    if state.get("window_id") != window_id:
+        return {
+            "version": 1,
+            "window_id": window_id,
+            "mode": None,
+            "profilarr_slots": [],
+            "created_at": now_iso(),
+        }
+    state.setdefault("profilarr_slots", [])
+    return state
+
+
+def balance_command(job: dict[str, Any], args: argparse.Namespace, balance_state: Path) -> str:
+    command: list[str] = [
+        "/usr/local/bin/mergerfs-balance",
+        job["mount_path"],
+        "--evacuate",
+        job["evacuate"],
+        "--min-free",
+        job["min_free"],
+        "--schedule-window",
+        job["schedule_window"],
+        "--state-file",
+        str(balance_state),
+    ]
+    for destination in job.get("destinations", []):
+        command.extend(["--destination", destination])
+    if job.get("pause_media_stack", True):
+        command.extend([
+            "--pause-command",
+            f"{args.media_stack_command} stop",
+            "--resume-command",
+            f"{args.media_stack_command} start",
+        ])
+    return " ".join(shlex.quote(part) for part in command)
+
+
+def run_balance(job: dict[str, Any], args: argparse.Namespace) -> dict[str, Any]:
+    state_dir = Path(args.state_dir)
+    balance_state = state_dir / f"balance-{job['name']}.json"
+    rc = run_shell(balance_command(job, args, balance_state))
+    result = read_json(balance_state, {})
+    result["returncode"] = rc
+    result["finished_at"] = now_iso()
+    return result
+
+
+def trigger_profilarr(args: argparse.Namespace, window_id: str, slot: str) -> int:
+    command = f"{args.profilarr_command} --window-id {shlex.quote(window_id)} --slot {shlex.quote(slot)}"
+    return run_shell(command)
+
+
+def cmd_run_window(args: argparse.Namespace) -> int:
+    state_dir = Path(args.state_dir)
+    state_dir.mkdir(parents=True, exist_ok=True)
+    inside, start, end = in_window(args.window)
+    window_id = start.strftime("%Y%m%d")
+    if not inside:
+        state = current_window_state(load_state(state_dir), window_id)
+        state.update({
+            "status": "outside-window",
+            "window": args.window,
+            "window_start": start.isoformat(timespec="minutes"),
+            "window_end": end.isoformat(timespec="minutes"),
+        })
+        save_state(state_dir, state)
+        print(f"Outside maintenance window {args.window}; nothing to do.")
+        return 0
+
+    try:
+        with MaintenanceLock():
+            queue = load_queue(state_dir)
+            state = current_window_state(load_state(state_dir), window_id)
+            state.update({
+                "status": "running",
+                "window": args.window,
+                "window_start": start.isoformat(timespec="minutes"),
+                "window_end": end.isoformat(timespec="minutes"),
+            })
+
+            jobs = pending_jobs(queue)
+            if jobs:
+                job = jobs[0]
+                state["mode"] = "balance"
+                state["balance_job"] = job["name"]
+                save_state(state_dir, state)
+                job["status"] = "running"
+                job["updated_at"] = now_iso()
+                save_queue(state_dir, queue)
+
+                result = run_balance(job, args)
+                job["last_result"] = result.get("status") or f"returncode-{result.get('returncode')}"
+                job["updated_at"] = now_iso()
+                if result.get("status") == "complete":
+                    job["status"] = "complete"
+                    job["completed_at"] = now_iso()
+                else:
+                    job["status"] = "pending"
+                save_queue(state_dir, queue)
+
+                state["status"] = "balance-complete" if job["status"] == "complete" else "balance-pending"
+                state["last_balance_result"] = result
+                save_state(state_dir, state)
+                return 0
+
+            if state.get("mode") == "balance":
+                state["status"] = "balance-night-reserved"
+                save_state(state_dir, state)
+                print("Balance already owned this maintenance window; skipping Profilarr.")
+                return 0
+
+            slot = dt.datetime.now().strftime("%Y%m%dT%H")
+            if slot in state.get("profilarr_slots", []):
+                print(f"Profilarr slot {slot} already handled.")
+                return 0
+
+            rc = trigger_profilarr(args, window_id, slot)
+            if rc == 0:
+                state["mode"] = "profilarr"
+                state["status"] = "profilarr-queued"
+                state.setdefault("profilarr_slots", []).append(slot)
+            else:
+                state["status"] = "profilarr-error"
+                state["last_profilarr_returncode"] = rc
+            save_state(state_dir, state)
+            return rc
+    except LockHeld as exc:
+        print(exc)
+        return 0
+
+
+def cmd_restore(args: argparse.Namespace) -> int:
+    state_dir = Path(args.state_dir)
+    state = load_state(state_dir)
+    rc = run_shell(f"{args.media_stack_command} start")
+    state["restore"] = {
+        "returncode": rc,
+        "ran_at": now_iso(),
+    }
+    save_state(state_dir, state)
+    return rc
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--state-dir", default=str(DEFAULT_STATE_DIR))
+
+    sub = parser.add_subparsers(dest="command", required=True)
+
+    balance = sub.add_parser("balance")
+    balance_sub = balance.add_subparsers(dest="balance_command", required=True)
+    add = balance_sub.add_parser("add")
+    add.add_argument("--name")
+    add.add_argument("--mount-path", default=DEFAULT_MOUNT_PATH)
+    add.add_argument("--evacuate", required=True)
+    add.add_argument("--destination", action="append", required=True)
+    add.add_argument("--min-free", default=DEFAULT_MIN_FREE)
+    add.add_argument("--window", default=DEFAULT_WINDOW)
+    add.add_argument("--no-pause-media-stack", action="store_true")
+    add.add_argument("--replace", action="store_true")
+    add.set_defaults(func=cmd_balance_add)
+
+    list_cmd = balance_sub.add_parser("list")
+    list_cmd.add_argument("--json", action="store_true")
+    list_cmd.set_defaults(func=cmd_balance_list)
+
+    remove = balance_sub.add_parser("remove")
+    remove.add_argument("name")
+    remove.set_defaults(func=cmd_balance_remove)
+
+    run_window = sub.add_parser("run-window")
+    run_window.add_argument("--window", default=DEFAULT_WINDOW)
+    run_window.add_argument("--profilarr-command", default=DEFAULT_PROFILARR_COMMAND)
+    run_window.add_argument("--media-stack-command", default=DEFAULT_MEDIA_STACK_COMMAND)
+    run_window.set_defaults(func=cmd_run_window)
+
+    restore = sub.add_parser("restore")
+    restore.add_argument("--media-stack-command", default=DEFAULT_MEDIA_STACK_COMMAND)
+    restore.set_defaults(func=cmd_restore)
+
+    return parser
+
+
+def main() -> int:
+    parser = build_parser()
+    args = parser.parse_args()
+    return args.func(args)
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

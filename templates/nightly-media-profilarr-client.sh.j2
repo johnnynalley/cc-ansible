@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+if [[ "$#" -lt 1 ]]; then
+  echo "usage: $0 {enqueue|status} [args...]" >&2
+  exit 2
+fi
+
+exec ssh \
+  -i {{ nightly_media_maintenance_ssh_key_path | quote }} \
+  -o BatchMode=yes \
+  -o ConnectTimeout={{ nightly_media_maintenance_ssh_connect_timeout | default(15) }} \
+  -o StrictHostKeyChecking=accept-new \
+  {{ ((nightly_media_maintenance_profilarr_ssh_user | default('johnny')) ~ '@' ~ nightly_media_maintenance_profilarr_ssh_host) | quote }} \
+  "$@"

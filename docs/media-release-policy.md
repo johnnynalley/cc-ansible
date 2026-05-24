@@ -795,10 +795,11 @@ Decision rule:
    changes the policy.
 7. Keep Recyclarr until Profilarr has been tested against real queue/history
    examples and rollback is clear.
-8. Profilarr live upgrade jobs are intentionally enabled as of 2026-05-23.
-   Do not "park" them just because the queue is busy. If they expose bad grabs,
-   fix the Sonarr/Radarr scoring, import metadata, or parsing cause rather than
-   relying on cleanup-only handling.
+8. Profilarr native scheduled Arr upgrades should stay disabled. Overnight
+   proactive upgrades are triggered by `playbooks/nightly-media-maintenance.yml`
+   only when no mergerfs balance job is pending for that night. If future live
+   runs expose bad grabs, fix the Sonarr/Radarr scoring, import metadata, or
+   parsing cause rather than relying on cleanup-only handling.
 
 Current deployed state on 2026-05-22:
 
@@ -807,9 +808,11 @@ Current deployed state on 2026-05-22:
   `/root/profilarr-admin.initial-password`.
 - `Sonarr` and `Radarr` are registered in Profilarr using the media-vm
   Tailscale service URLs and the public external URLs.
-- Upgrade scheduler configs are enabled. Sonarr has one cutoff-unmet
-  monitored-series filter (`count: 1`, hourly cron), and Radarr has one
-  cutoff-unmet monitored-movies filter (`count: 5`, hourly cron).
+- Upgrade scheduler configs are currently disabled and should stay disabled.
+  Sonarr has one cutoff-unmet monitored-series filter (`count: 1`), and Radarr
+  has one cutoff-unmet monitored-movies filter (`count: 5`). The nightly media
+  maintenance coordinator queues controlled hourly `arr.upgrade` jobs from
+  midnight through 6 AM only when no balance job is pending for that night.
 - On 2026-05-22, live scheduled upgrades were briefly enabled, queued one
   Sonarr run and one Radarr run for 23:00 UTC, and were disabled again after a
   Sonarr manual dry run selected `Bleach` but timed out while fetching release
@@ -826,13 +829,10 @@ Current deployed state on 2026-05-22:
   all non-upgrades, manual-import leftovers, or failed items. Removal used the
   Radarr queue API with `removeFromClient=true`, `blocklist=false`, and
   `skipRedownload=true`; the verified Radarr queue count afterward was zero.
-- After both queues were clean, Profilarr scheduled upgrades were re-enabled on
-  2026-05-22. Verification on 2026-05-23 still showed Sonarr and Radarr
-  `enabled=1` with hourly cron. Sonarr was scheduled next for
-  `2026-05-24T00:00:00.000Z`; Radarr was active in the 23:00 UTC run.
-- During the same investigation, queued Profilarr upgrade jobs were briefly
-  cancelled while diagnosing the queue, then upgrade configs were restored to
-  `enabled=1` after confirming the current passes can be rerun safely.
+- After both queues were clean, Profilarr scheduled upgrades were temporarily
+  re-enabled on 2026-05-22 for testing. They were later parked again and then
+  replaced by the nightly media maintenance coordinator so storage balance jobs
+  and Profilarr upgrades cannot race for the same overnight window.
 - Profilarr's local container build hard-codes Arr command waiting to 60
   minutes in `/app/server.js` (`MAX_TIMEOUT_MS = 3600 * 1000`). On
   2026-05-23, Sonarr upgrade runs failed after Profilarr waited 60 minutes for
@@ -856,16 +856,27 @@ Current deployed state on 2026-05-22:
 - On 2026-05-24, the Sonarr Profilarr filter was changed from selector
   `oldest` to `random` with backup
   `/opt/profilarr/config/data/backups/profilarr-pre-sonarr-upgrade-strategy-20260524T192516Z.db`.
-  The filter remains enabled, hourly, and `count=1`; this is not a patch and
-  does not reduce Profilarr's search count. It prevents a single old series
-  whose `SeriesSearch` runs longer than an hour from being the deterministic
-  next target every run.
+  The filter remains enabled inside the disabled upgrade config with `count=1`;
+  this is not a patch and does not reduce Profilarr's per-run search count. It
+  prevents a single old series whose `SeriesSearch` runs longer than an hour
+  from being the deterministic next target every run.
 - Live status at 2026-05-24 19:25 UTC: Profilarr had one Sonarr upgrade job
   running and one Radarr upgrade job queued. Recent Sonarr upgrade failures were
   `Command 561401 timed out after 60 minutes` and then `Command 561401
   disappeared`; the active Sonarr command was `SeriesSearch` for KonoSuba
   series id `10`, processing `1322` release candidates. Radarr upgrade runs
   were succeeding.
+- On 2026-05-24, after a media-vm VirtioFS hang/restart and resource-contention
+  review, Profilarr scheduled Arr upgrades were disabled again and queued
+  scheduled `arr.upgrade` jobs were cancelled. Database auto-pull/sync remains
+  enabled so Profilarr can still refresh upstream PCD data without launching
+  proactive Sonarr/Radarr searches. Rollback backup:
+  `/opt/profilarr/config/data/backups/profilarr-pre-disable-upgrade-jobs-20260524T225353Z.db`.
+- Later on 2026-05-24, `playbooks/nightly-media-maintenance.yml` became the
+  owner for overnight proactive upgrade launches. It keeps native Profilarr Arr
+  scheduling disabled, queues explicit `arr.upgrade` jobs during midnight-7 AM
+  windows when no balance job is pending, and reserves the whole night for
+  storage if any queued mergerfs balance job exists.
 - First `scripts/sonarr_transaction_audit.py --hours 2 --limit 8` run after
   monitor deployment skipped `10000` bootstrap history records and showed `11`
   real post-monitor events: `grabbed=10`, `downloadFolderImported=1`. The live

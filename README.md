@@ -485,8 +485,8 @@ Balances files across mergerfs branches by moving from fullest to emptiest. ZFS-
 - **Config variable**: `mergerfs_balance_exclude_paths` in `group_vars/nas_server/mergerfs.yml`
 - **CLI excludes**: `-E` flags merge with config excludes (additive)
 - **Evacuation mode**: `--evacuate <branch>` drains one branch to the least-used eligible branches before planned removal or reformat. Dry-run first.
-- **Scheduled mode**: `mergerfs_balance_schedules` in `group_vars/nas_server/mergerfs.yml` creates systemd timers. The script enforces its own `--schedule-window`, writes JSON state under `/var/lib/mergerfs-balance/`, and uses rsync partial files so interrupted moves can resume during the next window.
-- **Media stack pause/resume**: scheduled jobs can run `/usr/local/sbin/mergerfs-balance-media-stack stop|start` through a forced SSH key to `media-vm`. Current `nas02-evac` pauses Sonarr, Radarr, Prowlarr, Bazarr, Recyclarr, Byparr, qBittorrent, SABnzbd, and Profilarr while Plex stays up.
+- **Nightly coordinator**: `playbooks/nightly-media-maintenance.yml` owns the midnight-7 AM window. Balance jobs are queued with `nightly-media-maintenance balance add ...`; if a balance job is pending, Profilarr upgrades are skipped for that night.
+- **Media stack pause/resume**: balance jobs run `/usr/local/sbin/mergerfs-balance-media-stack stop|start` through a forced SSH key to `media-vm`. Current balance jobs pause Sonarr, Radarr, Prowlarr, Bazarr, Recyclarr, Byparr, qBittorrent, SABnzbd, and Profilarr while Plex stays up.
 - **VirtioFS caveat**: After balancing, media-vm needs a full stop/start (`qm stop`/`qm start`) to clear virtiofsd's stale directory cache
 
 ```bash
@@ -505,8 +505,10 @@ mergerfs-balance /srv/media --evacuate nas-02 --dry-run
 # Drain nas-02, leaving at least 100G free on destination branches
 mergerfs-balance /srv/media --evacuate nas-02 --min-free 100G
 
-# Managed overnight evacuation: nas-02 -> media-01..04, midnight-7 AM
-ansible-playbook playbooks/mergerfs.yml
+# Queue a managed overnight evacuation: nas-02 -> media-01..04, midnight-7 AM
+nightly-media-maintenance balance add --name nas02-evac --evacuate nas-02 \
+  --destination media-01 --destination media-02 --destination media-03 \
+  --destination media-04 --min-free 100G
 ```
 
 ## Immich (Photo/Video Management)
@@ -612,9 +614,11 @@ ansible media-vm -m shell -a "docker exec recyclarr recyclarr sync" --become
 
 Profilarr is staged on media-vm as a managed Docker stack at `/opt/profilarr`
 and is published at `profilarr.jnalley.me`. It is being evaluated as the
-proactive library-upgrade layer: scheduled upgrade jobs with filters, selectors,
-cooldowns, dry runs, and live searches. Live scheduled upgrades are enabled
-only when Sonarr/Radarr queue health is clean enough to absorb new searches.
+proactive library-upgrade layer: upgrade jobs with filters, selectors,
+cooldowns, dry runs, and live searches. Native Profilarr scheduled Arr upgrades
+stay disabled; the nightly media maintenance coordinator queues controlled
+upgrade cycles hourly from midnight through 6 AM only when no balance job is
+pending for that night.
 
 Operational rules:
 
@@ -640,7 +644,7 @@ Operational rules:
   limit and the upstream profile scores are not being imported.
 - Check scheduler health with
   `ansible media-vm -m script -a scripts/profilarr_state_audit.py` after
-  Profilarr restarts or hourly upgrade runs.
+  Profilarr restarts or coordinator-triggered upgrade runs.
 
 Current deployment notes:
 
@@ -650,9 +654,11 @@ Current deployment notes:
 - Profilarr API status is available at `/api/v1/status`; `/api/v1/arr` is
   read-only in the current build. Arr creation and upgrade-filter saves are
   automated through authenticated form endpoints.
-- Sonarr and Radarr upgrade filters are enabled hourly. Sonarr uses one
-  cutoff-unmet monitored-series search per run; Radarr uses up to five
-  cutoff-unmet monitored-movie searches per run.
+- Sonarr and Radarr upgrade filters remain configured but native scheduling is
+  disabled. The coordinator queues one controlled cycle per hour when storage
+  maintenance is not reserving the night. Sonarr uses one cutoff-unmet
+  monitored-series search per run; Radarr uses up to five cutoff-unmet
+  monitored-movie searches per run.
 - Test profiles currently exist but are not assigned to media:
   `shows-anime-profilarr-test` id 9 and `movies-anime-profilarr-test` id 8.
 - Dictionarry and Dumpstarr are linked in Profilarr. Dumpstarr is candidate

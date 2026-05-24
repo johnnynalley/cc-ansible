@@ -1,0 +1,20 @@
+# =============================================================================
+# NAS Server - Nightly Media Maintenance Coordination
+# =============================================================================
+
+nightly_media_maintenance_enabled: true
+nightly_media_maintenance_window: "00:00-07:00"
+nightly_media_maintenance_state_dir: /var/lib/nightly-media-maintenance
+
+nightly_media_maintenance_ssh_key_path: /root/.ssh/nightly_media_maintenance_ed25519
+nightly_media_maintenance_profilarr_ssh_host: "192.168.1.136"
+nightly_media_maintenance_profilarr_ssh_user: johnny
+
+# The coordinator replaces the earlier direct mergerfs-balance timers so the
+# overnight window has one owner.
+nightly_media_maintenance_disable_legacy_units: true
+nightly_media_maintenance_legacy_units:
+  - mergerfs-balance-nas02-evac.service
+  - mergerfs-balance-nas02-evac.timer
+  - mergerfs-balance-nas02-evac-media-stack-restore.service
+  - mergerfs-balance-nas02-evac-media-stack-restore.timer

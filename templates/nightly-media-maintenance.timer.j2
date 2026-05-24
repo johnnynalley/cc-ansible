@@ -1,0 +1,11 @@
+[Unit]
+Description=Run nightly media maintenance window ticks
+
+[Timer]
+OnCalendar=*-*-* 00..06:00:00
+AccuracySec=1min
+Persistent=true
+Unit=nightly-media-maintenance.service
+
+[Install]
+WantedBy=timers.target
