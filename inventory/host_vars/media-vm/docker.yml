@@ -14,6 +14,9 @@ docker_stacks:
     auto_update_services:
       - gluetun
       - lazylibrarian
+  - name: profilarr
+    path: /opt/profilarr
+    build: false
   - name: portainer-agent
     path: /opt/portainer-agent
     build: false

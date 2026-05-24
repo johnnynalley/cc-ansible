@@ -1,0 +1,32 @@
+# Preserve grab-time release metadata in download-client payload file names so
+# Sonarr/Radarr custom formats can still match DA/x265 at import time.
+media_release_stamper_enabled: true
+media_release_stamper_container_uid: "1000"
+media_release_stamper_container_gid: "1000"
+
+media_release_stamper_qbit_enabled: true
+media_release_stamper_qbit_script_dir: /opt/media-stack/qbittorrent/scripts
+media_release_stamper_qbit_env_path: /opt/media-stack/qbittorrent/scripts/qbit-release-stamper.env
+media_release_stamper_qbit_host_api: "{{ qbit_port_sync_api | default('http://127.0.0.1:8085/api/v2') }}"
+media_release_stamper_qbit_container_api: http://127.0.0.1:8085/api/v2
+media_release_stamper_qbit_user: "{{ qbit_port_sync_user }}"
+media_release_stamper_qbit_password: "{{ qbit_port_sync_password }}"
+media_release_stamper_da_original_languages:
+  - jpn
+media_release_stamper_sonarr_api: http://sonarr:8989/api/v3
+media_release_stamper_radarr_api: http://radarr:7878/api/v3
+media_release_stamper_qbit_categories:
+  - tv-sonarr
+  - sonarr
+  - radarr
+media_release_stamper_qbit_autorun_program: >-
+  /usr/bin/python3 /config/scripts/qbit-release-stamper.py --hash "%I" --name "%N" --category "%L"
+
+media_release_stamper_sab_enabled: true
+media_release_stamper_sab_config_dir: /opt/media-stack/sabnzbd
+media_release_stamper_sab_script_dir: /opt/media-stack/sabnzbd/scripts
+media_release_stamper_sab_env_path: /opt/media-stack/sabnzbd/scripts/sab-release-stamper.env
+media_release_stamper_sab_script_name: sab-release-stamper.py
+media_release_stamper_sab_categories:
+  - shows
+  - movies

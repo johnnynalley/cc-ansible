@@ -1,0 +1,121 @@
+#!/bin/bash
+# Sync qBittorrent's listening port with Gluetun's forwarded port.
+
+set -o pipefail
+
+LOG_TAG="qbit-port-sync"
+ENV_FILE="{{ qbit_port_sync_env_file | default('/etc/qbit-port-sync.env') }}"
+
+log() {
+    logger -t "$LOG_TAG" "$1"
+    echo "$(date): $1"
+}
+
+if [[ ! -r "$ENV_FILE" ]]; then
+    log "Environment file not readable: $ENV_FILE"
+    exit 1
+fi
+
+# shellcheck disable=SC1090
+. "$ENV_FILE"
+
+for required_var in PORT_FILE QBIT_API QBIT_USER QBIT_PASS COMPOSE_DIR QBIT_SERVICE LOCK_FILE MAX_RETRIES RETRY_DELAY; do
+    if [[ -z "${!required_var:-}" ]]; then
+        log "Missing required setting: $required_var"
+        exit 1
+    fi
+done
+
+restart_qbit() {
+    log "qBittorrent API not reachable, recreating container..."
+    cd "$COMPOSE_DIR" || exit 1
+    docker compose stop "$QBIT_SERVICE"
+
+    if [[ -f "$LOCK_FILE" ]]; then
+        mv "$LOCK_FILE" "${LOCK_FILE}.stale-$(date +%Y%m%d%H%M%S)"
+        log "Moved stale qBittorrent lockfile aside"
+    fi
+
+    docker compose up -d "$QBIT_SERVICE"
+}
+
+if [[ ! -f "$PORT_FILE" ]]; then
+    log "Port file not found: $PORT_FILE"
+    exit 1
+fi
+
+GLUETUN_PORT=$(tr -d '[:space:]' < "$PORT_FILE")
+
+if [[ -z "$GLUETUN_PORT" ]] || ! [[ "$GLUETUN_PORT" =~ ^[0-9]+$ ]]; then
+    log "Invalid port in file: '$GLUETUN_PORT'"
+    exit 1
+fi
+
+COOKIE_FILE=$(mktemp)
+LOGIN_BODY=$(mktemp)
+trap 'rm -f "$COOKIE_FILE" "$LOGIN_BODY"' EXIT
+
+log "Waiting for qBittorrent API (port $GLUETUN_PORT from Gluetun)..."
+
+RESTARTED_QBIT=false
+for ((i=1; i<=MAX_RETRIES; i++)); do
+    LOGIN_HTTP_CODE=$(curl -sS --connect-timeout 5 --max-time 10 \
+        -o "$LOGIN_BODY" -w "%{http_code}" \
+        -c "$COOKIE_FILE" -b "$COOKIE_FILE" \
+        --data-urlencode "username=$QBIT_USER" \
+        --data-urlencode "password=$QBIT_PASS" \
+        "$QBIT_API/auth/login" 2>/dev/null || true)
+    LOGIN_RESPONSE=$(cat "$LOGIN_BODY")
+
+    if [[ "$LOGIN_RESPONSE" == "Ok." ]] || [[ "$LOGIN_HTTP_CODE" == "204" ]]; then
+        log "Connected to qBittorrent API (attempt $i)"
+        break
+    fi
+
+    if [[ "$LOGIN_HTTP_CODE" != "000" ]]; then
+        log "qBittorrent API responded with HTTP $LOGIN_HTTP_CODE but login was not accepted; not recreating container"
+        exit 1
+    fi
+
+    # After repeated connection failures, recreate qBittorrent with stale lockfile cleanup.
+    if [[ $i -eq 5 ]] && [[ "$RESTARTED_QBIT" == "false" ]]; then
+        restart_qbit
+        RESTARTED_QBIT=true
+        sleep 10
+        continue
+    fi
+
+    if [[ $i -eq $MAX_RETRIES ]]; then
+        log "Failed to connect to qBittorrent API after $MAX_RETRIES attempts"
+        exit 1
+    fi
+
+    sleep "$RETRY_DELAY"
+done
+
+QBIT_PORT=$(curl -sS --max-time 10 -b "$COOKIE_FILE" "$QBIT_API/app/preferences" | grep -oP '"listen_port":\K\d+')
+
+if [[ -z "$QBIT_PORT" ]]; then
+    log "Could not get qBittorrent port from API"
+    exit 1
+fi
+
+if [[ "$GLUETUN_PORT" != "$QBIT_PORT" ]]; then
+    log "Port mismatch: Gluetun=$GLUETUN_PORT, qBittorrent=$QBIT_PORT. Updating via API..."
+
+    curl -sS --max-time 10 -b "$COOKIE_FILE" \
+        --data "json={\"listen_port\":$GLUETUN_PORT}" \
+        "$QBIT_API/app/setPreferences" >/dev/null
+
+    sleep 2
+    NEW_PORT=$(curl -sS --max-time 10 -b "$COOKIE_FILE" "$QBIT_API/app/preferences" | grep -oP '"listen_port":\K\d+')
+
+    if [[ "$NEW_PORT" == "$GLUETUN_PORT" ]]; then
+        log "Successfully updated qBittorrent to port $GLUETUN_PORT"
+    else
+        log "Failed to update port. Expected $GLUETUN_PORT, got $NEW_PORT"
+        exit 1
+    fi
+else
+    log "Ports already in sync ($GLUETUN_PORT)"
+fi

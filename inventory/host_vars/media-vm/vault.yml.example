@@ -1,0 +1,12 @@
+# =============================================================================
+# VAULT TEMPLATE - media-vm Secrets
+# =============================================================================
+#
+# To create/update the actual vault file:
+#   ansible-vault create inventory/host_vars/media-vm/vault.yml
+#   ansible-vault edit inventory/host_vars/media-vm/vault.yml
+#
+# Then add this variable with the qBittorrent WebUI/API password:
+# =============================================================================
+
+vault_qbit_port_sync_password: "REPLACE_WITH_QBITTORRENT_WEBUI_PASSWORD"
