@@ -155,8 +155,8 @@ def exclude_by_size(filepath, exclude_lt, exclude_gt):
         return False
 
 
-def find_a_file(src, relpath, file_includes, file_excludes,
-                path_includes, path_excludes, exclude_lt, exclude_gt):
+def iter_files(src, relpath, file_includes, file_excludes,
+               path_includes, path_excludes, exclude_lt, exclude_gt):
     basepath = os.path.join(src, relpath)
     for dirpath, dirnames, filenames in os.walk(basepath):
         for filename in filenames:
@@ -171,8 +171,16 @@ def find_a_file(src, relpath, file_includes, file_excludes,
                 continue
             if exclude_by_size(filepath, exclude_lt, exclude_gt):
                 continue
-            return os.path.relpath(filepath, src)
-    return None
+            yield os.path.relpath(filepath, src)
+
+
+def find_a_file(src, relpath, file_includes, file_excludes,
+                path_includes, path_excludes, exclude_lt, exclude_gt):
+    return next(iter_files(
+        src, relpath,
+        file_includes, file_excludes,
+        path_includes, path_excludes,
+        exclude_lt, exclude_gt), None)
 
 
 # ── Helpers ──────────────────────────────────────────────────────────
@@ -221,6 +229,69 @@ def load_config_excludes(config_path='/etc/mergerfs-balance.conf'):
     return excludes
 
 
+def resolve_branch(branch_arg, srcmounts):
+    """Resolve a branch name or path to one of this mount's source branches."""
+    if not branch_arg:
+        return None
+
+    real_arg = os.path.realpath(branch_arg)
+    real_srcmounts = {os.path.realpath(src): src for src in srcmounts}
+    if real_arg in real_srcmounts:
+        return real_srcmounts[real_arg]
+
+    matches = []
+    for real_src, src in real_srcmounts.items():
+        if real_src.startswith(real_arg.rstrip(os.sep) + os.sep):
+            matches.append(src)
+            continue
+        if os.path.basename(real_src) == branch_arg:
+            matches.append(src)
+            continue
+        if os.path.basename(os.path.dirname(real_src)) == branch_arg:
+            matches.append(src)
+
+    matches = sorted(set(matches))
+    if len(matches) == 1:
+        return matches[0]
+    if len(matches) > 1:
+        print(f"Branch {branch_arg!r} matched multiple source branches:")
+        for src in matches:
+            print(f"  {src}")
+        sys.exit(1)
+
+    print(f"Branch {branch_arg!r} is not one of this mergerfs mount's source branches.")
+    print('Known branches:')
+    for src in srcmounts:
+        print(f"  {src}")
+    sys.exit(1)
+
+
+def select_destination(stats, source_branch, fsize, min_free, allowed_destinations):
+    """Pick the least-used destination with enough free space after reserve."""
+    allowed = set(allowed_destinations) if allowed_destinations else None
+    for branch, _, _, avail in sorted(stats, key=lambda x: x[1]):
+        if branch == source_branch:
+            continue
+        if allowed is not None and branch not in allowed:
+            continue
+        if avail - fsize >= min_free:
+            return branch
+    return None
+
+
+def prune_empty_dirs(basepath):
+    removed = 0
+    for dirpath, dirnames, filenames in os.walk(basepath, topdown=False):
+        if dirpath == basepath:
+            continue
+        try:
+            os.rmdir(dirpath)
+            removed += 1
+        except OSError:
+            pass
+    return removed
+
+
 # ── Main ─────────────────────────────────────────────────────────────
 
 
@@ -249,6 +320,15 @@ def buildargparser():
                         help='exclude files larger than <int>[KMGT]')
     parser.add_argument('-n', '--dry-run', action='store_true',
                         help='show what would be moved without moving')
+    parser.add_argument('--evacuate', metavar='BRANCH', type=str,
+                        help='move eligible files out of one source branch for planned branch removal')
+    parser.add_argument('--destination', metavar='BRANCH', type=str,
+                        action='append', default=[],
+                        help='allowed evacuation destination branch; can be used multiple times')
+    parser.add_argument('--min-free', dest='minfree', type=str, default='50G',
+                        help='minimum free space to leave on evacuation destinations (default: 50G)')
+    parser.add_argument('--max-moves', dest='maxmoves', type=int, default=0,
+                        help='stop after this many moved files; 0 means unlimited')
     return parser
 
 
@@ -281,6 +361,16 @@ def main():
     exclude_gt = human_to_bytes(args.excludegt)
     srcmounts = mergerfs_srcmounts(ctrlfile)
     threshold = args.percentage / 100
+    evacuate_branch = resolve_branch(args.evacuate, srcmounts) if args.evacuate else None
+    evacuation_destinations = [resolve_branch(dest, srcmounts) for dest in args.destination]
+    min_free = human_to_bytes(args.minfree)
+
+    if evacuation_destinations and not evacuate_branch:
+        print('--destination can only be used with --evacuate')
+        sys.exit(1)
+    if evacuate_branch and evacuate_branch in evacuation_destinations:
+        print('--evacuate branch cannot also be an evacuation destination')
+        sys.exit(1)
 
     # Show initial state
     print('Branches:')
@@ -293,54 +383,92 @@ def main():
     spread = abs(stats[0][1] - stats[-1][1]) * 100
     print(f'\nCurrent spread: {spread:.1f}%  (target: {args.percentage:.1f}%)')
     print_status(stats)
+    if evacuate_branch:
+        print()
+        print(f'Evacuating: {evacuate_branch}')
+        if evacuation_destinations:
+            print('Allowed destinations:')
+            for dest in evacuation_destinations:
+                print(f'  {dest}')
+        print(f'Destination reserve: {human_size(min_free)}')
     print()
 
-    if all_within_range(stats, threshold):
+    if not evacuate_branch and all_within_range(stats, threshold):
         print('Already balanced.')
         sys.exit(0)
 
     move_count = 0
+    planned_count = 0
     session_bytes = 0
     session_start = time.time()
     try:
         while True:
             stats = branch_stats(srcmounts)
-            if all_within_range(stats, threshold):
+            if args.maxmoves and move_count >= args.maxmoves:
+                print(f'Max move count reached: {args.maxmoves}')
+                break
+
+            if not evacuate_branch and all_within_range(stats, threshold):
                 break
 
             # fullest = first (highest pct_used), emptiest = last
             fromdrive = None
             relfilepath = None
+            todrive = None
+            fsize = 0
 
-            for candidate, pct_used, _, _ in stats:
-                # don't try to move from the emptiest branch to itself
-                if candidate == stats[-1][0]:
-                    break
-                relfilepath = find_a_file(
-                    candidate, relpath,
-                    file_includes, file_excludes,
-                    path_includes, path_excludes,
-                    exclude_lt, exclude_gt)
-                if relfilepath:
-                    fromdrive = candidate
-                    break
+            if evacuate_branch:
+                for candidate_relpath in iter_files(
+                        evacuate_branch, relpath,
+                        file_includes, file_excludes,
+                        path_includes, path_excludes,
+                        exclude_lt, exclude_gt):
+                    try:
+                        candidate_size = os.lstat(
+                            os.path.join(evacuate_branch, candidate_relpath)).st_size
+                    except OSError:
+                        continue
+                    candidate_dest = select_destination(
+                        stats, evacuate_branch, candidate_size,
+                        min_free, evacuation_destinations)
+                    if candidate_dest:
+                        fromdrive = evacuate_branch
+                        relfilepath = candidate_relpath
+                        todrive = candidate_dest
+                        fsize = candidate_size
+                        break
+            else:
+                for candidate, pct_used, _, _ in stats:
+                    # don't try to move from the emptiest branch to itself
+                    if candidate == stats[-1][0]:
+                        break
+                    relfilepath = find_a_file(
+                        candidate, relpath,
+                        file_includes, file_excludes,
+                        path_includes, path_excludes,
+                        exclude_lt, exclude_gt)
+                    if relfilepath:
+                        fromdrive = candidate
+                        break
 
             if not relfilepath:
-                print('No eligible files found to transfer.')
+                if evacuate_branch:
+                    print('No eligible evacuation files found with enough destination space.')
+                else:
+                    print('No eligible files found to transfer.')
                 break
 
-            todrive = stats[-1][0]
+            if not todrive:
+                todrive = stats[-1][0]
 
-            move_count += 1
+            planned_count += 1
+            display_count = planned_count if args.dry_run else move_count + 1
             from_pct = next(s[1] for s in stats if s[0] == fromdrive)
-            to_pct = stats[-1][1]
-            try:
+            to_pct = next(s[1] for s in stats if s[0] == todrive)
+            if not fsize:
                 fsize = os.lstat(os.path.join(fromdrive, relfilepath)).st_size
-                size_str = human_size(fsize)
-            except OSError:
-                fsize = 0
-                size_str = '?'
-            print(f'[{move_count}] {relfilepath} ({size_str})')
+            size_str = human_size(fsize)
+            print(f'[{display_count}] {relfilepath} ({size_str})')
             print(f'  {fromdrive} ({from_pct*100:.1f}% used) -> {todrive} ({to_pct*100:.1f}% used)')
 
             cmd = ['rsync', '-avlhHAXWE', '--relative', '--progress',
@@ -359,17 +487,27 @@ def main():
             if rv:
                 print(f'rsync exited with code {rv}')
                 break
+            move_count += 1
             session_bytes += fsize
             print('\n-\n')
 
     except KeyboardInterrupt:
         print(f'\nStopped.')
 
+    if evacuate_branch and not args.dry_run:
+        prune_root = os.path.join(evacuate_branch, relpath)
+        removed = prune_empty_dirs(prune_root)
+        if removed:
+            print(f'Pruned {removed} empty directories from {prune_root}.')
+
     # Final status
     elapsed = time.time() - session_start
     stats = branch_stats(srcmounts)
     spread = abs(stats[0][1] - stats[-1][1]) * 100
-    print(f'\n{move_count} file(s) moved, {human_size(session_bytes)} total.')
+    if args.dry_run:
+        print(f'\nDry run: {planned_count} file(s) planned, 0 moved.')
+    else:
+        print(f'\n{move_count} file(s) moved, {human_size(session_bytes)} total.')
     if elapsed > 0 and session_bytes > 0:
         rate = session_bytes / elapsed
         mins = elapsed / 60

@@ -484,6 +484,7 @@ Balances files across mergerfs branches by moving from fullest to emptiest. ZFS-
 - **Default excludes**: `/etc/mergerfs-balance.conf` protects irreplaceable data on nas_zfs (photos, archive, books) from moving to single-drive pools
 - **Config variable**: `mergerfs_balance_exclude_paths` in `group_vars/nas_server/mergerfs.yml`
 - **CLI excludes**: `-E` flags merge with config excludes (additive)
+- **Evacuation mode**: `--evacuate <branch>` drains one branch to the least-used eligible branches before planned removal or reformat. Dry-run first.
 - **VirtioFS caveat**: After balancing, media-vm needs a full stop/start (`qm stop`/`qm start`) to clear virtiofsd's stale directory cache
 
 ```bash
@@ -495,6 +496,12 @@ mergerfs-balance /srv/media -p 5 --dry-run
 
 # Additional CLI excludes on top of config
 mergerfs-balance /srv/media -p 5 -E "/srv/nas-zfs/media/music/*"
+
+# Planned branch removal/reformat: preview moving data off nas-02
+mergerfs-balance /srv/media --evacuate nas-02 --dry-run
+
+# Drain nas-02, leaving at least 100G free on destination branches
+mergerfs-balance /srv/media --evacuate nas-02 --min-free 100G
 ```
 
 ## Immich (Photo/Video Management)
