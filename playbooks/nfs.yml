@@ -28,9 +28,13 @@
 - name: Configure NFS clients
   hosts: linux_hosts
   become: true
-  gather_facts: true
+  gather_facts: false
 
   tasks:
+    - name: Gather facts for hosts with NFS client mounts
+      ansible.builtin.setup:
+      when: nfs_mounts is defined
+
     - name: Setup NFS client mounts
       ansible.builtin.import_tasks: ../tasks/nfs-client.yml
       when: nfs_mounts is defined

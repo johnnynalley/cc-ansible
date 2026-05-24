@@ -26,6 +26,7 @@ pve_node_firewall:
     - { action: ACCEPT, iface: tailscale0, proto: tcp, dport: 3551, comment: "apcupsd NIS (Tailscale)" }
 
     # NFS server (ts440 exports to Tailscale clients)
+    - { action: ACCEPT, iface: vmbr0, source: "192.168.1.153", proto: tcp, dport: 2049, comment: "NFSv4 to docker-vm (LAN)" }
     - { action: ACCEPT, iface: tailscale0, proto: tcp, dport: 2049, comment: "NFSv4 (Tailscale)" }
 
     # SMB server (ts440 serves Samba shares over Tailscale only)

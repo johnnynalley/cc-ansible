@@ -4,70 +4,17 @@
 # Portable: applies to whichever host is in the [nas_server] group
 
 nfs_pseudo_root: /srv
-nfs_pseudo_root_clients: "100.93.140.41(ro,fsid=0,no_subtree_check) 100.108.254.100(ro,fsid=0,no_subtree_check) 100.123.248.34(ro,fsid=0,no_subtree_check)"
+nfs_pseudo_root_clients: "100.108.254.100(ro,fsid=0,no_subtree_check) 192.168.1.153(ro,fsid=0,no_subtree_check)"
 
 nfs_exports:
-  # pi5-01 gets access to all configs (includes ansible subdirectory)
-  - name: exports/configs
-    bind_source: /srv/nas-zfs/configs
-    owner: johnny
-    group: johnny
-    mode: "0755"
-    clients:
-      - host: 100.93.140.41
-        options: "rw,sync,no_subtree_check,no_root_squash"
-
-  # docker-vm gets access to audiobookshelf config
-  - name: configs/audiobookshelf
-    bind_source: /srv/nas-zfs/configs/audiobookshelf
-    owner: johnny
-    group: johnny
-    mode: "0755"
-    clients:
-      - host: 100.108.254.100
-        options: "rw,sync,no_subtree_check,no_root_squash"
-
-  # docker-vm gets access to caddy config (reverse proxy with HTTPS)
-  - name: configs/caddy
-    bind_source: /srv/nas-zfs/configs/caddy
-    owner: johnny
-    group: johnny
-    mode: "0755"
-    clients:
-      - host: 100.108.254.100
-        options: "rw,sync,no_subtree_check,no_root_squash"
-
-  # docker-vm gets access to vaultwarden config (password manager)
-  - name: configs/vaultwarden
-    bind_source: /srv/nas-zfs/configs/vaultwarden
-    owner: johnny
-    group: johnny
-    mode: "0755"
-    clients:
-      - host: 100.108.254.100
-        options: "rw,sync,no_subtree_check,no_root_squash"
-
-  # media-stack configs (sonarr, radarr, prowlarr, plex, etc.)
-  # docker-vm runs *arr apps, media-vm runs Plex
-  - name: configs/media-stack
-    bind_source: /srv/nas-zfs/configs/media-stack
-    owner: johnny
-    group: johnny
-    mode: "0755"
-    clients:
-      - host: 100.108.254.100
-        options: "rw,sync,no_subtree_check,no_root_squash"
-      - host: 100.66.6.113
-        options: "rw,sync,no_subtree_check,no_root_squash"
-
   # docker-vm gets access to media via mergerfs (includes podcasts from all pools)
   # Both Tailscale and LAN IPs for docker-vm (LAN is more stable for Docker NFS volumes)
   - name: media
     bind_source: /srv/media
     requires_mount: srv-media.mount
     owner: johnny
-    group: johnny
-    mode: "0755"
+    group: smbusers
+    mode: "2775"
     clients:
       - host: 100.108.254.100
         options: "rw,sync,no_subtree_check,no_root_squash,fsid=10"
@@ -80,15 +27,9 @@ nfs_exports:
     bind_source: /srv/media-downloads
     owner: johnny
     group: johnny
-    mode: "0755"
+    mode: "0775"
     clients:
       - host: 100.108.254.100
         options: "rw,sync,no_subtree_check,no_root_squash,fsid=11"
-
-  # Gaming PC access to full nas-zfs
-  # No bind_source needed - /srv/nas-zfs is already under the pseudo-root /srv
-  # Using bind_source here would create a circular bind mount that masks ZFS child datasets
-  - name: nas-zfs
-    clients:
-      - host: 100.123.248.34
-        options: "rw,sync,no_subtree_check,no_root_squash,crossmnt"
+      - host: 192.168.1.153
+        options: "rw,sync,no_subtree_check,no_root_squash,fsid=11"
