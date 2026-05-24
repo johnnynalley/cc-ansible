@@ -15,6 +15,8 @@ This repository manages homelab infrastructure with Ansible. `site.yml` is the t
 
 When creating or materially updating operator docs, policy docs, runbooks, or troubleshooting guides under `docs/`, add or update the matching pointer in `AGENTS.md` in the relevant operational section. The point is discoverability: future agents should know where to find the source of truth without guessing filenames or relying on memory. If a new doc captures behavior that should persist across sessions, also add a concise Codex memory note when the user explicitly asks for memory persistence.
 
+When renaming, moving, deleting, or replacing a source-of-truth doc, tracker, script, or runbook that OpenClaw references, update the matching OpenClaw workspace skills, hubs, heartbeat prompts, cron jobs, and guidance files in the same change. Do not leave OpenClaw pointing at stale paths after repo-side file moves.
+
 ### Build, Test, and Development Commands
 
 - `ansible-galaxy collection install -r requirements.yml`: install required collections.
