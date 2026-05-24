@@ -1,8 +1,29 @@
 #!/bin/bash
 # {{ ansible_managed }}
-# Scrub all configured ZFS pools
+# Scrub configured ZFS pools one at a time.
 set -euo pipefail
+
+poll_seconds={{ zfs_scrub_poll_seconds | default(300) }}
+
+wait_for_scrub() {
+  local pool="$1"
+
+  while zpool status "$pool" | grep -qE 'scan: (scrub|resilver) in progress'; do
+    sleep "$poll_seconds"
+  done
+
+  if zpool status "$pool" | grep -q 'scan: scrub canceled'; then
+    logger -t zfs-scrub "Scrub of $pool was canceled; stopping scrub sequence"
+    exit 0
+  fi
+}
+
 {% for pool in zfs_pools %}
 logger -t zfs-scrub "Starting scrub of {{ pool }}"
-zpool scrub {{ pool }} || logger -t zfs-scrub -p daemon.err "Scrub failed for {{ pool }}"
+if zpool scrub {{ pool }}; then
+  wait_for_scrub {{ pool }}
+  logger -t zfs-scrub "Finished scrub of {{ pool }}"
+else
+  logger -t zfs-scrub -p daemon.err "Scrub failed for {{ pool }}"
+fi
 {% endfor %}
