@@ -1,0 +1,253 @@
+#!/usr/bin/env python3
+"""Persist Sonarr history and queue snapshots for release-policy audits."""
+
+from __future__ import annotations
+
+import argparse
+import datetime as dt
+import json
+import sys
+import urllib.error
+import urllib.parse
+import urllib.request
+import xml.etree.ElementTree as ET
+from pathlib import Path
+from typing import Any
+
+PRIVATE_FILE_MODE = 0o640
+
+
+def utc_now() -> str:
+    return dt.datetime.now(dt.UTC).isoformat().replace("+00:00", "Z")
+
+
+def read_api_key(path: Path) -> str:
+    root = ET.parse(path).getroot()
+    api_key = root.findtext("ApiKey")
+    if not api_key:
+        raise RuntimeError(f"{path}: ApiKey was not found")
+    return api_key.strip()
+
+
+def api_get(base_url: str, api_key: str, path: str, params: dict[str, Any] | None = None) -> Any:
+    query = "?" + urllib.parse.urlencode(params, doseq=True) if params else ""
+    request = urllib.request.Request(
+        f"{base_url.rstrip('/')}{path}{query}",
+        headers={"X-Api-Key": api_key},
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=60) as response:
+            return json.load(response)
+    except urllib.error.HTTPError as exc:
+        body = exc.read().decode("utf-8", errors="replace")
+        raise RuntimeError(f"GET {path} failed: {exc.code} {body}") from exc
+
+
+def load_state(path: Path) -> dict[str, Any]:
+    if not path.exists():
+        return {}
+    with path.open("r", encoding="utf-8") as handle:
+        return json.load(handle)
+
+
+def save_state(path: Path, state: dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temp = path.with_suffix(path.suffix + ".tmp")
+    with temp.open("w", encoding="utf-8") as handle:
+        json.dump(state, handle, sort_keys=True)
+        handle.write("\n")
+    temp.replace(path)
+    path.chmod(PRIVATE_FILE_MODE)
+
+
+def append_event(path: Path, event: dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a", encoding="utf-8") as handle:
+        json.dump(event, handle, sort_keys=True, separators=(",", ":"))
+        handle.write("\n")
+    path.chmod(PRIVATE_FILE_MODE)
+
+
+def cf_names(items: list[dict[str, Any]] | None) -> list[str]:
+    return [str(item.get("name") or item.get("id")) for item in items or []]
+
+
+def quality_name(item: dict[str, Any] | None) -> str | None:
+    if not isinstance(item, dict):
+        return None
+    quality = item.get("quality")
+    if isinstance(quality, dict):
+        return str(quality.get("name") or quality.get("source") or "unknown")
+    return str(item.get("name") or "unknown")
+
+
+def summarize_history(record: dict[str, Any]) -> dict[str, Any]:
+    source_title = record.get("sourceTitle") or record.get("downloadId") or ""
+    series = record.get("series") or {}
+    episode = record.get("episode") or {}
+    return {
+        "id": record.get("id"),
+        "date": record.get("date"),
+        "eventType": record.get("eventType"),
+        "sourceTitle": source_title,
+        "downloadId": record.get("downloadId"),
+        "seriesId": record.get("seriesId") or series.get("id"),
+        "seriesTitle": series.get("title"),
+        "episodeId": record.get("episodeId") or episode.get("id"),
+        "seasonNumber": episode.get("seasonNumber"),
+        "episodeNumber": episode.get("episodeNumber"),
+        "quality": quality_name(record.get("quality")),
+        "customFormatScore": record.get("customFormatScore"),
+        "customFormats": cf_names(record.get("customFormats")),
+        "data": record.get("data") or {},
+    }
+
+
+def status_messages(record: dict[str, Any]) -> list[str]:
+    messages: list[str] = []
+    for status in record.get("statusMessages") or []:
+        title = status.get("title")
+        for message in status.get("messages") or []:
+            messages.append(f"{title}: {message}" if title else str(message))
+    error = record.get("errorMessage")
+    if error:
+        messages.append(str(error))
+    return messages
+
+
+def summarize_queue(record: dict[str, Any]) -> dict[str, Any]:
+    series = record.get("series") or {}
+    episode = record.get("episode") or {}
+    return {
+        "id": record.get("id"),
+        "downloadId": record.get("downloadId"),
+        "title": record.get("title") or record.get("downloadTitle"),
+        "seriesId": series.get("id"),
+        "seriesTitle": series.get("title"),
+        "episodeId": episode.get("id") or record.get("episodeId"),
+        "seasonNumber": episode.get("seasonNumber"),
+        "episodeNumber": episode.get("episodeNumber"),
+        "quality": quality_name(record.get("quality")),
+        "customFormatScore": record.get("customFormatScore")
+        if record.get("customFormatScore") is not None
+        else (record.get("trackedDownload") or {}).get("customFormatScore"),
+        "customFormats": cf_names(record.get("customFormats")),
+        "status": record.get("status"),
+        "trackedDownloadState": record.get("trackedDownloadState"),
+        "downloadClient": record.get("downloadClient"),
+        "protocol": record.get("protocol"),
+        "messages": status_messages(record),
+    }
+
+
+def fetch_new_history(
+    base_url: str,
+    api_key: str,
+    last_history_id: int,
+    bootstrap_records: int,
+    max_pages: int,
+) -> list[dict[str, Any]]:
+    page_size = 1000 if last_history_id else bootstrap_records
+    records: list[dict[str, Any]] = []
+    for page in range(1, max_pages + 1):
+        history = api_get(
+            base_url,
+            api_key,
+            "/api/v3/history",
+            {
+                "page": page,
+                "pageSize": page_size,
+                "sortKey": "id",
+                "sortDirection": "descending",
+            },
+        )
+        page_records = history.get("records") or []
+        if not page_records:
+            break
+        for record in page_records:
+            record_id = int(record.get("id") or 0)
+            if record_id <= last_history_id:
+                return records
+            records.append(record)
+        if len(page_records) < page_size:
+            break
+    return records
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--base-url", default="http://127.0.0.1:8989")
+    parser.add_argument("--config", type=Path, default=Path("/opt/media-stack/sonarr/config.xml"))
+    parser.add_argument("--state", type=Path, default=Path("/var/lib/sonarr-transaction-monitor/state.json"))
+    parser.add_argument("--output", type=Path, default=Path("/var/log/sonarr-transaction-monitor/events.jsonl"))
+    parser.add_argument("--bootstrap-records", type=int, default=1000)
+    parser.add_argument("--max-history-pages", type=int, default=10)
+    return parser.parse_args()
+
+
+def main() -> int:
+    args = parse_args()
+    api_key = read_api_key(args.config)
+    state = load_state(args.state)
+    previous_last_id = int(state.get("last_history_id") or 0)
+    observed_at = utc_now()
+
+    history_records = fetch_new_history(
+        args.base_url,
+        api_key,
+        previous_last_id,
+        args.bootstrap_records,
+        args.max_history_pages,
+    )
+    for record in sorted(history_records, key=lambda item: int(item.get("id") or 0)):
+        append_event(
+            args.output,
+            {
+                "observedAt": observed_at,
+                "kind": "history",
+                "bootstrap": previous_last_id == 0,
+                "record": summarize_history(record),
+            },
+        )
+
+    queue = api_get(
+        args.base_url,
+        api_key,
+        "/api/v3/queue",
+        {"page": 1, "pageSize": 1000, "includeUnknownSeriesItems": "true"},
+    )
+    queue_records = queue.get("records") or []
+    append_event(
+        args.output,
+        {
+            "observedAt": observed_at,
+            "kind": "queue_snapshot",
+            "count": len(queue_records),
+            "records": [summarize_queue(record) for record in queue_records],
+        },
+    )
+
+    max_history_id = previous_last_id
+    for record in history_records:
+        max_history_id = max(max_history_id, int(record.get("id") or 0))
+    save_state(
+        args.state,
+        {
+            "last_history_id": max_history_id,
+            "last_observed_at": observed_at,
+            "last_queue_count": len(queue_records),
+        },
+    )
+    print(
+        f"recorded history={len(history_records)} queue={len(queue_records)} "
+        f"last_history_id={max_history_id}"
+    )
+    return 0
+
+
+if __name__ == "__main__":
+    try:
+        raise SystemExit(main())
+    except Exception as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        raise SystemExit(2)

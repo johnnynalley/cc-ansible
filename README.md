@@ -691,7 +691,7 @@ Torrents via Nyaa as fallback when Usenet doesn't have a release.
 - **Priority**: SABnzbd (1) > qBittorrent (2) - Usenet preferred, torrents fallback
 - **Disk I/O**: POSIX-compliant (required for VirtioFS compatibility)
 - **Incomplete downloads**: Both SABnzbd and qBittorrent use the Lacie SSD for temp storage, isolated in separate subdirs (`usenet/` and `torrents/`)
-- **VirtioFS note**: All containers use `/srv/media/plex:/data` to prevent stale file handles. Hardlinks work across all clients.
+- **VirtioFS note**: Media containers use `/srv/plex:/data`, the dedicated Plex-library VirtioFS mount, while keeping the in-container path as `/data`. Do not switch back to `/srv/media/plex:/data` without revalidating mount responsiveness; on 2026-05-24 `/srv/media` was hanging while `/srv/plex` was healthy. Hardlinks were verified with a real `ln` test across `/data/downloads/complete` and `/data/Anime`.
 - **Automatic port sync**: managed by `playbooks/gluetun-watchdog.yml`. The systemd path unit watches Gluetun's port file and updates qBittorrent via API when VPN reconnects. Repaired on media-vm on 2026-05-22 to accept qBittorrent 5.2.0's HTTP 204 login success response and to clean up stale lockfiles before recreating qBittorrent.
 - **Known bad server**: ProtonVPN node-nl-215 (103.69.224.3) has broken port forwarding — gluetun-watchdog should detect and force-recreate
 - **Tuning**: `max_active_downloads: 5` to reduce I/O contention with uploads; `max_active_uploads: 200`

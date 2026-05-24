@@ -1,0 +1,9 @@
+# Sonarr transaction audit trail for release-policy/Profilarr upgrade reviews.
+sonarr_transaction_monitor_enabled: true
+sonarr_transaction_monitor_state_dir: /var/lib/sonarr-transaction-monitor
+sonarr_transaction_monitor_log_dir: /var/log/sonarr-transaction-monitor
+sonarr_transaction_monitor_bootstrap_records: 1000
+sonarr_transaction_monitor_max_history_pages: 10
+sonarr_transaction_monitor_on_boot_sec: 2min
+sonarr_transaction_monitor_interval_sec: 2min
+sonarr_transaction_monitor_log_rotate_count: 90

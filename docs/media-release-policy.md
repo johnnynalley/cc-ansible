@@ -1,6 +1,6 @@
 # Media Release Policy
 
-Last updated: 2026-05-23
+Last updated: 2026-05-24
 
 This documents the current Sonarr/Radarr release selection policy on `media-vm`.
 The goal is better grabbed releases, not just smaller files. Anime is handled as
@@ -20,8 +20,13 @@ a separate policy because dual audio is the highest priority there.
   - Radarr: `movies-anime-profilarr-test` id `8`
 - Release metadata stamper: `playbooks/media-release-stamper.yml`
 - Sonarr grab/import forensics: `scripts/sonarr_grab_forensics.py`
+- Sonarr transaction monitor: `sonarr-transaction-monitor.timer` writes
+  `/var/log/sonarr-transaction-monitor/events.jsonl`, rotated daily
 - Sonarr recycle bin: disabled
 - Radarr recycle bin: disabled
+- Media container library bind: `/srv/plex:/data`, backed by the dedicated
+  `plex_library` VirtioFS mount. Completed downloads and libraries stay under
+  `/data` inside the containers so hardlinks still work.
 
 Recyclarr manages the TRaSH custom formats and profile scores that are in its
 config. Local custom formats created directly in Sonarr/Radarr are still valid,
@@ -45,8 +50,9 @@ overridden by incidental format bonuses.
 2. Dual audio: `+100000`
 3. Quality rank: `+10000`, `+20000`, `+30000`, `+40000`
 4. x265/HEVC preference: `+2000`
-5. Release-group tiers: leave TRaSH tier scores intact
-6. Soft avoids: small negative values only
+5. Source rank: `+1500` for Bluray/BD sources
+6. Release-group tiers: leave TRaSH tier scores intact
+7. Soft avoids: small negative values only
 
 This means any acceptable dual-audio release beats a non-dual-audio release,
 but within dual audio, a higher enabled quality still beats a lower quality even
@@ -67,9 +73,22 @@ Radarr `movies-anime` currently only enables 720p and 1080p movie qualities.
 - `Local Anime Quality Rank - 720p`: `+30000`
 - `Local Anime Quality Rank - 1080p`: `+40000`
 
+## Anime Source Rank
+
+`Local Anime Source Rank - Bluray` is scored `+1500` in Sonarr
+`shows-anime`, Sonarr `shows-anime-profilarr-test`, Radarr `movies-anime`, and
+Radarr `movies-anime-profilarr-test`.
+
+The intent is narrow: same-resolution DA Web x264 should not beat same-resolution
+DA Bluray x264 only because Web has a release-tier match and Bluray has no
+source preference. Source rank stays below x265/HEVC (`+2000`), so a
+same-resolution DA Web x265 with a good Web tier can still beat a bare DA
+Bluray x264 when that matches the smaller-file preference.
+
 Do not add new local CFs casually. The custom-format limit matters. Current
-counts after the selective Profilarr/Dumpstarr CF staging pass are Sonarr `83`
-and Radarr `73`; the working limit for staging checks is `100`.
+counts after the selective Profilarr/Dumpstarr CF staging pass and local source
+rank are Sonarr `84` and Radarr `74`; the working limit for staging checks is
+`100`.
 
 The audit script `scripts/arr_release_policy_audit.py` checks current CF counts,
 profile scores, queue status, and unused/all-zero CFs. On 2026-05-22 it found no
@@ -90,6 +109,13 @@ smoke-test the Arr parse endpoints.
 check. It summarizes monitoring, per-season file/missing counts, active queue
 items, recent series history, and active/recent commands. Use it when a manual
 series/season search appears to grab only part of a show.
+
+`playbooks/sonarr-transaction-monitor.yml` deploys
+`sonarr-transaction-monitor.timer`, which records Sonarr history events and
+queue snapshots to `/var/log/sonarr-transaction-monitor/events.jsonl`. The log
+is mode `0640` and rotated daily with 90 retained rotations. Keep it enabled
+while Profilarr upgrade searches are active so later reviews can compare
+grab-time, queue-time, and import/delete outcomes without relying on memory.
 
 `scripts/arr_stage_profilarr_test_profiles.py` snapshots live Arr policy state
 and creates or refreshes the Profilarr test profiles by cloning the current
@@ -163,10 +189,14 @@ source of truth for anime language preference.
 
 ## Verified Anime Score Math
 
-The verification target is:
+The verification targets are:
 
 - `720p DA + x265 + best group`: `100000 + 30000 + 2000 + 1400 = 133400`
 - `1080p DA`: `100000 + 40000 = 140000`
+- `1080p DA Bluray x264`: `100000 + 40000 + 1500 = 141500`
+- `1080p DA Web x264 + best Web tier`: `100000 + 40000 + 600 = 140600`
+- `1080p DA Web x265 + best Web tier`: `100000 + 40000 + 2000 + 600 = 142600`
+- `1080p DA + x265 + Bluray + top single tier`: `100000 + 40000 + 2000 + 1500 + 1400 = 144900`
 
 The live Sonarr check on 2026-05-22 confirmed:
 
@@ -177,6 +207,10 @@ The live Sonarr check on 2026-05-22 confirmed:
 - Lowest enabled DA quality beats strongest single-tier non-DA:
   `110000 > 43400`.
 - `1080p DA` beats `720p DA + x265 + top single tier`: `140000 > 133400`.
+- `1080p DA Bluray x264` beats `1080p DA Web x264 + Web Tier 01`:
+  `141500 > 140600`.
+- `1080p DA Web x265 + Web Tier 01` beats bare `1080p DA Bluray x264`:
+  `142600 > 141500`.
 - Sonarr renaming is enabled, and the anime rename format includes both
   `{MediaInfo AudioLanguages}` and `{MediaInfo VideoCodec}`.
 - Series profile distribution was `shows-anime: 150`, `shows-regular: 71`, with
@@ -288,8 +322,8 @@ Current selective import state:
 - Script: `scripts/profilarr_selective_cf_import.py`
 - Latest applied snapshot:
   `/opt/media-stack/release-policy-snapshots/20260523T063425Z-selective-profilarr-cfs`
-- Sonarr CF count: `83/100`
-- Radarr CF count: `73/100`
+- Sonarr CF count: `84/100`
+- Radarr CF count: `74/100`
 - Existing TRaSH anime tier scores were zeroed only in:
   - Sonarr `shows-anime-profilarr-test`
   - Radarr `movies-anime-profilarr-test`
@@ -519,6 +553,32 @@ retention location. Do not let staging snapshots pile up indefinitely.
   non-upgrade queue item, `Straume.2024.1080p.BluRay.DD+7.1.x264-playHD`,
   removed with `removeFromClient=true` and `blocklist=false`; the final Radarr
   queue had two active downloads and zero status messages.
+- Bleach source-rank incident, 2026-05-24 UTC: LostYears DA Web 1080p x264
+  episodes replaced existing LGH DA Bluray 1080p x264 episodes because Web Tier
+  01 added `+600` while Bluray had no local source score. This was a scoring
+  hole, not a DA-detection failure: the replacement titles had `[EN+JA]` and
+  matched `Anime Dual Audio`. `scripts/arr_anime_source_rank_policy.py --apply`
+  created `Local Anime Source Rank - Bluray`, scored it `+1500` in the Sonarr
+  and Radarr anime production/test profiles, and raised the anime cutoffs to
+  `144900`. Backups are
+  `/opt/media-stack/arr-policy-backups/20260524T180618Z-anime-source-rank-policy`
+  and
+  `/opt/media-stack/arr-policy-backups/20260524T180632Z-anime-source-rank-policy`.
+  The bad tracked LostYears Web x264 files for Bleach S17E02/S17E03/S17E04/
+  S17E06/S17E08/S17E10/S17E11 were deleted through Sonarr after backing up
+  Sonarr DB/config to
+  `/opt/media-stack/arr-policy-backups/20260524T182146Z-bleach-web-x264-revert/`;
+  after the media-stack mount repair, rescan reattached the still-present LGH
+  Bluray files for S17E02/S17E03/S17E04/S17E06/S17E08/S17E10/S17E11.
+- Media-stack mount repair, 2026-05-24 UTC: media-vm's whole-media VirtioFS
+  mount `/srv/media` was hanging on simple `ls/stat` while the dedicated
+  Plex-library mount `/srv/plex` responded normally. Live
+  `/opt/media-stack/docker-compose.yml` was backed up to
+  `/opt/media-stack/arr-policy-backups/20260524T183559Z-media-stack-plex-bind/`
+  and media containers were rebound from `/srv/media/plex:/data` to
+  `/srv/plex:/data`. Container-internal paths did not change, and a real
+  `ln` test inside Sonarr verified hardlink behavior across
+  `/data/downloads/complete` and `/data/Anime`.
 
 ## Download Client Metadata Stamping
 

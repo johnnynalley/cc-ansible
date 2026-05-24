@@ -6,7 +6,10 @@
 # VirtioFS still used for media access:
 #   /srv/media -> /srv/media (mergerfs pool)
 #   /srv/incomplete_downloads -> /srv/media-downloads (Lacie SSD)
-#   /srv/plex -> /srv/media/plex (Plex library, read-only)
+#   /srv/plex -> /srv/media/plex via ts440 /srv/plex-library (Plex library)
+# Media containers should bind /srv/plex:/data, not /srv/media/plex:/data.
+# Hardlinks across /data/downloads/complete and /data/Anime were verified on
+# 2026-05-24 after /srv/media was found hanging while /srv/plex stayed healthy.
 docker_stacks:
   - name: media-stack
     path: /opt/media-stack

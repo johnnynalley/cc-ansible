@@ -133,6 +133,10 @@
   ansible.builtin.import_playbook: playbooks/media-release-stamper.yml
   tags: [media-release, release-stamper]
 
+- name: Configure Sonarr transaction monitor
+  ansible.builtin.import_playbook: playbooks/sonarr-transaction-monitor.yml
+  tags: [media-release, sonarr-monitor]
+
 - name: Configure stream relay
   ansible.builtin.import_playbook: playbooks/stream-relay.yml
   tags: [stream-relay, streaming, twitch]
