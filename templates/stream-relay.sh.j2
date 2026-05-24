@@ -12,7 +12,7 @@ case "${TWITCH_BANDWIDTH_TEST:-{{ stream_relay_twitch_bandwidth_test | lower }}}
     ;;
 esac
 
-srt_url="srt://{{ stream_relay_ingest_bind }}:{{ stream_relay_ingest_port }}?mode=listener&transtype=live&latency={{ stream_relay_ingest_latency_us }}"
+srt_url="srt://{{ stream_relay_ingest_bind }}:{{ stream_relay_ingest_port }}?mode=listener&transtype=live&latency={{ stream_relay_ingest_latency_us }}{% if stream_relay_ingest_rcvbuf is defined %}&rcvbuf={{ stream_relay_ingest_rcvbuf }}{% endif %}{% if stream_relay_ingest_ffs is defined %}&ffs={{ stream_relay_ingest_ffs }}{% endif %}"
 keyframe_frames=$(( {{ stream_relay_video_fps }} * {{ stream_relay_keyframe_interval_seconds }} ))
 tee_outputs=()
 tee_output_count=0

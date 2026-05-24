@@ -124,10 +124,13 @@ Open OBS on the gaming PC.
 Landscape output:
 
 - Service: Custom
-- Server: `srt://100.66.6.113:9000?mode=caller&transtype=live&latency=200000`
+- Server: `srt://192.168.1.136:9000?mode=caller&transtype=live&latency=5000000`
 - Stream key: any non-empty placeholder, for example `obs`
+- Streaming bitrate: `12000 Kbps`
 
 Starting the OBS stream is a real go-live action for any platform enabled in `/etc/stream-relay/stream-relay.env`. The media-vm relay forwards that feed to Twitch and YouTube using the live stream keys on media-vm.
+
+The gaming PC keeps a persistent host route for `192.168.1.136/32` through the Ethernet interface. Tailscale advertises a `192.168.1.0/24` subnet route with a lower metric, so this host route is required or Windows may send the media-vm LAN address through Tailscale instead of the switch.
 
 Aitum vertical output:
 

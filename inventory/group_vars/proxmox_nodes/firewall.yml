@@ -56,8 +56,7 @@ pve_firewall_ipsets:
   streaming-pc:
     comment: "Gaming PC stream relay source"
     entries:
-      # jn-desktop Linux and Windows Tailscale identities. Add the gaming PC
-      # 192.168.1.x address here once confirmed for direct same-switch SRT.
+      - { ip: "192.168.1.9", comment: "lj-gaming-pc Windows LAN IP" }
       - { ip: "100.123.248.34", comment: "jn-desktop Linux Tailscale IP" }
       - { ip: "100.78.248.44", comment: "lj-gaming-pc Windows Tailscale IP" }
 

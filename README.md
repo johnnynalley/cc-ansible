@@ -542,11 +542,11 @@ sudo systemctl start stream-relay.service
 sudo journalctl -u stream-relay.service -f
 ```
 
-Set `STREAM_RELAY_OUTPUTS="twitch youtube"` to add platforms. OBS sender settings: Custom service, server `srt://100.66.6.113:9000?mode=caller&transtype=live&latency=200000`, stream key `obs`. The relay binds to media-vm's Tailscale address by default. If any configured RTMP platform output closes, FFmpeg aborts and systemd restarts the relay so failed platform legs do not remain silently dead.
+Set `STREAM_RELAY_OUTPUTS="twitch youtube"` to add platforms. OBS sender settings: Custom service, server `srt://192.168.1.136:9000?mode=caller&transtype=live&latency=5000000`, stream key `obs`, and stream bitrate `12000 Kbps`. The relay binds to media-vm's LAN address so the high-bitrate OBS feed stays on the same switch. If any configured RTMP platform output closes, FFmpeg aborts and systemd restarts the relay so failed platform legs do not remain silently dead.
 
 `stream-relay-vertical.service` is the separate Aitum Vertical path for a standalone YouTube vertical/Shorts live stream. It listens for Aitum on `rtmp://100.66.6.113:1936/live` with stream key `vertical`, then sends the 9:16 feed to `YOUTUBE_VERTICAL_STREAM_KEY` from `/etc/stream-relay/stream-relay.env`. This is currently parked in favor of YouTube's automatic dual-stream mode because the unified chat workflow only tracks one YouTube live chat cleanly. Leave the Aitum layout intact for TikTok/virtual-camera use later, but keep Aitum's separate stream output disabled while this relay is parked.
 
-The Proxmox firewall uses the `streaming-pc` datacenter IP set. Current entries include lj-gaming-pc's Windows Tailscale IP. Add the gaming PC's `192.168.1.x` address only if switching the relay bind address to media-vm's LAN IP for a direct same-switch path.
+The Proxmox firewall uses the `streaming-pc` datacenter IP set. Current entries include lj-gaming-pc's Windows LAN IP and Tailscale IP. Because Tailscale advertises `192.168.1.0/24`, Windows also needs a persistent host route for media-vm's LAN IP so OBS traffic to `192.168.1.136` uses Ethernet instead of the Tailscale tunnel.
 
 ## Recyclarr Configuration
 
