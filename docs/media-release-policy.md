@@ -21,6 +21,10 @@ a separate policy because dual audio is the highest priority there.
 - Release metadata stamper: `playbooks/media-release-stamper.yml`
 - Sonarr grab/import forensics: `scripts/sonarr_grab_forensics.py`
 - Sonarr transaction audit report: `scripts/sonarr_transaction_audit.py`
+- Sonarr targeted queue blocklist/removal helper:
+  `scripts/sonarr_blocklist_queue_matches.py`
+- Sonarr JoJo Stardust arc-local repair helper:
+  `scripts/sonarr_jojo_stardust_s01_repair.py`
 - Sonarr transaction monitor: `sonarr-transaction-monitor.timer` writes
   `/var/log/sonarr-transaction-monitor/events.jsonl`, rotated daily
 - Sonarr recycle bin: disabled
@@ -396,6 +400,15 @@ rollback artifacts from the Profilarr staging pass:
   `/opt/media-stack/release-policy-snapshots/20260523T063425Z-selective-profilarr-cfs`
 - Profilarr DB backup before Sonarr selector change:
   `/opt/profilarr/config/data/backups/profilarr-pre-sonarr-upgrade-strategy-20260524T192516Z.db`
+- JoJo Stardust blocklist / wrong-import repair backups:
+  `/opt/media-stack/arr-policy-backups/20260524T210710Z-jojo-stardust-s01-repair`
+  and
+  `/opt/media-stack/arr-policy-backups/20260524T210853Z-jojo-stardust-s01-repair`
+- JoJo bad queue cleanup backups:
+  `/opt/media-stack/arr-policy-backups/20260524T211653Z-sonarr-blocklist-queue-matches`,
+  `/opt/media-stack/arr-policy-backups/20260524T211853Z-sonarr-blocklist-queue-matches`,
+  and
+  `/opt/media-stack/arr-policy-backups/20260524T211910Z-sonarr-blocklist-queue-matches`
 
 Keep these while the Profilarr candidate path is still being validated. After
 the final profile migration is accepted or abandoned, clean up the temporary
@@ -598,6 +611,30 @@ retention location. Do not let staging snapshots pile up indefinitely.
   `/srv/plex:/data`. Container-internal paths did not change, and a real
   `ln` test inside Sonarr verified hardlink behavior across
   `/data/downloads/complete` and `/data/Anime`.
+- JoJo Stardust arc-local blocklist incident, 2026-05-24 UTC: Sonarr's
+  combined `JoJo's Bizarre Adventure (2012)` series maps Jonathan/Joseph/Battle
+  Tendency to Season 1 with 26 episodes and maps Stardust Crusaders to Season 2
+  with 48 episodes. The bad releases were arc-local iAHD titles shaped like
+  `JoJos.Bizarre.Adventure.Stardust.Crusaders.S01E##...x265-iAHD`, which
+  Sonarr could parse as combined-series Season 2 episodes while the title still
+  said `S01`. Do not solve this with a broad custom format, because legitimate
+  Stardust Crusaders releases must remain eligible when they are correctly
+  labeled as Season 2. The chosen fix was to blocklist only that known bad
+  source-title family. `scripts/sonarr_jojo_stardust_s01_repair.py` added 49
+  matching Sonarr blocklist rows via the local SQLite database after Sonarr's
+  blocklist API returned `405` for this insert path, deleted the confirmed wrong
+  Season 1 imports for S01E23/S01E24, and queued fresh Season 1/2 searches.
+  Existing bad queue rows had to be cleaned separately because adding blocklist
+  entries does not purge already-tracked downloads. Direct SAB history cleanup
+  handled the first stale completed jobs, then
+  `scripts/sonarr_blocklist_queue_matches.py JoJo --apply
+  --no-remove-from-client --no-blocklist` removed the remaining stale Sonarr
+  queue records after inspection. Final verification showed
+  `desired_missing_blocklist: 0`, `existing_matching_blocklist: 49`,
+  `wrong_season_one_files: []`, zero matching bad queue rows, and Season 1
+  S01E23/S01E24 missing and monitored for replacement. The legitimate hchcsen
+  `S02` Stardust Crusaders DA Bluray HEVC pack remained queued/downloading at
+  score `144800`.
 
 ## Download Client Metadata Stamping
 
