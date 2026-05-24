@@ -33,6 +33,8 @@ SHUFFLE_STATE_PATH = os.environ.get("PLEX_APPLIANCE_SHUFFLE_STATE_PATH", "/var/l
 PLAYBACK_PROGRESS_SECONDS = max(1, int(os.environ.get("PLEX_APPLIANCE_PLAYBACK_PROGRESS_SECONDS", "5")))
 RESUME_REWIND_SECONDS = max(0, int(os.environ.get("PLEX_APPLIANCE_RESUME_REWIND_SECONDS", "10")))
 RESUME_END_THRESHOLD_SECONDS = max(0, int(os.environ.get("PLEX_APPLIANCE_RESUME_END_THRESHOLD_SECONDS", "30")))
+MPV_START_TIMEOUT_SECONDS = max(5, int(os.environ.get("PLEX_APPLIANCE_MPV_START_TIMEOUT_SECONDS", "45")))
+MPV_STALL_TIMEOUT_SECONDS = max(MPV_START_TIMEOUT_SECONDS, int(os.environ.get("PLEX_APPLIANCE_MPV_STALL_TIMEOUT_SECONDS", "120")))
 STATUS_SCREEN_ENABLED = os.environ.get("PLEX_APPLIANCE_STATUS_SCREEN", "true").lower() == "true"
 STATUS_TTY = os.environ.get("PLEX_APPLIANCE_STATUS_TTY", "/dev/tty").strip() or "/dev/tty"
 MPV_ARGS = shlex.split(os.environ.get("PLEX_APPLIANCE_MPV_ARGS", "--fs --no-terminal"))
@@ -101,6 +103,18 @@ def retry_wait(context: str, exc: object, attempt: int, seconds: int) -> None:
             "Playback will resume automatically.",
         ])
         time.sleep(1)
+
+
+def playback_retry_wait(title: str, seconds: int) -> None:
+    log(f"Playback unavailable for {title}; retrying in {seconds}s")
+    for remaining in range(seconds, 0, -1):
+        draw_status_screen([
+            "Playback is not ready yet.",
+            f"Retrying in {remaining} sec.",
+            "The latest Plex media file will be resolved automatically.",
+        ])
+        time.sleep(1)
+    clear_status_screen()
 
 
 def plex_url(path: str, params: Optional[Dict[str, object]] = None) -> str:
@@ -195,16 +209,16 @@ def load_collection_items() -> List[ET.Element]:
     for item in raw_items:
         expanded.extend(expand_video_item(item))
 
-    playable = [item for item in expanded if stream_url_for_item(item)]
+    playable = [item for item in expanded if item.attrib.get("ratingKey") or stream_url_for_item(item)]
     if not playable:
         raise RuntimeError(f"No playable items found in collection: {COLLECTION}")
     log(f"Loaded {len(playable)} playable items from {COLLECTION}")
     return playable
 
 
-def stream_url_for_item(item: ET.Element) -> Optional[str]:
+def stream_url_for_item(item: ET.Element, refresh_metadata: bool = False) -> Optional[str]:
     media_parent = item
-    if not item.findall("Media") and item.attrib.get("ratingKey"):
+    if item.attrib.get("ratingKey") and (refresh_metadata or not item.findall("Media")):
         fetched = fetch_metadata(item.attrib["ratingKey"])
         if fetched is not None:
             media_parent = fetched
@@ -393,7 +407,7 @@ def wait_for_ipc_socket(socket_path: str, timeout: float = 5.0) -> bool:
     return os.path.exists(socket_path)
 
 
-def mpv_property(socket_path: str, name: str) -> Optional[float]:
+def mpv_raw_property(socket_path: str, name: str) -> object:
     try:
         with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:
             client.settimeout(1.0)
@@ -412,8 +426,30 @@ def mpv_property(socket_path: str, name: str) -> Optional[float]:
         payload = json.loads(response.decode("utf-8"))
     except (json.JSONDecodeError, UnicodeDecodeError):
         return None
-    value = payload.get("data")
+    if payload.get("error") != "success":
+        return None
+    return payload.get("data")
+
+
+def mpv_number_property(socket_path: str, name: str) -> Optional[float]:
+    value = mpv_raw_property(socket_path, name)
     return numeric(value) if isinstance(value, (int, float)) else None
+
+
+def mpv_bool_property(socket_path: str, name: str) -> Optional[bool]:
+    value = mpv_raw_property(socket_path, name)
+    return value if isinstance(value, bool) else None
+
+
+def stop_mpv_process(process: subprocess.Popen, reason: str) -> int:
+    log(reason)
+    process.terminate()
+    try:
+        return process.wait(timeout=10)
+    except subprocess.TimeoutExpired:
+        log("mpv did not terminate cleanly; killing it")
+        process.kill()
+        return process.wait(timeout=10)
 
 
 def play(
@@ -422,7 +458,7 @@ def play(
     start_position: float,
     progress_callback,
 ) -> Tuple[int, float, float]:
-    url = stream_url_for_item(item)
+    url = stream_url_for_item(item, refresh_metadata=True)
     if not url:
         log(f"Skipping item without stream URL: {item_title(item)}")
         return 0, 0.0, 0.0
@@ -445,20 +481,50 @@ def play(
         process = subprocess.Popen(command)
         wait_for_ipc_socket(socket_path)
         progress_callback(last_position, duration)
+        started_at = time.monotonic()
+        last_progress_at: Optional[float] = started_at if start_position > 0 else None
+        last_seen_position = last_position
 
         while process.poll() is None:
             time.sleep(PLAYBACK_PROGRESS_SECONDS)
-            position_value = mpv_property(socket_path, "time-pos")
-            duration_value = mpv_property(socket_path, "duration")
+            now = time.monotonic()
+            position_value = mpv_number_property(socket_path, "time-pos")
+            duration_value = mpv_number_property(socket_path, "duration")
+            vo_configured = mpv_bool_property(socket_path, "vo-configured")
+            playback_ready = bool(vo_configured) or position_value is not None or duration_value is not None
+            if playback_ready and last_progress_at is None:
+                last_progress_at = now
             if position_value is not None:
+                if position_value > last_seen_position + 0.5:
+                    last_progress_at = now
+                last_seen_position = max(last_seen_position, position_value)
                 last_position = max(0.0, position_value)
             if duration_value is not None:
                 duration = max(0.0, duration_value)
             progress_callback(last_position, duration)
 
+            if not playback_ready and now - started_at >= MPV_START_TIMEOUT_SECONDS:
+                stop_mpv_process(
+                    process,
+                    f"mpv did not configure video within {MPV_START_TIMEOUT_SECONDS}s; retrying",
+                )
+                break
+
+            paused = mpv_bool_property(socket_path, "pause")
+            if (
+                last_progress_at is not None
+                and paused is not True
+                and now - last_progress_at >= MPV_STALL_TIMEOUT_SECONDS
+            ):
+                stop_mpv_process(
+                    process,
+                    f"mpv made no playback progress for {MPV_STALL_TIMEOUT_SECONDS}s; retrying",
+                )
+                break
+
         return_code = process.wait()
-        position_value = mpv_property(socket_path, "time-pos")
-        duration_value = mpv_property(socket_path, "duration")
+        position_value = mpv_number_property(socket_path, "time-pos")
+        duration_value = mpv_number_property(socket_path, "duration")
         if position_value is not None:
             last_position = max(last_position, position_value)
         if duration_value is not None:
@@ -471,14 +537,14 @@ def play(
 def main() -> int:
     queue_keys, played_keys, active = load_shuffle_state()
     item_map: Dict[str, ET.Element] = {}
-    next_refresh = 0.0
+    next_refresh = time.monotonic() + COLLECTION_REFRESH_SECONDS if queue_keys or active else 0.0
     refresh_attempt = 1
 
     while True:
         wait_for_server()
 
         now = time.monotonic()
-        if not item_map or not queue_keys or now >= next_refresh:
+        if (not queue_keys and not active_item_key(active)) or now >= next_refresh:
             try:
                 item_map = items_by_key(load_collection_items())
                 if not item_map:
@@ -501,15 +567,35 @@ def main() -> int:
 
         item_key_to_play = active_item_key(active)
         start_position = resume_position(active)
+        popped_from_queue = False
         if not item_key_to_play:
             item_key_to_play = queue_keys.pop(0)
             start_position = 0.0
+            popped_from_queue = True
 
         item = item_map.get(item_key_to_play)
         if item is None:
-            active = None
-            save_shuffle_state(queue_keys, played_keys)
-            continue
+            try:
+                item = fetch_metadata(item_key_to_play)
+            except Exception as exc:
+                if queue_keys:
+                    active = None
+                    insert_randomly(queue_keys, [item_key_to_play])
+                    save_shuffle_state(queue_keys, played_keys)
+                    log(f"Deferring item with unavailable metadata: {item_key_to_play}: {redact_token(exc)}")
+                    playback_retry_wait(f"item {item_key_to_play}", ITEM_FAILURE_DELAY_SECONDS)
+                    continue
+                if popped_from_queue:
+                    queue_keys.insert(0, item_key_to_play)
+                retry_wait("Failed to fetch episode metadata", exc, refresh_attempt, SERVER_RETRY_SECONDS)
+                refresh_attempt += 1
+                continue
+            if item is None:
+                active = None
+                save_shuffle_state(queue_keys, played_keys)
+                continue
+            item_map[item_key_to_play] = item
+            refresh_attempt = 1
 
         def save_progress(position: float, duration: float) -> None:
             save_shuffle_state(
@@ -532,11 +618,17 @@ def main() -> int:
             active = None
             save_shuffle_state(queue_keys, played_keys)
         else:
-            active = active_checkpoint(item_key_to_play, item, last_position, duration)
-            save_shuffle_state(queue_keys, played_keys, active)
+            if return_code != 0 and queue_keys and last_position <= start_position + 1:
+                active = None
+                insert_randomly(queue_keys, [item_key_to_play])
+                save_shuffle_state(queue_keys, played_keys)
+                log(f"Deferred item after failed playback start: {item_key_to_play}")
+            else:
+                active = active_checkpoint(item_key_to_play, item, last_position, duration)
+                save_shuffle_state(queue_keys, played_keys, active)
 
         if return_code != 0:
-            time.sleep(ITEM_FAILURE_DELAY_SECONDS)
+            playback_retry_wait(item_title(item), ITEM_FAILURE_DELAY_SECONDS)
 
 
 if __name__ == "__main__":
