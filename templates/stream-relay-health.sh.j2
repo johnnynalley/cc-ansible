@@ -77,11 +77,15 @@ else
   fi
 
   failed_count="$(count_files "$SPOOL_ROOT/failed" '*')"
+  incoming_old_count="$(count_old_files "$SPOOL_ROOT/incoming" '*.mkv.recording')"
   ready_old_count="$(count_old_files "$SPOOL_ROOT/ready" '*.mkv')"
   remuxed_old_count="$(count_old_files "$SPOOL_ROOT/remuxed" '*.mp4')"
 
   if [[ "$failed_count" -gt 0 ]]; then
     add_problem "stream VOD failed queue has ${failed_count} file(s)"
+  fi
+  if [[ "$incoming_old_count" -gt 0 ]]; then
+    add_problem "stream VOD incoming queue has ${incoming_old_count} stale recording file(s) older than ${MAX_BACKLOG_AGE_MINUTES} minutes"
   fi
   if [[ "$ready_old_count" -gt 0 ]]; then
     add_problem "stream VOD ready queue has ${ready_old_count} file(s) older than ${MAX_BACKLOG_AGE_MINUTES} minutes"

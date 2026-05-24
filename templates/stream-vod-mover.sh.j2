@@ -7,11 +7,14 @@ READY_DIR="${SPOOL_ROOT}/ready"
 REMUXING_DIR="${SPOOL_ROOT}/remuxing"
 REMUXED_DIR="${SPOOL_ROOT}/remuxed"
 FAILED_DIR="${SPOOL_ROOT}/failed"
+DISCARDED_DIR="${SPOOL_ROOT}/discarded"
 DEST_DIR="{{ stream_relay_recording_final_dir }}"
 TRANSFER_TMP_DIR="{{ stream_relay_recording_transfer_tmp_dir | default(stream_relay_recording_final_dir ~ '/.stream-vod-tmp') }}"
 DEST_UID="{{ stream_relay_recording_uid | default(33) }}"
 DEST_GID="{{ stream_relay_recording_gid | default(33) }}"
 LOCK_FILE="/run/stream-vod-mover.lock"
+MIN_VALID_BYTES="{{ stream_relay_recording_min_valid_bytes | default(1048576) }}"
+STALE_INCOMING_MINUTES="{{ stream_relay_recording_stale_incoming_minutes | default(10) }}"
 
 log() {
   logger -t stream-vod-mover "$*"
@@ -23,7 +26,7 @@ if ! mountpoint -q "$SPOOL_ROOT"; then
   exit 1
 fi
 
-mkdir -p "$INCOMING_DIR" "$READY_DIR" "$REMUXING_DIR" "$REMUXED_DIR" "$FAILED_DIR"
+mkdir -p "$INCOMING_DIR" "$READY_DIR" "$REMUXING_DIR" "$REMUXED_DIR" "$FAILED_DIR" "$DISCARDED_DIR"
 
 exec 9>"$LOCK_FILE"
 if ! flock -n 9; then
@@ -32,6 +35,34 @@ if ! flock -n 9; then
 fi
 
 shopt -s nullglob
+
+for recording in "$INCOMING_DIR"/*.mkv.recording; do
+  base="$(basename "$recording" .mkv.recording)"
+  ready_mkv="${READY_DIR}/${base}.mkv"
+
+  if [[ -z "$(find "$recording" -maxdepth 0 -mmin "+${STALE_INCOMING_MINUTES}" -print -quit 2>/dev/null)" ]]; then
+    continue
+  fi
+
+  recording_size="$(stat -c '%s' "$recording" 2>/dev/null || echo 0)"
+  if [[ "$recording_size" -lt "$MIN_VALID_BYTES" ]]; then
+    log "discarding stale tiny VOD fragment: $recording (${recording_size} bytes)"
+    mv -f "$recording" "${DISCARDED_DIR}/${base}.mkv.discarded"
+    continue
+  fi
+
+  if /usr/bin/ffprobe -v error \
+      -select_streams v:0 \
+      -show_entries stream=codec_type \
+      -of csv=p=0 \
+      "$recording" | grep -qx 'video'; then
+    log "salvaging stale incoming VOD for remux: $recording"
+    mv -f "$recording" "$ready_mkv"
+  else
+    log "stale incoming VOD is not readable; moving to failed: $recording"
+    mv -f "$recording" "${FAILED_DIR}/${base}.mkv"
+  fi
+done
 
 for mkv in "$READY_DIR"/*.mkv; do
   base="$(basename "$mkv" .mkv)"

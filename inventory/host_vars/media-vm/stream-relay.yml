@@ -66,6 +66,8 @@ stream_relay_recording_nextcloud_scan_path: "/Johnny/files/Media/Stream VODs"
 stream_relay_recording_file_prefix: stream
 stream_relay_recording_uid: 33
 stream_relay_recording_gid: 33
+stream_relay_recording_min_valid_bytes: 1048576
+stream_relay_recording_stale_incoming_minutes: 10
 
 stream_relay_health_enabled: true
 stream_relay_health_oncalendar: "*-*-* *:0/5"

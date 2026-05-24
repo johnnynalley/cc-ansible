@@ -18,6 +18,8 @@ tee_outputs=()
 tee_output_count=0
 recording_incoming=""
 recording_ready=""
+recording_discarded=""
+recording_min_valid_bytes="{{ stream_relay_recording_min_valid_bytes | default(1048576) }}"
 
 add_output() {
   local name="$1"
@@ -62,9 +64,11 @@ if mountpoint -q "$recording_spool"; then
     "$recording_spool/ready" \
     "$recording_spool/remuxing" \
     "$recording_spool/remuxed" \
-    "$recording_spool/failed"
+    "$recording_spool/failed" \
+    "$recording_spool/discarded"
   recording_incoming="$recording_spool/incoming/${recording_base}.mkv.recording"
   recording_ready="$recording_spool/ready/${recording_base}.mkv"
+  recording_discarded="$recording_spool/discarded/${recording_base}.mkv.discarded"
   tee_outputs+=("[f=matroska:onfail=ignore]${recording_incoming}")
   echo "stream-relay: recording local VOD spool ${recording_incoming}" >&2
 else
@@ -113,12 +117,16 @@ set +e
 ffmpeg_status=$?
 set -e
 
-if [[ -n "$recording_incoming" && -s "$recording_incoming" ]]; then
-  mv -f "$recording_incoming" "$recording_ready"
-  echo "stream-relay: queued VOD for remux ${recording_ready}" >&2
-  systemctl start stream-vod-mover.service >/dev/null 2>&1 || true
-elif [[ -n "$recording_incoming" && -e "$recording_incoming" ]]; then
-  rm -f "$recording_incoming"
+if [[ -n "$recording_incoming" && -e "$recording_incoming" ]]; then
+  recording_size="$(stat -c '%s' "$recording_incoming" 2>/dev/null || echo 0)"
+  if [[ "$recording_size" -ge "$recording_min_valid_bytes" ]]; then
+    mv -f "$recording_incoming" "$recording_ready"
+    echo "stream-relay: queued VOD for remux ${recording_ready}" >&2
+    systemctl start stream-vod-mover.service >/dev/null 2>&1 || true
+  else
+    mv -f "$recording_incoming" "$recording_discarded"
+    echo "stream-relay: discarded tiny VOD fragment ${recording_discarded} (${recording_size} bytes)" >&2
+  fi
 fi
 
 exit "$ffmpeg_status"

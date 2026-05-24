@@ -77,7 +77,8 @@
           "$mount_point/ready" \
           "$mount_point/remuxing" \
           "$mount_point/remuxed" \
-          "$mount_point/failed"
+          "$mount_point/failed" \
+          "$mount_point/discarded"
 
         if [ "$changed" -eq 1 ]; then
           echo "updated=1 device=$device mount=$mount_point"

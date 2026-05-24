@@ -85,7 +85,7 @@ This is optional:
 | `media-vm` | FFmpeg/Quadro stream relay and vertical RTMP broker | Tailscale `100.66.6.113`, LAN `192.168.1.136` |
 | `macbook-pro` | TikTok LIVE Studio, Mac OBS, webcam, optional Apple Music sender | Tailscale `100.119.197.17`, dock Ethernet `192.168.1.60`, Wi-Fi `192.168.1.104` |
 
-The production stream relay binds to media-vm's Tailscale IP. Do not switch it to LAN unless the Proxmox firewall IP set and OBS/Aitum settings are updated together.
+The production landscape stream relay binds to media-vm's LAN IP so the high-bitrate OBS SRT feed stays on the switch instead of traversing Tailscale. The gaming PC has a persistent host route for `192.168.1.136/32` through Ethernet because Tailscale advertises `192.168.1.0/24`. The vertical TikTok broker still uses Tailscale.
 
 ## Go Live Checklist
 
@@ -229,6 +229,8 @@ OK: stream relay health checks passed
 The Astra heartbeat entry lives directly in `/home/johnny/.openclaw/workspace/HEARTBEAT.md` on the OpenClaw host. See `docs/openclaw-heartbeats.md` before changing heartbeat behavior.
 
 Current VOD recording covers the landscape relay only. It records into `/srv/stream-vod-spool` on `media-vm`, then remuxes and delivers to `Stream VODs` inside the Nextcloud Media folder. The vertical/mobile path is not recorded until it is explicitly wired later.
+
+Tiny recorder fragments under the minimum valid size are moved to `/srv/stream-vod-spool/discarded` instead of the failed queue. Stale incoming recordings are checked by `stream-vod-mover`: readable files are salvaged into the remux queue, unreadable files move to `failed`, and stale tiny header-only fragments are discarded.
 
 ## Troubleshooting
 
