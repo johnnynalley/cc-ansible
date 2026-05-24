@@ -1,0 +1,31 @@
+---
+# lj-gaming-pc - gaming performance capture tooling
+
+windows_gaming_monitor_script_dir: 'C:\ProgramData\Johnny\GamingTools\Monitor'
+windows_gaming_monitor_state_dir: 'C:\Users\jn\AppData\Local\WindowsGamingMonitor'
+windows_gaming_monitor_capture_dir: 'C:\Users\jn\AppData\Local\WindowsGamingMonitor\Captures'
+windows_gaming_monitor_legacy_script_dirs:
+  - 'C:\Users\jn\Nextcloud\Scripts\WindowsGamingMonitor'
+windows_gaming_monitor_presentmon_path: 'C:\Program Files\Intel\PresentMon\PresentMonConsoleApplication\PresentMon-2.4.1-x64.exe'
+windows_gaming_monitor_nvidia_smi_path: 'C:\Windows\System32\nvidia-smi.exe'
+windows_gaming_monitor_session_name: FortniteCodexCapture
+windows_gaming_monitor_sample_interval_seconds: 1
+windows_gaming_monitor_process_inventory_interval_seconds: 15
+windows_gaming_monitor_post_stop_delay_seconds: 30
+windows_gaming_monitor_target_process_names:
+  - FortniteClient-Win64-Shipping
+windows_gaming_monitor_watch_process_names:
+  - FortniteClient-Win64-Shipping
+  - MsMpEng
+  - OneDrive
+  - dwm
+  - SignalRgb
+  - EpicGamesLauncher
+  - EpicWebHelper
+  - Launcher
+  - LauncherPatcher
+  - SocialClubHelper
+  - steam
+  - steamwebhelper
+  - Discord
+  - System

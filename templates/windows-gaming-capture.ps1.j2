@@ -1,0 +1,658 @@
+[CmdletBinding()]
+param(
+    [ValidateSet('Start', 'Stop', 'Status', 'Analyze', 'Sample', 'Mark')]
+    [string]$Action = 'Status',
+    [string]$Label = 'fortnite',
+    [string]$Marker = '',
+    [string]$SessionName = '{{ windows_gaming_monitor_session_name }}',
+    [int]$SampleIntervalSeconds = {{ windows_gaming_monitor_sample_interval_seconds }},
+    [int]$InventoryIntervalSeconds = {{ windows_gaming_monitor_process_inventory_interval_seconds }},
+    [int]$PostStopDelaySeconds = {{ windows_gaming_monitor_post_stop_delay_seconds }},
+    [string]$CaptureDir = ''
+)
+
+$ErrorActionPreference = 'Stop'
+
+$StateDir = '{{ windows_gaming_monitor_state_dir }}'
+$CaptureRoot = '{{ windows_gaming_monitor_capture_dir }}'
+$PresentMonPath = '{{ windows_gaming_monitor_presentmon_path }}'
+$NvidiaSmiPath = '{{ windows_gaming_monitor_nvidia_smi_path }}'
+$TargetProcessNames = @({{ windows_gaming_monitor_target_process_names | map('to_json') | join(', ') }})
+$WatchProcessNames = @({{ windows_gaming_monitor_watch_process_names | map('to_json') | join(', ') }})
+
+function Ensure-Directory {
+    param([string]$Path)
+    if (-not (Test-Path -LiteralPath $Path)) {
+        New-Item -ItemType Directory -Path $Path -Force | Out-Null
+    }
+}
+
+function Get-StatePath {
+    Join-Path $StateDir "$SessionName-state.json"
+}
+
+function Read-CaptureState {
+    $path = Get-StatePath
+    if (-not (Test-Path -LiteralPath $path)) {
+        return $null
+    }
+
+    Get-Content -LiteralPath $path -Raw | ConvertFrom-Json
+}
+
+function Write-CaptureState {
+    param([object]$State)
+    Ensure-Directory -Path $StateDir
+    $State | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath (Get-StatePath) -Encoding UTF8
+}
+
+function Add-CsvRow {
+    param(
+        [string]$Path,
+        [object]$Row
+    )
+
+    $exists = Test-Path -LiteralPath $Path
+    $Row | Export-Csv -LiteralPath $Path -NoTypeInformation -Append:($exists) -Force
+}
+
+function Add-Marker {
+    param(
+        [object]$State,
+        [string]$Name
+    )
+
+    $timestamp = Get-Date
+    $safeName = if ($Name) { $Name } else { 'marker' }
+    "{0} {1}" -f $timestamp.ToString('o'), $safeName | Add-Content -LiteralPath ([string]$State.MarkerPath) -Encoding UTF8
+}
+
+function Get-ExeProcessName {
+    param([string]$Name)
+    if ($Name.EndsWith('.exe', [System.StringComparison]::OrdinalIgnoreCase)) {
+        return $Name
+    }
+
+    return "$Name.exe"
+}
+
+function Find-Column {
+    param(
+        [string[]]$Columns,
+        [string[]]$Candidates
+    )
+
+    foreach ($candidate in $Candidates) {
+        $match = $Columns | Where-Object { $_ -ieq $candidate } | Select-Object -First 1
+        if ($match) {
+            return $match
+        }
+    }
+
+    foreach ($candidate in $Candidates) {
+        $match = $Columns | Where-Object { $_ -imatch [regex]::Escape($candidate) } | Select-Object -First 1
+        if ($match) {
+            return $match
+        }
+    }
+
+    return $null
+}
+
+function Get-Percentile {
+    param(
+        [double[]]$Values,
+        [double]$Percentile
+    )
+
+    if (-not $Values -or $Values.Count -eq 0) {
+        return $null
+    }
+
+    $sorted = $Values | Sort-Object
+    if ($sorted.Count -eq 1) {
+        return [double]$sorted[0]
+    }
+
+    $rank = ($Percentile / 100.0) * ($sorted.Count - 1)
+    $lower = [math]::Floor($rank)
+    $upper = [math]::Ceiling($rank)
+    if ($lower -eq $upper) {
+        return [double]$sorted[$lower]
+    }
+
+    $weight = $rank - $lower
+    return ([double]$sorted[$lower] * (1 - $weight)) + ([double]$sorted[$upper] * $weight)
+}
+
+function Convert-ToDoubleArray {
+    param(
+        [object[]]$Rows,
+        [string]$Column,
+        [double]$Minimum = [double]::MinValue,
+        [double]$Maximum = [double]::MaxValue
+    )
+
+    $values = @()
+    foreach ($row in $Rows) {
+        $parsed = 0.0
+        if ([double]::TryParse([string]$row.$Column, [ref]$parsed) -and $parsed -ge $Minimum -and $parsed -le $Maximum) {
+            $values += $parsed
+        }
+    }
+
+    return [double[]]$values
+}
+
+function Write-ProcessInventorySnapshot {
+    param(
+        [string]$Path,
+        [string]$Phase
+    )
+
+    $timestamp = Get-Date
+    $processes = @{}
+    foreach ($process in (Get-Process -ErrorAction SilentlyContinue)) {
+        $processes[[int]$process.Id] = $process
+    }
+
+    foreach ($cimProcess in (Get-CimInstance Win32_Process -ErrorAction SilentlyContinue)) {
+        $process = $processes[[int]$cimProcess.ProcessId]
+        $row = [pscustomobject]@{
+            Timestamp = $timestamp.ToString('o')
+            Phase = $Phase
+            ProcessName = $cimProcess.Name
+            Id = $cimProcess.ProcessId
+            ParentProcessId = $cimProcess.ParentProcessId
+            SessionId = $cimProcess.SessionId
+            ExecutablePath = $cimProcess.ExecutablePath
+            CpuSeconds = if ($process -and $null -ne $process.CPU) { [math]::Round($process.CPU, 3) } else { $null }
+            WorkingSetMB = if ($process) { [math]::Round($process.WorkingSet64 / 1MB, 1) } else { $null }
+            PrivateMemoryMB = if ($process) { [math]::Round($process.PrivateMemorySize64 / 1MB, 1) } else { $null }
+            ThreadCount = if ($process) { $process.Threads.Count } else { $null }
+            HandleCount = if ($process) { $process.HandleCount } else { $null }
+            StartTime = if ($process -and $process.StartTime) { $process.StartTime.ToString('o') } else { $null }
+        }
+        Add-CsvRow -Path $Path -Row $row
+    }
+}
+
+function Get-ProcessCpuRows {
+    param(
+        [object[]]$Before,
+        [object[]]$After,
+        [datetime]$Timestamp,
+        [double]$ElapsedSeconds,
+        [int]$LogicalProcessors,
+        [string[]]$Names = @()
+    )
+
+    $filterNames = @{}
+    foreach ($name in $Names) {
+        $filterNames[$name] = $true
+    }
+
+    $beforeByPid = @{}
+    foreach ($process in $Before) {
+        $beforeByPid[[int]$process.Id] = $process
+    }
+
+    foreach ($process in $After) {
+        if ($filterNames.Count -gt 0 -and -not $filterNames.ContainsKey($process.ProcessName)) {
+            continue
+        }
+
+        if (-not $beforeByPid.ContainsKey([int]$process.Id)) {
+            continue
+        }
+
+        $previous = $beforeByPid[[int]$process.Id]
+        if ($null -eq $process.CPU -or $null -eq $previous.CPU) {
+            continue
+        }
+
+        $deltaSeconds = [math]::Max(0, [double]$process.CPU - [double]$previous.CPU)
+        [pscustomobject]@{
+            Timestamp = $Timestamp.ToString('o')
+            ProcessName = $process.ProcessName
+            Id = $process.Id
+            CpuSeconds = [math]::Round($deltaSeconds, 4)
+            CpuPctTotal = [math]::Round(($deltaSeconds / $ElapsedSeconds / $LogicalProcessors) * 100, 3)
+            CpuPctOneThread = [math]::Round(($deltaSeconds / $ElapsedSeconds) * 100, 3)
+            WorkingSetMB = [math]::Round($process.WorkingSet64 / 1MB, 1)
+            PrivateMemoryMB = [math]::Round($process.PrivateMemorySize64 / 1MB, 1)
+        }
+    }
+}
+
+function Invoke-SampleLoop {
+    $state = Read-CaptureState
+    if (-not $state) {
+        throw "No active capture state found for $SessionName."
+    }
+
+    $systemCsv = [string]$state.SystemCsv
+    $processCsv = [string]$state.ProcessCsv
+    $topProcessCsv = [string]$state.TopProcessCsv
+    $inventoryCsv = [string]$state.InventoryCsv
+    $stopFile = [string]$state.StopFile
+    $logicalProcessors = [int](Get-CimInstance Win32_ComputerSystem).NumberOfLogicalProcessors
+    $counterPaths = @(
+        '\Processor Information(*)\% Processor Time',
+        '\LogicalDisk(Z:)\Avg. Disk sec/Read',
+        '\LogicalDisk(Z:)\Avg. Disk sec/Write',
+        '\LogicalDisk(Z:)\Disk Read Bytes/sec',
+        '\LogicalDisk(Z:)\Disk Write Bytes/sec',
+        '\LogicalDisk(Z:)\Current Disk Queue Length',
+        '\Memory\Available MBytes',
+        '\Memory\Pages/sec'
+    )
+
+    $before = Get-Process | Select-Object Id, ProcessName, CPU, WorkingSet64, PrivateMemorySize64
+    $lastTime = Get-Date
+    $lastInventoryTime = Get-Date
+
+    while (-not (Test-Path -LiteralPath $stopFile)) {
+        Start-Sleep -Seconds $SampleIntervalSeconds
+        $timestamp = Get-Date
+        $after = Get-Process | Select-Object Id, ProcessName, CPU, WorkingSet64, PrivateMemorySize64
+        $elapsed = [math]::Max(0.001, ($timestamp - $lastTime).TotalSeconds)
+        $watchedRows = @(Get-ProcessCpuRows -Before $before -After $after -Timestamp $timestamp -ElapsedSeconds $elapsed -LogicalProcessors $logicalProcessors -Names $WatchProcessNames)
+
+        foreach ($row in $watchedRows) {
+            Add-CsvRow -Path $processCsv -Row $row
+        }
+
+        $topRows = @(Get-ProcessCpuRows -Before $before -After $after -Timestamp $timestamp -ElapsedSeconds $elapsed -LogicalProcessors $logicalProcessors)
+        foreach ($row in ($topRows | Sort-Object CpuSeconds -Descending | Select-Object -First 25)) {
+            Add-CsvRow -Path $topProcessCsv -Row $row
+        }
+
+        $fortniteRows = @($watchedRows | Where-Object { $TargetProcessNames -contains $_.ProcessName })
+        if (($timestamp - $lastInventoryTime).TotalSeconds -ge $InventoryIntervalSeconds) {
+            $phase = if ($fortniteRows) { 'during-fortnite' } else { 'capture-active' }
+            Write-ProcessInventorySnapshot -Path $inventoryCsv -Phase $phase
+            $lastInventoryTime = $timestamp
+        }
+
+        $counterData = @{}
+        try {
+            $samples = (Get-Counter -Counter $counterPaths -ErrorAction Stop).CounterSamples
+            $cpuSamples = $samples | Where-Object { $_.Path -like '*\processor information(*)\% processor time' -and $_.InstanceName -match '^\d+,\d+$' }
+            $counterData.MaxLogicalCpuPct = [math]::Round((($cpuSamples | Measure-Object CookedValue -Maximum).Maximum), 2)
+            $counterData.TopLogicalCpu = (($cpuSamples | Sort-Object CookedValue -Descending | Select-Object -First 1).InstanceName)
+
+            foreach ($sample in ($samples | Where-Object { $_.Path -notlike '*\processor information(*)\% processor time' })) {
+                $key = ($sample.Path -replace '^.*\\', '') -replace '[^a-zA-Z0-9]+', ''
+                $counterData[$key] = [math]::Round([double]$sample.CookedValue, 6)
+            }
+        } catch {
+            $counterData.CounterError = $_.Exception.Message
+        }
+
+        $gpu = $null
+        if (Test-Path -LiteralPath $NvidiaSmiPath) {
+            try {
+                $gpuLine = & $NvidiaSmiPath --query-gpu=pstate,utilization.gpu,utilization.memory,clocks.gr,clocks.mem,temperature.gpu,power.draw --format=csv,noheader,nounits 2>$null
+                if ($gpuLine) {
+                    $parts = ($gpuLine | Select-Object -First 1).Split(',').ForEach({ $_.Trim() })
+                    $gpu = [pscustomobject]@{
+                        PState = $parts[0]
+                        GpuUtilPct = [double]$parts[1]
+                        GpuMemUtilPct = [double]$parts[2]
+                        GpuClockMHz = [double]$parts[3]
+                        GpuMemClockMHz = [double]$parts[4]
+                        GpuTempC = [double]$parts[5]
+                        GpuPowerW = [double]$parts[6]
+                    }
+                }
+            } catch {
+                $gpu = [pscustomobject]@{ GpuError = $_.Exception.Message }
+            }
+        }
+
+        $defenderRows = @($watchedRows | Where-Object { $_.ProcessName -eq 'MsMpEng' })
+        $systemRow = [ordered]@{
+            Timestamp = $timestamp.ToString('o')
+            FortniteRunning = [bool]$fortniteRows
+            FortniteCpuPctOneThread = [math]::Round((($fortniteRows | Measure-Object CpuPctOneThread -Sum).Sum), 3)
+            FortniteCpuPctTotal = [math]::Round((($fortniteRows | Measure-Object CpuPctTotal -Sum).Sum), 3)
+            FortniteWorkingSetMB = [math]::Round((($fortniteRows | Measure-Object WorkingSetMB -Sum).Sum), 1)
+            DefenderCpuPctOneThread = [math]::Round((($defenderRows | Measure-Object CpuPctOneThread -Sum).Sum), 3)
+            DefenderCpuPctTotal = [math]::Round((($defenderRows | Measure-Object CpuPctTotal -Sum).Sum), 3)
+        }
+
+        foreach ($key in $counterData.Keys) {
+            $systemRow[$key] = $counterData[$key]
+        }
+
+        if ($gpu) {
+            foreach ($property in $gpu.PSObject.Properties) {
+                $systemRow[$property.Name] = $property.Value
+            }
+        }
+
+        Add-CsvRow -Path $systemCsv -Row ([pscustomobject]$systemRow)
+
+        $before = $after
+        $lastTime = $timestamp
+    }
+}
+
+function Start-Capture {
+    Ensure-Directory -Path $StateDir
+    Ensure-Directory -Path $CaptureRoot
+
+    $startTime = Get-Date
+    $safeLabel = ($Label -replace '[^a-zA-Z0-9._-]+', '-').Trim('-')
+    if (-not $safeLabel) {
+        $safeLabel = 'capture'
+    }
+
+    $runDir = Join-Path $CaptureRoot ("{0}-{1}" -f $startTime.ToString('yyyyMMdd-HHmmss'), $safeLabel)
+    Ensure-Directory -Path $runDir
+
+    $presentMonCsv = Join-Path $runDir 'presentmon.csv'
+    $systemCsv = Join-Path $runDir 'system.csv'
+    $processCsv = Join-Path $runDir 'watched-processes.csv'
+    $topProcessCsv = Join-Path $runDir 'top-processes.csv'
+    $inventoryCsv = Join-Path $runDir 'process-inventory.csv'
+    $summaryPath = Join-Path $runDir 'summary.txt'
+    $stopFile = Join-Path $runDir 'stop.requested'
+    $markerPath = Join-Path $runDir 'markers.txt'
+
+    if (Test-Path -LiteralPath $stopFile) {
+        Remove-Item -LiteralPath $stopFile -Force
+    }
+
+    $presentMonPid = $null
+    if (Test-Path -LiteralPath $PresentMonPath) {
+        try {
+            & $PresentMonPath --session_name $SessionName --terminate_existing_session --no_csv --no_console_stats 2>$null | Out-Null
+        } catch {
+        }
+
+        $pmArgs = @(
+            '--output_file', $presentMonCsv,
+            '--v2_metrics',
+            '--date_time',
+            '--session_name', $SessionName,
+            '--stop_existing_session',
+            '--no_console_stats',
+            '--track_gpu_video'
+        )
+
+        foreach ($name in $TargetProcessNames) {
+            $pmArgs += @('--process_name', (Get-ExeProcessName -Name $name))
+        }
+
+        $pm = Start-Process -FilePath $PresentMonPath -ArgumentList $pmArgs -WindowStyle Hidden -PassThru
+        $presentMonPid = $pm.Id
+    }
+
+    $state = [pscustomobject]@{
+        SessionName = $SessionName
+        Label = $safeLabel
+        StartTime = $startTime.ToString('o')
+        RunDir = $runDir
+        PresentMonPath = $PresentMonPath
+        PresentMonCsv = $presentMonCsv
+        PresentMonPid = $presentMonPid
+        SystemCsv = $systemCsv
+        ProcessCsv = $processCsv
+        TopProcessCsv = $topProcessCsv
+        InventoryCsv = $inventoryCsv
+        SummaryPath = $summaryPath
+        StopFile = $stopFile
+        MarkerPath = $markerPath
+        SamplerPid = $null
+        TargetProcessNames = $TargetProcessNames
+        SampleIntervalSeconds = $SampleIntervalSeconds
+        InventoryIntervalSeconds = $InventoryIntervalSeconds
+    }
+
+    Write-CaptureState -State $state
+    "START $($startTime.ToString('o')) label=$safeLabel" | Set-Content -LiteralPath $markerPath -Encoding UTF8
+    Write-ProcessInventorySnapshot -Path $inventoryCsv -Phase 'pre-launch'
+
+    $samplerArgs = @(
+        '-NoProfile',
+        '-ExecutionPolicy', 'Bypass',
+        '-File', $PSCommandPath,
+        '-Action', 'Sample',
+        '-SessionName', $SessionName,
+        '-SampleIntervalSeconds', [string]$SampleIntervalSeconds,
+        '-InventoryIntervalSeconds', [string]$InventoryIntervalSeconds
+    )
+    $sampler = Start-Process -FilePath 'powershell.exe' -ArgumentList $samplerArgs -WindowStyle Hidden -PassThru
+    $state.SamplerPid = $sampler.Id
+    Write-CaptureState -State $state
+
+    [pscustomobject]@{
+        Started = $true
+        StartTime = $state.StartTime
+        RunDir = $runDir
+        PresentMonPid = $presentMonPid
+        SamplerPid = $sampler.Id
+        PresentMonCsv = $presentMonCsv
+        SystemCsv = $systemCsv
+        ProcessInventoryCsv = $inventoryCsv
+    }
+}
+
+function Stop-Capture {
+    $state = Read-CaptureState
+    if (-not $state) {
+        throw "No active capture state found for $SessionName."
+    }
+
+    $stopTime = Get-Date
+    Add-Marker -State $state -Name 'stop-requested'
+    New-Item -ItemType File -Path ([string]$state.StopFile) -Force | Out-Null
+
+    if ($state.PresentMonPath -and (Test-Path -LiteralPath ([string]$state.PresentMonPath))) {
+        try {
+            & ([string]$state.PresentMonPath) --session_name $SessionName --terminate_existing_session --no_csv --no_console_stats | Out-Null
+        } catch {
+            Write-Warning "PresentMon session termination reported: $($_.Exception.Message)"
+        }
+    }
+
+    if ($state.SamplerPid) {
+        $sampler = Get-Process -Id ([int]$state.SamplerPid) -ErrorAction SilentlyContinue
+        if ($sampler) {
+            $sampler.WaitForExit(10000) | Out-Null
+            if (-not $sampler.HasExited) {
+                Stop-Process -Id ([int]$state.SamplerPid) -Force -ErrorAction SilentlyContinue
+            }
+        }
+    }
+
+    if ($state.PresentMonPid) {
+        $pm = Get-Process -Id ([int]$state.PresentMonPid) -ErrorAction SilentlyContinue
+        if ($pm) {
+            $pm.WaitForExit(5000) | Out-Null
+            if (-not $pm.HasExited) {
+                Stop-Process -Id ([int]$state.PresentMonPid) -Force -ErrorAction SilentlyContinue
+            }
+        }
+    }
+
+    Write-ProcessInventorySnapshot -Path ([string]$state.InventoryCsv) -Phase 'post-stop-immediate'
+    if ($PostStopDelaySeconds -gt 0) {
+        Start-Sleep -Seconds $PostStopDelaySeconds
+        Write-ProcessInventorySnapshot -Path ([string]$state.InventoryCsv) -Phase "post-stop-plus-${PostStopDelaySeconds}s"
+    }
+
+    Invoke-Analyze -State $state -StopTime $stopTime
+}
+
+function Invoke-Analyze {
+    param(
+        [object]$State = $null,
+        [datetime]$StopTime = (Get-Date)
+    )
+
+    if (-not $State) {
+        if ($CaptureDir) {
+            $State = [pscustomobject]@{
+                RunDir = $CaptureDir
+                PresentMonCsv = Join-Path $CaptureDir 'presentmon.csv'
+                SystemCsv = Join-Path $CaptureDir 'system.csv'
+                ProcessCsv = Join-Path $CaptureDir 'watched-processes.csv'
+                TopProcessCsv = Join-Path $CaptureDir 'top-processes.csv'
+                InventoryCsv = Join-Path $CaptureDir 'process-inventory.csv'
+                SummaryPath = Join-Path $CaptureDir 'summary.txt'
+            }
+        } else {
+            $State = Read-CaptureState
+        }
+    }
+
+    if (-not $State) {
+        throw "No capture state or capture directory was supplied."
+    }
+
+    $lines = [System.Collections.Generic.List[string]]::new()
+    $lines.Add("Capture: $($State.RunDir)")
+
+    if ($State.StartTime) {
+        $lines.Add("Start: $($State.StartTime)")
+    }
+    if ($StopTime) {
+        $lines.Add("Stop:  $($StopTime.ToString('o'))")
+    }
+
+    if (Test-Path -LiteralPath ([string]$State.PresentMonCsv)) {
+        $pmRows = @(Import-Csv -LiteralPath ([string]$State.PresentMonCsv))
+        $lines.Add("PresentMonRows: $($pmRows.Count)")
+        if ($pmRows.Count -gt 0) {
+            $columns = $pmRows[0].PSObject.Properties.Name
+            $frameMsColumn = Find-Column -Columns $columns -Candidates @('MsBetweenPresents', 'msBetweenPresents', 'MsBetweenDisplayChange', 'msBetweenDisplayChange', 'msInPresentAPI')
+            $gpuBusyColumn = Find-Column -Columns $columns -Candidates @('MsGPUActive', 'msGPUActive', 'MsUntilRenderComplete', 'msUntilRenderComplete', 'GpuBusy')
+
+            if ($frameMsColumn) {
+                $frameMs = Convert-ToDoubleArray -Rows $pmRows -Column $frameMsColumn -Minimum 0.001 -Maximum 1000
+                if ($frameMs.Count -gt 0) {
+                    $avgFrameMs = ($frameMs | Measure-Object -Average).Average
+                    $p95 = Get-Percentile -Values $frameMs -Percentile 95
+                    $p99 = Get-Percentile -Values $frameMs -Percentile 99
+                    $p999 = Get-Percentile -Values $frameMs -Percentile 99.9
+                    $lines.Add(("FPS avg={0:N1} 1pctLow={1:N1} 0.1pctLow={2:N1}" -f (1000 / $avgFrameMs), (1000 / $p99), (1000 / $p999)))
+                    $lines.Add(("FrameMs avg={0:N2} p95={1:N2} p99={2:N2} p99.9={3:N2}" -f $avgFrameMs, $p95, $p99, $p999))
+                }
+            } else {
+                $lines.Add("FrameMs: no recognized PresentMon frame interval column found")
+                $lines.Add("PresentMonColumns: $($columns -join ', ')")
+            }
+
+            if ($gpuBusyColumn) {
+                $gpuBusy = Convert-ToDoubleArray -Rows $pmRows -Column $gpuBusyColumn -Minimum 0 -Maximum 1000
+                if ($gpuBusy.Count -gt 0) {
+                    $lines.Add(("GpuBusyMs avg={0:N2} p95={1:N2} p99={2:N2}" -f (($gpuBusy | Measure-Object -Average).Average), (Get-Percentile -Values $gpuBusy -Percentile 95), (Get-Percentile -Values $gpuBusy -Percentile 99)))
+                }
+            }
+        }
+    } else {
+        $lines.Add("PresentMonRows: 0 (no PresentMon CSV found)")
+    }
+
+    if (Test-Path -LiteralPath ([string]$State.SystemCsv)) {
+        $systemRows = @(Import-Csv -LiteralPath ([string]$State.SystemCsv))
+        $lines.Add("SystemSamples: $($systemRows.Count)")
+        if ($systemRows.Count -gt 0) {
+            $maxLogicalCpu = (($systemRows | ForEach-Object { [double]$_.MaxLogicalCpuPct }) | Measure-Object -Maximum).Maximum
+            $maxFortniteThread = (($systemRows | ForEach-Object { [double]$_.FortniteCpuPctOneThread }) | Measure-Object -Maximum).Maximum
+            $maxDefenderThread = (($systemRows | ForEach-Object { [double]$_.DefenderCpuPctOneThread }) | Measure-Object -Maximum).Maximum
+            $maxGpu = (($systemRows | Where-Object { $_.GpuUtilPct -ne $null -and $_.GpuUtilPct -ne '' } | ForEach-Object { [double]$_.GpuUtilPct }) | Measure-Object -Maximum).Maximum
+            $maxReadLatency = (($systemRows | Where-Object { $_.AvgDisksecRead -ne $null -and $_.AvgDisksecRead -ne '' } | ForEach-Object { [double]$_.AvgDisksecRead * 1000 }) | Measure-Object -Maximum).Maximum
+            $minAvailableMb = (($systemRows | Where-Object { $_.AvailableMBytes -ne $null -and $_.AvailableMBytes -ne '' } | ForEach-Object { [double]$_.AvailableMBytes }) | Measure-Object -Minimum).Minimum
+
+            $lines.Add(("MaxLogicalCpuPct={0:N1}" -f $maxLogicalCpu))
+            $lines.Add(("MaxFortniteCpuPctOneThread={0:N1}" -f $maxFortniteThread))
+            $lines.Add(("MaxDefenderCpuPctOneThread={0:N1}" -f $maxDefenderThread))
+            if ($null -ne $maxGpu) {
+                $lines.Add(("MaxGpuUtilPct={0:N1}" -f $maxGpu))
+            }
+            if ($null -ne $maxReadLatency) {
+                $lines.Add(("MaxDiskReadLatencyMs={0:N3}" -f $maxReadLatency))
+            }
+            if ($null -ne $minAvailableMb) {
+                $lines.Add(("MinAvailableMemoryGB={0:N2}" -f ($minAvailableMb / 1024)))
+            }
+        }
+    }
+
+    if (Test-Path -LiteralPath ([string]$State.InventoryCsv)) {
+        $inventoryRows = @(Import-Csv -LiteralPath ([string]$State.InventoryCsv))
+        $phases = @($inventoryRows | Select-Object -ExpandProperty Phase -Unique)
+        $lines.Add("ProcessInventoryRows: $($inventoryRows.Count)")
+        $lines.Add("ProcessInventoryPhases: $($phases -join ', ')")
+    }
+
+    $summaryPath = [string]$State.SummaryPath
+    if (-not $summaryPath) {
+        $summaryPath = Join-Path ([string]$State.RunDir) 'summary.txt'
+    }
+
+    $lines | Set-Content -LiteralPath $summaryPath -Encoding UTF8
+    $lines
+}
+
+function Get-CaptureStatus {
+    $state = Read-CaptureState
+    if (-not $state) {
+        [pscustomobject]@{
+            Active = $false
+            SessionName = $SessionName
+        }
+        return
+    }
+
+    $samplerActive = $false
+    $presentMonActive = $false
+    if ($state.SamplerPid) {
+        $samplerActive = [bool](Get-Process -Id ([int]$state.SamplerPid) -ErrorAction SilentlyContinue)
+    }
+    if ($state.PresentMonPid) {
+        $presentMonActive = [bool](Get-Process -Id ([int]$state.PresentMonPid) -ErrorAction SilentlyContinue)
+    }
+
+    [pscustomobject]@{
+        Active = $samplerActive -or $presentMonActive
+        SessionName = $SessionName
+        RunDir = $state.RunDir
+        StartTime = $state.StartTime
+        PresentMonActive = $presentMonActive
+        SamplerActive = $samplerActive
+        PresentMonCsv = $state.PresentMonCsv
+        SystemCsv = $state.SystemCsv
+        ProcessInventoryCsv = $state.InventoryCsv
+    }
+}
+
+function Add-CaptureMarker {
+    $state = Read-CaptureState
+    if (-not $state) {
+        throw "No active capture state found for $SessionName."
+    }
+
+    $safeMarker = if ($Marker) { ($Marker -replace '[^a-zA-Z0-9._-]+', '-').Trim('-') } else { 'marker' }
+    Add-Marker -State $state -Name $safeMarker
+    Write-ProcessInventorySnapshot -Path ([string]$state.InventoryCsv) -Phase "marker-$safeMarker"
+
+    [pscustomobject]@{
+        Marked = $true
+        Marker = $safeMarker
+        RunDir = $state.RunDir
+    }
+}
+
+switch ($Action) {
+    'Start' { Start-Capture }
+    'Stop' { Stop-Capture }
+    'Status' { Get-CaptureStatus }
+    'Analyze' { Invoke-Analyze }
+    'Sample' { Invoke-SampleLoop }
+    'Mark' { Add-CaptureMarker }
+}

@@ -1,0 +1,640 @@
+---
+- name: Select reachable Windows hosts for gaming tuning
+  hosts: localhost
+  gather_facts: false
+
+  vars:
+    windows_reachable_target_group: windows_gaming_tuning_targets
+
+  tasks:
+    - name: Build reachable Windows gaming tuning host group
+      ansible.builtin.import_tasks: ../tasks/windows-reachable-hosts.yml
+      tags: [always]
+
+- name: Manage Windows gaming performance tuning
+  hosts: windows_gaming_tuning_targets
+  gather_facts: false
+
+  tasks:
+    - name: Gather Windows OpenSSH server service state
+      ansible.windows.win_service_info:
+        name: sshd
+      register: windows_openssh_server_service
+      tags: [windows-ssh]
+
+    - name: Ensure Windows OpenSSH does not bind to a Tailscale-only address
+      ansible.windows.win_powershell:
+        script: |
+          [CmdletBinding(SupportsShouldProcess)]
+          param()
+
+          $Ansible.Changed = $false
+          $configPath = 'C:\ProgramData\ssh\sshd_config'
+          if (-not (Test-Path -LiteralPath $configPath)) {
+              return
+          }
+
+          $lines = Get-Content -LiteralPath $configPath
+          $disabled = @()
+          $newLines = foreach ($line in $lines) {
+              if ($line -match '^\s*ListenAddress\s+') {
+                  $disabled += $line.Trim()
+                  "# Managed by Ansible: disabled fragile listener binding: $line"
+              } else {
+                  $line
+              }
+          }
+
+          if ($disabled.Count -gt 0) {
+              $Ansible.Changed = $true
+              if (-not $Ansible.CheckMode) {
+                  $tempPath = "$configPath.ansible-test"
+                  $backupPath = "{0}.pre-ansible-listenaddress-{1}.bak" -f $configPath, (Get-Date -Format 'yyyyMMdd-HHmmss')
+                  Set-Content -LiteralPath $tempPath -Value $newLines -Encoding ASCII
+                  & sshd.exe -t -f $tempPath
+                  if ($LASTEXITCODE -ne 0) {
+                      Remove-Item -LiteralPath $tempPath -Force -ErrorAction SilentlyContinue
+                      throw "Proposed sshd_config failed validation"
+                  }
+                  Copy-Item -LiteralPath $configPath -Destination $backupPath -Force
+                  Move-Item -LiteralPath $tempPath -Destination $configPath -Force
+              }
+          }
+
+          [pscustomobject]@{
+              DisabledListenAddress = $disabled
+          }
+      when: windows_openssh_server_service.services | length > 0
+      tags: [windows-ssh]
+
+    - name: Ensure Windows OpenSSH server stays available
+      ansible.windows.win_service:
+        name: sshd
+        start_mode: delayed
+        state: started
+      when: windows_openssh_server_service.services | length > 0
+      tags: [windows-ssh]
+
+    - name: Ensure Windows OpenSSH retries if Tailscale is not ready at boot
+      ansible.windows.win_powershell:
+        script: |
+          [CmdletBinding(SupportsShouldProcess)]
+          param()
+
+          $Ansible.Changed = $false
+          $serviceReg = 'HKLM:\SYSTEM\CurrentControlSet\Services\sshd'
+          if (-not (Test-Path -LiteralPath $serviceReg)) {
+              return
+          }
+
+          $delayed = (Get-ItemProperty -LiteralPath $serviceReg -Name DelayedAutoStart -ErrorAction SilentlyContinue).DelayedAutoStart
+          $failure = (& sc.exe qfailure sshd 2>$null) -join "`n"
+          $failureFlag = (& sc.exe qfailureflag sshd 2>$null) -join "`n"
+
+          $failureConfigured = (
+              $failure -match 'RESET_PERIOD.*86400' -and
+              $failure -match 'RESTART -- Delay = 30000' -and
+              $failure -match 'RESTART -- Delay = 60000' -and
+              $failure -match 'RESTART -- Delay = 120000'
+          )
+          $failureFlagConfigured = $failureFlag -match 'FAILURE_ACTIONS_ON_NONCRASH_FAILURES\s*:\s*(1|TRUE)'
+
+          if ($delayed -ne 1 -or -not $failureConfigured -or -not $failureFlagConfigured) {
+              $Ansible.Changed = $true
+              if (-not $Ansible.CheckMode) {
+                  sc.exe config sshd start= delayed-auto | Out-Null
+                  sc.exe failure sshd reset= 86400 actions= restart/30000/restart/60000/restart/120000 | Out-Null
+                  sc.exe failureflag sshd 1 | Out-Null
+              }
+          }
+
+          [pscustomobject]@{
+              DelayedAutoStart = $delayed
+              FailureConfigured = $failureConfigured
+              FailureFlagConfigured = $failureFlagConfigured
+          }
+      when: windows_openssh_server_service.services | length > 0
+      tags: [windows-ssh]
+
+    - name: Ensure Windows OpenSSH is nudged after startup and logon
+      ansible.windows.win_powershell:
+        script: |
+          [CmdletBinding(SupportsShouldProcess)]
+          param()
+
+          $Ansible.Changed = $false
+          $taskName = "Johnny Ensure OpenSSH Server"
+          $taskPath = "\Johnny\"
+          $command = "try { sc.exe config sshd start= delayed-auto | Out-Null; if ((Get-Service -Name sshd -ErrorAction SilentlyContinue).Status -ne 'Running') { Start-Service -Name sshd } } catch {}"
+          $argument = "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -Command `"$command`""
+          $existing = Get-ScheduledTask -TaskName $taskName -TaskPath $taskPath -ErrorAction SilentlyContinue
+          $needsUpdate = $false
+
+          if (-not $existing) {
+              $needsUpdate = $true
+          } else {
+              $actions = @($existing.Actions)
+              $triggers = @($existing.Triggers)
+              $principal = $existing.Principal
+              if (
+                  $actions.Count -ne 1 -or
+                  $actions[0].Execute -ne "powershell.exe" -or
+                  $actions[0].Arguments -ne $argument -or
+                  -not (@($triggers | Where-Object { $_.CimClass.CimClassName -eq "MSFT_TaskBootTrigger" }).Count) -or
+                  -not (@($triggers | Where-Object { $_.CimClass.CimClassName -eq "MSFT_TaskLogonTrigger" }).Count) -or
+                  $principal.UserId -ne "SYSTEM" -or
+                  $principal.RunLevel -ne "Highest"
+              ) {
+                  $needsUpdate = $true
+              }
+          }
+
+          if ($needsUpdate) {
+              $Ansible.Changed = $true
+              if (-not $Ansible.CheckMode) {
+                  $action = New-ScheduledTaskAction -Execute "powershell.exe" -Argument $argument
+                  $startupTrigger = New-ScheduledTaskTrigger -AtStartup
+                  $logonTrigger = New-ScheduledTaskTrigger -AtLogOn
+                  $startupTrigger.Delay = "PT2M"
+                  $settings = New-ScheduledTaskSettingsSet `
+                      -AllowStartIfOnBatteries `
+                      -DontStopIfGoingOnBatteries `
+                      -StartWhenAvailable `
+                      -ExecutionTimeLimit (New-TimeSpan -Minutes 5)
+                  $principal = New-ScheduledTaskPrincipal -UserId "SYSTEM" -LogonType ServiceAccount -RunLevel Highest
+                  Register-ScheduledTask `
+                      -TaskName $taskName `
+                      -TaskPath $taskPath `
+                      -Action $action `
+                      -Trigger @($startupTrigger, $logonTrigger) `
+                      -Settings $settings `
+                      -Principal $principal `
+                      -Force | Out-Null
+              }
+          }
+
+          [pscustomobject]@{
+              TaskPath = $taskPath
+              TaskName = $taskName
+              Changed = $needsUpdate
+          }
+      when: windows_openssh_server_service.services | length > 0
+      tags: [windows-ssh]
+
+    - name: Ensure Windows OpenSSH firewall rule is enabled
+      ansible.windows.win_powershell:
+        parameters:
+          RemoteAddresses: "{{ windows_openssh_firewall_remote_addresses | default(['100.64.0.0/10']) }}"
+        script: |
+          [CmdletBinding(SupportsShouldProcess)]
+          param(
+              [string[]]$RemoteAddresses
+          )
+
+          $ErrorActionPreference = 'Stop'
+          $Ansible.Changed = $false
+          $rule = Get-NetFirewallRule -Name OpenSSH-Server-In-TCP -ErrorAction SilentlyContinue
+
+          if (-not $rule) {
+              $Ansible.Changed = $true
+              if (-not $Ansible.CheckMode) {
+                  New-NetFirewallRule `
+                      -Name OpenSSH-Server-In-TCP `
+                      -DisplayName "OpenSSH SSH Server (sshd)" `
+                      -Enabled True `
+                      -Profile Any `
+                      -Direction Inbound `
+                      -Protocol TCP `
+                      -RemoteAddress $RemoteAddresses `
+                      -Action Allow `
+                      -LocalPort 22 | Out-Null
+              }
+              return
+          }
+
+          $portFilter = $rule | Get-NetFirewallPortFilter
+          $addressFilter = $rule | Get-NetFirewallAddressFilter
+          $currentRemoteAddresses = @($addressFilter.RemoteAddress | ForEach-Object { [string]$_ } | Sort-Object)
+          $desiredRemoteAddresses = @($RemoteAddresses | ForEach-Object { [string]$_ } | Sort-Object)
+          $needsUpdate = (
+              $rule.Enabled -ne "True" -or
+              $rule.Profile -ne "Any" -or
+              $rule.Direction -ne "Inbound" -or
+              $rule.Action -ne "Allow" -or
+              $portFilter.Protocol -ne "TCP" -or
+              $portFilter.LocalPort -ne "22" -or
+              (Compare-Object -ReferenceObject $currentRemoteAddresses -DifferenceObject $desiredRemoteAddresses)
+          )
+
+          if ($needsUpdate) {
+              $Ansible.Changed = $true
+              if (-not $Ansible.CheckMode) {
+                  Set-NetFirewallRule `
+                      -Name OpenSSH-Server-In-TCP `
+                      -Enabled True `
+                      -Profile Any `
+                      -Direction Inbound `
+                      -Action Allow `
+                      -RemoteAddress $RemoteAddresses
+                  $rule |
+                      Get-NetFirewallPortFilter |
+                      Set-NetFirewallPortFilter `
+                      -Protocol TCP `
+                      -LocalPort 22
+              }
+          }
+      tags: [windows-ssh]
+
+    - name: Remove legacy Windows OpenSSH recovery script directories
+      ansible.windows.win_powershell:
+        parameters:
+          LegacyScriptDirs: "{{ windows_openssh_legacy_recovery_dirs | default([]) }}"
+        script: |
+          [CmdletBinding(SupportsShouldProcess)]
+          param([string[]]$LegacyScriptDirs)
+
+          $Ansible.Changed = $false
+          foreach ($path in $LegacyScriptDirs) {
+              if (-not $path) {
+                  continue
+              }
+              if ($path -notlike 'C:\Users\jn\Nextcloud\Scripts\*') {
+                  throw "Refusing to remove unexpected legacy script path: $path"
+              }
+              if (Test-Path -LiteralPath $path) {
+                  $Ansible.Changed = $true
+                  if (-not $Ansible.CheckMode) {
+                      Remove-Item -LiteralPath $path -Recurse -Force
+                  }
+              }
+          }
+      tags: [windows-ssh]
+
+    - name: Apply low-latency NIC advanced properties
+      ansible.windows.win_powershell:
+        parameters:
+          AdapterName: "{{ windows_gaming_nic_name }}"
+          Properties: "{{ windows_gaming_nic_advanced_properties }}"
+        script: |
+          [CmdletBinding(SupportsShouldProcess)]
+          param(
+              [string]$AdapterName,
+              [object[]]$Properties
+          )
+
+          $Ansible.Changed = $false
+          $results = @()
+          $needsRestart = $false
+
+          foreach ($property in $Properties) {
+              $displayName = [string]$property.display_name
+              $desiredValue = [string]$property.display_value
+              $current = Get-NetAdapterAdvancedProperty -Name $AdapterName -DisplayName $displayName -ErrorAction Stop
+
+              if ($current.DisplayValue -ne $desiredValue) {
+                  $Ansible.Changed = $true
+                  $needsRestart = $true
+
+                  if (-not $Ansible.CheckMode) {
+                      Set-NetAdapterAdvancedProperty -Name $AdapterName -DisplayName $displayName -DisplayValue $desiredValue -NoRestart -ErrorAction Stop
+                  }
+
+                  $results += [pscustomobject]@{
+                      DisplayName = $displayName
+                      Before = $current.DisplayValue
+                      After = $desiredValue
+                      Changed = $true
+                  }
+              } else {
+                  $results += [pscustomobject]@{
+                      DisplayName = $displayName
+                      Before = $current.DisplayValue
+                      After = $desiredValue
+                      Changed = $false
+                  }
+              }
+          }
+
+          if ($needsRestart -and -not $Ansible.CheckMode) {
+              Disable-NetAdapter -Name $AdapterName -Confirm:$false -ErrorAction Stop
+              Start-Sleep -Seconds 2
+              Enable-NetAdapter -Name $AdapterName -Confirm:$false -ErrorAction Stop
+          }
+
+          $results
+
+    - name: Apply Windows gaming power plan settings
+      ansible.windows.win_powershell:
+        parameters:
+          Schemes: "{{ windows_gaming_power_schemes | default([]) }}"
+          Settings: "{{ windows_gaming_power_settings | default([]) }}"
+        script: |
+          [CmdletBinding(SupportsShouldProcess)]
+          param(
+              [object[]]$Schemes,
+              [object[]]$Settings
+          )
+
+          $Ansible.Changed = $false
+          $results = @()
+
+          function Get-PowerSettingValue {
+              param(
+                  [string]$SchemeGuid,
+                  [string]$SubgroupGuid,
+                  [string]$SettingGuid,
+                  [string]$Kind
+              )
+
+              $raw = powercfg.exe /qh $SchemeGuid $SubgroupGuid $SettingGuid
+              $pattern = "Current $Kind Power Setting Index:\s+(0x[0-9a-fA-F]+)"
+              foreach ($line in $raw) {
+                  if ($line -match $pattern) {
+                      return [convert]::ToInt64($matches[1], 16)
+                  }
+              }
+
+              return $null
+          }
+
+          foreach ($scheme in $Schemes) {
+              $schemeGuid = [string]$scheme.guid
+              $schemeName = [string]$scheme.name
+
+              foreach ($setting in $Settings) {
+                  $subgroupGuid = [string]$setting.subgroup_guid
+                  $settingGuid = [string]$setting.setting_guid
+                  $settingName = [string]$setting.name
+                  $desiredAc = [int64]$setting.ac_value
+                  $desiredDc = [int64]$setting.dc_value
+
+                  $currentAc = Get-PowerSettingValue -SchemeGuid $schemeGuid -SubgroupGuid $subgroupGuid -SettingGuid $settingGuid -Kind "AC"
+                  $currentDc = Get-PowerSettingValue -SchemeGuid $schemeGuid -SubgroupGuid $subgroupGuid -SettingGuid $settingGuid -Kind "DC"
+
+                  if ($currentAc -ne $desiredAc) {
+                      $Ansible.Changed = $true
+                      if (-not $Ansible.CheckMode) {
+                          powercfg.exe /setacvalueindex $schemeGuid $subgroupGuid $settingGuid $desiredAc | Out-Null
+                      }
+                  }
+
+                  if ($currentDc -ne $desiredDc) {
+                      $Ansible.Changed = $true
+                      if (-not $Ansible.CheckMode) {
+                          powercfg.exe /setdcvalueindex $schemeGuid $subgroupGuid $settingGuid $desiredDc | Out-Null
+                      }
+                  }
+
+                  $results += [pscustomobject]@{
+                      Scheme = $schemeName
+                      Setting = $settingName
+                      CurrentAc = $currentAc
+                      DesiredAc = $desiredAc
+                      CurrentDc = $currentDc
+                      DesiredDc = $desiredDc
+                      Changed = ($currentAc -ne $desiredAc) -or ($currentDc -ne $desiredDc)
+                  }
+              }
+          }
+
+          $results
+
+    - name: Apply Windows gaming registry settings
+      ansible.windows.win_regedit:
+        path: "{{ item.path }}"
+        name: "{{ item.value_name }}"
+        data: "{{ item.data | default(omit) }}"
+        type: "{{ item.type | default('dword') }}"
+        state: "{{ item.state | default('present') }}"
+      loop: >-
+        {{
+          (windows_gaming_registry_settings | default([])) +
+          (windows_gaming_graphics_registry_settings | default([])) +
+          (windows_gaming_gamebar_registry_settings | default([])) +
+          (windows_gaming_scheduler_registry_settings | default([])) +
+          (windows_gaming_security_registry_settings | default([]))
+        }}
+      loop_control:
+        label: "{{ item.name }}"
+      when: item.enabled | default(true) | bool
+
+    - name: Set active Windows gaming power plan
+      ansible.windows.win_powershell:
+        parameters:
+          SchemeGuid: "{{ windows_gaming_active_power_scheme_guid | default('') }}"
+          SchemeName: "{{ windows_gaming_active_power_scheme_name | default('') }}"
+        script: |
+          [CmdletBinding(SupportsShouldProcess)]
+          param(
+              [string]$SchemeGuid,
+              [string]$SchemeName
+          )
+
+          $Ansible.Changed = $false
+
+          if (-not $SchemeGuid) {
+              return
+          }
+
+          $active = powercfg.exe /getactivescheme
+          $activeGuid = ""
+          if ($active -match "Power Scheme GUID:\s+([a-fA-F0-9-]+)") {
+              $activeGuid = $matches[1]
+          }
+
+          if ($activeGuid -ine $SchemeGuid) {
+              $Ansible.Changed = $true
+              if (-not $Ansible.CheckMode) {
+                  powercfg.exe /setactive $SchemeGuid | Out-Null
+              }
+          }
+
+          [pscustomobject]@{
+              ActiveBefore = $active
+              DesiredScheme = $SchemeName
+              DesiredGuid = $SchemeGuid
+              Changed = $Ansible.Changed
+          }
+
+    - name: Apply game INI performance settings
+      ansible.windows.win_powershell:
+        parameters:
+          IniFiles: "{{ windows_gaming_ini_files | default([]) }}"
+        script: |
+          [CmdletBinding(SupportsShouldProcess)]
+          param(
+              [object[]]$IniFiles
+          )
+
+          $Ansible.Changed = $false
+          $results = @()
+
+          foreach ($ini in $IniFiles) {
+              $path = [string]$ini.path
+              $settings = @($ini.settings)
+
+              if (-not (Test-Path -LiteralPath $path)) {
+                  $results += [pscustomobject]@{
+                      Path = $path
+                      Exists = $false
+                      Changed = $false
+                  }
+                  continue
+              }
+
+              $lines = [System.Collections.Generic.List[string]]::new()
+              foreach ($line in (Get-Content -LiteralPath $path)) {
+                  $lines.Add([string]$line)
+              }
+
+              $fileChanged = $false
+
+              foreach ($setting in $settings) {
+                  $key = [string]$setting.key
+                  $value = [string]$setting.value
+                  $desiredLine = "$key=$value"
+                  $keyPattern = "^\s*" + [regex]::Escape($key) + "\s*="
+                  $found = $false
+
+                  for ($i = 0; $i -lt $lines.Count; $i++) {
+                      if ($lines[$i] -match $keyPattern) {
+                          $found = $true
+                          if ($lines[$i] -cne $desiredLine) {
+                              $lines[$i] = $desiredLine
+                              $fileChanged = $true
+                          }
+                          break
+                      }
+                  }
+
+                  if (-not $found) {
+                      $lines.Add($desiredLine)
+                      $fileChanged = $true
+                  }
+              }
+
+              if ($fileChanged) {
+                  $Ansible.Changed = $true
+                  if (-not $Ansible.CheckMode) {
+                      $backupPath = "$path.pre-ansible-gaming-tuning.bak"
+                      if (-not (Test-Path -LiteralPath $backupPath)) {
+                          Copy-Item -LiteralPath $path -Destination $backupPath
+                      }
+                      Set-Content -LiteralPath $path -Value $lines -Encoding UTF8
+                  }
+              }
+
+              $results += [pscustomobject]@{
+                  Path = $path
+                  Exists = $true
+                  Changed = $fileChanged
+              }
+          }
+
+          $results
+
+    - name: Apply RTSS profile settings
+      ansible.windows.win_powershell:
+        parameters:
+          Profiles: "{{ windows_gaming_rtss_profiles | default([]) }}"
+          RestartOnChange: "{{ windows_gaming_rtss_restart_on_change | default(false) }}"
+        script: |
+          [CmdletBinding(SupportsShouldProcess)]
+          param(
+              [object[]]$Profiles,
+              [bool]$RestartOnChange
+          )
+
+          $Ansible.Changed = $false
+          $results = @()
+
+          if (-not $Profiles -or $Profiles.Count -eq 0) {
+              return
+          }
+
+          foreach ($profile in $Profiles) {
+              $path = [string]$profile.path
+
+              if (-not (Test-Path -LiteralPath $path)) {
+                  throw "RTSS profile not found: $path"
+              }
+
+              $lines = [System.Collections.Generic.List[string]]::new()
+              foreach ($line in (Get-Content -LiteralPath $path)) {
+                  $lines.Add([string]$line)
+              }
+
+              $profileChanged = $false
+
+              foreach ($setting in $profile.settings) {
+                  $section = [string]$setting.section
+                  $key = [string]$setting.key
+                  $value = [string]$setting.value
+                  $desiredLine = "$key=$value"
+                  $sectionHeader = "[$section]"
+                  $sectionIndex = -1
+
+                  for ($i = 0; $i -lt $lines.Count; $i++) {
+                      if ($lines[$i].Trim() -ieq $sectionHeader) {
+                          $sectionIndex = $i
+                          break
+                      }
+                  }
+
+                  if ($sectionIndex -lt 0) {
+                      if ($lines.Count -gt 0 -and $lines[$lines.Count - 1].Trim()) {
+                          $lines.Add("")
+                      }
+                      $lines.Add($sectionHeader)
+                      $lines.Add($desiredLine)
+                      $profileChanged = $true
+                      continue
+                  }
+
+                  $keyIndex = -1
+                  $insertIndex = $sectionIndex + 1
+
+                  for ($i = $sectionIndex + 1; $i -lt $lines.Count; $i++) {
+                      if ($lines[$i] -match '^\s*\[.+\]\s*$') {
+                          break
+                      }
+
+                      if ($lines[$i] -match ("^\s*" + [regex]::Escape($key) + "\s*=")) {
+                          $keyIndex = $i
+                          break
+                      }
+
+                      $insertIndex = $i + 1
+                  }
+
+                  if ($keyIndex -ge 0) {
+                      if ($lines[$keyIndex] -cne $desiredLine) {
+                          $lines[$keyIndex] = $desiredLine
+                          $profileChanged = $true
+                      }
+                  } else {
+                      $lines.Insert($insertIndex, $desiredLine)
+                      $profileChanged = $true
+                  }
+              }
+
+              if ($profileChanged) {
+                  $Ansible.Changed = $true
+                  if (-not $Ansible.CheckMode) {
+                      Set-Content -LiteralPath $path -Value $lines -Encoding ASCII
+                  }
+              }
+
+              $results += [pscustomobject]@{
+                  Path = $path
+                  Changed = $profileChanged
+              }
+          }
+
+          if ($Ansible.Changed -and $RestartOnChange -and -not $Ansible.CheckMode) {
+              Get-Process RTSSHooksLoader64,RTSS -ErrorAction SilentlyContinue | Stop-Process -Force
+              Start-Sleep -Seconds 1
+              Start-Process "C:\Program Files (x86)\RivaTuner Statistics Server\RTSS.exe" -ArgumentList "/s"
+          }
+
+          $results

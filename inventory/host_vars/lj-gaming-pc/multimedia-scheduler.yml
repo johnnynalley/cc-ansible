@@ -1,0 +1,16 @@
+---
+# lj-gaming-pc - Windows multimedia scheduler and network throttling tuning
+
+windows_gaming_scheduler_registry_settings:
+  - name: Disable multimedia network throttling
+    path: HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile
+    value_name: NetworkThrottlingIndex
+    type: dword
+    data: 4294967295
+    reboot_required: true
+  - name: Reduce low-priority CPU reservation for multimedia workloads
+    path: HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile
+    value_name: SystemResponsiveness
+    type: dword
+    data: 10
+    reboot_required: true

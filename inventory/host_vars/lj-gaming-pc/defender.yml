@@ -1,0 +1,7 @@
+---
+# lj-gaming-pc - Microsoft Defender gaming exclusions
+
+windows_gaming_defender_exclusion_paths:
+  - 'Z:\Epic Games\Fortnite'
+
+windows_gaming_defender_exclusion_processes: []

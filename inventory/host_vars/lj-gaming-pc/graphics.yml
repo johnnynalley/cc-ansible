@@ -1,0 +1,26 @@
+---
+# lj-gaming-pc - graphics scheduler and compositor tuning
+
+windows_gaming_graphics_registry_settings:
+  - name: Disable Hardware-Accelerated GPU Scheduling
+    path: HKLM:\SYSTEM\CurrentControlSet\Control\GraphicsDrivers
+    value_name: HwSchMode
+    type: dword
+    data: 1
+    reboot_required: true
+  - name: Disable Multiplane Overlay
+    path: HKLM:\SOFTWARE\Microsoft\Windows\Dwm
+    value_name: OverlayTestMode
+    type: dword
+    data: 5
+    reboot_required: true
+  - name: Prefer high-performance GPU for Fortnite
+    path: HKCU:\Software\Microsoft\DirectX\UserGpuPreferences
+    value_name: 'Z:\Epic Games\Fortnite\FortniteGame\Binaries\Win64\FortniteClient-Win64-Shipping.exe'
+    type: string
+    data: 'GpuPreference=2;'
+  - name: Prefer high-performance GPU for OBS
+    path: HKCU:\Software\Microsoft\DirectX\UserGpuPreferences
+    value_name: 'C:\Program Files\obs-studio\bin\64bit\obs64.exe'
+    type: string
+    data: 'GpuPreference=2;'

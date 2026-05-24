@@ -1,0 +1,155 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+usage() {
+  cat <<'EOF'
+Usage:
+  bin/windows-gaming-benchmark status
+  bin/windows-gaming-benchmark preflight
+  bin/windows-gaming-benchmark start --label LABEL [--affinity PRESET] [--priority CLASS] [--power PLAN]
+  bin/windows-gaming-benchmark mark --marker NAME
+  bin/windows-gaming-benchmark stop [--fetch] [--dest DIR]
+  bin/windows-gaming-benchmark fetch [--capture-dir WINDOWS_PATH] [--dest DIR]
+
+Actions:
+  status      Show the current benchmark session state.
+  preflight   Run the lightweight preflight checks without starting a capture.
+  start       Start a managed benchmark capture.
+  mark        Add a marker to the active capture.
+  stop        Stop the active capture.
+  fetch       Zip and fetch the latest or specified capture for local analysis.
+
+Common options:
+  --label LABEL             Capture label for start.
+  --marker NAME             Marker name for mark.
+  --affinity PRESET         Affinity preset from inventory, such as none, ccd0, ccd1, ccx0.
+  --affinity-mask MASK      Explicit processor affinity mask.
+  --priority CLASS          none, Idle, BelowNormal, Normal, AboveNormal, or High.
+  --power PLAN              current, ryzen-high, ryzen-balanced, ultimate, or windows-high.
+  --capture-dir PATH        Windows capture directory to analyze/fetch.
+  --fetch                   Fetch after the action completes.
+  --dest DIR                Local fetch destination. Default: /tmp.
+EOF
+}
+
+if [[ $# -lt 1 ]]; then
+  usage
+  exit 2
+fi
+
+action_raw="$1"
+shift
+
+label="game"
+marker=""
+affinity="none"
+affinity_mask=""
+power_plan="current"
+priority="none"
+capture_dir=""
+fetch_capture="false"
+fetch_dest="/tmp"
+
+case "${action_raw,,}" in
+  start) action="Start" ;;
+  stop) action="Stop" ;;
+  status) action="Status" ;;
+  mark) action="Mark" ;;
+  preflight) action="Preflight" ;;
+  analyze) action="Analyze" ;;
+  fetch)
+    action=""
+    fetch_capture="true"
+    ;;
+  -h|--help|help)
+    usage
+    exit 0
+    ;;
+  *)
+    echo "Unknown action: $action_raw" >&2
+    usage >&2
+    exit 2
+    ;;
+esac
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --label)
+      label="${2:?missing value for --label}"
+      shift 2
+      ;;
+    --marker)
+      marker="${2:?missing value for --marker}"
+      shift 2
+      ;;
+    --affinity)
+      affinity="${2:?missing value for --affinity}"
+      shift 2
+      ;;
+    --affinity-mask)
+      affinity_mask="${2:?missing value for --affinity-mask}"
+      shift 2
+      ;;
+    --priority)
+      priority="${2:?missing value for --priority}"
+      shift 2
+      ;;
+    --power)
+      power_plan="${2:?missing value for --power}"
+      shift 2
+      ;;
+    --capture-dir)
+      capture_dir="${2:?missing value for --capture-dir}"
+      shift 2
+      ;;
+    --fetch)
+      fetch_capture="true"
+      shift
+      ;;
+    --dest)
+      fetch_dest="${2:?missing value for --dest}"
+      shift 2
+      ;;
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    *)
+      echo "Unknown option: $1" >&2
+      usage >&2
+      exit 2
+      ;;
+  esac
+done
+
+if [[ "${action:-}" == "Mark" && -z "$marker" ]]; then
+  echo "mark requires --marker NAME" >&2
+  exit 2
+fi
+
+if [[ "${action:-}" == "Start" && "$label" == "game" ]]; then
+  label="capture"
+fi
+
+script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+repo_dir="$(cd -- "$script_dir/.." && pwd)"
+cd "$repo_dir"
+
+./bin/ansible-controller-guard check
+
+ansible_args=(
+  playbooks/windows-gaming-benchmark.yml
+  -e "windows_gaming_benchmark_action=${action:-}"
+  -e "windows_gaming_benchmark_label=$label"
+  -e "windows_gaming_benchmark_marker=$marker"
+  -e "windows_gaming_benchmark_action_capture_dir=$capture_dir"
+  -e "windows_gaming_benchmark_action_affinity_preset=$affinity"
+  -e "windows_gaming_benchmark_action_affinity_mask=$affinity_mask"
+  -e "windows_gaming_benchmark_action_power_plan=$power_plan"
+  -e "windows_gaming_benchmark_action_priority_class=$priority"
+  -e "windows_gaming_benchmark_fetch_capture=$fetch_capture"
+  -e "windows_gaming_benchmark_fetch_run_dir=$capture_dir"
+  -e "windows_gaming_benchmark_fetch_dest=$fetch_dest"
+)
+
+ansible-playbook "${ansible_args[@]}"

@@ -1,0 +1,214 @@
+---
+# lj-gaming-pc - Windows Performance Mode automation
+
+windows_performance_script_dir: 'C:\ProgramData\Johnny\WindowsPerformanceMode'
+windows_performance_state_dir: 'C:\Users\jn\AppData\Local\WindowsPerformanceMode'
+windows_performance_legacy_script_dirs:
+  - 'C:\Users\jn\Nextcloud\Scripts\WindowsPerformanceMode'
+  - 'C:\Users\jn\Nextcloud\Scripts\FortniteCompMode'
+windows_performance_task_user: 'LJ-GAMING-PC\jn'
+windows_performance_watcher_task_name: Windows Performance Mode Watcher
+windows_performance_poll_seconds: 5
+windows_performance_exit_grace_seconds: 45
+windows_performance_exit_prompt_enabled: true
+windows_performance_exit_prompt_title: Performance Mode
+windows_performance_exit_prompt_message: 'Fortnite exited. Disable Performance Mode and restore closed apps/services now?'
+windows_performance_obs_enable_script: true
+windows_performance_obs_scripts_dir: 'C:\Users\jn\AppData\Roaming\obs-studio\scripts'
+windows_performance_obs_scene_collection: 'C:\Users\jn\AppData\Roaming\obs-studio\basic\scenes\Untitled.json'
+windows_performance_obs_lua_script: performance-mode-trigger.lua
+windows_performance_desktop_shortcuts_enabled: true
+windows_performance_desktop_shortcut_dir: 'C:\Users\jn\OneDrive\Desktop'
+windows_performance_desktop_shortcut_legacy_dirs:
+  - 'C:\Users\jn\Desktop'
+windows_performance_obs_process_names:
+  - obs64
+
+windows_performance_game_profiles:
+  - id: fortnite
+    display_name: Fortnite
+    process_names:
+      - FortniteClient-Win64-Shipping
+    auto_performance_mode: true
+    exit_grace_seconds: 45
+
+# Cloud sync clients are normally left alone, but Nextcloud is paused during Performance Mode
+# so OBS can write local files without live sync CPU/network contention.
+windows_performance_process_rules:
+  - id: nextcloud
+    display_name: Nextcloud Desktop
+    process_names:
+      - nextcloud
+    launch_path: 'C:\Program Files\Nextcloud\nextcloud.exe'
+    launch_args: ''
+    restore_on_exit: true
+  - id: rockstar
+    display_name: Rockstar Games Launcher
+    process_names:
+      - Launcher
+      - LauncherPatcher
+      - SocialClubHelper
+      - RockstarErrorHandler
+    launch_path: 'C:\Program Files\Rockstar Games\Launcher\LauncherPatcher.exe'
+    launch_args: ''
+    restore_window_action: minimize
+    restore_window_title_patterns:
+      - Rockstar
+      - Launcher
+    restore_window_delay_seconds: 2
+    restore_window_timeout_seconds: 60
+  - id: musehub
+    display_name: Muse Hub
+    process_names:
+      - MuseHub
+      - MuseHubHelper
+      - MuseAuthService
+    launch_path: 'C:\Program Files\MuseHub\current\MuseHub.exe'
+    launch_args: ''
+    restore_on_exit: false
+  - id: google-play-games
+    display_name: Google Play Games
+    process_names:
+      - GooglePlayGames
+      - GooglePlayGamesServices
+    launch_path: ''
+    launch_args: ''
+    restore_on_exit: false
+  - id: xbox
+    display_name: Xbox App
+    process_names:
+      - XboxPcApp
+      - XboxPcAppFT
+      - XboxPcTray
+    launch_path: explorer.exe
+    launch_args: 'shell:AppsFolder\Microsoft.GamingApp_8wekyb3d8bbwe!Microsoft.Xbox.App'
+    restore_window_action: minimize
+    restore_window_process_names:
+      - ApplicationFrameHost
+      - XboxPcApp
+      - XboxPcAppFT
+      - XboxPcTray
+    restore_window_title_patterns:
+      - Xbox
+    restore_window_delay_seconds: 2
+    restore_window_timeout_seconds: 60
+  - id: epic
+    display_name: Epic Games Launcher
+    process_names:
+      - EpicGamesLauncher
+      - EpicWebHelper
+    launch_path: 'C:\Program Files\Epic Games\Launcher\Portal\Binaries\Win64\EpicGamesLauncher.exe'
+    launch_args: ''
+    defer_close_seconds: 120
+    defer_close_until_process_names:
+      - FortniteClient-Win64-Shipping
+    defer_close_reason_prefixes:
+      - game:fortnite
+    restore_window_action: minimize
+    restore_window_title_patterns:
+      - Epic
+    restore_window_delay_seconds: 2
+    restore_window_timeout_seconds: 60
+  - id: openrgb
+    display_name: OpenRGB
+    process_names:
+      - OpenRGB
+    launch_path: 'C:\Program Files\OpenRGB\OpenRGB.exe'
+    launch_args: ''
+    restore_on_exit: false
+  - id: signalrgb
+    display_name: SignalRGB
+    process_names:
+      - SignalRgb
+      - SignalRgbLauncher
+    launch_path: 'C:\Users\jn\AppData\Local\VortxEngine\SignalRgbLauncher.exe'
+    launch_args: '--silent'
+  - id: steam
+    display_name: Steam
+    process_names:
+      - steam
+      - steamwebhelper
+      - GameOverlayUI
+    launch_path: 'C:\Program Files (x86)\Steam\steam.exe'
+    launch_args: ''
+    restore_window_action: minimize
+    restore_window_title_patterns:
+      - Steam
+    restore_window_delay_seconds: 2
+    restore_window_timeout_seconds: 60
+    reason_prefixes:
+      - game:fortnite
+  - id: msi-center-engine
+    display_name: MSI Center Engine
+    process_names:
+      - CC_Engine_x64
+      - DCv2
+    launch_path: ''
+    launch_args: ''
+    restore_on_exit: false
+  - id: corsair-icue
+    display_name: Corsair iCUE
+    process_names:
+      - iCUE
+      - iCUEDevicePluginHost
+    launch_path: 'C:\Program Files\Corsair\Corsair iCUE5 Software\iCUE.exe'
+    launch_args: ''
+  - id: game-bar-overlay
+    display_name: Xbox Game Bar Overlay
+    process_names:
+      - GameBar
+      - GameBarFTServer
+      - GameBarPresenceWriter
+      - XboxGameBarWidgets
+    launch_path: ''
+    launch_args: ''
+    restore_on_exit: false
+  - id: nvidia-overlay
+    display_name: NVIDIA Overlay
+    process_names:
+      - NVIDIA Overlay
+      - NVIDIA Share
+      - NVIDIA ShadowPlay Helper
+      - NVIDIA Web Helper
+      - NVIDIA GeForce Experience
+    launch_path: ''
+    launch_args: ''
+    restore_on_exit: false
+
+windows_performance_service_rules:
+  - id: msi-case-service
+    display_name: MSI Center Case Service
+    service_name: MSI_Case_Service
+  - id: msi-center-service
+    display_name: MSI Center Service
+    service_name: MSI_Center_Service
+  - id: corsair-cpuid-service
+    display_name: Corsair CpuIdService
+    service_name: CorsairCpuIdService
+  - id: corsair-icue-update-service
+    display_name: Corsair iCUE Update Service
+    service_name: iCUEUpdateService
+  - id: rockstar-service
+    display_name: Rockstar Game Library Service
+    service_name: Rockstar Service
+  - id: sysmain
+    display_name: SysMain
+    service_name: SysMain
+  - id: delivery-optimization
+    display_name: Delivery Optimization
+    service_name: DoSvc
+  - id: windows-search
+    display_name: Windows Search
+    service_name: WSearch
+  - id: windows-update
+    display_name: Windows Update
+    service_name: wuauserv
+  - id: bits
+    display_name: Background Intelligent Transfer Service
+    service_name: BITS
+  - id: nvidia-frameview
+    display_name: NVIDIA FrameView SDK Service
+    service_name: FvSvc
+  - id: nvidia-inventory
+    display_name: NVIDIA Inventory and Compatibility Appraisal Service
+    service_name: InventorySvc

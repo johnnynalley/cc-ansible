@@ -1,0 +1,626 @@
+---
+- name: Select reachable Windows hosts for gaming benchmark capture
+  hosts: localhost
+  gather_facts: false
+
+  vars:
+    windows_reachable_target_group: windows_gaming_benchmark_targets
+
+  tasks:
+    - name: Build reachable Windows gaming benchmark host group
+      ansible.builtin.import_tasks: ../tasks/windows-reachable-hosts.yml
+
+- name: Manage Windows gaming benchmark capture tooling
+  hosts: windows_gaming_benchmark_targets
+  gather_facts: false
+
+  tasks:
+    - name: Ensure Windows gaming benchmark directories exist
+      ansible.windows.win_file:
+        path: "{{ item }}"
+        state: directory
+      loop:
+        - "{{ windows_gaming_benchmark_script_dir }}"
+        - "{{ windows_gaming_benchmark_state_dir }}"
+        - "{{ windows_gaming_benchmark_capture_dir }}"
+
+    - name: Install Windows gaming benchmark script
+      ansible.windows.win_template:
+        src: ../templates/windows-gaming-benchmark.ps1.j2
+        dest: "{{ windows_gaming_benchmark_script_dir }}\\windows-gaming-benchmark.ps1"
+
+    - name: Remove legacy Windows gaming benchmark script directories
+      ansible.windows.win_powershell:
+        parameters:
+          LegacyScriptDirs: "{{ windows_gaming_benchmark_legacy_script_dirs | default([]) }}"
+        script: |
+          [CmdletBinding(SupportsShouldProcess)]
+          param([string[]]$LegacyScriptDirs)
+
+          $Ansible.Changed = $false
+          foreach ($path in $LegacyScriptDirs) {
+              if (-not $path) {
+                  continue
+              }
+              if ($path -notlike 'C:\Users\jn\Nextcloud\Scripts\*') {
+                  throw "Refusing to remove unexpected legacy script path: $path"
+              }
+              if (Test-Path -LiteralPath $path) {
+                  $Ansible.Changed = $true
+                  if (-not $Ansible.CheckMode) {
+                      Remove-Item -LiteralPath $path -Recurse -Force
+                  }
+              }
+          }
+
+    - name: Run Windows gaming benchmark action
+      ansible.windows.win_powershell:
+        parameters:
+          BenchmarkScript: "{{ windows_gaming_benchmark_script_dir }}\\windows-gaming-benchmark.ps1"
+          Action: "{{ windows_gaming_benchmark_action }}"
+          Label: "{{ windows_gaming_benchmark_label | default('game') }}"
+          Marker: "{{ windows_gaming_benchmark_marker | default('') }}"
+          CaptureDir: "{{ windows_gaming_benchmark_action_capture_dir | default('') }}"
+          SessionName: "{{ windows_gaming_benchmark_session_name }}"
+          AffinityPreset: "{{ windows_gaming_benchmark_action_affinity_preset | default('none') }}"
+          AffinityMask: "{{ windows_gaming_benchmark_action_affinity_mask | default('') }}"
+          PowerPlan: "{{ windows_gaming_benchmark_action_power_plan | default('current') }}"
+          PriorityClass: "{{ windows_gaming_benchmark_action_priority_class | default('none') }}"
+        script: |
+          [CmdletBinding()]
+          param(
+              [string]$BenchmarkScript,
+              [string]$Action,
+              [string]$Label,
+              [string]$Marker,
+              [string]$CaptureDir,
+              [string]$SessionName,
+              [string]$AffinityPreset,
+              [string]$AffinityMask,
+              [string]$PowerPlan,
+              [string]$PriorityClass
+          )
+
+          $ErrorActionPreference = "Stop"
+          if (-not (Test-Path -LiteralPath $BenchmarkScript)) {
+              throw "Benchmark script not found: $BenchmarkScript"
+          }
+
+          Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force
+          & $BenchmarkScript `
+              -Action $Action `
+              -Label $Label `
+              -Marker $Marker `
+              -CaptureDir $CaptureDir `
+              -SessionName $SessionName `
+              -AffinityPreset $AffinityPreset `
+              -AffinityMask $AffinityMask `
+              -PowerPlan $PowerPlan `
+              -PriorityClass $PriorityClass
+      register: windows_gaming_benchmark_action_result
+      changed_when: windows_gaming_benchmark_action | lower in ['start', 'stop', 'mark']
+      when: windows_gaming_benchmark_action | default('') | length > 0
+
+    - name: Show Windows gaming benchmark action result
+      ansible.builtin.debug:
+        var: windows_gaming_benchmark_action_result.output
+      when: windows_gaming_benchmark_action | default('') | length > 0
+
+    - name: Package Windows gaming benchmark capture for local analysis
+      ansible.windows.win_powershell:
+        parameters:
+          SessionName: "{{ windows_gaming_benchmark_session_name }}"
+          StateDir: "{{ windows_gaming_benchmark_state_dir }}"
+          RunDir: "{{ windows_gaming_benchmark_fetch_run_dir | default('') }}"
+        script: |
+          [CmdletBinding()]
+          param(
+              [string]$SessionName,
+              [string]$StateDir,
+              [string]$RunDir
+          )
+
+          $ErrorActionPreference = "Stop"
+          $resolvedRunDir = $RunDir
+          if (-not $resolvedRunDir) {
+              $statePath = Join-Path $StateDir "$SessionName-state.json"
+              if (-not (Test-Path -LiteralPath $statePath)) {
+                  throw "No benchmark state file found: $statePath"
+              }
+              $state = Get-Content -LiteralPath $statePath -Raw | ConvertFrom-Json
+              $resolvedRunDir = [string]$state.RunDir
+          }
+
+          if (-not (Test-Path -LiteralPath $resolvedRunDir)) {
+              throw "Capture directory not found: $resolvedRunDir"
+          }
+
+          $runName = Split-Path -Path $resolvedRunDir -Leaf
+          $zipName = "{0}-{1}.zip" -f $env:COMPUTERNAME, $runName
+          $zipPath = Join-Path $env:TEMP $zipName
+          Remove-Item -LiteralPath $zipPath -Force -ErrorAction SilentlyContinue
+          Compress-Archive -Path (Join-Path $resolvedRunDir "*") -DestinationPath $zipPath -CompressionLevel Fastest -Force
+
+          [pscustomobject]@{
+              RunDir = $resolvedRunDir
+              RunName = $runName
+              ZipName = $zipName
+              ZipPath = $zipPath
+          } | ConvertTo-Json -Depth 3
+      register: windows_gaming_benchmark_fetch_package
+      changed_when: false
+      when: windows_gaming_benchmark_fetch_capture | default(false) | bool
+
+    - name: Record Windows gaming benchmark fetch package
+      ansible.builtin.set_fact:
+        windows_gaming_benchmark_fetch_info: "{{ windows_gaming_benchmark_fetch_package.output[0] | from_json }}"
+      when: windows_gaming_benchmark_fetch_capture | default(false) | bool
+
+    - name: Fetch Windows gaming benchmark capture archive
+      ansible.builtin.fetch:
+        src: "{{ windows_gaming_benchmark_fetch_info.ZipPath }}"
+        dest: "{{ windows_gaming_benchmark_fetch_dest | default('/tmp') }}/"
+        flat: true
+      when: windows_gaming_benchmark_fetch_capture | default(false) | bool
+
+    - name: Remove temporary Windows gaming benchmark capture archive
+      ansible.windows.win_file:
+        path: "{{ windows_gaming_benchmark_fetch_info.ZipPath }}"
+        state: absent
+      when:
+        - windows_gaming_benchmark_fetch_capture | default(false) | bool
+        - windows_gaming_benchmark_delete_remote_zip | default(true) | bool
+
+    - name: Show fetched Windows gaming benchmark archive
+      ansible.builtin.debug:
+        msg: "Fetched {{ windows_gaming_benchmark_fetch_info.RunDir }} to {{ windows_gaming_benchmark_fetch_dest | default('/tmp') }}/{{ windows_gaming_benchmark_fetch_info.ZipName }}"
+      when: windows_gaming_benchmark_fetch_capture | default(false) | bool
+
+    - name: Collect Windows gaming platform snapshot
+      ansible.windows.win_powershell:
+        parameters:
+          PowerSchemes: "{{ windows_gaming_power_schemes | default([]) }}"
+        script: |
+          [CmdletBinding()]
+          param(
+              [object[]]$PowerSchemes
+          )
+
+          $ErrorActionPreference = "Stop"
+
+          function Get-RegistryValue {
+              param(
+                  [string]$Path,
+                  [string]$Name
+              )
+
+              try {
+                  $item = Get-ItemProperty -LiteralPath $Path -Name $Name -ErrorAction Stop
+                  return $item.$Name
+              } catch {
+                  return $null
+              }
+          }
+
+          function Get-SoftwareEntries {
+              $roots = @(
+                  "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall",
+                  "HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall"
+              )
+
+              foreach ($root in $roots) {
+                  if (-not (Test-Path -LiteralPath $root)) {
+                      continue
+                  }
+
+                  Get-ChildItem -LiteralPath $root -ErrorAction SilentlyContinue |
+                      ForEach-Object {
+                          Get-ItemProperty -LiteralPath $_.PSPath -ErrorAction SilentlyContinue
+                      } |
+                      Where-Object {
+                          $_.DisplayName -and
+                          ($_.DisplayName -match "AMD|Ryzen|NVIDIA|OBS Studio|Epic Games Launcher|RivaTuner|MSI Center|SteelSeries")
+                      } |
+                      Select-Object DisplayName, DisplayVersion, Publisher, InstallDate
+              }
+          }
+
+          function Get-MsiModeRows {
+              $candidateDevices = Get-PnpDevice -PresentOnly -ErrorAction SilentlyContinue |
+                  Where-Object {
+                      $_.InstanceId -like "PCI\*" -and
+                      (
+                          $_.Class -in @("Display", "Net", "SCSIAdapter", "HDC", "System") -or
+                          $_.FriendlyName -match "NVIDIA|Ethernet|NVMe|NVM Express|USB xHCI|High Definition Audio"
+                      )
+                  } |
+                  Sort-Object Class, FriendlyName |
+                  Select-Object -First 60
+
+              foreach ($device in $candidateDevices) {
+                  $registryPath = "HKLM:\SYSTEM\CurrentControlSet\Enum\$($device.InstanceId)\Device Parameters\Interrupt Management\MessageSignaledInterruptProperties"
+                  $msiSupported = Get-RegistryValue -Path $registryPath -Name "MSISupported"
+                  $messageNumberLimit = Get-RegistryValue -Path $registryPath -Name "MessageNumberLimit"
+
+                  [pscustomobject]@{
+                      Class = $device.Class
+                      FriendlyName = $device.FriendlyName
+                      InstanceId = $device.InstanceId
+                      MsiSupported = $msiSupported
+                      MessageNumberLimit = $messageNumberLimit
+                  }
+              }
+          }
+
+          function Get-ImageMitigationRows {
+              $imageNames = @(
+                  "FortniteClient-Win64-Shipping.exe",
+                  "FortniteClient-Win64-Shipping_EAC_EOS.exe",
+                  "FortniteLauncher.exe",
+                  "obs64.exe"
+              )
+
+              foreach ($imageName in $imageNames) {
+                  $path = "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Image File Execution Options\$imageName"
+                  [pscustomobject]@{
+                      ImageName = $imageName
+                      MitigationOptions = Get-RegistryValue -Path $path -Name "MitigationOptions"
+                      MitigationAuditOptions = Get-RegistryValue -Path $path -Name "MitigationAuditOptions"
+                  }
+              }
+          }
+
+          function Get-NvidiaSmiRows {
+              $nvidiaSmi = "C:\Windows\System32\nvidia-smi.exe"
+              if (-not (Test-Path -LiteralPath $nvidiaSmi)) {
+                  return @()
+              }
+
+              $query = "name,driver_version,memory.total,pstate,pcie.link.gen.current,pcie.link.gen.max,pcie.link.width.current,pcie.link.width.max,power.limit,power.default_limit,clocks.max.graphics,clocks.max.memory"
+              try {
+                  & $nvidiaSmi "--query-gpu=$query" "--format=csv,noheader,nounits" 2>$null |
+                      ForEach-Object {
+                          $parts = @([string]$_ -split ",\s*")
+                          [pscustomobject]@{
+                              Name = $parts[0]
+                              DriverVersion = $parts[1]
+                              MemoryTotalMiB = $parts[2]
+                              PState = $parts[3]
+                              PcieLinkGenCurrent = $parts[4]
+                              PcieLinkGenMax = $parts[5]
+                              PcieLinkWidthCurrent = $parts[6]
+                              PcieLinkWidthMax = $parts[7]
+                              PowerLimitW = $parts[8]
+                              DefaultPowerLimitW = $parts[9]
+                              MaxGraphicsClockMHz = $parts[10]
+                              MaxMemoryClockMHz = $parts[11]
+                          }
+                      }
+              } catch {
+                  [pscustomobject]@{
+                      Error = $_.Exception.Message
+                  }
+              }
+          }
+
+          function Get-ActivePowerScheme {
+              $line = powercfg.exe /getactivescheme 2>$null | Select-Object -First 1
+              if ($line -match "Power Scheme GUID:\s+([0-9a-fA-F-]{36})\s+\((.*?)\)") {
+                  return [pscustomobject]@{
+                      Guid = $matches[1].ToLowerInvariant()
+                      Name = $matches[2]
+                  }
+              }
+
+              return $null
+          }
+
+          function Get-PowerSettingValue {
+              param(
+                  [string]$SchemeGuid,
+                  [string]$SubgroupGuid,
+                  [string]$SettingGuid,
+                  [string]$Kind
+              )
+
+              $raw = powercfg.exe /qh $SchemeGuid $SubgroupGuid $SettingGuid 2>$null
+              $pattern = "Current $Kind Power Setting Index:\s+(0x[0-9a-fA-F]+)"
+              foreach ($line in $raw) {
+                  if ($line -match $pattern) {
+                      return [convert]::ToInt64($matches[1], 16)
+                  }
+              }
+
+              return $null
+          }
+
+          function Get-PowerPlanSnapshot {
+              param([object[]]$Schemes)
+
+              $processorSubgroup = "54533251-82be-4824-96c1-47b60b740d00"
+              $processorSettings = @(
+                  [pscustomobject]@{ Name = "Minimum processor state"; Guid = "893dee8e-2bef-41e0-89c6-b55d0929964c" }
+                  [pscustomobject]@{ Name = "Maximum processor state"; Guid = "bc5038f7-23e0-4960-96da-33abaf5935ec" }
+                  [pscustomobject]@{ Name = "Processor performance boost mode"; Guid = "be337238-0d82-4146-a960-4f3749d470c7" }
+                  [pscustomobject]@{ Name = "Processor energy performance preference policy"; Guid = "36687f9e-e3a5-4dbf-b1dc-15eb381c6863" }
+                  [pscustomobject]@{ Name = "Processor performance core parking min cores"; Guid = "0cc5b647-c1df-4637-891a-dec35c318583" }
+                  [pscustomobject]@{ Name = "Processor performance core parking max cores"; Guid = "ea062031-0e34-4ff1-9b6d-eb1059334028" }
+                  [pscustomobject]@{ Name = "Processor performance increase threshold"; Guid = "06cadf0e-64ed-448a-8927-ce7bf90eb35d" }
+                  [pscustomobject]@{ Name = "Processor performance decrease threshold"; Guid = "12a0ab44-fe28-4fa9-b3bd-4b64f44960a6" }
+                  [pscustomobject]@{ Name = "Processor performance time check interval"; Guid = "4d2b0152-7d5c-498b-88e2-34345392a2c5" }
+                  [pscustomobject]@{ Name = "Latency sensitivity hint processor performance"; Guid = "619b7505-003b-4e82-b7a6-4dd29c300971" }
+                  [pscustomobject]@{ Name = "Latency sensitivity hint processor energy performance preference"; Guid = "4b70f900-cdd9-4e66-aa26-ae8417f98173" }
+              )
+
+              $activeScheme = Get-ActivePowerScheme
+              $schemeRows = foreach ($scheme in $Schemes) {
+                  $schemeGuid = [string]$scheme.guid
+                  if (-not $schemeGuid) {
+                      continue
+                  }
+
+                  [pscustomobject]@{
+                      Name = [string]$scheme.name
+                      Guid = $schemeGuid.ToLowerInvariant()
+                      Active = $activeScheme -and ($activeScheme.Guid -eq $schemeGuid.ToLowerInvariant())
+                      ProcessorSettings = @(
+                          foreach ($setting in $processorSettings) {
+                              [pscustomobject]@{
+                                  Name = $setting.Name
+                                  AcValue = Get-PowerSettingValue -SchemeGuid $schemeGuid -SubgroupGuid $processorSubgroup -SettingGuid $setting.Guid -Kind "AC"
+                                  DcValue = Get-PowerSettingValue -SchemeGuid $schemeGuid -SubgroupGuid $processorSubgroup -SettingGuid $setting.Guid -Kind "DC"
+                              }
+                          }
+                      )
+                  }
+              }
+
+              [pscustomobject]@{
+                  ActiveScheme = $activeScheme
+                  ConfiguredSchemes = @($schemeRows)
+              }
+          }
+
+          function Get-IniKeyRows {
+              param(
+                  [string]$Path,
+                  [string[]]$Keys
+              )
+
+              if (-not (Test-Path -LiteralPath $Path)) {
+                  return [pscustomobject]@{
+                      Path = $Path
+                      Exists = $false
+                      Values = @()
+                  }
+              }
+
+              $keyPattern = "^\s*({0})\s*=(.*)$" -f (($Keys | ForEach-Object { [regex]::Escape($_) }) -join "|")
+              $values = @(
+                  Get-Content -LiteralPath $Path -ErrorAction Stop |
+                      Where-Object { $_ -match $keyPattern } |
+                      ForEach-Object {
+                          [pscustomobject]@{
+                              Key = $matches[1]
+                              Value = $matches[2].Trim()
+                          }
+                      }
+              )
+
+              [pscustomobject]@{
+                  Path = $Path
+                  Exists = $true
+                  Values = $values
+              }
+          }
+
+          $deviceGuard = Get-CimInstance -Namespace "root\Microsoft\Windows\DeviceGuard" -ClassName Win32_DeviceGuard -ErrorAction SilentlyContinue
+          $bcdCurrent = (& bcdedit.exe /enum "{current}" 2>$null) -join "`n"
+          $computerSystem = Get-CimInstance Win32_ComputerSystem
+
+          $snapshot = [pscustomobject]@{
+              Timestamp = (Get-Date).ToString("o")
+              Computer = $computerSystem |
+                  Select-Object Manufacturer, Model, NumberOfProcessors, NumberOfLogicalProcessors, TotalPhysicalMemory, AutomaticManagedPagefile
+              Cpu = Get-CimInstance Win32_Processor |
+                  Select-Object Name, NumberOfCores, NumberOfLogicalProcessors, MaxClockSpeed, L2CacheSize, L3CacheSize, VirtualizationFirmwareEnabled
+              BaseBoard = Get-CimInstance Win32_BaseBoard |
+                  Select-Object Manufacturer, Product, Version, SerialNumber
+              Bios = Get-CimInstance Win32_BIOS |
+                  Select-Object Manufacturer, SMBIOSBIOSVersion, ReleaseDate
+              Os = Get-CimInstance Win32_OperatingSystem |
+                  Select-Object Caption, Version, BuildNumber, LastBootUpTime
+              MemoryModules = @(Get-CimInstance Win32_PhysicalMemory |
+                  Select-Object BankLabel, DeviceLocator, Manufacturer, PartNumber, Capacity, Speed, ConfiguredClockSpeed)
+              VideoControllers = @(Get-CimInstance Win32_VideoController |
+                  Select-Object Name, DriverVersion, DriverDate, AdapterRAM, CurrentHorizontalResolution, CurrentVerticalResolution, CurrentRefreshRate)
+              LogicalDisks = @(Get-CimInstance Win32_LogicalDisk -Filter "DriveType=3" |
+                  Where-Object { $_.DeviceID -in @("C:", "Z:") } |
+                  Select-Object DeviceID, VolumeName, FileSystem, Size, FreeSpace)
+              PageFiles = [pscustomobject]@{
+                  AutomaticManagedPagefile = $computerSystem.AutomaticManagedPagefile
+                  RegistryPagingFiles = Get-RegistryValue -Path "HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager\Memory Management" -Name "PagingFiles"
+                  Settings = @(Get-CimInstance Win32_PageFileSetting -ErrorAction SilentlyContinue |
+                      Select-Object Name, InitialSize, MaximumSize)
+                  Usage = @(Get-CimInstance Win32_PageFileUsage -ErrorAction SilentlyContinue |
+                      Select-Object Name, AllocatedBaseSize, CurrentUsage, PeakUsage)
+              }
+              NvidiaSmi = @(Get-NvidiaSmiRows)
+              InstalledSoftware = @(Get-SoftwareEntries | Sort-Object DisplayName -Unique)
+              DeviceGuard = if ($deviceGuard) {
+                  $deviceGuard | Select-Object SecurityServicesConfigured, SecurityServicesRunning, VirtualizationBasedSecurityStatus, RequiredSecurityProperties, AvailableSecurityProperties
+              } else {
+                  $null
+              }
+              BcdCurrentInterestingLines = @($bcdCurrent -split "`n" | Where-Object { $_ -match "useplatformclock|disabledynamictick|tscsyncpolicy|hypervisorlaunchtype|nx|pae" })
+              PowerPlans = Get-PowerPlanSnapshot -Schemes $PowerSchemes
+              Registry = [pscustomobject]@{
+                  HwSchMode = Get-RegistryValue -Path "HKLM:\SYSTEM\CurrentControlSet\Control\GraphicsDrivers" -Name "HwSchMode"
+                  OverlayTestMode = Get-RegistryValue -Path "HKLM:\SOFTWARE\Microsoft\Windows\Dwm" -Name "OverlayTestMode"
+                  Win32PrioritySeparation = Get-RegistryValue -Path "HKLM:\SYSTEM\CurrentControlSet\Control\PriorityControl" -Name "Win32PrioritySeparation"
+                  SystemResponsiveness = Get-RegistryValue -Path "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile" -Name "SystemResponsiveness"
+                  NetworkThrottlingIndex = Get-RegistryValue -Path "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile" -Name "NetworkThrottlingIndex"
+                  GameDvrAppCaptureEnabled = Get-RegistryValue -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\GameDVR" -Name "AppCaptureEnabled"
+                  GameDvrHistoricalCaptureEnabled = Get-RegistryValue -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\GameDVR" -Name "HistoricalCaptureEnabled"
+                  GameConfigStoreGameDvrEnabled = Get-RegistryValue -Path "HKCU:\System\GameConfigStore" -Name "GameDVR_Enabled"
+                  FortniteGpuPreference = Get-RegistryValue -Path "HKCU:\Software\Microsoft\DirectX\UserGpuPreferences" -Name "Z:\Epic Games\Fortnite\FortniteGame\Binaries\Win64\FortniteClient-Win64-Shipping.exe"
+                  ObsGpuPreference = Get-RegistryValue -Path "HKCU:\Software\Microsoft\DirectX\UserGpuPreferences" -Name "C:\Program Files\obs-studio\bin\64bit\obs64.exe"
+              }
+              MmcssGamesTask = [pscustomobject]@{
+                  Affinity = Get-RegistryValue -Path "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile\Tasks\Games" -Name "Affinity"
+                  BackgroundOnly = Get-RegistryValue -Path "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile\Tasks\Games" -Name "Background Only"
+                  BackgroundPriority = Get-RegistryValue -Path "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile\Tasks\Games" -Name "BackgroundPriority"
+                  GpuPriority = Get-RegistryValue -Path "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile\Tasks\Games" -Name "GPU Priority"
+                  Priority = Get-RegistryValue -Path "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile\Tasks\Games" -Name "Priority"
+                  SchedulingCategory = Get-RegistryValue -Path "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile\Tasks\Games" -Name "Scheduling Category"
+                  SfioPriority = Get-RegistryValue -Path "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile\Tasks\Games" -Name "SFIO Priority"
+              }
+              FortniteGameUserSettings = Get-IniKeyRows `
+                  -Path "C:\Users\jn\AppData\Local\FortniteGame\Saved\Config\WindowsClient\GameUserSettings.ini" `
+                  -Keys @(
+                      "bUseVSync",
+                      "FrameRateLimit",
+                      "FullscreenMode",
+                      "LastConfirmedFullscreenMode",
+                      "PreferredFullscreenMode",
+                      "ResolutionSizeX",
+                      "ResolutionSizeY",
+                      "LastUserConfirmedResolutionSizeX",
+                      "LastUserConfirmedResolutionSizeY",
+                      "PreferredRHI",
+                      "bShowGrass",
+                      "bMotionBlur",
+                      "bUseDynamicResolution",
+                      "sg.ViewDistanceQuality",
+                      "sg.AntiAliasingQuality",
+                      "sg.ShadowQuality",
+                      "sg.GlobalIlluminationQuality",
+                      "sg.ReflectionQuality",
+                      "sg.TextureQuality",
+                      "sg.EffectsQuality",
+                      "sg.PostProcessQuality"
+                  )
+              ImageMitigations = @(Get-ImageMitigationRows)
+              MsiModeCandidates = @(Get-MsiModeRows)
+          }
+
+          $snapshot | ConvertTo-Json -Depth 8
+      register: windows_gaming_platform_snapshot
+      changed_when: false
+      when: windows_gaming_benchmark_collect_platform_snapshot | default(false) | bool
+
+    - name: Show Windows gaming platform snapshot
+      ansible.builtin.debug:
+        msg: "{{ windows_gaming_platform_snapshot.output[0] | from_json }}"
+      when: windows_gaming_benchmark_collect_platform_snapshot | default(false) | bool
+
+    - name: Collect Windows gaming config snapshot
+      ansible.windows.win_powershell:
+        script: |
+          [CmdletBinding()]
+          param()
+
+          $ErrorActionPreference = "Stop"
+          $path = "C:\Users\jn\AppData\Local\FortniteGame\Saved\Config\WindowsClient\GameUserSettings.ini"
+          $keys = @(
+              "bUseVSync",
+              "FrameRateLimit",
+              "FullscreenMode",
+              "LastConfirmedFullscreenMode",
+              "PreferredFullscreenMode",
+              "ResolutionSizeX",
+              "ResolutionSizeY",
+              "LastUserConfirmedResolutionSizeX",
+              "LastUserConfirmedResolutionSizeY",
+              "PreferredRHI",
+              "bShowGrass",
+              "bMotionBlur",
+              "bUseDynamicResolution",
+              "sg.ViewDistanceQuality",
+              "sg.AntiAliasingQuality",
+              "sg.ShadowQuality",
+              "sg.GlobalIlluminationQuality",
+              "sg.ReflectionQuality",
+              "sg.TextureQuality",
+              "sg.EffectsQuality",
+              "sg.PostProcessQuality"
+          )
+
+          $values = [ordered]@{}
+          if (Test-Path -LiteralPath $path) {
+              foreach ($line in (Get-Content -LiteralPath $path)) {
+                  if ($line -match "^\s*([^=]+)\s*=(.*)$" -and $keys -contains $matches[1]) {
+                      $values[$matches[1]] = $matches[2].Trim()
+                  }
+              }
+          }
+
+          $epicManifests = @()
+          $manifestRoot = "C:\ProgramData\Epic\EpicGamesLauncher\Data\Manifests"
+          if (Test-Path -LiteralPath $manifestRoot) {
+              $epicManifests = @(
+                  Get-ChildItem -LiteralPath $manifestRoot -Filter "*.item" -File -ErrorAction SilentlyContinue |
+                      ForEach-Object {
+                          try {
+                              Get-Content -LiteralPath $_.FullName -Raw | ConvertFrom-Json
+                          } catch {
+                              $null
+                          }
+                      } |
+                      Where-Object {
+                          $_ -and (
+                              $_.DisplayName -like "*Fortnite*" -or
+                              $_.AppName -like "*Fortnite*" -or
+                              $_.MainGameAppName -like "*Fortnite*"
+                          )
+                      } |
+                      Select-Object DisplayName, AppName, MainGameAppName, InstallLocation, InstallSize, LaunchExecutable, InstallTags
+              )
+          }
+
+          $fortniteInstallLocation = @($epicManifests | Where-Object { $_.InstallLocation } | Select-Object -First 1 -ExpandProperty InstallLocation)
+          if (-not $fortniteInstallLocation) {
+              $fortniteInstallLocation = "Z:\Epic Games\Fortnite"
+          }
+
+          $paksPath = Join-Path $fortniteInstallLocation "FortniteGame\Content\Paks"
+          $optionalPaks = @()
+          if (Test-Path -LiteralPath $paksPath) {
+              $optionalPaks = @(
+                  Get-ChildItem -LiteralPath $paksPath -File -ErrorAction SilentlyContinue |
+                      Where-Object { $_.Name -match "optional" }
+              )
+          }
+
+          [pscustomobject]@{
+              Timestamp = (Get-Date).ToString("o")
+              FortniteGameUserSettings = [pscustomobject]@{
+                  Path = $path
+                  Exists = Test-Path -LiteralPath $path
+                  Values = $values
+              }
+              EpicFortniteInstall = [pscustomobject]@{
+                  ManifestRoot = $manifestRoot
+                  Manifests = $epicManifests
+                  InstallLocation = $fortniteInstallLocation
+                  PaksPath = $paksPath
+                  OptionalPakCount = @($optionalPaks).Count
+                  OptionalPakBytes = [int64](@($optionalPaks) | Measure-Object -Property Length -Sum).Sum
+                  LargestOptionalPaks = @($optionalPaks |
+                      Sort-Object Length -Descending |
+                      Select-Object -First 20 Name, Length)
+              }
+              PageFiles = [pscustomobject]@{
+                  AutomaticManagedPagefile = (Get-CimInstance Win32_ComputerSystem).AutomaticManagedPagefile
+                  Usage = @(Get-CimInstance Win32_PageFileUsage -ErrorAction SilentlyContinue |
+                      Select-Object Name, AllocatedBaseSize, CurrentUsage, PeakUsage)
+              }
+          } | ConvertTo-Json -Depth 6
+      register: windows_gaming_config_snapshot
+      changed_when: false
+      when: windows_gaming_benchmark_collect_config_snapshot | default(false) | bool
+
+    - name: Show Windows gaming config snapshot
+      ansible.builtin.debug:
+        msg: "{{ windows_gaming_config_snapshot.output[0] | from_json }}"
+      when: windows_gaming_benchmark_collect_config_snapshot | default(false) | bool

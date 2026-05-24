@@ -1,0 +1,77 @@
+---
+# lj-gaming-pc - Windows gaming power plan settings
+
+windows_gaming_power_schemes:
+  - name: AMD Ryzen Balanced
+    guid: 9897998c-92de-4669-853f-b7cd3ecb2790
+  - name: AMD Ryzen High Performance
+    guid: 9935e61f-1661-40c5-ae2f-8495027d5d5d
+windows_gaming_active_power_scheme_name: AMD Ryzen High Performance
+windows_gaming_active_power_scheme_guid: 9935e61f-1661-40c5-ae2f-8495027d5d5d
+
+windows_gaming_power_settings:
+  - name: Start menu power button
+    subgroup_guid: 4f971e89-eebd-4455-a8de-9e59040e7347
+    setting_guid: a7066653-8d6c-40a8-910e-a1f54b84c7e5
+    ac_value: 0
+    dc_value: 0
+  - name: Turn off display after
+    subgroup_guid: 7516b95f-f776-4464-8c53-06167f40cc99
+    setting_guid: 3c0bc021-c8a8-4e07-a973-6b14cbcb2b7e
+    ac_value: 900
+    dc_value: 180
+  - name: Display brightness
+    subgroup_guid: 7516b95f-f776-4464-8c53-06167f40cc99
+    setting_guid: aded5e82-b909-4619-9949-f5d71dac0bcb
+    ac_value: 75
+    dc_value: 75
+  - name: Dimmed display brightness
+    subgroup_guid: 7516b95f-f776-4464-8c53-06167f40cc99
+    setting_guid: f1fbfde2-a960-4165-9f88-50667911ce96
+    ac_value: 50
+    dc_value: 50
+  - name: Enable adaptive brightness
+    subgroup_guid: 7516b95f-f776-4464-8c53-06167f40cc99
+    setting_guid: fbd9aa66-9553-4097-ba44-ed6e9d65eab8
+    ac_value: 0
+    dc_value: 0
+  - name: Sleep after
+    subgroup_guid: 238c9fa8-0aad-41ed-83f4-97be242c8f20
+    setting_guid: 29f6c1db-86da-48c5-9fdb-f2b67b1f44da
+    ac_value: 0
+    dc_value: 600
+  - name: Allow hybrid sleep
+    subgroup_guid: 238c9fa8-0aad-41ed-83f4-97be242c8f20
+    setting_guid: 94ac6d29-73ce-41a6-809f-6363ba21b47e
+    ac_value: 1
+    dc_value: 1
+  - name: Hibernate after
+    subgroup_guid: 238c9fa8-0aad-41ed-83f4-97be242c8f20
+    setting_guid: 9d7815a6-7ee4-497e-8888-515a05f02364
+    ac_value: 0
+    dc_value: 0
+  - name: Allow wake timers
+    subgroup_guid: 238c9fa8-0aad-41ed-83f4-97be242c8f20
+    setting_guid: bd3b718a-0680-4d9d-8ab2-e1d2b4ac806d
+    ac_value: 1
+    dc_value: 1
+  - name: Latency sensitivity hint processor performance
+    subgroup_guid: 54533251-82be-4824-96c1-47b60b740d00
+    setting_guid: 619b7505-003b-4e82-b7a6-4dd29c300971
+    ac_value: 100
+    dc_value: 100
+  - name: Latency sensitivity hint processor energy performance preference
+    subgroup_guid: 54533251-82be-4824-96c1-47b60b740d00
+    setting_guid: 4b70f900-cdd9-4e66-aa26-ae8417f98173
+    ac_value: 0
+    dc_value: 0
+  - name: USB selective suspend
+    subgroup_guid: 2a737441-1930-4402-8d77-b2bebba308a3
+    setting_guid: 48e6b7a6-50f5-4782-a5d4-53bb8f07e226
+    ac_value: 0
+    dc_value: 0
+  - name: USB 3 link power management
+    subgroup_guid: 2a737441-1930-4402-8d77-b2bebba308a3
+    setting_guid: d4e98f31-5ffe-4ce1-be31-1b38b384c009
+    ac_value: 0
+    dc_value: 0

@@ -1,0 +1,14 @@
+---
+# lj-gaming-pc - Windows SSH/Ansible connection variables
+
+ansible_connection: ssh
+ansible_shell_type: powershell
+ansible_control_path: none
+ansible_ssh_args: "-F /dev/null -o ServerAliveInterval=15 -o ServerAliveCountMax=2 -o ControlMaster=no -o ControlPersist=no"
+ansible_ssh_common_args: "-o StrictHostKeyChecking=no"
+
+# Keep Windows OpenSSH reachable only from the active Ansible controller over Tailscale.
+windows_openssh_firewall_remote_addresses:
+  - 100.73.46.86
+windows_openssh_legacy_recovery_dirs:
+  - 'C:\Users\jn\Nextcloud\Scripts\WindowsSSHRecovery'

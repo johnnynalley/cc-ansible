@@ -1,0 +1,100 @@
+# Ansible managed
+$ErrorActionPreference = "Stop"
+
+$DesiredEnabled = {{ '$true' if item.lighting_enabled else '$false' }}
+$CloseAfterAction = {{ '$true' if item.close_after_action | default(signalrgb_close_after_action) | bool else '$false' }}
+$LaunchTimeoutSeconds = {{ signalrgb_launch_timeout_seconds | int }}
+$PostApplySettleSeconds = {{ signalrgb_post_apply_settle_seconds | int }}
+$ApiBase = "http://127.0.0.1:16038/api/v1"
+$LogPath = Join-Path $env:TEMP "signalrgb-lock-unlock.log"
+$LauncherPath = Join-Path $env:LOCALAPPDATA "VortxEngine\SignalRgbLauncher.exe"
+$ProcessPriority = "{{ signalrgb_process_priority }}"
+$StartupRunPath = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Run"
+
+function Write-SignalRgbLog {
+    param([string]$Message)
+    Add-Content -Path $LogPath -Value "$(Get-Date -Format s) $Message"
+}
+
+function Test-SignalRgbApi {
+    try {
+        Invoke-RestMethod -Method Get -Uri "$ApiBase/lighting" -TimeoutSec 2 | Out-Null
+        return $true
+    } catch {
+        return $false
+    }
+}
+
+function Set-SignalRgbPriority {
+    Get-Process SignalRgb,SignalRgbLauncher -ErrorAction SilentlyContinue | ForEach-Object {
+        try {
+            $_.PriorityClass = $ProcessPriority
+        } catch {
+            Write-SignalRgbLog "Priority update failed for $($_.ProcessName)[$($_.Id)]: $($_.Exception.Message)"
+        }
+    }
+}
+
+function Disable-SignalRgbStartup {
+    Remove-ItemProperty -Path $StartupRunPath -Name "SignalRgb" -ErrorAction SilentlyContinue
+}
+
+function Start-OpenSshRecovery {
+    try {
+        sc.exe config sshd start= delayed-auto | Out-Null
+        Start-Service -Name sshd -ErrorAction SilentlyContinue
+    } catch {
+        Write-SignalRgbLog "OpenSSH recovery failed: $($_.Exception.Message)"
+    }
+}
+
+try {
+    Start-OpenSshRecovery
+    Disable-SignalRgbStartup
+    Set-SignalRgbPriority
+
+    if (-not (Test-SignalRgbApi)) {
+        if (-not (Test-Path -LiteralPath $LauncherPath)) {
+            throw "SignalRGB launcher was not found at $LauncherPath"
+        }
+
+        Start-Process -FilePath $LauncherPath -ArgumentList "--silent" -WindowStyle Hidden
+
+        $deadline = (Get-Date).AddSeconds($LaunchTimeoutSeconds)
+        while ((Get-Date) -lt $deadline) {
+            Start-Sleep -Milliseconds 500
+            if (Test-SignalRgbApi) {
+                break
+            }
+        }
+
+        if (-not (Test-SignalRgbApi)) {
+            throw "SignalRGB API did not become available within $LaunchTimeoutSeconds seconds"
+        }
+
+        Set-SignalRgbPriority
+        Disable-SignalRgbStartup
+    }
+
+    Start-Sleep -Seconds 2
+
+    Invoke-RestMethod `
+        -Method Patch `
+        -Uri "$ApiBase/lighting/enabled" `
+        -ContentType "application/json" `
+        -Body (@{ enabled = $DesiredEnabled } | ConvertTo-Json -Compress) `
+        -TimeoutSec 5 | Out-Null
+
+    Set-SignalRgbPriority
+    Disable-SignalRgbStartup
+
+    if ($CloseAfterAction) {
+        Start-Sleep -Seconds $PostApplySettleSeconds
+        Get-Process SignalRgb,SignalRgbLauncher -ErrorAction SilentlyContinue |
+            Stop-Process -Force -ErrorAction SilentlyContinue
+    }
+} catch {
+    $state = if ($DesiredEnabled) { "ON" } else { "OFF" }
+    Write-SignalRgbLog "$state failed: $($_.Exception.Message)"
+    exit 1
+}

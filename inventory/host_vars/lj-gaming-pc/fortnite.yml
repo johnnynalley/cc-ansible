@@ -1,0 +1,12 @@
+---
+# lj-gaming-pc - Fortnite-specific performance settings
+
+windows_gaming_ini_files:
+  - path: 'C:\Users\jn\AppData\Local\FortniteGame\Saved\Config\WindowsClient\GameUserSettings.ini'
+    settings:
+      - key: bShowGrass
+        value: "False"
+      - key: bUseDynamicResolution
+        value: "False"
+      - key: sg.ViewDistanceQuality
+        value: "1"

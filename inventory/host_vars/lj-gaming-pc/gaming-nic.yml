@@ -1,0 +1,15 @@
+---
+# lj-gaming-pc - gaming NIC latency tuning
+
+windows_gaming_nic_name: Ethernet
+windows_gaming_nic_advanced_properties:
+  - display_name: Energy-Efficient Ethernet
+    display_value: Disabled
+  - display_name: Green Ethernet
+    display_value: Disabled
+  - display_name: Gigabit Lite
+    display_value: Disabled
+  - display_name: Power Saving Mode
+    display_value: Disabled
+  - display_name: Interrupt Moderation
+    display_value: Disabled

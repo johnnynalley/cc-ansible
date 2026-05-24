@@ -83,17 +83,46 @@ Do not manually delete paks. Use Epic Games Launcher options for this setting.
 
 ## Current Best Candidates
 
-1. Fortnite priority A/B, with no affinity change:
+> Updated 2026-05-24 after Astra/Vega/Antares review. Treat this as a benchmark queue, not applied wins. The goal is to preserve modern-Fortnite-valid paths for holding as close to 200 FPS as possible on the current Ryzen 9 3900X system while waiting on a possible AM4 X3D upgrade.
+
+1. OBS capture-pipeline A/B, before more BIOS work:
+   - the biggest measured delta is non-OBS gameplay around 151 FPS vs OBS recording around 99-102 FPS
+   - OBS process CPU was only about 4%, so the likely overhead is capture hook / compositor / preview / scene path rather than x264-style CPU encoding
+   - first tests: Game Capture vs Display Capture vs Window Capture, then preview enabled vs disabled
+   - then test stripped scene vs normal scene, overlays/browser sources disabled, OBS admin vs normal, OBS priority normal vs above-normal, and NVENC options
+2. VBS/HVCI diagnostic A/B if Johnny approves the reversible security tradeoff:
+   - VBS/HVCI is still a plausible Windows 11 tax on Zen 2 CPU-bound gaming
+   - document current `msinfo32` / Core Isolation state before changing anything
+   - if disabled for a test, reboot, run the same capture, and re-enable if there is no meaningful win
+3. Render-mode sanity checks, not a likely FPS unlock:
+   - do not expect DX12 to beat Performance Mode for raw average FPS on this CPU-limited setup
+   - DX11 or any legacy DX11 Performance path may be worth identifying only if it is still exposed/supported, but it is not expected to beat current Performance Mode for CPU frame time
+   - keep render-mode tests as frame-pacing/stutter/OBS-interaction sanity checks, not likely 200 FPS paths
+   - compare current Performance Mode against DX12 all-low/competitive only after multiple shader warm-up matches; if DX11 is still selectable, benchmark it separately
+   - compare average FPS, 1%/0.1% lows, CPU Busy, GPU Busy, stutter markers, and input feel
+4. HAGS A/B if the user approves another reboot-level graphics test:
+   - current managed state disables HAGS with `HwSchMode=1`
+   - Epic's FPS guide recommends enabling HAGS when available
+   - test HAGS with MPO still disabled first, and do not combine with render-mode changes in the same run
+5. NVIDIA driver/profile sanity:
+   - record the current NVIDIA driver version in this document before more A/B tests
+   - if captures regress after a driver update, consider a clean install or known-stable driver branch as a measured test
+   - this is a sanity check, not a magic tweak
+6. Fortnite priority A/B remains low-risk but is now behind OBS/VBS/render-mode/HAGS tests:
    - run the same Fortnite + OBS recording/streaming workload with `--priority High`
    - compare against the 2026-05-23 OBS recording captures below
    - do not bake priority into Performance Mode unless it wins clearly
-2. HAGS A/B if the user approves another reboot-level graphics test:
-   - current managed state disables HAGS with `HwSchMode=1`
-   - Epic's FPS guide recommends enabling HAGS when available
-3. BIOS-side Ryzen/RAM tuning:
+7. BIOS-side Ryzen/RAM tuning:
    - PBO/scalar/AutoOC and memory/FCLK/timing work are more likely to move the single-thread ceiling than more background-app cleanup
-4. VBS/HVCI remains a possible security-performance tradeoff, but the user declined it for now.
-5. Affinity/CCD/CCX tests are not the immediate next recommendation. The current saved benchmark state files all show `AffinityPreset: none`; if affinity was tried earlier, there is no durable capture artifact in the harness. Only revisit with a controlled, documented A/B if the user explicitly wants that path.
+   - current DDR4-3200/FCLK1600 CL16 is already sane, so memory work is latency refinement, not fixing a broken config
+   - any BIOS/memory change needs stability testing before calling it a Fortnite win
+8. Affinity/CCD/CCX tests are not the immediate recommendation. The current saved benchmark state files all show `AffinityPreset: none`; if affinity was tried earlier, there is no durable capture artifact in the harness. Only revisit with a controlled, documented A/B if Johnny explicitly wants that path or telemetry shows cross-CCD/thread-migration cost.
+
+## Upgrade Watch
+
+Johnny's current plan is to hold the Ryzen 9 3900X until a possible AM4 X3D upgrade is available and affordable. Rumors as of 2026-05-24 say AMD may re-release the Ryzen 7 5800X3D as an AM4 10th Anniversary Edition around Q2 2026, with early retailer sightings around the low-$300 range. Treat this as a rumor until AMD or retail availability is confirmed.
+
+If the anniversary 5800X3D is unavailable, scalped, or overpriced, the practical fallback is a Ryzen 7 5700X3D or used 5800X3D. For Fortnite and other cache-sensitive games, 5700X3D/5800X3D are much better upgrade targets from a 3900X than a 5900X. A 5900X adds cores but does not solve the cache/game-thread limitation that the captures are pointing at.
 
 ## 2026-05-23 Match Capture: High-Res Textures Off
 
@@ -252,9 +281,89 @@ Current conclusion from all 2026-05-23 captures:
 
 The observed 100-150 FPS range is not caused by GPU saturation, disk latency, RAM pressure, OBS CPU load, or obvious background app pollution. The durable pattern is CPU-frame-time dominance with one hot Fortnite thread/logical processor near saturation.
 
-### 1. Priority A/B Test
+### 1. OBS Capture Pipeline A/B Test
 
-Reason: the captures show a hot Fortnite frame thread while OBS and background audio processes are modest. Raising Fortnite's process priority is low-risk and reversible.
+Reason: the captures show the largest practical gap when OBS is involved: non-OBS gameplay averaged about 151 FPS, while OBS recording captures averaged about 99-102 FPS. OBS process CPU was only about 4%, so the likely overhead is Game Capture hook / compositor / preview / scene path rather than the encoder process itself.
+
+First tests:
+
+- Game Capture vs Display Capture vs Window Capture.
+- OBS preview enabled vs disabled.
+- Normal scene vs stripped scene with overlays/browser sources disabled.
+- OBS normal vs admin.
+- OBS process priority normal vs above-normal.
+
+Use the same Fortnite route/mode and markers as the 2026-05-23 OBS captures. Do not combine with render-mode, HAGS, VBS, or BIOS changes in the same run.
+
+Success criteria:
+
+- CPU Busy moves materially back toward the non-OBS 6.31 ms result.
+- Average FPS improves meaningfully against the OBS recording captures.
+- p99/p99.9 frame time and frames over 16.67/25/33.33 ms do not regress.
+- OBS capture, recording/stream output, and audio remain stable.
+
+### 2. VBS/HVCI A/B Test
+
+Reason: VBS and HVCI are enabled and running. Disabling them can improve some CPU-bound gaming workloads, especially on Windows 11 systems where virtualization-based security is active. This is a reversible diagnostic test, not a default permanent recommendation.
+
+Cost:
+
+- Security tradeoff while disabled
+- Reboot required
+- User approval required before applying
+
+Test:
+
+1. Record the current VBS/Core Isolation state from `msinfo32` and Windows Security.
+2. Baseline benchmark with current state.
+3. Disable Memory Integrity / HVCI and VBS using the managed security-performance path.
+4. Reboot.
+5. Repeat the same Fortnite benchmark.
+6. Re-enable if the result is not meaningful enough to justify the security tradeoff.
+
+### 3. Render Mode A/B Test
+
+Reason: modern Fortnite is not guaranteed to have best frame pacing on Performance Mode, but Johnny is right that DX12 is unlikely to increase raw average FPS on a CPU-limited Ryzen 9 3900X setup. DX11 or a legacy DX11 Performance path, if still selectable, may have lower graphics-feature overhead but is not expected to beat current Performance Mode's stripped-down path for raw CPU frame time. Keep render-mode testing as a sanity check for 1% lows, stutter, and OBS/capture interaction, not as a likely path to 200 FPS. Shader compilation can make first-run DX12 results misleading.
+
+Test:
+
+1. Current Performance Mode baseline.
+2. Identify the currently exposed rendering options in Fortnite settings and/or GameUserSettings.ini.
+3. If DX11 is still selectable, benchmark it separately with the same route/mode and markers.
+4. Benchmark DX12 all-low/competitive with Nanite/Lumen/ray tracing off only after multiple shader warm-up matches.
+5. Compare average FPS, 1% lows, 0.1% lows, CPU Busy, GPU Busy, stutter markers, and subjective input feel.
+
+### 4. HAGS A/B Test
+
+Reason: Epic's current FPS troubleshooting page recommends enabling Hardware-accelerated GPU scheduling when available, but our current managed state disables it.
+
+Cost:
+
+- Registry change
+- Reboot required
+- Needs A/B benchmark before and after
+
+Test:
+
+1. Baseline benchmark with current `HwSchMode=1`.
+2. Set `HwSchMode=2` while keeping MPO disabled.
+3. Reboot.
+4. Repeat the same Fortnite benchmark.
+5. Compare average FPS, 1% lows, 0.1% lows, PresentMon CPU busy/wait/GPU busy, and stutter markers.
+
+### 5. NVIDIA Driver/Profile Sanity
+
+Reason: Fortnite can regress on specific driver branches, and the current driver version is not yet recorded in this document.
+
+Test:
+
+1. Record current NVIDIA driver version before further A/B testing.
+2. If results regress after a driver update, consider a clean install or known-stable branch as a measured test.
+3. Do not treat this as a magic optimization; it is hygiene and rollback context.
+
+### 6. Priority A/B Test
+
+Reason: the captures show a hot Fortnite frame thread while OBS and background audio processes are modest. Raising Fortnite's process priority is low-risk and reversible, but it is now lower priority than the OBS capture-pipeline, VBS, render-mode, and HAGS tests.
 
 Test:
 
@@ -270,27 +379,9 @@ Success criteria:
 - p99/p99.9 frame time and frames over 16.67/25/33.33 ms do not regress.
 - OBS remains stable and audio/capture remain clean.
 
-### 2. HAGS A/B Test
+### 7. Affinity A/B Test
 
-Reason: Epic's current FPS troubleshooting page recommends enabling Hardware-accelerated GPU scheduling when available, but our current managed state disables it.
-
-Cost:
-
-- Registry change
-- Reboot required
-- Needs A/B benchmark before and after
-
-Test:
-
-1. Baseline benchmark with current `HwSchMode=1`.
-2. Set `HwSchMode=2`.
-3. Reboot.
-4. Repeat the same Fortnite benchmark.
-5. Compare average FPS, 1% lows, 0.1% lows, PresentMon CPU busy/wait/GPU busy, and stutter markers.
-
-### 3. Affinity A/B Test
-
-Reason: Ryzen 9 3900X is a multi-CCD Zen 2 CPU. Fortnite may behave better when its heavy threads stay within one CCD/CCX instead of bouncing across CCDs.
+Reason: Ryzen 9 3900X is a multi-CCD Zen 2 CPU. Fortnite may behave better when its heavy threads stay within one CCD/CCX instead of bouncing across CCDs, but this remains low-confidence without telemetry showing migration cost.
 
 Existing benchmark presets:
 
@@ -311,19 +402,9 @@ Current evidence state:
 
 - Saved benchmark state files currently present on the gaming PC all show `AffinityPreset=none`.
 - If affinity was tried earlier, it was not preserved as a durable capture in the current harness.
-- Do not re-suggest affinity as the next obvious move unless the user explicitly wants a controlled affinity A/B.
+- Do not re-suggest affinity as the next obvious move unless the user explicitly wants a controlled affinity A/B or telemetry points to cross-CCD thread migration cost.
 
-### 4. VBS/HVCI A/B Test
-
-Reason: VBS and HVCI are enabled and running. Disabling them can improve some CPU-bound gaming workloads.
-
-Cost:
-
-- Security tradeoff
-- Reboot required
-- User has previously been hesitant, so do not apply without explicit approval.
-
-### 5. BIOS-Side Ryzen / RAM Tuning
+### 8. BIOS-Side Ryzen / RAM Tuning
 
 Potential:
 
@@ -340,6 +421,14 @@ Risk:
 
 ## Lower-Confidence Tweaks
 
+Do not prioritize the following without a specific benchmark hypothesis:
+
+- `-USEALLAVAILABLECORES`, `-threads`, or similar launch arguments. Fortnite already uses multiple threads where it can; the measured problem is frame-critical CPU work, not that Windows is hiding cores.
+- `msconfig` processor-count tweaks. Leaving this unset is the correct Windows default.
+- HPET/platform-clock/dynamic-tick timer hacks. BCDEdit already shows no obvious timer pollution, and these tweaks are usually stale cargo cult.
+- Manual Fortnite pak deletion. High-resolution textures were removed through Epic Games Launcher options and verified by disk state; do not hand-delete pak files.
+- ReBAR as a major fix. It may be a small free tweak, but the current bottleneck is CPU-frame-time, not GPU memory transfer.
+
 MMCSS `Games` task currently shows:
 
 - `Scheduling Category=Medium`
@@ -353,6 +442,12 @@ Microsoft documents `GPU Priority` and `SFIO Priority` as not used, and `High` s
 
 - Epic Fortnite FPS troubleshooting recommends HAGS, high-performance GPU preference, Delivery Optimization off, High Performance power, Game Mode on, and Xbox Game Bar off: https://www.epicgames.com/help/en-US/fortnite-battle-royale-c-202300000001636/technical-support-c-202300000001719/improve-low-fps-in-fortnite-on-pc-a202300000014026
 - Epic Performance Mode article documents removing high-resolution textures through Epic Launcher options: https://www.epicgames.com/help/en-US/c-Category_Fortnite/c-Fortnite_TechnicalSupport/how-do-i-change-graphic-performance-to-increase-frame-rate-fps-a000089646
+- Epic DX12 stutter support documents DirectX 12 shader-cache stutter and below-expected performance troubleshooting: https://www.epicgames.com/help/c-202300000001636/c-202300000001719/fortnite-stutters-heavily-and-has-below-expected-performance-on-directx-12-a202300000018050
+- NVIDIA's OBS broadcasting guide documents NVENC as the preferred NVIDIA GPU encoding path for OBS: https://www.nvidia.com/en-us/geforce/guides/broadcasting-guide/
+- OBS forum guidance and release notes discuss NVENC performance behavior and preview/capture overhead: https://obsproject.com/forum/threads/nvenc-performance-improvements-release-candidate.98950/
+- Tom's Hardware measured Windows 11 VBS/HVCI gaming overhead, including Ryzen 3000-class results: https://www.tomshardware.com/news/windows-11-gaming-benchmarks-performance-vbs-hvci-security
 - AMD Ryzen Master docs describe PBO, PBO Advanced, and Curve Optimizer behavior and limits: https://docs.amd.com/r/en-US/68886-ryzen-master-user-guide/CPU
 - AMD Ryzen Master product page notes overclocking/PBO warranty caveats: https://www.amd.com/en/products/software/ryzen-master.html
 - Microsoft MMCSS docs: https://learn.microsoft.com/en-us/windows/win32/procthread/multimedia-class-scheduler-service
+- TechPowerUp reports the rumored Ryzen 7 5800X3D AM4 10th Anniversary Edition; treat as rumor until AMD/retail confirmation: https://www.techpowerup.com/348272/amd-to-re-launch-ryzen-7-5800x3d-as-am4-10th-anniversary-edition
+- Tom's Hardware reports early retailer sightings of the rumored Ryzen 7 5800X3D AM4 10th Anniversary Edition around $310: https://www.tomshardware.com/pc-components/cpus/ryzen-7-5800x3d-am4-10th-anniversary-edition-surfaces-online-for-usd310-return-of-iconic-gaming-cpu-for-budget-builders-seems-imminent

@@ -1,0 +1,35 @@
+---
+- name: Probe Windows Ansible reachability
+  ansible.windows.win_ping:
+  delegate_to: "{{ item }}"
+  loop: "{{ groups[windows_reachable_source_group | default('windows_hosts')] | default([]) }}"
+  register: windows_reachable_probe
+  failed_when: false
+  changed_when: false
+  ignore_unreachable: true
+  check_mode: false
+  vars:
+    ansible_ssh_timeout: "{{ windows_reachable_timeout | default(15) }}"
+
+- name: Add reachable Windows hosts to dynamic target group
+  ansible.builtin.add_host:
+    name: "{{ item.item }}"
+    groups: "{{ windows_reachable_target_group }}"
+  loop: "{{ windows_reachable_probe.results | default([]) }}"
+  when:
+    - not (item.unreachable | default(false))
+    - not (item.failed | default(false))
+    - item.ping | default('') == 'pong'
+  changed_when: false
+  check_mode: false
+
+- name: Report skipped unreachable Windows hosts
+  ansible.builtin.debug:
+    msg: >-
+      Skipping {{ item.item }} for {{ windows_reachable_target_group }}:
+      Ansible Windows probe failed at {{ hostvars[item.item].ansible_host | default(item.item) }}.
+  loop: "{{ windows_reachable_probe.results | default([]) }}"
+  when: >-
+    (item.unreachable | default(false)) or
+    (item.failed | default(false)) or
+    (item.ping | default('')) != 'pong'

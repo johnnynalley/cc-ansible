@@ -1,0 +1,24 @@
+---
+# lj-gaming-pc - Xbox Game Bar and Game DVR capture controls
+
+windows_gaming_gamebar_registry_settings:
+  - name: Disable Game DVR app capture
+    path: HKCU:\Software\Microsoft\Windows\CurrentVersion\GameDVR
+    value_name: AppCaptureEnabled
+    type: dword
+    data: 0
+  - name: Disable Game DVR historical capture
+    path: HKCU:\Software\Microsoft\Windows\CurrentVersion\GameDVR
+    value_name: HistoricalCaptureEnabled
+    type: dword
+    data: 0
+  - name: Disable Game DVR in game config store
+    path: HKCU:\System\GameConfigStore
+    value_name: GameDVR_Enabled
+    type: dword
+    data: 0
+  - name: Disable Game DVR policy
+    path: HKLM:\SOFTWARE\Policies\Microsoft\Windows\GameDVR
+    value_name: AllowGameDVR
+    type: dword
+    data: 0

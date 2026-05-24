@@ -1,0 +1,1896 @@
+[CmdletBinding()]
+param(
+    [ValidateSet('Start', 'Stop', 'Status', 'Mark', 'Analyze', 'Preflight', 'SampleInteractive')]
+    [string]$Action = 'Status',
+    [string]$Label = 'game',
+    [string]$Marker = '',
+    [string]$CaptureDir = '',
+    [string]$SessionName = '{{ windows_gaming_benchmark_session_name }}',
+    [string]$AffinityPreset = 'none',
+    [string]$AffinityMask = '',
+    [string]$PowerPlan = 'current',
+    [ValidateSet('none', 'Idle', 'BelowNormal', 'Normal', 'AboveNormal', 'High')]
+    [string]$PriorityClass = 'none'
+)
+
+$ErrorActionPreference = 'Stop'
+
+$ScriptDir = '{{ windows_gaming_benchmark_script_dir }}'
+$StateDir = '{{ windows_gaming_benchmark_state_dir }}'
+$CaptureRoot = '{{ windows_gaming_benchmark_capture_dir }}'
+$TaskName = '{{ windows_gaming_benchmark_task_name }}'
+$TaskUser = '{{ windows_gaming_benchmark_task_user }}'
+$SampleIntervalSeconds = {{ windows_gaming_benchmark_sample_interval_seconds }}
+$ProcessIntervalSeconds = {{ windows_gaming_benchmark_process_interval_seconds | default(2) }}
+$SystemIntervalSeconds = {{ windows_gaming_benchmark_system_interval_seconds | default(2) }}
+$InventoryIntervalSeconds = {{ windows_gaming_benchmark_inventory_interval_seconds }}
+$ThreadIntervalSeconds = {{ windows_gaming_benchmark_thread_interval_seconds }}
+$PostStopDelaySeconds = {{ windows_gaming_benchmark_post_stop_delay_seconds }}
+$PresentMonEnabled = [System.Convert]::ToBoolean('{{ windows_gaming_benchmark_presentmon_enabled | default(false) }}')
+$PmdpEnabled = [System.Convert]::ToBoolean('{{ windows_gaming_benchmark_pmdp_enabled | default(false) }}')
+$RtssEnabled = [System.Convert]::ToBoolean('{{ windows_gaming_benchmark_rtss_enabled | default(true) }}')
+$MahmEnabled = [System.Convert]::ToBoolean('{{ windows_gaming_benchmark_mahm_enabled | default(true) }}')
+$GpuEngineCountersEnabled = [System.Convert]::ToBoolean('{{ windows_gaming_benchmark_gpu_engine_counters_enabled | default(true) }}')
+$PresentMonPath = '{{ windows_gaming_benchmark_presentmon_path }}'
+$PmdpProviderPath = '{{ windows_gaming_benchmark_presentmon_provider_path }}'
+$NvidiaSmiEnabled = [System.Convert]::ToBoolean('{{ windows_gaming_benchmark_nvidia_smi_enabled | default(false) }}')
+$NvidiaSmiPath = '{{ windows_gaming_benchmark_nvidia_smi_path }}'
+$ObsProfilePath = '{{ windows_gaming_benchmark_obs_profile_path | default("") }}'
+$PreflightEnabled = [System.Convert]::ToBoolean('{{ windows_gaming_benchmark_preflight_enabled | default(true) }}')
+$PreflightFailOnWarnings = [System.Convert]::ToBoolean('{{ windows_gaming_benchmark_preflight_fail_on_warnings | default(true) }}')
+$PreflightMinAvailableMBytes = {{ windows_gaming_benchmark_preflight_min_available_mb | default(4096) | int }}
+$PreflightStalePowerShellAgeSeconds = {{ windows_gaming_benchmark_preflight_stale_powershell_age_seconds | default(120) | int }}
+$PreflightPowerShellWorkingSetMBytes = {{ windows_gaming_benchmark_preflight_powershell_working_set_mb | default(512) | int }}
+$PreflightPowerShellPrivateMBytes = {{ windows_gaming_benchmark_preflight_powershell_private_mb | default(512) | int }}
+$PreflightMemoryCompressionWorkingSetMBytes = {{ windows_gaming_benchmark_preflight_memory_compression_working_set_mb | default(512) | int }}
+$TargetProcessNames = @({{ windows_gaming_benchmark_target_process_names | map('to_json') | join(', ') }})
+$WatchProcessNames = @({{ windows_gaming_benchmark_watch_process_names | map('to_json') | join(', ') }})
+$PreflightAllowedPowerShellPatterns = @(
+{% for pattern in windows_gaming_benchmark_preflight_allowed_powershell_patterns | default(['windows-gaming-benchmark.ps1', 'windows-performance-watch.ps1', 'windows-performance-mode.ps1']) %}
+    "{{ pattern }}"{% if not loop.last %},{% endif %}
+{% endfor %}
+)
+$AffinityPresetMap = @{}
+{% for preset, mask in (windows_gaming_benchmark_affinity_presets | default({})).items() %}
+$AffinityPresetMap['{{ preset }}'] = '{{ mask }}'
+{% endfor %}
+$PowerPlanPresetMap = @{}
+{% for preset, guid in (windows_gaming_benchmark_power_plan_presets | default({})).items() %}
+$PowerPlanPresetMap['{{ preset }}'] = '{{ guid }}'
+{% endfor %}
+
+function Ensure-Directory {
+    param([string]$Path)
+    if (-not (Test-Path -LiteralPath $Path)) {
+        New-Item -ItemType Directory -Path $Path -Force | Out-Null
+    }
+}
+
+function Get-StatePath {
+    Join-Path $StateDir "$SessionName-state.json"
+}
+
+function Read-State {
+    $path = Get-StatePath
+    if (-not (Test-Path -LiteralPath $path)) {
+        return $null
+    }
+    Get-Content -LiteralPath $path -Raw | ConvertFrom-Json
+}
+
+function Write-State {
+    param([object]$State)
+    Ensure-Directory -Path $StateDir
+    $State | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Get-StatePath) -Encoding UTF8
+    if ($State -and $State.RunDir) {
+        $State | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path ([string]$State.RunDir) 'state.json') -Encoding UTF8
+    }
+}
+
+function Write-Log {
+    param(
+        [object]$State,
+        [string]$Message
+    )
+    $line = "{0} {1}" -f (Get-Date).ToString('o'), $Message
+    if ($State -and $State.LogPath) {
+        $line | Add-Content -LiteralPath ([string]$State.LogPath) -Encoding UTF8
+    } else {
+        Write-Output $line
+    }
+}
+
+function Write-CsvRow {
+    param(
+        [string]$Path,
+        [object]$Row
+    )
+    if (Test-Path -LiteralPath $Path) {
+        $Row | Export-Csv -LiteralPath $Path -NoTypeInformation -Append -Force
+    } else {
+        $Row | Export-Csv -LiteralPath $Path -NoTypeInformation -Force
+    }
+}
+
+function Test-TextMatchesAnyPattern {
+    param(
+        [string]$Text,
+        [string[]]$Patterns
+    )
+    foreach ($pattern in $Patterns) {
+        if ($pattern -and $Text -like "*$pattern*") {
+            return $true
+        }
+    }
+    return $false
+}
+
+function Get-ProcessCreationDate {
+    param([object]$CimProcess)
+    if (-not $CimProcess -or -not $CimProcess.CreationDate) {
+        return $null
+    }
+    if ($CimProcess.CreationDate -is [datetime]) {
+        return $CimProcess.CreationDate
+    }
+    try {
+        return [Management.ManagementDateTimeConverter]::ToDateTime([string]$CimProcess.CreationDate)
+    } catch {
+        try {
+            return [datetime]$CimProcess.CreationDate
+        } catch {
+            return $null
+        }
+    }
+}
+
+function Get-AvailableMemoryMBytes {
+    try {
+        return [math]::Round((Get-Counter '\Memory\Available MBytes' -ErrorAction Stop).CounterSamples[0].CookedValue, 0)
+    } catch {
+        return $null
+    }
+}
+
+function Invoke-PreflightCheck {
+    param(
+        [object]$State,
+        [bool]$FailOnWarnings = $PreflightFailOnWarnings
+    )
+    $warnings = [System.Collections.Generic.List[string]]::new()
+    if (-not $PreflightEnabled) {
+        return [string[]]@()
+    }
+
+    $now = Get-Date
+    $availableMBytes = Get-AvailableMemoryMBytes
+    if ($null -ne $availableMBytes) {
+        $detail = "available_mb=$availableMBytes threshold_mb=$PreflightMinAvailableMBytes"
+        $suspicious = $availableMBytes -lt $PreflightMinAvailableMBytes
+        Write-CsvRow -Path ([string]$State.PreflightCsv) -Row ([pscustomobject]@{
+            Timestamp = $now.ToString('o')
+            Category = 'memory'
+            Name = 'Available MBytes'
+            ProcessId = $null
+            AgeSeconds = $null
+            WorkingSetMB = $null
+            PrivateMemoryMB = $null
+            AvailableMBytes = $availableMBytes
+            Allowed = $true
+            Suspicious = $suspicious
+            Detail = $detail
+            CommandLine = ''
+        })
+        if ($suspicious) {
+            $warnings.Add("low available memory before benchmark: $detail")
+        }
+    }
+
+    $memoryCompression = Get-Process -Name 'Memory Compression' -ErrorAction SilentlyContinue | Select-Object -First 1
+    if ($memoryCompression) {
+        $workingSetMBytes = [math]::Round($memoryCompression.WorkingSet64 / 1MB, 1)
+        $suspicious = $workingSetMBytes -ge $PreflightMemoryCompressionWorkingSetMBytes
+        Write-CsvRow -Path ([string]$State.PreflightCsv) -Row ([pscustomobject]@{
+            Timestamp = $now.ToString('o')
+            Category = 'process'
+            Name = 'Memory Compression'
+            ProcessId = $memoryCompression.Id
+            AgeSeconds = $null
+            WorkingSetMB = $workingSetMBytes
+            PrivateMemoryMB = [math]::Round($memoryCompression.PrivateMemorySize64 / 1MB, 1)
+            AvailableMBytes = $availableMBytes
+            Allowed = $true
+            Suspicious = $suspicious
+            Detail = "working_set_mb=$workingSetMBytes threshold_mb=$PreflightMemoryCompressionWorkingSetMBytes"
+            CommandLine = ''
+        })
+        if ($suspicious) {
+            $warnings.Add("memory compression is already large before benchmark: working_set_mb=$workingSetMBytes")
+        }
+    }
+
+    $cimProcesses = @(Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | Where-Object { $_.Name -in @('powershell.exe', 'pwsh.exe') })
+    foreach ($cimProcess in $cimProcesses) {
+        $process = Get-Process -Id ([int]$cimProcess.ProcessId) -ErrorAction SilentlyContinue
+        $created = Get-ProcessCreationDate -CimProcess $cimProcess
+        $ageSeconds = if ($created) { [math]::Round(($now - $created).TotalSeconds, 0) } else { $null }
+        $workingSetMBytes = if ($process) { [math]::Round($process.WorkingSet64 / 1MB, 1) } else { $null }
+        $privateMBytes = if ($process) { [math]::Round($process.PrivateMemorySize64 / 1MB, 1) } else { $null }
+        $commandLine = [string]$cimProcess.CommandLine
+        $allowed = Test-TextMatchesAnyPattern -Text $commandLine -Patterns $PreflightAllowedPowerShellPatterns
+        $oldEnough = $null -ne $ageSeconds -and $ageSeconds -ge $PreflightStalePowerShellAgeSeconds
+        $largeEnough = (
+            ($null -ne $workingSetMBytes -and $workingSetMBytes -ge $PreflightPowerShellWorkingSetMBytes) -or
+            ($null -ne $privateMBytes -and $privateMBytes -ge $PreflightPowerShellPrivateMBytes)
+        )
+        $suspicious = (-not $allowed) -and $oldEnough -and $largeEnough
+        $detail = "age_s=$ageSeconds working_set_mb=$workingSetMBytes private_mb=$privateMBytes"
+        Write-CsvRow -Path ([string]$State.PreflightCsv) -Row ([pscustomobject]@{
+            Timestamp = $now.ToString('o')
+            Category = 'powershell'
+            Name = $cimProcess.Name
+            ProcessId = $cimProcess.ProcessId
+            AgeSeconds = $ageSeconds
+            WorkingSetMB = $workingSetMBytes
+            PrivateMemoryMB = $privateMBytes
+            AvailableMBytes = $availableMBytes
+            Allowed = $allowed
+            Suspicious = $suspicious
+            Detail = $detail
+            CommandLine = $commandLine
+        })
+        if ($suspicious) {
+            $warnings.Add("stale PowerShell diagnostic before benchmark: pid=$($cimProcess.ProcessId) $detail")
+        }
+    }
+
+    foreach ($warning in $warnings) {
+        Write-Log -State $State -Message "preflight warning: $warning"
+    }
+    if ($warnings.Count -gt 0 -and $FailOnWarnings) {
+        throw "Benchmark preflight failed: $($warnings -join '; ')"
+    }
+    return [string[]]$warnings
+}
+
+function Get-Percentile {
+    param(
+        [double[]]$Values,
+        [double]$Percentile
+    )
+    if (-not $Values -or $Values.Count -eq 0) {
+        return $null
+    }
+    $sorted = $Values | Sort-Object
+    if ($sorted.Count -eq 1) {
+        return [double]$sorted[0]
+    }
+    $rank = ($Percentile / 100.0) * ($sorted.Count - 1)
+    $lower = [math]::Floor($rank)
+    $upper = [math]::Ceiling($rank)
+    if ($lower -eq $upper) {
+        return [double]$sorted[$lower]
+    }
+    $weight = $rank - $lower
+    return ([double]$sorted[$lower] * (1 - $weight)) + ([double]$sorted[$upper] * $weight)
+}
+
+function Get-StatsLine {
+    param(
+        [string]$Name,
+        [double[]]$Values,
+        [string]$Format = 'N2'
+    )
+    if (-not $Values -or $Values.Count -eq 0) {
+        return "${Name}: no data"
+    }
+    $avg = ($Values | Measure-Object -Average).Average
+    $min = ($Values | Measure-Object -Minimum).Minimum
+    $max = ($Values | Measure-Object -Maximum).Maximum
+    return ("{0}: avg={1} min={2} max={3} p95={4} p99={5}" -f $Name, $avg.ToString($Format), $min.ToString($Format), $max.ToString($Format), (Get-Percentile -Values $Values -Percentile 95).ToString($Format), (Get-Percentile -Values $Values -Percentile 99).ToString($Format))
+}
+
+function Get-FpsLowLine {
+    param(
+        [string]$Name,
+        [double[]]$Values,
+        [string]$Format = 'N1'
+    )
+    if (-not $Values -or $Values.Count -eq 0) {
+        return "${Name}: no data"
+    }
+    $avg = ($Values | Measure-Object -Average).Average
+    $min = ($Values | Measure-Object -Minimum).Minimum
+    $p1 = Get-Percentile -Values $Values -Percentile 1
+    $p01 = Get-Percentile -Values $Values -Percentile 0.1
+    return ("{0}: avg={1} 1pctLow={2} 0.1pctLow={3} min={4}" -f $Name, $avg.ToString($Format), $p1.ToString($Format), $p01.ToString($Format), $min.ToString($Format))
+}
+
+function Get-FrameSpikeLine {
+    param(
+        [string]$Name,
+        [double[]]$Values,
+        [string]$Format = 'N2'
+    )
+    if (-not $Values -or $Values.Count -eq 0) {
+        return "${Name}: no data"
+    }
+    $p95 = Get-Percentile -Values $Values -Percentile 95
+    $p99 = Get-Percentile -Values $Values -Percentile 99
+    $p999 = Get-Percentile -Values $Values -Percentile 99.9
+    $max = ($Values | Measure-Object -Maximum).Maximum
+    $over833 = @($Values | Where-Object { $_ -gt 8.33 }).Count
+    $over10 = @($Values | Where-Object { $_ -gt 10 }).Count
+    $over1667 = @($Values | Where-Object { $_ -gt 16.67 }).Count
+    $over3333 = @($Values | Where-Object { $_ -gt 33.33 }).Count
+    return ("{0}: p95={1} p99={2} p99.9={3} max={4} over8.33ms={5} over10ms={6} over16.67ms={7} over33.33ms={8}" -f $Name, $p95.ToString($Format), $p99.ToString($Format), $p999.ToString($Format), $max.ToString($Format), $over833, $over10, $over1667, $over3333)
+}
+
+function Convert-ToDoubleArray {
+    param(
+        [object[]]$Rows,
+        [string]$Column,
+        [double]$Minimum = [double]::MinValue,
+        [double]$Maximum = [double]::MaxValue
+    )
+    $values = @()
+    foreach ($row in $Rows) {
+        $parsed = 0.0
+        if ([double]::TryParse([string]$row.$Column, [ref]$parsed) -and $parsed -ge $Minimum -and $parsed -le $Maximum) {
+            $values += $parsed
+        }
+    }
+    return [double[]]$values
+}
+
+function Get-StringFromView {
+    param(
+        [System.IO.MemoryMappedFiles.MemoryMappedViewAccessor]$View,
+        [int64]$Offset,
+        [int]$Length
+    )
+    $bytes = New-Object byte[] $Length
+    $View.ReadArray($Offset, $bytes, 0, $Length) | Out-Null
+    $end = [Array]::IndexOf($bytes, [byte]0)
+    if ($end -lt 0) {
+        $end = $Length
+    }
+    [Text.Encoding]::Default.GetString($bytes, 0, $end)
+}
+
+function Write-ProcessInventory {
+    param(
+        [object]$State,
+        [string]$Phase
+    )
+    $timestamp = Get-Date
+    $processes = @{}
+    foreach ($process in (Get-Process -ErrorAction SilentlyContinue)) {
+        $processes[[int]$process.Id] = $process
+    }
+    foreach ($cimProcess in (Get-CimInstance Win32_Process -ErrorAction SilentlyContinue)) {
+        $process = $processes[[int]$cimProcess.ProcessId]
+        $row = [pscustomobject]@{
+            Timestamp = $timestamp.ToString('o')
+            Phase = $Phase
+            ProcessName = $cimProcess.Name
+            Id = $cimProcess.ProcessId
+            ParentProcessId = $cimProcess.ParentProcessId
+            SessionId = $cimProcess.SessionId
+            ExecutablePath = $cimProcess.ExecutablePath
+            CommandLine = $cimProcess.CommandLine
+            CpuSeconds = if ($process -and $null -ne $process.CPU) { [math]::Round($process.CPU, 3) } else { $null }
+            WorkingSetMB = if ($process) { [math]::Round($process.WorkingSet64 / 1MB, 1) } else { $null }
+            PrivateMemoryMB = if ($process) { [math]::Round($process.PrivateMemorySize64 / 1MB, 1) } else { $null }
+            ThreadCount = if ($process) { $process.Threads.Count } else { $null }
+            HandleCount = if ($process) { $process.HandleCount } else { $null }
+            StartTime = if ($process -and $process.StartTime) { $process.StartTime.ToString('o') } else { $null }
+        }
+        Write-CsvRow -Path ([string]$State.ProcessInventoryCsv) -Row $row
+    }
+}
+
+function Write-ObsProfileSnapshot {
+    param([object]$State)
+    if (-not $ObsProfilePath) {
+        return
+    }
+    $timestamp = Get-Date
+    if (-not (Test-Path -LiteralPath $ObsProfilePath)) {
+        Write-CsvRow -Path ([string]$State.ObsProfileCsv) -Row ([pscustomobject]@{
+            Timestamp = $timestamp.ToString('o')
+            Available = $false
+            ProfilePath = $ObsProfilePath
+            Section = ''
+            Key = ''
+            Value = ''
+        })
+        return
+    }
+
+    $interestingKeys = @{
+        Mode = $true
+        StreamEncoder = $true
+        RecEncoder = $true
+        RecFormat2 = $true
+        VBitrate = $true
+        ABitrate = $true
+        NVENCPreset2 = $true
+        Preset = $true
+        RecQuality = $true
+        RecRB = $true
+        RecRBTime = $true
+        RecRBSize = $true
+        UseRescale = $true
+        RecUseRescale = $true
+        MultitrackVideoMaximumAggregateBitrateAuto = $true
+        MultitrackVideoMaximumAggregateBitrate = $true
+        MultitrackVideoMaximumVideoTracksAuto = $true
+        VodTrackIndex = $true
+        BaseCX = $true
+        BaseCY = $true
+        OutputCX = $true
+        OutputCY = $true
+        FPSType = $true
+        FPSCommon = $true
+        FPSNum = $true
+        FPSDen = $true
+        ScaleType = $true
+        ColorFormat = $true
+        ColorSpace = $true
+        ColorRange = $true
+    }
+
+    $section = ''
+    foreach ($line in (Get-Content -LiteralPath $ObsProfilePath -ErrorAction Stop)) {
+        if ($line -match '^\[(.+)\]$') {
+            $section = $matches[1]
+            continue
+        }
+        if ($line -notmatch '^([^=]+)=(.*)$') {
+            continue
+        }
+        $key = $matches[1].Trim()
+        if (-not $interestingKeys.ContainsKey($key)) {
+            continue
+        }
+        Write-CsvRow -Path ([string]$State.ObsProfileCsv) -Row ([pscustomobject]@{
+            Timestamp = $timestamp.ToString('o')
+            Available = $true
+            ProfilePath = $ObsProfilePath
+            Section = $section
+            Key = $key
+            Value = $matches[2]
+        })
+    }
+}
+
+function Get-TargetProcess {
+    foreach ($name in $TargetProcessNames) {
+        $process = Get-Process -Name $name -ErrorAction SilentlyContinue | Sort-Object StartTime -Descending | Select-Object -First 1
+        if ($process) {
+            return $process
+        }
+    }
+    return $null
+}
+
+function Get-ProcessCpuRows {
+    param(
+        [object[]]$Before,
+        [object[]]$After,
+        [datetime]$Timestamp,
+        [double]$ElapsedSeconds,
+        [int]$LogicalProcessors,
+        [string[]]$Names = @()
+    )
+    $filter = @{}
+    foreach ($name in $Names) {
+        $filter[$name] = $true
+    }
+    $beforeByPid = @{}
+    foreach ($process in $Before) {
+        $beforeByPid[[int]$process.Id] = $process
+    }
+    foreach ($process in $After) {
+        if ($filter.Count -gt 0 -and -not $filter.ContainsKey($process.ProcessName)) {
+            continue
+        }
+        if (-not $beforeByPid.ContainsKey([int]$process.Id)) {
+            continue
+        }
+        $previous = $beforeByPid[[int]$process.Id]
+        if ($null -eq $process.CPU -or $null -eq $previous.CPU) {
+            continue
+        }
+        $deltaSeconds = [math]::Max(0, [double]$process.CPU - [double]$previous.CPU)
+        [pscustomobject]@{
+            Timestamp = $Timestamp.ToString('o')
+            ProcessName = $process.ProcessName
+            Id = $process.Id
+            CpuSeconds = [math]::Round($deltaSeconds, 4)
+            CpuPctTotal = [math]::Round(($deltaSeconds / $ElapsedSeconds / $LogicalProcessors) * 100, 3)
+            CpuPctOneThread = [math]::Round(($deltaSeconds / $ElapsedSeconds) * 100, 3)
+            WorkingSetMB = [math]::Round($process.WorkingSet64 / 1MB, 1)
+            PrivateMemoryMB = [math]::Round($process.PrivateMemorySize64 / 1MB, 1)
+        }
+    }
+}
+
+function Write-ThreadSample {
+    param(
+        [object]$State,
+        [datetime]$Timestamp,
+        [hashtable]$ThreadBefore,
+        [double]$ElapsedSeconds
+    )
+    $process = Get-TargetProcess
+    if (-not $process) {
+        return @{}
+    }
+    $after = @{}
+    $rows = @()
+    foreach ($thread in (Get-Process -Id $process.Id).Threads) {
+        $after[$thread.Id] = $thread.TotalProcessorTime.TotalSeconds
+        if ($ThreadBefore.ContainsKey($thread.Id)) {
+            $delta = [math]::Max(0, $thread.TotalProcessorTime.TotalSeconds - [double]$ThreadBefore[$thread.Id])
+            $rows += [pscustomobject]@{
+                Timestamp = $Timestamp.ToString('o')
+                ProcessId = $process.Id
+                ThreadId = $thread.Id
+                CpuSeconds = [math]::Round($delta, 4)
+                OneThreadPct = [math]::Round(($delta / $ElapsedSeconds) * 100, 2)
+                State = [string]$thread.ThreadState
+                WaitReason = [string]$thread.WaitReason
+                StartAddress = $thread.StartAddress
+            }
+        }
+    }
+    foreach ($row in ($rows | Sort-Object CpuSeconds -Descending | Select-Object -First 32)) {
+        Write-CsvRow -Path ([string]$State.ThreadCsv) -Row $row
+    }
+    return $after
+}
+
+function Read-RtssSample {
+    param([object]$State)
+    $rows = @()
+    try {
+        Add-Type -AssemblyName System.Core -ErrorAction SilentlyContinue
+        $mmf = [System.IO.MemoryMappedFiles.MemoryMappedFile]::OpenExisting('RTSSSharedMemoryV2')
+        $view = $mmf.CreateViewAccessor(0, 0, [System.IO.MemoryMappedFiles.MemoryMappedFileAccess]::Read)
+        $signature = $view.ReadUInt32(0)
+        $version = $view.ReadUInt32(4)
+        $entrySize = $view.ReadUInt32(8)
+        $arrOffset = $view.ReadUInt32(12)
+        $arrSize = $view.ReadUInt32(16)
+        for ($i = 0; $i -lt $arrSize; $i++) {
+            $base = [int64]$arrOffset + ([int64]$i * [int64]$entrySize)
+            $rtssProcessId = $view.ReadUInt32($base)
+            $name = Get-StringFromView -View $view -Offset ($base + 4) -Length 260
+            $targetMatched = $false
+            foreach ($targetName in $TargetProcessNames) {
+                if ($name -like "*$targetName*") {
+                    $targetMatched = $true
+                    break
+                }
+            }
+            if (-not $targetMatched) {
+                continue
+            }
+            $time0 = $view.ReadUInt32($base + 268)
+            $time1 = $view.ReadUInt32($base + 272)
+            $frames = $view.ReadUInt32($base + 276)
+            $frameTimeUs = $view.ReadUInt32($base + 280)
+            $fpsWindow = if ($time1 -gt $time0 -and $frames -gt 0) { [math]::Round(1000.0 * $frames / ($time1 - $time0), 3) } else { $null }
+            $fpsInstant = if ($frameTimeUs -gt 0) { [math]::Round(1000000.0 / $frameTimeUs, 3) } else { $null }
+            $rows += [pscustomobject]@{
+                Timestamp = (Get-Date).ToString('o')
+                Signature = ('0x{0:X8}' -f $signature)
+                Version = ('0x{0:X8}' -f $version)
+                Index = $i
+                ProcessId = $rtssProcessId
+                Name = $name
+                FpsWindow = $fpsWindow
+                FpsInstant = $fpsInstant
+                FrameTimeMs = [math]::Round($frameTimeUs / 1000.0, 3)
+                Frames = $frames
+                Time0 = $time0
+                Time1 = $time1
+                Active = ($rtssProcessId -ne 0 -and $fpsWindow -ne $null -and $frameTimeUs -gt 0)
+            }
+        }
+        $view.Dispose()
+        $mmf.Dispose()
+    } catch {
+        Write-CsvRow -Path ([string]$State.RtssStatusCsv) -Row ([pscustomobject]@{
+            Timestamp = (Get-Date).ToString('o')
+            Available = $false
+            Error = $_.Exception.Message
+        })
+    }
+    foreach ($row in $rows) {
+        Write-CsvRow -Path ([string]$State.RtssCsv) -Row $row
+    }
+    return @($rows | Where-Object { $_.Active } | Sort-Object ProcessId -Descending | Select-Object -First 1)
+}
+
+function Read-MahmSample {
+    param([object]$State)
+    $timestamp = Get-Date
+    $entries = @()
+    try {
+        Add-Type -AssemblyName System.Core -ErrorAction SilentlyContinue
+        $mmf = $null
+        foreach ($name in @('MAHMSharedMemory', 'Local\MAHMSharedMemory')) {
+            try {
+                $mmf = [System.IO.MemoryMappedFiles.MemoryMappedFile]::OpenExisting($name)
+                break
+            } catch {
+            }
+        }
+        if (-not $mmf) {
+            throw 'MAHMSharedMemory map not found'
+        }
+        $view = $mmf.CreateViewAccessor(0, 0, [System.IO.MemoryMappedFiles.MemoryMappedFileAccess]::Read)
+        $signature = $view.ReadUInt32(0)
+        $version = $view.ReadUInt32(4)
+        $headerSize = $view.ReadUInt32(8)
+        $entryCount = $view.ReadUInt32(12)
+        $entrySize = $view.ReadUInt32(16)
+        for ($i = 0; $i -lt $entryCount; $i++) {
+            $base = [int64]$headerSize + ([int64]$i * [int64]$entrySize)
+            $source = Get-StringFromView -View $view -Offset $base -Length 260
+            $units = Get-StringFromView -View $view -Offset ($base + 260) -Length 260
+            $data = $view.ReadSingle($base + 1300)
+            $flags = $view.ReadUInt32($base + 1312)
+            $gpu = $view.ReadUInt32($base + 1316)
+            $sourceId = $view.ReadUInt32($base + 1320)
+            $entries += [pscustomobject]@{
+                Source = $source
+                Units = $units
+                Data = [double]$data
+                Flags = $flags
+                Gpu = $gpu
+                SourceId = $sourceId
+            }
+        }
+        $view.Dispose()
+        $mmf.Dispose()
+    } catch {
+        Write-CsvRow -Path ([string]$State.MahmStatusCsv) -Row ([pscustomobject]@{
+            Timestamp = $timestamp.ToString('o')
+            Available = $false
+            Error = $_.Exception.Message
+        })
+        return $null
+    }
+
+    $bySource = @{}
+    foreach ($entry in $entries) {
+        $bySource[$entry.Source] = $entry
+    }
+    $cpuUsage = @($entries | Where-Object { $_.Source -match '^CPU\d+ usage$' } | ForEach-Object { [double]$_.Data })
+    $cpuClock = @($entries | Where-Object { $_.Source -match '^CPU\d+ clock$' } | ForEach-Object { [double]$_.Data })
+    $cpuPower = @($entries | Where-Object { $_.Source -match '^CPU\d+ power$' } | ForEach-Object { [double]$_.Data })
+
+    $row = [pscustomobject]@{
+        Timestamp = $timestamp.ToString('o')
+        GpuUsagePct = if ($bySource.ContainsKey('GPU usage')) { [math]::Round($bySource['GPU usage'].Data, 3) } else { $null }
+        GpuTempC = if ($bySource.ContainsKey('GPU temperature')) { [math]::Round($bySource['GPU temperature'].Data, 3) } else { $null }
+        GpuClockMHz = if ($bySource.ContainsKey('Core clock')) { [math]::Round($bySource['Core clock'].Data, 3) } else { $null }
+        GpuMemClockMHz = if ($bySource.ContainsKey('Memory clock')) { [math]::Round($bySource['Memory clock'].Data, 3) } else { $null }
+        GpuPowerW = if ($bySource.ContainsKey('Power')) { [math]::Round($bySource['Power'].Data, 3) } else { $null }
+        GpuMemoryUsageMB = if ($bySource.ContainsKey('Memory usage')) { [math]::Round($bySource['Memory usage'].Data, 3) } else { $null }
+        CpuUsagePct = if ($bySource.ContainsKey('CPU usage')) { [math]::Round($bySource['CPU usage'].Data, 3) } else { $null }
+        CpuTempC = if ($bySource.ContainsKey('CPU temperature')) { [math]::Round($bySource['CPU temperature'].Data, 3) } else { $null }
+        CpuClockMHz = if ($bySource.ContainsKey('CPU clock')) { [math]::Round($bySource['CPU clock'].Data, 3) } else { $null }
+        CpuPowerW = if ($bySource.ContainsKey('CPU power')) { [math]::Round($bySource['CPU power'].Data, 3) } else { $null }
+        CpuMaxLogicalUsagePct = if ($cpuUsage.Count) { [math]::Round(($cpuUsage | Measure-Object -Maximum).Maximum, 3) } else { $null }
+        CpuAvgLogicalUsagePct = if ($cpuUsage.Count) { [math]::Round(($cpuUsage | Measure-Object -Average).Average, 3) } else { $null }
+        CpuMinClockMHz = if ($cpuClock.Count) { [math]::Round(($cpuClock | Measure-Object -Minimum).Minimum, 3) } else { $null }
+        CpuMaxClockMHz = if ($cpuClock.Count) { [math]::Round(($cpuClock | Measure-Object -Maximum).Maximum, 3) } else { $null }
+        CpuTotalCorePowerW = if ($cpuPower.Count) { [math]::Round(($cpuPower | Measure-Object -Sum).Sum, 3) } else { $null }
+        RamUsageMB = if ($bySource.ContainsKey('RAM usage')) { [math]::Round($bySource['RAM usage'].Data, 3) } else { $null }
+        OsdFramerate = if ($bySource.ContainsKey('Framerate')) { [math]::Round($bySource['Framerate'].Data, 3) } else { $null }
+        OsdFrametimeMs = if ($bySource.ContainsKey('Frametime')) { [math]::Round($bySource['Frametime'].Data, 3) } else { $null }
+    }
+    Write-CsvRow -Path ([string]$State.MahmCsv) -Row $row
+    return $row
+}
+
+function Read-PmdpFrames {
+    param(
+        [object]$State,
+        [long]$LastFrameCount
+    )
+    $timestamp = Get-Date
+    try {
+        Add-Type -AssemblyName System.Core -ErrorAction SilentlyContinue
+        $mmf = [System.IO.MemoryMappedFiles.MemoryMappedFile]::OpenExisting('PMDPSharedMemory')
+        $view = $mmf.CreateViewAccessor(0, 0, [System.IO.MemoryMappedFiles.MemoryMappedFileAccess]::Read)
+        $signature = $view.ReadUInt32(0)
+        $version = $view.ReadUInt32(4)
+        $entrySize = $view.ReadUInt32(8)
+        $arrOffset = $view.ReadUInt32(12)
+        $arrSize = $view.ReadUInt32(16)
+        $frameCount = [long]$view.ReadUInt32(20)
+        $framePos = [long]$view.ReadUInt32(24)
+        $status = $view.ReadUInt32(28)
+        Write-CsvRow -Path ([string]$State.PmdpStatusCsv) -Row ([pscustomobject]@{
+            Timestamp = $timestamp.ToString('o')
+            Available = $true
+            Signature = ('0x{0:X8}' -f $signature)
+            Version = ('0x{0:X8}' -f $version)
+            EntrySize = $entrySize
+            FrameCount = $frameCount
+            FramePos = $framePos
+            Status = $status
+        })
+        if ($frameCount -gt $LastFrameCount) {
+            $newCount = [math]::Min([int]($frameCount - $LastFrameCount), [int]$arrSize)
+            for ($n = $newCount; $n -ge 1; $n--) {
+                $frameNo = $frameCount - $n
+                $idx = $frameNo % $arrSize
+                $base = [int64]$arrOffset + ([int64]$idx * [int64]$entrySize)
+                Write-CsvRow -Path ([string]$State.PmdpCsv) -Row ([pscustomobject]@{
+                    Timestamp = $timestamp.ToString('o')
+                    FrameNo = $frameNo
+                    Index = $idx
+                    CpuStart = $view.ReadUInt64($base + 384)
+                    FrametimeMs = [math]::Round($view.ReadDouble($base + 392), 6)
+                    CpuBusyMs = [math]::Round($view.ReadDouble($base + 400), 6)
+                    CpuWaitMs = [math]::Round($view.ReadDouble($base + 408), 6)
+                    GpuLatencyMs = [math]::Round($view.ReadDouble($base + 416), 6)
+                    GpuTimeMs = [math]::Round($view.ReadDouble($base + 424), 6)
+                    GpuBusyMs = [math]::Round($view.ReadDouble($base + 432), 6)
+                    VideoBusyMs = [math]::Round($view.ReadDouble($base + 440), 6)
+                    GpuWaitMs = [math]::Round($view.ReadDouble($base + 448), 6)
+                    DisplayLatencyMs = [math]::Round($view.ReadDouble($base + 456), 6)
+                    DisplayedTimeMs = [math]::Round($view.ReadDouble($base + 464), 6)
+                    ClickToPhotonLatencyMs = [math]::Round($view.ReadDouble($base + 480), 6)
+                })
+            }
+        }
+        $view.Dispose()
+        $mmf.Dispose()
+        return $frameCount
+    } catch {
+        Write-CsvRow -Path ([string]$State.PmdpStatusCsv) -Row ([pscustomobject]@{
+            Timestamp = $timestamp.ToString('o')
+            Available = $false
+            Error = $_.Exception.Message
+        })
+        return $LastFrameCount
+    }
+}
+
+function Clear-PresentMonEtwState {
+    param([object]$State)
+    foreach ($session in @('PresentMonDataProvider', 'PresentMon', "$SessionName-PresentMon")) {
+        try {
+            $output = & logman stop $session -ets 2>&1 | Out-String
+            if ($output -and $State) {
+                Write-Log -State $State -Message "logman stop ${session}: $($output.Trim())"
+            }
+        } catch {
+        }
+    }
+    foreach ($processName in @('PresentMon-2.3.1-x64-DLSS4', 'PresentMonDataProvider')) {
+        Get-Process -Name $processName -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+    }
+}
+
+function Read-SystemCounters {
+    param([object]$State)
+    $timestamp = Get-Date
+    $row = [ordered]@{
+        Timestamp = $timestamp.ToString('o')
+        AvailableMBytes = $null
+        CommittedMBytes = $null
+        CommitLimitMBytes = $null
+        PagesPerSec = $null
+        PageFaultsPerSec = $null
+        CpuTotalProcessorTimePct = $null
+        CpuTotalUtilityPct = $null
+        CpuMaxProcessorTimePct = $null
+        CpuMaxUtilityPct = $null
+        CpuTotalPrivilegedPct = $null
+        CpuTotalDpcPct = $null
+        CpuTotalInterruptPct = $null
+        CpuMaxFrequencyMHz = $null
+        ContextSwitchesPerSec = $null
+        ProcessorQueueLength = $null
+        Processes = $null
+        Threads = $null
+        DiskReadLatencyMs = $null
+        DiskWriteLatencyMs = $null
+        DiskReadBytesPerSec = $null
+        DiskWriteBytesPerSec = $null
+        DiskQueueLength = $null
+        NetworkBytesTotalPerSec = $null
+        NetworkBytesReceivedPerSec = $null
+        NetworkBytesSentPerSec = $null
+        GpuEngine3DUtilPct = $null
+        GpuEngineCopyUtilPct = $null
+        GpuEngineVideoEncodeUtilPct = $null
+        GpuEngineVideoDecodeUtilPct = $null
+        GpuEngineComputeUtilPct = $null
+        GpuDedicatedUsageMB = $null
+        GpuSharedUsageMB = $null
+    }
+
+    $paths = @(
+        '\Memory\Available MBytes',
+        '\Memory\Committed Bytes',
+        '\Memory\Commit Limit',
+        '\Memory\Pages/sec',
+        '\Memory\Page Faults/sec',
+        '\Processor(_Total)\% Processor Time',
+        '\Processor(_Total)\% Privileged Time',
+        '\Processor(_Total)\% DPC Time',
+        '\Processor(_Total)\% Interrupt Time',
+        '\Processor(*)\% Processor Time',
+        '\Processor Information(_Total)\% Processor Utility',
+        '\Processor Information(*)\% Processor Utility',
+        '\Processor Information(*)\Actual Frequency',
+        '\System\Context Switches/sec',
+        '\System\Processor Queue Length',
+        '\System\Processes',
+        '\System\Threads',
+        '\LogicalDisk(Z:)\Avg. Disk sec/Read',
+        '\LogicalDisk(Z:)\Avg. Disk sec/Write',
+        '\LogicalDisk(Z:)\Disk Read Bytes/sec',
+        '\LogicalDisk(Z:)\Disk Write Bytes/sec',
+        '\LogicalDisk(Z:)\Current Disk Queue Length',
+        '\Network Interface(*)\Bytes Total/sec',
+        '\Network Interface(*)\Bytes Received/sec',
+        '\Network Interface(*)\Bytes Sent/sec'
+    )
+
+    if ($GpuEngineCountersEnabled) {
+        $paths += @(
+        '\GPU Engine(*)\Utilization Percentage',
+        '\GPU Adapter Memory(*)\Dedicated Usage',
+        '\GPU Adapter Memory(*)\Shared Usage'
+        )
+    }
+
+    $samples = @()
+    $errors = [System.Collections.Generic.List[string]]::new()
+    try {
+        $samples = (Get-Counter -Counter $paths -ErrorAction Stop).CounterSamples
+    } catch {
+        $errors.Add("bulk counter read failed: $($_.Exception.Message)")
+        foreach ($path in $paths) {
+            try {
+                $samples += (Get-Counter -Counter $path -ErrorAction Stop).CounterSamples
+            } catch {
+                $errors.Add("${path}: $($_.Exception.Message)")
+            }
+        }
+    }
+
+    $cpuProcessorValues = @()
+    $cpuUtilityValues = @()
+    $frequencyValues = @()
+    $networkTotal = 0.0
+    $networkReceived = 0.0
+    $networkSent = 0.0
+    $gpu3d = 0.0
+    $gpuCopy = 0.0
+    $gpuVideoEncode = 0.0
+    $gpuVideoDecode = 0.0
+    $gpuCompute = 0.0
+    $gpuDedicated = 0.0
+    $gpuShared = 0.0
+
+    foreach ($sample in $samples) {
+        $path = $sample.Path.ToLowerInvariant()
+        $instance = [string]$sample.InstanceName
+        $value = [double]$sample.CookedValue
+
+        if ($path -like '*\memory\available mbytes') { $row.AvailableMBytes = [math]::Round($value, 3); continue }
+        if ($path -like '*\memory\committed bytes') { $row.CommittedMBytes = [math]::Round($value / 1MB, 3); continue }
+        if ($path -like '*\memory\commit limit') { $row.CommitLimitMBytes = [math]::Round($value / 1MB, 3); continue }
+        if ($path -like '*\memory\pages/sec') { $row.PagesPerSec = [math]::Round($value, 3); continue }
+        if ($path -like '*\memory\page faults/sec') { $row.PageFaultsPerSec = [math]::Round($value, 3); continue }
+        if ($path -like '*\processor(_total)\% processor time') { $row.CpuTotalProcessorTimePct = [math]::Round($value, 3); continue }
+        if ($path -like '*\processor(_total)\% privileged time') { $row.CpuTotalPrivilegedPct = [math]::Round($value, 3); continue }
+        if ($path -like '*\processor(_total)\% dpc time') { $row.CpuTotalDpcPct = [math]::Round($value, 3); continue }
+        if ($path -like '*\processor(_total)\% interrupt time') { $row.CpuTotalInterruptPct = [math]::Round($value, 3); continue }
+        if ($path -like '*\processor(*)\% processor time' -and $instance -ne '_Total') { $cpuProcessorValues += $value; continue }
+        if ($path -like '*\processor information(_total)\% processor utility') { $row.CpuTotalUtilityPct = [math]::Round($value, 3); continue }
+        if ($path -like '*\processor information(*)\% processor utility' -and $instance -ne '_Total') { $cpuUtilityValues += $value; continue }
+        if ($path -like '*\processor information(*)\actual frequency' -and $instance -ne '_Total') { $frequencyValues += $value; continue }
+        if ($path -like '*\system\context switches/sec') { $row.ContextSwitchesPerSec = [math]::Round($value, 3); continue }
+        if ($path -like '*\system\processor queue length') { $row.ProcessorQueueLength = [math]::Round($value, 3); continue }
+        if ($path -like '*\system\processes') { $row.Processes = [math]::Round($value, 0); continue }
+        if ($path -like '*\system\threads') { $row.Threads = [math]::Round($value, 0); continue }
+        if ($path -like '*\logicaldisk(z:)\avg. disk sec/read') { $row.DiskReadLatencyMs = [math]::Round($value * 1000, 6); continue }
+        if ($path -like '*\logicaldisk(z:)\avg. disk sec/write') { $row.DiskWriteLatencyMs = [math]::Round($value * 1000, 6); continue }
+        if ($path -like '*\logicaldisk(z:)\disk read bytes/sec') { $row.DiskReadBytesPerSec = [math]::Round($value, 3); continue }
+        if ($path -like '*\logicaldisk(z:)\disk write bytes/sec') { $row.DiskWriteBytesPerSec = [math]::Round($value, 3); continue }
+        if ($path -like '*\logicaldisk(z:)\current disk queue length') { $row.DiskQueueLength = [math]::Round($value, 6); continue }
+        if ($path -like '*\network interface(*)\bytes total/sec') { $networkTotal += $value; continue }
+        if ($path -like '*\network interface(*)\bytes received/sec') { $networkReceived += $value; continue }
+        if ($path -like '*\network interface(*)\bytes sent/sec') { $networkSent += $value; continue }
+        if ($path -like '*\gpu engine(*)\utilization percentage') {
+            if ($path -like '*engtype_3d*') { $gpu3d += $value }
+            elseif ($path -like '*engtype_copy*') { $gpuCopy += $value }
+            elseif ($path -like '*engtype_videoencode*') { $gpuVideoEncode += $value }
+            elseif ($path -like '*engtype_videodecode*') { $gpuVideoDecode += $value }
+            elseif ($path -like '*engtype_compute*') { $gpuCompute += $value }
+            continue
+        }
+        if ($path -like '*\gpu adapter memory(*)\dedicated usage') { $gpuDedicated += $value; continue }
+        if ($path -like '*\gpu adapter memory(*)\shared usage') { $gpuShared += $value; continue }
+    }
+
+    if ($cpuProcessorValues.Count -gt 0) { $row.CpuMaxProcessorTimePct = [math]::Round((($cpuProcessorValues | Measure-Object -Maximum).Maximum), 3) }
+    if ($cpuUtilityValues.Count -gt 0) { $row.CpuMaxUtilityPct = [math]::Round((($cpuUtilityValues | Measure-Object -Maximum).Maximum), 3) }
+    if ($frequencyValues.Count -gt 0) { $row.CpuMaxFrequencyMHz = [math]::Round((($frequencyValues | Measure-Object -Maximum).Maximum), 3) }
+    $row.NetworkBytesTotalPerSec = [math]::Round($networkTotal, 3)
+    $row.NetworkBytesReceivedPerSec = [math]::Round($networkReceived, 3)
+    $row.NetworkBytesSentPerSec = [math]::Round($networkSent, 3)
+    $row.GpuEngine3DUtilPct = [math]::Round($gpu3d, 3)
+    $row.GpuEngineCopyUtilPct = [math]::Round($gpuCopy, 3)
+    $row.GpuEngineVideoEncodeUtilPct = [math]::Round($gpuVideoEncode, 3)
+    $row.GpuEngineVideoDecodeUtilPct = [math]::Round($gpuVideoDecode, 3)
+    $row.GpuEngineComputeUtilPct = [math]::Round($gpuCompute, 3)
+    $row.GpuDedicatedUsageMB = [math]::Round($gpuDedicated / 1MB, 3)
+    $row.GpuSharedUsageMB = [math]::Round($gpuShared / 1MB, 3)
+    if ($errors.Count -gt 0) { $row.CounterError = ($errors -join ' | ') }
+
+    $result = [pscustomobject]$row
+    Write-CsvRow -Path ([string]$State.SystemCsv) -Row $result
+    return $result
+}
+
+function Read-NvidiaSmiSample {
+    param([object]$State)
+    $timestamp = Get-Date
+    if (-not $NvidiaSmiEnabled) {
+        return $null
+    }
+    if (-not (Test-Path -LiteralPath $NvidiaSmiPath)) {
+        Write-CsvRow -Path ([string]$State.NvidiaSmiStatusCsv) -Row ([pscustomobject]@{
+            Timestamp = $timestamp.ToString('o')
+            Available = $false
+            Error = "nvidia-smi not found: $NvidiaSmiPath"
+        })
+        return $null
+    }
+    try {
+        $query = 'utilization.gpu,utilization.memory,clocks.current.graphics,clocks.current.memory,power.draw,temperature.gpu,memory.used,memory.total,pcie.link.gen.current,pcie.link.width.current'
+        $line = & $NvidiaSmiPath --query-gpu=$query --format=csv,noheader,nounits 2>&1 | Select-Object -First 1
+        if (-not $line) {
+            throw 'nvidia-smi returned no data'
+        }
+        $parts = @($line -split ',').ForEach({ $_.Trim() })
+        if ($parts.Count -lt 10) {
+            throw "unexpected nvidia-smi output: $line"
+        }
+        $row = [pscustomobject]@{
+            Timestamp = $timestamp.ToString('o')
+            GpuUtilPct = $parts[0]
+            GpuMemoryUtilPct = $parts[1]
+            GpuGraphicsClockMHz = $parts[2]
+            GpuMemoryClockMHz = $parts[3]
+            GpuPowerW = $parts[4]
+            GpuTempC = $parts[5]
+            GpuMemoryUsedMB = $parts[6]
+            GpuMemoryTotalMB = $parts[7]
+            PcieLinkGen = $parts[8]
+            PcieLinkWidth = $parts[9]
+        }
+        Write-CsvRow -Path ([string]$State.NvidiaSmiCsv) -Row $row
+        return $row
+    } catch {
+        Write-CsvRow -Path ([string]$State.NvidiaSmiStatusCsv) -Row ([pscustomobject]@{
+            Timestamp = $timestamp.ToString('o')
+            Available = $false
+            Error = $_.Exception.Message
+        })
+        return $null
+    }
+}
+
+function Get-ActivePowerPlanGuid {
+    $output = powercfg /getactivescheme 2>$null | Out-String
+    if ($output -match '([0-9a-fA-F-]{36})') {
+        return $matches[1]
+    }
+    return ''
+}
+
+function Resolve-PowerPlanGuid {
+    param([string]$Preset)
+    if (-not $Preset) {
+        return ''
+    }
+    $trimmed = $Preset.Trim()
+    if (-not $trimmed -or $trimmed.ToLowerInvariant() -eq 'current') {
+        return ''
+    }
+    if ($trimmed -match '^[0-9a-fA-F-]{36}$') {
+        return $trimmed
+    }
+    $key = $trimmed.ToLowerInvariant()
+    if ($PowerPlanPresetMap.ContainsKey($key)) {
+        return [string]$PowerPlanPresetMap[$key]
+    }
+    throw "Unknown power plan preset '$Preset'. Known presets: $(@($PowerPlanPresetMap.Keys) -join ', ')"
+}
+
+function Set-BenchmarkPowerPlan {
+    param([object]$State)
+    if (-not $State.RequestedPowerPlanGuid) {
+        return
+    }
+    try {
+        $current = Get-ActivePowerPlanGuid
+        if (-not $State.OriginalPowerPlanGuid) {
+            $State.OriginalPowerPlanGuid = $current
+        }
+        if ($current -and $current.ToLowerInvariant() -eq ([string]$State.RequestedPowerPlanGuid).ToLowerInvariant()) {
+            $State.AppliedPowerPlanGuid = $current
+            return
+        }
+        powercfg /setactive ([string]$State.RequestedPowerPlanGuid) | Out-Null
+        Start-Sleep -Milliseconds 300
+        $State.AppliedPowerPlanGuid = Get-ActivePowerPlanGuid
+        Write-Log -State $State -Message "applied power plan preset=$($State.PowerPlanPreset) guid=$($State.AppliedPowerPlanGuid) original=$($State.OriginalPowerPlanGuid)"
+        Write-State -State $State
+    } catch {
+        Write-Log -State $State -Message "failed to apply power plan preset=$($State.PowerPlanPreset) guid=$($State.RequestedPowerPlanGuid): $($_.Exception.Message)"
+    }
+}
+
+function Restore-BenchmarkPowerPlan {
+    param([object]$State)
+    if (-not $State.OriginalPowerPlanGuid -or -not $State.RequestedPowerPlanGuid) {
+        return
+    }
+    try {
+        powercfg /setactive ([string]$State.OriginalPowerPlanGuid) | Out-Null
+        Start-Sleep -Milliseconds 300
+        $restored = Get-ActivePowerPlanGuid
+        Write-Log -State $State -Message "restored power plan guid=$restored original=$($State.OriginalPowerPlanGuid)"
+        $State.RestoredPowerPlanGuid = $restored
+        Write-State -State $State
+    } catch {
+        Write-Log -State $State -Message "failed to restore power plan guid=$($State.OriginalPowerPlanGuid): $($_.Exception.Message)"
+    }
+}
+
+function Resolve-AffinityMaskText {
+    param(
+        [string]$Preset,
+        [string]$Mask
+    )
+    if ($Mask) {
+        return $Mask
+    }
+    $key = if ($Preset) { $Preset.ToLowerInvariant() } else { 'none' }
+    if ($AffinityPresetMap.ContainsKey($key)) {
+        return [string]$AffinityPresetMap[$key]
+    }
+    throw "Unknown affinity preset '$Preset'. Known presets: $(@($AffinityPresetMap.Keys) -join ', ')"
+}
+
+function Convert-AffinityMaskToInt64 {
+    param([string]$MaskText)
+    if (-not $MaskText) {
+        return 0
+    }
+    $trimmed = $MaskText.Trim()
+    if ($trimmed -match '^0x') {
+        return [Convert]::ToInt64($trimmed.Substring(2), 16)
+    }
+    return [Convert]::ToInt64($trimmed, 10)
+}
+
+function Format-AffinityMask {
+    param([object]$Mask)
+    if ($null -eq $Mask) {
+        return ''
+    }
+    $value = [int64]$Mask
+    return ('0x{0:X}' -f $value)
+}
+
+function Set-TargetAffinity {
+    param(
+        [object]$State,
+        [System.Diagnostics.Process]$Process
+    )
+    $maskText = [string]$State.RequestedAffinityMask
+    if (-not $maskText) {
+        return
+    }
+    try {
+        if (-not $State.OriginalAffinityMask) {
+            $State.OriginalAffinityMask = Format-AffinityMask -Mask $Process.ProcessorAffinity
+        }
+        $maskValue = Convert-AffinityMaskToInt64 -MaskText $maskText
+        if ($maskValue -le 0) {
+            return
+        }
+        $Process.ProcessorAffinity = [IntPtr]$maskValue
+        $State.AppliedAffinityMask = Format-AffinityMask -Mask $maskValue
+        $State.AffinityApplied = $true
+        Write-CsvRow -Path ([string]$State.MarkersCsv) -Row ([pscustomobject]@{
+            Timestamp = (Get-Date).ToString('o')
+            Marker = "affinity-applied-$($State.AffinityPreset)-$($State.AppliedAffinityMask)"
+        })
+        Write-Log -State $State -Message "applied affinity preset=$($State.AffinityPreset) mask=$($State.AppliedAffinityMask) original=$($State.OriginalAffinityMask) pid=$($Process.Id)"
+        Write-State -State $State
+    } catch {
+        Write-Log -State $State -Message "failed to apply affinity preset=$($State.AffinityPreset) mask=$maskText pid=$($Process.Id): $($_.Exception.Message)"
+    }
+}
+
+function Restore-TargetAffinity {
+    param([object]$State)
+    if (-not $State.AffinityApplied -or -not $State.OriginalAffinityMask) {
+        return
+    }
+    $target = Get-TargetProcess
+    if (-not $target) {
+        return
+    }
+    try {
+        $maskValue = Convert-AffinityMaskToInt64 -MaskText ([string]$State.OriginalAffinityMask)
+        if ($maskValue -gt 0) {
+            $target.ProcessorAffinity = [IntPtr]$maskValue
+            Write-CsvRow -Path ([string]$State.MarkersCsv) -Row ([pscustomobject]@{
+                Timestamp = (Get-Date).ToString('o')
+                Marker = "affinity-restored-$($State.OriginalAffinityMask)"
+            })
+            Write-Log -State $State -Message "restored affinity mask=$($State.OriginalAffinityMask) pid=$($target.Id)"
+        }
+    } catch {
+        Write-Log -State $State -Message "failed to restore affinity mask=$($State.OriginalAffinityMask): $($_.Exception.Message)"
+    }
+}
+
+function Set-TargetPriority {
+    param(
+        [object]$State,
+        [System.Diagnostics.Process]$Process
+    )
+    $requested = [string]$State.RequestedPriorityClass
+    if (-not $requested -or $requested -ieq 'none') {
+        return
+    }
+    try {
+        if (-not $State.OriginalPriorityClass) {
+            $State.OriginalPriorityClass = [string]$Process.PriorityClass
+        }
+        $priority = [System.Enum]::Parse([System.Diagnostics.ProcessPriorityClass], $requested, $true)
+        $Process.PriorityClass = $priority
+        $State.AppliedPriorityClass = [string]$Process.PriorityClass
+        $State.PriorityApplied = $true
+        Write-CsvRow -Path ([string]$State.MarkersCsv) -Row ([pscustomobject]@{
+            Timestamp = (Get-Date).ToString('o')
+            Marker = "priority-applied-$($State.AppliedPriorityClass)"
+        })
+        Write-Log -State $State -Message "applied priority class=$($State.AppliedPriorityClass) original=$($State.OriginalPriorityClass) pid=$($Process.Id)"
+        Write-State -State $State
+    } catch {
+        Write-Log -State $State -Message "failed to apply priority class=$requested pid=$($Process.Id): $($_.Exception.Message)"
+    }
+}
+
+function Restore-TargetPriority {
+    param([object]$State)
+    if (-not $State.PriorityApplied -or -not $State.OriginalPriorityClass) {
+        return
+    }
+    $target = Get-TargetProcess
+    if (-not $target) {
+        return
+    }
+    try {
+        $priority = [System.Enum]::Parse([System.Diagnostics.ProcessPriorityClass], [string]$State.OriginalPriorityClass, $true)
+        $target.PriorityClass = $priority
+        Write-CsvRow -Path ([string]$State.MarkersCsv) -Row ([pscustomobject]@{
+            Timestamp = (Get-Date).ToString('o')
+            Marker = "priority-restored-$($State.OriginalPriorityClass)"
+        })
+        Write-Log -State $State -Message "restored priority class=$($State.OriginalPriorityClass) pid=$($target.Id)"
+    } catch {
+        Write-Log -State $State -Message "failed to restore priority class=$($State.OriginalPriorityClass): $($_.Exception.Message)"
+    }
+}
+
+function Start-PresentMonTools {
+    param(
+        [object]$State,
+        [int]$ProcessId
+    )
+    if ($State.PresentMonStartedForPid -eq $ProcessId -or $ProcessId -le 0) {
+        return
+    }
+    Stop-PresentMonTools -State $State
+    if ($PresentMonEnabled -or $PmdpEnabled) {
+        Clear-PresentMonEtwState -State $State
+    }
+    $State.PresentMonStartedForPid = $ProcessId
+    if ($PresentMonEnabled -and (Test-Path -LiteralPath $PresentMonPath)) {
+        try {
+            $pmSession = "$SessionName-PresentMon"
+            $args = @(
+                '--process_id', [string]$ProcessId,
+                '--output_file', [string]$State.PresentMonCsv,
+                '--v2_metrics',
+                '--date_time',
+                '--session_name', $pmSession,
+                '--stop_existing_session',
+                '--no_console_stats',
+                '--set_circular_buffer_size', '65536'
+            )
+            $pm = Start-Process -FilePath $PresentMonPath -ArgumentList $args -WindowStyle Hidden -RedirectStandardOutput ([string]$State.PresentMonStdoutPath) -RedirectStandardError ([string]$State.PresentMonStderrPath) -PassThru
+            $State.PresentMonPid = $pm.Id
+            Write-Log -State $State -Message "started PresentMon pid=$($pm.Id) target=$ProcessId"
+        } catch {
+            Write-Log -State $State -Message "failed to start PresentMon: $($_.Exception.Message)"
+        }
+    }
+    if ($PmdpEnabled -and (Test-Path -LiteralPath $PmdpProviderPath)) {
+        try {
+            $pmdp = Start-Process -FilePath $PmdpProviderPath -ArgumentList @('/i', [string]$ProcessId) -WindowStyle Hidden -PassThru
+            $State.PmdpProviderPid = $pmdp.Id
+            Write-Log -State $State -Message "started PMDP provider pid=$($pmdp.Id) target=$ProcessId"
+        } catch {
+            Write-Log -State $State -Message "failed to start PMDP provider: $($_.Exception.Message)"
+        }
+    }
+    Write-State -State $State
+}
+
+function Stop-PresentMonTools {
+    param([object]$State)
+    if ($PresentMonEnabled -and (Test-Path -LiteralPath $PresentMonPath)) {
+        try {
+            & $PresentMonPath --session_name "$SessionName-PresentMon" --terminate_existing_session --no_csv --no_console_stats 2>&1 | Add-Content -LiteralPath ([string]$State.PresentMonStderrPath) -Encoding UTF8
+            if ($State.PresentMonPid) {
+                Wait-Process -Id ([int]$State.PresentMonPid) -Timeout 5 -ErrorAction SilentlyContinue
+            }
+        } catch {
+            Write-Log -State $State -Message "PresentMon stop reported: $($_.Exception.Message)"
+        }
+    }
+    if ($PmdpEnabled -and (Test-Path -LiteralPath $PmdpProviderPath)) {
+        try {
+            Start-Process -FilePath $PmdpProviderPath -ArgumentList '/u' -WindowStyle Hidden | Out-Null
+        } catch {
+            Write-Log -State $State -Message "PMDP provider stop reported: $($_.Exception.Message)"
+        }
+    }
+    foreach ($toolProcessId in @($State.PresentMonPid, $State.PmdpProviderPid)) {
+        if ($toolProcessId) {
+            Stop-Process -Id ([int]$toolProcessId) -Force -ErrorAction SilentlyContinue
+        }
+    }
+    $State.PresentMonPid = $null
+    $State.PmdpProviderPid = $null
+    $State.PresentMonStartedForPid = $null
+    Write-State -State $State
+}
+
+function Process-MarkerRequests {
+    param([object]$State)
+    $pendingPath = [string]$State.MarkerPendingPath
+    if (-not (Test-Path -LiteralPath $pendingPath)) {
+        return
+    }
+    $lines = @(Get-Content -LiteralPath $pendingPath -ErrorAction SilentlyContinue)
+    Remove-Item -LiteralPath $pendingPath -Force -ErrorAction SilentlyContinue
+    foreach ($line in $lines) {
+        if (-not $line) {
+            continue
+        }
+        $parts = $line.Split('|', 2)
+        $timestamp = $parts[0]
+        $name = if ($parts.Count -gt 1 -and $parts[1]) { $parts[1] } else { 'marker' }
+        Write-CsvRow -Path ([string]$State.MarkersCsv) -Row ([pscustomobject]@{
+            Timestamp = $timestamp
+            Marker = $name
+        })
+        Write-ProcessInventory -State $State -Phase "marker-$name"
+        Write-Log -State $State -Message "marker $name"
+    }
+}
+
+function Invoke-InteractiveSampler {
+    $state = Read-State
+    if (-not $state) {
+        throw "No active benchmark state found for $SessionName."
+    }
+    try {
+        if (-not $state.SamplerPid) {
+            $state.SamplerPid = $PID
+            Write-State -State $state
+        }
+        Write-Log -State $state -Message "interactive sampler starting"
+        Write-ProcessInventory -State $state -Phase 'pre-launch'
+        $logicalProcessors = [int](Get-CimInstance Win32_ComputerSystem).NumberOfLogicalProcessors
+        $beforeProcesses = Get-Process | Select-Object Id, ProcessName, CPU, WorkingSet64, PrivateMemorySize64
+        $lastProcessTime = Get-Date
+        $lastSystemTime = Get-Date
+        $lastInventoryTime = Get-Date
+        $lastThreadTime = Get-Date
+        $threadBefore = @{}
+        $lastPmdpFrameCount = 0
+        $lastTargetPid = 0
+        $lastSystemSample = $null
+        $lastNvidiaSmiSample = $null
+
+        while (-not (Test-Path -LiteralPath ([string]$state.StopFile))) {
+            Start-Sleep -Seconds $SampleIntervalSeconds
+            $timestamp = Get-Date
+            Process-MarkerRequests -State $state
+
+            $target = Get-TargetProcess
+            $targetPid = if ($target) { [int]$target.Id } else { 0 }
+            if ($targetPid -ne $lastTargetPid) {
+                $marker = if ($targetPid) { "target-started-$targetPid" } else { "target-exited-$lastTargetPid" }
+                Write-CsvRow -Path ([string]$state.MarkersCsv) -Row ([pscustomobject]@{
+                    Timestamp = $timestamp.ToString('o')
+                    Marker = $marker
+                })
+                Write-ProcessInventory -State $state -Phase $marker
+                if ($targetPid) {
+                    Set-TargetAffinity -State $state -Process $target
+                    Set-TargetPriority -State $state -Process $target
+                    Start-PresentMonTools -State $state -ProcessId $targetPid
+                } else {
+                    Stop-PresentMonTools -State $state
+                }
+                $lastTargetPid = $targetPid
+            }
+
+            if (($timestamp - $lastProcessTime).TotalSeconds -ge $ProcessIntervalSeconds) {
+                $afterProcesses = Get-Process | Select-Object Id, ProcessName, CPU, WorkingSet64, PrivateMemorySize64
+                $elapsed = [math]::Max(0.001, ($timestamp - $lastProcessTime).TotalSeconds)
+                $watchedRows = @(Get-ProcessCpuRows -Before $beforeProcesses -After $afterProcesses -Timestamp $timestamp -ElapsedSeconds $elapsed -LogicalProcessors $logicalProcessors -Names $WatchProcessNames)
+                foreach ($row in $watchedRows) {
+                    Write-CsvRow -Path ([string]$state.WatchedProcessCsv) -Row $row
+                }
+                $topRows = @(Get-ProcessCpuRows -Before $beforeProcesses -After $afterProcesses -Timestamp $timestamp -ElapsedSeconds $elapsed -LogicalProcessors $logicalProcessors)
+                foreach ($row in ($topRows | Sort-Object CpuSeconds -Descending | Select-Object -First 25)) {
+                    Write-CsvRow -Path ([string]$state.TopProcessCsv) -Row $row
+                }
+                $beforeProcesses = $afterProcesses
+                $lastProcessTime = $timestamp
+            }
+
+            if (($timestamp - $lastSystemTime).TotalSeconds -ge $SystemIntervalSeconds) {
+                $lastSystemSample = Read-SystemCounters -State $state
+                $lastNvidiaSmiSample = Read-NvidiaSmiSample -State $state
+                $lastSystemTime = $timestamp
+            }
+            $rtss = if ($RtssEnabled) { Read-RtssSample -State $state } else { $null }
+            $mahm = if ($MahmEnabled) { Read-MahmSample -State $state } else { $null }
+            if ($PmdpEnabled) {
+                $lastPmdpFrameCount = Read-PmdpFrames -State $state -LastFrameCount $lastPmdpFrameCount
+            }
+
+            Write-CsvRow -Path ([string]$state.CombinedCsv) -Row ([pscustomobject]@{
+                Timestamp = $timestamp.ToString('o')
+                TargetRunning = [bool]$targetPid
+                TargetPid = $targetPid
+                AffinityPreset = $state.AffinityPreset
+                AppliedAffinityMask = $state.AppliedAffinityMask
+                PowerPlanPreset = $state.PowerPlanPreset
+                AppliedPowerPlanGuid = $state.AppliedPowerPlanGuid
+                RtssFpsWindow = if ($rtss) { $rtss.FpsWindow } else { $null }
+                RtssFpsInstant = if ($rtss) { $rtss.FpsInstant } else { $null }
+                RtssFrameTimeMs = if ($rtss) { $rtss.FrameTimeMs } else { $null }
+                MahmFps = if ($mahm) { $mahm.OsdFramerate } else { $null }
+                MahmFrameTimeMs = if ($mahm) { $mahm.OsdFrametimeMs } else { $null }
+                GpuUsagePct = if ($mahm) { $mahm.GpuUsagePct } else { $null }
+                GpuClockMHz = if ($mahm) { $mahm.GpuClockMHz } else { $null }
+                GpuPowerW = if ($mahm) { $mahm.GpuPowerW } else { $null }
+                GpuTempC = if ($mahm) { $mahm.GpuTempC } else { $null }
+                CpuUsagePct = if ($mahm) { $mahm.CpuUsagePct } else { $null }
+                CpuMaxLogicalUsagePct = if ($mahm) { $mahm.CpuMaxLogicalUsagePct } else { $null }
+                CpuClockMHz = if ($mahm) { $mahm.CpuClockMHz } else { $null }
+                CpuTempC = if ($mahm) { $mahm.CpuTempC } else { $null }
+                CpuPowerW = if ($mahm) { $mahm.CpuPowerW } else { $null }
+                RamUsageMB = if ($mahm) { $mahm.RamUsageMB } else { $null }
+                AvailableMBytes = if ($lastSystemSample) { $lastSystemSample.AvailableMBytes } else { $null }
+                CommittedMBytes = if ($lastSystemSample) { $lastSystemSample.CommittedMBytes } else { $null }
+                PagesPerSec = if ($lastSystemSample) { $lastSystemSample.PagesPerSec } else { $null }
+                CpuTotalProcessorTimePct = if ($lastSystemSample) { $lastSystemSample.CpuTotalProcessorTimePct } else { $null }
+                CpuTotalUtilityPct = if ($lastSystemSample) { $lastSystemSample.CpuTotalUtilityPct } else { $null }
+                CpuMaxProcessorTimePct = if ($lastSystemSample) { $lastSystemSample.CpuMaxProcessorTimePct } else { $null }
+                CpuMaxUtilityPct = if ($lastSystemSample) { $lastSystemSample.CpuMaxUtilityPct } else { $null }
+                CpuTotalDpcPct = if ($lastSystemSample) { $lastSystemSample.CpuTotalDpcPct } else { $null }
+                CpuTotalInterruptPct = if ($lastSystemSample) { $lastSystemSample.CpuTotalInterruptPct } else { $null }
+                CpuMaxFrequencyMHz = if ($lastSystemSample) { $lastSystemSample.CpuMaxFrequencyMHz } else { $null }
+                ProcessorQueueLength = if ($lastSystemSample) { $lastSystemSample.ProcessorQueueLength } else { $null }
+                ContextSwitchesPerSec = if ($lastSystemSample) { $lastSystemSample.ContextSwitchesPerSec } else { $null }
+                DiskReadLatencyMs = if ($lastSystemSample) { $lastSystemSample.DiskReadLatencyMs } else { $null }
+                DiskWriteLatencyMs = if ($lastSystemSample) { $lastSystemSample.DiskWriteLatencyMs } else { $null }
+                DiskQueueLength = if ($lastSystemSample) { $lastSystemSample.DiskQueueLength } else { $null }
+                NetworkBytesTotalPerSec = if ($lastSystemSample) { $lastSystemSample.NetworkBytesTotalPerSec } else { $null }
+                GpuEngine3DUtilPct = if ($lastSystemSample) { $lastSystemSample.GpuEngine3DUtilPct } else { $null }
+                GpuEngineVideoEncodeUtilPct = if ($lastSystemSample) { $lastSystemSample.GpuEngineVideoEncodeUtilPct } else { $null }
+                GpuDedicatedUsageMB = if ($lastSystemSample) { $lastSystemSample.GpuDedicatedUsageMB } else { $null }
+                NvidiaGpuUtilPct = if ($lastNvidiaSmiSample) { $lastNvidiaSmiSample.GpuUtilPct } else { $null }
+                NvidiaGpuMemoryUtilPct = if ($lastNvidiaSmiSample) { $lastNvidiaSmiSample.GpuMemoryUtilPct } else { $null }
+                NvidiaGpuGraphicsClockMHz = if ($lastNvidiaSmiSample) { $lastNvidiaSmiSample.GpuGraphicsClockMHz } else { $null }
+                NvidiaGpuMemoryClockMHz = if ($lastNvidiaSmiSample) { $lastNvidiaSmiSample.GpuMemoryClockMHz } else { $null }
+                NvidiaGpuPowerW = if ($lastNvidiaSmiSample) { $lastNvidiaSmiSample.GpuPowerW } else { $null }
+                NvidiaGpuTempC = if ($lastNvidiaSmiSample) { $lastNvidiaSmiSample.GpuTempC } else { $null }
+                NvidiaGpuMemoryUsedMB = if ($lastNvidiaSmiSample) { $lastNvidiaSmiSample.GpuMemoryUsedMB } else { $null }
+                NvidiaPcieLinkGen = if ($lastNvidiaSmiSample) { $lastNvidiaSmiSample.PcieLinkGen } else { $null }
+                NvidiaPcieLinkWidth = if ($lastNvidiaSmiSample) { $lastNvidiaSmiSample.PcieLinkWidth } else { $null }
+                PmdpFrameCount = $lastPmdpFrameCount
+            })
+
+            if (($timestamp - $lastThreadTime).TotalSeconds -ge $ThreadIntervalSeconds) {
+                $threadBefore = Write-ThreadSample -State $state -Timestamp $timestamp -ThreadBefore $threadBefore -ElapsedSeconds (($timestamp - $lastThreadTime).TotalSeconds)
+                $lastThreadTime = $timestamp
+            }
+            if ($InventoryIntervalSeconds -gt 0 -and ($timestamp - $lastInventoryTime).TotalSeconds -ge $InventoryIntervalSeconds) {
+                $phase = if ($targetPid) { 'during-target' } else { 'capture-active' }
+                Write-ProcessInventory -State $state -Phase $phase
+                $lastInventoryTime = $timestamp
+            }
+        }
+
+        Write-Log -State $state -Message "stop file observed"
+        Restore-TargetPriority -State $state
+        Restore-TargetAffinity -State $state
+        Stop-PresentMonTools -State $state
+        Write-ProcessInventory -State $state -Phase 'post-stop-immediate'
+        if ($PostStopDelaySeconds -gt 0) {
+            Start-Sleep -Seconds $PostStopDelaySeconds
+            Write-ProcessInventory -State $state -Phase "post-stop-plus-${PostStopDelaySeconds}s"
+        }
+        Write-Log -State $state -Message "interactive sampler exiting"
+    } catch {
+        Write-Log -State $state -Message "interactive sampler failed: $($_.Exception.Message)"
+        Write-Log -State $state -Message $_.ScriptStackTrace
+        throw
+    }
+}
+
+function Start-Benchmark {
+    Ensure-Directory -Path $ScriptDir
+    Ensure-Directory -Path $StateDir
+    Ensure-Directory -Path $CaptureRoot
+    $safeLabel = ($Label -replace '[^a-zA-Z0-9._-]+', '-').Trim('-')
+    if (-not $safeLabel) {
+        $safeLabel = 'capture'
+    }
+    $startTime = Get-Date
+    $runDir = Join-Path $CaptureRoot ("{0}-{1}" -f $startTime.ToString('yyyyMMdd-HHmmss'), $safeLabel)
+    Ensure-Directory -Path $runDir
+    $state = [pscustomobject]@{
+        SessionName = $SessionName
+        Label = $safeLabel
+        StartTime = $startTime.ToString('o')
+        RunDir = $runDir
+        StopFile = Join-Path $runDir 'stop.requested'
+        LogPath = Join-Path $runDir 'benchmark.log'
+        MarkerPendingPath = Join-Path $runDir 'markers.pending'
+        MarkersCsv = Join-Path $runDir 'markers.csv'
+        CombinedCsv = Join-Path $runDir 'combined.csv'
+        SystemCsv = Join-Path $runDir 'system.csv'
+        NvidiaSmiCsv = Join-Path $runDir 'nvidia-smi.csv'
+        NvidiaSmiStatusCsv = Join-Path $runDir 'nvidia-smi-status.csv'
+        RtssCsv = Join-Path $runDir 'rtss.csv'
+        RtssStatusCsv = Join-Path $runDir 'rtss-status.csv'
+        MahmCsv = Join-Path $runDir 'afterburner.csv'
+        MahmStatusCsv = Join-Path $runDir 'afterburner-status.csv'
+        PmdpCsv = Join-Path $runDir 'presentmon-provider.csv'
+        PmdpStatusCsv = Join-Path $runDir 'presentmon-provider-status.csv'
+        PresentMonCsv = Join-Path $runDir 'presentmon-console.csv'
+        PresentMonStdoutPath = Join-Path $runDir 'presentmon-console.stdout.log'
+        PresentMonStderrPath = Join-Path $runDir 'presentmon-console.stderr.log'
+        PreflightCsv = Join-Path $runDir 'preflight.csv'
+        ObsProfileCsv = Join-Path $runDir 'obs-profile.csv'
+        ProcessInventoryCsv = Join-Path $runDir 'process-inventory.csv'
+        WatchedProcessCsv = Join-Path $runDir 'watched-processes.csv'
+        TopProcessCsv = Join-Path $runDir 'top-processes.csv'
+        ThreadCsv = Join-Path $runDir 'target-threads.csv'
+        SummaryPath = Join-Path $runDir 'summary.txt'
+        SamplerPid = $null
+        PresentMonPid = $null
+        PmdpProviderPid = $null
+        PresentMonStartedForPid = $null
+        AffinityPreset = $AffinityPreset.ToLowerInvariant()
+        RequestedAffinityMask = Resolve-AffinityMaskText -Preset $AffinityPreset -Mask $AffinityMask
+        AppliedAffinityMask = $null
+        OriginalAffinityMask = $null
+        AffinityApplied = $false
+        RequestedPriorityClass = $PriorityClass
+        OriginalPriorityClass = $null
+        AppliedPriorityClass = $null
+        PriorityApplied = $false
+        PowerPlanPreset = $PowerPlan.ToLowerInvariant()
+        RequestedPowerPlanGuid = Resolve-PowerPlanGuid -Preset $PowerPlan
+        OriginalPowerPlanGuid = $null
+        AppliedPowerPlanGuid = $null
+        RestoredPowerPlanGuid = $null
+        PreflightWarnings = @()
+    }
+    Write-ObsProfileSnapshot -State $state
+    $preflightWarnings = @(Invoke-PreflightCheck -State $state)
+    $state.PreflightWarnings = @($preflightWarnings)
+    Write-State -State $state
+    Set-BenchmarkPowerPlan -State $state
+    Write-CsvRow -Path ([string]$state.MarkersCsv) -Row ([pscustomobject]@{
+        Timestamp = $startTime.ToString('o')
+        Marker = 'start'
+    })
+
+    Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false -ErrorAction SilentlyContinue
+    $scriptPath = Join-Path $ScriptDir 'windows-gaming-benchmark.ps1'
+    $args = "-NoProfile -ExecutionPolicy Bypass -File `"$scriptPath`" -Action SampleInteractive -SessionName `"$SessionName`""
+    $action = New-ScheduledTaskAction -Execute 'powershell.exe' -Argument $args
+    $principal = New-ScheduledTaskPrincipal -UserId $TaskUser -LogonType Interactive -RunLevel Highest
+    $settings = New-ScheduledTaskSettingsSet -ExecutionTimeLimit (New-TimeSpan -Hours 8)
+    Register-ScheduledTask -TaskName $TaskName -Action $action -Principal $principal -Settings $settings -Force | Out-Null
+    Start-ScheduledTask -TaskName $TaskName
+    Start-Sleep -Seconds 2
+    $sampler = Get-CimInstance Win32_Process -Filter "Name='powershell.exe'" | Where-Object { $_.CommandLine -like "*windows-gaming-benchmark.ps1*SampleInteractive*" } | Sort-Object CreationDate -Descending | Select-Object -First 1
+    if ($sampler) {
+        $state.SamplerPid = [int]$sampler.ProcessId
+        Write-State -State $state
+    }
+    [pscustomobject]@{
+        Started = $true
+        StartTime = $state.StartTime
+        RunDir = $runDir
+        SamplerPid = $state.SamplerPid
+        AffinityPreset = $state.AffinityPreset
+        RequestedAffinityMask = $state.RequestedAffinityMask
+        RequestedPriorityClass = $state.RequestedPriorityClass
+        PowerPlanPreset = $state.PowerPlanPreset
+        RequestedPowerPlanGuid = $state.RequestedPowerPlanGuid
+        OriginalPowerPlanGuid = $state.OriginalPowerPlanGuid
+        AppliedPowerPlanGuid = $state.AppliedPowerPlanGuid
+        PreflightWarnings = @($state.PreflightWarnings)
+    }
+}
+
+function Invoke-BenchmarkPreflight {
+    Ensure-Directory -Path $ScriptDir
+    Ensure-Directory -Path $CaptureRoot
+    $runDir = Join-Path $CaptureRoot ("{0}-preflight" -f (Get-Date).ToString('yyyyMMdd-HHmmss'))
+    Ensure-Directory -Path $runDir
+    $state = [pscustomobject]@{
+        SessionName = $SessionName
+        RunDir = $runDir
+        LogPath = Join-Path $runDir 'benchmark.log'
+        PreflightCsv = Join-Path $runDir 'preflight.csv'
+    }
+    $warnings = @(Invoke-PreflightCheck -State $state -FailOnWarnings:$false)
+    [pscustomobject]@{
+        Passed = ($warnings.Count -eq 0)
+        WarningCount = $warnings.Count
+        Warnings = $warnings
+        RunDir = $runDir
+        PreflightCsv = $state.PreflightCsv
+    }
+}
+
+function Stop-Benchmark {
+    $state = Read-State
+    if (-not $state) {
+        throw "No active benchmark state found for $SessionName."
+    }
+    $stopTime = Get-Date
+    Write-CsvRow -Path ([string]$state.MarkersCsv) -Row ([pscustomobject]@{
+        Timestamp = $stopTime.ToString('o')
+        Marker = 'stop-requested'
+    })
+    New-Item -ItemType File -Path ([string]$state.StopFile) -Force | Out-Null
+    $deadline = (Get-Date).AddSeconds($PostStopDelaySeconds + 45)
+    while ((Get-Date) -lt $deadline) {
+        $task = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
+        $sampler = if ($state.SamplerPid) { Get-Process -Id ([int]$state.SamplerPid) -ErrorAction SilentlyContinue } else { $null }
+        if ((-not $task -or $task.State -ne 'Running') -and -not $sampler) {
+            break
+        }
+        Start-Sleep -Seconds 1
+    }
+    Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false -ErrorAction SilentlyContinue
+    Restore-BenchmarkPowerPlan -State $state
+    [pscustomobject]@{
+        Stopped = $true
+        StopTime = $stopTime.ToString("o")
+        RunDir = $state.RunDir
+        SamplerPid = $state.SamplerPid
+        PowerPlanPreset = $state.PowerPlanPreset
+        OriginalPowerPlanGuid = $state.OriginalPowerPlanGuid
+        AppliedPowerPlanGuid = $state.AppliedPowerPlanGuid
+        RestoredPowerPlanGuid = $state.RestoredPowerPlanGuid
+        AnalyzeCommand = ($ScriptDir + "\windows-gaming-benchmark.ps1 -Action Analyze -CaptureDir " + [string]$state.RunDir)
+    }
+}
+
+function Mark-Benchmark {
+    $state = Read-State
+    if (-not $state) {
+        throw "No active benchmark state found for $SessionName."
+    }
+    $safeMarker = if ($Marker) { ($Marker -replace '[^a-zA-Z0-9._-]+', '-').Trim('-') } else { 'marker' }
+    if (-not $safeMarker) {
+        $safeMarker = 'marker'
+    }
+    "{0}|{1}" -f (Get-Date).ToString('o'), $safeMarker | Add-Content -LiteralPath ([string]$state.MarkerPendingPath) -Encoding UTF8
+    [pscustomobject]@{
+        Marked = $true
+        Marker = $safeMarker
+        RunDir = $state.RunDir
+    }
+}
+
+function Get-BenchmarkStatus {
+    $state = Read-State
+    if (-not $state) {
+        return [pscustomobject]@{
+            Active = $false
+            SessionName = $SessionName
+        }
+    }
+    $samplerActive = if ($state.SamplerPid) { [bool](Get-Process -Id ([int]$state.SamplerPid) -ErrorAction SilentlyContinue) } else { $false }
+    $task = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
+    [pscustomobject]@{
+        Active = $samplerActive -or ($task -and $task.State -eq 'Running')
+        SessionName = $SessionName
+        RunDir = $state.RunDir
+        StartTime = $state.StartTime
+        SamplerPid = $state.SamplerPid
+        SamplerActive = $samplerActive
+        TaskState = if ($task) { [string]$task.State } else { 'Missing' }
+        CombinedCsv = $state.CombinedCsv
+        SystemCsv = $state.SystemCsv
+        NvidiaSmiCsv = $state.NvidiaSmiCsv
+        NvidiaSmiStatusCsv = $state.NvidiaSmiStatusCsv
+        AffinityPreset = $state.AffinityPreset
+        RequestedAffinityMask = $state.RequestedAffinityMask
+        AppliedAffinityMask = $state.AppliedAffinityMask
+        OriginalAffinityMask = $state.OriginalAffinityMask
+        RequestedPriorityClass = $state.RequestedPriorityClass
+        OriginalPriorityClass = $state.OriginalPriorityClass
+        AppliedPriorityClass = $state.AppliedPriorityClass
+        PowerPlanPreset = $state.PowerPlanPreset
+        RequestedPowerPlanGuid = $state.RequestedPowerPlanGuid
+        OriginalPowerPlanGuid = $state.OriginalPowerPlanGuid
+        AppliedPowerPlanGuid = $state.AppliedPowerPlanGuid
+        RestoredPowerPlanGuid = $state.RestoredPowerPlanGuid
+    }
+}
+
+function Import-CsvSafe {
+    param([string]$Path)
+    if ($Path -and (Test-Path -LiteralPath $Path)) {
+        return @(Import-Csv -LiteralPath $Path)
+    }
+    return @()
+}
+
+function Invoke-Analyze {
+    param(
+        [object]$State = $null,
+        [datetime]$StopTime = (Get-Date)
+    )
+    if (-not $State) {
+        if ($CaptureDir) {
+            $State = [pscustomobject]@{
+                RunDir = $CaptureDir
+                SummaryPath = Join-Path $CaptureDir 'summary.txt'
+                MarkersCsv = Join-Path $CaptureDir 'markers.csv'
+                CombinedCsv = Join-Path $CaptureDir 'combined.csv'
+                RtssCsv = Join-Path $CaptureDir 'rtss.csv'
+                MahmCsv = Join-Path $CaptureDir 'afterburner.csv'
+                PmdpCsv = Join-Path $CaptureDir 'presentmon-provider.csv'
+                PmdpStatusCsv = Join-Path $CaptureDir 'presentmon-provider-status.csv'
+                PresentMonCsv = Join-Path $CaptureDir 'presentmon-console.csv'
+                PreflightCsv = Join-Path $CaptureDir 'preflight.csv'
+                ObsProfileCsv = Join-Path $CaptureDir 'obs-profile.csv'
+                WatchedProcessCsv = Join-Path $CaptureDir 'watched-processes.csv'
+                TopProcessCsv = Join-Path $CaptureDir 'top-processes.csv'
+                ThreadCsv = Join-Path $CaptureDir 'target-threads.csv'
+                ProcessInventoryCsv = Join-Path $CaptureDir 'process-inventory.csv'
+                SystemCsv = Join-Path $CaptureDir 'system.csv'
+                NvidiaSmiCsv = Join-Path $CaptureDir 'nvidia-smi.csv'
+                NvidiaSmiStatusCsv = Join-Path $CaptureDir 'nvidia-smi-status.csv'
+            }
+        } else {
+            $State = Read-State
+        }
+    }
+    if (-not $State) {
+        throw "No state or capture directory supplied."
+    }
+
+    $lines = [System.Collections.Generic.List[string]]::new()
+    $lines.Add("Capture: $($State.RunDir)")
+    if ($State.StartTime) { $lines.Add("Start: $($State.StartTime)") }
+    if ($StopTime) { $lines.Add("Stop:  $($StopTime.ToString('o'))") }
+
+    $markers = Import-CsvSafe -Path ([string]$State.MarkersCsv)
+    $combined = Import-CsvSafe -Path ([string]$State.CombinedCsv)
+    $rtss = Import-CsvSafe -Path ([string]$State.RtssCsv)
+    $mahm = Import-CsvSafe -Path ([string]$State.MahmCsv)
+    $pmdp = Import-CsvSafe -Path ([string]$State.PmdpCsv)
+    $pmdpStatus = Import-CsvSafe -Path ([string]$State.PmdpStatusCsv)
+    $presentMon = Import-CsvSafe -Path ([string]$State.PresentMonCsv)
+    $threads = Import-CsvSafe -Path ([string]$State.ThreadCsv)
+    $topProcess = Import-CsvSafe -Path ([string]$State.TopProcessCsv)
+    $inventory = Import-CsvSafe -Path ([string]$State.ProcessInventoryCsv)
+    $system = Import-CsvSafe -Path ([string]$State.SystemCsv)
+    $nvidiaSmi = Import-CsvSafe -Path ([string]$State.NvidiaSmiCsv)
+    $nvidiaSmiStatus = Import-CsvSafe -Path ([string]$State.NvidiaSmiStatusCsv)
+    $preflight = Import-CsvSafe -Path ([string]$State.PreflightCsv)
+    $obsProfile = Import-CsvSafe -Path ([string]$State.ObsProfileCsv)
+
+    $lines.Add("PreflightRows: $($preflight.Count)")
+    $lines.Add("ObsProfileRows: $($obsProfile.Count)")
+    if ($obsProfile.Count -gt 0) {
+        $obsByKey = @{}
+        foreach ($row in $obsProfile) {
+            if ([string]$row.Available -ieq 'true' -and $row.Key) {
+                $obsByKey["$($row.Section).$($row.Key)"] = $row.Value
+            }
+        }
+        foreach ($key in @(
+            'Output.Mode',
+            'SimpleOutput.StreamEncoder',
+            'SimpleOutput.RecEncoder',
+            'SimpleOutput.NVENCPreset2',
+            'SimpleOutput.RecRB',
+            'SimpleOutput.VBitrate',
+            'SimpleOutput.MultitrackVideoMaximumAggregateBitrate',
+            'Video.BaseCX',
+            'Video.BaseCY',
+            'Video.OutputCX',
+            'Video.OutputCY',
+            'Video.FPSCommon'
+        )) {
+            if ($obsByKey.ContainsKey($key)) {
+                $lines.Add("OBS ${key}: $($obsByKey[$key])")
+            }
+        }
+    }
+    $preflightWarnings = @($preflight | Where-Object { [string]$_.Suspicious -ieq 'true' })
+    if ($preflightWarnings.Count -gt 0) {
+        $lines.Add("PreflightWarnings:")
+        foreach ($row in $preflightWarnings) {
+            $lines.Add("  $($row.Timestamp) $($row.Category) $($row.Name) pid=$($row.ProcessId) $($row.Detail)")
+        }
+    }
+    $lines.Add("Markers: $($markers.Count)")
+    foreach ($marker in $markers) {
+        $lines.Add("  $($marker.Timestamp) $($marker.Marker)")
+    }
+    $lines.Add("CombinedSamples: $($combined.Count)")
+    $lines.Add("RTSSRows: $($rtss.Count)")
+    $lines.Add("AfterburnerRows: $($mahm.Count)")
+    $lines.Add("PMDPRows: $($pmdp.Count)")
+    $lines.Add("PMDPStatusRows: $($pmdpStatus.Count)")
+    $lines.Add("PresentMonConsoleRows: $($presentMon.Count)")
+    $lines.Add("SystemRows: $($system.Count)")
+    $lines.Add("NvidiaSmiRows: $($nvidiaSmi.Count)")
+    $lines.Add("NvidiaSmiStatusRows: $($nvidiaSmiStatus.Count)")
+    $lines.Add("ProcessInventoryRows: $($inventory.Count)")
+    if ($State.AffinityPreset -or $State.RequestedAffinityMask -or $State.AppliedAffinityMask) {
+        $lines.Add("AffinityPreset: $($State.AffinityPreset)")
+        $lines.Add("RequestedAffinityMask: $($State.RequestedAffinityMask)")
+        $lines.Add("AppliedAffinityMask: $($State.AppliedAffinityMask)")
+        $lines.Add("OriginalAffinityMask: $($State.OriginalAffinityMask)")
+    }
+    if ($State.RequestedPriorityClass -or $State.AppliedPriorityClass) {
+        $lines.Add("RequestedPriorityClass: $($State.RequestedPriorityClass)")
+        $lines.Add("AppliedPriorityClass: $($State.AppliedPriorityClass)")
+        $lines.Add("OriginalPriorityClass: $($State.OriginalPriorityClass)")
+    }
+    if ($State.PowerPlanPreset -or $State.RequestedPowerPlanGuid -or $State.AppliedPowerPlanGuid) {
+        $lines.Add("PowerPlanPreset: $($State.PowerPlanPreset)")
+        $lines.Add("RequestedPowerPlanGuid: $($State.RequestedPowerPlanGuid)")
+        $lines.Add("OriginalPowerPlanGuid: $($State.OriginalPowerPlanGuid)")
+        $lines.Add("AppliedPowerPlanGuid: $($State.AppliedPowerPlanGuid)")
+        $lines.Add("RestoredPowerPlanGuid: $($State.RestoredPowerPlanGuid)")
+    }
+
+    if ($combined.Count -gt 0) {
+        $rtssFpsValues = Convert-ToDoubleArray -Rows $combined -Column 'RtssFpsWindow' -Minimum 1 -Maximum 1000
+        $rtssFrameValues = Convert-ToDoubleArray -Rows $combined -Column 'RtssFrameTimeMs' -Minimum 0.1 -Maximum 1000
+        $mahmFpsValues = Convert-ToDoubleArray -Rows $combined -Column 'MahmFps' -Minimum 1 -Maximum 1000
+        $mahmFrameValues = Convert-ToDoubleArray -Rows $combined -Column 'MahmFrameTimeMs' -Minimum 0.1 -Maximum 1000
+        $lines.Add((Get-StatsLine -Name 'RTSS FPS window' -Values $rtssFpsValues -Format 'N1'))
+        $lines.Add((Get-FpsLowLine -Name 'RTSS FPS lows' -Values $rtssFpsValues -Format 'N1'))
+        $lines.Add((Get-StatsLine -Name 'RTSS frame ms' -Values $rtssFrameValues -Format 'N2'))
+        $lines.Add((Get-FrameSpikeLine -Name 'RTSS frame spikes' -Values $rtssFrameValues -Format 'N2'))
+        $lines.Add((Get-StatsLine -Name 'Afterburner FPS' -Values $mahmFpsValues -Format 'N1'))
+        $lines.Add((Get-FpsLowLine -Name 'Afterburner FPS lows' -Values $mahmFpsValues -Format 'N1'))
+        $lines.Add((Get-StatsLine -Name 'Afterburner frame ms' -Values $mahmFrameValues -Format 'N2'))
+        $lines.Add((Get-FrameSpikeLine -Name 'Afterburner frame spikes' -Values $mahmFrameValues -Format 'N2'))
+        $lines.Add((Get-StatsLine -Name 'GPU usage pct' -Values (Convert-ToDoubleArray -Rows $combined -Column 'GpuUsagePct' -Minimum 0 -Maximum 100) -Format 'N1'))
+        $lines.Add((Get-StatsLine -Name 'GPU clock MHz' -Values (Convert-ToDoubleArray -Rows $combined -Column 'GpuClockMHz' -Minimum 0 -Maximum 4000) -Format 'N0'))
+        $lines.Add((Get-StatsLine -Name 'GPU power W' -Values (Convert-ToDoubleArray -Rows $combined -Column 'GpuPowerW' -Minimum 0 -Maximum 500) -Format 'N1'))
+        $lines.Add((Get-StatsLine -Name 'CPU usage pct' -Values (Convert-ToDoubleArray -Rows $combined -Column 'CpuUsagePct' -Minimum 0 -Maximum 100) -Format 'N1'))
+        $lines.Add((Get-StatsLine -Name 'Max logical CPU pct' -Values (Convert-ToDoubleArray -Rows $combined -Column 'CpuMaxLogicalUsagePct' -Minimum 0 -Maximum 100) -Format 'N1'))
+        $lines.Add((Get-StatsLine -Name 'CPU clock MHz' -Values (Convert-ToDoubleArray -Rows $combined -Column 'CpuClockMHz' -Minimum 0 -Maximum 7000) -Format 'N0'))
+        $lines.Add((Get-StatsLine -Name 'CPU temp C' -Values (Convert-ToDoubleArray -Rows $combined -Column 'CpuTempC' -Minimum 0 -Maximum 120) -Format 'N1'))
+        $lines.Add((Get-StatsLine -Name 'RAM usage MB' -Values (Convert-ToDoubleArray -Rows $combined -Column 'RamUsageMB' -Minimum 0 -Maximum 65536) -Format 'N0'))
+        $lines.Add((Get-StatsLine -Name 'Available memory MB' -Values (Convert-ToDoubleArray -Rows $combined -Column 'AvailableMBytes' -Minimum 0 -Maximum 131072) -Format 'N0'))
+        $lines.Add((Get-StatsLine -Name 'Pages/sec' -Values (Convert-ToDoubleArray -Rows $combined -Column 'PagesPerSec' -Minimum 0 -Maximum 1000000) -Format 'N1'))
+        $lines.Add((Get-StatsLine -Name 'CPU total utility pct' -Values (Convert-ToDoubleArray -Rows $combined -Column 'CpuTotalUtilityPct' -Minimum 0 -Maximum 1000) -Format 'N1'))
+        $lines.Add((Get-StatsLine -Name 'CPU max utility pct' -Values (Convert-ToDoubleArray -Rows $combined -Column 'CpuMaxUtilityPct' -Minimum 0 -Maximum 1000) -Format 'N1'))
+        $lines.Add((Get-StatsLine -Name 'CPU max processor pct' -Values (Convert-ToDoubleArray -Rows $combined -Column 'CpuMaxProcessorTimePct' -Minimum 0 -Maximum 1000) -Format 'N1'))
+        $lines.Add((Get-StatsLine -Name 'CPU max frequency MHz' -Values (Convert-ToDoubleArray -Rows $combined -Column 'CpuMaxFrequencyMHz' -Minimum 0 -Maximum 7000) -Format 'N0'))
+        $lines.Add((Get-StatsLine -Name 'CPU DPC pct' -Values (Convert-ToDoubleArray -Rows $combined -Column 'CpuTotalDpcPct' -Minimum 0 -Maximum 100) -Format 'N2'))
+        $lines.Add((Get-StatsLine -Name 'CPU interrupt pct' -Values (Convert-ToDoubleArray -Rows $combined -Column 'CpuTotalInterruptPct' -Minimum 0 -Maximum 100) -Format 'N2'))
+        $lines.Add((Get-StatsLine -Name 'Processor queue length' -Values (Convert-ToDoubleArray -Rows $combined -Column 'ProcessorQueueLength' -Minimum 0 -Maximum 1000) -Format 'N1'))
+        $lines.Add((Get-StatsLine -Name 'Context switches/sec' -Values (Convert-ToDoubleArray -Rows $combined -Column 'ContextSwitchesPerSec' -Minimum 0 -Maximum 10000000) -Format 'N0'))
+        $lines.Add((Get-StatsLine -Name 'Disk read latency ms' -Values (Convert-ToDoubleArray -Rows $combined -Column 'DiskReadLatencyMs' -Minimum 0 -Maximum 10000) -Format 'N2'))
+        $lines.Add((Get-StatsLine -Name 'Disk write latency ms' -Values (Convert-ToDoubleArray -Rows $combined -Column 'DiskWriteLatencyMs' -Minimum 0 -Maximum 10000) -Format 'N2'))
+        $lines.Add((Get-StatsLine -Name 'Disk queue length' -Values (Convert-ToDoubleArray -Rows $combined -Column 'DiskQueueLength' -Minimum 0 -Maximum 10000) -Format 'N2'))
+        $lines.Add((Get-StatsLine -Name 'Network bytes/sec' -Values (Convert-ToDoubleArray -Rows $combined -Column 'NetworkBytesTotalPerSec' -Minimum 0 -Maximum 100000000000) -Format 'N0'))
+        $lines.Add((Get-StatsLine -Name 'GPU engine 3D pct' -Values (Convert-ToDoubleArray -Rows $combined -Column 'GpuEngine3DUtilPct' -Minimum 0 -Maximum 1000) -Format 'N1'))
+        $lines.Add((Get-StatsLine -Name 'GPU video encode pct' -Values (Convert-ToDoubleArray -Rows $combined -Column 'GpuEngineVideoEncodeUtilPct' -Minimum 0 -Maximum 1000) -Format 'N1'))
+        $lines.Add((Get-StatsLine -Name 'GPU dedicated memory MB' -Values (Convert-ToDoubleArray -Rows $combined -Column 'GpuDedicatedUsageMB' -Minimum 0 -Maximum 65536) -Format 'N0'))
+        $lines.Add((Get-StatsLine -Name 'NVIDIA GPU util pct' -Values (Convert-ToDoubleArray -Rows $combined -Column 'NvidiaGpuUtilPct' -Minimum 0 -Maximum 100) -Format 'N1'))
+        $lines.Add((Get-StatsLine -Name 'NVIDIA GPU clock MHz' -Values (Convert-ToDoubleArray -Rows $combined -Column 'NvidiaGpuGraphicsClockMHz' -Minimum 0 -Maximum 4000) -Format 'N0'))
+        $lines.Add((Get-StatsLine -Name 'NVIDIA GPU power W' -Values (Convert-ToDoubleArray -Rows $combined -Column 'NvidiaGpuPowerW' -Minimum 0 -Maximum 500) -Format 'N1'))
+        $lines.Add((Get-StatsLine -Name 'NVIDIA GPU temp C' -Values (Convert-ToDoubleArray -Rows $combined -Column 'NvidiaGpuTempC' -Minimum 0 -Maximum 120) -Format 'N1'))
+    }
+    if ($presentMon.Count -gt 0) {
+        $pmFrameValues = Convert-ToDoubleArray -Rows $presentMon -Column 'FrameTime' -Minimum 0.1 -Maximum 1000
+        $lines.Add((Get-StatsLine -Name 'PresentMon frame ms' -Values $pmFrameValues -Format 'N2'))
+        $lines.Add((Get-FrameSpikeLine -Name 'PresentMon frame spikes' -Values $pmFrameValues -Format 'N2'))
+        $lines.Add((Get-StatsLine -Name 'PresentMon CPU busy ms' -Values (Convert-ToDoubleArray -Rows $presentMon -Column 'CPUBusy' -Minimum 0 -Maximum 1000) -Format 'N2'))
+        $lines.Add((Get-StatsLine -Name 'PresentMon CPU wait ms' -Values (Convert-ToDoubleArray -Rows $presentMon -Column 'CPUWait' -Minimum 0 -Maximum 1000) -Format 'N2'))
+        $lines.Add((Get-StatsLine -Name 'PresentMon GPU time ms' -Values (Convert-ToDoubleArray -Rows $presentMon -Column 'GPUTime' -Minimum 0 -Maximum 1000) -Format 'N2'))
+        $lines.Add((Get-StatsLine -Name 'PresentMon GPU busy ms' -Values (Convert-ToDoubleArray -Rows $presentMon -Column 'GPUBusy' -Minimum 0 -Maximum 1000) -Format 'N2'))
+        $lines.Add((Get-StatsLine -Name 'PresentMon GPU wait ms' -Values (Convert-ToDoubleArray -Rows $presentMon -Column 'GPUWait' -Minimum 0 -Maximum 1000) -Format 'N2'))
+        $lines.Add((Get-StatsLine -Name 'PresentMon display latency ms' -Values (Convert-ToDoubleArray -Rows $presentMon -Column 'DisplayLatency' -Minimum 0 -Maximum 1000) -Format 'N2'))
+        $lines.Add((Get-StatsLine -Name 'PresentMon animation error ms' -Values (Convert-ToDoubleArray -Rows $presentMon -Column 'AnimationError' -Minimum -1000 -Maximum 1000) -Format 'N2'))
+    }
+    if ($system.Count -gt 0) {
+        $lines.Add((Get-StatsLine -Name 'Disk read latency ms' -Values (Convert-ToDoubleArray -Rows $system -Column 'DiskReadLatencyMs' -Minimum 0 -Maximum 10000) -Format 'N3'))
+        $lines.Add((Get-StatsLine -Name 'Available memory MB' -Values (Convert-ToDoubleArray -Rows $system -Column 'AvailableMBytes' -Minimum 0 -Maximum 65536) -Format 'N0'))
+    }
+    if ($threads.Count -gt 0) {
+        $hot = $threads | Sort-Object { [double]$_.OneThreadPct } -Descending | Select-Object -First 8
+        $lines.Add("Hottest target threads:")
+        foreach ($row in $hot) {
+            $lines.Add("  $($row.Timestamp) tid=$($row.ThreadId) oneThreadPct=$($row.OneThreadPct) state=$($row.State) wait=$($row.WaitReason)")
+        }
+    }
+    if ($topProcess.Count -gt 0) {
+        $lines.Add("Top sampled process CPU seconds:")
+        $topProcess | Group-Object ProcessName | ForEach-Object {
+            [pscustomobject]@{
+                ProcessName = $_.Name
+                CpuSeconds = ($_.Group | ForEach-Object { [double]$_.CpuSeconds } | Measure-Object -Sum).Sum
+            }
+        } | Sort-Object CpuSeconds -Descending | Select-Object -First 12 | ForEach-Object {
+            $lines.Add("  $($_.ProcessName) $([math]::Round($_.CpuSeconds, 2))")
+        }
+    }
+
+    $summaryPath = if ($State.SummaryPath) { [string]$State.SummaryPath } else { Join-Path ([string]$State.RunDir) 'summary.txt' }
+    $lines | Set-Content -LiteralPath $summaryPath -Encoding UTF8
+    $lines
+}
+
+switch ($Action) {
+    'Start' { Start-Benchmark }
+    'Stop' { Stop-Benchmark }
+    'Status' { Get-BenchmarkStatus }
+    'Mark' { Mark-Benchmark }
+    'Analyze' { Invoke-Analyze }
+    'Preflight' { Invoke-BenchmarkPreflight }
+    'SampleInteractive' { Invoke-InteractiveSampler }
+}

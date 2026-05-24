@@ -1,0 +1,189 @@
+# Ansible managed
+$ErrorActionPreference = "Stop"
+
+$PerformanceModeScript = "{{ windows_performance_script_dir }}\windows-performance-mode.ps1"
+$StateDir = "{{ windows_performance_state_dir }}"
+$LogPath = Join-Path $StateDir "watcher.log"
+$PollSeconds = {{ windows_performance_poll_seconds | int }}
+$DefaultExitGraceSeconds = {{ windows_performance_exit_grace_seconds | int }}
+$ExitPromptEnabled = {{ '$true' if windows_performance_exit_prompt_enabled | default(false) else '$false' }}
+$ExitPromptTitle = @'
+{{ windows_performance_exit_prompt_title | default('Performance Mode') }}
+'@.Trim()
+$ExitPromptMessage = @'
+{{ windows_performance_exit_prompt_message | default('Game exited. Disable Performance Mode and restore closed apps/services now?') }}
+'@.Trim()
+$HoldDir = Join-Path $StateDir 'holds'
+$ProfilesPayloadJson = @'
+{"profiles": {{ windows_performance_game_profiles | to_json }}}
+'@
+$Profiles = @((ConvertFrom-Json -InputObject $ProfilesPayloadJson).profiles) | Where-Object { $_.auto_performance_mode -ne $false }
+$ObsProcessNames = @(
+{% for process_name in windows_performance_obs_process_names | default(['obs64']) %}
+    "{{ process_name }}"{% if not loop.last %},{% endif %}
+{% endfor %}
+)
+$ObsReasons = @("obs:stream", "obs:record")
+
+New-Item -Path $StateDir -ItemType Directory -Force | Out-Null
+New-Item -Path $HoldDir -ItemType Directory -Force | Out-Null
+
+function Write-WatcherLog {
+    param([string]$Message)
+    Add-Content -Path $LogPath -Value "$(Get-Date -Format s) $Message"
+}
+
+function Test-ProcessesRunning {
+    param([string[]]$Names)
+
+    foreach ($name in $Names) {
+        if (Get-Process -Name $name -ErrorAction SilentlyContinue) {
+            return $true
+        }
+    }
+
+    return $false
+}
+
+function Get-HoldPath {
+    param([string]$Reason)
+
+    $safeName = $Reason -replace '[^A-Za-z0-9_.-]', '_'
+    return (Join-Path $HoldDir "$safeName.hold")
+}
+
+function Test-ExitHold {
+    param([string]$Reason)
+
+    return (Test-Path -LiteralPath (Get-HoldPath -Reason $Reason))
+}
+
+function Set-ExitHold {
+    param([string]$Reason)
+
+    Set-Content -LiteralPath (Get-HoldPath -Reason $Reason) -Value (Get-Date -Format o) -Encoding UTF8
+}
+
+function Clear-ExitHold {
+    param([string]$Reason)
+
+    $path = Get-HoldPath -Reason $Reason
+    if (Test-Path -LiteralPath $path) {
+        Remove-Item -LiteralPath $path -Force -ErrorAction SilentlyContinue
+    }
+}
+
+function Confirm-PerformanceModeExit {
+    param([object]$Profile)
+
+    if (-not $ExitPromptEnabled) {
+        return $true
+    }
+
+    try {
+        $shell = New-Object -ComObject WScript.Shell
+        $message = $ExitPromptMessage
+        if (-not $message) {
+            $message = "$($Profile.display_name) exited. Disable Performance Mode and restore closed apps/services now?"
+        }
+        $result = $shell.Popup($message, 0, $ExitPromptTitle, 4 + 32 + 4096)
+        return ($result -eq 6)
+    } catch {
+        Write-WatcherLog "exit prompt failed for $($Profile.display_name): $($_.Exception.Message); exiting performance mode"
+        return $true
+    }
+}
+
+function Invoke-PerformanceMode {
+    param(
+        [string]$Mode,
+        [string]$Reason = "watcher"
+    )
+
+    & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $PerformanceModeScript -Mode $Mode -Reason $Reason
+    if ($LASTEXITCODE -ne 0) {
+        throw "performance mode script exited with code $LASTEXITCODE for mode=$Mode reason=$Reason"
+    }
+}
+
+Write-WatcherLog "watcher started; profiles=$(@($Profiles.id) -join ',')"
+
+$profileState = @{}
+foreach ($profile in $Profiles) {
+    $reason = "game:$($profile.id)"
+    $graceSeconds = if ($profile.exit_grace_seconds) { [int]$profile.exit_grace_seconds } else { $DefaultExitGraceSeconds }
+    $running = Test-ProcessesRunning -Names @($profile.process_names)
+
+    $profileState[[string]$profile.id] = [pscustomobject]@{
+        running = $running
+        last_seen = if ($running) { Get-Date } else { $null }
+        reason = $reason
+        grace_seconds = $graceSeconds
+    }
+
+    if ($running) {
+        Clear-ExitHold -Reason $reason
+        Write-WatcherLog "$($profile.display_name) detected at watcher start; entering performance mode"
+        Invoke-PerformanceMode -Mode enter -Reason $reason
+    } elseif (Test-ExitHold -Reason $reason) {
+        Write-WatcherLog "$($profile.display_name) absent at watcher start; keeping held performance mode reason $reason"
+    } else {
+        Invoke-PerformanceMode -Mode exit -Reason $reason
+    }
+}
+
+$obsWasRunning = Test-ProcessesRunning -Names $ObsProcessNames
+if (-not $obsWasRunning) {
+    foreach ($reason in $ObsReasons) {
+        Invoke-PerformanceMode -Mode exit -Reason $reason
+    }
+}
+
+while ($true) {
+    try {
+        foreach ($profile in $Profiles) {
+            $state = $profileState[[string]$profile.id]
+            $running = Test-ProcessesRunning -Names @($profile.process_names)
+
+            if ($running) {
+                Clear-ExitHold -Reason $state.reason
+                $state.last_seen = Get-Date
+                Invoke-PerformanceMode -Mode enter -Reason $state.reason
+
+                if (-not $state.running) {
+                    Write-WatcherLog "$($profile.display_name) detected; entering performance mode"
+                    $state.running = $true
+                }
+            } elseif ($state.running) {
+                $elapsed = if ($state.last_seen) { ((Get-Date) - $state.last_seen).TotalSeconds } else { $state.grace_seconds + 1 }
+                if ($elapsed -ge $state.grace_seconds) {
+                    if (Confirm-PerformanceModeExit -Profile $profile) {
+                        Write-WatcherLog "$($profile.display_name) absent for $([int]$elapsed)s; exiting performance mode"
+                        Clear-ExitHold -Reason $state.reason
+                        Invoke-PerformanceMode -Mode exit -Reason $state.reason
+                    } else {
+                        Write-WatcherLog "$($profile.display_name) absent for $([int]$elapsed)s; user chose to keep performance mode active"
+                        Set-ExitHold -Reason $state.reason
+                    }
+                    $state.running = $false
+                    $state.last_seen = $null
+                }
+            }
+        }
+
+        $obsRunning = Test-ProcessesRunning -Names $ObsProcessNames
+        if ((-not $obsRunning) -and $obsWasRunning) {
+            Write-WatcherLog "OBS exited; removing OBS performance mode reasons"
+            foreach ($reason in $ObsReasons) {
+                Invoke-PerformanceMode -Mode exit -Reason $reason
+            }
+        }
+        $obsWasRunning = $obsRunning
+
+        Invoke-PerformanceMode -Mode enforce -Reason watcher
+    } catch {
+        Write-WatcherLog "watch loop failed: $($_.Exception.Message)"
+    }
+
+    Start-Sleep -Seconds $PollSeconds
+}

@@ -1,0 +1,90 @@
+---
+# lj-gaming-pc - interactive gaming benchmark capture
+
+windows_gaming_benchmark_script_dir: 'C:\ProgramData\Johnny\GamingTools\Benchmark'
+windows_gaming_benchmark_state_dir: 'C:\Users\jn\AppData\Local\WindowsGamingBenchmark'
+windows_gaming_benchmark_capture_dir: 'C:\Users\jn\AppData\Local\WindowsGamingBenchmark\Captures'
+windows_gaming_benchmark_legacy_script_dirs:
+  - 'C:\Users\jn\Nextcloud\Scripts\WindowsGamingBenchmark'
+windows_gaming_benchmark_task_name: Windows Gaming Benchmark Sampler
+windows_gaming_benchmark_task_user: 'LJ-GAMING-PC\jn'
+windows_gaming_benchmark_session_name: GameBenchmark
+windows_gaming_benchmark_sample_interval_seconds: 1
+windows_gaming_benchmark_process_interval_seconds: 10
+windows_gaming_benchmark_system_interval_seconds: 30
+windows_gaming_benchmark_inventory_interval_seconds: 0
+windows_gaming_benchmark_thread_interval_seconds: 15
+windows_gaming_benchmark_post_stop_delay_seconds: 30
+windows_gaming_benchmark_preflight_enabled: true
+windows_gaming_benchmark_preflight_fail_on_warnings: true
+windows_gaming_benchmark_preflight_min_available_mb: 4096
+windows_gaming_benchmark_preflight_stale_powershell_age_seconds: 120
+windows_gaming_benchmark_preflight_powershell_working_set_mb: 512
+windows_gaming_benchmark_preflight_powershell_private_mb: 512
+windows_gaming_benchmark_preflight_memory_compression_working_set_mb: 1024
+windows_gaming_benchmark_preflight_allowed_powershell_patterns:
+  - windows-gaming-benchmark.ps1
+  - windows-performance-watch.ps1
+  - windows-performance-mode.ps1
+windows_gaming_benchmark_presentmon_enabled: true
+windows_gaming_benchmark_pmdp_enabled: false
+windows_gaming_benchmark_rtss_enabled: false
+windows_gaming_benchmark_mahm_enabled: false
+windows_gaming_benchmark_gpu_engine_counters_enabled: false
+windows_gaming_benchmark_presentmon_path: 'C:\Program Files\Intel\PresentMon\PresentMonConsoleApplication\PresentMon-2.4.1-x64.exe'
+windows_gaming_benchmark_presentmon_provider_path: 'C:\Program Files (x86)\RivaTuner Statistics Server\Plugins\Client\PresentMonDataProvider\PresentMonDataProvider.exe'
+windows_gaming_benchmark_nvidia_smi_enabled: true
+windows_gaming_benchmark_nvidia_smi_path: 'C:\Windows\System32\nvidia-smi.exe'
+windows_gaming_benchmark_obs_profile_path: 'C:\Users\jn\AppData\Roaming\obs-studio\basic\profiles\Untitled\basic.ini'
+windows_gaming_benchmark_affinity_presets:
+  none: ''
+  all: '0xFFFFFF'
+  ccd0: '0x000FFF'
+  ccd1: '0xFFF000'
+  ccx0: '0x00003F'
+  ccx1: '0x000FC0'
+  ccx2: '0x03F000'
+  ccx3: '0xFC0000'
+  primary12: '0x555555'
+  secondary12: '0xAAAAAA'
+  low12: '0x000FFF'
+  high12: '0xFFF000'
+  low6: '0x00003F'
+  high6: '0xFC0000'
+windows_gaming_benchmark_power_plan_presets:
+  current: ''
+  ryzen-high: '9935e61f-1661-40c5-ae2f-8495027d5d5d'
+  ryzen-balanced: '9897998c-92de-4669-853f-b7cd3ecb2790'
+  ultimate: '8a9fe039-ed95-4480-b13b-9ed8bccea22a'
+  windows-high: '8c5e7fda-e8bf-4a96-9a85-a6e23a8c635c'
+windows_gaming_benchmark_target_process_names:
+  - FortniteClient-Win64-Shipping
+windows_gaming_benchmark_watch_process_names:
+  - FortniteClient-Win64-Shipping
+  - MsMpEng
+  - OneDrive
+  - dwm
+  - SignalRgb
+  - EpicGamesLauncher
+  - EpicWebHelper
+  - Launcher
+  - LauncherPatcher
+  - SocialClubHelper
+  - steam
+  - steamwebhelper
+  - Discord
+  - System
+  - PresentMon-2.4.1-x64
+  - PresentMonService
+  - nvcontainer
+  - NVDisplay.Container
+  - powershell
+  - pwsh
+  - conhost
+  - Memory Compression
+  - nextcloud
+  - SonoBus
+  - audiodg
+  - SteelSeriesSonar
+  - SteelSeriesGGClient
+  - obs64

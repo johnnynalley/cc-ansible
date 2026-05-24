@@ -1,0 +1,740 @@
+# Ansible managed
+[CmdletBinding()]
+param(
+    [Parameter(Mandatory=$true)]
+    [ValidateSet("enter", "exit", "exit-all", "enforce", "status")]
+    [string]$Mode,
+
+    [string]$Reason = "manual",
+
+    [switch]$DryRun
+)
+
+$ErrorActionPreference = "Stop"
+
+$StateDir = "{{ windows_performance_state_dir }}"
+$StatePath = Join-Path $StateDir "state.json"
+$LogPath = Join-Path $StateDir "performance-mode.log"
+$RulesPayloadJson = @'
+{"rules": {{ windows_performance_process_rules | to_json }}}
+'@
+$Rules = @((ConvertFrom-Json -InputObject $RulesPayloadJson).rules)
+$ServiceRulesPayloadJson = @'
+{"rules": {{ windows_performance_service_rules | default([]) | to_json }}}
+'@
+$ServiceRules = @((ConvertFrom-Json -InputObject $ServiceRulesPayloadJson).rules)
+$PriorityTargets = @("SignalRgb", "SignalRgbLauncher")
+
+New-Item -Path $StateDir -ItemType Directory -Force | Out-Null
+
+function Write-PerformanceLog {
+    param([string]$Message)
+    Add-Content -Path $LogPath -Value "$(Get-Date -Format s) $Message"
+}
+
+function New-DefaultState {
+    [pscustomobject]@{
+        active = $false
+        active_reasons = @()
+        entered_at = $null
+        updated_at = $null
+        exited_at = $null
+        closed_apps = @()
+        stopped_services = @()
+    }
+}
+
+function Normalize-State {
+    param([object]$State)
+
+    if (-not $State) {
+        $State = New-DefaultState
+    }
+
+    $defaults = New-DefaultState
+    foreach ($property in $defaults.PSObject.Properties.Name) {
+        if (-not $State.PSObject.Properties[$property]) {
+            $State | Add-Member -MemberType NoteProperty -Name $property -Value $defaults.$property
+        }
+    }
+
+    $State.active_reasons = @($State.active_reasons | Where-Object { $_ } | ForEach-Object { [string]$_ })
+    $State.closed_apps = @($State.closed_apps)
+    $State.stopped_services = @($State.stopped_services)
+
+    return $State
+}
+
+function Read-State {
+    if (Test-Path -LiteralPath $StatePath) {
+        try {
+            return Normalize-State (Get-Content -Path $StatePath -Raw | ConvertFrom-Json)
+        } catch {
+            Write-PerformanceLog "state read failed: $($_.Exception.Message)"
+        }
+    }
+
+    return New-DefaultState
+}
+
+function Write-State {
+    param([object]$State)
+    if (-not $DryRun) {
+        Normalize-State $State | ConvertTo-Json -Depth 12 | Set-Content -Path $StatePath -Encoding UTF8
+    }
+}
+
+function Set-PerformancePriorities {
+    foreach ($target in $PriorityTargets) {
+        Get-Process -Name $target -ErrorAction SilentlyContinue | ForEach-Object {
+            try {
+                $_.PriorityClass = "BelowNormal"
+            } catch {
+                Write-PerformanceLog "priority update failed for $($_.ProcessName)[$($_.Id)]: $($_.Exception.Message)"
+            }
+        }
+    }
+}
+
+function Get-RuleProcesses {
+    param([object]$Rule)
+
+    $processes = @()
+    foreach ($name in @($Rule.process_names)) {
+        $processes += @(Get-Process -Name $name -ErrorAction SilentlyContinue)
+    }
+
+    return $processes | Sort-Object Id -Unique
+}
+
+function Get-LaunchPath {
+    param(
+        [object]$Rule,
+        [object[]]$Processes
+    )
+
+    if ($Rule.launch_path -and [string]$Rule.launch_path -ne "") {
+        return [string]$Rule.launch_path
+    }
+
+    $processWithPath = $Processes |
+        Where-Object { $_.Path -and (Test-Path -LiteralPath $_.Path) } |
+        Select-Object -First 1
+
+    if ($processWithPath) {
+        return [string]$processWithPath.Path
+    }
+
+    return ""
+}
+
+function Test-RuleApplies {
+    param(
+        [object]$Rule,
+        [object]$State
+    )
+
+    $activeReasons = @($State.active_reasons | ForEach-Object { [string]$_ } | Where-Object { $_ })
+
+    if ($Rule.PSObject.Properties["reason_prefixes"]) {
+        $prefixes = @($Rule.reason_prefixes | ForEach-Object { [string]$_ } | Where-Object { $_ })
+        if ($prefixes.Count -gt 0) {
+            $matched = $false
+            foreach ($reason in $activeReasons) {
+                foreach ($prefix in $prefixes) {
+                    if ($reason.StartsWith($prefix, [System.StringComparison]::OrdinalIgnoreCase)) {
+                        $matched = $true
+                        break
+                    }
+                }
+                if ($matched) {
+                    break
+                }
+            }
+            if (-not $matched) {
+                return $false
+            }
+        }
+    }
+
+    if ($Rule.PSObject.Properties["excluded_reason_prefixes"]) {
+        $excludedPrefixes = @($Rule.excluded_reason_prefixes | ForEach-Object { [string]$_ } | Where-Object { $_ })
+        foreach ($reason in $activeReasons) {
+            foreach ($prefix in $excludedPrefixes) {
+                if ($reason.StartsWith($prefix, [System.StringComparison]::OrdinalIgnoreCase)) {
+                    return $false
+                }
+            }
+        }
+    }
+
+    return $true
+}
+
+function Get-RuleById {
+    param([string]$Id)
+
+    return $Rules | Where-Object { [string]$_.id -eq $Id } | Select-Object -First 1
+}
+
+function Get-ServiceRuleById {
+    param([string]$Id)
+
+    return $ServiceRules | Where-Object { [string]$_.id -eq $Id } | Select-Object -First 1
+}
+
+function Get-RuleIntValue {
+    param(
+        [object]$Rule,
+        [string]$Property,
+        [int]$Default
+    )
+
+    if ($Rule -and $Rule.PSObject.Properties[$Property]) {
+        $value = $Rule.PSObject.Properties[$Property].Value
+        if ($null -ne $value -and [string]$value -ne "") {
+            return [int]$value
+        }
+    }
+
+    return $Default
+}
+
+function Test-AnyProcessRunning {
+    param([string[]]$ProcessNames)
+
+    foreach ($name in @($ProcessNames | Where-Object { $_ })) {
+        if (Get-Process -Name $name -ErrorAction SilentlyContinue) {
+            return $true
+        }
+    }
+
+    return $false
+}
+
+function Test-RuleCloseDeferred {
+    param(
+        [object]$Rule,
+        [object[]]$Processes,
+        [object]$State
+    )
+
+    $deferSeconds = Get-RuleIntValue -Rule $Rule -Property "defer_close_seconds" -Default 0
+    if ($deferSeconds -le 0) {
+        return $false
+    }
+
+    if ($Rule.PSObject.Properties["defer_close_reason_prefixes"]) {
+        $prefixes = @($Rule.defer_close_reason_prefixes | ForEach-Object { [string]$_ } | Where-Object { $_ })
+        if ($prefixes.Count -gt 0) {
+            $matched = $false
+            foreach ($reason in @($State.active_reasons | ForEach-Object { [string]$_ } | Where-Object { $_ })) {
+                foreach ($prefix in $prefixes) {
+                    if ($reason.StartsWith($prefix, [System.StringComparison]::OrdinalIgnoreCase)) {
+                        $matched = $true
+                        break
+                    }
+                }
+                if ($matched) {
+                    break
+                }
+            }
+
+            if (-not $matched) {
+                return $false
+            }
+        }
+    }
+
+    if ($Rule.PSObject.Properties["defer_close_until_process_names"]) {
+        $targetNames = @($Rule.defer_close_until_process_names | ForEach-Object { [string]$_ } | Where-Object { $_ })
+        if ($targetNames.Count -gt 0 -and (Test-AnyProcessRunning -ProcessNames $targetNames)) {
+            return $false
+        }
+    }
+
+    $now = Get-Date
+    foreach ($process in @($Processes)) {
+        try {
+            if ($process.StartTime -and (($now - $process.StartTime).TotalSeconds -lt $deferSeconds)) {
+                Write-PerformanceLog "deferred closing $($Rule.display_name); age=$([int](($now - $process.StartTime).TotalSeconds))s limit=${deferSeconds}s"
+                return $true
+            }
+        } catch {
+            Write-PerformanceLog "defer check failed for $($Rule.display_name)[$($process.Id)]: $($_.Exception.Message)"
+        }
+    }
+
+    return $false
+}
+
+function Add-Reason {
+    param([object]$State)
+
+    $reasons = @($State.active_reasons | ForEach-Object { [string]$_ } | Where-Object { $_ })
+    if ($Reason -and ($reasons -notcontains $Reason)) {
+        $reasons += $Reason
+    }
+
+    $State.active_reasons = @($reasons | Sort-Object -Unique)
+}
+
+function Remove-Reason {
+    param([object]$State)
+
+    $State.active_reasons = @(
+        $State.active_reasons |
+            ForEach-Object { [string]$_ } |
+            Where-Object { $_ -and $_ -ne $Reason } |
+            Sort-Object -Unique
+    )
+}
+
+function Close-AllowedProcesses {
+    param(
+        [object]$State,
+        [string]$Context,
+        [bool]$RecordForRestore = $true
+    )
+
+    $closedCount = 0
+
+    foreach ($rule in $Rules) {
+        if (-not (Test-RuleApplies -Rule $rule -State $State)) {
+            continue
+        }
+
+        $processes = @(Get-RuleProcesses -Rule $rule)
+        if ($processes.Count -eq 0) {
+            continue
+        }
+
+        if (Test-RuleCloseDeferred -Rule $rule -Processes $processes -State $State) {
+            continue
+        }
+
+        $launchPath = Get-LaunchPath -Rule $rule -Processes $processes
+        $launchArgs = if ($rule.launch_args) { [string]$rule.launch_args } else { "" }
+        $existing = @($State.closed_apps) | Where-Object { $_.id -eq [string]$rule.id } | Select-Object -First 1
+
+        $restoreOnExit = $RecordForRestore
+        if ($rule.PSObject.Properties["restore_on_exit"]) {
+            $restoreOnExit = $restoreOnExit -and [bool]$rule.restore_on_exit
+        }
+
+        if ($restoreOnExit -and -not $existing) {
+            $State.closed_apps = @($State.closed_apps) + [pscustomobject]@{
+                id = [string]$rule.id
+                display_name = [string]$rule.display_name
+                process_names = @($rule.process_names)
+                launch_path = $launchPath
+                launch_args = $launchArgs
+                closed_processes = @($processes | ForEach-Object {
+                    [pscustomobject]@{
+                        id = $_.Id
+                        name = $_.ProcessName
+                        path = $_.Path
+                    }
+                })
+            }
+        }
+
+        Write-PerformanceLog "$Context closing $($rule.display_name): $($processes.ProcessName -join ', ')"
+        if (-not $DryRun) {
+            $processes | Stop-Process -Force -ErrorAction SilentlyContinue
+        }
+        $closedCount += $processes.Count
+    }
+
+    return $closedCount
+}
+
+function Stop-AllowedServices {
+    param(
+        [object]$State,
+        [string]$Context,
+        [bool]$RecordForRestore = $true
+    )
+
+    $stoppedCount = 0
+
+    foreach ($rule in $ServiceRules) {
+        if (-not (Test-RuleApplies -Rule $rule -State $State)) {
+            continue
+        }
+
+        $serviceName = [string]$rule.service_name
+        if (-not $serviceName) {
+            continue
+        }
+
+        $service = Get-Service -Name $serviceName -ErrorAction SilentlyContinue
+        if (-not $service -or $service.Status -ne "Running") {
+            continue
+        }
+
+        $existing = @($State.stopped_services) |
+            Where-Object { $_.id -eq [string]$rule.id } |
+            Select-Object -First 1
+
+        Write-PerformanceLog "$Context stopping service $($rule.display_name)[$serviceName]"
+        if (-not $DryRun) {
+            try {
+                Stop-Service -Name $serviceName -Force -ErrorAction Stop
+                if ($RecordForRestore -and -not $existing) {
+                    $State.stopped_services = @($State.stopped_services) + [pscustomobject]@{
+                        id = [string]$rule.id
+                        display_name = [string]$rule.display_name
+                        service_name = $serviceName
+                    }
+                }
+                $stoppedCount += 1
+            } catch {
+                Write-PerformanceLog "$Context failed to stop service $($rule.display_name)[$serviceName]: $($_.Exception.Message)"
+            }
+        } else {
+            if ($RecordForRestore -and -not $existing) {
+                $State.stopped_services = @($State.stopped_services) + [pscustomobject]@{
+                    id = [string]$rule.id
+                    display_name = [string]$rule.display_name
+                    service_name = $serviceName
+                }
+            }
+            $stoppedCount += 1
+        }
+    }
+
+    return $stoppedCount
+}
+
+function Enter-PerformanceMode {
+    $state = Normalize-State (Read-State)
+    $wasActive = [bool]$state.active
+    $previousReasons = @($state.active_reasons)
+
+    Set-PerformancePriorities
+
+    if (-not $wasActive) {
+        $state.closed_apps = @()
+        $state.stopped_services = @()
+        $state.entered_at = (Get-Date).ToString("s")
+        $state.exited_at = $null
+    }
+
+    Add-Reason -State $state
+    $stoppedServiceCount = Stop-AllowedServices -State $state -Context "enter[$Reason]" -RecordForRestore $true
+    $closedCount = Close-AllowedProcesses -State $state -Context "enter[$Reason]" -RecordForRestore $true
+
+    $state.active = $true
+    $state.updated_at = (Get-Date).ToString("s")
+    Write-State -State $state
+
+    $reasonChanged = (@($previousReasons) -join "|") -ne (@($state.active_reasons) -join "|")
+    if ((-not $wasActive) -or $reasonChanged -or $closedCount -gt 0 -or $stoppedServiceCount -gt 0) {
+        Write-PerformanceLog "active; reasons=$(@($state.active_reasons) -join ','); closed_apps=$(@($state.closed_apps).Count); stopped_services=$(@($state.stopped_services).Count); closed_now=$closedCount; services_stopped_now=$stoppedServiceCount"
+    }
+}
+
+function Enforce-PerformanceMode {
+    $state = Normalize-State (Read-State)
+    Set-PerformancePriorities
+
+    if ($state.active -ne $true) {
+        return
+    }
+
+    $stoppedServiceCount = Stop-AllowedServices -State $state -Context "enforce" -RecordForRestore $false
+    $closedCount = Close-AllowedProcesses -State $state -Context "enforce" -RecordForRestore $false
+    if ($closedCount -gt 0 -or $stoppedServiceCount -gt 0) {
+        $state.updated_at = (Get-Date).ToString("s")
+        Write-State -State $state
+        Write-PerformanceLog "enforced; reasons=$(@($state.active_reasons) -join ','); closed_apps=$(@($state.closed_apps).Count); stopped_services=$(@($state.stopped_services).Count); closed_now=$closedCount; services_stopped_now=$stoppedServiceCount"
+    }
+}
+
+function Restore-App {
+    param([object]$App)
+
+    $names = @($App.process_names)
+    $alreadyRunning = $false
+
+    foreach ($name in $names) {
+        if (Get-Process -Name $name -ErrorAction SilentlyContinue) {
+            $alreadyRunning = $true
+            break
+        }
+    }
+
+    if ($alreadyRunning) {
+        Write-PerformanceLog "skip reopen $($App.display_name); already running"
+        Invoke-RestoreWindowAction -App $App
+        return
+    }
+
+    if (-not $App.launch_path) {
+        Write-PerformanceLog "skip reopen $($App.display_name); no launch path"
+        return
+    }
+
+    Write-PerformanceLog "reopening $($App.display_name)"
+    if (-not $DryRun) {
+        if ($App.launch_args) {
+            Start-Process -FilePath $App.launch_path -ArgumentList $App.launch_args -ErrorAction SilentlyContinue
+        } else {
+            Start-Process -FilePath $App.launch_path -ErrorAction SilentlyContinue
+        }
+    }
+
+    Invoke-RestoreWindowAction -App $App
+}
+
+function Invoke-RestoreWindowAction {
+    param([object]$App)
+
+    $rule = Get-RuleById -Id ([string]$App.id)
+    if (-not $rule -or -not $rule.PSObject.Properties["restore_window_action"]) {
+        return
+    }
+
+    $action = ([string]$rule.restore_window_action).ToLowerInvariant()
+    if ($action -notin @("close", "minimize")) {
+        return
+    }
+
+    $delaySeconds = Get-RuleIntValue -Rule $rule -Property "restore_window_delay_seconds" -Default 2
+    $timeoutSeconds = Get-RuleIntValue -Rule $rule -Property "restore_window_timeout_seconds" -Default 12
+    $processNames = @($App.process_names | ForEach-Object { [string]$_ } | Where-Object { $_ })
+    $windowProcessNames = @()
+    if ($rule.PSObject.Properties["restore_window_process_names"]) {
+        $windowProcessNames = @($rule.restore_window_process_names | ForEach-Object { [string]$_ } | Where-Object { $_ })
+    }
+    $titlePatterns = @()
+    if ($rule.PSObject.Properties["restore_window_title_patterns"]) {
+        $titlePatterns = @($rule.restore_window_title_patterns | ForEach-Object { [string]$_ } | Where-Object { $_ })
+    }
+    $windowActionPath = Join-Path $PSScriptRoot "windows-performance-window-action.ps1"
+
+    if ($processNames.Count -eq 0) {
+        return
+    }
+
+    if (-not (Test-Path -LiteralPath $windowActionPath)) {
+        Write-PerformanceLog "skip window action $action for $($App.display_name); helper script missing"
+        return
+    }
+
+    $arguments = @(
+        "-NoProfile",
+        "-ExecutionPolicy", "Bypass",
+        "-File",
+        $windowActionPath,
+        "-Action", $action,
+        "-DisplayName", [string]$App.display_name,
+        "-DelaySeconds", [string]$delaySeconds,
+        "-TimeoutSeconds", [string]$timeoutSeconds,
+        "-LogPath", $LogPath,
+        "-ProcessNames", ($processNames -join ",")
+    )
+    if ($windowProcessNames.Count -gt 0) {
+        $arguments += @("-WindowProcessNames", ($windowProcessNames -join ","))
+    }
+    if ($titlePatterns.Count -gt 0) {
+        $arguments += @("-TitlePatterns", ($titlePatterns -join ","))
+    }
+
+    $quotedArguments = @($arguments | ForEach-Object {
+        '"' + ([string]$_).Replace('"', '\"') + '"'
+    }) -join " "
+
+    Write-PerformanceLog "scheduled $action restored window for $($App.display_name); timeout=${timeoutSeconds}s"
+    if (-not $DryRun) {
+        try {
+            Start-Process -FilePath "powershell.exe" -ArgumentList $quotedArguments -WindowStyle Hidden -ErrorAction Stop
+        } catch {
+            Write-PerformanceLog "failed to schedule $action restored window for $($App.display_name): $($_.Exception.Message)"
+        }
+    }
+}
+
+function Restore-ClosedApps {
+    param([object]$State)
+
+    foreach ($app in @($State.closed_apps)) {
+        Restore-App -App $app
+    }
+}
+
+function Restore-Service {
+    param([object]$ServiceEntry)
+
+    $serviceName = [string]$ServiceEntry.service_name
+    if (-not $serviceName) {
+        return
+    }
+
+    $service = Get-Service -Name $serviceName -ErrorAction SilentlyContinue
+    if (-not $service) {
+        Write-PerformanceLog "skip service restore $($ServiceEntry.display_name)[$serviceName]; service not found"
+        return
+    }
+
+    if ($service.Status -eq "Running") {
+        Write-PerformanceLog "skip service restore $($ServiceEntry.display_name)[$serviceName]; already running"
+        return
+    }
+
+    Write-PerformanceLog "starting service $($ServiceEntry.display_name)[$serviceName]"
+    if (-not $DryRun) {
+        try {
+            Start-Service -Name $serviceName -ErrorAction Stop
+        } catch {
+            Write-PerformanceLog "failed to start service $($ServiceEntry.display_name)[$serviceName]: $($_.Exception.Message)"
+        }
+    }
+}
+
+function Restore-StoppedServices {
+    param([object]$State)
+
+    foreach ($serviceEntry in @($State.stopped_services)) {
+        Restore-Service -ServiceEntry $serviceEntry
+    }
+}
+
+function Restore-NoLongerApplicableApps {
+    param([object]$State)
+
+    $remaining = @()
+    $restoredCount = 0
+
+    foreach ($app in @($State.closed_apps)) {
+        $rule = Get-RuleById -Id ([string]$app.id)
+
+        if ($rule -and -not (Test-RuleApplies -Rule $rule -State $State)) {
+            Write-PerformanceLog "restoring $($app.display_name); rule no longer applies to reasons=$(@($State.active_reasons) -join ',')"
+            Restore-App -App $app
+            $restoredCount += 1
+        } else {
+            $remaining += $app
+        }
+    }
+
+    $State.closed_apps = $remaining
+    return $restoredCount
+}
+
+function Restore-NoLongerApplicableServices {
+    param([object]$State)
+
+    $remaining = @()
+    $restoredCount = 0
+
+    foreach ($serviceEntry in @($State.stopped_services)) {
+        $rule = Get-ServiceRuleById -Id ([string]$serviceEntry.id)
+
+        if ($rule -and -not (Test-RuleApplies -Rule $rule -State $State)) {
+            Write-PerformanceLog "restoring service $($serviceEntry.display_name); rule no longer applies to reasons=$(@($State.active_reasons) -join ',')"
+            Restore-Service -ServiceEntry $serviceEntry
+            $restoredCount += 1
+        } else {
+            $remaining += $serviceEntry
+        }
+    }
+
+    $State.stopped_services = $remaining
+    return $restoredCount
+}
+
+function Exit-PerformanceMode {
+    $state = Normalize-State (Read-State)
+    Set-PerformancePriorities
+
+    if ($state.active -ne $true) {
+        return
+    }
+
+    Remove-Reason -State $state
+
+    if (@($state.active_reasons).Count -gt 0) {
+        $restoredServiceCount = Restore-NoLongerApplicableServices -State $state
+        $restoredCount = Restore-NoLongerApplicableApps -State $state
+        $state.updated_at = (Get-Date).ToString("s")
+        Write-State -State $state
+        Write-PerformanceLog "reason removed[$Reason]; still active; reasons=$(@($state.active_reasons) -join ','); restored_now=$restoredCount; services_restored_now=$restoredServiceCount"
+        return
+    }
+
+    Restore-StoppedServices -State $state
+    Restore-ClosedApps -State $state
+
+    $state.active = $false
+    $state.active_reasons = @()
+    $state.closed_apps = @()
+    $state.stopped_services = @()
+    $state.exited_at = (Get-Date).ToString("s")
+    $state.updated_at = $state.exited_at
+    Write-State -State $state
+    Write-PerformanceLog "inactive; last_reason=$Reason"
+}
+
+function Exit-AllPerformanceMode {
+    $state = Normalize-State (Read-State)
+    Set-PerformancePriorities
+
+    Restore-StoppedServices -State $state
+    Restore-ClosedApps -State $state
+
+    $state.active = $false
+    $state.active_reasons = @()
+    $state.closed_apps = @()
+    $state.stopped_services = @()
+    $state.exited_at = (Get-Date).ToString("s")
+    $state.updated_at = $state.exited_at
+    Write-State -State $state
+    Write-PerformanceLog "inactive; exit-all reason=$Reason"
+}
+
+function Show-Status {
+    $state = Normalize-State (Read-State)
+    [pscustomobject]@{
+        mode = $Mode
+        reason = $Reason
+        dry_run = [bool]$DryRun
+        active = [bool]$state.active
+        active_reasons = @($state.active_reasons)
+        entered_at = $state.entered_at
+        updated_at = $state.updated_at
+        exited_at = $state.exited_at
+        closed_apps = @($state.closed_apps).Count
+        stopped_services = @($state.stopped_services).Count
+    }
+
+    foreach ($rule in $Rules) {
+        $processes = @(Get-RuleProcesses -Rule $rule)
+        [pscustomobject]@{
+            id = [string]$rule.id
+            display_name = [string]$rule.display_name
+            running_count = $processes.Count
+            running_processes = ($processes.ProcessName | Sort-Object -Unique) -join ", "
+        }
+    }
+
+    foreach ($rule in $ServiceRules) {
+        $serviceName = [string]$rule.service_name
+        $service = Get-Service -Name $serviceName -ErrorAction SilentlyContinue
+        [pscustomobject]@{
+            id = [string]$rule.id
+            display_name = [string]$rule.display_name
+            service_name = $serviceName
+            status = if ($service) { [string]$service.Status } else { "NotFound" }
+        }
+    }
+}
+
+switch ($Mode) {
+    "enter" { Enter-PerformanceMode }
+    "exit" { Exit-PerformanceMode }
+    "exit-all" { Exit-AllPerformanceMode }
+    "enforce" { Enforce-PerformanceMode }
+    "status" { Show-Status }
+}

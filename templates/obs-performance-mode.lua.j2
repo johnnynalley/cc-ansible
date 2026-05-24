@@ -1,0 +1,42 @@
+-- Ansible managed
+obs = obslua
+
+local script_path = [[{{ windows_performance_script_dir }}\windows-performance-mode.ps1]]
+local hidden_runner_path = [[{{ windows_performance_script_dir }}\windows-performance-run-hidden.vbs]]
+
+local function escape_arg(value)
+    return tostring(value):gsub('"', '\\"')
+end
+
+local function run_mode(mode, reason)
+    local command = 'wscript.exe "' .. hidden_runner_path .. '" "' .. script_path ..
+        '" "-Mode" "' .. escape_arg(mode) .. '" "-Reason" "' .. escape_arg(reason) .. '"'
+    os.execute(command)
+end
+
+local function on_event(event)
+    if event == obs.OBS_FRONTEND_EVENT_STREAMING_STARTED then
+        run_mode("enter", "obs:stream")
+    elseif event == obs.OBS_FRONTEND_EVENT_STREAMING_STOPPED then
+        run_mode("exit", "obs:stream")
+    elseif event == obs.OBS_FRONTEND_EVENT_RECORDING_STARTED then
+        run_mode("enter", "obs:record")
+    elseif event == obs.OBS_FRONTEND_EVENT_RECORDING_STOPPED then
+        run_mode("exit", "obs:record")
+    end
+end
+
+function script_description()
+    return "Triggers Windows Performance Mode while OBS is streaming or recording."
+end
+
+function script_load(settings)
+    obs.script_log(obs.LOG_INFO, "Windows Performance Mode trigger loaded")
+    obs.obs_frontend_add_event_callback(on_event)
+end
+
+function script_unload()
+    if obs.obs_frontend_remove_event_callback ~= nil then
+        obs.obs_frontend_remove_event_callback(on_event)
+    end
+end

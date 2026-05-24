@@ -1,0 +1,30 @@
+' Ansible managed
+Option Explicit
+
+Dim shell
+Dim command
+Dim sshHealCommand
+Dim i
+
+Set shell = CreateObject("WScript.Shell")
+
+' Best-effort controller access recovery. This runner is launched by a high-privilege
+' scheduled task, so it can restart OpenSSH before the normal watcher begins.
+sshHealCommand = "powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -Command " & QuoteArg("try { sc.exe config sshd start= delayed-auto > $null; Start-Service -Name sshd -ErrorAction SilentlyContinue } catch {}")
+shell.Run sshHealCommand, 0, False
+
+If WScript.Arguments.Count < 1 Then
+    WScript.Quit 1
+End If
+
+command = "powershell.exe -NoProfile -ExecutionPolicy Bypass -File " & QuoteArg(WScript.Arguments(0))
+
+For i = 1 To WScript.Arguments.Count - 1
+    command = command & " " & QuoteArg(WScript.Arguments(i))
+Next
+
+shell.Run command, 0, False
+
+Function QuoteArg(value)
+    QuoteArg = """" & Replace(CStr(value), """", """""") & """"
+End Function

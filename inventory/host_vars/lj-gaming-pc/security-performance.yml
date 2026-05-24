@@ -1,0 +1,28 @@
+---
+# lj-gaming-pc - security/performance test toggles
+#
+# These entries are intentionally disabled until explicitly approved for a test.
+# Enabling them disables Windows VBS/HVCI security features and requires reboot.
+
+windows_gaming_security_registry_settings:
+  - name: Disable VBS for Ryzen Master test
+    enabled: false
+    path: HKLM:\SYSTEM\CurrentControlSet\Control\DeviceGuard
+    value_name: EnableVirtualizationBasedSecurity
+    type: dword
+    data: 0
+    reboot_required: true
+  - name: Disable Device Guard platform security requirement for Ryzen Master test
+    enabled: false
+    path: HKLM:\SYSTEM\CurrentControlSet\Control\DeviceGuard
+    value_name: RequirePlatformSecurityFeatures
+    type: dword
+    data: 0
+    reboot_required: true
+  - name: Disable HVCI Memory Integrity for Ryzen Master test
+    enabled: false
+    path: HKLM:\SYSTEM\CurrentControlSet\Control\DeviceGuard\Scenarios\HypervisorEnforcedCodeIntegrity
+    value_name: Enabled
+    type: dword
+    data: 0
+    reboot_required: true
