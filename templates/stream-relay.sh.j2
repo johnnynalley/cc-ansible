@@ -40,6 +40,12 @@ fi
 
 unset TWITCH_STREAM_KEY YOUTUBE_STREAM_KEY YOUTUBE_BACKUP_STREAM_KEY
 tee_spec="$(IFS='|'; printf '%s' "${tee_outputs[*]}")"
+audio_args=()
+{% if stream_relay_audio_codec | default('aac') == 'copy' %}
+audio_args=(-c:a copy)
+{% else %}
+audio_args=(-c:a {{ stream_relay_audio_codec | default('aac') }} -b:a {{ stream_relay_audio_bitrate }} -ar {{ stream_relay_audio_sample_rate }} -ac 2)
+{% endif %}
 
 set +e
 /usr/bin/ffmpeg \
@@ -65,10 +71,7 @@ set +e
   -b:v {{ stream_relay_video_bitrate }} \
   -maxrate {{ stream_relay_video_maxrate }} \
   -bufsize {{ stream_relay_video_bufsize }} \
-  -c:a aac \
-  -b:a {{ stream_relay_audio_bitrate }} \
-  -ar {{ stream_relay_audio_sample_rate }} \
-  -ac 2 \
+  "${audio_args[@]}" \
   -f tee \
   "$tee_spec"
 ffmpeg_status=$?

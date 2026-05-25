@@ -65,7 +65,8 @@ These are the paths to rely on for a real stream.
 
 - Landscape encoding and VOD are handled by `stream-relay.service` on `media-vm`.
 - Landscape fanout is handled by local MPEG-TS/TCP feeds from `stream-relay.service` to one `stream-relay-output@<platform>.service` worker per platform.
-- Twitch copies the shared AAC audio from the producer.
+- The producer copies OBS's incoming AAC audio instead of adding another producer-side AAC encode.
+- Twitch copies that audio to RTMP.
 - YouTube re-encodes audio with `aresample=async=1:first_pts=0` so YouTube gets fresh 48 kHz audio timestamps.
 - With the current TCP fanout, if a platform worker disconnects after latching, restart the full landscape relay set instead of only restarting that output worker.
 - TikTok LIVE Studio runs on the MacBook, not the gaming PC.

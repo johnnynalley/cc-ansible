@@ -87,6 +87,7 @@ stream_relay_video_bitrate: 6000k
 stream_relay_video_maxrate: 6000k
 stream_relay_video_bufsize: 12000k
 
+stream_relay_audio_codec: copy
 stream_relay_audio_bitrate: 160k
 stream_relay_audio_sample_rate: 48000
 
