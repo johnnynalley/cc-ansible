@@ -68,6 +68,7 @@ These are the paths to rely on for a real stream.
 - The producer copies OBS's incoming AAC audio instead of adding another producer-side AAC encode.
 - Twitch copies that audio to RTMP.
 - YouTube re-encodes audio with `aresample=async=1:first_pts=0` so YouTube gets fresh 48 kHz audio timestamps.
+- The relay does not use FFmpeg `nobuffer`/`low_delay` flags; the SRT path already has explicit latency, and aggressive low-delay buffering caused audible artifacts in live testing.
 - With the current TCP fanout, if a platform worker disconnects after latching, restart the full landscape relay set instead of only restarting that output worker.
 - TikTok LIVE Studio runs on the MacBook, not the gaming PC.
 - TikTok receives video from the Mac OBS virtual camera.
