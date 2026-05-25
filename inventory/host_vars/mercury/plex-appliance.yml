@@ -37,6 +37,9 @@ plex_appliance_page_size: 100
 plex_appliance_server_retry_seconds: 3
 plex_appliance_item_failure_delay_seconds: 10
 plex_appliance_collection_refresh_seconds: 3600
+plex_appliance_resume_rewind_seconds: 15
+plex_appliance_stream_prestart_timeout_seconds: 12
+plex_appliance_mpv_start_timeout_seconds: 20
 plex_appliance_mpv_args:
   - --fs
   - --no-terminal
