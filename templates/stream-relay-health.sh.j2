@@ -105,8 +105,8 @@ else
   fi
 
   failed_count="$(count_files "$SPOOL_ROOT/failed" '*')"
-  incoming_old_count="$(count_old_closed_files "$SPOOL_ROOT/incoming" '*.mkv.recording')"
-  ready_old_count="$(count_old_files "$SPOOL_ROOT/ready" '*.mkv')"
+  incoming_old_count="$(count_old_closed_files "$SPOOL_ROOT/incoming" '*.recording')"
+  ready_old_count="$(count_old_files "$SPOOL_ROOT/ready" '*')"
   remuxed_old_count="$(count_old_files "$SPOOL_ROOT/remuxed" '*.mp4')"
 
   if [[ "$failed_count" -gt 0 ]]; then

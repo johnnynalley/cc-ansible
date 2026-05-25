@@ -36,9 +36,10 @@ fi
 
 shopt -s nullglob
 
-for recording in "$INCOMING_DIR"/*.mkv.recording; do
-  base="$(basename "$recording" .mkv.recording)"
-  ready_mkv="${READY_DIR}/${base}.mkv"
+for recording in "$INCOMING_DIR"/*.recording; do
+  file="$(basename "$recording")"
+  base="${file%.recording}"
+  ready_media="${READY_DIR}/${base}"
 
   if command -v fuser >/dev/null 2>&1 && fuser -s "$recording"; then
     continue
@@ -61,41 +62,43 @@ for recording in "$INCOMING_DIR"/*.mkv.recording; do
       -of csv=p=0 \
       "$recording" | grep -qx 'video'; then
     log "salvaging stale incoming VOD for remux: $recording"
-    mv -f "$recording" "$ready_mkv"
+    mv -f "$recording" "$ready_media"
   else
     log "stale incoming VOD is not readable; moving to failed: $recording"
-    mv -f "$recording" "${FAILED_DIR}/${base}.mkv"
+    mv -f "$recording" "${FAILED_DIR}/${base}"
   fi
 done
 
-for mkv in "$READY_DIR"/*.mkv; do
-  base="$(basename "$mkv" .mkv)"
-  work_mkv="${REMUXING_DIR}/${base}.mkv"
+for media in "$READY_DIR"/*; do
+  file="$(basename "$media")"
+  ext="${file##*.}"
+  base="${file%.*}"
+  work_media="${REMUXING_DIR}/${base}.${ext}"
   tmp_mp4="${REMUXING_DIR}/${base}.mp4.tmp"
   done_mp4="${REMUXED_DIR}/${base}.mp4"
 
   if [[ -e "$done_mp4" ]]; then
-    log "remux target already exists; moving duplicate to failed: $mkv"
-    mv -f "$mkv" "${FAILED_DIR}/${base}.duplicate.mkv"
+    log "remux target already exists; moving duplicate to failed: $media"
+    mv -f "$media" "${FAILED_DIR}/${base}.duplicate.${ext}"
     continue
   fi
 
-  mv -f "$mkv" "$work_mkv"
+  mv -f "$media" "$work_media"
   rm -f "$tmp_mp4"
-  log "remuxing $work_mkv -> $done_mp4"
+  log "remuxing $work_media -> $done_mp4"
   if /usr/bin/ffmpeg -hide_banner -nostdin -loglevel warning -y \
-      -i "$work_mkv" \
+      -i "$work_media" \
       -map 0 \
       -c copy \
       -movflags +faststart \
       -f mp4 \
       "$tmp_mp4"; then
     mv -f "$tmp_mp4" "$done_mp4"
-    rm -f "$work_mkv"
+    rm -f "$work_media"
   else
-    log "remux failed for $work_mkv"
+    log "remux failed for $work_media"
     rm -f "$tmp_mp4"
-    mv -f "$work_mkv" "${FAILED_DIR}/${base}.mkv"
+    mv -f "$work_media" "${FAILED_DIR}/${base}.${ext}"
   fi
 done
 

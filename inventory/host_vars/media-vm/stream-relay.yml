@@ -16,7 +16,7 @@ stream_relay_env_file: /etc/stream-relay/stream-relay.env
 stream_relay_mediamtx_version: "1.18.2"
 stream_relay_mediamtx_arch: linux_amd64
 
-stream_relay_broker_enabled: true
+stream_relay_broker_enabled: false
 stream_relay_broker_rtmp_bind: "127.0.0.1"
 stream_relay_broker_rtmp_port: 1935
 stream_relay_broker_app: live
@@ -27,6 +27,10 @@ stream_relay_output_enabled: true
 stream_relay_outputs:
   - twitch
   - youtube
+stream_relay_output_ports:
+  twitch: 10000
+  youtube: 10001
+stream_relay_output_fifo_size: 50000000
 stream_relay_output_retry_seconds: 10
 
 # Park the separate Aitum-to-YouTube vertical relay for now. YouTube's automatic

@@ -1,8 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-broker_output_url="${STREAM_RELAY_BROKER_OUTPUT_URL:-{{ stream_relay_broker_input_url }}}"
-
 srt_url="srt://{{ stream_relay_ingest_bind }}:{{ stream_relay_ingest_port }}?mode=listener&transtype=live&latency={{ stream_relay_ingest_latency_us }}{% if stream_relay_ingest_rcvbuf is defined %}&rcvbuf={{ stream_relay_ingest_rcvbuf }}{% endif %}{% if stream_relay_ingest_ffs is defined %}&ffs={{ stream_relay_ingest_ffs }}{% endif %}"
 keyframe_frames=$(( {{ stream_relay_video_fps }} * {{ stream_relay_keyframe_interval_seconds }} ))
 tee_outputs=()
@@ -10,7 +8,10 @@ recording_incoming=""
 recording_ready=""
 recording_discarded=""
 recording_min_valid_bytes="{{ stream_relay_recording_min_valid_bytes | default(1048576) }}"
-tee_outputs+=("[f=flv:onfail=abort]${broker_output_url}")
+
+{% for output in stream_relay_outputs | default([]) %}
+tee_outputs+=("[f=mpegts:onfail=ignore]udp://127.0.0.1:{{ stream_relay_output_ports[output] }}?pkt_size=1316")
+{% endfor %}
 
 {% if stream_relay_recording_enabled | default(false) | bool %}
 recording_spool="{{ stream_relay_recording_spool_mount }}"
@@ -23,10 +24,10 @@ if mountpoint -q "$recording_spool"; then
     "$recording_spool/remuxed" \
     "$recording_spool/failed" \
     "$recording_spool/discarded"
-  recording_incoming="$recording_spool/incoming/${recording_base}.mkv.recording"
-  recording_ready="$recording_spool/ready/${recording_base}.mkv"
-  recording_discarded="$recording_spool/discarded/${recording_base}.mkv.discarded"
-  tee_outputs+=("[f=matroska:onfail=ignore]${recording_incoming}")
+  recording_incoming="$recording_spool/incoming/${recording_base}.ts.recording"
+  recording_ready="$recording_spool/ready/${recording_base}.ts"
+  recording_discarded="$recording_spool/discarded/${recording_base}.ts.discarded"
+  tee_outputs+=("[f=mpegts:onfail=ignore]${recording_incoming}")
   echo "stream-relay: recording local VOD spool ${recording_incoming}" >&2
 else
   echo "stream-relay: recording enabled but spool mount unavailable: ${recording_spool}" >&2

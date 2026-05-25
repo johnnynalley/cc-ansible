@@ -1,6 +1,6 @@
 # Streaming Runbook
 
-> Last updated: 2026-05-21
+> Last updated: 2026-05-24
 
 This is the current streaming setup across the gaming PC, media-vm, and MacBook.
 It is meant to answer one question first: "what do I do to go live?"
@@ -35,7 +35,7 @@ Starting the gaming PC OBS stream is a real go-live action for Twitch and YouTub
 Gaming PC OBS
   landscape SRT
     -> media-vm stream-relay.service
-    -> media-vm stream-relay-broker.service
+    -> local MPEG-TS/UDP fanout on media-vm
     -> media-vm stream-relay-output@twitch.service
     -> media-vm stream-relay-output@youtube.service
     -> Twitch + YouTube landscape RTMP
@@ -64,7 +64,7 @@ Mac OBS
 These are the paths to rely on for a real stream.
 
 - Landscape encoding and VOD are handled by `stream-relay.service` on `media-vm`.
-- Landscape fanout is handled by `stream-relay-broker.service` plus one `stream-relay-output@<platform>.service` worker per platform.
+- Landscape fanout is handled by local MPEG-TS/UDP feeds from `stream-relay.service` to one `stream-relay-output@<platform>.service` worker per platform.
 - TikTok LIVE Studio runs on the MacBook, not the gaming PC.
 - TikTok receives video from the Mac OBS virtual camera.
 - TikTok receives stream audio from `BlackHole 2ch`, which Mac OBS monitors from the vertical broker source.
@@ -95,15 +95,16 @@ The production landscape stream relay binds to media-vm's LAN IP so the high-bit
 
 ### 1. media-vm
 
-Confirm the relay, platform workers, and TikTok broker are up:
+Confirm the relay, platform workers, health timers, and TikTok broker are up:
 
 ```bash
-ansible media-vm -m shell -a "systemctl is-active stream-relay-broker.service stream-relay.service stream-relay-output@twitch.service stream-relay-output@youtube.service stream-relay-vertical-broker.service" --become
+ansible media-vm -m shell -a "systemctl is-active stream-relay.service stream-relay-output@twitch.service stream-relay-output@youtube.service stream-vod-mover.timer stream-relay-health.timer stream-relay-vertical-broker.service" --become
 ```
 
 Expected:
 
 ```text
+active
 active
 active
 active
@@ -194,15 +195,15 @@ Repo-managed files:
 - `templates/stream-relay.service.j2`
 - `templates/stream-relay-output.sh.j2`
 - `templates/stream-relay-output@.service.j2`
-- `templates/stream-relay-broker.service.j2`
 - `templates/stream-relay-vertical.sh.j2`
 - `templates/stream-relay-vertical.service.j2`
 - `templates/stream-relay-vertical-broker.service.j2`
-- `templates/mediamtx-stream-relay-broker.yml.j2`
 - `templates/mediamtx-vertical-broker.yml.j2`
 - `scripts/configure-aitum-tiktok-broker.ps1`
 - `scripts/configure-mac-apple-music-ndi.py`
 - `scripts/configure-mac-apple-music-sonobus.py`
+
+The old landscape MediaMTX broker templates are still in the repo, but the active landscape path has `stream_relay_broker_enabled: false` and uses local UDP fanout instead.
 
 Live-only secrets and platform keys:
 
@@ -255,10 +256,10 @@ Check the relay log:
 ansible media-vm -m shell -a "journalctl -u stream-relay.service -n 120 --no-pager" --become
 ```
 
-Check the broker and platform worker logs:
+Check the platform worker logs:
 
 ```bash
-ansible media-vm -m shell -a "journalctl -u stream-relay-broker.service -u stream-relay-output@twitch.service -u stream-relay-output@youtube.service -n 160 --no-pager" --become
+ansible media-vm -m shell -a "journalctl -u stream-relay-output@twitch.service -u stream-relay-output@youtube.service -n 160 --no-pager" --become
 ```
 
 Check that the Quadro encoder is being used:
@@ -356,7 +357,7 @@ To fall back to direct Twitch/YouTube streaming from OBS:
 3. Stop the media-vm relay services if desired:
 
 ```bash
-ansible media-vm -m shell -a "systemctl stop stream-relay-output@twitch.service stream-relay-output@youtube.service stream-relay.service stream-relay-broker.service" --become
+ansible media-vm -m shell -a "systemctl stop stream-relay-output@twitch.service stream-relay-output@youtube.service stream-relay.service" --become
 ```
 
 To move TikTok back to the gaming PC, stop using the Mac OBS virtual camera path and open TikTok LIVE Studio on the gaming PC again. That puts the TikTok load back on the gaming PC.

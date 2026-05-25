@@ -7,12 +7,23 @@ if [[ -z "$output" ]]; then
   exit 1
 fi
 
-input_url="${STREAM_RELAY_BROKER_INPUT_URL:-{{ stream_relay_broker_input_url }}}"
 retry_seconds="${STREAM_RELAY_OUTPUT_RETRY_SECONDS:-{{ stream_relay_output_retry_seconds | default(10) }}}"
 
 TWITCH_RTMP_URL="${TWITCH_RTMP_URL:-${TWITCH_RTMP_BASE:-{{ stream_relay_twitch_rtmp_base }}}}"
 YOUTUBE_RTMP_URL="${YOUTUBE_RTMP_URL:-{{ stream_relay_youtube_rtmp_base }}}"
 YOUTUBE_BACKUP_RTMP_URL="${YOUTUBE_BACKUP_RTMP_URL:-{{ stream_relay_youtube_backup_rtmp_base }}}"
+
+case "$output" in
+{% for output in stream_relay_outputs | default([]) %}
+  {{ output }})
+    input_url="${STREAM_RELAY_INPUT_URL:-udp://127.0.0.1:{{ stream_relay_output_ports[output] }}?fifo_size={{ stream_relay_output_fifo_size | default(50000000) }}&overrun_nonfatal=1}"
+    ;;
+{% endfor %}
+  *)
+    echo "stream-relay-output: no local feed configured for ${output}" >&2
+    exit 1
+    ;;
+esac
 
 if [[ "$output" == "twitch" ]]; then
   case "${TWITCH_BANDWIDTH_TEST:-{{ stream_relay_twitch_bandwidth_test | lower }}}" in
