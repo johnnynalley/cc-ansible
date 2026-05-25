@@ -122,6 +122,134 @@
   gather_facts: false
 
   tasks:
+    - name: Read Plex preferences
+      ansible.builtin.slurp:
+        src: "{{ nightly_media_maintenance_plex_preferences_path }}"
+      register: nightly_media_maintenance_plex_preferences_file
+      no_log: true
+      check_mode: false
+      when: nightly_media_maintenance_plex_preferences_enabled | default(false)
+
+    - name: Extract Plex preference state
+      ansible.builtin.set_fact:
+        nightly_media_maintenance_plex_preferences_text: >-
+          {{ nightly_media_maintenance_plex_preferences_file.content | b64decode }}
+        nightly_media_maintenance_plex_token: >-
+          {{
+            (
+              nightly_media_maintenance_plex_preferences_file.content
+              | b64decode
+              | regex_search('PlexOnlineToken="([^"]+)"', '\1')
+            )[0]
+          }}
+      no_log: true
+      when: nightly_media_maintenance_plex_preferences_enabled | default(false)
+
+    - name: Calculate Plex preference changes
+      ansible.builtin.set_fact:
+        nightly_media_maintenance_plex_preference_changes: >-
+          {{
+            (nightly_media_maintenance_plex_preference_changes | default([]))
+            + [item]
+          }}
+      vars:
+        plex_pref_current_value: >-
+          {{
+            (
+              nightly_media_maintenance_plex_preferences_text
+              | regex_search('id="' ~ item.key ~ '"[^>]*value="([^"]*)"', '\1')
+              | default([], true)
+            )[0] | default('')
+          }}
+      loop: "{{ nightly_media_maintenance_plex_preferences | default({}) | dict2items }}"
+      loop_control:
+        label: "{{ item.key }}"
+      when:
+        - nightly_media_maintenance_plex_preferences_enabled | default(false)
+        - plex_pref_current_value != (item.value | string)
+
+    - name: Create Plex preferences backup directory
+      ansible.builtin.file:
+        path: >-
+          {{ nightly_media_maintenance_plex_backup_root }}/{{ lookup('ansible.builtin.pipe', 'date -u +%Y%m%dT%H%M%SZ') }}
+        state: directory
+        owner: root
+        group: root
+        mode: "0700"
+      register: nightly_media_maintenance_plex_backup_dir
+      when:
+        - nightly_media_maintenance_plex_preferences_enabled | default(false)
+        - (nightly_media_maintenance_plex_preference_changes | default([])) | length > 0
+        - not ansible_check_mode
+
+    - name: Back up Plex preferences before API updates
+      ansible.builtin.copy:
+        src: "{{ nightly_media_maintenance_plex_preferences_path }}"
+        dest: "{{ nightly_media_maintenance_plex_backup_dir.path }}/Preferences.xml"
+        remote_src: true
+        owner: root
+        group: root
+        mode: "0600"
+      when:
+        - nightly_media_maintenance_plex_preferences_enabled | default(false)
+        - (nightly_media_maintenance_plex_preference_changes | default([])) | length > 0
+        - not ansible_check_mode
+
+    - name: Update Plex maintenance preferences
+      ansible.builtin.uri:
+        url: >-
+          {{ nightly_media_maintenance_plex_url }}/:/prefs?{{ item.key }}={{ item.value | urlencode }}&X-Plex-Token={{ nightly_media_maintenance_plex_token | urlencode }}
+        method: PUT
+        status_code: [200]
+        return_content: false
+      loop: "{{ nightly_media_maintenance_plex_preference_changes | default([]) }}"
+      loop_control:
+        label: "{{ item.key }}"
+      changed_when: true
+      no_log: true
+      when:
+        - nightly_media_maintenance_plex_preferences_enabled | default(false)
+        - not ansible_check_mode
+
+    - name: Report Plex preference updates
+      ansible.builtin.debug:
+        msg:
+          backup: "{{ nightly_media_maintenance_plex_backup_dir.path | default('not-created') }}"
+          updated_preferences: "{{ nightly_media_maintenance_plex_preference_changes | default([]) | map(attribute='key') | list }}"
+      when:
+        - nightly_media_maintenance_plex_preferences_enabled | default(false)
+        - (nightly_media_maintenance_plex_preference_changes | default([])) | length > 0
+        - not ansible_check_mode
+
+    - name: Verify Plex maintenance preferences
+      ansible.builtin.uri:
+        url: >-
+          {{ nightly_media_maintenance_plex_url }}/:/prefs?X-Plex-Token={{ nightly_media_maintenance_plex_token | urlencode }}
+        method: GET
+        status_code: [200]
+        return_content: true
+      register: nightly_media_maintenance_plex_preferences_verify
+      changed_when: false
+      no_log: true
+      check_mode: false
+      when:
+        - nightly_media_maintenance_plex_preferences_enabled | default(false)
+        - not ansible_check_mode
+
+    - name: Assert Plex maintenance preferences are configured
+      ansible.builtin.assert:
+        that:
+          - >-
+            nightly_media_maintenance_plex_preferences_verify.content
+            is search('id="' ~ item.key ~ '"[^>]*value="' ~ (item.value | string) ~ '"')
+        fail_msg: "Plex preference {{ item.key }} did not converge to {{ item.value }}."
+      loop: "{{ nightly_media_maintenance_plex_preferences | default({}) | dict2items }}"
+      loop_control:
+        label: "{{ item.key }}"
+      when:
+        - nightly_media_maintenance_plex_preferences_enabled | default(false)
+        - not ansible_check_mode
+
     - name: End play when nightly media maintenance key is not available
       ansible.builtin.meta: end_host
       when: >-

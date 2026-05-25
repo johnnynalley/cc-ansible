@@ -1,6 +1,26 @@
 # =============================================================================
-# media-vm - Nightly Media Maintenance Endpoint
+# media-vm - Nightly Media Maintenance Endpoint / Plex Maintenance Window
 # =============================================================================
 
 nightly_media_maintenance_profilarr_endpoint_enabled: true
 nightly_media_maintenance_profilarr_ssh_user: johnny
+
+nightly_media_maintenance_plex_preferences_enabled: true
+nightly_media_maintenance_plex_url: http://127.0.0.1:32400
+nightly_media_maintenance_plex_preferences_path: "/opt/media-stack/plex/Library/Application Support/Plex Media Server/Preferences.xml"
+nightly_media_maintenance_plex_backup_root: /opt/media-stack/plex-preference-backups
+
+# Keep Plex analysis features enabled, but only let expensive background work
+# run inside the same 00:00-07:00 window as the media maintenance coordinator.
+nightly_media_maintenance_plex_preferences:
+  ButlerStartHour: "0"
+  ButlerEndHour: "7"
+  GenerateBIFBehavior: scheduled
+  GenerateIntroMarkerBehavior: scheduled
+  GenerateCreditsMarkerBehavior: scheduled
+  GenerateAdMarkerBehavior: scheduled
+  GenerateVADBehavior: scheduled
+  GenerateChapterThumbBehavior: scheduled
+  LoudnessAnalysisBehavior: scheduled
+  MusicAnalysisBehavior: scheduled
+  ScannerLowPriority: "1"
