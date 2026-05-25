@@ -21,7 +21,7 @@ Use this when you just want to start the stream.
    - Mic cleanup/effects/noise suppression are off
 7. On the gaming PC, start the Aitum vertical output to the media-vm broker.
 8. Confirm TikTok LIVE Studio shows the vertical feed and its mic meter moves with game audio.
-9. Open SleepyChat for Twitch and YouTube chat.
+9. Open SleepyChat for Twitch, YouTube, and TikTok chat.
 10. Optional: if using Apple Music from the MacBook, open `SonoBus Apple Music Receiver` on the gaming PC and connect the Mac OBS SonoBus plugin to the same group.
 11. When ready to actually go live, click Start Streaming in gaming PC OBS.
 12. When ready to actually go live on TikTok, start the TikTok LIVE Studio stream on the MacBook.
@@ -82,8 +82,8 @@ These are the paths to rely on for a real stream.
 - `BlackHole 2ch` is only a virtual cable. It does not process, clean up, compress, or enhance audio.
 - TikTok LIVE Studio must not apply mic cleanup/effects/noise suppression to `BlackHole 2ch`, because this input is the full stream mix, not a raw microphone.
 - Leave the Mac's normal default input/output as `MacBook Pro Microphone` and `MacBook Pro Speakers`. Do not make `BlackHole 2ch` the Mac default device for day-to-day use.
-- SleepyChat is the current unified chat tool for Twitch and YouTube.
-- TikTok chat stays in TikTok LIVE Studio.
+- SleepyChat is the current unified chat tool for Twitch, YouTube, and TikTok.
+- TikTok LIVE Studio should still stay open for TikTok stream control and fallback chat visibility.
 - YouTube Shorts/vertical is currently handled by YouTube's automatic dual-stream feature.
 
 This is intentionally parked for now:
@@ -191,8 +191,8 @@ BlackHole should not be the Mac's default mic. The MacBook remains a normal work
 
 ### 5. Chat And Dashboards
 
-- SleepyChat: use for Twitch and YouTube chat.
-- TikTok LIVE Studio: use for TikTok chat.
+- SleepyChat: use for Twitch, YouTube, and TikTok chat.
+- TikTok LIVE Studio: keep open for TikTok stream control and fallback chat.
 - Twitch: check Creator Dashboard or Twitch Inspector for stable bitrate.
 - YouTube: check Live Control Room. YouTube can sit on "Preparing stream" for a few minutes before the stream appears.
 
@@ -349,6 +349,25 @@ Fix:
 - Keep desktop/system audio muted.
 
 BlackHole does not add this processing. If both mic and game audio sound narrow, gated, or cut in and out, check TikTok's mic processing first.
+
+### SleepyChat YouTube Says Disconnected
+
+SleepyChat works for Twitch, YouTube, and TikTok in the current setup.
+
+Expected behavior:
+
+- Twitch usually connects immediately.
+- TikTok may retry only while the TikTok stream exists; it often connects once TikTok LIVE Studio is actually live.
+- YouTube can be flaky because SleepyChat has to find the current YouTube live chat for the active event/video, and that binding can lag or get stale even when Twitch is fine.
+
+If YouTube says disconnected:
+
+1. Confirm YouTube is actually live or visible in Live Control Room, not just waiting in OBS or still preparing.
+2. Refresh the SleepyChat window once.
+3. If it immediately returns to disconnected and tells you to refresh again, open the SleepyChat dashboard and relink YouTube.
+4. Reopen or refresh the SleepyChat chat window after relinking.
+
+Relinking YouTube is the practical recovery when SleepyChat stops retrying. If YouTube later connects by itself without a refresh, that usually means YouTube finally exposed the active live chat and SleepyChat found it on a later retry.
 
 ### OBS Virtual Camera Error On Mac
 
