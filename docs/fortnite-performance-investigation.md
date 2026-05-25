@@ -124,6 +124,13 @@ Johnny's current plan is to hold the Ryzen 9 3900X until a possible AM4 X3D upgr
 
 If the anniversary 5800X3D is unavailable, scalped, or overpriced, the practical fallback is a Ryzen 7 5700X3D or used 5800X3D. For Fortnite and other cache-sensitive games, 5700X3D/5800X3D are much better upgrade targets from a 3900X than a 5900X. A 5900X adds cores but does not solve the cache/game-thread limitation that the captures are pointing at.
 
+
+## 2026-05-24 Creative 32-Player Cup Zone Wars FPS Observation
+
+Johnny reported unusually severe FPS lag in a 32-player cup zone wars map, specifically noting that it was FPS lag and that the map had a lot going on. Treat large Creative endgame maps as worst-case CPU-frame-time stress tests, not representative BR baselines. For practice quality, prefer smaller or better-optimized endgame/zone wars maps if the 32-player map breaks frame pacing; bad FPS produces bad fighting reps.
+
+Implication for benchmark planning: if Creative 32-player maps are used for testing, label them explicitly as stress tests and do not compare them directly against normal BR / Realistics captures. Capture map code, player count, OBS state, and whether the lag is map-specific.
+
 ## 2026-05-23 Match Capture: High-Res Textures Off
 
 Capture:

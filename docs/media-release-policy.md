@@ -141,6 +141,11 @@ linked PCD databases, upgrade configs, recent sync/link/upgrade jobs, and
 scheduler health. It treats queued and running jobs as active. Use it after
 Profilarr restarts or scheduled upgrade runs.
 
+`scripts/profilarr_disable_upgrade_jobs.py` disables Profilarr's scheduled
+Arr upgrade configs and cancels queued scheduled `arr.upgrade` jobs with a
+SQLite backup. It intentionally leaves Profilarr database auto-pull/sync
+enabled.
+
 `scripts/profilarr_sonarr_upgrade_strategy.py` updates the supported stored
 settings for the Sonarr Profilarr upgrade filter without patching Profilarr
 application code. It creates a SQLite backup before live mutation. Current use:

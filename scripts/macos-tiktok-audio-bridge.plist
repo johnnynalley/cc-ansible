@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>me.johnny.tiktok-audio-bridge</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/Users/johnny/Library/Application Support/Johnny/Streaming/tiktok-audio-bridge.sh</string>
+    <string>rtmp://100.66.6.113:1936/live/vertical</string>
+  </array>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key>
+    <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+  </dict>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
+  <key>StandardOutPath</key>
+  <string>/Users/johnny/Library/Logs/tiktok-audio-bridge.log</string>
+  <key>StandardErrorPath</key>
+  <string>/Users/johnny/Library/Logs/tiktok-audio-bridge.log</string>
+  <key>WorkingDirectory</key>
+  <string>/Users/johnny</string>
+</dict>
+</plist>
