@@ -21,6 +21,7 @@ case "$output" in
 {% else %}
     input_url="${STREAM_RELAY_INPUT_URL:-udp://127.0.0.1:{{ stream_relay_output_ports[output] }}?fifo_size={{ stream_relay_output_fifo_size | default(50000000) }}&overrun_nonfatal=1}"
 {% endif %}
+    audio_codec="${STREAM_RELAY_AUDIO_CODEC:-{{ (stream_relay_output_audio_codecs | default({})).get(output, 'copy') }}}"
     ;;
 {% endfor %}
   *)
@@ -65,6 +66,11 @@ fi
 
 unset TWITCH_STREAM_KEY YOUTUBE_STREAM_KEY YOUTUBE_BACKUP_STREAM_KEY YOUTUBE_VERTICAL_STREAM_KEY
 
+audio_args=(-c:a "$audio_codec")
+if [[ "$audio_codec" != "copy" ]]; then
+  audio_args+=(-b:a {{ stream_relay_audio_bitrate }} -ar {{ stream_relay_audio_sample_rate }} -ac 2)
+fi
+
 while true; do
   echo "stream-relay-output: ${output} reading ${input_url}" >&2
   set +e
@@ -78,7 +84,8 @@ while true; do
     -i "$input_url" \
     -map 0:v:0 \
     -map 0:a:0? \
-    -c copy \
+    -c:v copy \
+    "${audio_args[@]}" \
     -f flv \
     "$full_url"
   ffmpeg_status=$?

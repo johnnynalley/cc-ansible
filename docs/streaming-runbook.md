@@ -65,6 +65,8 @@ These are the paths to rely on for a real stream.
 
 - Landscape encoding and VOD are handled by `stream-relay.service` on `media-vm`.
 - Landscape fanout is handled by local MPEG-TS/TCP feeds from `stream-relay.service` to one `stream-relay-output@<platform>.service` worker per platform.
+- Twitch and YouTube both copy the shared AAC audio from the producer.
+- With the current TCP fanout, if a platform worker disconnects after latching, restart the full landscape relay set instead of only restarting that output worker.
 - TikTok LIVE Studio runs on the MacBook, not the gaming PC.
 - TikTok receives video from the Mac OBS virtual camera.
 - TikTok receives stream audio from `BlackHole 2ch`, which Mac OBS monitors from the vertical broker source.
