@@ -35,7 +35,7 @@ Starting the gaming PC OBS stream is a real go-live action for Twitch and YouTub
 Gaming PC OBS
   landscape SRT
     -> media-vm stream-relay.service
-    -> local MPEG-TS/UDP fanout on media-vm
+    -> local MPEG-TS/TCP fanout on media-vm
     -> media-vm stream-relay-output@twitch.service
     -> media-vm stream-relay-output@youtube.service
     -> Twitch + YouTube landscape RTMP
@@ -64,7 +64,7 @@ Mac OBS
 These are the paths to rely on for a real stream.
 
 - Landscape encoding and VOD are handled by `stream-relay.service` on `media-vm`.
-- Landscape fanout is handled by local MPEG-TS/UDP feeds from `stream-relay.service` to one `stream-relay-output@<platform>.service` worker per platform.
+- Landscape fanout is handled by local MPEG-TS/TCP feeds from `stream-relay.service` to one `stream-relay-output@<platform>.service` worker per platform.
 - TikTok LIVE Studio runs on the MacBook, not the gaming PC.
 - TikTok receives video from the Mac OBS virtual camera.
 - TikTok receives stream audio from `BlackHole 2ch`, which Mac OBS monitors from the vertical broker source.
@@ -203,7 +203,7 @@ Repo-managed files:
 - `scripts/configure-mac-apple-music-ndi.py`
 - `scripts/configure-mac-apple-music-sonobus.py`
 
-The old landscape MediaMTX broker templates are still in the repo, but the active landscape path has `stream_relay_broker_enabled: false` and uses local UDP fanout instead.
+The old landscape MediaMTX broker templates are still in the repo, but the active landscape path has `stream_relay_broker_enabled: false` and uses local TCP fanout instead.
 
 Live-only secrets and platform keys:
 

@@ -1,8 +1,8 @@
 [Unit]
 Description=Stream relay output worker for %i
 Documentation=file:/etc/stream-relay/stream-relay.env.example
-After=network-online.target stream-relay-broker.service stream-relay.service
-Wants=network-online.target stream-relay-broker.service stream-relay.service
+After=network-online.target stream-relay.service
+Wants=network-online.target stream-relay.service
 
 [Service]
 Type=simple

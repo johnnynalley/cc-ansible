@@ -10,7 +10,11 @@ recording_discarded=""
 recording_min_valid_bytes="{{ stream_relay_recording_min_valid_bytes | default(1048576) }}"
 
 {% for output in stream_relay_outputs | default([]) %}
+{% if stream_relay_output_fanout_transport | default('udp') == 'tcp' %}
+tee_outputs+=("[f=mpegts:onfail=ignore]tcp://127.0.0.1:{{ stream_relay_output_ports[output] }}?listen=1")
+{% else %}
 tee_outputs+=("[f=mpegts:onfail=ignore]udp://127.0.0.1:{{ stream_relay_output_ports[output] }}?pkt_size=1316")
+{% endif %}
 {% endfor %}
 
 {% if stream_relay_recording_enabled | default(false) | bool %}

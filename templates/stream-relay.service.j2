@@ -1,8 +1,8 @@
 [Unit]
-Description=OBS SRT to local stream relay broker producer
+Description=OBS SRT to streaming platform fanout producer
 Documentation=file:/etc/stream-relay/stream-relay.env.example
-After=network-online.target stream-relay-broker.service
-Wants=network-online.target stream-relay-broker.service
+After=network-online.target
+Wants=network-online.target
 
 [Service]
 Type=simple

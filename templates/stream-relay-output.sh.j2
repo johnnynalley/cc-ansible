@@ -16,7 +16,11 @@ YOUTUBE_BACKUP_RTMP_URL="${YOUTUBE_BACKUP_RTMP_URL:-{{ stream_relay_youtube_back
 case "$output" in
 {% for output in stream_relay_outputs | default([]) %}
   {{ output }})
+{% if stream_relay_output_fanout_transport | default('udp') == 'tcp' %}
+    input_url="${STREAM_RELAY_INPUT_URL:-tcp://127.0.0.1:{{ stream_relay_output_ports[output] }}}"
+{% else %}
     input_url="${STREAM_RELAY_INPUT_URL:-udp://127.0.0.1:{{ stream_relay_output_ports[output] }}?fifo_size={{ stream_relay_output_fifo_size | default(50000000) }}&overrun_nonfatal=1}"
+{% endif %}
     ;;
 {% endfor %}
   *)

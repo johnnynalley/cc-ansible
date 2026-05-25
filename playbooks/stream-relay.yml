@@ -45,6 +45,27 @@
         cache_valid_time: 3600
       when: ansible_facts.os_family == "Debian"
 
+    - name: Configure stream relay network buffers
+      ansible.builtin.copy:
+        dest: /etc/sysctl.d/90-stream-relay.conf
+        owner: root
+        group: root
+        mode: "0644"
+        content: |
+          # Managed by Ansible: playbooks/stream-relay.yml
+          {% for key, value in (stream_relay_sysctl | default({})).items() | sort %}
+          {{ key }} = {{ value }}
+          {% endfor %}
+      register: stream_relay_sysctl_file
+      when: stream_relay_sysctl is defined
+
+    - name: Apply stream relay network buffers
+      ansible.builtin.command: sysctl -p /etc/sysctl.d/90-stream-relay.conf
+      when:
+        - stream_relay_sysctl is defined
+        - stream_relay_sysctl_file.changed
+      changed_when: true
+
     - name: Configure stream relay recording spool filesystem
       ansible.builtin.shell: |
         set -euo pipefail

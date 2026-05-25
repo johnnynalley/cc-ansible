@@ -4,7 +4,7 @@
 
 # OBS stream offload:
 #   gaming PC OBS -> SRT over LAN -> media-vm FFmpeg/NVENC producer
-#   producer -> local MediaMTX broker -> per-platform RTMP output workers
+#   producer -> reliable localhost fanout -> per-platform RTMP output workers
 #
 # The service is managed as enabled after the OBS/Twitch relay POC succeeded.
 # Real platform stream keys stay live-only in /etc/stream-relay/stream-relay.env.
@@ -30,8 +30,16 @@ stream_relay_outputs:
 stream_relay_output_ports:
   twitch: 10000
   youtube: 10001
+stream_relay_output_fanout_transport: tcp
 stream_relay_output_fifo_size: 50000000
 stream_relay_output_retry_seconds: 10
+
+stream_relay_sysctl:
+  net.core.rmem_default: 33554432
+  net.core.rmem_max: 134217728
+  net.core.wmem_default: 33554432
+  net.core.wmem_max: 134217728
+  net.core.netdev_max_backlog: 5000
 
 # Park the separate Aitum-to-YouTube vertical relay for now. YouTube's automatic
 # dual-stream mode is the active vertical path while SleepyChat only tracks one
@@ -55,8 +63,8 @@ stream_relay_vertical_broker_arch: "{{ stream_relay_mediamtx_arch }}"
 stream_relay_ingest_bind: "192.168.1.136"
 stream_relay_ingest_port: 9000
 stream_relay_ingest_latency_us: 5000000
-stream_relay_ingest_rcvbuf: 33554432
-stream_relay_ingest_ffs: 33554432
+stream_relay_ingest_rcvbuf: 67108864
+stream_relay_ingest_ffs: 67108864
 
 stream_relay_twitch_rtmp_base: "rtmp://live.twitch.tv/app"
 stream_relay_twitch_bandwidth_test: false
