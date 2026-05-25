@@ -1,6 +1,6 @@
 # Streaming Runbook
 
-> Last updated: 2026-05-24
+> Last updated: 2026-05-25
 
 This is the current streaming setup across the gaming PC, media-vm, and MacBook.
 It is meant to answer one question first: "what do I do to go live?"
@@ -18,8 +18,9 @@ Use this when you just want to start the stream.
    - Camera is `OBS Virtual Camera`
    - Mic/audio input is `BlackHole 2ch`
    - Desktop/system audio is muted
+   - Mic cleanup/effects/noise suppression are off
 7. On the gaming PC, start the Aitum vertical output to the media-vm broker.
-8. Confirm TikTok LIVE Studio shows the vertical feed.
+8. Confirm TikTok LIVE Studio shows the vertical feed and its mic meter moves with game audio.
 9. Open SleepyChat for Twitch and YouTube chat.
 10. Optional: if using Apple Music from the MacBook, open `SonoBus Apple Music Receiver` on the gaming PC and connect the Mac OBS SonoBus plugin to the same group.
 11. When ready to actually go live, click Start Streaming in gaming PC OBS.
@@ -53,6 +54,11 @@ Mac OBS
     -> Gaming PC OBS webcam source
 
 Mac OBS
+  TikTok Vertical Broker audio monitor
+    -> BlackHole 2ch
+    -> TikTok LIVE Studio mic input
+
+Mac OBS
   Apple Music app audio
     -> OBS VST filter "SonoBus Apple Music"
     -> Windows SonoBus
@@ -73,6 +79,9 @@ These are the paths to rely on for a real stream.
 - TikTok LIVE Studio runs on the MacBook, not the gaming PC.
 - TikTok receives video from the Mac OBS virtual camera.
 - TikTok receives stream audio from `BlackHole 2ch`, which Mac OBS monitors from the vertical broker source.
+- `BlackHole 2ch` is only a virtual cable. It does not process, clean up, compress, or enhance audio.
+- TikTok LIVE Studio must not apply mic cleanup/effects/noise suppression to `BlackHole 2ch`, because this input is the full stream mix, not a raw microphone.
+- Leave the Mac's normal default input/output as `MacBook Pro Microphone` and `MacBook Pro Speakers`. Do not make `BlackHole 2ch` the Mac default device for day-to-day use.
 - SleepyChat is the current unified chat tool for Twitch and YouTube.
 - TikTok chat stays in TikTok LIVE Studio.
 - YouTube Shorts/vertical is currently handled by YouTube's automatic dual-stream feature.
@@ -161,8 +170,10 @@ Open OBS normally. Do not launch it with `--startvirtualcam`; that path showed a
 In the `TikTok Vertical` scene:
 
 - `TikTok Vertical Broker` should show the Aitum vertical feed.
+- `TikTok Vertical Broker` audio monitoring should be `Monitor and Output`.
 - `Video Capture Device` / MacBook webcam should stay visible, locked, and parked off-canvas. Do not hide it. Hiding it froze the DistroAV webcam feed before.
 - Monitoring device should be `BlackHole 2ch`.
+- The `Apple Music` source should not be monitored into BlackHole; it is only used for the optional SonoBus sender path.
 - Start OBS Virtual Camera if it is not already started.
 
 ### 4. TikTok LIVE Studio On Mac
@@ -172,8 +183,11 @@ TikTok LIVE Studio source setup:
 - Camera: `OBS Virtual Camera`
 - Mic/audio input: `BlackHole 2ch`
 - Desktop/system audio: muted
+- Mic cleanup/effects/noise suppression/voice enhancement: off
 
 The muted desktop/system audio matters because TikTok LIVE Studio on macOS can grab desktop audio by default. Keep TikTok alerts on the Mac speakers if needed, but do not let TikTok Studio capture desktop/system audio unless that is intentional.
+
+BlackHole should not be the Mac's default mic. The MacBook remains a normal work laptop; Teams and normal apps should continue to use `MacBook Pro Microphone` unless intentionally changed.
 
 ### 5. Chat And Dashboards
 
@@ -289,6 +303,52 @@ Then check the chain in order:
 - Mac OBS `TikTok Vertical Broker` source is live.
 - Mac OBS Virtual Camera is started.
 - TikTok LIVE Studio camera is `OBS Virtual Camera`.
+
+### TikTok Audio Meter Does Not Move
+
+Expected path:
+
+```text
+Gaming PC Aitum vertical audio
+  -> media-vm vertical broker
+  -> Mac OBS TikTok Vertical Broker
+  -> OBS audio monitoring device BlackHole 2ch
+  -> TikTok LIVE Studio mic input BlackHole 2ch
+```
+
+Do not change the Mac's default input to BlackHole. Keep the Mac default input on `MacBook Pro Microphone`.
+
+Check the chain in order:
+
+- Gaming PC Aitum vertical output is running.
+- Mac OBS `TikTok Vertical Broker` source meter moves with game audio.
+- Mac OBS Settings -> Audio -> Advanced -> Monitoring Device is `BlackHole 2ch`.
+- Mac OBS Advanced Audio Properties has `TikTok Vertical Broker` set to `Monitor and Output`.
+- TikTok LIVE Studio mic/audio input is `BlackHole 2ch`.
+- TikTok LIVE Studio desktop/system audio is muted.
+
+If Mac OBS meters move but TikTok is silent, restart TikTok LIVE Studio first, then restart Mac OBS if needed. If it still fails, open QuickTime Player -> New Audio Recording, set the recording dropdown to `BlackHole 2ch`, and verify whether the meter moves while Mac OBS is receiving game audio.
+
+If QuickTime also sees silence, test BlackHole itself:
+
+1. Temporarily set System Settings -> Sound -> Output to `BlackHole 2ch`.
+2. Play loud local Mac audio for a few seconds.
+3. Confirm QuickTime's `BlackHole 2ch` meter moves.
+4. Immediately set System Settings -> Sound -> Output back to `MacBook Pro Speakers`.
+
+If this wake-up test makes BlackHole work again, leave Mac defaults on the MacBook devices and continue. BlackHole is the virtual pipe only; it should not stay as a normal default output or input.
+
+### TikTok Audio Sounds Like A Phone Call
+
+This is TikTok LIVE Studio processing the full stream mix as if it were a raw microphone.
+
+Fix:
+
+- In TikTok LIVE Studio, keep the mic/audio input as `BlackHole 2ch`.
+- Turn off noise suppression, voice enhancement, audio effects, echo cancellation, and similar mic-cleanup options.
+- Keep desktop/system audio muted.
+
+BlackHole does not add this processing. If both mic and game audio sound narrow, gated, or cut in and out, check TikTok's mic processing first.
 
 ### OBS Virtual Camera Error On Mac
 
