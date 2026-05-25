@@ -33,7 +33,9 @@ stream_relay_output_ports:
 stream_relay_output_fanout_transport: tcp
 stream_relay_output_audio_codecs:
   twitch: copy
-  youtube: copy
+  youtube: aac
+stream_relay_output_audio_filters:
+  youtube: "aresample=async=1:first_pts=0"
 stream_relay_output_fifo_size: 50000000
 stream_relay_output_retry_seconds: 10
 

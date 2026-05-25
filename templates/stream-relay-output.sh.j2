@@ -22,6 +22,7 @@ case "$output" in
     input_url="${STREAM_RELAY_INPUT_URL:-udp://127.0.0.1:{{ stream_relay_output_ports[output] }}?fifo_size={{ stream_relay_output_fifo_size | default(50000000) }}&overrun_nonfatal=1}"
 {% endif %}
     audio_codec="${STREAM_RELAY_AUDIO_CODEC:-{{ (stream_relay_output_audio_codecs | default({})).get(output, 'copy') }}}"
+    audio_filter="${STREAM_RELAY_AUDIO_FILTER:-{{ (stream_relay_output_audio_filters | default({})).get(output, '') }}}"
     ;;
 {% endfor %}
   *)
@@ -66,9 +67,14 @@ fi
 
 unset TWITCH_STREAM_KEY YOUTUBE_STREAM_KEY YOUTUBE_BACKUP_STREAM_KEY YOUTUBE_VERTICAL_STREAM_KEY
 
-audio_args=(-c:a "$audio_codec")
-if [[ "$audio_codec" != "copy" ]]; then
-  audio_args+=(-b:a {{ stream_relay_audio_bitrate }} -ar {{ stream_relay_audio_sample_rate }} -ac 2)
+audio_args=()
+if [[ "$audio_codec" == "copy" ]]; then
+  audio_args=(-c:a copy)
+else
+  if [[ -n "$audio_filter" ]]; then
+    audio_args+=(-af "$audio_filter")
+  fi
+  audio_args+=(-c:a "$audio_codec" -b:a {{ stream_relay_audio_bitrate }} -ar {{ stream_relay_audio_sample_rate }} -ac 2)
 fi
 
 while true; do
