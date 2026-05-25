@@ -1,6 +1,6 @@
 [Unit]
 Description=Check stream relay recording and delivery health
-After=network-online.target stream-relay.service
+After=network-online.target stream-relay-broker.service stream-relay.service
 Wants=network-online.target
 
 [Service]

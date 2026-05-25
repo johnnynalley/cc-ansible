@@ -3,7 +3,8 @@
 # =============================================================================
 
 # OBS stream offload:
-#   gaming PC OBS -> SRT over Tailscale -> media-vm FFmpeg/NVENC -> platform RTMP outputs
+#   gaming PC OBS -> SRT over LAN -> media-vm FFmpeg/NVENC producer
+#   producer -> local MediaMTX broker -> per-platform RTMP output workers
 #
 # The service is managed as enabled after the OBS/Twitch relay POC succeeded.
 # Real platform stream keys stay live-only in /etc/stream-relay/stream-relay.env.
@@ -11,6 +12,22 @@ stream_relay_enabled: true
 
 stream_relay_name: stream
 stream_relay_env_file: /etc/stream-relay/stream-relay.env
+
+stream_relay_mediamtx_version: "1.18.2"
+stream_relay_mediamtx_arch: linux_amd64
+
+stream_relay_broker_enabled: true
+stream_relay_broker_rtmp_bind: "127.0.0.1"
+stream_relay_broker_rtmp_port: 1935
+stream_relay_broker_app: live
+stream_relay_broker_stream: landscape
+stream_relay_broker_input_url: "rtmp://127.0.0.1:1935/live/landscape"
+
+stream_relay_output_enabled: true
+stream_relay_outputs:
+  - twitch
+  - youtube
+stream_relay_output_retry_seconds: 10
 
 # Park the separate Aitum-to-YouTube vertical relay for now. YouTube's automatic
 # dual-stream mode is the active vertical path while SleepyChat only tracks one
@@ -26,8 +43,8 @@ stream_relay_vertical_ingest_stream: vertical
 #   Mac OBS         -> RTMP media-vm:1936/live/vertical
 # Mac OBS then exposes the feed to TikTok LIVE Studio as a virtual camera.
 stream_relay_vertical_broker_enabled: true
-stream_relay_vertical_broker_version: "1.18.2"
-stream_relay_vertical_broker_arch: linux_amd64
+stream_relay_vertical_broker_version: "{{ stream_relay_mediamtx_version }}"
+stream_relay_vertical_broker_arch: "{{ stream_relay_mediamtx_arch }}"
 
 # Bind to media-vm's LAN address so the high-bitrate OBS SRT feed stays on the
 # same switch instead of traversing Tailscale.

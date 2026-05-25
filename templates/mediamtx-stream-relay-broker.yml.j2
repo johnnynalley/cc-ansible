@@ -1,0 +1,17 @@
+logLevel: info
+logDestinations: [stdout]
+
+api: false
+metrics: false
+pprof: false
+
+rtsp: false
+rtmp: true
+rtmpAddress: "{{ stream_relay_broker_rtmp_bind }}:{{ stream_relay_broker_rtmp_port }}"
+hls: false
+webrtc: false
+srt: false
+
+paths:
+  "{{ stream_relay_broker_app }}/{{ stream_relay_broker_stream }}":
+    source: publisher

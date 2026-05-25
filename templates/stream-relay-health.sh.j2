@@ -41,6 +41,22 @@ count_old_files() {
   find "$path" -maxdepth 1 -type f -name "$pattern" -mmin "+${MAX_BACKLOG_AGE_MINUTES}" 2>/dev/null | wc -l
 }
 
+count_old_closed_files() {
+  local path="$1"
+  local pattern="$2"
+  local count=0
+  local file
+
+  while IFS= read -r file; do
+    if command -v fuser >/dev/null 2>&1 && fuser -s "$file"; then
+      continue
+    fi
+    count=$((count + 1))
+  done < <(find "$path" -maxdepth 1 -type f -name "$pattern" -mmin "+${MAX_BACKLOG_AGE_MINUTES}" 2>/dev/null)
+
+  printf '%s\n' "$count"
+}
+
 check_service_active() {
   local service="$1"
   if ! systemctl is-active --quiet "$service"; then
@@ -57,6 +73,18 @@ check_service_not_failed() {
 
 check_service_active stream-relay.service
 check_service_not_failed stream-relay.service
+
+{% if stream_relay_broker_enabled | default(false) | bool %}
+check_service_active stream-relay-broker.service
+check_service_not_failed stream-relay-broker.service
+{% endif %}
+
+{% if stream_relay_output_enabled | default(false) | bool %}
+{% for output in stream_relay_outputs | default([]) %}
+check_service_active stream-relay-output@{{ output }}.service
+check_service_not_failed stream-relay-output@{{ output }}.service
+{% endfor %}
+{% endif %}
 
 {% if stream_relay_vertical_broker_enabled | default(false) | bool %}
 check_service_active stream-relay-vertical-broker.service
@@ -77,7 +105,7 @@ else
   fi
 
   failed_count="$(count_files "$SPOOL_ROOT/failed" '*')"
-  incoming_old_count="$(count_old_files "$SPOOL_ROOT/incoming" '*.mkv.recording')"
+  incoming_old_count="$(count_old_closed_files "$SPOOL_ROOT/incoming" '*.mkv.recording')"
   ready_old_count="$(count_old_files "$SPOOL_ROOT/ready" '*.mkv')"
   remuxed_old_count="$(count_old_files "$SPOOL_ROOT/remuxed" '*.mp4')"
 

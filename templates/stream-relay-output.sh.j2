@@ -1,0 +1,74 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+output="${1:-${STREAM_RELAY_OUTPUT:-}}"
+if [[ -z "$output" ]]; then
+  echo "stream-relay-output: missing output name" >&2
+  exit 1
+fi
+
+input_url="${STREAM_RELAY_BROKER_INPUT_URL:-{{ stream_relay_broker_input_url }}}"
+retry_seconds="${STREAM_RELAY_OUTPUT_RETRY_SECONDS:-{{ stream_relay_output_retry_seconds | default(10) }}}"
+
+TWITCH_RTMP_URL="${TWITCH_RTMP_URL:-${TWITCH_RTMP_BASE:-{{ stream_relay_twitch_rtmp_base }}}}"
+YOUTUBE_RTMP_URL="${YOUTUBE_RTMP_URL:-{{ stream_relay_youtube_rtmp_base }}}"
+YOUTUBE_BACKUP_RTMP_URL="${YOUTUBE_BACKUP_RTMP_URL:-{{ stream_relay_youtube_backup_rtmp_base }}}"
+
+if [[ "$output" == "twitch" ]]; then
+  case "${TWITCH_BANDWIDTH_TEST:-{{ stream_relay_twitch_bandwidth_test | lower }}}" in
+    1|true|TRUE|yes|YES|on|ON)
+      TWITCH_RTMP_QUERY="${TWITCH_RTMP_QUERY:-bandwidthtest=true}"
+      ;;
+  esac
+fi
+
+prefix="$(tr '[:lower:]-' '[:upper:]_' <<< "$output")"
+url_var="${prefix}_RTMP_URL"
+key_var="${prefix}_STREAM_KEY"
+query_var="${prefix}_RTMP_QUERY"
+url="${!url_var:-}"
+key="${!key_var:-}"
+query="${!query_var:-}"
+
+if [[ -z "$key" && "$output" == "youtube_backup" ]]; then
+  key="${YOUTUBE_STREAM_KEY:-}"
+fi
+
+if [[ -z "$url" || -z "$key" ]]; then
+  echo "stream-relay-output: missing ${url_var} or ${key_var}" >&2
+  exit 1
+fi
+
+full_url="${url%/}/${key}"
+if [[ -n "$query" ]]; then
+  if [[ "$full_url" == *\?* ]]; then
+    full_url="${full_url}&${query}"
+  else
+    full_url="${full_url}?${query}"
+  fi
+fi
+
+unset TWITCH_STREAM_KEY YOUTUBE_STREAM_KEY YOUTUBE_BACKUP_STREAM_KEY YOUTUBE_VERTICAL_STREAM_KEY
+
+while true; do
+  echo "stream-relay-output: ${output} reading ${input_url}" >&2
+  set +e
+  /usr/bin/ffmpeg \
+    -hide_banner \
+    -nostdin \
+    -loglevel warning \
+    -stats_period 30 \
+    -fflags nobuffer \
+    -flags low_delay \
+    -i "$input_url" \
+    -map 0:v:0 \
+    -map 0:a:0? \
+    -c copy \
+    -f flv \
+    "$full_url"
+  ffmpeg_status=$?
+  set -e
+
+  echo "stream-relay-output: ${output} ffmpeg exited with status ${ffmpeg_status}; retrying in ${retry_seconds}s" >&2
+  sleep "$retry_seconds"
+done

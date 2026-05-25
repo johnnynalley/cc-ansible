@@ -1,14 +1,15 @@
 [Unit]
-Description=OBS SRT to local stream relay broker producer
+Description=Stream relay output worker for %i
 Documentation=file:/etc/stream-relay/stream-relay.env.example
-After=network-online.target stream-relay-broker.service
-Wants=network-online.target stream-relay-broker.service
+After=network-online.target stream-relay-broker.service stream-relay.service
+Wants=network-online.target stream-relay-broker.service stream-relay.service
 
 [Service]
 Type=simple
 EnvironmentFile=-{{ stream_relay_env_file }}
+Environment=STREAM_RELAY_OUTPUT=%i
 ExecStartPre=/bin/sh -c 'test -r "{{ stream_relay_env_file }}"'
-ExecStart=/usr/local/sbin/stream-relay
+ExecStart=/usr/local/sbin/stream-relay-output %i
 Restart=always
 RestartSec=5
 TimeoutStartSec=30
@@ -16,7 +17,7 @@ TimeoutStopSec=10
 KillSignal=SIGTERM
 StandardOutput=journal
 StandardError=journal
-SyslogIdentifier=stream-relay
+SyslogIdentifier=stream-relay-output-%i
 
 [Install]
 WantedBy=multi-user.target

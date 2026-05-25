@@ -20,7 +20,17 @@
       ansible.builtin.systemd:
         name: stream-relay-vertical-broker.service
         state: restarted
-      when: stream_relay_vertical_broker_enabled | default(false)
+      when:
+        - stream_relay_vertical_broker_enabled | default(false)
+        - not ansible_check_mode
+
+    - name: Restart stream relay broker
+      ansible.builtin.systemd:
+        name: stream-relay-broker.service
+        state: restarted
+      when:
+        - stream_relay_broker_enabled | default(false)
+        - not ansible_check_mode
 
   tasks:
     - name: Ensure stream relay package dependencies are installed
@@ -28,6 +38,7 @@
         name:
           - curl
           - ffmpeg
+          - psmisc
           - rsync
         state: present
         update_cache: true
@@ -106,7 +117,7 @@
         shell: /usr/sbin/nologin
         home: /nonexistent
         create_home: false
-      when: stream_relay_vertical_broker_enabled | default(false)
+      when: (stream_relay_broker_enabled | default(false) | bool) or (stream_relay_vertical_broker_enabled | default(false) | bool)
 
     - name: Ensure MediaMTX directories exist
       ansible.builtin.file:
@@ -116,33 +127,33 @@
         group: "{{ item.group }}"
         mode: "{{ item.mode }}"
       loop:
-        - { path: "/opt/mediamtx/{{ stream_relay_vertical_broker_version }}", owner: root, group: root, mode: "0755" }
+        - { path: "/opt/mediamtx/{{ stream_relay_mediamtx_version }}", owner: root, group: root, mode: "0755" }
         - { path: "/etc/mediamtx", owner: root, group: mediamtx, mode: "0750" }
-      when: stream_relay_vertical_broker_enabled | default(false)
+      when: (stream_relay_broker_enabled | default(false) | bool) or (stream_relay_vertical_broker_enabled | default(false) | bool)
 
     - name: Download MediaMTX release archive
       ansible.builtin.get_url:
-        url: "https://github.com/bluenviron/mediamtx/releases/download/v{{ stream_relay_vertical_broker_version }}/mediamtx_v{{ stream_relay_vertical_broker_version }}_{{ stream_relay_vertical_broker_arch }}.tar.gz"
-        dest: "/tmp/mediamtx_v{{ stream_relay_vertical_broker_version }}_{{ stream_relay_vertical_broker_arch }}.tar.gz"
+        url: "https://github.com/bluenviron/mediamtx/releases/download/v{{ stream_relay_mediamtx_version }}/mediamtx_v{{ stream_relay_mediamtx_version }}_{{ stream_relay_mediamtx_arch }}.tar.gz"
+        dest: "/tmp/mediamtx_v{{ stream_relay_mediamtx_version }}_{{ stream_relay_mediamtx_arch }}.tar.gz"
         mode: "0644"
-      when: stream_relay_vertical_broker_enabled | default(false)
+      when: (stream_relay_broker_enabled | default(false) | bool) or (stream_relay_vertical_broker_enabled | default(false) | bool)
 
     - name: Extract MediaMTX release archive
       ansible.builtin.unarchive:
-        src: "/tmp/mediamtx_v{{ stream_relay_vertical_broker_version }}_{{ stream_relay_vertical_broker_arch }}.tar.gz"
-        dest: "/opt/mediamtx/{{ stream_relay_vertical_broker_version }}"
+        src: "/tmp/mediamtx_v{{ stream_relay_mediamtx_version }}_{{ stream_relay_mediamtx_arch }}.tar.gz"
+        dest: "/opt/mediamtx/{{ stream_relay_mediamtx_version }}"
         remote_src: true
-        creates: "/opt/mediamtx/{{ stream_relay_vertical_broker_version }}/mediamtx"
-      when: stream_relay_vertical_broker_enabled | default(false)
+        creates: "/opt/mediamtx/{{ stream_relay_mediamtx_version }}/mediamtx"
+      when: (stream_relay_broker_enabled | default(false) | bool) or (stream_relay_vertical_broker_enabled | default(false) | bool)
 
     - name: Install MediaMTX binary symlink
       ansible.builtin.file:
-        src: "/opt/mediamtx/{{ stream_relay_vertical_broker_version }}/mediamtx"
+        src: "/opt/mediamtx/{{ stream_relay_mediamtx_version }}/mediamtx"
         dest: /usr/local/sbin/mediamtx
         state: link
         owner: root
         group: root
-      when: stream_relay_vertical_broker_enabled | default(false)
+      when: (stream_relay_broker_enabled | default(false) | bool) or (stream_relay_vertical_broker_enabled | default(false) | bool)
 
     - name: Deploy vertical stream broker config
       ansible.builtin.template:
@@ -153,6 +164,16 @@
         mode: "0640"
       notify: Restart vertical stream broker
       when: stream_relay_vertical_broker_enabled | default(false)
+
+    - name: Deploy landscape stream relay broker config
+      ansible.builtin.template:
+        src: ../templates/mediamtx-stream-relay-broker.yml.j2
+        dest: /etc/mediamtx/stream-relay-broker.yml
+        owner: root
+        group: mediamtx
+        mode: "0640"
+      notify: Restart stream relay broker
+      when: stream_relay_broker_enabled | default(false)
 
     - name: Check for generic stream relay env
       ansible.builtin.stat:
@@ -168,7 +189,9 @@
         content: |
           # Copy to {{ stream_relay_env_file }} and set the real key there.
           # Keep this file and the live env file root-readable only.
-          STREAM_RELAY_OUTPUTS="twitch"
+          # Output workers are enabled from inventory with stream_relay_outputs.
+          STREAM_RELAY_BROKER_INPUT_URL={{ stream_relay_broker_input_url }}
+          STREAM_RELAY_OUTPUT_RETRY_SECONDS={{ stream_relay_output_retry_seconds | default(10) }}
           TWITCH_RTMP_URL={{ stream_relay_twitch_rtmp_base }}
           TWITCH_STREAM_KEY=live_000000000_placeholder
           TWITCH_BANDWIDTH_TEST={{ stream_relay_twitch_bandwidth_test | lower }}
@@ -183,6 +206,14 @@
       ansible.builtin.template:
         src: ../templates/stream-relay.sh.j2
         dest: /usr/local/sbin/stream-relay
+        owner: root
+        group: root
+        mode: "0755"
+
+    - name: Deploy stream relay output worker script
+      ansible.builtin.template:
+        src: ../templates/stream-relay-output.sh.j2
+        dest: /usr/local/sbin/stream-relay-output
         owner: root
         group: root
         mode: "0755"
@@ -221,6 +252,27 @@
         group: root
         mode: "0644"
       notify: Reload systemd
+
+    - name: Deploy stream relay output worker service template
+      ansible.builtin.template:
+        src: ../templates/stream-relay-output@.service.j2
+        dest: /etc/systemd/system/stream-relay-output@.service
+        owner: root
+        group: root
+        mode: "0644"
+      notify: Reload systemd
+
+    - name: Deploy stream relay broker service
+      ansible.builtin.template:
+        src: ../templates/stream-relay-broker.service.j2
+        dest: /etc/systemd/system/stream-relay-broker.service
+        owner: root
+        group: root
+        mode: "0644"
+      notify:
+        - Reload systemd
+        - Restart stream relay broker
+      when: stream_relay_broker_enabled | default(false)
 
     - name: Deploy stream VOD mover service
       ansible.builtin.template:
@@ -283,12 +335,30 @@
         - Restart vertical stream broker
       when: stream_relay_vertical_broker_enabled | default(false)
 
-    - name: Set stream relay service state
+    - name: Set stream relay broker service state
+      ansible.builtin.systemd:
+        name: stream-relay-broker.service
+        enabled: "{{ stream_relay_broker_enabled | default(false) }}"
+        state: "{{ (stream_relay_broker_enabled | default(false)) | ternary('started', 'stopped') }}"
+        daemon_reload: true
+      failed_when: false
+      when: stream_relay_broker_enabled is defined
+
+    - name: Set stream relay producer service state
       ansible.builtin.systemd:
         name: stream-relay.service
         enabled: "{{ stream_relay_enabled | default(false) }}"
         state: "{{ (stream_relay_enabled | default(false)) | ternary('started', 'stopped') }}"
         daemon_reload: true
+      failed_when: false
+
+    - name: Set stream relay output worker states
+      ansible.builtin.systemd:
+        name: "stream-relay-output@{{ item }}.service"
+        enabled: "{{ stream_relay_output_enabled | default(false) }}"
+        state: "{{ (stream_relay_output_enabled | default(false)) | ternary('started', 'stopped') }}"
+        daemon_reload: true
+      loop: "{{ stream_relay_outputs | default([]) }}"
       failed_when: false
 
     - name: Set stream VOD mover retry timer state

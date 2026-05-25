@@ -317,7 +317,7 @@ Packages are merged from multiple sources (all applicable variables combined):
 | `samba.yml` | `linux_hosts` | Samba shares + Time Machine (ts440 + pve-herc) |
 | `docker-stacks.yml` | `docker_hosts` | Deploy Docker Compose stacks and the managed Caddyfile (per-service update reporting with version diffs) |
 | `gluetun-watchdog.yml` | media-vm | Gluetun VPN crash loop detection, port forwarding monitoring, auto-restart, and qBittorrent port sync |
-| `stream-relay.yml` | media-vm | OBS SRT ingest to Twitch RTMP relay using the Quadro NVENC encoder |
+| `stream-relay.yml` | media-vm | OBS SRT ingest, Quadro NVENC encode, local relay broker, platform RTMP workers, and VOD delivery |
 | `docker-auto-update.yml` | `docker_hosts` | Auto-update selected containers every 6h with major version guard |
 | `virtiofs.yml` | `proxmox_nodes`, `vms` | Configure VirtioFS shares between Proxmox hosts and VMs |
 | `proxmox-vm-hardware.yml` | `proxmox_nodes` | Apply durable Proxmox VM hardware settings such as CPU model overrides |
@@ -534,7 +534,7 @@ ansible media-vm -m shell -a "docker exec immich_folder_album_creator python3 -m
 
 ## Stream Relay (OBS to platforms via media-vm)
 
-`playbooks/stream-relay.yml` deploys `stream-relay.service` on media-vm. It receives one OBS SRT feed on UDP 9000, encodes once with `h264_nvenc` on the Quadro P2200, then fans out to the configured RTMP platforms. Stream keys are live-only in `/etc/stream-relay/stream-relay.env`; do not commit them.
+`playbooks/stream-relay.yml` deploys the media-vm stream relay. `stream-relay.service` receives one OBS SRT feed on UDP 9000 and encodes once with `h264_nvenc` on the Quadro P2200. It publishes that encoded feed to local `stream-relay-broker.service`, then `stream-relay-output@<platform>.service` workers copy the broker feed to Twitch, YouTube, and any future RTMP platform. Stream keys are live-only in `/etc/stream-relay/stream-relay.env`; do not commit them.
 
 ```bash
 # Deploy relay files and apply the configured service state
@@ -544,12 +544,14 @@ ansible-playbook playbooks/stream-relay.yml
 sudo cp /etc/stream-relay/stream-relay.env.example /etc/stream-relay/stream-relay.env
 sudo nano /etc/stream-relay/stream-relay.env
 
-# Start the listener before OBS
+# Start the broker, listener, and output workers before OBS
+sudo systemctl start stream-relay-broker.service
 sudo systemctl start stream-relay.service
-sudo journalctl -u stream-relay.service -f
+sudo systemctl start stream-relay-output@twitch.service stream-relay-output@youtube.service
+sudo journalctl -u stream-relay.service -u stream-relay-output@twitch.service -u stream-relay-output@youtube.service -f
 ```
 
-Set `STREAM_RELAY_OUTPUTS="twitch youtube"` to add platforms. OBS sender settings: Custom service, server `srt://192.168.1.136:9000?mode=caller&transtype=live&latency=5000000`, stream key `obs`, and stream bitrate `12000 Kbps`. The relay binds to media-vm's LAN address so the high-bitrate OBS feed stays on the same switch. If any configured RTMP platform output closes, FFmpeg aborts and systemd restarts the relay so failed platform legs do not remain silently dead. Landscape VOD recording discards tiny header-only fragments and salvages stale readable incoming recordings before remux.
+Set `stream_relay_outputs` in `inventory/host_vars/media-vm/stream-relay.yml` to add platform workers. OBS sender settings: Custom service, server `srt://192.168.1.136:9000?mode=caller&transtype=live&latency=5000000`, stream key `obs`, and stream bitrate `12000 Kbps`. The relay binds to media-vm's LAN address so the high-bitrate OBS feed stays on the same switch. If one RTMP platform output closes, only that worker reconnects; the producer, broker, VOD, and other platform workers continue. Landscape VOD recording discards tiny header-only fragments and salvages stale readable incoming recordings before remux.
 
 `stream-relay-vertical.service` is the separate Aitum Vertical path for a standalone YouTube vertical/Shorts live stream. It listens for Aitum on `rtmp://100.66.6.113:1936/live` with stream key `vertical`, then sends the 9:16 feed to `YOUTUBE_VERTICAL_STREAM_KEY` from `/etc/stream-relay/stream-relay.env`. This is currently parked in favor of YouTube's automatic dual-stream mode because the unified chat workflow only tracks one YouTube live chat cleanly. Leave the Aitum layout intact for TikTok/virtual-camera use later, but keep Aitum's separate stream output disabled while this relay is parked.
 

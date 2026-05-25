@@ -40,6 +40,10 @@ for recording in "$INCOMING_DIR"/*.mkv.recording; do
   base="$(basename "$recording" .mkv.recording)"
   ready_mkv="${READY_DIR}/${base}.mkv"
 
+  if command -v fuser >/dev/null 2>&1 && fuser -s "$recording"; then
+    continue
+  fi
+
   if [[ -z "$(find "$recording" -maxdepth 0 -mmin "+${STALE_INCOMING_MINUTES}" -print -quit 2>/dev/null)" ]]; then
     continue
   fi
