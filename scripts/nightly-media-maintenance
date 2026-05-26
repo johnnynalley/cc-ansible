@@ -151,13 +151,19 @@ def pending_jobs(queue: dict[str, Any]) -> list[dict[str, Any]]:
     ]
 
 
-def default_job_name(evacuate: str) -> str:
-    return f"{evacuate.replace('/', '-').strip('-')}-evac"
+def default_job_name(evacuate: str | None) -> str:
+    if evacuate:
+        return f"{evacuate.replace('/', '-').strip('-')}-evac"
+    return "pool-balance"
 
 
 def cmd_balance_add(args: argparse.Namespace) -> int:
     state_dir = Path(args.state_dir)
     state_dir.mkdir(parents=True, exist_ok=True)
+    destinations = args.destination or []
+    if destinations and not args.evacuate:
+        raise SystemExit("--destination can only be used with --evacuate")
+
     name = args.name or default_job_name(args.evacuate)
     validate_name(name)
     queue = load_queue(state_dir)
@@ -166,14 +172,17 @@ def cmd_balance_add(args: argparse.Namespace) -> int:
         print(f"Balance job {name!r} already exists with status={existing.get('status')}.")
         return 0
 
+    schedule_window = None if args.no_schedule_window else args.window
     job = {
         "name": name,
         "status": "pending",
         "mount_path": args.mount_path,
         "evacuate": args.evacuate,
-        "destinations": args.destination,
+        "destinations": destinations,
+        "percentage": args.percentage,
+        "max_moves": args.max_moves,
         "min_free": args.min_free,
-        "schedule_window": args.window,
+        "schedule_window": schedule_window,
         "pause_media_stack": not args.no_pause_media_stack,
         "created_at": existing.get("created_at") if existing else now_iso(),
         "updated_at": now_iso(),
@@ -184,7 +193,11 @@ def cmd_balance_add(args: argparse.Namespace) -> int:
     else:
         queue["jobs"].append(job)
     save_queue(state_dir, queue)
-    print(f"Queued balance job {name}: evacuate {args.evacuate} -> {', '.join(args.destination)}")
+    if args.evacuate:
+        target = f" -> {', '.join(destinations)}" if destinations else ""
+        print(f"Queued balance job {name}: evacuate {args.evacuate}{target}")
+    else:
+        print(f"Queued balance job {name}: rebalance {args.mount_path}")
     return 0
 
 
@@ -199,9 +212,11 @@ def cmd_balance_list(args: argparse.Namespace) -> int:
         return 0
     for job in queue["jobs"]:
         destinations = ", ".join(job.get("destinations", []))
+        job_kind = f"evacuate={job.get('evacuate')}" if job.get("evacuate") else "balance=pool"
+        destination_text = f" destinations=[{destinations}]" if destinations else ""
         print(
             f"{job.get('name')}: status={job.get('status')} "
-            f"evacuate={job.get('evacuate')} destinations=[{destinations}] "
+            f"{job_kind}{destination_text} "
             f"last={job.get('last_result')}"
         )
     return 0
@@ -236,15 +251,19 @@ def balance_command(job: dict[str, Any], args: argparse.Namespace, balance_state
     command: list[str] = [
         "/usr/local/bin/mergerfs-balance",
         job["mount_path"],
-        "--evacuate",
-        job["evacuate"],
         "--min-free",
         job["min_free"],
-        "--schedule-window",
-        job["schedule_window"],
         "--state-file",
         str(balance_state),
     ]
+    if job.get("schedule_window"):
+        command.extend(["--schedule-window", job["schedule_window"]])
+    if job.get("percentage") is not None:
+        command.extend(["-p", str(job["percentage"])])
+    if job.get("max_moves") is not None:
+        command.extend(["--max-moves", str(job["max_moves"])])
+    if job.get("evacuate"):
+        command.extend(["--evacuate", job["evacuate"]])
     for destination in job.get("destinations", []):
         command.extend(["--destination", destination])
     if job.get("pause_media_stack", True):
@@ -374,10 +393,13 @@ def build_parser() -> argparse.ArgumentParser:
     add = balance_sub.add_parser("add")
     add.add_argument("--name")
     add.add_argument("--mount-path", default=DEFAULT_MOUNT_PATH)
-    add.add_argument("--evacuate", required=True)
-    add.add_argument("--destination", action="append", required=True)
+    add.add_argument("--evacuate")
+    add.add_argument("--destination", action="append")
+    add.add_argument("--percentage")
+    add.add_argument("--max-moves", type=int)
     add.add_argument("--min-free", default=DEFAULT_MIN_FREE)
     add.add_argument("--window", default=DEFAULT_WINDOW)
+    add.add_argument("--no-schedule-window", action="store_true")
     add.add_argument("--no-pause-media-stack", action="store_true")
     add.add_argument("--replace", action="store_true")
     add.set_defaults(func=cmd_balance_add)
