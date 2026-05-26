@@ -57,6 +57,9 @@
   for one Sonarr series folder.
 - `sonarr_queue_status_summary.py`: Summarizes Sonarr queue status messages
   without dumping every episode row.
+- `sonarr_release_rejection_report.py`: Read-only manual-search report for a
+  series, season, or episode that shows current file scores, candidate releases,
+  custom formats, and Sonarr rejection reasons.
 - `sonarr_release_expectation_check.py`: Read-only check of live Sonarr anime
   release-selection expectations.
 - `sonarr_restore_local_better_files.py`: Dry-run by default helper for
