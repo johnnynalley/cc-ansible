@@ -10,9 +10,48 @@ case "$ACTION" in
     ;;
 esac
 
-{% for target in mergerfs_balance_media_stack_compose_targets | default([]) %}
-(
-  cd {{ target.path | quote }}
-  docker compose "$ACTION"{% for service in target.services | default([]) %} {{ service | quote }}{% endfor %}
+running_services() {
+  docker compose ps --services --status running "$@" 2>/dev/null || true
+}
+
+all_stopped() {
+  [[ -z "$(running_services "$@")" ]]
+}
+
+compose_action() (
+  local path="$1"
+  shift
+  cd "$path"
+
+  if [[ "$ACTION" == "start" ]]; then
+    docker compose start "$@"
+    return
+  fi
+
+  for attempt in 1 2; do
+    if docker compose stop --timeout 60 "$@"; then
+      if all_stopped "$@"; then
+        return
+      fi
+      echo "docker compose stop returned success, but some services are still running in $path" >&2
+    else
+      rc=$?
+      echo "docker compose stop failed in $path on attempt $attempt with rc=$rc; verifying state" >&2
+      if all_stopped "$@"; then
+        return
+      fi
+    fi
+
+    if [[ "$attempt" -lt 2 ]]; then
+      sleep 5
+    fi
+  done
+
+  echo "services still running in $path after stop attempts:" >&2
+  running_services "$@" >&2
+  return 1
 )
+
+{% for target in mergerfs_balance_media_stack_compose_targets | default([]) %}
+compose_action {{ target.path | quote }}{% for service in target.services | default([]) %} {{ service | quote }}{% endfor %}{{ '\n' }}
 {% endfor %}
