@@ -94,7 +94,9 @@
         owner: root
         group: root
         mode: "0600"
-      when: router_firewall_interfaces_needs_change
+      when:
+        - router_firewall_interfaces_needs_change
+        - not ansible_check_mode
 
     - name: Add downstream LAN bridge for router/firewall VM
       ansible.builtin.blockinfile:
