@@ -119,10 +119,10 @@
         group: root
         mode: "0755"
       loop:
-        - { src: ../templates/motd-header.sh.j2, dest: "00-header" }
-        - { src: ../templates/motd-sysinfo.sh.j2, dest: "50-sysinfo" }
-        - { src: ../templates/motd-updates.sh.j2, dest: "90-updates" }
-        - { src: ../templates/motd-reboot-required.sh.j2, dest: "98-reboot-required" }
+        - { src: ../templates/motd/motd-header.sh.j2, dest: "00-header" }
+        - { src: ../templates/motd/motd-sysinfo.sh.j2, dest: "50-sysinfo" }
+        - { src: ../templates/motd/motd-updates.sh.j2, dest: "90-updates" }
+        - { src: ../templates/motd/motd-reboot-required.sh.j2, dest: "98-reboot-required" }
       when:
         - ansible_facts.os_family == "Debian"
         - ansible_facts.distribution != "Ubuntu"

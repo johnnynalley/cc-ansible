@@ -113,34 +113,32 @@ cc-ansible/
 │   ├── samba.yml               # Samba server configuration
 │   └── docker-network.yml      # Ensure Docker networks exist
 ├── templates/
-│   ├── exports.j2              # NFS exports template
-│   ├── smb.conf.j2             # Samba configuration template
-│   ├── sanoid.conf.j2          # ZFS snapshot policy configuration
-│   ├── smartd.conf.j2          # smartd monitoring config
-│   ├── apcupsd.conf.j2         # apcupsd daemon config (master/slave)
-│   ├── apcupsd-event-notify.sh.j2  # apcupsd Apprise notification
-│   ├── smartd-notify.sh.j2     # smartd Apprise notification
-│   ├── mergerfs-media.mount.j2 # MergerFS systemd mount unit
-│   ├── mergerfs-balance.conf.j2 # mergerfs-balance default path excludes
-│   ├── avahi-timemachine.service.j2  # Time Machine mDNS advertisement
-│   ├── docker-stacks.service.j2  # Docker stacks systemd service
-│   ├── auto-updates-debian.sh.j2  # Debian auto-updates with notifications
-│   ├── auto-updates-arch.sh.j2  # Arch auto-updates with notifications
-│   ├── 50unattended-upgrades.j2  # Security-only unattended-upgrades config
-│   ├── unattended-upgrades-notify.sh.j2  # Post-upgrade Apprise notification
-│   ├── network-watchdog.sh.j2  # Network recovery watchdog with notifications
-│   ├── gluetun-watchdog.sh.j2  # Gluetun VPN crash loop watchdog
-│   ├── docker-auto-update.sh.j2  # Docker auto-update script
-│   ├── diun.yml.j2              # Diun config (schedule + notifications)
-│   ├── proxmox-virtiofs-directory.cfg.j2  # VirtioFS directory mappings
-│   ├── proxmox-cluster-firewall.fw.j2    # Datacenter firewall rules
-│   ├── proxmox-node-firewall.fw.j2       # Node-level firewall rules
-│   ├── proxmox-vm-firewall.fw.j2         # VM/CT firewall rules
-│   └── openclaw-update-check.sh.j2      # OpenClaw npm update checker
+│   ├── README.md              # Template catalog and operating rules
+│   ├── auto-updates/          # Auto-update and unattended-upgrades templates
+│   ├── docker/                # Docker Compose, Caddy, Diun, and stack helpers
+│   ├── freepbx/               # FreePBX support templates
+│   ├── gluetun/               # Gluetun and qBittorrent port-sync templates
+│   ├── logging/               # Alloy/Loki logging templates
+│   ├── media-maintenance/     # Nightly media maintenance units and client
+│   ├── motd/                  # Custom Linux MOTD templates
+│   ├── network/               # Network recovery watchdog templates
+│   ├── openclaw/              # OpenClaw service support templates
+│   ├── plex-appliance/        # Plex appliance services, scripts, and env
+│   ├── proxmox/               # Proxmox firewall, VirtioFS, PBS, and hookscripts
+│   ├── samba/                 # Samba and Time Machine advertisement templates
+│   ├── smartmontools/         # SMART monitoring templates
+│   ├── storage/               # NFS, ZFS, Sanoid, and MergerFS templates
+│   ├── streaming/             # Stream relay, MediaMTX, and VOD mover templates
+│   ├── ups/                   # APC UPS daemon and notification templates
+│   └── windows/               # Windows gaming, performance, and SignalRGB templates
 ├── scripts/
-│   ├── docker-stack-diff       # Per-service image change detection with version labels
-│   ├── mergerfs-balance        # ZFS-compatible mergerfs branch balancer
-│   └── storage-status          # Storage usage report (ZFS + mergerfs)
+│   ├── README.md              # Script catalog and operating rules
+│   ├── docker/                # Docker stack update helpers
+│   ├── gaming/                # Capture and frame-time analysis helpers
+│   ├── media-maintenance/     # Overnight maintenance coordinators
+│   ├── media-release/         # Sonarr, Radarr, Profilarr, and release-policy tools
+│   ├── storage/               # Storage reporting and mergerfs balancing tools
+│   └── streaming/             # OBS, TikTok, Mac audio, and stream-routing helpers
 └── bin/
     └── ansible-menu            # Interactive playbook launcher
 ```
@@ -769,7 +767,7 @@ docker-vm (VM 110 on pve-m70q) runs infrastructure services:
 
 Stacks support `start: true/false` in `docker.yml` to control service state.
 
-Caddy is now Ansible-managed. Edit `templates/Caddyfile.j2` for routes, `templates/caddy.yml` for compose, and `templates/caddy.Dockerfile` for the Cloudflare DNS build. Apply with `ansible-playbook playbooks/docker-stacks.yml --tags caddy`. The live files under `/opt/caddy/` are generated except `.env`, which stays live because it contains the Cloudflare API token. Emergency live edits should be backported to the templates or they will be overwritten.
+Caddy is now Ansible-managed. Edit `templates/docker/Caddyfile.j2` for routes, `templates/docker/caddy.yml` for compose, and `templates/docker/caddy.Dockerfile` for the Cloudflare DNS build. Apply with `ansible-playbook playbooks/docker-stacks.yml --tags caddy`. The live files under `/opt/caddy/` are generated except `.env`, which stays live because it contains the Cloudflare API token. Emergency live edits should be backported to the templates or they will be overwritten.
 
 ## Cloudflare Tunnel
 
@@ -951,7 +949,7 @@ Centralized log aggregation. Loki + Grafana run on docker-vm, Alloy agents on al
 - **Grafana**: `https://grafana.jnalley.me` (Tailscale only, admin/vault password)
 - **Loki**: `http://100.108.254.100:3100` (internal, Alloy agents push here)
 - **Retention**: 30 days
-- **Config**: `group_vars/all/loki.yml`, `templates/alloy-config.alloy.j2`
+- **Config**: `group_vars/all/loki.yml`, `templates/logging/alloy-config.alloy.j2`
 - **Playbook**: `ansible-playbook playbooks/logging.yml`
 
 **What's collected:**
@@ -1024,7 +1022,7 @@ OpenClaw AI agent platform — personal homelab admin assistant via web UI and D
 - **Timers**: repo-sync (5 min), update-check (daily 08:00 → Apprise)
 - **Playbook**: `ansible-playbook playbooks/openclaw.yml` (opt-in via `openclaw_enabled`)
 - **Mem0 memory**: `@mem0/openclaw-mem0` plugin with Qdrant (localhost:6333), Gemini embeddings, and the configured OpenAI-compatible LLM for fact extraction. Auto-capture + auto-recall across sessions.
-- **dbc ops access**: Least-privilege write on media-vm (`docker-compose.yml`, `.env`) and emergency live Caddy access on docker-vm. The canonical Caddy source is `templates/Caddyfile.j2`; live edits must be backported. Deployed by `user-separation.yml` Phase 1d (`--tags dbc-ops`).
+- **dbc ops access**: Least-privilege write on media-vm (`docker-compose.yml`, `.env`) and emergency live Caddy access on docker-vm. The canonical Caddy source is `templates/docker/Caddyfile.j2`; live edits must be backported. Deployed by `user-separation.yml` Phase 1d (`--tags dbc-ops`).
 
 ```bash
 # Check gateway status (on openclaw-vm)

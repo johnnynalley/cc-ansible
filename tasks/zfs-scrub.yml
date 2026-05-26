@@ -13,7 +13,7 @@
 
 - name: Deploy ZFS scrub script
   ansible.builtin.template:
-    src: ../templates/zfs-scrub.sh.j2
+    src: ../templates/storage/zfs-scrub.sh.j2
     dest: /usr/local/sbin/zfs-scrub
     owner: root
     group: root

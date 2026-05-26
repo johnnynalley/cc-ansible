@@ -222,7 +222,7 @@
 
     - name: Deploy Plex appliance environment
       ansible.builtin.template:
-        src: ../templates/plex-appliance.env.j2
+        src: ../templates/plex-appliance/plex-appliance.env.j2
         dest: /etc/plex-appliance/plex-appliance.env
         owner: root
         group: "{{ (plex_appliance_effective_mode == 'hdmi') | ternary(plex_appliance_user, 'root') }}"
@@ -234,7 +234,7 @@
 
     - name: Deploy Plex appliance player
       ansible.builtin.template:
-        src: ../templates/plex-appliance-player.py.j2
+        src: ../templates/plex-appliance/plex-appliance-player.py.j2
         dest: /usr/local/bin/plex-appliance-player
         owner: root
         group: root
@@ -245,7 +245,7 @@
 
     - name: Deploy Plex appliance corrupt media report
       ansible.builtin.template:
-        src: ../templates/plex-appliance-corrupt-media-report.py.j2
+        src: ../templates/plex-appliance/plex-appliance-corrupt-media-report.py.j2
         dest: /usr/local/bin/plex-appliance-corrupt-media-report
         owner: root
         group: root
@@ -253,7 +253,7 @@
 
     - name: Deploy Plex HDMI watcher
       ansible.builtin.template:
-        src: ../templates/plex-appliance-hdmi-watcher.py.j2
+        src: ../templates/plex-appliance/plex-appliance-hdmi-watcher.py.j2
         dest: /usr/local/bin/plex-appliance-hdmi-watcher
         owner: root
         group: root
@@ -264,7 +264,7 @@
 
     - name: Deploy Plex HDMI VT watcher
       ansible.builtin.template:
-        src: ../templates/plex-appliance-hdmi-vt-watcher.py.j2
+        src: ../templates/plex-appliance/plex-appliance-hdmi-vt-watcher.py.j2
         dest: /usr/local/bin/plex-appliance-hdmi-vt-watcher
         owner: root
         group: root
@@ -276,7 +276,7 @@
 
     - name: Deploy Plex HDMI autostart helper
       ansible.builtin.template:
-        src: ../templates/plex-appliance-hdmi-autostart.sh.j2
+        src: ../templates/plex-appliance/plex-appliance-hdmi-autostart.sh.j2
         dest: /usr/local/bin/plex-appliance-hdmi-autostart
         owner: root
         group: root
@@ -307,7 +307,7 @@
 
     - name: Deploy Plex HDMI watcher user service
       ansible.builtin.template:
-        src: ../templates/plex-appliance-hdmi.service.j2
+        src: ../templates/plex-appliance/plex-appliance-hdmi.service.j2
         dest: "/home/{{ plex_appliance_user }}/.config/systemd/user/plex-appliance-hdmi.service"
         owner: "{{ plex_appliance_user }}"
         group: "{{ plex_appliance_user }}"
@@ -318,7 +318,7 @@
 
     - name: Deploy Plex HDMI watcher KDE autostart
       ansible.builtin.template:
-        src: ../templates/plex-appliance-hdmi.desktop.j2
+        src: ../templates/plex-appliance/plex-appliance-hdmi.desktop.j2
         dest: "/home/{{ plex_appliance_user }}/.config/autostart/plex-appliance-hdmi.desktop"
         owner: "{{ plex_appliance_user }}"
         group: "{{ plex_appliance_user }}"
@@ -346,7 +346,7 @@
 
     - name: Deploy Plex HDMI TV player service
       ansible.builtin.template:
-        src: ../templates/plex-appliance-tv.service.j2
+        src: ../templates/plex-appliance/plex-appliance-tv.service.j2
         dest: /etc/systemd/system/plex-appliance-tv.service
         owner: root
         group: root
@@ -360,7 +360,7 @@
 
     - name: Deploy Plex HDMI VT watcher service
       ansible.builtin.template:
-        src: ../templates/plex-appliance-hdmi-vt-watcher.service.j2
+        src: ../templates/plex-appliance/plex-appliance-hdmi-vt-watcher.service.j2
         dest: /etc/systemd/system/plex-appliance-hdmi-vt-watcher.service
         owner: root
         group: root
@@ -398,7 +398,7 @@
 
     - name: Deploy Plex appliance systemd service
       ansible.builtin.template:
-        src: ../templates/plex-appliance.service.j2
+        src: ../templates/plex-appliance/plex-appliance.service.j2
         dest: /etc/systemd/system/plex-appliance.service
         owner: root
         group: root

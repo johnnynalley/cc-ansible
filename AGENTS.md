@@ -17,9 +17,17 @@ Treat reusable diagnostics, policy probes, and repair helpers as managed reposit
 
 Do not create standalone diagnostic scripts in `/tmp` as the primary work product and then discard them. If a remote host needs a temporary copy for execution, the source should still live in the repo first, and the remote temporary copy should be cleaned up after use. Do not add new runnable scripts directly under `scripts/`; only the top-level script catalog belongs there.
 
+### Template Inventory & Rendered Configs
+
+Treat Jinja templates, compose templates, service units, scripts, and generated config sources under `templates/` as managed repository assets. Before adding or moving a template, read `templates/README.md` and the relevant template-directory README to find the current owner folder and consumers. Do not add new templates directly under `templates/`; put them in the appropriate `templates/<domain>/` directory, document them in that directory's README, and update `templates/README.md` when the directory or ownership category changes.
+
+When moving, renaming, deleting, or replacing a template, update every playbook, task file, inventory variable, operator doc, and README reference in the same change. Pay special attention to dynamic Ansible template lookups such as Docker compose templates, nightly media maintenance service loops, and Windows script loops.
+
 ### Documentation Cross-References
 
 When creating or materially updating operator docs, policy docs, runbooks, or troubleshooting guides under `docs/`, add or update the matching pointer in `AGENTS.md` in the relevant operational section. The point is discoverability: future agents should know where to find the source of truth without guessing filenames or relying on memory. If a new doc captures behavior that should persist across sessions, also add a concise Codex memory note when the user explicitly asks for memory persistence.
+
+When a change affects repository layout, operator entrypoints, common commands, source-of-truth document locations, or human-facing workflow guidance, update `README.md` in the same scoped change. Do not leave `README.md` pointing at old paths, stale command examples, or outdated directory structure after moving files, scripts, templates, playbooks, or docs.
 
 When renaming, moving, deleting, or replacing a source-of-truth doc, tracker, script, or runbook that OpenClaw references, update the matching OpenClaw workspace skills, hubs, heartbeat prompts, cron jobs, and guidance files in the same change. Do not leave OpenClaw pointing at stale paths after repo-side file moves.
 
@@ -37,7 +45,7 @@ When the user asks Codex to name a session, consider the full context of the ses
 
 ### Coding Style & Naming Conventions
 
-Write YAML with two-space indentation and descriptive task names. Keep playbooks focused on orchestration and move reusable logic into `tasks/*.yml`. Name playbooks and task files with lowercase hyphenated names, for example `network-recovery.yml`. Keep variables lowercase snake_case. Prefer modular variable files named for their concern, such as `host_vars/<hostname>/backup.yml`, `docker.yml`, `firewall.yml`, or `performance-mode.yml`; do not pile unrelated settings into a monolithic `vars.yml`. Templates should use `.j2` suffixes and render service/config names clearly, such as `templates/smb.conf.j2`.
+Write YAML with two-space indentation and descriptive task names. Keep playbooks focused on orchestration and move reusable logic into `tasks/*.yml`. Name playbooks and task files with lowercase hyphenated names, for example `network-recovery.yml`. Keep variables lowercase snake_case. Prefer modular variable files named for their concern, such as `host_vars/<hostname>/backup.yml`, `docker.yml`, `firewall.yml`, or `performance-mode.yml`; do not pile unrelated settings into a monolithic `vars.yml`. Templates should live under `templates/<domain>/`, use `.j2` suffixes when rendered, and render service/config names clearly, such as `templates/samba/smb.conf.j2`.
 
 ### Testing Guidelines
 
@@ -225,7 +233,7 @@ Ansible on jn-t14s-lin uses a **dedicated passwordless SSH key** (`~/.ssh/ansibl
 - `ListenAddress 100.119.197.17` in `/etc/ssh/sshd_config`
 - Remote Login enabled for user `johnny` only (System Settings → Sharing)
 
-**Tailscale SSH MOTD**: Tailscale SSH invokes `login(1)` with PAM service `remote`, which by default has no config file (PAM falls back to `other`, which lacks `pam_motd.so`). The `ssh-hardening.yml` playbook deploys `/etc/pam.d/remote` to all Linux hosts to enable MOTD display over Tailscale SSH. Ubuntu hosts show a rich MOTD (system info, available updates) via `landscape-common` and `update-notifier-common` (installed by `packages.yml`). Debian hosts get custom MOTD scripts (`templates/motd-*.sh.j2`) deployed to `/etc/update-motd.d/` showing system info, available updates, and reboot-required status.
+**Tailscale SSH MOTD**: Tailscale SSH invokes `login(1)` with PAM service `remote`, which by default has no config file (PAM falls back to `other`, which lacks `pam_motd.so`). The `ssh-hardening.yml` playbook deploys `/etc/pam.d/remote` to all Linux hosts to enable MOTD display over Tailscale SSH. Ubuntu hosts show a rich MOTD (system info, available updates) via `landscape-common` and `update-notifier-common` (installed by `packages.yml`). Debian hosts get custom MOTD scripts (`templates/motd/motd-*.sh.j2`) deployed to `/etc/update-motd.d/` showing system info, available updates, and reboot-required status.
 
 **Deploying the key to a new host:**
 ```bash
@@ -366,9 +374,9 @@ Lightweight VM (6 cores, 6GB RAM) running infrastructure services. Stacks define
 
 **Portainer CE** (multi-host): Central Docker management UI at `portainer.jnalley.me`. Manages docker-vm locally via socket; media-vm and nextcloud-vm connect via Portainer Edge Agents (`portainer/agent:latest` with `EDGE=1`). Edge Agents connect outbound to Portainer — no inbound ports needed on remote hosts. Agent compose files at `/opt/portainer-agent/` where enabled, with per-environment edge keys from the Portainer API. Admin credentials in Portainer's local database (not vault-managed).
 
-**Dispatcharr** (disabled): HDHomeRun emulator for free IPTV in Plex. Commented out in `docker.yml` — free M3U playlists had too many dead streams. Compose file and data preserved at `/opt/dispatcharr/` on docker-vm. Uncomment in `docker.yml` and `templates/Caddyfile.j2` to re-enable. HDHR tuner URL for Plex: `http://100.108.254.100:9191/hdhr` (note the `/hdhr` path — not root).
+**Dispatcharr** (disabled): HDHomeRun emulator for free IPTV in Plex. Commented out in `docker.yml` — free M3U playlists had too many dead streams. Compose file and data preserved at `/opt/dispatcharr/` on docker-vm. Uncomment in `docker.yml` and `templates/docker/Caddyfile.j2` to re-enable. HDHR tuner URL for Plex: `http://100.108.254.100:9191/hdhr` (note the `/hdhr` path — not root).
 
-**Removed services** (disabled 2026-04-13, compose files and data preserved at `/opt/` on docker-vm for easy re-enable): Uptime Kuma (`status.jnalley.me`), Homepage (`home.jnalley.me`), Gitea (`git.jnalley.me`). Commented out in `docker.yml` and `templates/Caddyfile.j2`.
+**Removed services** (disabled 2026-04-13, compose files and data preserved at `/opt/` on docker-vm for easy re-enable): Uptime Kuma (`status.jnalley.me`), Homepage (`home.jnalley.me`), Gitea (`git.jnalley.me`). Commented out in `docker.yml` and `templates/docker/Caddyfile.j2`.
 
 #### nextcloud-vm (VM 101 on ts440)
 
@@ -396,7 +404,7 @@ Primary media VM (10GB RAM, 4 cores, 200GB disk, Quadro P2200 GPU passthrough). 
 
 **Release metadata stamper**: `playbooks/media-release-stamper.yml` deploys SABnzbd and qBittorrent post-download stampers that preserve grab-time evidence before Sonarr/Radarr import. qBittorrent renames payload files through its Web API to keep seeding state intact. DA evidence is stamped as language-combo tags such as `[JA+EN]`, `[KO+EN]`, or `[JA+KO+EN]`, per file only when audio metadata shows English plus the configured original language; qBittorrent can optionally get that original language from Sonarr/Radarr by torrent hash/download ID, and SABnzbd can optionally get it by release/job title. Arr lookup must stay bounded and non-fatal; fallback default is `jpn`, so `eng+kor` does not qualify when context is unavailable. `[x265]` is stamped per file only after the payload itself contains HEVC markers or MKV video-track CodecID evidence. Platform/source tags and release-group suffixes may be copied from the parent release/job/torrent title to preserve release-context custom formats at import, but generic quality/resolution/source labels are not copied. If Sonarr context is available and a TV payload basename starts with bare `SxxEyy`, the stamper may prefix the canonical series title so Sonarr can parse the imported file. Existing-tag checks must use the payload basename, not the parent torrent directory. Stamper env files must remain readable by the media containers' UID/GID `1000` without exposing them world-readable. Document behavior changes in `docs/media-release-policy.md`.
 
-**Tdarr** (disabled 2026-04-13): Media transcoding service. Commented out in `/opt/media-stack/docker-compose.yml` and `templates/Caddyfile.j2`. Compose config and `/opt/media-stack/tdarr/` data preserved for easy re-enable.
+**Tdarr** (disabled 2026-04-13): Media transcoding service. Commented out in `/opt/media-stack/docker-compose.yml` and `templates/docker/Caddyfile.j2`. Compose config and `/opt/media-stack/tdarr/` data preserved for easy re-enable.
 
 #### Torrent Fallback (Gluetun + qBittorrent)
 
@@ -499,7 +507,7 @@ Sonarr/Radarr ──→ Discord (native connection, rich embeds with poster art)
 
 **Apprise email URL gotcha**: When SMTP username contains `@`, use `?user=` query parameter format instead of URL path. Apprise's serialization loses `%40` encoding via API, causing auth failures.
 
-Diun runs on all three Docker VMs (docker-vm, media-vm, nextcloud-vm) monitoring containers for image updates. Config templated by Ansible (`templates/diun.yml.j2`) and deployed by `docker-auto-update.yml`. Schedule (`0 1/6 * * *` — 01:00, 07:00, 13:00, 19:00) is offset to run after the auto-update timer so already-updated containers don't trigger redundant alerts. Config vars in `group_vars/docker_hosts/diun.yml`. Sonarr/Radarr also send to Discord (native connection) for rich embeds with poster art.
+Diun runs on all three Docker VMs (docker-vm, media-vm, nextcloud-vm) monitoring containers for image updates. Config templated by Ansible (`templates/docker/diun.yml.j2`) and deployed by `docker-auto-update.yml`. Schedule (`0 1/6 * * *` — 01:00, 07:00, 13:00, 19:00) is offset to run after the auto-update timer so already-updated containers don't trigger redundant alerts. Config vars in `group_vars/docker_hosts/diun.yml`. Sonarr/Radarr also send to Discord (native connection) for rich embeds with poster art.
 
 #### Centralized Logging (Loki + Grafana + Alloy)
 
@@ -528,7 +536,7 @@ All hosts (Alloy) ──→ Loki (docker-vm:3100) ←── Grafana (caddy-proxy
 
 #### Reverse Proxy (Caddy on docker-vm)
 
-Caddy provides HTTPS for all internal services via Cloudflare DNS-01 challenge. The canonical sources are `templates/Caddyfile.j2` for routes, `templates/caddy.yml` for compose, and `templates/caddy.Dockerfile` for the Cloudflare DNS build. `docker-stacks.yml --tags caddy` renders them under `/opt/caddy/`, validates the Caddyfile, and recreates the Caddy container when the Caddyfile changes. `/opt/caddy/.env` remains live-only because it contains the Cloudflare API token. docker-vm services are proxied by container name (`caddy-proxy` Docker network); media-vm services by Tailscale IP (`100.66.6.113`). Proxmox/PBS/PDM management UIs are proxied at `pve-ts440.jnalley.me`, `pve-alto.jnalley.me`, `pve-herc.jnalley.me`, `pve-m70q.jnalley.me`, `pbs.jnalley.me`, and `pdm.jnalley.me`. All services require Tailscale to access.
+Caddy provides HTTPS for all internal services via Cloudflare DNS-01 challenge. The canonical sources are `templates/docker/Caddyfile.j2` for routes, `templates/docker/caddy.yml` for compose, and `templates/docker/caddy.Dockerfile` for the Cloudflare DNS build. `docker-stacks.yml --tags caddy` renders them under `/opt/caddy/`, validates the Caddyfile, and recreates the Caddy container when the Caddyfile changes. `/opt/caddy/.env` remains live-only because it contains the Cloudflare API token. docker-vm services are proxied by container name (`caddy-proxy` Docker network); media-vm services by Tailscale IP (`100.66.6.113`). Proxmox/PBS/PDM management UIs are proxied at `pve-ts440.jnalley.me`, `pve-alto.jnalley.me`, `pve-herc.jnalley.me`, `pve-m70q.jnalley.me`, `pbs.jnalley.me`, and `pdm.jnalley.me`. All services require Tailscale to access.
 
 **Image Updates**: The playbook separates pull and update steps — it only runs `docker compose up -d` if images were actually updated (detected via "Pull complete" or "Downloaded newer" in pull output). This avoids unnecessary container restarts when images are already current. Pull has retry logic (3 attempts, 10s delay) to handle transient registry timeouts. Dangling images are pruned after each run. Between pull and update, `scripts/docker/docker-stack-diff` runs to report per-service image changes with version labels (`org.opencontainers.image.version`) when available, falling back to truncated image digests. The `up -d` output is also displayed, showing which specific containers were recreated vs. left running.
 
@@ -657,7 +665,7 @@ Security model: default deny (`policy_in: DROP`) on all VMs. Caddy (docker-vm) i
 
 A Proxmox hookscript refuses to start a VM/CT until that VM's declared host mountpoints are present, so VMs that depend on broken storage stay off (no stale VirtioFS handles, no Sonarr/Radarr "missing files" cascades) while unrelated VMs (e.g., docker-vm with no host storage deps) start normally.
 
-- Hookscript binary: `templates/wait-for-mounts.sh.j2` → `/var/lib/vz/snippets/wait-for-mounts.sh` on every Proxmox node
+- Hookscript binary: `templates/proxmox/wait-for-mounts.sh.j2` → `/var/lib/vz/snippets/wait-for-mounts.sh` on every Proxmox node
 - Per-VM declarations: `host_vars/<vm>/storage.yml` with `vmid` and `required_host_mounts: [/srv/...]`
 - Aggregated cluster-wide config: `/etc/pve/wait-for-mounts.json` (lives on pmxcfs, so it travels with VM migrations automatically)
 - Wired per-VM via `qm set <vmid> --hookscript local:snippets/wait-for-mounts.sh`
@@ -713,7 +721,7 @@ The `dbc` user (OpenClaw agent) has least-privilege operational access on manage
 |------|---------------|---------------|
 | jn-t14s-lin | `~/cc-ansible` (rwx), `~/.claude` (rwx) | `sudo /usr/local/bin/ansible-dryrun` (dry-run only) |
 | media-vm | `/opt/media-stack/docker-compose.yml`, `.env` | `sudo /usr/local/sbin/dbc-media-stack-apply` |
-| docker-vm | `/opt/caddy/Caddyfile` for emergency live fixes only; backport to `templates/Caddyfile.j2` | `sudo /usr/local/sbin/dbc-caddy-apply` |
+| docker-vm | `/opt/caddy/Caddyfile` for emergency live fixes only; backport to `templates/docker/Caddyfile.j2` | `sudo /usr/local/sbin/dbc-caddy-apply` |
 
 Helper scripts validate config before applying (compose config check, Caddy validate+reload). File access is via POSIX ACLs (`setfacl`), not group membership. All hosts also have read-only sudo for `systemctl status`, `journalctl`, `zpool status`, `zfs list`, `findmnt`.
 

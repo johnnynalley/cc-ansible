@@ -436,7 +436,7 @@
 
     - name: Deploy PBS connectivity check script
       ansible.builtin.template:
-        src: ../templates/pbs-connectivity-check.sh.j2
+        src: ../templates/proxmox/pbs-connectivity-check.sh.j2
         dest: /usr/local/bin/pbs-connectivity-check
         mode: "0755"
 

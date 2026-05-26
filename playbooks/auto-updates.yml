@@ -31,7 +31,7 @@
     # =========================================================================
     - name: Create auto-updates script (Debian)
       ansible.builtin.template:
-        src: ../templates/auto-updates-debian.sh.j2
+        src: ../templates/auto-updates/auto-updates-debian.sh.j2
         dest: /usr/local/sbin/auto-updates
         owner: root
         group: root
@@ -44,7 +44,7 @@
     # =========================================================================
     - name: Create auto-updates script (Arch)
       ansible.builtin.template:
-        src: ../templates/auto-updates-arch.sh.j2
+        src: ../templates/auto-updates/auto-updates-arch.sh.j2
         dest: /usr/local/sbin/auto-updates
         owner: root
         group: root

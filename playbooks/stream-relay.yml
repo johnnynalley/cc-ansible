@@ -178,7 +178,7 @@
 
     - name: Deploy vertical stream broker config
       ansible.builtin.template:
-        src: ../templates/mediamtx-vertical-broker.yml.j2
+        src: ../templates/streaming/mediamtx-vertical-broker.yml.j2
         dest: /etc/mediamtx/vertical-broker.yml
         owner: root
         group: mediamtx
@@ -188,7 +188,7 @@
 
     - name: Deploy landscape stream relay broker config
       ansible.builtin.template:
-        src: ../templates/mediamtx-stream-relay-broker.yml.j2
+        src: ../templates/streaming/mediamtx-stream-relay-broker.yml.j2
         dest: /etc/mediamtx/stream-relay-broker.yml
         owner: root
         group: mediamtx
@@ -225,7 +225,7 @@
 
     - name: Deploy generic stream relay script
       ansible.builtin.template:
-        src: ../templates/stream-relay.sh.j2
+        src: ../templates/streaming/stream-relay.sh.j2
         dest: /usr/local/sbin/stream-relay
         owner: root
         group: root
@@ -233,7 +233,7 @@
 
     - name: Deploy stream relay output worker script
       ansible.builtin.template:
-        src: ../templates/stream-relay-output.sh.j2
+        src: ../templates/streaming/stream-relay-output.sh.j2
         dest: /usr/local/sbin/stream-relay-output
         owner: root
         group: root
@@ -241,7 +241,7 @@
 
     - name: Deploy stream VOD mover script
       ansible.builtin.template:
-        src: ../templates/stream-vod-mover.sh.j2
+        src: ../templates/streaming/stream-vod-mover.sh.j2
         dest: /usr/local/sbin/stream-vod-mover
         owner: root
         group: root
@@ -250,7 +250,7 @@
 
     - name: Deploy stream relay health check script
       ansible.builtin.template:
-        src: ../templates/stream-relay-health.sh.j2
+        src: ../templates/streaming/stream-relay-health.sh.j2
         dest: /usr/local/sbin/stream-relay-health
         owner: root
         group: root
@@ -259,7 +259,7 @@
 
     - name: Deploy vertical stream relay script
       ansible.builtin.template:
-        src: ../templates/stream-relay-vertical.sh.j2
+        src: ../templates/streaming/stream-relay-vertical.sh.j2
         dest: /usr/local/sbin/stream-relay-vertical
         owner: root
         group: root
@@ -267,7 +267,7 @@
 
     - name: Deploy stream relay service
       ansible.builtin.template:
-        src: ../templates/stream-relay.service.j2
+        src: ../templates/streaming/stream-relay.service.j2
         dest: /etc/systemd/system/stream-relay.service
         owner: root
         group: root
@@ -276,7 +276,7 @@
 
     - name: Deploy stream relay output worker service template
       ansible.builtin.template:
-        src: ../templates/stream-relay-output@.service.j2
+        src: ../templates/streaming/stream-relay-output@.service.j2
         dest: /etc/systemd/system/stream-relay-output@.service
         owner: root
         group: root
@@ -285,7 +285,7 @@
 
     - name: Deploy stream relay broker service
       ansible.builtin.template:
-        src: ../templates/stream-relay-broker.service.j2
+        src: ../templates/streaming/stream-relay-broker.service.j2
         dest: /etc/systemd/system/stream-relay-broker.service
         owner: root
         group: root
@@ -297,7 +297,7 @@
 
     - name: Deploy stream VOD mover service
       ansible.builtin.template:
-        src: ../templates/stream-vod-mover.service.j2
+        src: ../templates/streaming/stream-vod-mover.service.j2
         dest: /etc/systemd/system/stream-vod-mover.service
         owner: root
         group: root
@@ -307,7 +307,7 @@
 
     - name: Deploy stream VOD mover retry timer
       ansible.builtin.template:
-        src: ../templates/stream-vod-mover.timer.j2
+        src: ../templates/streaming/stream-vod-mover.timer.j2
         dest: /etc/systemd/system/stream-vod-mover.timer
         owner: root
         group: root
@@ -317,7 +317,7 @@
 
     - name: Deploy stream relay health check service
       ansible.builtin.template:
-        src: ../templates/stream-relay-health.service.j2
+        src: ../templates/streaming/stream-relay-health.service.j2
         dest: /etc/systemd/system/stream-relay-health.service
         owner: root
         group: root
@@ -327,7 +327,7 @@
 
     - name: Deploy stream relay health check timer
       ansible.builtin.template:
-        src: ../templates/stream-relay-health.timer.j2
+        src: ../templates/streaming/stream-relay-health.timer.j2
         dest: /etc/systemd/system/stream-relay-health.timer
         owner: root
         group: root
@@ -337,7 +337,7 @@
 
     - name: Deploy vertical stream relay service
       ansible.builtin.template:
-        src: ../templates/stream-relay-vertical.service.j2
+        src: ../templates/streaming/stream-relay-vertical.service.j2
         dest: /etc/systemd/system/stream-relay-vertical.service
         owner: root
         group: root
@@ -346,7 +346,7 @@
 
     - name: Deploy vertical stream broker service
       ansible.builtin.template:
-        src: ../templates/stream-relay-vertical-broker.service.j2
+        src: ../templates/streaming/stream-relay-vertical-broker.service.j2
         dest: /etc/systemd/system/stream-relay-vertical-broker.service
         owner: root
         group: root

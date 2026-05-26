@@ -59,7 +59,7 @@
 
         - name: Create gluetun-watchdog script
           ansible.builtin.template:
-            src: ../templates/gluetun-watchdog.sh.j2
+            src: ../templates/gluetun/gluetun-watchdog.sh.j2
             dest: /usr/local/sbin/gluetun-watchdog
             mode: "0755"
             owner: root
@@ -134,7 +134,7 @@
 
         - name: Create qBittorrent port sync script
           ansible.builtin.template:
-            src: ../templates/qbit-port-sync.sh.j2
+            src: ../templates/gluetun/qbit-port-sync.sh.j2
             dest: /usr/local/bin/qbit-port-sync
             mode: "0755"
             owner: root

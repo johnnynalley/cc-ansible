@@ -75,7 +75,7 @@
 
     - name: Deploy mergerfs systemd mount unit
       ansible.builtin.template:
-        src: ../templates/mergerfs-media.mount.j2
+        src: ../templates/storage/mergerfs-media.mount.j2
         dest: "/etc/systemd/system/{{ mergerfs_mount_path | regex_replace('^/', '') | regex_replace('/', '-') }}.mount"
         owner: root
         group: root
@@ -101,7 +101,7 @@
 
     - name: Deploy mergerfs-balance config (default excludes)
       ansible.builtin.template:
-        src: ../templates/mergerfs-balance.conf.j2
+        src: ../templates/storage/mergerfs-balance.conf.j2
         dest: /etc/mergerfs-balance.conf
         owner: root
         group: root
@@ -150,7 +150,7 @@
 
     - name: Deploy mergerfs-balance media stack SSH client
       ansible.builtin.template:
-        src: ../templates/mergerfs-balance-media-stack-client.sh.j2
+        src: ../templates/storage/mergerfs-balance-media-stack-client.sh.j2
         dest: /usr/local/sbin/mergerfs-balance-media-stack
         owner: root
         group: root
@@ -159,7 +159,7 @@
 
     - name: Deploy scheduled mergerfs-balance services
       ansible.builtin.template:
-        src: ../templates/mergerfs-balance-scheduled.service.j2
+        src: ../templates/storage/mergerfs-balance-scheduled.service.j2
         dest: "/etc/systemd/system/mergerfs-balance-{{ item.name }}.service"
         owner: root
         group: root
@@ -172,7 +172,7 @@
 
     - name: Deploy scheduled mergerfs-balance timers
       ansible.builtin.template:
-        src: ../templates/mergerfs-balance-scheduled.timer.j2
+        src: ../templates/storage/mergerfs-balance-scheduled.timer.j2
         dest: "/etc/systemd/system/mergerfs-balance-{{ item.name }}.timer"
         owner: root
         group: root
@@ -185,7 +185,7 @@
 
     - name: Deploy mergerfs-balance media stack restore services
       ansible.builtin.template:
-        src: ../templates/mergerfs-balance-media-stack-restore.service.j2
+        src: ../templates/storage/mergerfs-balance-media-stack-restore.service.j2
         dest: "/etc/systemd/system/mergerfs-balance-{{ item.name }}-media-stack-restore.service"
         owner: root
         group: root
@@ -200,7 +200,7 @@
 
     - name: Deploy mergerfs-balance media stack restore timers
       ansible.builtin.template:
-        src: ../templates/mergerfs-balance-media-stack-restore.timer.j2
+        src: ../templates/storage/mergerfs-balance-media-stack-restore.timer.j2
         dest: "/etc/systemd/system/mergerfs-balance-{{ item.name }}-media-stack-restore.timer"
         owner: root
         group: root
@@ -255,7 +255,7 @@
 
     - name: Deploy mergerfs-balance media stack control wrapper
       ansible.builtin.template:
-        src: ../templates/mergerfs-balance-media-stack-control.sh.j2
+        src: ../templates/storage/mergerfs-balance-media-stack-control.sh.j2
         dest: /usr/local/sbin/mergerfs-balance-media-stack-control
         owner: root
         group: root

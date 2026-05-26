@@ -35,7 +35,7 @@
 
     - name: Deploy smartd notification script
       ansible.builtin.template:
-        src: ../templates/smartd-notify.sh.j2
+        src: ../templates/smartmontools/smartd-notify.sh.j2
         dest: /usr/local/bin/smartd-notify
         owner: root
         group: root
@@ -44,7 +44,7 @@
 
     - name: Configure smartd
       ansible.builtin.template:
-        src: ../templates/smartd.conf.j2
+        src: ../templates/smartmontools/smartd.conf.j2
         dest: /etc/smartd.conf
         owner: root
         group: root

@@ -45,7 +45,7 @@
 
     - name: Deploy SignalRGB lock and unlock scripts
       ansible.windows.win_template:
-        src: ../templates/signalrgb-lock-state.ps1.j2
+        src: ../templates/windows/signalrgb-lock-state.ps1.j2
         dest: "{{ signalrgb_script_dir }}\\{{ item.script_name }}"
       loop: "{{ signalrgb_actions }}"
 

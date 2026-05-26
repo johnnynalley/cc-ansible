@@ -44,7 +44,7 @@
 
         - name: Deploy VirtioFS directory mappings
           ansible.builtin.template:
-            src: ../templates/proxmox-virtiofs-directory.cfg.j2
+            src: ../templates/proxmox/proxmox-virtiofs-directory.cfg.j2
             dest: /etc/pve/mapping/directory.cfg
             mode: '0640'
 

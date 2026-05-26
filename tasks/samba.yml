@@ -37,7 +37,7 @@
 
 - name: Configure /etc/samba/smb.conf
   ansible.builtin.template:
-    src: ../templates/smb.conf.j2
+    src: ../templates/samba/smb.conf.j2
     dest: /etc/samba/smb.conf
     owner: root
     group: root
@@ -54,7 +54,7 @@
 
 - name: Configure Avahi Time Machine service
   ansible.builtin.template:
-    src: ../templates/avahi-timemachine.service.j2
+    src: ../templates/samba/avahi-timemachine.service.j2
     dest: /etc/avahi/services/timemachine.service
     owner: root
     group: root

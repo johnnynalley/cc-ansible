@@ -167,7 +167,7 @@
 
     - name: Create network-watchdog script
       ansible.builtin.template:
-        src: ../templates/network-watchdog.sh.j2
+        src: ../templates/network/network-watchdog.sh.j2
         dest: /usr/local/sbin/network-watchdog
         mode: "0755"
         owner: root

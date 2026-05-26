@@ -96,7 +96,7 @@
 
     - name: Deploy media-stack-health script
       ansible.builtin.template:
-        src: ../templates/media-stack-health.sh.j2
+        src: ../templates/docker/media-stack-health.sh.j2
         dest: /usr/local/sbin/media-stack-health
         owner: root
         group: root

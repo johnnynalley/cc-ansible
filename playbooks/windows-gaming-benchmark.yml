@@ -26,7 +26,7 @@
 
     - name: Install Windows gaming benchmark script
       ansible.windows.win_template:
-        src: ../templates/windows-gaming-benchmark.ps1.j2
+        src: ../templates/windows/windows-gaming-benchmark.ps1.j2
         dest: "{{ windows_gaming_benchmark_script_dir }}\\windows-gaming-benchmark.ps1"
 
     - name: Remove legacy Windows gaming benchmark script directories

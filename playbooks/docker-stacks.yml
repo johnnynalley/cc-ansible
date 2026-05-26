@@ -26,8 +26,8 @@
         - docker_stacks | default([]) | selectattr('name', 'equalto', 'portainer-agent') | list | length > 0
         - docker_stacks | default([]) | selectattr('name', 'equalto', 'portainer') | list | length == 0
 
-    # Deploy Ansible-managed compose files from templates/
-    # Any stack with a matching templates/<name>.yml gets its compose file
+    # Deploy Ansible-managed compose files from templates/docker/
+    # Any stack with a matching templates/docker/<name>.yml gets its compose file
     # deployed automatically. Stacks without a template are assumed to have
     # their compose file already on the host (manually managed).
     - name: Ensure stack directory exists (Ansible-managed stacks)
@@ -45,11 +45,11 @@
         - >-
           item.compose_template is defined
           or
-          lookup('ansible.builtin.fileglob', playbook_dir + '/../templates/' + item.name + '.yml') | length > 0
+          lookup('ansible.builtin.fileglob', playbook_dir + '/../templates/docker/' + item.name + '.yml') | length > 0
 
     - name: Deploy compose file (Ansible-rendered stacks)
       ansible.builtin.template:
-        src: "../templates/{{ item.compose_template | default(item.name + '.yml.j2') }}"
+        src: "../templates/{{ item.compose_template | default('docker/' + item.name + '.yml.j2') }}"
         dest: "{{ item.path }}/docker-compose.yml"
         owner: root
         group: root
@@ -64,7 +64,7 @@
 
     - name: Deploy compose file (Ansible-managed stacks)
       ansible.builtin.copy:
-        src: "../templates/{{ item.compose_template | default(item.name + '.yml') }}"
+        src: "../templates/{{ item.compose_template | default('docker/' + item.name + '.yml') }}"
         dest: "{{ item.path }}/docker-compose.yml"
         owner: root
         group: root
@@ -78,7 +78,7 @@
           (item.compose_template is defined and item.compose_template is not search('\.j2$'))
           or (
             item.compose_template is not defined
-            and lookup('ansible.builtin.fileglob', playbook_dir + '/../templates/' + item.name + '.yml') | length > 0
+            and lookup('ansible.builtin.fileglob', playbook_dir + '/../templates/docker/' + item.name + '.yml') | length > 0
           )
 
     - name: Find Caddy stack path
@@ -102,19 +102,19 @@
 
     - name: Deploy Caddy compose file
       ansible.builtin.copy:
-        src: ../templates/caddy.yml
+        src: ../templates/docker/caddy.yml
         dest: "{{ caddy_stack_paths[0] }}/docker-compose.yml"
         owner: johnny
         group: ansible
         mode: "0664"
       when:
         - caddy_stack_paths | length > 0
-        - lookup('ansible.builtin.fileglob', playbook_dir + '/../templates/caddy.yml') | length > 0
+        - lookup('ansible.builtin.fileglob', playbook_dir + '/../templates/docker/caddy.yml') | length > 0
       tags: [caddy]
 
     - name: Deploy Caddyfile
       ansible.builtin.template:
-        src: ../templates/Caddyfile.j2
+        src: ../templates/docker/Caddyfile.j2
         dest: "{{ caddy_stack_paths[0] }}/Caddyfile"
         owner: root
         group: root
@@ -122,25 +122,25 @@
       register: caddyfile_deploy
       when:
         - caddy_stack_paths | length > 0
-        - lookup('ansible.builtin.fileglob', playbook_dir + '/../templates/Caddyfile.j2') | length > 0
+        - lookup('ansible.builtin.fileglob', playbook_dir + '/../templates/docker/Caddyfile.j2') | length > 0
       tags: [caddy]
 
     - name: Deploy Caddy Dockerfile
       ansible.builtin.copy:
-        src: ../templates/caddy.Dockerfile
+        src: ../templates/docker/caddy.Dockerfile
         dest: "{{ caddy_stack_paths[0] }}/Dockerfile"
         owner: johnny
         group: ansible
         mode: "0664"
       when:
         - caddy_stack_paths | length > 0
-        - lookup('ansible.builtin.fileglob', playbook_dir + '/../templates/caddy.Dockerfile') | length > 0
+        - lookup('ansible.builtin.fileglob', playbook_dir + '/../templates/docker/caddy.Dockerfile') | length > 0
       tags: [caddy]
 
     # Create systemd service to start stacks with proper network dependencies
     - name: Create docker-stacks systemd service
       ansible.builtin.template:
-        src: ../templates/docker-stacks.service.j2
+        src: ../templates/docker/docker-stacks.service.j2
         dest: /etc/systemd/system/docker-stacks.service
         owner: root
         group: root

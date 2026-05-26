@@ -34,7 +34,7 @@
 
     - name: Manage Asterisk logrotate config with size guardrails
       ansible.builtin.template:
-        src: ../templates/freepbx-asterisk-logrotate.j2
+        src: ../templates/freepbx/freepbx-asterisk-logrotate.j2
         dest: /etc/logrotate.d/asterisk
         owner: root
         group: root

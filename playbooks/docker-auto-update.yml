@@ -48,7 +48,7 @@
 
     - name: Create docker-auto-update script
       ansible.builtin.template:
-        src: ../templates/docker-auto-update.sh.j2
+        src: ../templates/docker/docker-auto-update.sh.j2
         dest: /usr/local/sbin/docker-auto-update
         owner: root
         group: root
@@ -108,7 +108,7 @@
     # -------------------------------------------------------------------------
     - name: Deploy Diun config
       ansible.builtin.template:
-        src: ../templates/diun.yml.j2
+        src: ../templates/docker/diun.yml.j2
         dest: /opt/diun/diun.yml
         owner: root
         group: root

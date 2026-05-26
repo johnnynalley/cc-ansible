@@ -14,7 +14,7 @@ docker_stacks:
   - name: media-stack
     path: /opt/media-stack
     build: false
-    compose_template: docker-media-stack.yml.j2
+    compose_template: docker/docker-media-stack.yml.j2
     compose_mode: "0600"
     remove_orphans: true
     auto_update_services:

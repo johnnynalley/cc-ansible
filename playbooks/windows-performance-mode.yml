@@ -31,7 +31,7 @@
 
     - name: Deploy Windows performance mode scripts
       ansible.windows.win_template:
-        src: "../templates/{{ item }}"
+        src: "../templates/windows/{{ item }}"
         dest: "{{ windows_performance_script_dir }}\\{{ item | regex_replace('\\.j2$', '') }}"
       loop:
         - windows-performance-mode.ps1.j2
@@ -41,7 +41,7 @@
 
     - name: Deploy OBS performance mode trigger
       ansible.windows.win_template:
-        src: "../templates/obs-performance-mode.lua.j2"
+        src: "../templates/windows/obs-performance-mode.lua.j2"
         dest: "{{ windows_performance_obs_scripts_dir }}\\{{ windows_performance_obs_lua_script }}"
       when: windows_performance_obs_enable_script | default(false)
 

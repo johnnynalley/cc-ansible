@@ -210,14 +210,14 @@ Repo-managed files:
 
 - `playbooks/stream-relay.yml`
 - `inventory/host_vars/media-vm/stream-relay.yml`
-- `templates/stream-relay.sh.j2`
-- `templates/stream-relay.service.j2`
-- `templates/stream-relay-output.sh.j2`
-- `templates/stream-relay-output@.service.j2`
-- `templates/stream-relay-vertical.sh.j2`
-- `templates/stream-relay-vertical.service.j2`
-- `templates/stream-relay-vertical-broker.service.j2`
-- `templates/mediamtx-vertical-broker.yml.j2`
+- `templates/streaming/stream-relay.sh.j2`
+- `templates/streaming/stream-relay.service.j2`
+- `templates/streaming/stream-relay-output.sh.j2`
+- `templates/streaming/stream-relay-output@.service.j2`
+- `templates/streaming/stream-relay-vertical.sh.j2`
+- `templates/streaming/stream-relay-vertical.service.j2`
+- `templates/streaming/stream-relay-vertical-broker.service.j2`
+- `templates/streaming/mediamtx-vertical-broker.yml.j2`
 - `scripts/streaming/configure-aitum-tiktok-broker.ps1`
 - `scripts/streaming/configure-mac-apple-music-ndi.py`
 - `scripts/streaming/configure-mac-apple-music-sonobus.py`
