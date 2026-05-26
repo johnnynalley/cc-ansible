@@ -91,6 +91,10 @@ def state_path(state_dir: Path) -> Path:
     return state_dir / "state.json"
 
 
+def skip_path(state_dir: Path) -> Path:
+    return state_dir / "skip-until.json"
+
+
 def load_queue(state_dir: Path) -> dict[str, Any]:
     data = read_json(queue_path(state_dir), {"version": 1, "jobs": []})
     data.setdefault("version", 1)
@@ -142,6 +146,24 @@ class MaintenanceLock:
 def validate_name(name: str) -> None:
     if not SAFE_NAME.match(name):
         raise SystemExit(f"unsafe job name {name!r}; use letters, numbers, dot, dash, underscore")
+
+
+def parse_datetime(value: str) -> dt.datetime:
+    text = value.strip()
+    if text.endswith("Z"):
+        text = f"{text[:-1]}+00:00"
+    try:
+        return dt.datetime.fromisoformat(text)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(
+            f"{value!r} must be an ISO timestamp like 2026-05-26T07:00:00"
+        ) from exc
+
+
+def skip_is_active(skip: dict[str, Any]) -> bool:
+    until = parse_datetime(str(skip.get("until", "")))
+    now = dt.datetime.now(until.tzinfo) if until.tzinfo else dt.datetime.now()
+    return now < until
 
 
 def pending_jobs(queue: dict[str, Any]) -> list[dict[str, Any]]:
@@ -234,6 +256,31 @@ def cmd_balance_remove(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_skip_set(args: argparse.Namespace) -> int:
+    state_dir = Path(args.state_dir)
+    state_dir.mkdir(parents=True, exist_ok=True)
+    until = parse_datetime(args.until)
+    payload = {
+        "version": 1,
+        "until": until.isoformat(timespec="seconds"),
+        "reason": args.reason,
+        "created_at": now_iso(),
+    }
+    atomic_write_json(skip_path(state_dir), payload)
+    print(f"Skipping nightly media maintenance until {payload['until']}: {args.reason}")
+    return 0
+
+
+def cmd_skip_clear(args: argparse.Namespace) -> int:
+    path = skip_path(Path(args.state_dir))
+    try:
+        path.unlink()
+        print("Cleared nightly media maintenance skip marker.")
+    except FileNotFoundError:
+        print("No nightly media maintenance skip marker exists.")
+    return 0
+
+
 def current_window_state(state: dict[str, Any], window_id: str) -> dict[str, Any]:
     if state.get("window_id") != window_id:
         return {
@@ -318,6 +365,24 @@ def cmd_run_window(args: argparse.Namespace) -> int:
                 "window_start": start.isoformat(timespec="minutes"),
                 "window_end": end.isoformat(timespec="minutes"),
             })
+
+            skip_file = skip_path(state_dir)
+            skip = read_json(skip_file, {})
+            if skip.get("until"):
+                if skip_is_active(skip):
+                    state.update({
+                        "status": "skipped",
+                        "mode": "skipped",
+                        "skip_until": skip["until"],
+                        "skip_reason": skip.get("reason"),
+                    })
+                    save_state(state_dir, state)
+                    print(
+                        "Skipping maintenance until "
+                        f"{skip['until']}: {skip.get('reason') or 'no reason provided'}"
+                    )
+                    return 0
+                skip_file.unlink(missing_ok=True)
 
             jobs = pending_jobs(queue)
             if jobs:
@@ -411,6 +476,16 @@ def build_parser() -> argparse.ArgumentParser:
     remove = balance_sub.add_parser("remove")
     remove.add_argument("name")
     remove.set_defaults(func=cmd_balance_remove)
+
+    skip = sub.add_parser("skip")
+    skip_sub = skip.add_subparsers(dest="skip_command", required=True)
+    skip_set = skip_sub.add_parser("set")
+    skip_set.add_argument("--until", required=True)
+    skip_set.add_argument("--reason", default="manual skip")
+    skip_set.set_defaults(func=cmd_skip_set)
+
+    skip_clear = skip_sub.add_parser("clear")
+    skip_clear.set_defaults(func=cmd_skip_clear)
 
     run_window = sub.add_parser("run-window")
     run_window.add_argument("--window", default=DEFAULT_WINDOW)
