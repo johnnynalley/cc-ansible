@@ -705,6 +705,7 @@ OpenClaw AI agent platform (Node.js gateway daemon). Provides a web UI and Disco
 - **Config**: `~/.openclaw/openclaw.json` and `~/.openclaw/.env` — created manually, backed up by restic (NOT templated by Ansible)
 - **Astra heartbeat**: The active heartbeat prompt is `/home/johnny/.openclaw/workspace/HEARTBEAT.md` on the OpenClaw host. Treat it as live OpenClaw workspace content that Astra may edit; update it directly when changing heartbeat behavior and document the expectation in this repo. Do not create an OpenClaw cron when the right primitive is the heartbeat file. Heartbeat procedure details, including stream relay and Plex appliance verified-corruption checks, live in `docs/openclaw-heartbeats.md`.
 - **Linting tools**: `ansible-lint`, `yamllint` in venv at `/opt/openclaw-venv/`
+- **PATH safety**: Do not prepend `/opt/openclaw-venv/bin` to the controller login PATH. That venv can shadow system Ansible with newer `ansible-core`; under the Codex sandbox, Ansible 2.21's local RPC manager fails before any host task runs. Keep system `/usr/bin/ansible` as the default controller Ansible and append the lint venv only as a fallback for lint tools.
 - **Timers**: repo-sync (git pull every 5 min), update-check (daily at 08:00 with Apprise notification)
 - **Playbook**: `playbooks/agents/openclaw.yml` (opt-in via `openclaw_enabled` variable)
 - **Config**: `host_vars/jn-t14s-lin/openclaw.yml`, `packages.yml`, `backup.yml`, and `docker.yml`

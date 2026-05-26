@@ -157,15 +157,31 @@
         virtualenv: /opt/openclaw-venv
         virtualenv_command: python3 -m venv
 
-    - name: Add venv bin to johnny's PATH via profile
+    - name: Remove OpenClaw lint venv PATH prepend
       ansible.builtin.lineinfile:
         path: /home/{{ admin_user }}/.profile
-        line: 'export PATH="/opt/openclaw-venv/bin:$PATH"'
-        regexp: '^export PATH="/opt/openclaw-venv/bin'
+        regexp: '^export PATH="/opt/openclaw-venv/bin:\$PATH"$'
+        state: absent
         owner: "{{ admin_user }}"
         group: "{{ admin_user }}"
         create: true
         mode: "0644"
+      tags: [openclaw-path]
+
+    - name: Add OpenClaw lint venv to the end of johnny's PATH
+      ansible.builtin.blockinfile:
+        path: /home/{{ admin_user }}/.profile
+        create: true
+        owner: "{{ admin_user }}"
+        group: "{{ admin_user }}"
+        mode: "0644"
+        marker: "# {mark} ANSIBLE MANAGED BLOCK - OpenClaw lint venv"
+        block: |
+          case ":$PATH:" in
+            *":/opt/openclaw-venv/bin:"*) ;;
+            *) export PATH="$PATH:/opt/openclaw-venv/bin" ;;
+          esac
+      tags: [openclaw-path]
 
     # --- Create config directory ---
     - name: Create OpenClaw config directory
