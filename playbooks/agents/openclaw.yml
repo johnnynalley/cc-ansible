@@ -157,6 +157,28 @@
         virtualenv: /opt/openclaw-venv
         virtualenv_command: python3 -m venv
 
+    - name: Keep OpenClaw lint venv from shadowing controller Ansible CLI
+      ansible.builtin.copy:
+        dest: "/opt/openclaw-venv/bin/{{ item }}"
+        owner: root
+        group: root
+        mode: "0755"
+        content: |
+          #!/bin/sh
+          exec /usr/bin/{{ item }} "$@"
+      loop:
+        - ansible
+        - ansible-config
+        - ansible-console
+        - ansible-doc
+        - ansible-galaxy
+        - ansible-inventory
+        - ansible-playbook
+        - ansible-pull
+        - ansible-test
+        - ansible-vault
+      tags: [openclaw-path]
+
     - name: Remove OpenClaw lint venv PATH prepend
       ansible.builtin.lineinfile:
         path: /home/{{ admin_user }}/.profile
@@ -177,10 +199,22 @@
         mode: "0644"
         marker: "# {mark} ANSIBLE MANAGED BLOCK - OpenClaw lint venv"
         block: |
-          case ":$PATH:" in
-            *":/opt/openclaw-venv/bin:"*) ;;
-            *) export PATH="$PATH:/opt/openclaw-venv/bin" ;;
-          esac
+          _openclaw_lint_venv="/opt/openclaw-venv/bin"
+          _openclaw_new_path=""
+          _openclaw_old_ifs=$IFS
+          IFS=:
+          for _openclaw_path_entry in $PATH; do
+            if [ "$_openclaw_path_entry" != "$_openclaw_lint_venv" ]; then
+              if [ -z "$_openclaw_new_path" ]; then
+                _openclaw_new_path="$_openclaw_path_entry"
+              else
+                _openclaw_new_path="$_openclaw_new_path:$_openclaw_path_entry"
+              fi
+            fi
+          done
+          IFS=$_openclaw_old_ifs
+          export PATH="$_openclaw_new_path:$_openclaw_lint_venv"
+          unset _openclaw_lint_venv _openclaw_new_path _openclaw_old_ifs _openclaw_path_entry
       tags: [openclaw-path]
 
     # --- Create config directory ---
