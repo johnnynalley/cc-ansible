@@ -402,7 +402,7 @@ Automatic recovery after router/WiFi restarts via `network-recovery.yml`:
 
 - **Network Watchdog** runs every 60 seconds:
   - Ensures interfaces are UP (catches link flaps where carrier recovers but interface stays DOWN)
-  - Fixes Proxmox bridge interfaces that got detached (`eno1` removed from `vmbr0`)
+  - Fixes Proxmox bridge interfaces that got detached (`eno1` or VM firewall ports like `fwpr100p0` removed from `vmbr0`)
   - Restarts networking/DHCP after gateway failures
   - Restarts Tailscale after connectivity failures
   - Restarts all Docker containers on recovery to clear stale state

@@ -180,6 +180,61 @@ fix_proxmox_bridge() {
             current_bridge=""
         fi
     done < /etc/network/interfaces
+
+    fix_proxmox_vm_firewall_ports
+}
+
+get_proxmox_firewall_bridge() {
+    local vmid="$1"
+    local netidx="$2"
+    local config line
+
+    for config in "/etc/pve/qemu-server/${vmid}.conf" "/etc/pve/lxc/${vmid}.conf"; do
+        [[ -r "$config" ]] || continue
+        line=$(grep -E "^net${netidx}:" "$config" | head -n 1 || true)
+        [[ -n "$line" ]] || continue
+        [[ "$line" == *"firewall=1"* ]] || continue
+
+        if [[ "$line" =~ bridge=([^,[:space:]]+) ]]; then
+            echo "${BASH_REMATCH[1]}"
+            return 0
+        fi
+    done
+
+    return 1
+}
+
+fix_proxmox_vm_firewall_ports() {
+    # Proxmox VM firewall mode inserts dynamic fwpr<vmid>p<netidx> ports
+    # between guest firewall bridges and the real bridge. Link flaps can leave
+    # those dynamic ports detached even when the physical bridge is healthy.
+    [[ -d /etc/pve ]] || return 0
+
+    local iface_path iface vmid netidx expected_bridge current_master
+
+    shopt -s nullglob
+    for iface_path in /sys/class/net/fwpr*p*; do
+        iface=$(basename "$iface_path")
+        if [[ ! "$iface" =~ ^fwpr([0-9]+)p([0-9]+)$ ]]; then
+            continue
+        fi
+
+        vmid="${BASH_REMATCH[1]}"
+        netidx="${BASH_REMATCH[2]}"
+        expected_bridge=$(get_proxmox_firewall_bridge "$vmid" "$netidx" || true)
+        [[ -n "$expected_bridge" ]] || continue
+        [[ -e "/sys/class/net/$expected_bridge" ]] || continue
+
+        current_master=$(readlink "/sys/class/net/$iface/master" 2>/dev/null || true)
+        current_master="${current_master##*/}"
+        if [[ "$current_master" != "$expected_bridge" ]]; then
+            log "Reattaching VM firewall port $iface to $expected_bridge (was ${current_master:-detached})"
+            ip link set "$iface" master "$expected_bridge" 2>/dev/null || true
+        fi
+
+        ip link set "$iface" up 2>/dev/null || true
+    done
+    shopt -u nullglob
 }
 
 ensure_interfaces_up() {

@@ -618,7 +618,7 @@ Deployed via `playbooks/network-recovery.yml` to `linux_hosts:!workstations`.
 
 **Network Watchdog** (`network-watchdog.timer`, every 60s):
 - Ensures interfaces are UP (catches link flaps)
-- On Proxmox: fixes bridge interfaces detached during router restarts (e.g., `eno1` removed from `vmbr0`)
+- On Proxmox: fixes bridge interfaces detached during router restarts or switch moves (e.g., `eno1` or VM firewall ports like `fwpr100p0` removed from `vmbr0`)
 - After 3 gateway failures: restarts networking/DHCP
 - After 5 Tailscale failures: restarts tailscaled
 - After 5 DHCP recovery failures: reboots (only if router is reachable, to avoid boot loops)
