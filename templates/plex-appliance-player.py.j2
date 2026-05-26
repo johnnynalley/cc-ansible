@@ -469,6 +469,21 @@ def parse_progress_time(value: object) -> Optional[float]:
     return (hours * 3600) + (minutes * 60) + seconds
 
 
+def plex_stream_unavailable_zero_bytes(stderr_lower: str, decoded_seconds: float) -> bool:
+    if decoded_seconds > 0:
+        return False
+    source_unavailable_markers = [
+        "stream ends prematurely at 0",
+        "error opening input",
+        "server returned 5",
+        "service unavailable",
+        "connection refused",
+        "connection timed out",
+        "read timed out",
+    ]
+    return any(text in stderr_lower for text in source_unavailable_markers)
+
+
 def run_corruption_check(item: ET.Element, position: float, duration: float) -> Dict[str, Any]:
     start = max(0.0, position - CORRUPTION_CHECK_REWIND_SECONDS)
     expected_seconds = float(CORRUPTION_CHECK_SECONDS)
@@ -573,6 +588,11 @@ def run_corruption_check(item: ET.Element, position: float, duration: float) -> 
     if completed.returncode == 0 and decoded_expected_window:
         result["status"] = "passed"
         result["reason"] = "ffmpeg_decoded_expected_window"
+        if marker:
+            result["warning_marker"] = marker
+    elif plex_stream_unavailable_zero_bytes(stderr_lower, decoded_seconds):
+        result["status"] = "inconclusive"
+        result["reason"] = "plex_stream_unavailable_zero_bytes"
         if marker:
             result["warning_marker"] = marker
     elif marker:
