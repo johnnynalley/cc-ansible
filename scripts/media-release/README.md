@@ -12,8 +12,8 @@
   custom-format audit for `docker-vm`.
 - `arr_profile_math_audit.py`: Read-only Sonarr/Radarr Profilarr test-profile
   score-band audit that checks DA, x265, quality rank, Bluray source rank,
-  Dictionarry tier stacks, Bluray/WEB source ordering, service tiebreakers, old
-  tier zeroing, and the CF limit.
+  Dictionarry tier stacks, bounded TRaSH fallback tiers, Bluray/WEB source
+  ordering, service/repack tiebreakers, legacy tier drift, and the CF limit.
 - `arr_stage_profilarr_test_profiles.py`: Snapshots live Arr policy state and
   clones anime profiles for Profilarr testing.
 - `profilarr_candidate_audit.py`: Read-only audit of Profilarr PCD databases as
@@ -21,15 +21,16 @@
 - `profilarr_cf_definition_sync.py`: Syncs selected existing Arr custom-format
   definitions from Profilarr PCD sources while preserving local profile
   structure and scores.
-- `profilarr_bounded_tier_import.py`: Imports curated Dictionarry
-  compact/efficient/HEVC/WEB-DL release-tier custom formats into refreshed Arr
-  test profiles with backups, ordered service-score compression, anime source
-  rank zeroing, replacement-mode legacy tier score zeroing, and cleanup of
-  all-zero non-rename CFs.
+- `profilarr_bounded_tier_import.py`: Imports curated Dictionarry primary tiers
+  plus Profilarr-synced TRaSH fallback tiers into refreshed Arr test profiles
+  with backups, x265 held at `+5000`, ordered service/repack compression, anime
+  source-rank zeroing, legacy tier drift checks, and cleanup of all-zero
+  non-rename CFs.
 - `profilarr_disable_upgrade_jobs.py`: Disables Profilarr scheduled Arr upgrade
   jobs with a SQLite backup, without disabling PCD sync.
 - `profilarr_link_database.py`: Links a Profilarr database through the local
-  authenticated web app without printing secrets.
+  authenticated web app or a direct SQLite/clone fallback, taking a Profilarr
+  DB backup first and without printing secrets.
 - `profilarr_nightly_upgrade.py`: Queues controlled Profilarr upgrade jobs for
   the overnight maintenance coordinator.
 - `profilarr_selective_cf_import.py`: Imports curated Profilarr custom formats

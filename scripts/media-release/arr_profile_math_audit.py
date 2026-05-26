@@ -29,10 +29,11 @@ ANIME_QUALITY_RANKS = {
     "720p": 30000,
     "1080p": 40000,
 }
-ANIME_X265_MIN_SCORE = 2000
-REGULAR_X265_MIN_SCORE = 3000
+ANIME_X265_MIN_SCORE = 5000
+REGULAR_X265_MIN_SCORE = 5000
 ANIME_BLURAY_SOURCE_RANK = 0
-SERVICE_MAX_SCORE = 7
+SERVICE_MAX_SCORE = 3
+REPACK_MAX_SCORE = 3
 SERVICE_FORMAT_NAMES = {
     "ABEMA",
     "ADN",
@@ -56,6 +57,11 @@ SERVICE_FORMAT_NAMES = {
     "SHO",
     "STAN",
     "VRV",
+}
+REPACK_FORMAT_NAMES = {
+    "Repack/Proper",
+    "Repack2",
+    "Repack3",
 }
 
 
@@ -222,6 +228,31 @@ SOURCE_ORDERING_CHECKS = {
     ),
 }
 
+TRASH_FALLBACK_SCORES = {
+    ("sonarr", "anime"): {
+        **{f"Anime BD Tier {index:02d}": score for index, score in enumerate((96, 88, 80, 72, 64, 56, 48, 40), start=1)},
+        **{f"Anime Web Tier {index:02d}": score for index, score in enumerate((32, 24, 16, 12, 8, 4), start=1)},
+    },
+    ("radarr", "anime"): {
+        **{f"Anime BD Tier {index:02d}": score for index, score in enumerate((96, 88, 80, 72, 64, 56, 48, 40), start=1)},
+        **{f"Anime Web Tier {index:02d}": score for index, score in enumerate((32, 24, 16, 12, 8, 4), start=1)},
+    },
+    ("sonarr", "regular"): {
+        "WEB Tier 01": 96,
+        "WEB Tier 02": 88,
+        "WEB Tier 03": 80,
+        "WEB Scene": 16,
+    },
+    ("radarr", "regular"): {
+        "HD Bluray Tier 01": 96,
+        "HD Bluray Tier 02": 88,
+        "HD Bluray Tier 03": 80,
+        "WEB Tier 01": 80,
+        "WEB Tier 02": 72,
+        "WEB Tier 03": 64,
+    },
+}
+
 ANIME_NEGATIVE_GUARDRAILS = (
     "Anime LQ Groups",
     "Anime Raws",
@@ -308,11 +339,12 @@ def score_sum(scores: dict[str, int], names: tuple[str, ...]) -> tuple[int, list
     return sum(scores.get(name, 0) for name in names), missing
 
 
-def nonzero_legacy_tiers(scores: dict[str, int]) -> dict[str, int]:
+def unexpected_fallback_tiers(scores: dict[str, int], expected_scores: dict[str, int]) -> dict[str, int]:
     return {
         name: score
         for name, score in scores.items()
-        if score != 0 and (LEGACY_TIER_PATTERN.match(name) or name in LEGACY_TIER_NAMES)
+        if score != expected_scores.get(name, 0)
+        and (LEGACY_TIER_PATTERN.match(name) or name in LEGACY_TIER_NAMES)
     }
 
 
@@ -325,6 +357,14 @@ def active_service_scores(scores: dict[str, int]) -> dict[str, int]:
         name: score
         for name, score in scores.items()
         if name in SERVICE_FORMAT_NAMES and score != 0
+    }
+
+
+def active_repack_scores(scores: dict[str, int]) -> dict[str, int]:
+    return {
+        name: score
+        for name, score in scores.items()
+        if name in REPACK_FORMAT_NAMES and score != 0
     }
 
 
@@ -344,6 +384,10 @@ def min_configured_tier_gap(instance_name: str, scores: dict[str, int], failures
                     f"must stay above {later} ({scores[later]})"
                 )
     return min(gaps or [0])
+
+
+def expected_fallback_scores(instance_name: str, profile_kind: str) -> dict[str, int]:
+    return TRASH_FALLBACK_SCORES.get((instance_name, profile_kind), {})
 
 
 def audit_profile(
@@ -391,17 +435,53 @@ def audit_profile(
         names = ", ".join(f"{name}={score}" for name, score in sorted(excessive_services.items()))
         failures.append(f"{profile_check.name}: service scores above max {SERVICE_MAX_SCORE}: {names}")
     max_service_score = max(service_scores.values() or [0])
+
+    repack_scores = active_repack_scores(scores)
+    excessive_repacks = {name: score for name, score in repack_scores.items() if score > REPACK_MAX_SCORE}
+    if excessive_repacks:
+        names = ", ".join(f"{name}={score}" for name, score in sorted(excessive_repacks.items()))
+        failures.append(f"{profile_check.name}: repack/proper scores above max {REPACK_MAX_SCORE}: {names}")
+    max_repack_score = max(repack_scores.values() or [0])
+    max_incidental_score = max_service_score + max_repack_score
+
     min_tier_gap = min_configured_tier_gap(instance.name, scores, failures, profile_check.name)
-    if max_service_score >= min_tier_gap:
+    if max_incidental_score >= min_tier_gap:
         failures.append(
-            f"{profile_check.name}: max service score {max_service_score} "
+            f"{profile_check.name}: max incidental score {max_incidental_score} "
             f"must stay below smallest Dictionarry tier gap {min_tier_gap}"
         )
 
-    legacy_scores = nonzero_legacy_tiers(scores)
+    fallback_expected = expected_fallback_scores(instance.name, profile_check.kind)
+    fallback_scores = {name: scores.get(name, 0) for name in fallback_expected}
+    fallback_mismatches = {
+        name: {"expected": expected, "actual": fallback_scores.get(name, 0)}
+        for name, expected in fallback_expected.items()
+        if fallback_scores.get(name, 0) != expected
+    }
+    if fallback_mismatches:
+        names = ", ".join(
+            f"{name}={item['actual']} expected {item['expected']}"
+            for name, item in sorted(fallback_mismatches.items())
+        )
+        failures.append(f"{profile_check.name}: fallback TRaSH tier score mismatch: {names}")
+    legacy_scores = unexpected_fallback_tiers(scores, fallback_expected)
     if legacy_scores:
         names = ", ".join(f"{name}={score}" for name, score in sorted(legacy_scores.items()))
-        failures.append(f"{profile_check.name}: legacy tier scores still active: {names}")
+        failures.append(f"{profile_check.name}: unexpected legacy/fallback tier scores: {names}")
+    max_fallback_score = max(fallback_expected.values() or [0])
+    min_positive_dictionarry = min(
+        (
+            score
+            for name, score in scores.items()
+            if name.startswith("Dictionarry ") and score > 0
+        ),
+        default=0,
+    )
+    if min_positive_dictionarry <= max_fallback_score + max_incidental_score:
+        failures.append(
+            f"{profile_check.name}: lowest Dictionarry score {min_positive_dictionarry} "
+            f"must stay above fallback+incidental {max_fallback_score + max_incidental_score}"
+        )
 
     x265_score = scores.get(instance.x265_name, 0)
     x265_floor = ANIME_X265_MIN_SCORE if profile_check.kind == "anime" else REGULAR_X265_MIN_SCORE
@@ -427,7 +507,8 @@ def audit_profile(
         if da_score < ANIME_DUAL_AUDIO_SCORE:
             failures.append(f"{profile_check.name}: Anime Dual Audio score {da_score} is below {ANIME_DUAL_AUDIO_SCORE}")
 
-        source_plus_stack = source_rank + max(bluray_stack, web_stack) + max_service_score
+        release_stack = max(bluray_stack, web_stack) + max_fallback_score + max_incidental_score
+        source_plus_stack = source_rank + release_stack
         if source_plus_stack >= x265_score:
             failures.append(
                 f"{profile_check.name}: source+tier stack {source_plus_stack} "
@@ -438,8 +519,7 @@ def audit_profile(
             ANIME_QUALITY_RANKS["1080p"]
             + x265_score
             + source_rank
-            + max(bluray_stack, web_stack)
-            + max_service_score
+            + release_stack
         )
         if max_non_da_1080p >= da_score:
             failures.append(
@@ -452,8 +532,7 @@ def audit_profile(
             + ANIME_QUALITY_RANKS["720p"]
             + x265_score
             + source_rank
-            + max(bluray_stack, web_stack)
-            + max_service_score
+            + release_stack
         )
         min_1080p_da = da_score + ANIME_QUALITY_RANKS["1080p"]
         if min_1080p_da <= max_720p_da:
@@ -462,9 +541,10 @@ def audit_profile(
                 f"must beat max 720p DA {max_720p_da}"
             )
     else:
-        if max(bluray_stack, web_stack) + max_service_score >= x265_score:
+        release_stack = max(bluray_stack, web_stack) + max_fallback_score + max_incidental_score
+        if release_stack >= x265_score:
             failures.append(
-                f"{profile_check.name}: tier stack {max(bluray_stack, web_stack) + max_service_score} "
+                f"{profile_check.name}: tier stack {release_stack} "
                 f"must stay below x265 {x265_score}"
             )
 
@@ -475,10 +555,16 @@ def audit_profile(
         "x265_score": x265_score,
         "source_rank_bluray_score": source_rank,
         "max_service_score": max_service_score,
+        "max_repack_score": max_repack_score,
+        "max_incidental_score": max_incidental_score,
         "min_tier_gap": min_tier_gap,
         "service_scores": service_scores,
+        "repack_scores": repack_scores,
+        "fallback_scores": fallback_scores,
+        "max_fallback_score": max_fallback_score,
+        "min_positive_dictionarry_score": min_positive_dictionarry,
         "dual_audio_score": scores.get("Anime Dual Audio"),
-        "nonzero_legacy_tier_scores": legacy_scores,
+        "unexpected_legacy_tier_scores": legacy_scores,
         "failures": failures,
     }
 
@@ -516,22 +602,26 @@ def print_text(report: dict[str, Any]) -> None:
             stacks = profile["stacks"]
             print(
                 "  {profile}: Bluray HEVC stack={bluray}; second Bluray={second}; "
-                "WEB HEVC stack={web}; service max={service}; min tier gap={gap}; "
+                "WEB HEVC stack={web}; fallback max={fallback}; incidental max={incidental}; "
+                "service max={service}; repack max={repack}; min tier gap={gap}; "
                 "x265={x265}; Bluray source={source}; DA={da}".format(
                     profile=profile["profile"],
                     bluray=stacks["best_bluray_hevc"]["score"],
                     second=stacks["second_bluray_hevc"]["score"],
                     web=stacks["best_web_hevc"]["score"],
+                    fallback=profile["max_fallback_score"],
+                    incidental=profile["max_incidental_score"],
                     service=profile["max_service_score"],
+                    repack=profile["max_repack_score"],
                     gap=profile["min_tier_gap"],
                     x265=profile["x265_score"],
                     source=profile["source_rank_bluray_score"],
                     da=profile["dual_audio_score"],
                 )
             )
-            if profile["nonzero_legacy_tier_scores"]:
-                print("    active legacy tiers:")
-                for name, score in sorted(profile["nonzero_legacy_tier_scores"].items()):
+            if profile["unexpected_legacy_tier_scores"]:
+                print("    unexpected legacy/fallback tiers:")
+                for name, score in sorted(profile["unexpected_legacy_tier_scores"].items()):
                     print(f"      - {name}: {score}")
         if instance["failures"]:
             print("  failures:")
