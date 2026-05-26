@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""Import Dictionarry compact release tiers into Arr test profiles.
+"""Import bounded Dictionarry release tiers into Arr test profiles.
 
 Run this on docker-vm. It reads Profilarr's locally synced Dictionarry PCD
-database, creates or updates a curated set of compact release-tier custom
-formats in Sonarr/Radarr, refreshes test profiles from their current source
-profiles, and scores only those test profiles.
+database, creates or updates a curated set of release-tier custom formats in
+Sonarr/Radarr, refreshes test profiles from their current source profiles, and
+scores only those test profiles.
 
 The script does not import upstream quality profiles, does not change profile
 cutoffs, and does not modify local DA/x265 custom formats.
@@ -54,6 +54,45 @@ PROTECTED_CLEANUP_NAMES = {
 
 PROTECTED_CLEANUP_PREFIXES = ("Local Anime Quality Rank -",)
 LEGACY_TIER_PATTERN = re.compile(r"^(?!Dictionarry ).*\bTier \d{2}$", re.IGNORECASE)
+LEGACY_TIER_NAMES = {
+    "WEB Scene",
+}
+
+ANIME_DUAL_AUDIO_SCORE = 100000
+ANIME_QUALITY_RANKS = {
+    "480p": 10000,
+    "576p": 20000,
+    "720p": 30000,
+    "1080p": 40000,
+}
+ANIME_X265_SCORE = 2000
+REGULAR_X265_SCORE = 3000
+ANIME_BLURAY_SOURCE_RANK = 1500
+SERVICE_TIEBREAKER_SCORE = 1
+SERVICE_FORMAT_NAMES = {
+    "ABEMA",
+    "ADN",
+    "AMZN",
+    "ATVP",
+    "B-Global",
+    "Bilibili",
+    "CR",
+    "DSNP",
+    "FUNi",
+    "HBO",
+    "HIDIVE",
+    "HMAX",
+    "HULU",
+    "Hulu",
+    "iT",
+    "MAX",
+    "NF",
+    "PCOK",
+    "PMTP",
+    "SHO",
+    "STAN",
+    "VRV",
+}
 
 
 @dataclass(frozen=True)
@@ -112,26 +151,181 @@ def dictionarry(source_name: str, score: int, targets: tuple[str, ...]) -> Curat
 
 
 CURATED_FORMATS: tuple[CuratedFormat, ...] = (
-    dictionarry("1080p Compact TV Bluray Tier 1", 750, ("sonarr",)),
-    dictionarry("1080p Compact TV Bluray Tier 2", 700, ("sonarr",)),
-    dictionarry("1080p Compact TV Bluray Tier 3", 650, ("sonarr",)),
-    dictionarry("1080p Compact TV Bluray Tier 4", 600, ("sonarr",)),
-    dictionarry("1080p Compact TV Bluray Tier 5", 550, ("sonarr",)),
-    dictionarry("1080p Compact TV Bluray Tier 6", 500, ("sonarr",)),
-    dictionarry("1080p Compact TV WEB Tier 1", 650, ("sonarr",)),
-    dictionarry("1080p Compact TV WEB Tier 2", 600, ("sonarr",)),
-    dictionarry("1080p Compact TV WEB Tier 3", 550, ("sonarr",)),
-    dictionarry("1080p Compact TV WEB Tier 4", 500, ("sonarr",)),
-    dictionarry("1080p Compact TV WEB Tier 5", 450, ("sonarr",)),
-    dictionarry("1080p Compact Movie Bluray Tier 1", 750, ("radarr",)),
-    dictionarry("1080p Compact Movie Bluray Tier 2", 700, ("radarr",)),
-    dictionarry("1080p Compact Movie Bluray Tier 3", 650, ("radarr",)),
-    dictionarry("1080p Compact Movie Bluray Tier 4", 600, ("radarr",)),
-    dictionarry("1080p Compact Movie WEB Tier 1", 650, ("radarr",)),
-    dictionarry("1080p Compact Movie WEB Tier 2", 600, ("radarr",)),
-    dictionarry("1080p Compact Movie WEB Tier 3", 550, ("radarr",)),
-    dictionarry("1080p Compact Movie WEB Tier 4", 500, ("radarr",)),
+    # Scores are intentionally small because families can stack. The strongest
+    # practical positive stack is capped below x265, even with Bluray source rank.
+    dictionarry("1080p Efficient TV Bluray Tier 1", 180, ("sonarr",)),
+    dictionarry("1080p Efficient TV Bluray Tier 2", 172, ("sonarr",)),
+    dictionarry("1080p Efficient TV Bluray Tier 3", 150, ("sonarr",)),
+    dictionarry("1080p Efficient TV Bluray Tier 4", 135, ("sonarr",)),
+    dictionarry("1080p Efficient TV Bluray Tier 5", 120, ("sonarr",)),
+    dictionarry("1080p Efficient TV Bluray Tier 6", 105, ("sonarr",)),
+    dictionarry("1080p Efficient TV WEB Tier 1", 160, ("sonarr",)),
+    dictionarry("1080p Efficient TV WEB Tier 2", 145, ("sonarr",)),
+    dictionarry("1080p Efficient TV WEB Tier 3", 130, ("sonarr",)),
+    dictionarry("1080p Efficient TV WEB Tier 4", 115, ("sonarr",)),
+    dictionarry("1080p Efficient TV WEB Tier 5", 100, ("sonarr",)),
+    dictionarry("1080p Compact TV Bluray Tier 1", 150, ("sonarr",)),
+    dictionarry("1080p Compact TV Bluray Tier 2", 142, ("sonarr",)),
+    dictionarry("1080p Compact TV Bluray Tier 3", 126, ("sonarr",)),
+    dictionarry("1080p Compact TV Bluray Tier 4", 114, ("sonarr",)),
+    dictionarry("1080p Compact TV Bluray Tier 5", 102, ("sonarr",)),
+    dictionarry("1080p Compact TV Bluray Tier 6", 90, ("sonarr",)),
+    dictionarry("1080p Compact TV WEB Tier 1", 130, ("sonarr",)),
+    dictionarry("1080p Compact TV WEB Tier 2", 118, ("sonarr",)),
+    dictionarry("1080p Compact TV WEB Tier 3", 106, ("sonarr",)),
+    dictionarry("1080p Compact TV WEB Tier 4", 94, ("sonarr",)),
+    dictionarry("1080p Compact TV WEB Tier 5", 82, ("sonarr",)),
+    dictionarry("1080p Compact TV Trash Tier 1", -250, ("sonarr",)),
+    dictionarry("1080p Compact TV Trash Tier 2", -350, ("sonarr",)),
+    dictionarry("1080p Efficient Movie Bluray Tier 1", 180, ("radarr",)),
+    dictionarry("1080p Efficient Movie Bluray Tier 2", 165, ("radarr",)),
+    dictionarry("1080p Efficient Movie Bluray Tier 3", 150, ("radarr",)),
+    dictionarry("1080p Efficient Movie Bluray Tier 4", 135, ("radarr",)),
+    dictionarry("1080p Efficient Movie WEB Tier 1", 150, ("radarr",)),
+    dictionarry("1080p Efficient Movie WEB Tier 2", 132, ("radarr",)),
+    dictionarry("1080p Efficient Movie WEB Tier 3", 114, ("radarr",)),
+    dictionarry("1080p Efficient Movie WEB Tier 4", 96, ("radarr",)),
+    dictionarry("1080p Compact Movie Bluray Tier 1", 150, ("radarr",)),
+    dictionarry("1080p Compact Movie Bluray Tier 2", 135, ("radarr",)),
+    dictionarry("1080p Compact Movie Bluray Tier 3", 120, ("radarr",)),
+    dictionarry("1080p Compact Movie Bluray Tier 4", 105, ("radarr",)),
+    dictionarry("1080p Compact Movie WEB Tier 1", 125, ("radarr",)),
+    dictionarry("1080p Compact Movie WEB Tier 2", 110, ("radarr",)),
+    dictionarry("1080p Compact Movie WEB Tier 3", 95, ("radarr",)),
+    dictionarry("1080p Compact Movie WEB Tier 4", 80, ("radarr",)),
+    dictionarry("1080p Bluray HEVC Tier 1", 60, ("sonarr", "radarr")),
+    dictionarry("1080p WEB-DL HEVC Tier 1", 60, ("sonarr", "radarr")),
+    dictionarry("WEB-DL Tier 1", 20, ("sonarr", "radarr")),
+    dictionarry("WEB-DL Tier 2", 16, ("sonarr", "radarr")),
+    dictionarry("WEB-DL Tier 3", 12, ("sonarr", "radarr")),
+    dictionarry("WEB-DL Tier 4", 8, ("sonarr", "radarr")),
+    dictionarry("WEB-DL Tier 5", 4, ("sonarr", "radarr")),
 )
+
+CURATED_SCORE_STACKS = {
+    "sonarr": {
+        "best_bluray_hevc": (
+            "1080p Efficient TV Bluray Tier 1",
+            "1080p Compact TV Bluray Tier 1",
+            "1080p Bluray HEVC Tier 1",
+        ),
+        "second_bluray_hevc": (
+            "1080p Efficient TV Bluray Tier 2",
+            "1080p Compact TV Bluray Tier 2",
+            "1080p Bluray HEVC Tier 1",
+        ),
+        "best_web_hevc": (
+            "1080p Efficient TV WEB Tier 1",
+            "1080p Compact TV WEB Tier 1",
+            "1080p WEB-DL HEVC Tier 1",
+            "WEB-DL Tier 1",
+        ),
+    },
+    "radarr": {
+        "best_bluray_hevc": (
+            "1080p Efficient Movie Bluray Tier 1",
+            "1080p Compact Movie Bluray Tier 1",
+            "1080p Bluray HEVC Tier 1",
+        ),
+        "second_bluray_hevc": (
+            "1080p Efficient Movie Bluray Tier 2",
+            "1080p Compact Movie Bluray Tier 2",
+            "1080p Bluray HEVC Tier 1",
+        ),
+        "best_web_hevc": (
+            "1080p Efficient Movie WEB Tier 1",
+            "1080p Compact Movie WEB Tier 1",
+            "1080p WEB-DL HEVC Tier 1",
+            "WEB-DL Tier 1",
+        ),
+    },
+}
+
+CURATED_SCORE_FAMILIES = {
+    "sonarr": {
+        "Efficient TV Bluray": (
+            "1080p Efficient TV Bluray Tier 1",
+            "1080p Efficient TV Bluray Tier 2",
+            "1080p Efficient TV Bluray Tier 3",
+            "1080p Efficient TV Bluray Tier 4",
+            "1080p Efficient TV Bluray Tier 5",
+            "1080p Efficient TV Bluray Tier 6",
+        ),
+        "Efficient TV WEB": (
+            "1080p Efficient TV WEB Tier 1",
+            "1080p Efficient TV WEB Tier 2",
+            "1080p Efficient TV WEB Tier 3",
+            "1080p Efficient TV WEB Tier 4",
+            "1080p Efficient TV WEB Tier 5",
+        ),
+        "Compact TV Bluray": (
+            "1080p Compact TV Bluray Tier 1",
+            "1080p Compact TV Bluray Tier 2",
+            "1080p Compact TV Bluray Tier 3",
+            "1080p Compact TV Bluray Tier 4",
+            "1080p Compact TV Bluray Tier 5",
+            "1080p Compact TV Bluray Tier 6",
+        ),
+        "Compact TV WEB": (
+            "1080p Compact TV WEB Tier 1",
+            "1080p Compact TV WEB Tier 2",
+            "1080p Compact TV WEB Tier 3",
+            "1080p Compact TV WEB Tier 4",
+            "1080p Compact TV WEB Tier 5",
+        ),
+        "WEB-DL": (
+            "WEB-DL Tier 1",
+            "WEB-DL Tier 2",
+            "WEB-DL Tier 3",
+            "WEB-DL Tier 4",
+            "WEB-DL Tier 5",
+        ),
+    },
+    "radarr": {
+        "Efficient Movie Bluray": (
+            "1080p Efficient Movie Bluray Tier 1",
+            "1080p Efficient Movie Bluray Tier 2",
+            "1080p Efficient Movie Bluray Tier 3",
+            "1080p Efficient Movie Bluray Tier 4",
+        ),
+        "Efficient Movie WEB": (
+            "1080p Efficient Movie WEB Tier 1",
+            "1080p Efficient Movie WEB Tier 2",
+            "1080p Efficient Movie WEB Tier 3",
+            "1080p Efficient Movie WEB Tier 4",
+        ),
+        "Compact Movie Bluray": (
+            "1080p Compact Movie Bluray Tier 1",
+            "1080p Compact Movie Bluray Tier 2",
+            "1080p Compact Movie Bluray Tier 3",
+            "1080p Compact Movie Bluray Tier 4",
+        ),
+        "Compact Movie WEB": (
+            "1080p Compact Movie WEB Tier 1",
+            "1080p Compact Movie WEB Tier 2",
+            "1080p Compact Movie WEB Tier 3",
+            "1080p Compact Movie WEB Tier 4",
+        ),
+        "WEB-DL": (
+            "WEB-DL Tier 1",
+            "WEB-DL Tier 2",
+            "WEB-DL Tier 3",
+            "WEB-DL Tier 4",
+            "WEB-DL Tier 5",
+        ),
+    },
+}
+
+CURATED_SOURCE_ORDERING_CHECKS = {
+    "sonarr": (
+        ("1080p Efficient TV Bluray Tier 2", "1080p Efficient TV WEB Tier 1"),
+        ("1080p Compact TV Bluray Tier 2", "1080p Compact TV WEB Tier 1"),
+    ),
+    "radarr": (
+        ("1080p Efficient Movie Bluray Tier 2", "1080p Efficient Movie WEB Tier 1"),
+        ("1080p Compact Movie Bluray Tier 2", "1080p Compact Movie WEB Tier 1"),
+    ),
+}
 
 
 SOURCE_VALUES = {
@@ -178,6 +372,155 @@ QUALITY_MODIFIER_VALUES = {
     "brdisk": 3,
     "remux": 4,
 }
+
+
+def score_model_report() -> dict[str, Any]:
+    scores_by_arr = {
+        arr_name: {
+            curated.source_name: curated.score
+            for curated in CURATED_FORMATS
+            if arr_name in curated.targets
+        }
+        for arr_name in CURATED_SCORE_STACKS
+    }
+    instances: dict[str, dict[str, Any]] = {}
+    errors: list[str] = []
+
+    for arr_name, stacks in CURATED_SCORE_STACKS.items():
+        arr_scores = scores_by_arr[arr_name]
+        stack_scores: dict[str, int] = {}
+        stack_components: dict[str, dict[str, int]] = {}
+        for stack_name, component_names in stacks.items():
+            missing = [name for name in component_names if name not in arr_scores]
+            if missing:
+                errors.append(f"{arr_name} {stack_name} has missing components: {', '.join(missing)}")
+                continue
+            component_scores = {name: int(arr_scores[name]) for name in component_names}
+            stack_components[stack_name] = component_scores
+            stack_scores[stack_name] = sum(component_scores.values())
+
+        bluray_hevc = stack_scores.get("best_bluray_hevc", 0)
+        second_bluray_hevc = stack_scores.get("second_bluray_hevc", 0)
+        web_hevc = stack_scores.get("best_web_hevc", 0)
+        if bluray_hevc <= web_hevc:
+            errors.append(
+                f"{arr_name} best Bluray HEVC stack ({bluray_hevc}) "
+                f"must stay above best WEB HEVC stack ({web_hevc})"
+            )
+        if second_bluray_hevc <= web_hevc:
+            errors.append(
+                f"{arr_name} second Bluray HEVC stack ({second_bluray_hevc}) "
+                f"must stay above best WEB HEVC stack ({web_hevc})"
+            )
+
+        source_ordering: list[dict[str, Any]] = []
+        for bluray_name, web_name in CURATED_SOURCE_ORDERING_CHECKS[arr_name]:
+            bluray_score = arr_scores.get(bluray_name)
+            web_score = arr_scores.get(web_name)
+            source_ordering.append(
+                {
+                    "bluray": bluray_name,
+                    "bluray_score": bluray_score,
+                    "web": web_name,
+                    "web_score": web_score,
+                }
+            )
+            if bluray_score is None or web_score is None:
+                errors.append(f"{arr_name} missing source ordering check: {bluray_name} / {web_name}")
+            elif bluray_score <= web_score:
+                errors.append(
+                    f"{arr_name} {bluray_name} ({bluray_score}) "
+                    f"must stay above {web_name} ({web_score})"
+                )
+
+        tier_gaps: dict[str, int] = {}
+        for family_name, names in CURATED_SCORE_FAMILIES[arr_name].items():
+            family_scores = [arr_scores.get(name) for name in names]
+            if any(score is None for score in family_scores):
+                errors.append(f"{arr_name} {family_name} is missing configured scores")
+                continue
+            for earlier, later, earlier_score, later_score in zip(
+                names[:-1],
+                names[1:],
+                family_scores[:-1],
+                family_scores[1:],
+                strict=True,
+            ):
+                assert earlier_score is not None
+                assert later_score is not None
+                gap = int(earlier_score) - int(later_score)
+                tier_gaps[f"{earlier} > {later}"] = gap
+                if gap <= 0:
+                    errors.append(
+                        f"{arr_name} {earlier} ({earlier_score}) "
+                        f"must stay above {later} ({later_score})"
+                    )
+        min_tier_gap = min(tier_gaps.values() or [0])
+        if min_tier_gap <= SERVICE_TIEBREAKER_SCORE:
+            errors.append(
+                f"{arr_name} smallest Dictionarry tier gap ({min_tier_gap}) "
+                f"must stay above service tiebreaker ({SERVICE_TIEBREAKER_SCORE})"
+            )
+
+        max_stack_with_service = max(stack_scores.values() or [0]) + SERVICE_TIEBREAKER_SCORE
+        if max_stack_with_service + ANIME_BLURAY_SOURCE_RANK >= ANIME_X265_SCORE:
+            errors.append(
+                f"{arr_name} Bluray source+tier stack "
+                f"({ANIME_BLURAY_SOURCE_RANK}+{max_stack_with_service}) "
+                f"must stay below anime x265 ({ANIME_X265_SCORE})"
+            )
+        if max_stack_with_service >= REGULAR_X265_SCORE:
+            errors.append(f"{arr_name} Dictionarry stack must stay below regular x265 ({REGULAR_X265_SCORE})")
+        min_positive_score = min((score for score in arr_scores.values() if score > 0), default=0)
+        if min_positive_score <= SERVICE_TIEBREAKER_SCORE:
+            errors.append(
+                f"{arr_name} lowest positive Dictionarry score ({min_positive_score}) "
+                f"must stay above service tiebreaker ({SERVICE_TIEBREAKER_SCORE})"
+            )
+
+        max_non_da_1080p = (
+            ANIME_QUALITY_RANKS["1080p"]
+            + ANIME_X265_SCORE
+            + ANIME_BLURAY_SOURCE_RANK
+            + max_stack_with_service
+        )
+        if max_non_da_1080p >= ANIME_DUAL_AUDIO_SCORE:
+            errors.append(
+                f"{arr_name} max non-DA 1080p score ({max_non_da_1080p}) "
+                f"must stay below DA ({ANIME_DUAL_AUDIO_SCORE})"
+            )
+
+        max_720p_da = (
+            ANIME_DUAL_AUDIO_SCORE
+            + ANIME_QUALITY_RANKS["720p"]
+            + ANIME_X265_SCORE
+            + ANIME_BLURAY_SOURCE_RANK
+            + max_stack_with_service
+        )
+        min_1080p_da = ANIME_DUAL_AUDIO_SCORE + ANIME_QUALITY_RANKS["1080p"]
+        if min_1080p_da <= max_720p_da:
+            errors.append(
+                f"{arr_name} 1080p DA floor ({min_1080p_da}) "
+                f"must beat max 720p DA ({max_720p_da})"
+            )
+
+        instances[arr_name] = {
+            "stacks": stack_scores,
+            "stack_components": stack_components,
+            "source_ordering": source_ordering,
+            "min_tier_gap": min_tier_gap,
+            "bluray_source_plus_best_stack": ANIME_BLURAY_SOURCE_RANK + max_stack_with_service,
+            "anime_x265_score": ANIME_X265_SCORE,
+            "regular_x265_score": REGULAR_X265_SCORE,
+            "service_tiebreaker_score": SERVICE_TIEBREAKER_SCORE,
+            "min_positive_dictionarry_score": min_positive_score,
+            "max_non_da_1080p_score": max_non_da_1080p,
+            "dual_audio_score": ANIME_DUAL_AUDIO_SCORE,
+            "max_720p_da_score": max_720p_da,
+            "min_1080p_da_score": min_1080p_da,
+        }
+
+    return {"instances": instances, "errors": errors}
 
 
 def utc_stamp() -> str:
@@ -629,13 +972,33 @@ def zero_legacy_tier_scores(
         if cf_id is None:
             continue
         name = str(custom_formats_by_id.get(cf_id, {}).get("name") or item.get("name") or "")
-        if not LEGACY_TIER_PATTERN.match(name):
+        if not (LEGACY_TIER_PATTERN.match(name) or name in LEGACY_TIER_NAMES):
             continue
         old_score = int(item.get("score") or 0)
         if old_score == 0:
             continue
         changes[name] = {"old": old_score, "new": 0}
         item["score"] = 0
+    return changes
+
+
+def cap_service_scores(
+    profile: dict[str, Any],
+    custom_formats_by_id: dict[int, dict[str, Any]],
+) -> dict[str, dict[str, int]]:
+    changes: dict[str, dict[str, int]] = {}
+    for item in profile.get("formatItems", []):
+        cf_id = custom_format_id_from_item(item)
+        if cf_id is None:
+            continue
+        name = str(custom_formats_by_id.get(cf_id, {}).get("name") or item.get("name") or "")
+        if name not in SERVICE_FORMAT_NAMES:
+            continue
+        old_score = int(item.get("score") or 0)
+        if old_score <= SERVICE_TIEBREAKER_SCORE:
+            continue
+        changes[name] = {"old": old_score, "new": SERVICE_TIEBREAKER_SCORE}
+        item["score"] = SERVICE_TIEBREAKER_SCORE
     return changes
 
 
@@ -709,7 +1072,7 @@ def process_instance(
 
     if len(before_formats) + len(to_create) > cf_limit:
         raise RuntimeError(
-            f"{instance.name}: compact tier import would exceed CF limit: "
+            f"{instance.name}: bounded tier import would exceed CF limit: "
             f"{len(before_formats)} existing + {len(to_create)} new > {cf_limit}"
         )
 
@@ -763,6 +1126,7 @@ def process_instance(
                 add_missing_format_item(profile, simulated_by_name[curated.target_name])
             changes = merge_score_changes(
                 zero_legacy_tier_scores(profile, custom_formats_by_id),
+                cap_service_scores(profile, custom_formats_by_id),
                 set_profile_scores(profile, custom_formats_by_id, target_scores),
             )
             if changes:
@@ -806,6 +1170,7 @@ def process_instance(
                 add_missing_format_item(profile, custom_formats_by_name[curated.target_name])
             changes = merge_score_changes(
                 zero_legacy_tier_scores(profile, custom_formats_by_id),
+                cap_service_scores(profile, custom_formats_by_id),
                 set_profile_scores(profile, custom_formats_by_id, target_scores),
             )
             request_json(instance, api_key, "PUT", f"/api/v3/qualityprofile/{profile['id']}", profile)
@@ -868,6 +1233,22 @@ def parse_args() -> argparse.Namespace:
 
 def print_text(report: dict[str, Any]) -> None:
     print(f"Snapshot: {report['snapshot_dir']}")
+    print("Score model:")
+    for arr_name, item in report["score_model"]["instances"].items():
+        stacks = item["stacks"]
+        print(
+            f"  {arr_name}: best Bluray HEVC stack={stacks['best_bluray_hevc']}; "
+            f"second Bluray HEVC stack={stacks['second_bluray_hevc']}; "
+            f"best WEB HEVC stack={stacks['best_web_hevc']}; "
+            f"service={item['service_tiebreaker_score']} < "
+            f"min tier gap={item['min_tier_gap']}; "
+            f"Bluray source+max stack+service={item['bluray_source_plus_best_stack']} < "
+            f"x265={item['anime_x265_score']}; "
+            f"max non-DA 1080p={item['max_non_da_1080p_score']} < "
+            f"DA={item['dual_audio_score']}; "
+            f"max 720p DA={item['max_720p_da_score']} < "
+            f"1080p DA floor={item['min_1080p_da_score']}"
+        )
     for result in report["instances"]:
         mode = "dry-run" if result["dry_run"] else "applied"
         print()
@@ -914,7 +1295,11 @@ def print_text(report: dict[str, Any]) -> None:
 
 def main() -> int:
     args = parse_args()
-    suffix = "dictionarry-compact-tiers-dry-run" if args.dry_run else "dictionarry-compact-tiers"
+    score_model = score_model_report()
+    if score_model["errors"]:
+        raise RuntimeError("score model failed: " + "; ".join(score_model["errors"]))
+
+    suffix = "dictionarry-bounded-tiers-dry-run" if args.dry_run else "dictionarry-bounded-tiers"
     snapshot_dir = Path(args.snapshot_root) / f"{utc_stamp()}-{suffix}"
     snapshot_dir.mkdir(parents=True, exist_ok=False)
 
@@ -925,6 +1310,7 @@ def main() -> int:
     )
     report = {
         "snapshot_dir": str(snapshot_dir),
+        "score_model": score_model,
         "instances": [
             process_instance(
                 instance,

@@ -86,7 +86,7 @@ overridden by incidental format bonuses.
 3. Quality rank: `+10000`, `+20000`, `+30000`, `+40000`
 4. x265/HEVC preference: `+2000`
 5. Source rank: `+1500` for Bluray/BD sources
-6. Release-group tiers: leave TRaSH tier scores intact
+6. Release-group tiers: bounded Profilarr/Dictionarry test tiers below x265
 7. Soft avoids: small negative values only
 
 This means any acceptable dual-audio release beats a non-dual-audio release,
@@ -121,15 +121,17 @@ same-resolution DA Web x265 with a good Web tier can still beat a bare DA
 Bluray x264 when that matches the smaller-file preference.
 
 Do not add new local CFs casually. The custom-format limit matters. Current
-counts after the Dictionarry compact-tier test staging and stale all-zero
-non-rename cleanup are Sonarr `76` and Radarr `64`; the working limit for
-staging checks is `100`.
+counts before the bounded Dictionarry tier test staging are Sonarr `76` and
+Radarr `64`; the working limit for staging checks is `100`.
 
-The audit script `scripts/media-release/arr_release_policy_audit.py` checks current CF counts,
-profile scores, queue status, and unused/all-zero CFs. On 2026-05-26 it found no
-unused Sonarr or Radarr custom formats after compact-tier staging. Remaining
-all-zero formats were rename-enabled service/source tags or protected local
-helpers such as DA and H.265/x265 matching, so they were preserved.
+The audit script `scripts/media-release/arr_release_policy_audit.py` checks
+current CF counts, profile scores, queue status, and unused/all-zero CFs.
+`scripts/media-release/arr_profile_math_audit.py` checks the Profilarr test
+profiles as a whole: DA beats all non-DA paths, x265 stays above source+tier
+stacking, 1080p DA beats any 720p DA stack, best Bluray HEVC and best WEB HEVC
+Dictionarry stacks are source-ordered, service CFs stay below the smallest
+release-tier gap, old Recyclarr/TRaSH tier scores such as `WEB Scene` are zero
+in the test profiles, and the CF limit is still obeyed.
 
 The read-only live expectation checkers are
 `scripts/media-release/sonarr_release_expectation_check.py` and
@@ -419,14 +421,15 @@ Historical selective Dumpstarr import state:
   - `Banned Groups (Title)`
   - `Bad Source` on Radarr
 
-Current Dictionarry compact-tier test state:
+Current Dictionarry bounded-tier test plan:
 
 - Scripts:
   - `scripts/media-release/profilarr_tier_candidate_compare.py`
-  - `scripts/media-release/profilarr_compact_tier_import.py`
-- Latest applied snapshot:
+  - `scripts/media-release/profilarr_bounded_tier_import.py`
+  - `scripts/media-release/arr_profile_math_audit.py`
+- Latest applied compact-only snapshot:
   `/opt/media-stack/release-policy-snapshots/20260526T211737Z-dictionarry-compact-tiers`
-- Current CF counts after cleanup:
+- Current CF counts before bounded-tier apply:
   - Sonarr: `76/100`
   - Radarr: `64/100`
 - Refreshed test profiles only:
@@ -435,40 +438,67 @@ Current Dictionarry compact-tier test state:
   - Radarr `movies-anime-profilarr-test` id `8`
   - Radarr `movies-regular-profilarr-test` id `9`
 - Production profile scores, cutoffs, and media assignments were not changed.
-- This is a replacement-mechanics pilot, not the full proposed main-profile
-  migration. It proves that Profilarr/Dictionarry release-tier CFs can replace
-  the old Recyclarr/TRaSH tier band in test profiles without double-counting,
-  but the compact tier slice alone is too narrow to be the final profile.
+- This is still test-profile only. It is the proposed main-profile replacement
+  model staged for inspection before moving any series/movie to the test
+  profiles and before changing production profile scores.
 - Test profiles are staged in replacement mode, not stacked mode. Legacy
-  Recyclarr/TRaSH release-tier scores matching `Tier NN` are zeroed in the test
-  profiles before Dictionarry compact tiers are scored. The old CF definitions
-  still exist for production profiles; only the test-profile scores are zeroed.
-- Imported Sonarr Dictionarry compact TV tiers:
-  - `Dictionarry 1080p Compact TV Bluray Tier 1..6`: `+750`, `+700`,
-    `+650`, `+600`, `+550`, `+500`
-  - `Dictionarry 1080p Compact TV WEB Tier 1..5`: `+650`, `+600`, `+550`,
-    `+500`, `+450`
-- Imported Radarr Dictionarry compact movie tiers:
-  - `Dictionarry 1080p Compact Movie Bluray Tier 1..4`: `+750`, `+700`,
-    `+650`, `+600`
-  - `Dictionarry 1080p Compact Movie WEB Tier 1..4`: `+650`, `+600`,
-    `+550`, `+500`
-- These scores are intentionally below DA (`+100000`), anime quality ranks,
-  x265/HEVC (`+2000`), and Bluray source rank (`+1500`). Because the old
-  Recyclarr/TRaSH tier scores are zeroed in the test profiles, Dictionarry tiers
-  do not stack with the old tier band or outrank x265 by double-counting release
-  groups.
-- The compact-tier import cleanup deletes only all-zero non-rename custom
+  Recyclarr/TRaSH release-tier scores matching `Tier NN` plus the old regular
+  `WEB Scene` tier are zeroed in the test profiles before Dictionarry tiers are
+  scored. Sonarr/Radarr require every custom format to stay present in profile
+  `formatItems`, so old tier rows may still be visible at `0`; only nonzero
+  score affects release selection.
+- Imported Sonarr Dictionarry TV tiers:
+  - Efficient Bluray Tier 1..6: `+180`, `+172`, `+150`, `+135`, `+120`,
+    `+105`
+  - Efficient WEB Tier 1..5: `+160`, `+145`, `+130`, `+115`, `+100`
+  - Compact Bluray Tier 1..6: `+150`, `+142`, `+126`, `+114`, `+102`, `+90`
+  - Compact WEB Tier 1..5: `+130`, `+118`, `+106`, `+94`, `+82`
+  - Compact Trash Tier 1..2: `-250`, `-350`
+- Imported Radarr Dictionarry movie tiers:
+  - Efficient Bluray Tier 1..4: `+180`, `+165`, `+150`, `+135`
+  - Efficient WEB Tier 1..4: `+150`, `+132`, `+114`, `+96`
+  - Compact Bluray Tier 1..4: `+150`, `+135`, `+120`, `+105`
+  - Compact WEB Tier 1..4: `+125`, `+110`, `+95`, `+80`
+- Shared imported Dictionarry tiers:
+  - `1080p Bluray HEVC Tier 1`: `+60`
+  - `1080p WEB-DL HEVC Tier 1`: `+60`
+  - `WEB-DL Tier 1..5`: `+20`, `+16`, `+12`, `+8`, `+4`
+- Positive service/source tags such as `AMZN`, `NF`, `DSNP`, `CR`, and `VRV`
+  are capped to `+1` in the test profiles when they were positive in the
+  cloned source profile. Zero-scored service tags stay zero. This makes them
+  tie-breakers only: the smallest adjacent Dictionarry tier gap is `+4`, so a
+  service tag cannot reorder even the weakest imported tier ladder.
+- Score math:
+  - Best Bluray HEVC stack: `180 + 150 + 60 = 390`
+  - Sonarr second Bluray HEVC stack: `172 + 142 + 60 = 374`
+  - Sonarr best WEB HEVC stack: `160 + 130 + 60 + 20 = 370`
+  - Radarr second Bluray HEVC stack: `165 + 135 + 60 = 360`
+  - Radarr best WEB HEVC stack: `150 + 125 + 60 + 20 = 355`
+  - Anime Bluray source plus best tier stack plus service tie-breaker:
+    `1500 + 390 + 1 = 1891`, still below x265/HEVC at `+2000`
+  - Max non-DA 1080p path: `40000 + 2000 + 1500 + 390 + 1 = 43891`, still
+    below DA at `+100000`
+  - Max 720p DA path: `100000 + 30000 + 2000 + 1500 + 390 + 1 = 133891`, still
+    below the 1080p DA floor of `140000`
+- Source ordering checks deliberately keep WEB below Bluray at the near-tier
+  boundary: Sonarr Efficient WEB Tier 1 (`+160`) is below Efficient Bluray Tier
+  2 (`+172`), Sonarr Compact WEB Tier 1 (`+130`) is below Compact Bluray Tier 2
+  (`+142`), Radarr Efficient WEB Tier 1 (`+150`) is below Efficient Bluray Tier
+  2 (`+165`), and Radarr Compact WEB Tier 1 (`+125`) is below Compact Bluray
+  Tier 2 (`+135`).
+- These scores are intentionally below DA (`+100000`), anime quality ranks, and
+  x265/HEVC (`+2000` anime, `+3000` regular). Because old Recyclarr/TRaSH tier
+  scores are zeroed in the test profiles, Dictionarry tiers do not stack with
+  the old tier band or outrank x265 by double-counting release groups.
+- The bounded-tier import cleanup deletes only all-zero non-rename custom
   formats. It must not delete formats with `includeCustomFormatWhenRenaming`
   enabled, and it protects local helper formats such as DA title/metadata
   helpers, H.265/x265, source rank, hard rejects, soft avoids, and local anime
   quality-rank prefixes.
-- Broader Dictionarry tiering is available and still needs a mapped import
-  before any test profile should be considered production-equivalent. Candidate
-  families seen in the enabled Dictionarry database include Compact, Efficient,
-  HEVC-specific, Balanced, Quality, lower-resolution, HDTV, WEB-DL, and
-  trash-tier release-group CFs. Add them only after comparing coverage and
-  score math against the existing profiles and the CF limit.
+- Broader Dictionarry tiering is available but deliberately excluded from this
+  pass. Balanced, Quality, lower-resolution, HDTV, and Remux families remain
+  candidates for later review; do not add them until their scoring can be proven
+  not to bias the profile toward larger files or weaker source choices.
 - Coverage check from the 2026-05-26 live tier audit: compact-only is narrower
   than the previous tier coverage. Sonarr/Radarr anime TRaSH anime BD+Web tiers
   each exposed about `251` release-title/release-group patterns, while the
@@ -515,8 +545,8 @@ Profilarr remains the upstream refresh source for imported CFs, but Profilarr
 itself is not directly managing the copied Arr formats yet. The sync path is:
 Profilarr auto-pulls Dictionarry/Dumpstarr, then repo-managed scripts refresh
 selected Arr definitions and reapply local scores. Use
-`scripts/media-release/profilarr_compact_tier_import.py` for the current
-Dictionarry compact-tier test profiles. This preserves upstream CF-definition
+`scripts/media-release/profilarr_bounded_tier_import.py` for the current
+Dictionarry bounded-tier test profiles. This preserves upstream CF-definition
 updates without accepting upstream profile scoring such as the stock x265
 penalty.
 
@@ -526,7 +556,8 @@ Before assigning any series/movie to a Profilarr-derived profile, run:
 ansible docker-vm --become -m script -a "scripts/media-release/arr_stage_profilarr_test_profiles.py --dry-run"
 ansible docker-vm -m script -a scripts/media-release/profilarr_candidate_audit.py
 ansible docker-vm -m script -a "scripts/media-release/profilarr_tier_candidate_compare.py --only-missing --name-regex '1080p Compact (TV|Movie) (WEB|Bluray|Trash) Tier'"
-ansible docker-vm --become -m script -a "scripts/media-release/profilarr_compact_tier_import.py --dry-run"
+ansible docker-vm --become -m script -a "scripts/media-release/profilarr_bounded_tier_import.py --dry-run"
+ansible docker-vm -m script -a scripts/media-release/arr_profile_math_audit.py
 ansible docker-vm --become -m script -a "scripts/media-release/sonarr_transaction_audit.py --hours 24 --limit 25"
 ansible docker-vm -m script -a scripts/media-release/sonarr_release_expectation_check.py
 ansible docker-vm -m script -a scripts/media-release/radarr_release_expectation_check.py

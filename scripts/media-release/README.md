@@ -10,6 +10,10 @@
   explicit title markers can be trusted at grab/import time.
 - `arr_release_policy_audit.py`: Read-only Sonarr/Radarr release profile and
   custom-format audit for `docker-vm`.
+- `arr_profile_math_audit.py`: Read-only Sonarr/Radarr Profilarr test-profile
+  score-band audit that checks DA, x265, quality rank, Bluray source rank,
+  Dictionarry tier stacks, Bluray/WEB source ordering, service tiebreakers, old
+  tier zeroing, and the CF limit.
 - `arr_stage_profilarr_test_profiles.py`: Snapshots live Arr policy state and
   clones anime profiles for Profilarr testing.
 - `profilarr_candidate_audit.py`: Read-only audit of Profilarr PCD databases as
@@ -17,10 +21,10 @@
 - `profilarr_cf_definition_sync.py`: Syncs selected existing Arr custom-format
   definitions from Profilarr PCD sources while preserving local profile
   structure and scores.
-- `profilarr_compact_tier_import.py`: Imports curated Dictionarry compact
-  TV/movie release-tier custom formats into refreshed Arr test profiles with
-  backups, replacement-mode legacy tier score zeroing, and cleanup of all-zero
-  non-rename CFs.
+- `profilarr_bounded_tier_import.py`: Imports curated Dictionarry
+  compact/efficient/HEVC/WEB-DL release-tier custom formats into refreshed Arr
+  test profiles with backups, service-score capping, replacement-mode legacy
+  tier score zeroing, and cleanup of all-zero non-rename CFs.
 - `profilarr_disable_upgrade_jobs.py`: Disables Profilarr scheduled Arr upgrade
   jobs with a SQLite backup, without disabling PCD sync.
 - `profilarr_link_database.py`: Links a Profilarr database through the local
