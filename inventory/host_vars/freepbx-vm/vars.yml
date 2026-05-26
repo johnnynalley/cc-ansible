@@ -7,3 +7,12 @@ local_restic_backup_paths:
   - /etc/asterisk
   - /var/lib/asterisk
   - /var/spool/asterisk
+
+freepbx_asterisk_nofile_limit: 65535
+freepbx_asterisk_logrotate_maxsize: 100M
+freepbx_asterisk_logrotate_rotate: 7
+freepbx_asterisk_logrotate_queue_rotate: 30
+freepbx_journald_system_max_use: 300M
+freepbx_journald_system_keep_free: 2G
+freepbx_journald_system_max_file_size: 64M
+freepbx_journald_max_retention_sec: 14day

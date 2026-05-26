@@ -21,6 +21,7 @@ plex_appliance_token: "{{ vault_plex_appliance_token | default('') }}"
 # Raspberry Pi OS Lite 64-bit is the intended base, but this also works on
 # Ubuntu/Debian as long as the packages below are available.
 plex_appliance_packages:
+  - ffmpeg
   - mpv
   - python3
   - python3-requests

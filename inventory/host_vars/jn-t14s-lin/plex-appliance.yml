@@ -22,6 +22,7 @@ plex_appliance_subtitles: auto
 plex_appliance_token: "{{ vault_plex_appliance_token | default('') }}"
 
 plex_appliance_packages:
+  - ffmpeg
   - mpv
   - python3
   - python3-requests

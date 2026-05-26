@@ -80,6 +80,7 @@
           ansible.builtin.command:
             cmd: findmnt -n {{ item.mount_point }}
           register: virtiofs_mountcheck
+          check_mode: false
           loop: "{{ virtiofs_mounts }}"
           loop_control:
             label: "{{ item.mount_point }}"
@@ -110,15 +111,18 @@
 
         - name: Mount VirtioFS shares
           ansible.posix.mount:
-            path: "{{ item.mount_point }}"
-            src: "{{ item.name }}"
+            path: "{{ item.item.mount_point }}"
+            src: "{{ item.item.name }}"
             fstype: virtiofs
-            opts: "{{ item.options | default('defaults') }}"
+            opts: "{{ item.item.options | default('defaults') }}"
             state: mounted
           register: virtiofs_mount_result
           failed_when:
             - virtiofs_mount_result is failed
-            - not (item.allow_unavailable | default(false) | bool)
-          loop: "{{ virtiofs_mounts }}"
+            - not (item.item.allow_unavailable | default(false) | bool)
+          loop: "{{ virtiofs_mountcheck.results }}"
           loop_control:
-            label: "{{ item.mount_point }}"
+            label: "{{ item.item.mount_point }}"
+          when:
+            - not ansible_check_mode
+            - item.rc != 0

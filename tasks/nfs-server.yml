@@ -42,6 +42,16 @@
   loop: "{{ nfs_exports | default([]) }}"
   when: item.bind_source is defined
 
+- name: Create managed subdirectories inside bind-source exports
+  ansible.builtin.file:
+    path: "{{ item.0.bind_source }}/{{ item.1.path }}"
+    state: directory
+    owner: "{{ item.1.owner | default(item.0.owner | default('root')) }}"
+    group: "{{ item.1.group | default(item.0.group | default('root')) }}"
+    mode: "{{ item.1.mode | default(item.0.mode | default('0755')) }}"
+  loop: "{{ nfs_exports | default([]) | subelements('subdirs', skip_missing=True) }}"
+  when: item.0.bind_source is defined
+
 - name: Configure /etc/exports
   ansible.builtin.template:
     src: ../templates/exports.j2

@@ -73,13 +73,24 @@
       changed_when: "'CHANGED' in grafana_key_dl.stdout"
       when: ansible_facts.os_family == "Debian"
 
+    - name: Remove legacy Grafana one-line APT repository (Debian)
+      ansible.builtin.file:
+        path: /etc/apt/sources.list.d/grafana.list
+        state: absent
+      when: ansible_facts.os_family == "Debian"
+
     - name: Add Grafana APT repository (Debian)
-      ansible.builtin.apt_repository:
-        repo: >-
-          deb [signed-by=/etc/apt/keyrings/grafana.gpg]
-          https://apt.grafana.com stable main
-        filename: grafana
-        state: present
+      ansible.builtin.copy:
+        content: |
+          Types: deb
+          URIs: https://apt.grafana.com
+          Suites: stable
+          Components: main
+          Signed-By: /etc/apt/keyrings/grafana.gpg
+        dest: /etc/apt/sources.list.d/grafana.sources
+        owner: root
+        group: root
+        mode: "0644"
       when: ansible_facts.os_family == "Debian"
 
     - name: Update apt cache after adding repo
@@ -182,10 +193,11 @@
   serial: 1
 
   vars:
-    alloy_config_dir: "{{ ansible_env.HOME }}/.config/alloy"
-    alloy_data_dir: "{{ ansible_env.HOME }}/.local/share/alloy"
-    alloy_plist: "{{ ansible_env.HOME }}/Library/LaunchAgents/com.grafana.alloy.plist"
-    alloy_log_dir: "{{ ansible_env.HOME }}/Library/Logs"
+    alloy_home: "{{ ansible_facts.env.HOME }}"
+    alloy_config_dir: "{{ alloy_home }}/.config/alloy"
+    alloy_data_dir: "{{ alloy_home }}/.local/share/alloy"
+    alloy_plist: "{{ alloy_home }}/Library/LaunchAgents/com.grafana.alloy.plist"
+    alloy_log_dir: "{{ alloy_home }}/Library/Logs"
     alloy_bin: /opt/homebrew/bin/alloy
 
   tasks:
@@ -230,7 +242,7 @@
 
     - name: Ensure LaunchAgents directory exists
       ansible.builtin.file:
-        path: "{{ ansible_env.HOME }}/Library/LaunchAgents"
+        path: "{{ alloy_home }}/Library/LaunchAgents"
         state: directory
         mode: "0755"
 

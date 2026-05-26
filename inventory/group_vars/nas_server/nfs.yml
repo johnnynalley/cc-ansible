@@ -28,6 +28,27 @@ nfs_exports:
     owner: johnny
     group: johnny
     mode: "0775"
+    subdirs:
+      - path: torrents
+        owner: johnny
+        group: johnny
+        mode: "2775"
+      - path: torrents/tv-sonarr
+        owner: johnny
+        group: johnny
+        mode: "2775"
+      - path: torrents/sonarr
+        owner: johnny
+        group: johnny
+        mode: "2775"
+      - path: torrents/radarr
+        owner: johnny
+        group: johnny
+        mode: "2775"
+      - path: usenet
+        owner: johnny
+        group: johnny
+        mode: "2775"
     clients:
       - host: 100.108.254.100
         options: "rw,sync,no_subtree_check,no_root_squash,fsid=11"

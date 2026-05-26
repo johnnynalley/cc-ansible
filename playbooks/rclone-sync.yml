@@ -216,10 +216,11 @@
   serial: 1
 
   vars:
-    rclone_sync_script: "{{ ansible_env.HOME }}/.local/bin/rclone-sync"
-    rclone_sync_state_dir: "{{ ansible_env.HOME }}/.local/share/rclone-sync"
-    rclone_sync_plist: "{{ ansible_env.HOME }}/Library/LaunchAgents/com.rclone.onedrive-sync.plist"
-    rclone_sync_log_dir: "{{ ansible_env.HOME }}/Library/Logs"
+    rclone_sync_home: "{{ ansible_facts.env.HOME }}"
+    rclone_sync_script: "{{ rclone_sync_home }}/.local/bin/rclone-sync"
+    rclone_sync_state_dir: "{{ rclone_sync_home }}/.local/share/rclone-sync"
+    rclone_sync_plist: "{{ rclone_sync_home }}/Library/LaunchAgents/com.rclone.onedrive-sync.plist"
+    rclone_sync_log_dir: "{{ rclone_sync_home }}/Library/Logs"
     rclone_bin: /opt/homebrew/bin/rclone
 
   tasks:
@@ -239,9 +240,9 @@
         state: directory
         mode: "0755"
       loop:
-        - "{{ ansible_env.HOME }}/.local/bin"
+        - "{{ rclone_sync_home }}/.local/bin"
         - "{{ rclone_sync_state_dir }}"
-        - "{{ ansible_env.HOME }}/Library/LaunchAgents"
+        - "{{ rclone_sync_home }}/Library/LaunchAgents"
       tags: [config]
 
     # =========================================================================

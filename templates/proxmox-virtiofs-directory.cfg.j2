@@ -1,5 +1,5 @@
 {% for mapping in virtiofs_directory_mappings | default([]) %}
 {{ mapping.name }}
-	map node={{ ansible_hostname }},path={{ mapping.path }}
+	map node={{ ansible_facts.hostname }},path={{ mapping.path }}
 
 {% endfor %}

@@ -1,0 +1,299 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ALERT_MODE=1
+if [[ "${1:-}" == "--no-alert" ]]; then
+  ALERT_MODE=0
+fi
+
+HOSTNAME="$(hostname)"
+STATE_DIR="{{ media_stack_health_state_dir | default('/var/lib/media-stack-health') }}"
+ALERT_COOLDOWN_SECONDS="{{ media_stack_health_alert_cooldown_seconds | default(1800) }}"
+APPRISE_ENDPOINT="{{ apprise_endpoint }}"
+APPRISE_TOKEN="{{ apprise_token }}"
+APPRISE_TAGS="{{ media_stack_health_alert_tags | default(apprise_alert_tags) }}"
+QBIT_ENV_FILE="{{ media_stack_health_qbit_env_file | default('/etc/qbit-port-sync.env') }}"
+HARDLINK_CONTAINER="{{ media_stack_health_hardlink_container | default('sonarr') }}"
+HARDLINK_SOURCE_DIR="{{ media_stack_health_hardlink_source_dir | default('/data/downloads/complete') }}"
+HARDLINK_TARGET_DIR="{{ media_stack_health_hardlink_target_dir | default('/data/Anime') }}"
+LIBRARY_PROBE_PATH="{{ media_stack_health_library_probe_path | default('/srv/media/plex/Movies') }}"
+
+mkdir -p "$STATE_DIR"
+
+problems=()
+
+add_problem() {
+  problems+=("$1")
+}
+
+expected_fstype_matches() {
+  local actual="$1"
+  local expected="$2"
+
+  case "$expected" in
+    "")
+      return 0
+      ;;
+    nfs)
+      [[ "$actual" == "nfs" || "$actual" == "nfs4" ]]
+      ;;
+    *)
+      [[ "$actual" == "$expected" ]]
+      ;;
+  esac
+}
+
+check_mount() {
+  local path="$1"
+  local expected_fstype="$2"
+  local require_path="$3"
+  local fstype
+  local source
+
+  if ! findmnt -rn --target "$path" >/dev/null 2>&1; then
+    add_problem "$path is not mounted"
+    return
+  fi
+
+  fstype="$(findmnt -rn --target "$path" -o FSTYPE 2>/dev/null | head -n1 || true)"
+  source="$(findmnt -rn --target "$path" -o SOURCE 2>/dev/null | head -n1 || true)"
+
+  if ! expected_fstype_matches "$fstype" "$expected_fstype"; then
+    add_problem "$path has fstype ${fstype:-unknown} from ${source:-unknown}, expected $expected_fstype"
+  fi
+
+  if [[ -n "$require_path" && ! -e "$require_path" ]]; then
+    add_problem "$path is mounted but required path is missing: $require_path"
+  fi
+}
+
+check_library_probe() {
+  local path="$1"
+
+  if [[ -z "$path" ]]; then
+    return
+  fi
+  if [[ ! -d "$path" ]]; then
+    add_problem "media library probe path is missing: $path"
+    return
+  fi
+  if ! find "$path" -mindepth 1 -maxdepth 1 -type d -print -quit 2>/dev/null | grep -q .; then
+    add_problem "media library probe path has no visible library directories: $path"
+  fi
+}
+
+check_container() {
+  local container="$1"
+  local state
+  local health
+
+  if ! docker inspect "$container" >/dev/null 2>&1; then
+    add_problem "$container container is missing"
+    return
+  fi
+
+  state="$(docker inspect --format {% raw %}'{{.State.Status}}'{% endraw %} "$container" 2>/dev/null || true)"
+  if [[ "$state" != "running" ]]; then
+    add_problem "$container container state is ${state:-unknown}"
+    return
+  fi
+
+  health="$(docker inspect --format {% raw %}'{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}'{% endraw %} "$container" 2>/dev/null || true)"
+  case "$health" in
+    healthy|none)
+      ;;
+    starting)
+      add_problem "$container healthcheck is still starting"
+      ;;
+    *)
+      add_problem "$container healthcheck is ${health:-unknown}"
+      ;;
+  esac
+}
+
+check_http() {
+  local name="$1"
+  local url="$2"
+  local code
+
+  code="$(curl -sS -o /dev/null -w '%{http_code}' --connect-timeout 3 --max-time 8 "$url" 2>/dev/null || true)"
+  case "$code" in
+    2*|3*|401|403)
+      ;;
+    *)
+      add_problem "$name endpoint returned HTTP ${code:-000}: $url"
+      ;;
+  esac
+}
+
+check_qbit_port_sync() {
+  local required
+  local gluetun_port
+  local cookie_file
+  local login_body
+  local login_http_code
+  local login_response
+  local prefs
+  local qbit_port
+
+  if [[ ! -r "$QBIT_ENV_FILE" ]]; then
+    add_problem "qBittorrent port-sync env is not readable: $QBIT_ENV_FILE"
+    return
+  fi
+
+  # shellcheck disable=SC1090
+  . "$QBIT_ENV_FILE"
+
+  for required in PORT_FILE QBIT_API QBIT_USER QBIT_PASS; do
+    if [[ -z "${!required:-}" ]]; then
+      add_problem "qBittorrent port-sync env is missing $required"
+      return
+    fi
+  done
+
+  if [[ ! -r "$PORT_FILE" ]]; then
+    add_problem "Gluetun forwarded-port file is not readable: $PORT_FILE"
+    return
+  fi
+
+  gluetun_port="$(tr -d '[:space:]' < "$PORT_FILE")"
+  if [[ -z "$gluetun_port" || ! "$gluetun_port" =~ ^[0-9]+$ ]]; then
+    add_problem "Gluetun forwarded-port file has invalid value"
+    return
+  fi
+
+  cookie_file="$(mktemp)"
+  login_body="$(mktemp)"
+  trap 'rm -f "$cookie_file" "$login_body"' RETURN
+
+  login_http_code="$(curl -sS --connect-timeout 5 --max-time 10 \
+    -o "$login_body" -w "%{http_code}" \
+    -c "$cookie_file" -b "$cookie_file" \
+    --data-urlencode "username=$QBIT_USER" \
+    --data-urlencode "password=$QBIT_PASS" \
+    "$QBIT_API/auth/login" 2>/dev/null || true)"
+  login_response="$(cat "$login_body")"
+
+  if [[ "$login_response" != "Ok." && "$login_http_code" != "204" ]]; then
+    add_problem "qBittorrent API login failed with HTTP ${login_http_code:-000}"
+    return
+  fi
+
+  prefs="$(curl -sS --max-time 10 -b "$cookie_file" "$QBIT_API/app/preferences" 2>/dev/null || true)"
+  qbit_port="$(printf '%s' "$prefs" | sed -n 's/.*"listen_port":[[:space:]]*\([0-9][0-9]*\).*/\1/p' | head -n1)"
+
+  if [[ -z "$qbit_port" ]]; then
+    add_problem "could not read qBittorrent listen_port from API"
+    return
+  fi
+
+  if [[ "$gluetun_port" != "$qbit_port" ]]; then
+    add_problem "qBittorrent listen_port is $qbit_port but Gluetun forwarded port is $gluetun_port"
+  fi
+}
+
+check_hardlinks() {
+  local container="$1"
+  local source_dir="$2"
+  local target_dir="$3"
+  local output
+  local src_line
+  local dst_line
+  local src_dev
+  local src_inode
+  local src_links
+  local dst_dev
+  local dst_inode
+  local dst_links
+
+  if ! docker inspect "$container" >/dev/null 2>&1; then
+    add_problem "hardlink test container is missing: $container"
+    return
+  fi
+
+  output="$(docker exec --user 1000:1000 "$container" sh -c '
+    set -eu
+    source_dir="$1"
+    target_dir="$2"
+    if [ ! -d "$source_dir" ]; then
+      echo "missing source directory: $source_dir" >&2
+      exit 10
+    fi
+    if [ ! -d "$target_dir" ]; then
+      echo "missing target directory: $target_dir" >&2
+      exit 11
+    fi
+    file=".media-stack-health-$(date +%s)-$$"
+    trap "rm -f \"$source_dir/$file\" \"$target_dir/$file\"" EXIT
+    printf health > "$source_dir/$file"
+    ln "$source_dir/$file" "$target_dir/$file"
+    stat -c "%d %i %h" "$source_dir/$file" "$target_dir/$file"
+  ' sh "$source_dir" "$target_dir" 2>&1)" || {
+    add_problem "hardlink test failed between $source_dir and $target_dir: $(printf '%s' "$output" | head -n1)"
+    return
+  }
+
+  src_line="$(printf '%s\n' "$output" | sed -n '1p')"
+  dst_line="$(printf '%s\n' "$output" | sed -n '2p')"
+  read -r src_dev src_inode src_links <<< "$src_line"
+  read -r dst_dev dst_inode dst_links <<< "$dst_line"
+
+  if [[ -z "${src_dev:-}" || -z "${dst_dev:-}" ]]; then
+    add_problem "hardlink test returned incomplete stat output"
+    return
+  fi
+
+  if [[ "$src_dev" != "$dst_dev" || "$src_inode" != "$dst_inode" || "$src_links" -lt 2 || "$dst_links" -lt 2 ]]; then
+    add_problem "hardlink test did not produce same device/inode/link-count across $source_dir and $target_dir"
+  fi
+}
+
+{% for mount in media_stack_health_mounts | default(media_stack_health_default_mounts) %}
+check_mount {{ mount.path | quote }} {{ mount.fstype | default('') | quote }} {{ mount.require_path | default('') | quote }}
+{% endfor %}
+
+check_library_probe "$LIBRARY_PROBE_PATH"
+
+{% for container in media_stack_health_containers | default(media_stack_health_default_containers) %}
+check_container {{ container | quote }}
+{% endfor %}
+
+{% for endpoint in media_stack_health_endpoints | default(media_stack_health_default_endpoints) %}
+check_http {{ endpoint.name | quote }} {{ endpoint.url | quote }}
+{% endfor %}
+
+check_qbit_port_sync
+check_hardlinks "$HARDLINK_CONTAINER" "$HARDLINK_SOURCE_DIR" "$HARDLINK_TARGET_DIR"
+
+if [[ "${#problems[@]}" -eq 0 ]]; then
+  rm -f "$STATE_DIR/last-alert"
+  printf 'OK: media-stack health checks passed\n'
+  exit 0
+fi
+
+body="$(printf '%s\n' "${problems[@]}")"
+printf 'CRITICAL: media-stack health check failed\n%s\n' "$body" >&2
+
+if [[ "$ALERT_MODE" -eq 1 ]]; then
+  now="$(date +%s)"
+  last_alert=0
+  if [[ -f "$STATE_DIR/last-alert" ]]; then
+    last_alert="$(cat "$STATE_DIR/last-alert" 2>/dev/null || echo 0)"
+  fi
+
+  if (( now - last_alert >= ALERT_COOLDOWN_SECONDS )); then
+    if curl -sf -o /dev/null \
+      -X POST "${APPRISE_ENDPOINT}/notify/${APPRISE_TOKEN}" \
+      --form-string "title=[Media Stack] ${HOSTNAME}: health check failed" \
+      --form-string "body=${body}" \
+      --form-string "tag=${APPRISE_TAGS}" \
+      --form-string "type=warning" \
+      --max-time 30 \
+      --retry 3 \
+      --retry-delay 5; then
+      printf '%s\n' "$now" > "$STATE_DIR/last-alert"
+    fi
+  fi
+fi
+
+exit 2

@@ -14,6 +14,7 @@
 #
 # Usage:
 #   ansible-playbook playbooks/user-separation.yml
+#   ansible-playbook playbooks/user-separation.yml --tags secure-johnny -e user_separation_secure_johnny=true
 # =============================================================================
 
 # ============================================================
@@ -29,6 +30,14 @@
     automation_user: ansible
 
   tasks:
+    - name: Check whether ansible automation user already exists
+      ansible.builtin.command: "getent passwd {{ automation_user }}"
+      register: automation_user_getent
+      changed_when: false
+      failed_when: automation_user_getent.rc not in [0, 2]
+      check_mode: false
+      tags: [ansible-user]
+
     - name: Create ansible automation user
       ansible.builtin.user:
         name: "{{ automation_user }}"
@@ -45,6 +54,7 @@
         owner: "{{ automation_user }}"
         group: "{{ automation_user }}"
         mode: "0700"
+      when: not ansible_check_mode or automation_user_getent.rc == 0
       tags: [ansible-user]
 
     - name: Deploy Ansible SSH key to ansible user
@@ -52,6 +62,7 @@
         user: "{{ automation_user }}"
         key: "{{ lookup('file', ansible_pubkey_path) }}"
         state: present
+      when: not ansible_check_mode or automation_user_getent.rc == 0
       tags: [ansible-user]
 
     - name: Configure passwordless sudo for ansible user
@@ -298,7 +309,8 @@
 # which requires a password. Ansible no longer connects as johnny
 # (except local orchestrator + macbook-pro, both use vault password).
 #
-# Run with: ansible-playbook playbooks/user-separation.yml --tags secure-johnny
+# Run with:
+#   ansible-playbook playbooks/user-separation.yml --tags secure-johnny -e user_separation_secure_johnny=true
 # ============================================================
 - name: "Phase 2: Secure johnny's sudo"
   hosts: linux_hosts
@@ -307,18 +319,21 @@
 
   vars:
     ansible_pubkey_path: "~/.ssh/ansible_ed25519.pub"
+    user_separation_secure_johnny: false
 
   tasks:
     - name: Remove NOPASSWD sudoers for johnny
       ansible.builtin.file:
         path: "/etc/sudoers.d/ansible-johnny"
         state: absent
+      when: user_separation_secure_johnny | bool
       tags: [secure-johnny]
 
     - name: Remove legacy ansible-tty sudoers if present
       ansible.builtin.file:
         path: "/etc/sudoers.d/ansible-tty"
         state: absent
+      when: user_separation_secure_johnny | bool
       tags: [secure-johnny]
 
     - name: Remove Ansible automation key from johnny's authorized_keys
@@ -326,4 +341,5 @@
         user: johnny
         key: "{{ lookup('file', ansible_pubkey_path) }}"
         state: absent
+      when: user_separation_secure_johnny | bool
       tags: [secure-johnny]

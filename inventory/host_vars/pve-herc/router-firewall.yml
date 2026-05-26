@@ -1,0 +1,29 @@
+# =============================================================================
+# pve-herc - Room Router/Firewall Foundation
+# =============================================================================
+
+router_firewall_enabled: true
+
+# Physical mapping verified on 2026-05-26:
+# - enp3s0 is the currently connected Realtek NIC on vmbr0
+#   (likely the chassis label "eth0")
+# - enp2s0 is the currently unused Realtek NIC
+#   (likely the chassis label "eth1")
+router_firewall_upstream_bridge: vmbr0
+router_firewall_upstream_interface: enp3s0
+router_firewall_lan_bridge: vmbr1
+router_firewall_lan_interface: enp2s0
+
+# First router/firewall phase: keep Spectrum as the upstream router and put only
+# the Compute Corner switch behind this LAN bridge.
+router_firewall_room_subnet: 192.168.20.0/24
+router_firewall_room_gateway: 192.168.20.1
+
+# Candidate VM defaults. The first appliance should stay lightweight because
+# pve-herc also runs PBS and freepbx-vm on a 4-core, 8 GB host.
+router_firewall_vm_id: 160
+router_firewall_vm_name: herc-router
+router_firewall_vm_memory_mb: 2048
+router_firewall_vm_cores: 1
+router_firewall_vm_disk_size: 16G
+router_firewall_vm_storage: local-zfs

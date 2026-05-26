@@ -212,6 +212,14 @@
         group: "{{ plex_appliance_user }}"
         mode: "0750"
 
+    - name: Create Plex appliance log directory
+      ansible.builtin.file:
+        path: "{{ plex_appliance_corrupt_media_log_path | default('/var/log/plex-appliance/corrupt-media.jsonl') | dirname }}"
+        state: directory
+        owner: "{{ plex_appliance_user }}"
+        group: "{{ plex_appliance_user }}"
+        mode: "0755"
+
     - name: Deploy Plex appliance environment
       ansible.builtin.template:
         src: ../templates/plex-appliance.env.j2
@@ -234,6 +242,14 @@
       notify:
         - Restart plex appliance
         - Restart Plex HDMI VT watcher
+
+    - name: Deploy Plex appliance corrupt media report
+      ansible.builtin.template:
+        src: ../templates/plex-appliance-corrupt-media-report.py.j2
+        dest: /usr/local/bin/plex-appliance-corrupt-media-report
+        owner: root
+        group: root
+        mode: "0755"
 
     - name: Deploy Plex HDMI watcher
       ansible.builtin.template:

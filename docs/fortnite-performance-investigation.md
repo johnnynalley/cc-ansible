@@ -122,6 +122,8 @@ Do not manually delete paks. Use Epic Games Launcher options for this setting.
 
 Johnny's current plan is to hold the Ryzen 9 3900X until a possible AM4 X3D upgrade is available and affordable. Rumors as of 2026-05-24 say AMD may re-release the Ryzen 7 5800X3D as an AM4 10th Anniversary Edition around Q2 2026, with early retailer sightings around the low-$300 range. Treat this as a rumor until AMD or retail availability is confirmed.
 
+As of 2026-05-25, Astra created OpenClaw cron job `aeebfe19-a1b8-4f12-8f74-9406c29c5aab` (`AMD 5800X3D Re-release Watch`) to check every 6 hours and alert Johnny in `#astra` only for material updates: official AMD confirmation, US retailer stock/preorder, credible launch/MSRP/regional-limit news, meaningful price movement, or debunk/cancellation. Baseline state is stored in `/home/johnny/.openclaw/workspace/memory/5800x3d-watch.json`. Baseline evidence remains the same rumor cluster: Indian 99deals.in listing around ~$310 / ₹30,000 and press coverage from Tom's Hardware, TechPowerUp, VideoCardz, etc.; no official AMD or US retailer availability was confirmed at setup time.
+
 If the anniversary 5800X3D is unavailable, scalped, or overpriced, the practical fallback is a Ryzen 7 5700X3D or used 5800X3D. For Fortnite and other cache-sensitive games, 5700X3D/5800X3D are much better upgrade targets from a 3900X than a 5900X. A 5900X adds cores but does not solve the cache/game-thread limitation that the captures are pointing at.
 
 

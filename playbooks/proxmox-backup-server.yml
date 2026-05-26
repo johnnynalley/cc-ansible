@@ -42,8 +42,8 @@
     - name: Download Proxmox release key
       ansible.builtin.shell: |
         set -euo pipefail
-        url="https://enterprise.proxmox.com/debian/proxmox-release-{{ ansible_distribution_release }}.gpg"
-        dest="/usr/share/keyrings/proxmox-release-{{ ansible_distribution_release }}.gpg"
+        url="https://enterprise.proxmox.com/debian/proxmox-release-{{ ansible_facts.distribution_release }}.gpg"
+        dest="/usr/share/keyrings/proxmox-release-{{ ansible_facts.distribution_release }}.gpg"
         tmp="$(mktemp)"
         curl -fsSL "$url" -o "$tmp"
         if [ ! -f "$dest" ] || ! cmp -s "$tmp" "$dest"; then
@@ -59,7 +59,7 @@
     - name: Add PBS no-subscription repository
       ansible.builtin.copy:
         content: |
-          deb [signed-by=/usr/share/keyrings/proxmox-release-{{ ansible_distribution_release }}.gpg] http://download.proxmox.com/debian/pbs {{ ansible_distribution_release }} pbs-no-subscription
+          deb [signed-by=/usr/share/keyrings/proxmox-release-{{ ansible_facts.distribution_release }}.gpg] http://download.proxmox.com/debian/pbs {{ ansible_facts.distribution_release }} pbs-no-subscription
         dest: /etc/apt/sources.list.d/pbs-no-subscription.list
         mode: "0644"
       register: pbs_repo_added

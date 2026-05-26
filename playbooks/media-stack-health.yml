@@ -1,0 +1,159 @@
+# =============================================================================
+# Media Stack Health Playbook - docker-vm media automation sentinel
+# =============================================================================
+# Usage:
+#   ansible-playbook playbooks/media-stack-health.yml
+#   ansible-playbook playbooks/media-stack-health.yml --check --diff
+# =============================================================================
+
+- name: Configure media stack health monitor
+  hosts: docker-vm
+  become: true
+  gather_facts: true
+
+  vars:
+    media_stack_health_default_mounts:
+      - path: /srv/media
+        fstype: nfs
+        require_path: /srv/media/plex/Movies
+      - path: /srv/incomplete_downloads
+        fstype: nfs
+      - path: /srv/archive
+        fstype: nfs
+    media_stack_health_default_containers:
+      - sonarr
+      - radarr
+      - prowlarr
+      - bazarr
+      - sabnzbd
+      - recyclarr
+      - gluetun
+      - qbittorrent
+      - byparr
+      - profilarr
+      - profilarr-parser
+    media_stack_health_default_endpoints:
+      - name: sonarr
+        url: http://127.0.0.1:8989/ping
+      - name: radarr
+        url: http://127.0.0.1:7878/ping
+      - name: prowlarr
+        url: http://127.0.0.1:9696/ping
+      - name: bazarr
+        url: http://127.0.0.1:6767/
+      - name: sabnzbd
+        url: http://127.0.0.1:8080/api?mode=version
+      - name: qbittorrent
+        url: http://127.0.0.1:8085/
+      - name: byparr
+        url: http://127.0.0.1:8191/health
+      - name: profilarr
+        url: http://127.0.0.1:6868/
+
+  handlers:
+    - name: Reload systemd
+      ansible.builtin.systemd:
+        daemon_reload: true
+
+  tasks:
+    - name: Stop and disable media-stack-health timer when disabled
+      ansible.builtin.systemd:
+        name: media-stack-health.timer
+        enabled: false
+        state: stopped
+        daemon_reload: true
+      when: not (media_stack_health_enabled | default(false))
+      failed_when: false
+
+    - name: Stop media-stack-health service when disabled
+      ansible.builtin.systemd:
+        name: media-stack-health.service
+        state: stopped
+      when: not (media_stack_health_enabled | default(false))
+      failed_when: false
+
+    - name: Skip hosts without media-stack-health enabled
+      ansible.builtin.meta: end_host
+      when: not (media_stack_health_enabled | default(false))
+
+    - name: Ensure media-stack-health dependencies are installed
+      ansible.builtin.apt:
+        name:
+          - curl
+        state: present
+        update_cache: true
+        cache_valid_time: 3600
+      when: ansible_facts.os_family == "Debian"
+
+    - name: Create media-stack-health state directory
+      ansible.builtin.file:
+        path: "{{ media_stack_health_state_dir | default('/var/lib/media-stack-health') }}"
+        state: directory
+        owner: root
+        group: root
+        mode: "0755"
+
+    - name: Deploy media-stack-health script
+      ansible.builtin.template:
+        src: ../templates/media-stack-health.sh.j2
+        dest: /usr/local/sbin/media-stack-health
+        owner: root
+        group: root
+        mode: "0755"
+
+    - name: Create media-stack-health.service
+      ansible.builtin.copy:
+        dest: /etc/systemd/system/media-stack-health.service
+        owner: root
+        group: root
+        mode: "0644"
+        content: |
+          [Unit]
+          Description=Media stack health check
+          After=network-online.target docker.service
+          Wants=network-online.target
+          Requires=docker.service
+
+          [Service]
+          Type=oneshot
+          ExecStart=/usr/local/sbin/media-stack-health
+          StandardOutput=journal
+          StandardError=journal
+          TimeoutStartSec=120
+      notify: Reload systemd
+
+    - name: Create media-stack-health.timer
+      ansible.builtin.copy:
+        dest: /etc/systemd/system/media-stack-health.timer
+        owner: root
+        group: root
+        mode: "0644"
+        content: |
+          [Unit]
+          Description=Run media stack health check periodically
+
+          [Timer]
+          OnBootSec={{ media_stack_health_interval | default('5min') }}
+          OnUnitActiveSec={{ media_stack_health_interval | default('5min') }}
+          AccuracySec={{ media_stack_health_accuracy | default('30s') }}
+
+          [Install]
+          WantedBy=timers.target
+      notify: Reload systemd
+
+    - name: Flush systemd reload before validation
+      ansible.builtin.meta: flush_handlers
+
+    - name: Validate media-stack-health command
+      ansible.builtin.command: /usr/local/sbin/media-stack-health --no-alert
+      register: media_stack_health_validation
+      changed_when: false
+      when: not ansible_check_mode
+
+    - name: Enable and start media-stack-health timer
+      ansible.builtin.systemd:
+        name: media-stack-health.timer
+        enabled: true
+        state: started
+        daemon_reload: true
+      when: not ansible_check_mode

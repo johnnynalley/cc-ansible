@@ -13,9 +13,17 @@
   ansible.builtin.import_playbook: playbooks/sysctl.yml
   tags: [sysctl, kernel]
 
+- name: Configure separated automation and operational users
+  ansible.builtin.import_playbook: playbooks/user-separation.yml
+  tags: [users, user-separation]
+
 - name: Install baseline packages
   ansible.builtin.import_playbook: playbooks/packages.yml
   tags: [packages]
+
+- name: Configure FreePBX/Asterisk guardrails
+  ansible.builtin.import_playbook: playbooks/freepbx.yml
+  tags: [freepbx, asterisk, logging]
 
 - name: Configure Codex CLI
   ansible.builtin.import_playbook: playbooks/codex-cli.yml
@@ -140,6 +148,10 @@
 - name: Configure Sonarr transaction monitor
   ansible.builtin.import_playbook: playbooks/sonarr-transaction-monitor.yml
   tags: [media-release, sonarr-monitor]
+
+- name: Configure media stack health monitor
+  ansible.builtin.import_playbook: playbooks/media-stack-health.yml
+  tags: [media-stack, media-health, monitoring]
 
 - name: Configure stream relay
   ansible.builtin.import_playbook: playbooks/stream-relay.yml

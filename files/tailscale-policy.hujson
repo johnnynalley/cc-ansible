@@ -95,9 +95,10 @@
 		{
 			// OpenClaw now runs on orchestrator/controller hosts such as t14s.
 			// Allow its dbc operational account to run narrow health checks on
-			// managed servers and VMs without re-tagging stable devices.
+			// managed hosts, including Plex appliances that are still on the
+			// default tagged-devices tag.
 			"src":    ["tag:orchestrators"],
-			"dst":    ["tag:vms-lxcs", "tag:servers"],
+			"dst":    ["tag:vms-lxcs", "tag:servers", "tag:tagged-devices"],
 			"users":  ["dbc"],
 			"action": "accept",
 		},
