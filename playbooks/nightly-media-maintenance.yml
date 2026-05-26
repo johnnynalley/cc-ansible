@@ -256,10 +256,6 @@
         hostvars[groups['nas_server'][0]].nightly_media_maintenance_public_key
         is not defined
 
-    - name: End play when Profilarr nightly endpoint is disabled
-      ansible.builtin.meta: end_host
-      when: not (nightly_media_maintenance_profilarr_endpoint_enabled | default(false))
-
     - name: Deploy Profilarr nightly upgrade helper
       ansible.builtin.copy:
         src: ../scripts/profilarr_nightly_upgrade.py
@@ -267,6 +263,7 @@
         owner: root
         group: root
         mode: "0755"
+      when: nightly_media_maintenance_profilarr_endpoint_enabled | default(false)
 
     - name: Authorize nightly media maintenance key for Profilarr helper
       ansible.posix.authorized_key:
@@ -274,3 +271,17 @@
         key: "{{ hostvars[groups['nas_server'][0]].nightly_media_maintenance_public_key }}"
         key_options: 'command="/usr/local/sbin/profilarr-nightly-upgrade",no-agent-forwarding,no-X11-forwarding,no-port-forwarding,no-pty'
         state: present
+      when: nightly_media_maintenance_profilarr_endpoint_enabled | default(false)
+
+    - name: Remove disabled Profilarr nightly upgrade helper
+      ansible.builtin.file:
+        path: /usr/local/sbin/profilarr-nightly-upgrade
+        state: absent
+      when: not (nightly_media_maintenance_profilarr_endpoint_enabled | default(false))
+
+    - name: Remove disabled nightly media maintenance key
+      ansible.posix.authorized_key:
+        user: "{{ nightly_media_maintenance_profilarr_ssh_user | default('johnny') }}"
+        key: "{{ hostvars[groups['nas_server'][0]].nightly_media_maintenance_public_key }}"
+        state: absent
+      when: not (nightly_media_maintenance_profilarr_endpoint_enabled | default(false))

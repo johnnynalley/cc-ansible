@@ -1,21 +1,9 @@
 # =============================================================================
-# media-vm - MergerFS Balance Coordination
+# media-vm - Legacy MergerFS Balance Coordination Cleanup
 # =============================================================================
 
-mergerfs_balance_media_stack_control_enabled: true
+# Arr/Profilarr pause-resume control moved to docker-vm with the media stack.
+# Keep this disabled so the mergerfs playbook removes the old forced-command
+# endpoint from media-vm.
+mergerfs_balance_media_stack_control_enabled: false
 mergerfs_balance_media_stack_ssh_user: johnny
-mergerfs_balance_media_stack_compose_targets:
-  - path: /opt/media-stack
-    services:
-      - sonarr
-      - radarr
-      - prowlarr
-      - bazarr
-      - recyclarr
-      - byparr
-      - qbittorrent
-      - sabnzbd
-  - path: /opt/profilarr
-    services:
-      - profilarr
-      - profilarr-parser

@@ -242,7 +242,7 @@
         - not ansible_check_mode
 
 - name: Configure mergerfs-balance media stack control endpoint
-  hosts: gluetun_hosts
+  hosts: gluetun_hosts:media-vm
   become: true
   gather_facts: false
 
@@ -269,3 +269,16 @@
         key_options: 'command="/usr/local/sbin/mergerfs-balance-media-stack-control",no-agent-forwarding,no-X11-forwarding,no-port-forwarding,no-pty'
         state: present
       when: mergerfs_balance_media_stack_control_enabled | default(false)
+
+    - name: Remove disabled mergerfs-balance media stack control key
+      ansible.posix.authorized_key:
+        user: "{{ mergerfs_balance_media_stack_ssh_user | default('johnny') }}"
+        key: "{{ hostvars[groups['nas_server'][0]].mergerfs_balance_media_stack_public_key }}"
+        state: absent
+      when: not (mergerfs_balance_media_stack_control_enabled | default(false))
+
+    - name: Remove disabled mergerfs-balance media stack control wrapper
+      ansible.builtin.file:
+        path: /usr/local/sbin/mergerfs-balance-media-stack-control
+        state: absent
+      when: not (mergerfs_balance_media_stack_control_enabled | default(false))
