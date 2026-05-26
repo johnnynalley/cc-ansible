@@ -13,8 +13,8 @@ proxmox_lxc_hardware:
 proxmox_vm_hardware:
   - name: docker-vm
     vmid: 110
-    memory: 10240
-    balloon: 8192
+    memory: 12288
+    balloon: 10240
     agent: true
     onboot: true
 
