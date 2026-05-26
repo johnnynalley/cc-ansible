@@ -33,7 +33,7 @@
 
     - name: Deploy nightly media maintenance coordinator
       ansible.builtin.copy:
-        src: ../scripts/nightly-media-maintenance
+        src: ../scripts/media-maintenance/nightly-media-maintenance
         dest: /usr/local/bin/nightly-media-maintenance
         owner: root
         group: root
@@ -258,7 +258,7 @@
 
     - name: Deploy Profilarr nightly upgrade helper
       ansible.builtin.copy:
-        src: ../scripts/profilarr_nightly_upgrade.py
+        src: ../scripts/media-release/profilarr_nightly_upgrade.py
         dest: /usr/local/sbin/profilarr-nightly-upgrade
         owner: root
         group: root

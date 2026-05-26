@@ -21,12 +21,12 @@ a separate policy because dual audio is the highest priority there.
   - Sonarr: `shows-anime-profilarr-test` id `9`
   - Radarr: `movies-anime-profilarr-test` id `8`
 - Release metadata stamper: `playbooks/media-release-stamper.yml`
-- Sonarr grab/import forensics: `scripts/sonarr_grab_forensics.py`
-- Sonarr transaction audit report: `scripts/sonarr_transaction_audit.py`
+- Sonarr grab/import forensics: `scripts/media-release/sonarr_grab_forensics.py`
+- Sonarr transaction audit report: `scripts/media-release/sonarr_transaction_audit.py`
 - Sonarr targeted queue blocklist/removal helper:
-  `scripts/sonarr_blocklist_queue_matches.py`
+  `scripts/media-release/sonarr_blocklist_queue_matches.py`
 - Sonarr JoJo Stardust arc-local repair helper:
-  `scripts/sonarr_jojo_stardust_s01_repair.py`
+  `scripts/media-release/sonarr_jojo_stardust_s01_repair.py`
 - Sonarr transaction monitor: `sonarr-transaction-monitor.timer` writes
   `/var/log/sonarr-transaction-monitor/events.jsonl`, rotated daily
 - Sonarr recycle bin: disabled
@@ -97,22 +97,22 @@ counts after the selective Profilarr/Dumpstarr CF staging pass and local source
 rank are Sonarr `84` and Radarr `74`; the working limit for staging checks is
 `100`.
 
-The audit script `scripts/arr_release_policy_audit.py` checks current CF counts,
+The audit script `scripts/media-release/arr_release_policy_audit.py` checks current CF counts,
 profile scores, queue status, and unused/all-zero CFs. On 2026-05-22 it found no
 truly unused Sonarr or Radarr custom formats. All-zero CFs were still referenced
 by profiles, and several are intentionally used for rename tags or DA helper
 matching, so they were not deleted.
 
 The read-only live expectation checkers are
-`scripts/sonarr_release_expectation_check.py` and
-`scripts/radarr_release_expectation_check.py`. Run them on `docker-vm` through
+`scripts/media-release/sonarr_release_expectation_check.py` and
+`scripts/media-release/radarr_release_expectation_check.py`. Run them on `docker-vm` through
 Ansible when changing anime release policy. They verify the live anime profile
 scores, confirm enabled anime qualities are in one native quality group, check
 rename-format preservation of audio languages and video codec, check DA/x265
 title-side custom-format matching, print series/movie profile counts, and
 smoke-test the Arr parse endpoints.
 
-`scripts/sonarr_series_audit.py <series>` is the read-only per-series state
+`scripts/media-release/sonarr_series_audit.py <series>` is the read-only per-series state
 check. It summarizes monitoring, per-season file/missing counts, active queue
 items, recent series history, and active/recent commands. Use it when a manual
 series/season search appears to grab only part of a show.
@@ -124,42 +124,42 @@ is mode `0640` and rotated daily with 90 retained rotations. Keep it enabled
 while Profilarr upgrade searches are active so later reviews can compare
 grab-time, queue-time, and import/delete outcomes without relying on memory.
 
-`scripts/sonarr_transaction_audit.py` is the compact report over that monitor
+`scripts/media-release/sonarr_transaction_audit.py` is the compact report over that monitor
 log plus the live Sonarr queue. It summarizes recent history event types,
 queue-count movement, recent grabbed/imported/deleted groups, and the current
 queue's grouped classifications. Use it for periodic Profilarr review:
 
 ```bash
-ansible docker-vm --become -m script -a "scripts/sonarr_transaction_audit.py --hours 24 --limit 25"
+ansible docker-vm --become -m script -a "scripts/media-release/sonarr_transaction_audit.py --hours 24 --limit 25"
 ```
 
-`scripts/arr_stage_profilarr_test_profiles.py` snapshots live Arr policy state
+`scripts/media-release/arr_stage_profilarr_test_profiles.py` snapshots live Arr policy state
 and creates or refreshes the Profilarr test profiles by cloning the current
 anime profiles. It does not assign any series or movies to the test profiles.
 It refuses to stage if the live CF count exceeds the configured CF limit.
 
-`scripts/profilarr_state_audit.py` checks the local Profilarr SQLite database,
+`scripts/media-release/profilarr_state_audit.py` checks the local Profilarr SQLite database,
 linked PCD databases, upgrade configs, recent sync/link/upgrade jobs, and
 scheduler health. It treats queued and running jobs as active. Use it after
 Profilarr restarts or scheduled upgrade runs.
 
-`scripts/profilarr_disable_upgrade_jobs.py` disables Profilarr's scheduled
+`scripts/media-release/profilarr_disable_upgrade_jobs.py` disables Profilarr's scheduled
 Arr upgrade configs and cancels queued scheduled `arr.upgrade` jobs with a
 SQLite backup. It intentionally leaves Profilarr database auto-pull/sync
 enabled.
 
-`scripts/profilarr_sonarr_upgrade_strategy.py` updates the supported stored
+`scripts/media-release/profilarr_sonarr_upgrade_strategy.py` updates the supported stored
 settings for the Sonarr Profilarr upgrade filter without patching Profilarr
 application code. It creates a SQLite backup before live mutation. Current use:
 set the Sonarr selector to `random` so one old/problem series does not
 monopolize every scheduled run.
 
-`scripts/profilarr_candidate_audit.py` materializes the linked Profilarr PCD
+`scripts/media-release/profilarr_candidate_audit.py` materializes the linked Profilarr PCD
 repositories in memory and compares candidate CF/profile names with live
 Sonarr/Radarr. It is read-only and useful for deciding what to borrow; it does
 not sync anything to Arr.
 
-`scripts/profilarr_selective_cf_import.py` is the controlled Profilarr-to-Arr
+`scripts/media-release/profilarr_selective_cf_import.py` is the controlled Profilarr-to-Arr
 bridge. It reads Profilarr's locally synced Dictionarry/Dumpstarr PCD data,
 copies only curated custom-format definitions into Arr as `Dumpstarr ...`
 formats, and scores only the unassigned Profilarr test profiles. It does not
@@ -295,7 +295,7 @@ For future release-policy changes:
 4. Apply live changes with backups.
 5. Run Recyclarr `sync --preview` and confirm it will not undo the policy.
 6. Run Sonarr/Radarr queue/history checks for regressions. For Sonarr, use
-   `scripts/sonarr_grab_forensics.py` before any cleanup so the queue is
+   `scripts/media-release/sonarr_grab_forensics.py` before any cleanup so the queue is
    classified as valid upgrade, payload score loss, pack collateral, or client
    failure instead of just deleted after bandwidth has already been spent.
 7. Update this document and the short README summary in the same change.
@@ -346,7 +346,7 @@ Candidate material not safe to adopt blindly:
 
 Current selective import state:
 
-- Script: `scripts/profilarr_selective_cf_import.py`
+- Script: `scripts/media-release/profilarr_selective_cf_import.py`
 - Latest applied snapshot:
   `/opt/media-stack/release-policy-snapshots/20260523T063425Z-selective-profilarr-cfs`
 - Sonarr CF count: `84/100`
@@ -371,7 +371,7 @@ Current selective import state:
 Profilarr remains the upstream refresh source for these imported CFs, but
 Profilarr itself is not directly managing the copied Arr formats yet. The sync
 path is: Profilarr auto-pulls Dictionarry/Dumpstarr, then
-`scripts/profilarr_selective_cf_import.py` refreshes the selected Arr
+`scripts/media-release/profilarr_selective_cf_import.py` refreshes the selected Arr
 definitions and reapplies local scores. This preserves upstream CF-definition
 updates without accepting upstream profile scoring such as the stock x265
 penalty.
@@ -379,12 +379,12 @@ penalty.
 Before assigning any series/movie to a Profilarr-derived profile, run:
 
 ```bash
-ansible docker-vm --become -m script -a "scripts/arr_stage_profilarr_test_profiles.py --dry-run"
-ansible docker-vm -m script -a scripts/profilarr_candidate_audit.py
-ansible docker-vm --become -m script -a "scripts/profilarr_selective_cf_import.py --dry-run"
-ansible docker-vm --become -m script -a "scripts/sonarr_transaction_audit.py --hours 24 --limit 25"
-ansible docker-vm -m script -a scripts/sonarr_release_expectation_check.py
-ansible docker-vm -m script -a scripts/radarr_release_expectation_check.py
+ansible docker-vm --become -m script -a "scripts/media-release/arr_stage_profilarr_test_profiles.py --dry-run"
+ansible docker-vm -m script -a scripts/media-release/profilarr_candidate_audit.py
+ansible docker-vm --become -m script -a "scripts/media-release/profilarr_selective_cf_import.py --dry-run"
+ansible docker-vm --become -m script -a "scripts/media-release/sonarr_transaction_audit.py --hours 24 --limit 25"
+ansible docker-vm -m script -a scripts/media-release/sonarr_release_expectation_check.py
+ansible docker-vm -m script -a scripts/media-release/radarr_release_expectation_check.py
 ```
 
 Only after the candidate profile proves the same DA/x265/quality math should a
@@ -442,7 +442,7 @@ retention location. Do not let staging snapshots pile up indefinitely.
   reports `Request limit reached`, leave the indexer enabled and let Prowlarr's
   own temporary indexer-status cooldown skip it until the quota window resets.
 - A large Sonarr queue does not prove every queued episode was individually
-  accepted as an upgrade. On 2026-05-22, `scripts/sonarr_grab_diagnostics.py`
+  accepted as an upgrade. On 2026-05-22, `scripts/media-release/sonarr_grab_diagnostics.py`
   showed Bleach queue pollution from multi-episode Judas packs: one
   `056-111` pack had 56 queue rows but only one row where the queued release
   beat the current file score, while two `001-055` pack rows were entirely
@@ -468,14 +468,14 @@ retention location. Do not let staging snapshots pile up indefinitely.
   matching evidence in each eligible payload file before Sonarr imports it.
   Deleting current-better queue rows is a last cleanup step after inspection,
   not the steady-state behavior.
-- `scripts/sonarr_grab_diagnostics.py` is the queue regression check. By
+- `scripts/media-release/sonarr_grab_diagnostics.py` is the queue regression check. By
   default it is read-only. `--remove-current-better --remove-from-client`
   removes only downloads where the existing imported file has a higher current
   custom-format score than the queued item; it uses Sonarr queue deletion with
   `blocklist=false`. On 2026-05-22, after inspection, it removed 168 stale
   worse queue rows across 5 downloads. The follow-up check showed 69 remaining
   queue rows, all with `queued_better` and no `current_better` candidates.
-- `scripts/sonarr_grab_forensics.py` is the first-line read-only queue
+- `scripts/media-release/sonarr_grab_forensics.py` is the first-line read-only queue
   classifier for the same problem. It groups queue rows by download, compares
   queued vs current custom-format scores, flags likely payload score loss,
   pack collateral/mapping issues, stalled/warning downloads, and active valid
@@ -486,7 +486,7 @@ retention location. Do not let staging snapshots pile up indefinitely.
   rebooted at `20:50` and again at `20:58`. Sonarr restarted at `20:50:35` and
   `20:58:41`, leaving already-running searches orphaned/interrupted. The only
   Bleach download left active afterward was the already-grabbed S17 LGH
-  dual-audio pack. `scripts/sonarr_series_audit.py Bleach` confirmed all
+  dual-audio pack. `scripts/media-release/sonarr_series_audit.py Bleach` confirmed all
   regular seasons were monitored and 360 monitored episodes remained missing,
   so this was not a profile/monitoring choice to only grab S17. A replacement
   Bleach `SeriesSearch` was queued as Sonarr command `559238`.
@@ -515,7 +515,7 @@ retention location. Do not let staging snapshots pile up indefinitely.
   Arr blocklist action. Keep checking qBittorrent/SAB directly during large
   manual searches because Sonarr's queue API can hide client-side residue.
 - Bleach queue cleanup, 2026-05-23 UTC: during the larger Bleach search,
-  `scripts/sonarr_grab_diagnostics.py` found `[Judas] Bleach 001-055 [BD
+  `scripts/media-release/sonarr_grab_diagnostics.py` found `[Judas] Bleach 001-055 [BD
   1080p][HEVC x265 10bit][Dual-Audio][Eng-Sub]` was still present as 55 SAB
   queue rows even though the current imported files already had higher scores.
   It was removed with `--remove-current-better --remove-from-client` and no
@@ -529,7 +529,7 @@ retention location. Do not let staging snapshots pile up indefinitely.
   score `41700`. The problem was not the release title or release group; it was
   that the live `Anime Dual Audio` CF still depended on optional parsed-language
   specs, so queue/import reparses could lose DA when Sonarr only saw
-  `[Eng-Sub]`. `scripts/arr_dual_audio_title_policy.py --apply` changed Sonarr
+  `[Eng-Sub]`. `scripts/media-release/arr_dual_audio_title_policy.py --apply` changed Sonarr
   and Radarr `Anime Dual Audio` to trust explicit title markers such as
   `Dual-Audio`, `Multi-Audio`, `JA+EN`, `JP+EN`, `ZH+EN`, or `KO+EN`, and
   changed `Language - Not Original` so it does not apply when those explicit DA
@@ -567,12 +567,12 @@ retention location. Do not let staging snapshots pile up indefinitely.
   both Sonarr and Radarr containers succeeded, and Sonarr health no longer
   reported the recycle-bin error. The same pass removed 22 remaining SiQ Bleach
   single-episode queue downloads where the current imported file already had a
-  higher CF score, using `scripts/sonarr_grab_diagnostics.py --remove-current-better
+  higher CF score, using `scripts/media-release/sonarr_grab_diagnostics.py --remove-current-better
   --remove-from-client` with the default `blocklist=false`. A follow-up
   diagnostic showed 317 queue rows and no remaining current-better cleanup
   candidates.
 - Recycle bins are now disabled because preserving old replaced media consumed
-  too much mergerfs branch space during large upgrade passes. `scripts/arr_disable_recycle_bins.py`
+  too much mergerfs branch space during large upgrade passes. `scripts/media-release/arr_disable_recycle_bins.py`
   backed up the live media-management configs to
   `/opt/media-stack/arr-policy-backups/20260523T065044Z-recycle-bin-disabled/`,
   then set Sonarr/Radarr `recycleBin` to empty and `recycleBinCleanupDays` to
@@ -587,7 +587,7 @@ retention location. Do not let staging snapshots pile up indefinitely.
   two Bleach BluRay box downloads, one lower-scored Bleach dual-audio download,
   six stalled xDTK Bleach downloads, and one Slime download. Removal used
   `removeFromClient=true` and `blocklist=false`. A final
-  `scripts/sonarr_grab_diagnostics.py` pass showed 194 Sonarr queue rows with
+  `scripts/media-release/sonarr_grab_diagnostics.py` pass showed 194 Sonarr queue rows with
   `current_better=0` on every remaining group. Radarr had one completed
   non-upgrade queue item, `Straume.2024.1080p.BluRay.DD+7.1.x264-playHD`,
   removed with `removeFromClient=true` and `blocklist=false`; the final Radarr
@@ -596,7 +596,7 @@ retention location. Do not let staging snapshots pile up indefinitely.
   episodes replaced existing LGH DA Bluray 1080p x264 episodes because Web Tier
   01 added `+600` while Bluray had no local source score. This was a scoring
   hole, not a DA-detection failure: the replacement titles had `[EN+JA]` and
-  matched `Anime Dual Audio`. `scripts/arr_anime_source_rank_policy.py --apply`
+  matched `Anime Dual Audio`. `scripts/media-release/arr_anime_source_rank_policy.py --apply`
   created `Local Anime Source Rank - Bluray`, scored it `+1500` in the Sonarr
   and Radarr anime production/test profiles, and raised the anime cutoffs to
   `144900`. Backups are
@@ -627,14 +627,14 @@ retention location. Do not let staging snapshots pile up indefinitely.
   said `S01`. Do not solve this with a broad custom format, because legitimate
   Stardust Crusaders releases must remain eligible when they are correctly
   labeled as Season 2. The chosen fix was to blocklist only that known bad
-  source-title family. `scripts/sonarr_jojo_stardust_s01_repair.py` added 49
+  source-title family. `scripts/media-release/sonarr_jojo_stardust_s01_repair.py` added 49
   matching Sonarr blocklist rows via the local SQLite database after Sonarr's
   blocklist API returned `405` for this insert path, deleted the confirmed wrong
   Season 1 imports for S01E23/S01E24, and queued fresh Season 1/2 searches.
   Existing bad queue rows had to be cleaned separately because adding blocklist
   entries does not purge already-tracked downloads. Direct SAB history cleanup
   handled the first stale completed jobs, then
-  `scripts/sonarr_blocklist_queue_matches.py JoJo --apply
+  `scripts/media-release/sonarr_blocklist_queue_matches.py JoJo --apply
   --no-remove-from-client --no-blocklist` removed the remaining stale Sonarr
   queue records after inspection. Final verification showed
   `desired_missing_blocklist: 0`, `existing_matching_blocklist: 49`,
@@ -884,7 +884,7 @@ Current deployed state on 2026-05-22:
   scheduling disabled, queues explicit `arr.upgrade` jobs during midnight-7 AM
   windows when no balance job is pending, and reserves the whole night for
   storage if any queued mergerfs balance job exists.
-- First `scripts/sonarr_transaction_audit.py --hours 2 --limit 8` run after
+- First `scripts/media-release/sonarr_transaction_audit.py --hours 2 --limit 8` run after
   monitor deployment skipped `10000` bootstrap history records and showed `11`
   real post-monitor events: `grabbed=10`, `downloadFolderImported=1`. The live
   queue was `203` records across `59` download groups with no

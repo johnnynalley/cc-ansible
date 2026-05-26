@@ -53,7 +53,7 @@ bin/windows-gaming-benchmark fetch --capture-dir 'C:\Users\jn\AppData\Local\Wind
 Analyze after unzipping locally:
 
 ```bash
-python3 scripts/analyze-gaming-capture.py /tmp/fortnite-match-highres-off-lobby-to-game
+python3 scripts/gaming/analyze-gaming-capture.py /tmp/fortnite-match-highres-off-lobby-to-game
 ```
 
 ## A/B Test Options
@@ -104,7 +104,7 @@ The capture script writes:
 ## Notes
 
 - Use markers aggressively. Marker names are cheap and make later analysis much cleaner.
-- Windows-side `Analyze` can be slow on large PresentMon CSVs. Prefer fetching and running `scripts/analyze-gaming-capture.py` locally.
+- Windows-side `Analyze` can be slow on large PresentMon CSVs. Prefer fetching and running `scripts/gaming/analyze-gaming-capture.py` locally.
 - If the wrapper reports `SSH port 22 is not reachable`, fix Windows SSH reachability before treating status/fetch results as current.
 
 ## SSH Recovery

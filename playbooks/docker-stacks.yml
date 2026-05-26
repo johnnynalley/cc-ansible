@@ -170,7 +170,7 @@
       changed_when: false
 
     - name: Detect per-service image changes (build stacks)
-      ansible.builtin.script: "{{ playbook_dir }}/../scripts/docker-stack-diff --check-major {{ item.item.path }}"
+      ansible.builtin.script: "{{ playbook_dir }}/../scripts/docker/docker-stack-diff --check-major {{ item.item.path }}"
       args:
         executable: /bin/bash
       loop: "{{ build_result.results | default([]) }}"
@@ -271,7 +271,7 @@
       changed_when: "'Pull complete' in pull_result.stdout or 'Downloaded newer' in pull_result.stdout"
 
     - name: Detect per-service image changes (pull-only stacks)
-      ansible.builtin.script: "{{ playbook_dir }}/../scripts/docker-stack-diff --check-major {{ item.item.path }}"
+      ansible.builtin.script: "{{ playbook_dir }}/../scripts/docker/docker-stack-diff --check-major {{ item.item.path }}"
       args:
         executable: /bin/bash
       loop: "{{ pull_result.results | default([]) }}"

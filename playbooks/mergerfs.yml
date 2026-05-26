@@ -93,7 +93,7 @@
 
     - name: Deploy mergerfs-balance script
       ansible.builtin.copy:
-        src: ../scripts/mergerfs-balance
+        src: ../scripts/storage/mergerfs-balance
         dest: /usr/local/bin/mergerfs-balance
         owner: root
         group: root

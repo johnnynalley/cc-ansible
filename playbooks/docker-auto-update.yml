@@ -40,7 +40,7 @@
 
     - name: Deploy docker-stack-diff utility
       ansible.builtin.copy:
-        src: ../scripts/docker-stack-diff
+        src: ../scripts/docker/docker-stack-diff
         dest: /usr/local/bin/docker-stack-diff
         owner: root
         group: root

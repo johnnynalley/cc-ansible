@@ -10,7 +10,7 @@
   tasks:
     - name: Deploy storage-status script
       ansible.builtin.copy:
-        src: ../scripts/storage-status
+        src: ../scripts/storage/storage-status
         dest: /usr/local/bin/storage-status
         mode: "0755"
         owner: root

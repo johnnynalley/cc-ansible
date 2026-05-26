@@ -218,9 +218,9 @@ Repo-managed files:
 - `templates/stream-relay-vertical.service.j2`
 - `templates/stream-relay-vertical-broker.service.j2`
 - `templates/mediamtx-vertical-broker.yml.j2`
-- `scripts/configure-aitum-tiktok-broker.ps1`
-- `scripts/configure-mac-apple-music-ndi.py`
-- `scripts/configure-mac-apple-music-sonobus.py`
+- `scripts/streaming/configure-aitum-tiktok-broker.ps1`
+- `scripts/streaming/configure-mac-apple-music-ndi.py`
+- `scripts/streaming/configure-mac-apple-music-sonobus.py`
 
 The old landscape MediaMTX broker templates are still in the repo, but the active landscape path has `stream_relay_broker_enabled: false` and uses local TCP fanout instead.
 
