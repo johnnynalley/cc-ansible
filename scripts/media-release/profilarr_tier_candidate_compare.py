@@ -32,6 +32,20 @@ RELEASE_KEYWORDS = (
     "efficient",
 )
 
+FAMILY_ORDER = (
+    "Compact",
+    "Efficient",
+    "HEVC-specific",
+    "Balanced",
+    "Quality",
+    "Lower-resolution",
+    "HDTV",
+    "WEB-DL",
+    "Trash-tier",
+    "Remux",
+    "Other",
+)
+
 TOKEN_IGNORE = {
     "b",
     "d",
@@ -502,6 +516,79 @@ def candidate_priority(candidate: dict[str, Any], instance_name: str) -> tuple[i
     return (-priority, -score, -int(candidate["new_token_count"]), str(candidate["name"]).lower())
 
 
+def candidate_family(name: str) -> str:
+    lowered = name.lower()
+    if "trash tier" in lowered:
+        return "Trash-tier"
+    if "hevc" in lowered or "h265" in lowered or "x265" in lowered:
+        return "HEVC-specific"
+    if re.search(r"^(?:480p|576p|720p|dvd|sdtv)\b", lowered):
+        return "Lower-resolution"
+    if "compact" in lowered:
+        return "Compact"
+    if "efficient" in lowered:
+        return "Efficient"
+    if "balanced" in lowered:
+        return "Balanced"
+    if "quality" in lowered:
+        return "Quality"
+    if "hdtv" in lowered:
+        return "HDTV"
+    if "web-dl" in lowered:
+        return "WEB-DL"
+    if "remux" in lowered:
+        return "Remux"
+    return "Other"
+
+
+def summarize_families(candidates: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    by_family: dict[str, dict[str, Any]] = {}
+    for candidate in candidates:
+        family = candidate_family(str(candidate["name"]))
+        entry = by_family.setdefault(
+            family,
+            {
+                "family": family,
+                "candidate_count": 0,
+                "pattern_count": 0,
+                "release_title_count": 0,
+                "release_group_count": 0,
+                "sources": set(),
+                "upstream_profiles": set(),
+                "examples": [],
+            },
+        )
+        entry["candidate_count"] += 1
+        entry["pattern_count"] += int(candidate["pattern_count"])
+        entry["release_title_count"] += int(candidate["release_title_count"])
+        entry["release_group_count"] += int(candidate["release_group_count"])
+        entry["sources"].update(candidate["sources"])
+        entry["upstream_profiles"].update(
+            str(row["quality_profile_name"]) for row in candidate["score_hints"]
+        )
+        if len(entry["examples"]) < 6:
+            entry["examples"].append(candidate["name"])
+
+    def sort_key(entry: dict[str, Any]) -> tuple[int, str]:
+        family = str(entry["family"])
+        try:
+            index = FAMILY_ORDER.index(family)
+        except ValueError:
+            index = len(FAMILY_ORDER)
+        return (index, family)
+
+    result = []
+    for entry in sorted(by_family.values(), key=sort_key):
+        result.append(
+            {
+                **entry,
+                "sources": sorted(entry["sources"]),
+                "upstream_profiles": sorted(entry["upstream_profiles"]),
+            }
+        )
+    return result
+
+
 def build_report(args: argparse.Namespace) -> dict[str, Any]:
     name_regex = re.compile(args.name_regex, re.IGNORECASE)
     databases = load_candidate_databases(
@@ -542,6 +629,7 @@ def build_report(args: argparse.Namespace) -> dict[str, Any]:
                 "live_tiers": live["live_tiers"],
                 "candidate_count": len(candidates),
                 "candidates": candidates[: args.limit],
+                "family_summary": summarize_families(candidates),
             }
         )
 
@@ -615,6 +703,22 @@ def print_text(report: dict[str, Any]) -> None:
             if candidate["new_tokens_sample"]:
                 print(f"      new token sample: {', '.join(candidate['new_tokens_sample'][:12])}")
 
+        if report["family_summary"]:
+            print("  candidate family summary:")
+            for family in instance["family_summary"]:
+                source_text = ", ".join(family["sources"]) or "no source gate"
+                profile_text = ", ".join(family["upstream_profiles"][:6]) or "no score hints"
+                print(
+                    "    - {family}: CFs={candidate_count}, patterns={pattern_count}, "
+                    "title={release_title_count}, group={release_group_count}, "
+                    "sources={source_text}, upstream_profiles={profile_text}".format(
+                        source_text=source_text,
+                        profile_text=profile_text,
+                        **family,
+                    )
+                )
+                print(f"      examples: {', '.join(family['examples'])}")
+
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
@@ -628,6 +732,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--include-disabled-databases", action="store_true")
     parser.add_argument("--only-missing", action="store_true")
     parser.add_argument("--limit", type=int, default=40)
+    parser.add_argument("--family-summary", action="store_true")
     parser.add_argument(
         "--live-limit",
         type=int,
@@ -642,6 +747,7 @@ def main() -> int:
     args = parse_args()
     report = build_report(args)
     report["live_limit"] = args.live_limit
+    report["family_summary"] = args.family_summary
     if args.json:
         json.dump(report, sys.stdout, indent=2, sort_keys=True)
         print()

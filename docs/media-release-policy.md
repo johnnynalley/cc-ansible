@@ -477,6 +477,21 @@ Current Dictionarry compact-tier test state:
   `73`; Radarr regular `HD Bluray Tier 01..03` plus `WEB Tier 01..03` exposed
   about `81`. Do not treat compact-only as a full replacement for the old tier
   reach.
+- Dictionarry family summary from the same audit:
+  - Compact: `20` CFs, about `149` patterns
+  - Efficient: `30` CFs, about `300` patterns
+  - HEVC-specific: `4` CFs, about `17` patterns
+  - Balanced: `5` CFs, about `6` patterns
+  - Quality: `12` CFs, about `195` patterns
+  - Lower-resolution: `27` CFs, about `152` patterns
+  - HDTV: `4` CFs, about `14` patterns
+  - WEB-DL: `5` CFs, about `54` patterns
+  - Trash-tier: `2` CFs, about `8` patterns
+  - Remux: `6` CFs, about `33` patterns
+  Efficient and HEVC-specific are the most relevant next candidates for the
+  smaller-file/x265 preference. Quality has broad reach, but it should be
+  treated carefully because it may bias toward larger, quality-first groups
+  rather than compact/efficient encodes.
 
 Current existing-definition sync state:
 
