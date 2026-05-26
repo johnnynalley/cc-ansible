@@ -60,6 +60,7 @@ SESSION.headers.update({
 })
 RNG = random.SystemRandom()
 STATUS_SCREEN_AVAILABLE = True
+RETRY_STATE_KEYS = ("failure_count", "failure_position", "failure_reason")
 
 
 def log(message: str) -> None:
@@ -382,29 +383,44 @@ def optional_numeric(value: object) -> Optional[float]:
         return None
 
 
-def active_checkpoint(item_key_to_play: str, item: ET.Element, position: float, duration: float) -> Dict[str, Any]:
-    return {
+def active_checkpoint(
+    item_key_to_play: str,
+    item: ET.Element,
+    position: float,
+    duration: float,
+    previous_active: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    checkpoint = {
         "key": item_key_to_play,
         "title": item_title(item),
         "position": max(0.0, position),
         "duration": max(0.0, duration),
         "updated_at": int(time.time()),
     }
+    if previous_active and str(previous_active.get("key", "")) == item_key_to_play:
+        for key in RETRY_STATE_KEYS:
+            if key in previous_active:
+                checkpoint[key] = previous_active[key]
+    return checkpoint
 
 
-def failed_active_checkpoint(
+def retry_active_checkpoint(
     item_key_to_play: str,
     item: ET.Element,
     position: float,
     duration: float,
     previous_active: Optional[Dict[str, Any]],
+    reason: str,
 ) -> Dict[str, Any]:
-    checkpoint = active_checkpoint(item_key_to_play, item, position, duration)
+    checkpoint = active_checkpoint(item_key_to_play, item, position, duration, previous_active)
     previous_count = 0
     previous_position: Optional[float] = None
     if previous_active and str(previous_active.get("key", "")) == item_key_to_play:
-        previous_count = int(numeric(previous_active.get("failure_count"), 0.0))
-        previous_position = optional_numeric(previous_active.get("failure_position"))
+        previous_reason = str(previous_active.get("failure_reason") or "")
+        legacy_playback_failure = reason == "playback_failure" and "failure_count" in previous_active and not previous_reason
+        if previous_reason == reason or legacy_playback_failure:
+            previous_count = int(numeric(previous_active.get("failure_count"), 0.0))
+            previous_position = optional_numeric(previous_active.get("failure_position"))
 
     failure_position = max(0.0, position)
     if previous_position is not None and abs(failure_position - previous_position) <= PLAYBACK_FAILURE_POSITION_WINDOW_SECONDS:
@@ -414,7 +430,28 @@ def failed_active_checkpoint(
 
     checkpoint["failure_count"] = failure_count
     checkpoint["failure_position"] = failure_position
+    checkpoint["failure_reason"] = reason
     return checkpoint
+
+
+def failed_active_checkpoint(
+    item_key_to_play: str,
+    item: ET.Element,
+    position: float,
+    duration: float,
+    previous_active: Optional[Dict[str, Any]],
+) -> Dict[str, Any]:
+    return retry_active_checkpoint(item_key_to_play, item, position, duration, previous_active, "playback_failure")
+
+
+def early_exit_active_checkpoint(
+    item_key_to_play: str,
+    item: ET.Element,
+    position: float,
+    duration: float,
+    previous_active: Optional[Dict[str, Any]],
+) -> Dict[str, Any]:
+    return retry_active_checkpoint(item_key_to_play, item, position, duration, previous_active, "early_clean_exit")
 
 
 def parse_progress_time(value: object) -> Optional[float]:
@@ -526,21 +563,24 @@ def run_corruption_check(item: ET.Element, position: float, duration: float) -> 
     ]
     marker = next((text for text in corruption_markers if text in stderr_lower), "")
     short_decode = expected_seconds - decoded_seconds >= 15 and decoded_seconds < expected_seconds * 0.8
+    decoded_expected_window = decoded_seconds >= expected_seconds * 0.8
 
     result.update({
         "return_code": completed.returncode,
         "decoded_seconds": round(decoded_seconds, 3),
         "stderr_tail": stderr[-1000:],
     })
-    if marker:
+    if completed.returncode == 0 and decoded_expected_window:
+        result["status"] = "passed"
+        result["reason"] = "ffmpeg_decoded_expected_window"
+        if marker:
+            result["warning_marker"] = marker
+    elif marker:
         result["status"] = "corrupt"
         result["reason"] = marker
     elif short_decode and duration > start + expected_seconds:
         result["status"] = "corrupt"
         result["reason"] = "decode_ended_before_expected_window"
-    elif completed.returncode == 0 and decoded_seconds >= expected_seconds * 0.8:
-        result["status"] = "passed"
-        result["reason"] = "ffmpeg_decoded_expected_window"
     else:
         result["status"] = "inconclusive"
         result["reason"] = "ffmpeg_failed_without_corruption_marker" if completed.returncode != 0 else "short_decode_without_corruption_marker"
@@ -562,15 +602,45 @@ def append_corrupt_media_log(
         "collection": COLLECTION,
         "rating_key": item_key_to_play,
         "title": item_title(item),
-        "position": round(numeric(checkpoint.get("failure_position")), 3),
+        "position": round(numeric(checkpoint.get("failure_position"), numeric(checkpoint.get("position"))), 3),
         "duration": round(numeric(checkpoint.get("duration")), 3),
         "failure_count": int(numeric(checkpoint.get("failure_count"), 0.0)),
+        "failure_reason": str(checkpoint.get("failure_reason") or "playback_failure"),
         "check": check,
     }
     line = json.dumps(record, sort_keys=True, separators=(",", ":"))
     with open(CORRUPT_MEDIA_LOG_PATH, "a", encoding="utf-8") as failure_log:
         failure_log.write(line + "\n")
     log(f"PLEX_APPLIANCE_CORRUPT_MEDIA {line}")
+
+
+def append_playback_skip_log(
+    item_key_to_play: str,
+    item: ET.Element,
+    checkpoint: Dict[str, Any],
+    check: Dict[str, Any],
+    skip_reason: str,
+) -> None:
+    log_dir = os.path.dirname(CORRUPT_MEDIA_LOG_PATH)
+    if log_dir:
+        os.makedirs(log_dir, exist_ok=True)
+    record = {
+        "event": "playback_item_skipped",
+        "timestamp": int(time.time()),
+        "collection": COLLECTION,
+        "rating_key": item_key_to_play,
+        "title": item_title(item),
+        "position": round(numeric(checkpoint.get("failure_position"), numeric(checkpoint.get("position"))), 3),
+        "duration": round(numeric(checkpoint.get("duration")), 3),
+        "failure_count": int(numeric(checkpoint.get("failure_count"), 0.0)),
+        "failure_reason": str(checkpoint.get("failure_reason") or ""),
+        "skip_reason": skip_reason,
+        "check": check,
+    }
+    line = json.dumps(record, sort_keys=True, separators=(",", ":"))
+    with open(CORRUPT_MEDIA_LOG_PATH, "a", encoding="utf-8") as skip_log:
+        skip_log.write(line + "\n")
+    log(f"PLEX_APPLIANCE_PLAYBACK_SKIP {line}")
 
 
 def resume_position(active: Optional[Dict[str, Any]]) -> float:
@@ -854,7 +924,7 @@ def main() -> int:
             save_shuffle_state(
                 queue_keys,
                 played_keys,
-                active_checkpoint(item_key_to_play, item, checkpoint_position, duration),
+                active_checkpoint(item_key_to_play, item, checkpoint_position, duration, previous_active),
             )
 
         save_progress(start_position, numeric(active.get("duration")) if active else 0.0)
@@ -866,7 +936,7 @@ def main() -> int:
             last_position = start_position
             duration = numeric(active.get("duration")) if active else 0.0
 
-        skipped_after_failure = False
+        retry_after_playback = False
         if playback_completed(return_code, last_position, duration):
             played_keys.append(item_key_to_play)
             active = None
@@ -885,6 +955,13 @@ def main() -> int:
                             f"{failure_count} failed playback attempts: {item_key_to_play}"
                         )
                     else:
+                        append_playback_skip_log(
+                            item_key_to_play,
+                            item,
+                            active,
+                            check,
+                            "repeated_playback_failures_without_verified_corruption",
+                        )
                         log(
                             "Skipping item after repeated playback failures without verified corruption: "
                             f"{item_key_to_play}; check_status={check.get('status')} reason={check.get('reason')}"
@@ -892,7 +969,6 @@ def main() -> int:
                     if item_key_to_play not in played_keys:
                         played_keys.append(item_key_to_play)
                     active = None
-                    skipped_after_failure = True
                     save_shuffle_state(queue_keys, played_keys)
                 else:
                     save_shuffle_state(queue_keys, played_keys, active)
@@ -900,11 +976,43 @@ def main() -> int:
                         "Retrying active item after failed playback attempt "
                         f"{failure_count}/{PLAYBACK_FAILURE_SKIP_THRESHOLD}: {item_key_to_play}"
                     )
+                    retry_after_playback = True
             else:
-                active = active_checkpoint(item_key_to_play, item, active_position, duration)
-                save_shuffle_state(queue_keys, played_keys, active)
+                active = early_exit_active_checkpoint(item_key_to_play, item, active_position, duration, previous_active)
+                failure_count = int(numeric(active.get("failure_count"), 0.0))
+                if failure_count >= PLAYBACK_FAILURE_SKIP_THRESHOLD:
+                    check = run_corruption_check(item, active_position, duration)
+                    if check.get("status") == "corrupt":
+                        append_corrupt_media_log(item_key_to_play, item, active, check)
+                        log(
+                            "Skipping verified corrupt media after "
+                            f"{failure_count} early player exits: {item_key_to_play}"
+                        )
+                    else:
+                        append_playback_skip_log(
+                            item_key_to_play,
+                            item,
+                            active,
+                            check,
+                            "repeated_early_clean_exits_without_verified_corruption",
+                        )
+                        log(
+                            "Skipping item after repeated early player exits without verified corruption: "
+                            f"{item_key_to_play}; check_status={check.get('status')} reason={check.get('reason')}"
+                        )
+                    if item_key_to_play not in played_keys:
+                        played_keys.append(item_key_to_play)
+                    active = None
+                    save_shuffle_state(queue_keys, played_keys)
+                else:
+                    save_shuffle_state(queue_keys, played_keys, active)
+                    log(
+                        "Retrying active item after early player exit "
+                        f"{failure_count}/{PLAYBACK_FAILURE_SKIP_THRESHOLD}: {item_key_to_play}"
+                    )
+                    retry_after_playback = True
 
-        if return_code != 0 and not skipped_after_failure:
+        if retry_after_playback:
             playback_retry_wait(item_title(item), ITEM_FAILURE_DELAY_SECONDS)
 
 
