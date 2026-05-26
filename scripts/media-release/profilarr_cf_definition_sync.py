@@ -349,7 +349,11 @@ def materialize_database(
     return conn, skipped
 
 
-def load_candidate_databases(profilarr_db: Path, data_root: Path) -> dict[str, dict[str, Any]]:
+def load_candidate_databases(
+    profilarr_db: Path,
+    data_root: Path,
+    include_disabled: bool,
+) -> dict[str, dict[str, Any]]:
     source_conn = sqlite3.connect(f"file:{profilarr_db}?mode=ro", uri=True)
     source_conn.row_factory = sqlite3.Row
     databases = fetch_all(
@@ -374,6 +378,8 @@ def load_candidate_databases(profilarr_db: Path, data_root: Path) -> dict[str, d
 
     result: dict[str, dict[str, Any]] = {}
     for db_row in databases:
+        if not include_disabled and not bool(db_row.get("enabled")):
+            continue
         conn, skipped = materialize_database(data_root, db_row, ops_by_database.get(db_row["id"], []))
         result[str(db_row["name"])] = {
             "connection": conn,
@@ -778,6 +784,9 @@ def process_instance(
     snapshot_dir: Path,
     cf_limit: int,
     min_free_slots: int,
+    min_spec_retention_ratio: float,
+    allow_major_spec_shrink: bool,
+    inspect_targets: set[str],
     dry_run: bool,
 ) -> dict[str, Any]:
     api_key = read_api_key(instance.config_path)
@@ -816,12 +825,21 @@ def process_instance(
 
     changes: list[dict[str, Any]] = []
     skipped: list[dict[str, Any]] = []
+    inspections: list[dict[str, Any]] = []
     applied: list[str] = []
     for target in sync_targets:
         if instance.name not in target.targets:
             continue
+        inspect_this = target.target_name in inspect_targets
         live = custom_formats_by_name.get(target.target_name)
         if live is None:
+            if inspect_this:
+                inspections.append(
+                    {
+                        "target": target.target_name,
+                        "reason": "target custom format is not present in Arr",
+                    }
+                )
             skipped.append(
                 {
                     "target": target.target_name,
@@ -831,6 +849,14 @@ def process_instance(
             continue
         match = first_source_match(candidate_dbs, target.sources)
         if match is None:
+            if inspect_this:
+                inspections.append(
+                    {
+                        "target": target.target_name,
+                        "reason": "no configured source custom format found",
+                        "live_specs": canonical_specs(live),
+                    }
+                )
             skipped.append(
                 {
                     "target": target.target_name,
@@ -849,6 +875,15 @@ def process_instance(
                 bool(live.get("includeCustomFormatWhenRenaming")),
             )
         except RuntimeError as exc:
+            if inspect_this:
+                inspections.append(
+                    {
+                        "target": target.target_name,
+                        "source": f"{match.database_name}:{match.source_name}",
+                        "reason": str(exc),
+                        "live_specs": canonical_specs(live),
+                    }
+                )
             skipped.append(
                 {
                     "target": target.target_name,
@@ -858,6 +893,15 @@ def process_instance(
             )
             continue
         if desired is None:
+            if inspect_this:
+                inspections.append(
+                    {
+                        "target": target.target_name,
+                        "source": f"{match.database_name}:{match.source_name}",
+                        "reason": "source produced no usable Arr specifications",
+                        "live_specs": canonical_specs(live),
+                    }
+                )
             skipped.append(
                 {
                     "target": target.target_name,
@@ -867,13 +911,45 @@ def process_instance(
             )
             continue
         changed = specs_changed(live, desired)
+        live_spec_count = len(live.get("specifications") or [])
+        desired_spec_count = len(desired.get("specifications") or [])
+        if inspect_this:
+            inspections.append(
+                {
+                    "target": target.target_name,
+                    "source": f"{match.database_name}:{match.source_name}",
+                    "changed": changed,
+                    "live_spec_count": live_spec_count,
+                    "desired_spec_count": desired_spec_count,
+                    "live_specs": canonical_specs(live),
+                    "desired_specs": canonical_specs(desired),
+                }
+            )
+        if (
+            changed
+            and not allow_major_spec_shrink
+            and live_spec_count > 0
+            and desired_spec_count < live_spec_count * min_spec_retention_ratio
+        ):
+            skipped.append(
+                {
+                    "target": target.target_name,
+                    "source": f"{match.database_name}:{match.source_name}",
+                    "reason": (
+                        "desired definition keeps too few specifications "
+                        f"({desired_spec_count}/{live_spec_count}); rerun with "
+                        "--allow-major-spec-shrink after review"
+                    ),
+                }
+            )
+            continue
         changes.append(
             {
                 "target": target.target_name,
                 "source": f"{match.database_name}:{match.source_name}",
                 "changed": changed,
-                "live_spec_count": len(live.get("specifications") or []),
-                "desired_spec_count": len(desired.get("specifications") or []),
+                "live_spec_count": live_spec_count,
+                "desired_spec_count": desired_spec_count,
                 "rename_flag_preserved": bool(live.get("includeCustomFormatWhenRenaming")),
             }
         )
@@ -894,6 +970,7 @@ def process_instance(
         "candidate_summaries": candidate_summary(candidate_dbs, set(custom_formats_by_name)),
         "planned_changes": changes,
         "skipped": skipped,
+        "inspections": inspections,
         "applied": applied,
     }
 
@@ -905,10 +982,46 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--snapshot-root", default=DEFAULT_SNAPSHOT_ROOT)
     parser.add_argument("--cf-limit", type=int, default=DEFAULT_CF_LIMIT)
     parser.add_argument("--min-free-slots", type=int, default=DEFAULT_MIN_FREE_SLOTS)
+    parser.add_argument(
+        "--include-disabled-databases",
+        action="store_true",
+        help="also consider disabled Profilarr PCD databases as sync sources",
+    )
+    parser.add_argument(
+        "--min-spec-retention-ratio",
+        type=float,
+        default=0.5,
+        help=(
+            "skip updates whose desired definition keeps less than this fraction "
+            "of the live specification count; use 0 to disable"
+        ),
+    )
+    parser.add_argument(
+        "--allow-major-spec-shrink",
+        action="store_true",
+        help="allow replacing many-spec live formats with much smaller upstream definitions",
+    )
+    parser.add_argument(
+        "--inspect-target",
+        action="append",
+        default=[],
+        help="print live and desired specification details for a target custom format",
+    )
     parser.add_argument("--manifest", help="optional JSON manifest overriding the embedded sync target list")
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--json", action="store_true")
     return parser.parse_args()
+
+
+def format_spec_for_text(spec: dict[str, Any]) -> str:
+    fields = ", ".join(
+        f"{item.get('name')}={item.get('value')!r}"
+        for item in spec.get("fields") or []
+    )
+    return (
+        f"{spec.get('name')} {spec.get('implementation')} "
+        f"required={spec.get('required')} negate={spec.get('negate')} {fields}"
+    ).strip()
 
 
 def print_text(report: dict[str, Any]) -> None:
@@ -945,6 +1058,25 @@ def print_text(report: dict[str, Any]) -> None:
         for item in result["skipped"][:20]:
             source = f" source={item['source']}" if item.get("source") else ""
             print(f"    skip {item['target']}: {item['reason']}{source}")
+        if result["inspections"]:
+            print("  inspections:")
+            for item in result["inspections"]:
+                source = f" source={item['source']}" if item.get("source") else ""
+                reason = f" reason={item['reason']}" if item.get("reason") else ""
+                print(f"    {item['target']}{source}{reason}")
+                live_specs = item.get("live_specs") or []
+                desired_specs = item.get("desired_specs") or []
+                print(f"      live specs: {len(live_specs)}")
+                for spec in live_specs[:12]:
+                    print(f"        - {format_spec_for_text(spec)}")
+                if len(live_specs) > 12:
+                    print(f"        ... {len(live_specs) - 12} more")
+                if desired_specs:
+                    print(f"      desired specs: {len(desired_specs)}")
+                    for spec in desired_specs[:12]:
+                        print(f"        - {format_spec_for_text(spec)}")
+                    if len(desired_specs) > 12:
+                        print(f"        ... {len(desired_specs) - 12} more")
         if result["applied"]:
             print("  applied:")
             for name in result["applied"]:
@@ -958,7 +1090,11 @@ def main() -> int:
     snapshot_dir = Path(args.snapshot_root) / f"{timestamp}-{suffix}"
     snapshot_dir.mkdir(parents=True, exist_ok=False)
 
-    candidate_dbs = load_candidate_databases(Path(args.profilarr_db), Path(args.data_root))
+    candidate_dbs = load_candidate_databases(
+        Path(args.profilarr_db),
+        Path(args.data_root),
+        args.include_disabled_databases,
+    )
     sync_targets = load_manifest(args.manifest)
     report = {
         "snapshot_dir": str(snapshot_dir),
@@ -971,6 +1107,9 @@ def main() -> int:
                 snapshot_dir,
                 args.cf_limit,
                 args.min_free_slots,
+                args.min_spec_retention_ratio,
+                args.allow_major_spec_shrink,
+                set(args.inspect_target),
                 args.dry_run,
             )
             for instance in INSTANCES

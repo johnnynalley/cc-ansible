@@ -194,6 +194,15 @@ assignments. Run it in `--dry-run` first; it writes timestamped Arr policy
 snapshots under `/opt/media-stack/release-policy-snapshots/` before any live
 mutation.
 
+`scripts/media-release/profilarr_cf_definition_sync.py` refreshes selected
+existing Arr custom-format definitions from enabled Profilarr PCD databases
+without importing upstream quality profiles, changing profile structure, or
+changing scores. It preserves local DA/x265/quality-rank CFs and enforces the
+CF limit. By default it ignores disabled PCD databases and skips large
+spec-count collapses, because some upstream names do not represent the same
+kind of CF as the existing Arr name. Use `--inspect-target <CF name>` before
+reviewing any tier-list replacement.
+
 ## Anime Hard Rejects
 
 Hard rejects use `-1000000`. They must stay far below zero even if combined
@@ -332,7 +341,7 @@ anime `100000`-point dual-audio model.
 
 ## Profilarr Candidate Migration
 
-Current migration posture as of 2026-05-23:
+Current migration posture as of 2026-05-26:
 
 - Live Sonarr/Radarr source profiles are still active:
   - Sonarr `shows-anime`: 150 series
@@ -340,11 +349,17 @@ Current migration posture as of 2026-05-23:
 - Test profiles exist but have no assignments:
   - Sonarr `shows-anime-profilarr-test`: 0 series
   - Radarr `movies-anime-profilarr-test`: 0 movies
-- Dictionarry is linked in Profilarr and auto-pulls hourly.
-- Dumpstarr is linked in Profilarr and queued for hourly sync.
+- Dictionarry is linked in Profilarr, enabled, and auto-pulls hourly.
+- Dumpstarr is linked in Profilarr but currently disabled. Do not use
+  disabled/stale PCD sources for production definition sync unless the source
+  is explicitly re-enabled and revalidated first.
 - Selected Dumpstarr custom-format definitions have been copied into Arr and
   scored only in the test profiles. Production `shows-anime` and
   `movies-anime` still use the existing active policy.
+- Selected existing Arr CF definitions were safely refreshed from enabled
+  Dictionarry sources on 2026-05-26. This touched service/source/repack-style
+  CF definitions only; it did not touch DA, x265, quality ranks, profile
+  scores, profile structure, or release-group tier CFs.
 
 The candidate audit found useful material in Dumpstarr and Dictionarry, but
 also confirmed that stock Dumpstarr scoring conflicts with this library's codec
@@ -369,6 +384,10 @@ Candidate material not safe to adopt blindly:
 - Any profile cutoff/minimum score that assumes a normal TRaSH score scale.
 - Any release-group tiers that duplicate current names without proving better
   regex coverage.
+- Dumpstarr exact `WEB Tier 01/02/03` definitions as direct replacements for
+  current Arr `WEB Tier` release-group tiers. The 2026-05-26 inspection showed
+  those materialized Dumpstarr definitions collapse to WEB source checks, not
+  release-group tier regexes.
 
 Current selective import state:
 
@@ -393,6 +412,24 @@ Current selective import state:
   - `Bad Dual Groups`
   - `Banned Groups (Title)`
   - `Bad Source` on Radarr
+
+Current existing-definition sync state:
+
+- Script: `scripts/media-release/profilarr_cf_definition_sync.py`
+- Latest applied snapshot:
+  `/opt/media-stack/release-policy-snapshots/20260526T202831Z-profilarr-cf-definition-sync`
+- Latest idempotence dry-run snapshot:
+  `/opt/media-stack/release-policy-snapshots/20260526T202848Z-profilarr-cf-definition-sync-dry-run`
+- Applied from enabled Dictionarry sources:
+  - Sonarr: `Extras`, `AV1`, `Repack2`, `Repack3`, `AMZN`, `ATVP`, `CR`,
+    `DSNP`, `HMAX`, `HULU`, `MAX`, `NF`, `PCOK`, `PMTP`, `SHO`, `STAN`, `iT`
+  - Radarr: `Extras`, `AV1`, `Repack2`, `Repack3`, `AMZN`, `ATVP`, `DSNP`,
+    `HMAX`, `MAX`, `NF`, `PCOK`, `PMTP`, `STAN`, `iT`
+- Post-apply dry run reported `changed=0` for the safe enabled-source sync.
+- Validation after the apply:
+  - Sonarr/Radarr queues were clean.
+  - Sonarr and Radarr DA/x265/quality-rank expectation checks passed.
+  - CF counts remained Sonarr `84/100`, Radarr `74/100`.
 
 Profilarr remains the upstream refresh source for these imported CFs, but
 Profilarr itself is not directly managing the copied Arr formats yet. The sync
@@ -433,6 +470,11 @@ rollback artifacts from the Profilarr staging pass:
   `/opt/media-stack/release-policy-snapshots/20260523T063425Z-selective-profilarr-cfs`
 - Profilarr DB backup before Sonarr selector change:
   `/opt/profilarr/config/data/backups/profilarr-pre-sonarr-upgrade-strategy-20260524T192516Z.db`
+- Existing-CF Dictionarry definition sync snapshots:
+  `/opt/media-stack/release-policy-snapshots/20260526T202831Z-profilarr-cf-definition-sync`,
+  `/opt/media-stack/release-policy-snapshots/20260526T202848Z-profilarr-cf-definition-sync-dry-run`,
+  and inspection snapshot
+  `/opt/media-stack/release-policy-snapshots/20260526T203104Z-profilarr-cf-definition-sync-dry-run`
 - JoJo Stardust blocklist / wrong-import repair backups:
   `/opt/media-stack/arr-policy-backups/20260524T210710Z-jojo-stardust-s01-repair`
   and
@@ -843,8 +885,9 @@ Decision rule:
 Current deployed state on 2026-05-22:
 
 - Profilarr was bootstrapped through HTTP form/API calls, not the browser UI.
-  The generated local admin password is stored root-only on `docker-vm` at
-  `/root/profilarr-admin.initial-password`.
+  The originally expected `/root/profilarr-admin.initial-password` file was
+  not present during the 2026-05-26 check, so do not assume that path still
+  contains the login password.
 - `Sonarr` and `Radarr` are registered in Profilarr using docker-vm-local
   service URLs and the public external URLs.
 - Upgrade scheduler configs are currently disabled and should stay disabled.
