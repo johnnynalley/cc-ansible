@@ -29,23 +29,27 @@ nfs_exports:
     group: johnny
     mode: "0775"
     subdirs:
-      - path: torrents
+      - path: incomplete
         owner: johnny
         group: johnny
         mode: "2775"
-      - path: torrents/tv-sonarr
+      - path: incomplete/torrents
         owner: johnny
         group: johnny
         mode: "2775"
-      - path: torrents/sonarr
+      - path: incomplete/torrents/tv-sonarr
         owner: johnny
         group: johnny
         mode: "2775"
-      - path: torrents/radarr
+      - path: incomplete/torrents/sonarr
         owner: johnny
         group: johnny
         mode: "2775"
-      - path: usenet
+      - path: incomplete/torrents/radarr
+        owner: johnny
+        group: johnny
+        mode: "2775"
+      - path: incomplete/usenet
         owner: johnny
         group: johnny
         mode: "2775"

@@ -80,7 +80,7 @@ services:
       - ./sabnzbd:/config
       - /srv/media/plex:/data
       - /srv/archive:/archive
-      - /srv/incomplete_downloads/usenet:/incomplete
+      - /srv/incomplete_downloads/incomplete/usenet:/incomplete
     ports:
       - 8080:8080
     networks:
@@ -136,7 +136,7 @@ services:
       - WEBUI_PORT=8085
     volumes:
       - ./qbittorrent:/config
-      - /srv/incomplete_downloads/torrents:/incomplete
+      - /srv/incomplete_downloads/incomplete/torrents:/incomplete
       - /srv/media/plex:/data
       - /srv/archive:/archive
     depends_on:
