@@ -85,8 +85,8 @@ overridden by incidental format bonuses.
 2. Dual audio: `+100000`
 3. Quality rank: `+10000`, `+20000`, `+30000`, `+40000`
 4. x265/HEVC preference: `+2000`
-5. Source rank: `+1500` for Bluray/BD sources
-6. Release-group tiers: bounded Profilarr/Dictionarry test tiers below x265
+5. Release-group tiers: bounded Profilarr/Dictionarry test tiers below x265
+6. Service/source tags: ordered tie-breakers below the lowest tier gap
 7. Soft avoids: small negative values only
 
 This means any acceptable dual-audio release beats a non-dual-audio release,
@@ -110,28 +110,30 @@ Radarr `movies-anime` currently only enables 720p and 1080p movie qualities.
 
 ## Anime Source Rank
 
-`Local Anime Source Rank - Bluray` is scored `+1500` in Sonarr
-`shows-anime`, Sonarr `shows-anime-profilarr-test`, Radarr `movies-anime`, and
-Radarr `movies-anime-profilarr-test`.
+`Local Anime Source Rank - Bluray` remains scored `+1500` in the current
+production anime profiles, Sonarr `shows-anime` and Radarr `movies-anime`,
+until the Profilarr-derived test profile is approved for migration.
 
-The intent is narrow: same-resolution DA Web x264 should not beat same-resolution
-DA Bluray x264 only because Web has a release-tier match and Bluray has no
-source preference. Source rank stays below x265/HEVC (`+2000`), so a
-same-resolution DA Web x265 with a good Web tier can still beat a bare DA
-Bluray x264 when that matches the smaller-file preference.
+The Profilarr test profiles zero this score. The proposed replacement policy
+should not use a broad local Bluray source bonus, because it can make a
+same-resolution DA Bluray release beat a same-resolution DA WEB release even
+when WEB has stronger release-tier, service, or codec evidence. The custom
+format row may still be visible in Arr profile pages because Sonarr/Radarr
+require all custom formats to be present in `formatItems`; only the nonzero
+score matters.
 
 Do not add new local CFs casually. The custom-format limit matters. Current
-counts before the bounded Dictionarry tier test staging are Sonarr `76` and
-Radarr `64`; the working limit for staging checks is `100`.
+counts after the bounded Dictionarry tier test staging are Sonarr `96` and
+Radarr `79`; the working limit for staging checks is `100`.
 
 The audit script `scripts/media-release/arr_release_policy_audit.py` checks
 current CF counts, profile scores, queue status, and unused/all-zero CFs.
 `scripts/media-release/arr_profile_math_audit.py` checks the Profilarr test
-profiles as a whole: DA beats all non-DA paths, x265 stays above source+tier
-stacking, 1080p DA beats any 720p DA stack, best Bluray HEVC and best WEB HEVC
-Dictionarry stacks are source-ordered, service CFs stay below the smallest
-release-tier gap, old Recyclarr/TRaSH tier scores such as `WEB Scene` are zero
-in the test profiles, and the CF limit is still obeyed.
+profiles as a whole: DA beats all non-DA paths, x265 stays above tier and
+service stacking, 1080p DA beats any 720p DA stack, best Bluray HEVC and best
+WEB HEVC Dictionarry stacks are source-ordered, service CFs stay below the
+smallest release-tier gap, old Recyclarr/TRaSH tier scores such as `WEB Scene`
+are zero in the test profiles, and the CF limit is still obeyed.
 
 The read-only live expectation checkers are
 `scripts/media-release/sonarr_release_expectation_check.py` and
@@ -427,11 +429,13 @@ Current Dictionarry bounded-tier test plan:
   - `scripts/media-release/profilarr_tier_candidate_compare.py`
   - `scripts/media-release/profilarr_bounded_tier_import.py`
   - `scripts/media-release/arr_profile_math_audit.py`
-- Latest applied compact-only snapshot:
-  `/opt/media-stack/release-policy-snapshots/20260526T211737Z-dictionarry-compact-tiers`
-- Current CF counts before bounded-tier apply:
-  - Sonarr: `76/100`
-  - Radarr: `64/100`
+- Latest dry-run snapshot:
+  `/opt/media-stack/release-policy-snapshots/20260526T221251Z-dictionarry-bounded-tiers-dry-run`
+- Latest applied snapshot:
+  `/opt/media-stack/release-policy-snapshots/20260526T221301Z-dictionarry-bounded-tiers`
+- Current CF counts after bounded-tier apply:
+  - Sonarr: `96/100`
+  - Radarr: `79/100`
 - Refreshed test profiles only:
   - Sonarr `shows-anime-profilarr-test` id `9`
   - Sonarr `shows-regular-profilarr-test` id `10`
@@ -447,44 +451,49 @@ Current Dictionarry bounded-tier test plan:
   scored. Sonarr/Radarr require every custom format to stay present in profile
   `formatItems`, so old tier rows may still be visible at `0`; only nonzero
   score affects release selection.
+- `Local Anime Source Rank - Bluray` is zeroed in the test profiles after
+  cloning production anime profiles, so the proposed replacement does not add a
+  broad local Bluray source preference.
 - Imported Sonarr Dictionarry TV tiers:
   - Efficient Bluray Tier 1..6: `+180`, `+172`, `+150`, `+135`, `+120`,
     `+105`
-  - Efficient WEB Tier 1..5: `+160`, `+145`, `+130`, `+115`, `+100`
+  - Efficient WEB Tier 1..5: `+150`, `+135`, `+120`, `+105`, `+90`
   - Compact Bluray Tier 1..6: `+150`, `+142`, `+126`, `+114`, `+102`, `+90`
-  - Compact WEB Tier 1..5: `+130`, `+118`, `+106`, `+94`, `+82`
+  - Compact WEB Tier 1..5: `+120`, `+108`, `+96`, `+84`, `+72`
   - Compact Trash Tier 1..2: `-250`, `-350`
 - Imported Radarr Dictionarry movie tiers:
   - Efficient Bluray Tier 1..4: `+180`, `+165`, `+150`, `+135`
-  - Efficient WEB Tier 1..4: `+150`, `+132`, `+114`, `+96`
+  - Efficient WEB Tier 1..4: `+140`, `+122`, `+104`, `+86`
   - Compact Bluray Tier 1..4: `+150`, `+135`, `+120`, `+105`
-  - Compact WEB Tier 1..4: `+125`, `+110`, `+95`, `+80`
+  - Compact WEB Tier 1..4: `+115`, `+100`, `+85`, `+70`
 - Shared imported Dictionarry tiers:
   - `1080p Bluray HEVC Tier 1`: `+60`
   - `1080p WEB-DL HEVC Tier 1`: `+60`
-  - `WEB-DL Tier 1..5`: `+20`, `+16`, `+12`, `+8`, `+4`
+  - `WEB-DL Tier 1..5`: `+40`, `+32`, `+24`, `+16`, `+8`
 - Positive service/source tags such as `AMZN`, `NF`, `DSNP`, `CR`, and `VRV`
-  are capped to `+1` in the test profiles when they were positive in the
-  cloned source profile. Zero-scored service tags stay zero. This makes them
-  tie-breakers only: the smallest adjacent Dictionarry tier gap is `+4`, so a
-  service tag cannot reorder even the weakest imported tier ladder.
+  are compressed into an ordered tie-breaker ladder in the test profiles when
+  they were positive in the cloned source profile: old `75 -> +7`, `10 -> +6`,
+  `7 -> +5`, `6 -> +4`, `3 -> +3`, `2 -> +2`, and `1 -> +1`. Zero-scored
+  service tags stay zero. The lowest positive Dictionarry tier score is `+8`
+  and the smallest adjacent Dictionarry tier gap is `+8`, so service tags keep
+  their relative order without reordering any release-tier ladder.
 - Score math:
   - Best Bluray HEVC stack: `180 + 150 + 60 = 390`
   - Sonarr second Bluray HEVC stack: `172 + 142 + 60 = 374`
-  - Sonarr best WEB HEVC stack: `160 + 130 + 60 + 20 = 370`
+  - Sonarr best WEB HEVC stack: `150 + 120 + 60 + 40 = 370`
   - Radarr second Bluray HEVC stack: `165 + 135 + 60 = 360`
-  - Radarr best WEB HEVC stack: `150 + 125 + 60 + 20 = 355`
-  - Anime Bluray source plus best tier stack plus service tie-breaker:
-    `1500 + 390 + 1 = 1891`, still below x265/HEVC at `+2000`
-  - Max non-DA 1080p path: `40000 + 2000 + 1500 + 390 + 1 = 43891`, still
+  - Radarr best WEB HEVC stack: `140 + 115 + 60 + 40 = 355`
+  - Best tier stack plus service tie-breaker: `390 + 7 = 397`, still below
+    x265/HEVC at `+2000`
+  - Max non-DA 1080p path: `40000 + 2000 + 390 + 7 = 42397`, still
     below DA at `+100000`
-  - Max 720p DA path: `100000 + 30000 + 2000 + 1500 + 390 + 1 = 133891`, still
+  - Max 720p DA path: `100000 + 30000 + 2000 + 390 + 7 = 132397`, still
     below the 1080p DA floor of `140000`
 - Source ordering checks deliberately keep WEB below Bluray at the near-tier
-  boundary: Sonarr Efficient WEB Tier 1 (`+160`) is below Efficient Bluray Tier
-  2 (`+172`), Sonarr Compact WEB Tier 1 (`+130`) is below Compact Bluray Tier 2
-  (`+142`), Radarr Efficient WEB Tier 1 (`+150`) is below Efficient Bluray Tier
-  2 (`+165`), and Radarr Compact WEB Tier 1 (`+125`) is below Compact Bluray
+  boundary: Sonarr Efficient WEB Tier 1 (`+150`) is below Efficient Bluray Tier
+  2 (`+172`), Sonarr Compact WEB Tier 1 (`+120`) is below Compact Bluray Tier 2
+  (`+142`), Radarr Efficient WEB Tier 1 (`+140`) is below Efficient Bluray Tier
+  2 (`+165`), and Radarr Compact WEB Tier 1 (`+115`) is below Compact Bluray
   Tier 2 (`+135`).
 - These scores are intentionally below DA (`+100000`), anime quality ranks, and
   x265/HEVC (`+2000` anime, `+3000` regular). Because old Recyclarr/TRaSH tier

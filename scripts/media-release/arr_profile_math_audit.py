@@ -31,8 +31,8 @@ ANIME_QUALITY_RANKS = {
 }
 ANIME_X265_MIN_SCORE = 2000
 REGULAR_X265_MIN_SCORE = 3000
-ANIME_BLURAY_SOURCE_RANK = 1500
-SERVICE_TIEBREAKER_SCORE = 1
+ANIME_BLURAY_SOURCE_RANK = 0
+SERVICE_MAX_SCORE = 7
 SERVICE_FORMAT_NAMES = {
     "ABEMA",
     "ADN",
@@ -386,12 +386,10 @@ def audit_profile(
             )
 
     service_scores = active_service_scores(scores)
-    excessive_services = {
-        name: score for name, score in service_scores.items() if score > SERVICE_TIEBREAKER_SCORE
-    }
+    excessive_services = {name: score for name, score in service_scores.items() if score > SERVICE_MAX_SCORE}
     if excessive_services:
         names = ", ".join(f"{name}={score}" for name, score in sorted(excessive_services.items()))
-        failures.append(f"{profile_check.name}: service scores above tiebreaker {SERVICE_TIEBREAKER_SCORE}: {names}")
+        failures.append(f"{profile_check.name}: service scores above max {SERVICE_MAX_SCORE}: {names}")
     max_service_score = max(service_scores.values() or [0])
     min_tier_gap = min_configured_tier_gap(instance.name, scores, failures, profile_check.name)
     if max_service_score >= min_tier_gap:
@@ -419,6 +417,11 @@ def audit_profile(
         failures.append(f"{profile_check.name}: weak negative guardrails: {names}")
 
     source_rank = scores.get("Local Anime Source Rank - Bluray", 0)
+    if source_rank != ANIME_BLURAY_SOURCE_RANK:
+        failures.append(
+            f"{profile_check.name}: Local Anime Source Rank - Bluray score {source_rank} "
+            f"must be {ANIME_BLURAY_SOURCE_RANK}"
+        )
     if profile_check.kind == "anime":
         da_score = scores.get("Anime Dual Audio", 0)
         if da_score < ANIME_DUAL_AUDIO_SCORE:

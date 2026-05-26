@@ -23,8 +23,9 @@
   structure and scores.
 - `profilarr_bounded_tier_import.py`: Imports curated Dictionarry
   compact/efficient/HEVC/WEB-DL release-tier custom formats into refreshed Arr
-  test profiles with backups, service-score capping, replacement-mode legacy
-  tier score zeroing, and cleanup of all-zero non-rename CFs.
+  test profiles with backups, ordered service-score compression, anime source
+  rank zeroing, replacement-mode legacy tier score zeroing, and cleanup of
+  all-zero non-rename CFs.
 - `profilarr_disable_upgrade_jobs.py`: Disables Profilarr scheduled Arr upgrade
   jobs with a SQLite backup, without disabling PCD sync.
 - `profilarr_link_database.py`: Links a Profilarr database through the local
