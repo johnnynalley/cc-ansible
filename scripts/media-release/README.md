@@ -17,6 +17,9 @@
 - `profilarr_cf_definition_sync.py`: Syncs selected existing Arr custom-format
   definitions from Profilarr PCD sources while preserving local profile
   structure and scores.
+- `profilarr_compact_tier_import.py`: Imports curated Dictionarry compact
+  TV/movie release-tier custom formats into refreshed Arr test profiles with
+  backups and cleanup of all-zero non-rename CFs.
 - `profilarr_disable_upgrade_jobs.py`: Disables Profilarr scheduled Arr upgrade
   jobs with a SQLite backup, without disabling PCD sync.
 - `profilarr_link_database.py`: Links a Profilarr database through the local
@@ -29,6 +32,8 @@
   filter through stored settings with a SQLite backup.
 - `profilarr_state_audit.py`: Read-only audit of Profilarr database, scheduler,
   and upgrade-job state.
+- `profilarr_tier_candidate_compare.py`: Read-only comparison of live Arr
+  release-tier custom formats against Profilarr/Dictionarry tier candidates.
 - `radarr_release_expectation_check.py`: Read-only check of live Radarr anime
   release-selection expectations.
 - `sonarr_blocklist_queue_matches.py`: Backs up Sonarr state, then optionally

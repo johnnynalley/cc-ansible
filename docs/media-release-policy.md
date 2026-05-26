@@ -19,7 +19,9 @@ a separate policy because dual audio is the highest priority there.
   `profilarr.jnalley.me`
 - Profilarr candidate/test profiles:
   - Sonarr: `shows-anime-profilarr-test` id `9`
+  - Sonarr: `shows-regular-profilarr-test` id `10`
   - Radarr: `movies-anime-profilarr-test` id `8`
+  - Radarr: `movies-regular-profilarr-test` id `9`
 - Release metadata stamper: `playbooks/media/media-release-stamper.yml`
 - Sonarr grab/import forensics: `scripts/media-release/sonarr_grab_forensics.py`
 - Sonarr transaction audit report: `scripts/media-release/sonarr_transaction_audit.py`
@@ -119,15 +121,15 @@ same-resolution DA Web x265 with a good Web tier can still beat a bare DA
 Bluray x264 when that matches the smaller-file preference.
 
 Do not add new local CFs casually. The custom-format limit matters. Current
-counts after the selective Profilarr/Dumpstarr CF staging pass and local source
-rank are Sonarr `84` and Radarr `74`; the working limit for staging checks is
-`100`.
+counts after the Dictionarry compact-tier test staging and stale all-zero
+non-rename cleanup are Sonarr `76` and Radarr `64`; the working limit for
+staging checks is `100`.
 
 The audit script `scripts/media-release/arr_release_policy_audit.py` checks current CF counts,
-profile scores, queue status, and unused/all-zero CFs. On 2026-05-22 it found no
-truly unused Sonarr or Radarr custom formats. All-zero CFs were still referenced
-by profiles, and several are intentionally used for rename tags or DA helper
-matching, so they were not deleted.
+profile scores, queue status, and unused/all-zero CFs. On 2026-05-26 it found no
+unused Sonarr or Radarr custom formats after compact-tier staging. Remaining
+all-zero formats were rename-enabled service/source tags or protected local
+helpers such as DA and H.265/x265 matching, so they were preserved.
 
 The read-only live expectation checkers are
 `scripts/media-release/sonarr_release_expectation_check.py` and
@@ -348,14 +350,16 @@ Current migration posture as of 2026-05-26:
   - Radarr `movies-anime`: 32 movies
 - Test profiles exist but have no assignments:
   - Sonarr `shows-anime-profilarr-test`: 0 series
+  - Sonarr `shows-regular-profilarr-test`: 0 series
   - Radarr `movies-anime-profilarr-test`: 0 movies
+  - Radarr `movies-regular-profilarr-test`: 0 movies
 - Dictionarry is linked in Profilarr, enabled, and auto-pulls hourly.
 - Dumpstarr is linked in Profilarr but currently disabled. Do not use
   disabled/stale PCD sources for production definition sync unless the source
   is explicitly re-enabled and revalidated first.
-- Selected Dumpstarr custom-format definitions have been copied into Arr and
-  scored only in the test profiles. Production `shows-anime` and
-  `movies-anime` still use the existing active policy.
+- Dictionarry compact release-tier custom formats have been copied into Arr and
+  scored only in the test profiles. Production `shows-anime`, `shows-regular`,
+  `movies-anime`, and `movies-regular` still use the existing active policy.
 - Selected existing Arr CF definitions were safely refreshed from enabled
   Dictionarry sources on 2026-05-26. This touched service/source/repack-style
   CF definitions only; it did not touch DA, x265, quality ranks, profile
@@ -389,17 +393,19 @@ Candidate material not safe to adopt blindly:
   those materialized Dumpstarr definitions collapse to WEB source checks, not
   release-group tier regexes.
 
-Current selective import state:
+Historical selective Dumpstarr import state:
 
 - Script: `scripts/media-release/profilarr_selective_cf_import.py`
 - Latest applied snapshot:
   `/opt/media-stack/release-policy-snapshots/20260523T063425Z-selective-profilarr-cfs`
-- Sonarr CF count: `84/100`
-- Radarr CF count: `74/100`
-- Existing TRaSH anime tier scores were zeroed only in:
+- The imported `Dumpstarr ...` formats from this pass were later removed from
+  live Arr as stale all-zero non-rename formats during Dictionarry compact-tier
+  staging on 2026-05-26.
+- Existing TRaSH anime tier scores were zeroed only in the test profiles during
+  that historical pass:
   - Sonarr `shows-anime-profilarr-test`
   - Radarr `movies-anime-profilarr-test`
-- New `Dumpstarr ...` tier/filter scores in the test profiles:
+- Historical `Dumpstarr ...` tier/filter scores in the test profiles were:
   - `Dumpstarr Anime BD Tier 01..08`: `+1400` down to `+700`
   - `Dumpstarr Anime WEB Tier 01..6`: `+1400` down to `+900`
   - `Dumpstarr Anime Baseline Groups`: `+150`
@@ -412,6 +418,41 @@ Current selective import state:
   - `Bad Dual Groups`
   - `Banned Groups (Title)`
   - `Bad Source` on Radarr
+
+Current Dictionarry compact-tier test state:
+
+- Scripts:
+  - `scripts/media-release/profilarr_tier_candidate_compare.py`
+  - `scripts/media-release/profilarr_compact_tier_import.py`
+- Latest applied snapshot:
+  `/opt/media-stack/release-policy-snapshots/20260526T210414Z-dictionarry-compact-tiers`
+- Current CF counts after cleanup:
+  - Sonarr: `76/100`
+  - Radarr: `64/100`
+- Refreshed test profiles only:
+  - Sonarr `shows-anime-profilarr-test` id `9`
+  - Sonarr `shows-regular-profilarr-test` id `10`
+  - Radarr `movies-anime-profilarr-test` id `8`
+  - Radarr `movies-regular-profilarr-test` id `9`
+- Production profile scores, cutoffs, and media assignments were not changed.
+- Imported Sonarr Dictionarry compact TV tiers:
+  - `Dictionarry 1080p Compact TV Bluray Tier 1..6`: `+750`, `+700`,
+    `+650`, `+600`, `+550`, `+500`
+  - `Dictionarry 1080p Compact TV WEB Tier 1..5`: `+650`, `+600`, `+550`,
+    `+500`, `+450`
+- Imported Radarr Dictionarry compact movie tiers:
+  - `Dictionarry 1080p Compact Movie Bluray Tier 1..4`: `+750`, `+700`,
+    `+650`, `+600`
+  - `Dictionarry 1080p Compact Movie WEB Tier 1..4`: `+650`, `+600`,
+    `+550`, `+500`
+- These scores are intentionally below DA (`+100000`), anime quality ranks,
+  x265/HEVC (`+2000`), and Bluray source rank (`+1500`). They are release-group
+  and compact-encode tie-breakers, not DA or quality overrides.
+- The compact-tier import cleanup deletes only all-zero non-rename custom
+  formats. It must not delete formats with `includeCustomFormatWhenRenaming`
+  enabled, and it protects local helper formats such as DA title/metadata
+  helpers, H.265/x265, source rank, hard rejects, soft avoids, and local anime
+  quality-rank prefixes.
 
 Current existing-definition sync state:
 
@@ -431,11 +472,12 @@ Current existing-definition sync state:
   - Sonarr and Radarr DA/x265/quality-rank expectation checks passed.
   - CF counts remained Sonarr `84/100`, Radarr `74/100`.
 
-Profilarr remains the upstream refresh source for these imported CFs, but
-Profilarr itself is not directly managing the copied Arr formats yet. The sync
-path is: Profilarr auto-pulls Dictionarry/Dumpstarr, then
-`scripts/media-release/profilarr_selective_cf_import.py` refreshes the selected Arr
-definitions and reapplies local scores. This preserves upstream CF-definition
+Profilarr remains the upstream refresh source for imported CFs, but Profilarr
+itself is not directly managing the copied Arr formats yet. The sync path is:
+Profilarr auto-pulls Dictionarry/Dumpstarr, then repo-managed scripts refresh
+selected Arr definitions and reapply local scores. Use
+`scripts/media-release/profilarr_compact_tier_import.py` for the current
+Dictionarry compact-tier test profiles. This preserves upstream CF-definition
 updates without accepting upstream profile scoring such as the stock x265
 penalty.
 
@@ -444,7 +486,8 @@ Before assigning any series/movie to a Profilarr-derived profile, run:
 ```bash
 ansible docker-vm --become -m script -a "scripts/media-release/arr_stage_profilarr_test_profiles.py --dry-run"
 ansible docker-vm -m script -a scripts/media-release/profilarr_candidate_audit.py
-ansible docker-vm --become -m script -a "scripts/media-release/profilarr_selective_cf_import.py --dry-run"
+ansible docker-vm -m script -a "scripts/media-release/profilarr_tier_candidate_compare.py --only-missing --name-regex '1080p Compact (TV|Movie) (WEB|Bluray|Trash) Tier'"
+ansible docker-vm --become -m script -a "scripts/media-release/profilarr_compact_tier_import.py --dry-run"
 ansible docker-vm --become -m script -a "scripts/media-release/sonarr_transaction_audit.py --hours 24 --limit 25"
 ansible docker-vm -m script -a scripts/media-release/sonarr_release_expectation_check.py
 ansible docker-vm -m script -a scripts/media-release/radarr_release_expectation_check.py
@@ -475,6 +518,11 @@ rollback artifacts from the Profilarr staging pass:
   `/opt/media-stack/release-policy-snapshots/20260526T202848Z-profilarr-cf-definition-sync-dry-run`,
   and inspection snapshot
   `/opt/media-stack/release-policy-snapshots/20260526T203104Z-profilarr-cf-definition-sync-dry-run`
+- Dictionarry compact-tier test-profile snapshots:
+  `/opt/media-stack/release-policy-snapshots/20260526T203854Z-profilarr-cf-definition-sync-dry-run`,
+  `/opt/media-stack/release-policy-snapshots/20260526T210325Z-dictionarry-compact-tiers-dry-run`,
+  and applied snapshot
+  `/opt/media-stack/release-policy-snapshots/20260526T210414Z-dictionarry-compact-tiers`
 - JoJo Stardust blocklist / wrong-import repair backups:
   `/opt/media-stack/arr-policy-backups/20260524T210710Z-jojo-stardust-s01-repair`
   and
