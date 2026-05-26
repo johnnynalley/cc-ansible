@@ -1,6 +1,6 @@
 # Repository Guidelines
 
-> **Last updated:** 2026-05-21
+> **Last updated:** 2026-05-26
 
 This file provides guidance to Codex CLI when working with code in this repository. It combines a quick contributor guide with the full operational reference migrated from Claude Code.
 
@@ -10,6 +10,12 @@ This file provides guidance to Codex CLI when working with code in this reposito
 ### Project Structure & Module Organization
 
 This repository manages homelab infrastructure with Ansible. `site.yml` is the top-level playbook and `playbooks/` contains targeted runs such as `packages.yml`, `docker-stacks.yml`, and `proxmox-firewall.yml`. Shared task files live in `tasks/`, Jinja2 templates in `templates/`, helper executables in `scripts/` and `bin/`, and all host/group configuration under `inventory/`. Use `inventory/group_vars/` for group defaults and `inventory/host_vars/<hostname>/` for host-specific overrides.
+
+### Script Inventory & Reusable Diagnostics
+
+Treat reusable diagnostics, policy probes, and repair helpers as managed repository assets, not throwaway `/tmp` scripts. Before writing a new helper, read `scripts/README.md` and the relevant script-directory README to find existing tools and extension points. If a script would be useful beyond a single shell one-liner, add or improve a repo-managed script under an appropriate `scripts/<domain>/` directory, document it in that directory's README, and update `scripts/README.md` if the directory or tool category changes.
+
+Do not create standalone diagnostic scripts in `/tmp` as the primary work product and then discard them. If a remote host needs a temporary copy for execution, the source should still live in the repo first, and the remote temporary copy should be cleaned up after use. Existing flat files under `scripts/` are legacy; migrate them into domain directories only as a deliberate compatibility-checked change that updates playbooks, docs, and references in the same commit.
 
 ### Documentation Cross-References
 
