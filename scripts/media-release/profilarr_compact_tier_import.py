@@ -53,6 +53,7 @@ PROTECTED_CLEANUP_NAMES = {
 }
 
 PROTECTED_CLEANUP_PREFIXES = ("Local Anime Quality Rank -",)
+LEGACY_TIER_PATTERN = re.compile(r"^(?!Dictionarry ).*\bTier \d{2}$", re.IGNORECASE)
 
 
 @dataclass(frozen=True)
@@ -618,6 +619,40 @@ def set_profile_scores(
     return changes
 
 
+def zero_legacy_tier_scores(
+    profile: dict[str, Any],
+    custom_formats_by_id: dict[int, dict[str, Any]],
+) -> dict[str, dict[str, int]]:
+    changes: dict[str, dict[str, int]] = {}
+    for item in profile.get("formatItems", []):
+        cf_id = custom_format_id_from_item(item)
+        if cf_id is None:
+            continue
+        name = str(custom_formats_by_id.get(cf_id, {}).get("name") or item.get("name") or "")
+        if not LEGACY_TIER_PATTERN.match(name):
+            continue
+        old_score = int(item.get("score") or 0)
+        if old_score == 0:
+            continue
+        changes[name] = {"old": old_score, "new": 0}
+        item["score"] = 0
+    return changes
+
+
+def merge_score_changes(*change_sets: dict[str, dict[str, int]]) -> dict[str, dict[str, int]]:
+    merged: dict[str, dict[str, int]] = {}
+    for changes in change_sets:
+        for name, score_change in changes.items():
+            if name in merged and merged[name]["old"] == score_change["new"]:
+                merged.pop(name)
+                continue
+            if name in merged:
+                merged[name]["new"] = score_change["new"]
+            else:
+                merged[name] = dict(score_change)
+    return merged
+
+
 def scored_custom_format_ids(profiles: list[dict[str, Any]]) -> set[int]:
     scored: set[int] = set()
     for profile in profiles:
@@ -726,7 +761,10 @@ def process_instance(
             profile_actions[pair.test_name] = "would-refresh" if target_id is not None else "would-create"
             for curated, _payload in payloads:
                 add_missing_format_item(profile, simulated_by_name[curated.target_name])
-            changes = set_profile_scores(profile, custom_formats_by_id, target_scores)
+            changes = merge_score_changes(
+                zero_legacy_tier_scores(profile, custom_formats_by_id),
+                set_profile_scores(profile, custom_formats_by_id, target_scores),
+            )
             if changes:
                 profile_score_changes[pair.test_name] = changes
             replace_profile(simulated_profiles, profile)
@@ -766,7 +804,10 @@ def process_instance(
             profile = find_one(profiles, pair.test_name, "quality profile")
             for curated, _payload in payloads:
                 add_missing_format_item(profile, custom_formats_by_name[curated.target_name])
-            changes = set_profile_scores(profile, custom_formats_by_id, target_scores)
+            changes = merge_score_changes(
+                zero_legacy_tier_scores(profile, custom_formats_by_id),
+                set_profile_scores(profile, custom_formats_by_id, target_scores),
+            )
             request_json(instance, api_key, "PUT", f"/api/v3/qualityprofile/{profile['id']}", profile)
             if changes:
                 profile_score_changes[pair.test_name] = changes

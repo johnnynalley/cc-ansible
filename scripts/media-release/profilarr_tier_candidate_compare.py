@@ -65,13 +65,23 @@ INSTANCES = (
         name="sonarr",
         base_url="http://127.0.0.1:8989",
         config_path="/opt/media-stack/sonarr/config.xml",
-        profile_names=("shows-anime", "shows-regular", "shows-anime-profilarr-test"),
+        profile_names=(
+            "shows-anime",
+            "shows-regular",
+            "shows-anime-profilarr-test",
+            "shows-regular-profilarr-test",
+        ),
     ),
     ArrInstance(
         name="radarr",
         base_url="http://127.0.0.1:7878",
         config_path="/opt/media-stack/radarr/config.xml",
-        profile_names=("movies-anime", "movies-regular", "movies-anime-profilarr-test"),
+        profile_names=(
+            "movies-anime",
+            "movies-regular",
+            "movies-anime-profilarr-test",
+            "movies-regular-profilarr-test",
+        ),
     ),
 )
 
@@ -579,14 +589,16 @@ def print_text(report: dict[str, Any]) -> None:
             )
         )
         print("  live scored/tier-like formats:")
-        for tier in instance["live_tiers"][:30]:
+        live_limit = report["live_limit"]
+        live_tiers = instance["live_tiers"] if live_limit < 0 else instance["live_tiers"][:live_limit]
+        for tier in live_tiers:
             score_text = ", ".join(f"{key}={value}" for key, value in tier["scores"].items()) or "unscored"
             print(
                 "    - {name}: {score_text}; specs={spec_count} release_specs={release_spec_count} "
                 "source_specs={source_spec_count}".format(score_text=score_text, **tier)
             )
-        if len(instance["live_tiers"]) > 30:
-            print(f"    ... {len(instance['live_tiers']) - 30} more")
+        if live_limit >= 0 and len(instance["live_tiers"]) > live_limit:
+            print(f"    ... {len(instance['live_tiers']) - live_limit} more")
 
         print("  candidate formats:")
         for candidate in instance["candidates"]:
@@ -616,6 +628,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--include-disabled-databases", action="store_true")
     parser.add_argument("--only-missing", action="store_true")
     parser.add_argument("--limit", type=int, default=40)
+    parser.add_argument(
+        "--live-limit",
+        type=int,
+        default=30,
+        help="number of live scored/tier-like formats to show; use -1 for all",
+    )
     parser.add_argument("--json", action="store_true")
     return parser.parse_args()
 
@@ -623,6 +641,7 @@ def parse_args() -> argparse.Namespace:
 def main() -> int:
     args = parse_args()
     report = build_report(args)
+    report["live_limit"] = args.live_limit
     if args.json:
         json.dump(report, sys.stdout, indent=2, sort_keys=True)
         print()

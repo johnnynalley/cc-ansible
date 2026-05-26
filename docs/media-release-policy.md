@@ -425,7 +425,7 @@ Current Dictionarry compact-tier test state:
   - `scripts/media-release/profilarr_tier_candidate_compare.py`
   - `scripts/media-release/profilarr_compact_tier_import.py`
 - Latest applied snapshot:
-  `/opt/media-stack/release-policy-snapshots/20260526T210414Z-dictionarry-compact-tiers`
+  `/opt/media-stack/release-policy-snapshots/20260526T211737Z-dictionarry-compact-tiers`
 - Current CF counts after cleanup:
   - Sonarr: `76/100`
   - Radarr: `64/100`
@@ -435,6 +435,14 @@ Current Dictionarry compact-tier test state:
   - Radarr `movies-anime-profilarr-test` id `8`
   - Radarr `movies-regular-profilarr-test` id `9`
 - Production profile scores, cutoffs, and media assignments were not changed.
+- This is a replacement-mechanics pilot, not the full proposed main-profile
+  migration. It proves that Profilarr/Dictionarry release-tier CFs can replace
+  the old Recyclarr/TRaSH tier band in test profiles without double-counting,
+  but the compact tier slice alone is too narrow to be the final profile.
+- Test profiles are staged in replacement mode, not stacked mode. Legacy
+  Recyclarr/TRaSH release-tier scores matching `Tier NN` are zeroed in the test
+  profiles before Dictionarry compact tiers are scored. The old CF definitions
+  still exist for production profiles; only the test-profile scores are zeroed.
 - Imported Sonarr Dictionarry compact TV tiers:
   - `Dictionarry 1080p Compact TV Bluray Tier 1..6`: `+750`, `+700`,
     `+650`, `+600`, `+550`, `+500`
@@ -446,13 +454,29 @@ Current Dictionarry compact-tier test state:
   - `Dictionarry 1080p Compact Movie WEB Tier 1..4`: `+650`, `+600`,
     `+550`, `+500`
 - These scores are intentionally below DA (`+100000`), anime quality ranks,
-  x265/HEVC (`+2000`), and Bluray source rank (`+1500`). They are release-group
-  and compact-encode tie-breakers, not DA or quality overrides.
+  x265/HEVC (`+2000`), and Bluray source rank (`+1500`). Because the old
+  Recyclarr/TRaSH tier scores are zeroed in the test profiles, Dictionarry tiers
+  do not stack with the old tier band or outrank x265 by double-counting release
+  groups.
 - The compact-tier import cleanup deletes only all-zero non-rename custom
   formats. It must not delete formats with `includeCustomFormatWhenRenaming`
   enabled, and it protects local helper formats such as DA title/metadata
   helpers, H.265/x265, source rank, hard rejects, soft avoids, and local anime
   quality-rank prefixes.
+- Broader Dictionarry tiering is available and still needs a mapped import
+  before any test profile should be considered production-equivalent. Candidate
+  families seen in the enabled Dictionarry database include Compact, Efficient,
+  HEVC-specific, Balanced, Quality, lower-resolution, HDTV, WEB-DL, and
+  trash-tier release-group CFs. Add them only after comparing coverage and
+  score math against the existing profiles and the CF limit.
+- Coverage check from the 2026-05-26 live tier audit: compact-only is narrower
+  than the previous tier coverage. Sonarr/Radarr anime TRaSH anime BD+Web tiers
+  each exposed about `251` release-title/release-group patterns, while the
+  staged Dictionarry compact TV tiers exposed about `58` and compact movie
+  tiers exposed about `47`. Sonarr regular `WEB Tier 01..03` exposed about
+  `73`; Radarr regular `HD Bluray Tier 01..03` plus `WEB Tier 01..03` exposed
+  about `81`. Do not treat compact-only as a full replacement for the old tier
+  reach.
 
 Current existing-definition sync state:
 
@@ -521,8 +545,11 @@ rollback artifacts from the Profilarr staging pass:
 - Dictionarry compact-tier test-profile snapshots:
   `/opt/media-stack/release-policy-snapshots/20260526T203854Z-profilarr-cf-definition-sync-dry-run`,
   `/opt/media-stack/release-policy-snapshots/20260526T210325Z-dictionarry-compact-tiers-dry-run`,
-  and applied snapshot
-  `/opt/media-stack/release-policy-snapshots/20260526T210414Z-dictionarry-compact-tiers`
+  `/opt/media-stack/release-policy-snapshots/20260526T210414Z-dictionarry-compact-tiers`,
+  replacement-mode dry-run
+  `/opt/media-stack/release-policy-snapshots/20260526T211726Z-dictionarry-compact-tiers-dry-run`,
+  and replacement-mode applied snapshot
+  `/opt/media-stack/release-policy-snapshots/20260526T211737Z-dictionarry-compact-tiers`
 - JoJo Stardust blocklist / wrong-import repair backups:
   `/opt/media-stack/arr-policy-backups/20260524T210710Z-jojo-stardust-s01-repair`
   and

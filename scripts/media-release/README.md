@@ -19,7 +19,8 @@
   structure and scores.
 - `profilarr_compact_tier_import.py`: Imports curated Dictionarry compact
   TV/movie release-tier custom formats into refreshed Arr test profiles with
-  backups and cleanup of all-zero non-rename CFs.
+  backups, replacement-mode legacy tier score zeroing, and cleanup of all-zero
+  non-rename CFs.
 - `profilarr_disable_upgrade_jobs.py`: Disables Profilarr scheduled Arr upgrade
   jobs with a SQLite backup, without disabling PCD sync.
 - `profilarr_link_database.py`: Links a Profilarr database through the local
