@@ -1,0 +1,135 @@
+# Purpose: Configure automatic updates.
+# Hosts: linux_hosts.
+# Key vars: packages_*, bootstrap_*, auto_updates_*, unattended_upgrades_*, swap_*, sysctl_*, logging_*, smartd_*, apcupsd_*.
+# Templates: templates/auto-updates, templates/logging, templates/motd, templates/smartmontools, templates/ups.
+# Scripts: scripts/repo/repo-audit for repo checks; otherwise none by default.
+# Validation: ansible-playbook playbooks/core/auto-updates.yml --syntax-check.
+
+# =============================================================================
+# Auto-Updates Playbook - Systemd timer for automatic updates
+# =============================================================================
+# Usage: ansible-playbook playbooks/core/auto-updates.yml
+# =============================================================================
+
+- name: Configure automatic system updates
+  hosts: linux_hosts
+  become: true
+  gather_facts: true
+
+  tasks:
+    # =========================================================================
+    # Skip hosts with auto_updates_enabled: false
+    # =========================================================================
+    - name: Stop and disable auto-updates timer (disabled hosts)
+      ansible.builtin.systemd:
+        name: auto-updates.timer
+        enabled: false
+        state: stopped
+        daemon_reload: true
+      when: auto_updates_enabled is defined and not auto_updates_enabled
+      failed_when: false
+
+    - name: End play for hosts with auto-updates disabled
+      ansible.builtin.meta: end_host
+      when: auto_updates_enabled is defined and not auto_updates_enabled
+
+    # =========================================================================
+    # Debian/Ubuntu auto-updates script
+    # =========================================================================
+    - name: Create auto-updates script (Debian)
+      ansible.builtin.template:
+        src: ../templates/auto-updates/auto-updates-debian.sh.j2
+        dest: /usr/local/sbin/auto-updates
+        owner: root
+        group: root
+        mode: "0755"
+      when: ansible_facts.os_family == "Debian"
+      tags: [script]
+
+    # =========================================================================
+    # Arch Linux auto-updates script
+    # =========================================================================
+    - name: Create auto-updates script (Arch)
+      ansible.builtin.template:
+        src: ../templates/auto-updates/auto-updates-arch.sh.j2
+        dest: /usr/local/sbin/auto-updates
+        owner: root
+        group: root
+        mode: "0755"
+      when: ansible_facts.os_family == "Archlinux"
+      tags: [script]
+
+    # =========================================================================
+    # Systemd service
+    # =========================================================================
+    - name: Create auto-updates systemd service
+      ansible.builtin.copy:
+        content: |
+          [Unit]
+          Description=Automatic System Updates
+          After=network-online.target
+          Wants=network-online.target
+
+          [Service]
+          Type=oneshot
+          ExecStart=/usr/local/sbin/auto-updates
+          StandardOutput=journal
+          StandardError=journal
+
+          # Run as root
+          User=root
+
+          # Safety limits
+          TimeoutStartSec={{ auto_updates_timeout_start_sec | default('7200') }}
+          Nice=19
+          IOSchedulingClass=idle
+        dest: /etc/systemd/system/auto-updates.service
+        owner: root
+        group: root
+        mode: "0644"
+      notify: Reload systemd
+      tags: [systemd]
+
+    # =========================================================================
+    # Systemd timer
+    # =========================================================================
+    - name: Create auto-updates systemd timer
+      ansible.builtin.copy:
+        content: |
+          [Unit]
+          Description=Run automatic updates on schedule
+
+          [Timer]
+          OnCalendar={{ auto_updates_oncalendar | default('Sun *-*-* 03:30:00') }}
+          RandomizedDelaySec={{ auto_updates_randomized_delay_sec | default('15m') }}
+          Persistent=true
+
+          [Install]
+          WantedBy=timers.target
+        dest: /etc/systemd/system/auto-updates.timer
+        owner: root
+        group: root
+        mode: "0644"
+      notify:
+        - Reload systemd
+        - Enable auto-updates timer
+      tags: [systemd]
+
+    - name: Ensure auto-updates timer is enabled and started
+      ansible.builtin.systemd:
+        name: auto-updates.timer
+        enabled: true
+        state: started
+        daemon_reload: true
+      tags: [systemd]
+
+  handlers:
+    - name: Reload systemd
+      ansible.builtin.systemd:
+        daemon_reload: true
+
+    - name: Enable auto-updates timer
+      ansible.builtin.systemd:
+        name: auto-updates.timer
+        enabled: true
+        state: started

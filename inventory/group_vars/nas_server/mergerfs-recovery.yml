@@ -1,6 +1,6 @@
 ---
 # MergerFS branch recovery — auto-remount + watchdog + media-app refresh
-# Deployed by playbooks/mergerfs-recovery.yml (opt-in via mergerfs_recovery_enabled).
+# Deployed by playbooks/storage/mergerfs-recovery.yml (opt-in via mergerfs_recovery_enabled).
 
 mergerfs_recovery_enabled: true
 

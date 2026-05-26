@@ -6,7 +6,7 @@
 
 ## Consumers
 
-- `playbooks/logging.yml`
+- `playbooks/core/logging.yml`
 
 ## Safety Notes
 

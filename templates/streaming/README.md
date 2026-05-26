@@ -16,7 +16,7 @@
 
 ## Consumers
 
-- `playbooks/stream-relay.yml`
+- `playbooks/media/stream-relay.yml`
 - `docs/streaming-runbook.md`
 
 ## Safety Notes

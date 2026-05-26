@@ -12,7 +12,7 @@
 
 ## Consumers
 
-- `playbooks/nightly-media-maintenance.yml`
+- `playbooks/media/nightly-media-maintenance.yml`
 
 ## Safety Notes
 

@@ -1,0 +1,330 @@
+---
+# Purpose: Configure Windows Performance Mode automation.
+# Hosts: localhost, windows_performance_mode_targets.
+# Key vars: windows_gaming_*, windows_performance_mode_*, windows_signalrgb_*, gaming_benchmark_*.
+# Templates: templates/windows.
+# Scripts: scripts/gaming.
+# Validation: ansible-playbook playbooks/windows/windows-performance-mode.yml --syntax-check.
+
+- name: Select reachable Windows hosts for performance mode
+  hosts: localhost
+  gather_facts: false
+
+  vars:
+    windows_reachable_target_group: windows_performance_mode_targets
+
+  tasks:
+    - name: Build reachable Windows performance mode host group
+      ansible.builtin.import_tasks: ../../tasks/windows-reachable-hosts.yml
+
+- name: Manage Windows performance mode automation
+  hosts: windows_performance_mode_targets
+  gather_facts: false
+
+  tasks:
+    - name: Ensure Windows performance mode directories exist
+      ansible.windows.win_file:
+        path: "{{ item }}"
+        state: directory
+      loop:
+        - "{{ windows_performance_script_dir }}"
+        - "{{ windows_performance_state_dir }}"
+
+    - name: Ensure OBS script directory exists
+      ansible.windows.win_file:
+        path: "{{ windows_performance_obs_scripts_dir }}"
+        state: directory
+      when: windows_performance_obs_enable_script | default(false)
+
+    - name: Deploy Windows performance mode scripts
+      ansible.windows.win_template:
+        src: "../templates/windows/{{ item }}"
+        dest: "{{ windows_performance_script_dir }}\\{{ item | regex_replace('\\.j2$', '') }}"
+      loop:
+        - windows-performance-mode.ps1.j2
+        - windows-performance-watch.ps1.j2
+        - windows-performance-window-action.ps1.j2
+        - windows-performance-run-hidden.vbs.j2
+
+    - name: Deploy OBS performance mode trigger
+      ansible.windows.win_template:
+        src: "../templates/windows/obs-performance-mode.lua.j2"
+        dest: "{{ windows_performance_obs_scripts_dir }}\\{{ windows_performance_obs_lua_script }}"
+      when: windows_performance_obs_enable_script | default(false)
+
+    - name: Stop legacy Fortnite comp mode watcher if present
+      ansible.windows.win_powershell:
+        script: |
+          [CmdletBinding(SupportsShouldProcess)]
+          param()
+
+          if ($Ansible.CheckMode) {
+              return
+          }
+
+          $ErrorActionPreference = 'SilentlyContinue'
+          Stop-ScheduledTask -TaskName 'Fortnite Comp Mode Watcher'
+      changed_when: false
+
+    - name: Remove legacy Fortnite comp mode watcher
+      community.windows.win_scheduled_task:
+        name: Fortnite Comp Mode Watcher
+        state: absent
+
+    - name: Stop Windows performance mode watcher before update
+      ansible.windows.win_powershell:
+        script: |
+          [CmdletBinding(SupportsShouldProcess)]
+          param()
+
+          if ($Ansible.CheckMode) {
+              return
+          }
+
+          $ErrorActionPreference = 'SilentlyContinue'
+          Stop-ScheduledTask -TaskName '{{ windows_performance_watcher_task_name }}'
+          $WatcherPath = '{{ windows_performance_script_dir }}\windows-performance-watch.ps1'
+          Get-CimInstance Win32_Process |
+              Where-Object {
+                  $_.Name -ieq 'powershell.exe' -and
+                  $_.CommandLine -like "*$WatcherPath*"
+              } |
+              ForEach-Object {
+                  Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue
+              }
+      changed_when: false
+
+    - name: Register Windows performance mode watcher
+      community.windows.win_scheduled_task:
+        name: "{{ windows_performance_watcher_task_name }}"
+        description: Watch games and OBS triggers and enter/exit performance mode automatically.
+        actions:
+          - path: wscript.exe
+            arguments: >-
+              "{{ windows_performance_script_dir }}\windows-performance-run-hidden.vbs"
+              "{{ windows_performance_script_dir }}\windows-performance-watch.ps1"
+        triggers:
+          - type: logon
+            user_id: "{{ windows_performance_task_user }}"
+        username: "{{ windows_performance_task_user }}"
+        logon_type: interactive_token
+        run_level: highest
+        hidden: true
+        enabled: true
+        start_when_available: true
+        multiple_instances: 2
+        disallow_start_if_on_batteries: false
+        stop_if_going_on_batteries: false
+        execution_time_limit: PT0S
+        compatibility: 4
+        state: present
+
+    - name: Create Windows performance mode desktop shortcuts
+      ansible.windows.win_powershell:
+        script: |
+          [CmdletBinding(SupportsShouldProcess)]
+          param()
+
+          $ErrorActionPreference = 'Stop'
+          $ShortcutDir = '{{ windows_performance_desktop_shortcut_dir }}'
+          $ScriptPath = '{{ windows_performance_script_dir }}\windows-performance-mode.ps1'
+          $WorkingDirectory = '{{ windows_performance_script_dir }}'
+          $Shell = New-Object -ComObject WScript.Shell
+          $Ansible.Changed = $false
+
+          if (-not (Test-Path -LiteralPath $ShortcutDir)) {
+              $Ansible.Changed = $true
+              if (-not $Ansible.CheckMode) {
+                  New-Item -Path $ShortcutDir -ItemType Directory -Force | Out-Null
+              }
+          }
+
+          $shortcuts = @(
+              @{
+                  Name = 'Performance Mode On.lnk'
+                  Arguments = "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$ScriptPath`" -Mode enter -Reason manual"
+                  WindowStyle = 7
+              },
+              @{
+                  Name = 'Performance Mode Off.lnk'
+                  Arguments = "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$ScriptPath`" -Mode exit-all -Reason manual"
+                  WindowStyle = 7
+              },
+              @{
+                  Name = 'Performance Mode Status.lnk'
+                  Arguments = "-NoProfile -ExecutionPolicy Bypass -NoExit -File `"$ScriptPath`" -Mode status -Reason manual"
+                  WindowStyle = 1
+              }
+          )
+
+          foreach ($item in $shortcuts) {
+              $path = Join-Path $ShortcutDir $item.Name
+              $shortcut = $Shell.CreateShortcut($path)
+              $desiredTarget = Join-Path $env:WINDIR 'System32\WindowsPowerShell\v1.0\powershell.exe'
+              $needsUpdate = -not (Test-Path -LiteralPath $path)
+
+              if ($shortcut.TargetPath -ne $desiredTarget) {
+                  $needsUpdate = $true
+              }
+              if ($shortcut.Arguments -ne $item.Arguments) {
+                  $needsUpdate = $true
+              }
+              if ($shortcut.WorkingDirectory -ne $WorkingDirectory) {
+                  $needsUpdate = $true
+              }
+              if ([int]$shortcut.WindowStyle -ne [int]$item.WindowStyle) {
+                  $needsUpdate = $true
+              }
+
+              if ($needsUpdate) {
+                  $Ansible.Changed = $true
+                  if (-not $Ansible.CheckMode) {
+                      $shortcut.TargetPath = $desiredTarget
+                      $shortcut.Arguments = $item.Arguments
+                      $shortcut.WorkingDirectory = $WorkingDirectory
+                      $shortcut.WindowStyle = [int]$item.WindowStyle
+                      $shortcut.Save()
+                  }
+              }
+          }
+      when: windows_performance_desktop_shortcuts_enabled | default(false)
+
+    - name: Remove legacy Windows performance mode desktop shortcuts
+      ansible.windows.win_powershell:
+        parameters:
+          LegacyShortcutDirs: "{{ windows_performance_desktop_shortcut_legacy_dirs | default([]) }}"
+          ActiveShortcutDir: "{{ windows_performance_desktop_shortcut_dir }}"
+        script: |
+          [CmdletBinding(SupportsShouldProcess)]
+          param(
+              [string[]]$LegacyShortcutDirs,
+              [string]$ActiveShortcutDir
+          )
+
+          $ErrorActionPreference = 'Stop'
+          $shortcutNames = @(
+              'Performance Mode On.lnk',
+              'Performance Mode Off.lnk',
+              'Performance Mode Status.lnk'
+          )
+          $Ansible.Changed = $false
+
+          foreach ($dir in @($LegacyShortcutDirs | Where-Object { $_ })) {
+              if ($dir -eq $ActiveShortcutDir) {
+                  continue
+              }
+              foreach ($name in $shortcutNames) {
+                  $path = Join-Path $dir $name
+                  if (Test-Path -LiteralPath $path) {
+                      $Ansible.Changed = $true
+                      if (-not $Ansible.CheckMode) {
+                          Remove-Item -LiteralPath $path -Force
+                      }
+                  }
+              }
+          }
+      when: windows_performance_desktop_shortcuts_enabled | default(false)
+
+    - name: Wire OBS performance mode trigger into active scene collection
+      ansible.windows.win_powershell:
+        script: |
+          [CmdletBinding(SupportsShouldProcess)]
+          param()
+
+          $ErrorActionPreference = 'Stop'
+          $Path = '{{ windows_performance_obs_scene_collection }}'
+          $ScriptPath = '{{ windows_performance_obs_scripts_dir }}\{{ windows_performance_obs_lua_script }}'
+
+          if (-not (Test-Path -LiteralPath $Path)) {
+              throw "OBS scene collection not found: $Path"
+          }
+
+          $raw = Get-Content -LiteralPath $Path -Raw
+          $json = $raw | ConvertFrom-Json
+
+          if (-not $json.PSObject.Properties['modules']) {
+              $json | Add-Member -MemberType NoteProperty -Name modules -Value ([pscustomobject]@{})
+          }
+
+          if (-not $json.modules.PSObject.Properties['scripts-tool']) {
+              $json.modules | Add-Member -MemberType NoteProperty -Name 'scripts-tool' -Value @()
+          }
+
+          $scripts = @($json.modules.'scripts-tool')
+          $scriptStrings = @($scripts | ForEach-Object { [string]$_ })
+
+          if ($scriptStrings -notcontains $ScriptPath) {
+              $Ansible.Changed = $true
+              if (-not $Ansible.CheckMode) {
+                  $backupPath = "$Path.pre-windows-performance-mode.bak"
+                  if (-not (Test-Path -LiteralPath $backupPath)) {
+                      Copy-Item -LiteralPath $Path -Destination $backupPath
+                  }
+                  $json.modules.'scripts-tool' = @($scripts + $ScriptPath)
+                  $json | ConvertTo-Json -Depth 100 | Set-Content -LiteralPath $Path -Encoding UTF8
+              }
+          } else {
+              $Ansible.Changed = $false
+          }
+      when: windows_performance_obs_enable_script | default(false)
+
+    - name: Start Windows performance mode watcher
+      ansible.windows.win_powershell:
+        script: |
+          [CmdletBinding(SupportsShouldProcess)]
+          param()
+
+          $ErrorActionPreference = 'Stop'
+          $TaskName = '{{ windows_performance_watcher_task_name }}'
+          $WatcherPath = '{{ windows_performance_script_dir }}\windows-performance-watch.ps1'
+          $runningWatcher = Get-CimInstance Win32_Process |
+              Where-Object {
+                  $_.Name -ieq 'powershell.exe' -and
+                  $_.CommandLine -like "*$WatcherPath*"
+              } |
+              Select-Object -First 1
+
+          if ($runningWatcher) {
+              $Ansible.Changed = $false
+              return
+          }
+
+          $task = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
+
+          if (-not $task) {
+              $Ansible.Changed = $true
+              return
+          }
+
+          if ($task.State -ne 'Running') {
+              $Ansible.Changed = $true
+              if (-not $Ansible.CheckMode) {
+                  Start-ScheduledTask -TaskName $TaskName
+              }
+          } else {
+              $Ansible.Changed = $false
+          }
+
+    - name: Remove legacy Windows performance mode script directories
+      ansible.windows.win_powershell:
+        parameters:
+          LegacyScriptDirs: "{{ windows_performance_legacy_script_dirs | default([]) }}"
+        script: |
+          [CmdletBinding(SupportsShouldProcess)]
+          param([string[]]$LegacyScriptDirs)
+
+          $Ansible.Changed = $false
+          foreach ($path in $LegacyScriptDirs) {
+              if (-not $path) {
+                  continue
+              }
+              if ($path -notlike 'C:\Users\jn\Nextcloud\Scripts\*') {
+                  throw "Refusing to remove unexpected legacy script path: $path"
+              }
+              if (Test-Path -LiteralPath $path) {
+                  $Ansible.Changed = $true
+                  if (-not $Ansible.CheckMode) {
+                      Remove-Item -LiteralPath $path -Recurse -Force
+                  }
+              }
+          }

@@ -7,7 +7,7 @@
 
 ## Consumers
 
-- `playbooks/smartmontools.yml`
+- `playbooks/core/smartmontools.yml`
 
 ## Safety Notes
 

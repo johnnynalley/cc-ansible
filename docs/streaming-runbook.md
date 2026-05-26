@@ -208,7 +208,7 @@ Do not force-close OBS unless it is stuck. Force-closing OBS caused crash prompt
 
 Repo-managed files:
 
-- `playbooks/stream-relay.yml`
+- `playbooks/media/stream-relay.yml`
 - `inventory/host_vars/media-vm/stream-relay.yml`
 - `templates/streaming/stream-relay.sh.j2`
 - `templates/streaming/stream-relay.service.j2`

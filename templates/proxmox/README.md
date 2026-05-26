@@ -11,10 +11,10 @@
 
 ## Consumers
 
-- `playbooks/proxmox-firewall.yml`
-- `playbooks/virtiofs.yml`
-- `playbooks/proxmox-backup-server.yml`
-- `playbooks/vm-storage-gate.yml`
+- `playbooks/proxmox/proxmox-firewall.yml`
+- `playbooks/storage/virtiofs.yml`
+- `playbooks/proxmox/proxmox-backup-server.yml`
+- `playbooks/storage/vm-storage-gate.yml`
 
 ## Safety Notes
 

@@ -16,7 +16,7 @@
 
 ## Consumers
 
-- `playbooks/plex-appliance.yml`
+- `playbooks/media/plex-appliance.yml`
 
 ## Safety Notes
 

@@ -138,7 +138,7 @@ cd "$repo_dir"
 ./bin/ansible-controller-guard check
 
 ansible_args=(
-  playbooks/windows-gaming-benchmark.yml
+  playbooks/windows/windows-gaming-benchmark.yml
   -e "windows_gaming_benchmark_action=${action:-}"
   -e "windows_gaming_benchmark_label=$label"
   -e "windows_gaming_benchmark_marker=$marker"

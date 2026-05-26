@@ -6,7 +6,7 @@
 
 ## Consumers
 
-- `playbooks/openclaw.yml`
+- `playbooks/agents/openclaw.yml`
 
 ## Safety Notes
 

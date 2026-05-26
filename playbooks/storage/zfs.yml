@@ -1,0 +1,42 @@
+# Purpose: Configure ZFS (snapshots, scrub, tuning, properties, ACLs).
+# Hosts: nas_server.
+# Key vars: smb_shares, nfs_*, filesystem_mounts, mergerfs_*, zfs_*, virtiofs_*, vm_storage_gate_*.
+# Templates: templates/storage, templates/samba, templates/proxmox.
+# Scripts: scripts/storage.
+# Validation: ansible-playbook playbooks/storage/zfs.yml --syntax-check.
+
+# =============================================================================
+# ZFS Playbook - Snapshots, Scrub, Tuning, Properties, ACLs
+# =============================================================================
+# Usage: ansible-playbook playbooks/storage/zfs.yml
+#        ansible-playbook playbooks/storage/zfs.yml --tags zfs-properties
+# =============================================================================
+
+- name: Configure ZFS (snapshots, scrub, tuning, properties, ACLs)
+  hosts: nas_server
+  become: true
+  gather_facts: true
+
+  handlers:
+    - name: Reload systemd
+      ansible.builtin.systemd:
+        daemon_reload: true
+
+    - name: Restart sanoid timer
+      ansible.builtin.systemd:
+        name: sanoid.timer
+        state: restarted
+        daemon_reload: true
+
+    - name: Reload systemd for scrub
+      ansible.builtin.systemd:
+        daemon_reload: true
+
+  tasks:
+    - name: Import sanoid tasks
+      ansible.builtin.import_tasks: ../../tasks/sanoid.yml
+      tags: [sanoid, zfs, snapshots]
+
+    - name: Import ZFS scrub and tuning tasks
+      ansible.builtin.import_tasks: ../../tasks/zfs-scrub.yml
+      tags: [zfs, zfs-scrub, zfs-tuning]

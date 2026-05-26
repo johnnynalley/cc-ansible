@@ -20,6 +20,7 @@ audits, controlled repairs, and deployment support.
 - `gaming/`: Capture and frame-time analysis helpers.
 - `media-maintenance/`: Overnight maintenance coordinators.
 - `media-release/`: Sonarr, Radarr, Profilarr, and release-policy tools.
+- `repo/`: Repository layout and cross-reference audit helpers.
 - `storage/`: Storage reporting and mergerfs balancing tools.
 - `streaming/`: OBS, TikTok, Mac audio, and stream-routing helpers.
 

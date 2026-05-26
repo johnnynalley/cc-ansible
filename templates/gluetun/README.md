@@ -7,7 +7,7 @@
 
 ## Consumers
 
-- `playbooks/gluetun-watchdog.yml`
+- `playbooks/docker/gluetun-watchdog.yml`
 
 ## Safety Notes
 

@@ -1,0 +1,99 @@
+# Purpose: Configure WiFi power management.
+# Hosts: linux_hosts.
+# Key vars: network_recovery_*, netplan_*, wifi_*, e1000e_*.
+# Templates: templates/network.
+# Scripts: none by default.
+# Validation: ansible-playbook playbooks/network/wifi.yml --syntax-check.
+
+# =============================================================================
+# WiFi Playbook - Power management and suspend/resume fixes
+# =============================================================================
+# Deploys:
+#   - WiFi powersave disable (reduces random disconnects)
+#   - PCI FLR reset on resume — lightweight hardware reset (opt-in)
+#   - Module reload on resume — full driver teardown/reload (opt-in, heavier)
+#
+# Usage: ansible-playbook playbooks/network/wifi.yml
+# =============================================================================
+
+- name: Configure WiFi power management and suspend/resume fixes
+  hosts: linux_hosts
+  become: true
+  gather_facts: false
+
+  tasks:
+    # =========================================================================
+    # WiFi powersave disable (reduces random disconnects)
+    # =========================================================================
+    - name: Disable WiFi power saving
+      ansible.builtin.copy:
+        content: |
+          # Managed by Ansible - playbooks/network/wifi.yml
+          [connection]
+          wifi.powersave = 2
+        dest: /etc/NetworkManager/conf.d/wifi-powersave.conf
+        owner: root
+        group: root
+        mode: "0644"
+      when: wifi_powersave_disable | default(false)
+      notify: Restart NetworkManager
+
+    # =========================================================================
+    # PCI Function-Level Reset on resume (preferred — lightweight)
+    # Resets WiFi hardware without tearing down the driver stack.
+    # Faster than module reload and NetworkManager doesn't fully reconnect.
+    # Requires wifi_pci_device (e.g. "0000:02:00.0") — find with:
+    #   lspci -D | grep -i network
+    # =========================================================================
+    - name: Deploy PCI FLR WiFi resume hook
+      ansible.builtin.copy:
+        content: |
+          #!/bin/bash
+          # PCI Function-Level Reset for WiFi adapter on resume
+          # Managed by Ansible - playbooks/network/wifi.yml
+
+          case "$1/$2" in
+            post/suspend|post/hibernate)
+              logger -t wifi-resume "PCI FLR reset on {{ wifi_pci_device }}"
+              echo 1 > /sys/bus/pci/devices/{{ wifi_pci_device }}/reset
+              logger -t wifi-resume "PCI FLR reset complete"
+              ;;
+          esac
+        dest: /usr/lib/systemd/system-sleep/wifi-pci-reset.sh
+        owner: root
+        group: root
+        mode: "0755"
+      when: wifi_pci_flr_fix | default(false)
+
+    # =========================================================================
+    # WiFi module reload on resume (fallback — heavier)
+    # Full teardown and reload of the kernel module. Use if PCI FLR
+    # doesn't solve the issue.
+    # =========================================================================
+    - name: Deploy WiFi module reload resume hook
+      ansible.builtin.copy:
+        content: |
+          #!/bin/bash
+          # Reload WiFi kernel module on resume to fix connectivity
+          # Managed by Ansible - playbooks/network/wifi.yml
+
+          case "$1/$2" in
+            post/suspend|post/hibernate)
+              logger -t wifi-resume "Reloading {{ wifi_module }} after resume"
+              modprobe -r {{ wifi_module }}
+              sleep 1
+              modprobe {{ wifi_module }}
+              logger -t wifi-resume "{{ wifi_module }} reloaded"
+              ;;
+          esac
+        dest: /usr/lib/systemd/system-sleep/wifi-resume.sh
+        owner: root
+        group: root
+        mode: "0755"
+      when: suspend_resume_wifi_fix | default(false)
+
+  handlers:
+    - name: Restart NetworkManager
+      ansible.builtin.systemd:
+        name: NetworkManager
+        state: restarted

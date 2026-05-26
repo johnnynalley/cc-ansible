@@ -17,9 +17,9 @@
 
 ## Consumers
 
-- `playbooks/docker-stacks.yml`
-- `playbooks/docker-auto-update.yml`
-- `playbooks/media-stack-health.yml`
+- `playbooks/docker/docker-stacks.yml`
+- `playbooks/docker/docker-auto-update.yml`
+- `playbooks/media/media-stack-health.yml`
 - Docker stack definitions in `inventory/host_vars/*/docker.yml`
 
 ## Safety Notes

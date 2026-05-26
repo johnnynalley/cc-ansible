@@ -1,0 +1,380 @@
+# Purpose: Configure rclone sync jobs.
+# Hosts: managed_hosts.
+# Key vars: restic_*, local_restic_*, rclone_sync_*, git_sync_*, nextcloud_scan_*.
+# Templates: templates/storage, templates/docker when sync jobs consume generated configs.
+# Scripts: none by default.
+# Validation: ansible-playbook playbooks/backup-sync/rclone-sync.yml --syntax-check.
+
+# =============================================================================
+# rclone Sync Playbook - OneDrive to Nextcloud via WebDAV
+# =============================================================================
+# Syncs a source (rclone remote or local path) to a Nextcloud WebDAV destination.
+# rclone remotes must be configured manually (credentials/tokens).
+#
+# Linux: systemd timer | macOS: launchd LaunchAgent
+#
+# Usage: ansible-playbook playbooks/backup-sync/rclone-sync.yml
+# =============================================================================
+
+# =============================================================================
+# Linux hosts (systemd timer)
+# =============================================================================
+- name: Configure rclone sync - Linux (systemd)
+  hosts: managed_hosts
+  become: true
+  gather_facts: true
+  serial: 1
+
+  vars:
+    rclone_sync_script: /usr/local/sbin/rclone-sync
+    rclone_sync_state_dir: /var/lib/rclone-sync
+
+  tasks:
+    # =========================================================================
+    # Feature toggle + OS gate
+    # =========================================================================
+    - name: Stop and disable rclone-sync timer (disabled hosts)
+      ansible.builtin.systemd:
+        name: rclone-sync.timer
+        enabled: false
+        state: stopped
+        daemon_reload: true
+      when: not (rclone_sync_enabled | default(false)) or ansible_facts.os_family == "Darwin"
+      failed_when: false
+
+    - name: Skip if rclone sync is not enabled or not Linux
+      ansible.builtin.meta: end_host
+      when: not (rclone_sync_enabled | default(false)) or ansible_facts.os_family == "Darwin"
+
+    # =========================================================================
+    # Prerequisites
+    # =========================================================================
+    - name: Install rclone (Debian)
+      ansible.builtin.apt:
+        name: rclone
+        state: present
+        update_cache: true
+      when: ansible_facts.os_family == "Debian"
+      tags: [install]
+
+    - name: Create state directory
+      ansible.builtin.file:
+        path: "{{ rclone_sync_state_dir }}"
+        state: directory
+        owner: root
+        group: root
+        mode: "0755"
+      tags: [config]
+
+    # =========================================================================
+    # Sync script
+    # =========================================================================
+    - name: Create rclone sync script
+      ansible.builtin.copy:
+        content: |
+          #!/bin/bash
+          set -euo pipefail
+
+          LOG_TAG="rclone-sync"
+          STATE_DIR="{{ rclone_sync_state_dir }}"
+          FAILURE_COUNT_FILE="${STATE_DIR}/consecutive_failures"
+          LOG_FILE="{{ rclone_sync_log_file }}"
+          HEALTHCHECK_URL="{{ rclone_sync_healthcheck_url | default('') }}"
+
+          log() { logger -t "$LOG_TAG" "$*"; echo "$(date '+%Y-%m-%d %H:%M:%S') $*"; }
+
+          get_failure_count() {
+              if [[ -f "$FAILURE_COUNT_FILE" ]]; then
+                  cat "$FAILURE_COUNT_FILE"
+              else
+                  echo 0
+              fi
+          }
+
+          set_failure_count() {
+              echo "$1" > "$FAILURE_COUNT_FILE"
+          }
+
+          log "Starting rclone sync: {{ rclone_sync_source }} -> {{ rclone_sync_dest }}"
+
+          # Rotate log if > 10MB
+          if [[ -f "$LOG_FILE" ]] && [[ $(stat -c%s "$LOG_FILE" 2>/dev/null || echo 0) -gt 10485760 ]]; then
+              mv "$LOG_FILE" "${LOG_FILE}.old"
+              log "Rotated log file"
+          fi
+
+          # Run rclone sync
+          exit_code=0
+          rclone sync \
+              "{{ rclone_sync_source }}" \
+              "{{ rclone_sync_dest }}" \
+              --log-file "$LOG_FILE" \
+              --log-level "{{ rclone_sync_log_level | default('INFO') }}" \
+              --stats-one-line \
+              --stats 30s \
+          || exit_code=$?
+
+          if [[ "$exit_code" -eq 0 ]]; then
+              log "Sync completed successfully"
+              set_failure_count 0
+
+              # Ping Uptime Kuma on success
+              if [[ -n "$HEALTHCHECK_URL" ]]; then
+                  curl -fsS -m 10 "$HEALTHCHECK_URL" >/dev/null 2>&1 || log "Warning: healthcheck ping failed"
+              fi
+          elif [[ "$exit_code" -eq 6 ]]; then
+              failures=$(( $(get_failure_count) + 1 ))
+              set_failure_count "$failures"
+              log "ERROR: Authentication failure (exit code 6) - consecutive failures: $failures"
+              log "ACTION REQUIRED: Re-run 'sudo rclone config reconnect school-onedrive:' on {{ inventory_hostname }}"
+              exit 6
+          else
+              failures=$(( $(get_failure_count) + 1 ))
+              set_failure_count "$failures"
+              log "ERROR: rclone sync failed with exit code $exit_code - consecutive failures: $failures"
+              exit "$exit_code"
+          fi
+        dest: "{{ rclone_sync_script }}"
+        owner: root
+        group: root
+        mode: "0700"
+      tags: [script]
+
+    # =========================================================================
+    # Systemd service and timer
+    # =========================================================================
+    - name: Create rclone-sync systemd service
+      ansible.builtin.copy:
+        content: |
+          [Unit]
+          Description=rclone sync OneDrive to Nextcloud
+          After=network-online.target
+          Wants=network-online.target
+
+          [Service]
+          Type=oneshot
+          ExecStart={{ rclone_sync_script }}
+          StandardOutput=journal
+          StandardError=journal
+
+          User=root
+          Environment=HOME=/root
+
+          Nice=19
+          IOSchedulingClass=idle
+
+          TimeoutStartSec={{ rclone_sync_timeout | default(1800) }}
+        dest: /etc/systemd/system/rclone-sync.service
+        owner: root
+        group: root
+        mode: "0644"
+      notify: Reload systemd
+      tags: [systemd]
+
+    - name: Create rclone-sync systemd timer
+      ansible.builtin.copy:
+        content: |
+          [Unit]
+          Description=rclone sync timer (OneDrive to Nextcloud)
+
+          [Timer]
+          OnCalendar={{ rclone_sync_oncalendar | default('*-*-* 0/2:00:00') }}
+          RandomizedDelaySec={{ rclone_sync_randomized_delay | default('5m') }}
+          Persistent=true
+
+          [Install]
+          WantedBy=timers.target
+        dest: /etc/systemd/system/rclone-sync.timer
+        owner: root
+        group: root
+        mode: "0644"
+      notify:
+        - Reload systemd
+        - Enable rclone-sync timer
+      tags: [systemd]
+
+    - name: Ensure rclone-sync timer is enabled and started
+      ansible.builtin.systemd:
+        name: rclone-sync.timer
+        enabled: true
+        state: started
+        daemon_reload: true
+      tags: [systemd]
+
+  handlers:
+    - name: Reload systemd
+      ansible.builtin.systemd:
+        daemon_reload: true
+
+    - name: Enable rclone-sync timer
+      ansible.builtin.systemd:
+        name: rclone-sync.timer
+        enabled: true
+        state: started
+
+
+# =============================================================================
+# macOS hosts (launchd LaunchAgent)
+# =============================================================================
+- name: Configure rclone sync - macOS (launchd)
+  hosts: managed_hosts
+  become: false
+  gather_facts: true
+  serial: 1
+
+  vars:
+    rclone_sync_home: "{{ ansible_facts.env.HOME }}"
+    rclone_sync_script: "{{ rclone_sync_home }}/.local/bin/rclone-sync"
+    rclone_sync_state_dir: "{{ rclone_sync_home }}/.local/share/rclone-sync"
+    rclone_sync_plist: "{{ rclone_sync_home }}/Library/LaunchAgents/com.rclone.onedrive-sync.plist"
+    rclone_sync_log_dir: "{{ rclone_sync_home }}/Library/Logs"
+    rclone_bin: /opt/homebrew/bin/rclone
+
+  tasks:
+    # =========================================================================
+    # Feature toggle + OS gate
+    # =========================================================================
+    - name: Skip if rclone sync is not enabled or not macOS
+      ansible.builtin.meta: end_host
+      when: not (rclone_sync_enabled | default(false)) or ansible_facts.os_family != "Darwin"
+
+    # =========================================================================
+    # Directories
+    # =========================================================================
+    - name: Create directories
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: directory
+        mode: "0755"
+      loop:
+        - "{{ rclone_sync_home }}/.local/bin"
+        - "{{ rclone_sync_state_dir }}"
+        - "{{ rclone_sync_home }}/Library/LaunchAgents"
+      tags: [config]
+
+    # =========================================================================
+    # Sync script (macOS-adapted)
+    # =========================================================================
+    - name: Create rclone sync script (macOS)
+      ansible.builtin.copy:
+        content: |
+          #!/bin/bash
+          set -euo pipefail
+
+          LOG_TAG="rclone-sync"
+          STATE_DIR="{{ rclone_sync_state_dir }}"
+          FAILURE_COUNT_FILE="${STATE_DIR}/consecutive_failures"
+          LOG_FILE="{{ rclone_sync_log_dir }}/rclone-sync.log"
+          HEALTHCHECK_URL="{{ rclone_sync_healthcheck_url | default('') }}"
+          RCLONE="{{ rclone_bin }}"
+
+          log() { logger -t "$LOG_TAG" "$*"; echo "$(date '+%Y-%m-%d %H:%M:%S') $*"; }
+
+          get_failure_count() {
+              if [[ -f "$FAILURE_COUNT_FILE" ]]; then
+                  cat "$FAILURE_COUNT_FILE"
+              else
+                  echo 0
+              fi
+          }
+
+          set_failure_count() {
+              echo "$1" > "$FAILURE_COUNT_FILE"
+          }
+
+          log "Starting rclone sync: {{ rclone_sync_source }} -> {{ rclone_sync_dest }}"
+
+          # Rotate log if > 10MB (macOS stat syntax)
+          if [[ -f "$LOG_FILE" ]] && [[ $(stat -f%z "$LOG_FILE" 2>/dev/null || echo 0) -gt 10485760 ]]; then
+              mv "$LOG_FILE" "${LOG_FILE}.old"
+              log "Rotated log file"
+          fi
+
+          # Run rclone sync
+          exit_code=0
+          "$RCLONE" sync \
+              "{{ rclone_sync_source }}" \
+              "{{ rclone_sync_dest }}" \
+              --log-file "$LOG_FILE" \
+              --log-level "{{ rclone_sync_log_level | default('INFO') }}" \
+              --stats-one-line \
+              --stats 30s \
+          || exit_code=$?
+
+          if [[ "$exit_code" -eq 0 ]]; then
+              log "Sync completed successfully"
+              set_failure_count 0
+
+              # Ping Uptime Kuma on success
+              if [[ -n "$HEALTHCHECK_URL" ]]; then
+                  curl -fsS -m 10 "$HEALTHCHECK_URL" >/dev/null 2>&1 || log "Warning: healthcheck ping failed"
+              fi
+          elif [[ "$exit_code" -eq 6 ]]; then
+              failures=$(( $(get_failure_count) + 1 ))
+              set_failure_count "$failures"
+              log "ERROR: Authentication failure (exit code 6) - consecutive failures: $failures"
+              log "ACTION REQUIRED: Re-run 'rclone config reconnect nextcloud:' on {{ inventory_hostname }}"
+              exit 6
+          else
+              failures=$(( $(get_failure_count) + 1 ))
+              set_failure_count "$failures"
+              log "ERROR: rclone sync failed with exit code $exit_code - consecutive failures: $failures"
+              exit "$exit_code"
+          fi
+        dest: "{{ rclone_sync_script }}"
+        mode: "0700"
+      tags: [script]
+
+    # =========================================================================
+    # LaunchAgent plist
+    # =========================================================================
+    - name: Create LaunchAgent plist
+      ansible.builtin.copy:
+        content: |
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+              <key>Label</key>
+              <string>com.rclone.onedrive-sync</string>
+              <key>ProgramArguments</key>
+              <array>
+                  <string>{{ rclone_sync_script }}</string>
+              </array>
+              <key>StartInterval</key>
+              <integer>{{ rclone_sync_interval | default(7200) }}</integer>
+              <key>RunAtLoad</key>
+              <true/>
+              <key>StandardOutPath</key>
+              <string>{{ rclone_sync_log_dir }}/rclone-sync-stdout.log</string>
+              <key>StandardErrorPath</key>
+              <string>{{ rclone_sync_log_dir }}/rclone-sync-stderr.log</string>
+              <key>EnvironmentVariables</key>
+              <dict>
+                  <key>PATH</key>
+                  <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+              </dict>
+          </dict>
+          </plist>
+        dest: "{{ rclone_sync_plist }}"
+        mode: "0644"
+      register: plist_result
+      tags: [launchd]
+
+    # =========================================================================
+    # Load LaunchAgent
+    # =========================================================================
+    - name: Unload LaunchAgent (if plist changed)
+      ansible.builtin.command:
+        cmd: launchctl unload {{ rclone_sync_plist }}
+      when: plist_result.changed
+      failed_when: false
+      changed_when: false
+      tags: [launchd]
+
+    - name: Load LaunchAgent
+      ansible.builtin.command:
+        cmd: launchctl load {{ rclone_sync_plist }}
+      when: plist_result.changed
+      changed_when: true
+      tags: [launchd]

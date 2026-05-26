@@ -1,0 +1,231 @@
+---
+# Purpose: Provision the Proxmox Datacenter Manager VM.
+# Hosts: pve-alto.
+# Key vars: proxmox_*, pve_*, pbs_*, pdm_*.
+# Templates: templates/proxmox.
+# Scripts: none by default.
+# Validation: ansible-playbook playbooks/proxmox/proxmox-pdm-vm.yml --syntax-check.
+
+# =============================================================================
+# Proxmox Datacenter Manager VM Provisioning
+# =============================================================================
+# Creates pdm-vm (VM 150) on pve-alto from the Debian 13 generic cloud image
+# when it does not already exist. Existing VMs are detected through the Proxmox
+# cluster resource API so the playbook remains safe after migrations.
+# Service configuration is handled separately by playbooks/proxmox/pdm.yml after the VM
+# is reachable over SSH.
+#
+# Usage: ansible-playbook playbooks/proxmox/proxmox-pdm-vm.yml
+# =============================================================================
+
+- name: Provision PDM VM on pve-alto
+  hosts: pve-alto
+  become: true
+  gather_facts: false
+
+  vars:
+    pdm_vm_target_node: pve-alto
+    pdm_vm_id: 150
+    pdm_vm_name: pdm-vm
+    pdm_vm_memory_mb: 4096
+    pdm_vm_cores: 2
+    pdm_vm_disk_size: 40G
+    pdm_vm_bridge: vmbr0
+    pdm_vm_storage: local-lvm
+    pdm_vm_cloudinit_storage: local-lvm
+    pdm_vm_snippet_storage: local
+    pdm_vm_cloud_image_url: https://cloud.debian.org/images/cloud/trixie/latest/debian-13-genericcloud-amd64.qcow2
+    pdm_vm_cloud_image_path: /var/lib/vz/template/iso/debian-13-genericcloud-amd64.qcow2
+    pdm_vm_user_data_path: /var/lib/vz/snippets/pdm-vm-user-data.yml
+    pdm_vm_ssh_keys: |
+      {{ lookup('ansible.builtin.file', '~/.ssh/id_ed25519.pub') }}
+      {{ lookup('ansible.builtin.file', '~/.ssh/ansible_ed25519.pub') }}
+
+  tasks:
+    - name: Read Proxmox cluster VM resources
+      ansible.builtin.command: pvesh get /cluster/resources --type vm --output-format json
+      register: pdm_cluster_resources_raw
+      changed_when: false
+      check_mode: false
+
+    - name: Parse Proxmox cluster VM resources
+      ansible.builtin.set_fact:
+        pdm_cluster_vms: "{{ pdm_cluster_resources_raw.stdout | from_json }}"
+
+    - name: Find existing PDM VM records
+      ansible.builtin.set_fact:
+        pdm_vmid_matches: "{{ pdm_cluster_vms | selectattr('vmid', 'equalto', pdm_vm_id | int) | list }}"
+        pdm_name_matches: "{{ pdm_cluster_vms | selectattr('name', 'equalto', pdm_vm_name) | list }}"
+
+    - name: Normalize existing PDM VM records
+      ansible.builtin.set_fact:
+        pdm_existing_by_vmid: "{{ (pdm_vmid_matches | first) | default({}) }}"
+        pdm_existing_by_name: "{{ (pdm_name_matches | first) | default({}) }}"
+
+    - name: Refuse to reuse a conflicting VMID or VM name
+      ansible.builtin.assert:
+        that:
+          - (pdm_existing_by_vmid | length) == 0 or pdm_existing_by_vmid.name == pdm_vm_name
+          - (pdm_existing_by_vmid | length) == 0 or pdm_existing_by_vmid.type == "qemu"
+          - (pdm_existing_by_name | length) == 0 or pdm_existing_by_name.vmid == (pdm_vm_id | int)
+        fail_msg: >-
+          Refusing to provision {{ pdm_vm_name }}: VMID {{ pdm_vm_id }} or name
+          {{ pdm_vm_name }} is already assigned to a different Proxmox guest.
+
+    - name: Decide whether PDM VM needs creation
+      ansible.builtin.set_fact:
+        pdm_vm_exists: "{{ (pdm_existing_by_vmid | length) > 0 }}"
+
+    - name: Report existing PDM VM placement
+      ansible.builtin.debug:
+        msg: >-
+          Existing {{ pdm_vm_name }} found on {{ pdm_existing_by_vmid.node }}
+          with status {{ pdm_existing_by_vmid.status }}; create/import tasks will be skipped.
+      when: pdm_vm_exists
+
+    - name: Create PDM VM when missing
+      when: not pdm_vm_exists
+      block:
+        - name: Ensure local storage allows snippets
+          ansible.builtin.shell: |
+            set -euo pipefail
+            current="$(
+              awk -v storage="{{ pdm_vm_snippet_storage }}" '
+                $2 == storage && $1 ~ /:$/ { in_stanza = 1; next }
+                in_stanza && $0 ~ /^[^[:space:]]/ { in_stanza = 0 }
+                in_stanza && $1 == "content" { print $2; exit }
+              ' /etc/pve/storage.cfg
+            )"
+            case ",${current}," in
+              *,snippets,*) ;;
+              *) pvesm set {{ pdm_vm_snippet_storage }} --content "${current},snippets"; echo CHANGED ;;
+            esac
+          args:
+            executable: /bin/bash
+          register: pdm_snippets_content
+          changed_when: "'CHANGED' in pdm_snippets_content.stdout"
+
+        - name: Ensure snippets directory exists
+          ansible.builtin.file:
+            path: /var/lib/vz/snippets
+            state: directory
+            owner: root
+            group: root
+            mode: "0755"
+
+        - name: Write PDM VM cloud-init user data
+          ansible.builtin.copy:
+            dest: "{{ pdm_vm_user_data_path }}"
+            owner: root
+            group: root
+            mode: "0644"
+            content: |
+              #cloud-config
+              hostname: {{ pdm_vm_name }}
+              manage_etc_hosts: true
+              users:
+                - name: johnny
+                  groups: [sudo]
+                  shell: /bin/bash
+                  sudo: ALL=(ALL) NOPASSWD:ALL
+                  lock_passwd: true
+                  ssh_authorized_keys:
+              {% for key in pdm_vm_ssh_keys.splitlines() if key | trim %}
+                    - {{ key }}
+              {% endfor %}
+              package_update: true
+              packages:
+                - ca-certificates
+                - curl
+                - gnupg
+                - openssh-server
+                - qemu-guest-agent
+                - sudo
+              runcmd:
+                - [systemctl, enable, --now, qemu-guest-agent]
+
+        - name: Download Debian 13 cloud image
+          ansible.builtin.get_url:
+            url: "{{ pdm_vm_cloud_image_url }}"
+            dest: "{{ pdm_vm_cloud_image_path }}"
+            mode: "0644"
+            force: true
+            timeout: 300
+
+        - name: Create PDM VM shell
+          ansible.builtin.command: >
+            qm create {{ pdm_vm_id }}
+            --name {{ pdm_vm_name }}
+            --memory {{ pdm_vm_memory_mb }}
+            --cores {{ pdm_vm_cores }}
+            --cpu host
+            --net0 virtio,bridge={{ pdm_vm_bridge }}
+            --ostype l26
+            --agent enabled=1
+            --onboot 1
+            --scsihw virtio-scsi-pci
+            --serial0 socket
+            --vga serial0
+
+        - name: Import PDM VM disk
+          ansible.builtin.command: "qm importdisk {{ pdm_vm_id }} {{ pdm_vm_cloud_image_path }} {{ pdm_vm_storage }}"
+
+        - name: Attach PDM VM disk and cloud-init drive
+          ansible.builtin.command: >
+            qm set {{ pdm_vm_id }}
+            --scsi0 {{ pdm_vm_storage }}:vm-{{ pdm_vm_id }}-disk-0,discard=on
+            --ide2 {{ pdm_vm_cloudinit_storage }}:cloudinit
+            --boot order=scsi0
+            --ipconfig0 ip=dhcp
+            --cicustom user={{ pdm_vm_snippet_storage }}:snippets/pdm-vm-user-data.yml
+
+        - name: Resize PDM VM disk
+          ansible.builtin.command: "qm resize {{ pdm_vm_id }} scsi0 {{ pdm_vm_disk_size }}"
+
+    - name: Refresh Proxmox cluster VM resources
+      ansible.builtin.command: pvesh get /cluster/resources --type vm --output-format json
+      register: pdm_cluster_resources_refreshed_raw
+      changed_when: false
+      check_mode: false
+
+    - name: Parse refreshed PDM VM record
+      ansible.builtin.set_fact:
+        pdm_cluster_vms_refreshed: "{{ pdm_cluster_resources_refreshed_raw.stdout | from_json }}"
+
+    - name: Find current PDM VM record
+      ansible.builtin.set_fact:
+        pdm_current_matches: "{{ pdm_cluster_vms_refreshed | selectattr('vmid', 'equalto', pdm_vm_id | int) | list }}"
+
+    - name: Assert PDM VM exists after provisioning
+      ansible.builtin.assert:
+        that:
+          - (pdm_current_matches | length) == 1
+          - (pdm_current_matches | first).name == pdm_vm_name
+          - (pdm_current_matches | first).type == "qemu"
+
+    - name: Normalize current PDM VM placement
+      ansible.builtin.set_fact:
+        pdm_current_vm: "{{ pdm_current_matches | first }}"
+
+    - name: Set current PDM VM node
+      ansible.builtin.set_fact:
+        pdm_vm_current_node: "{{ pdm_current_vm.node }}"
+
+    - name: Ensure PDM VM is running
+      ansible.builtin.command: "pvesh create /nodes/{{ pdm_vm_current_node }}/qemu/{{ pdm_vm_id }}/status/start"
+      when: pdm_current_vm.status != "running"
+
+    - name: Wait for qemu-guest-agent networking
+      ansible.builtin.command: "pvesh get /nodes/{{ pdm_vm_current_node }}/qemu/{{ pdm_vm_id }}/agent/network-get-interfaces --output-format json"
+      register: pdm_vm_guest_network
+      changed_when: false
+      check_mode: false
+      retries: 60
+      delay: 5
+      until: pdm_vm_guest_network.rc == 0
+
+    - name: Show PDM VM guest network info
+      ansible.builtin.debug:
+        msg:
+          - "vmid={{ pdm_vm_id }} node={{ pdm_vm_current_node }}"
+          - "{{ pdm_vm_guest_network.stdout }}"

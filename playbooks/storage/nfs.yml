@@ -1,0 +1,48 @@
+# Purpose: Configure NFS server and clients.
+# Hosts: nas_server, linux_hosts.
+# Key vars: smb_shares, nfs_*, filesystem_mounts, mergerfs_*, zfs_*, virtiofs_*, vm_storage_gate_*.
+# Templates: templates/storage, templates/samba, templates/proxmox.
+# Scripts: scripts/storage.
+# Validation: ansible-playbook playbooks/storage/nfs.yml --syntax-check.
+
+# =============================================================================
+# NFS Playbook - Server and Client Configuration
+# =============================================================================
+# Usage: ansible-playbook playbooks/storage/nfs.yml
+#        ansible-playbook playbooks/storage/nfs.yml --tags client
+# =============================================================================
+
+- name: Configure NFS server
+  hosts: nas_server
+  become: true
+  gather_facts: true
+
+  tasks:
+    - name: Setup NFS server
+      ansible.builtin.import_tasks: ../../tasks/nfs-server.yml
+      when: nfs_exports is defined
+      tags: [nfs, server]
+
+  handlers:
+    - name: Reload NFS exports
+      ansible.builtin.command: exportfs -ra
+
+    - name: Reload systemd
+      ansible.builtin.systemd:
+        daemon_reload: true
+
+
+- name: Configure NFS clients
+  hosts: linux_hosts
+  become: true
+  gather_facts: false
+
+  tasks:
+    - name: Gather facts for hosts with NFS client mounts
+      ansible.builtin.setup:
+      when: nfs_mounts is defined
+
+    - name: Setup NFS client mounts
+      ansible.builtin.import_tasks: ../../tasks/nfs-client.yml
+      when: nfs_mounts is defined
+      tags: [nfs, client]

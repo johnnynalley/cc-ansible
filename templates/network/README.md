@@ -8,7 +8,7 @@
 
 ## Consumers
 
-- `playbooks/network-recovery.yml`
+- `playbooks/network/network-recovery.yml`
 
 ## Safety Notes
 

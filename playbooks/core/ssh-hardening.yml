@@ -1,0 +1,163 @@
+# Purpose: Configure SSH hardening.
+# Hosts: linux_hosts.
+# Key vars: packages_*, bootstrap_*, auto_updates_*, unattended_upgrades_*, swap_*, sysctl_*, logging_*, smartd_*, apcupsd_*.
+# Templates: templates/auto-updates, templates/logging, templates/motd, templates/smartmontools, templates/ups.
+# Scripts: scripts/repo/repo-audit for repo checks; otherwise none by default.
+# Validation: ansible-playbook playbooks/core/ssh-hardening.yml --syntax-check.
+
+# =============================================================================
+# SSH Hardening Playbook
+# =============================================================================
+# Ensures SSH is configured securely across all Linux hosts
+# Usage: ansible-playbook playbooks/core/ssh-hardening.yml
+# =============================================================================
+
+- name: Configure SSH hardening
+  hosts: linux_hosts
+  become: true
+  gather_facts: true
+
+  tasks:
+    - name: Check systemd SSH client proxy config type
+      ansible.builtin.stat:
+        path: /etc/ssh/ssh_config.d/20-systemd-ssh-proxy.conf
+        follow: false
+      register: systemd_ssh_proxy_config
+      tags: [ssh, harden]
+
+    - name: Materialize systemd SSH client proxy config
+      ansible.builtin.copy:
+        remote_src: true
+        src: /usr/lib/systemd/ssh_config.d/20-systemd-ssh-proxy.conf
+        dest: /etc/ssh/ssh_config.d/20-systemd-ssh-proxy.conf
+        owner: root
+        group: root
+        mode: "0644"
+      when: systemd_ssh_proxy_config.stat.islnk | default(false)
+      tags: [ssh, harden]
+
+    - name: Enable SSH public key authentication
+      ansible.builtin.lineinfile:
+        path: /etc/ssh/sshd_config
+        regexp: '^#?PubkeyAuthentication'
+        line: 'PubkeyAuthentication yes'
+        validate: "sshd -t -f %s"
+      notify: Reload SSH
+      tags: [ssh, harden]
+
+    - name: Disable SSH password authentication
+      ansible.builtin.lineinfile:
+        path: /etc/ssh/sshd_config
+        regexp: '^#?PasswordAuthentication'
+        line: 'PasswordAuthentication {{ "yes" if ssh_password_auth | default(false) else "no" }}'
+        validate: "sshd -t -f %s"
+      notify: Reload SSH
+      tags: [ssh, harden]
+
+    - name: Set PermitRootLogin
+      ansible.builtin.lineinfile:
+        path: /etc/ssh/sshd_config
+        regexp: '^#?PermitRootLogin'
+        line: 'PermitRootLogin {{ ssh_permit_root_login | default("prohibit-password") }}'
+        validate: "sshd -t -f %s"
+      notify: Reload SSH
+      tags: [ssh, harden]
+
+    - name: Ensure Proxmox cluster names resolve over LAN
+      ansible.builtin.blockinfile:
+        path: /etc/hosts
+        marker: "# {mark} PVE cluster nodes (Ansible)"
+        block: |
+          {% for node in pve_cluster_nodes %}
+          {{ node.address }} {{ node.names | join(' ') }}
+          {% endfor %}
+      when: pve_cluster_nodes is defined
+      tags: [ssh, harden, proxmox]
+
+    - name: Allow Proxmox root SSH from cluster LAN peers only
+      ansible.builtin.blockinfile:
+        path: /etc/ssh/sshd_config
+        marker: "# {mark} ANSIBLE MANAGED - Proxmox root SSH exception"
+        insertafter: EOF
+        block: |
+          Match Address {{ ssh_root_login_match_addresses | join(',') }}
+              PermitRootLogin {{ ssh_root_login_match_policy | default('prohibit-password') }}
+        validate: "sshd -t -f %s"
+      when: ssh_root_login_match_addresses is defined
+      notify: Reload SSH
+      tags: [ssh, harden, proxmox]
+
+    # Tailscale SSH invokes login(1) with PAM service 'remote'.
+    # Without this file, PAM falls back to 'other' which lacks
+    # pam_motd.so, so no MOTD is displayed on Tailscale SSH login.
+    - name: Create PAM config for Tailscale SSH (remote service)
+      ansible.builtin.copy:
+        content: |
+          # /etc/pam.d/remote - Tailscale SSH sessions
+          # Tailscale invokes login(1) with PAM service 'remote'.
+          # Without this file, PAM falls back to 'other' (no MOTD).
+
+          @include common-auth
+          @include common-account
+
+          session    required     pam_loginuid.so
+          session    optional     pam_motd.so  motd=/run/motd.dynamic
+          session    optional     pam_motd.so noupdate
+
+          @include common-session
+          @include common-password
+        dest: /etc/pam.d/remote
+        owner: root
+        group: root
+        mode: "0644"
+      tags: [ssh, motd]
+
+    # =========================================================================
+    # Custom MOTD scripts for Debian (non-Ubuntu) hosts
+    # =========================================================================
+    # Ubuntu has landscape-common + update-notifier-common for rich MOTD.
+    # Debian only ships 10-uname. These scripts provide similar system info.
+
+    - name: Deploy custom MOTD scripts (Debian non-Ubuntu)
+      ansible.builtin.template:
+        src: "{{ item.src }}"
+        dest: "/etc/update-motd.d/{{ item.dest }}"
+        owner: root
+        group: root
+        mode: "0755"
+      loop:
+        - { src: ../templates/motd/motd-header.sh.j2, dest: "00-header" }
+        - { src: ../templates/motd/motd-sysinfo.sh.j2, dest: "50-sysinfo" }
+        - { src: ../templates/motd/motd-updates.sh.j2, dest: "90-updates" }
+        - { src: ../templates/motd/motd-reboot-required.sh.j2, dest: "98-reboot-required" }
+      when:
+        - ansible_facts.os_family == "Debian"
+        - ansible_facts.distribution != "Ubuntu"
+      tags: [ssh, motd]
+
+    - name: Remove stock 10-uname (replaced by 00-header)
+      ansible.builtin.file:
+        path: /etc/update-motd.d/10-uname
+        state: absent
+      when:
+        - ansible_facts.os_family == "Debian"
+        - ansible_facts.distribution != "Ubuntu"
+      tags: [ssh, motd]
+
+    - name: Remove static /etc/motd boilerplate (Debian non-Ubuntu)
+      ansible.builtin.copy:
+        content: ""
+        dest: /etc/motd
+        owner: root
+        group: root
+        mode: "0644"
+      when:
+        - ansible_facts.os_family == "Debian"
+        - ansible_facts.distribution != "Ubuntu"
+      tags: [ssh, motd]
+
+  handlers:
+    - name: Reload SSH
+      ansible.builtin.systemd:
+        name: "{{ 'ssh' if ansible_facts.distribution == 'Ubuntu' or ansible_facts.distribution == 'Debian' else 'sshd' }}"
+        state: reloaded

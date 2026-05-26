@@ -1,0 +1,281 @@
+# Purpose: Configure media release metadata stamping.
+# Hosts: gluetun_hosts.
+# Key vars: nightly_media_*, media_release_stamper_*, media_stack_health_*, stream_relay_*, plex_appliance_*.
+# Templates: templates/media-maintenance, templates/streaming, templates/plex-appliance, templates/docker.
+# Scripts: scripts/media-maintenance, scripts/media-release, scripts/streaming.
+# Validation: ansible-playbook playbooks/media/media-release-stamper.yml --syntax-check.
+
+# =============================================================================
+# Media Release Stamper
+# =============================================================================
+# Preserves grab-time metadata such as Dual-Audio and x265/HEVC in completed
+# download payload file names before Sonarr/Radarr import re-evaluates custom
+# formats on individual files.
+# =============================================================================
+
+- name: Configure media release metadata stamping
+  hosts: gluetun_hosts
+  become: true
+  gather_facts: false
+
+  tasks:
+    - name: Configure qBittorrent release stamper
+      when:
+        - media_release_stamper_enabled | default(false)
+        - media_release_stamper_qbit_enabled | default(false)
+      block:
+        - name: Ensure qBittorrent release stamper directory exists
+          ansible.builtin.file:
+            path: "{{ media_release_stamper_qbit_script_dir }}"
+            state: directory
+            owner: root
+            group: root
+            mode: "0755"
+
+        - name: Deploy qBittorrent release stamper
+          ansible.builtin.copy:
+            src: ../files/qbit-release-stamper.py
+            dest: "{{ media_release_stamper_qbit_script_dir }}/qbit-release-stamper.py"
+            owner: root
+            group: root
+            mode: "0755"
+
+        - name: Read Sonarr config for qBittorrent release stamper
+          ansible.builtin.slurp:
+            src: "{{ media_release_stamper_sonarr_config_path | default('/opt/media-stack/sonarr/config.xml') }}"
+          register: media_release_stamper_sonarr_config
+          no_log: true
+          check_mode: false
+
+        - name: Read Radarr config for qBittorrent release stamper
+          ansible.builtin.slurp:
+            src: "{{ media_release_stamper_radarr_config_path | default('/opt/media-stack/radarr/config.xml') }}"
+          register: media_release_stamper_radarr_config
+          no_log: true
+          check_mode: false
+
+        - name: Extract Arr API keys for qBittorrent release stamper
+          ansible.builtin.set_fact:
+            media_release_stamper_sonarr_api_key: >-
+              {{
+                (
+                  media_release_stamper_sonarr_config.content
+                  | b64decode
+                  | regex_search('<ApiKey>([^<]+)</ApiKey>', '\1')
+                )[0]
+              }}
+            media_release_stamper_radarr_api_key: >-
+              {{
+                (
+                  media_release_stamper_radarr_config.content
+                  | b64decode
+                  | regex_search('<ApiKey>([^<]+)</ApiKey>', '\1')
+                )[0]
+              }}
+          no_log: true
+
+        - name: Deploy qBittorrent release stamper environment
+          ansible.builtin.copy:
+            dest: "{{ media_release_stamper_qbit_env_path }}"
+            owner: "{{ media_release_stamper_container_uid | default('1000') }}"
+            group: "{{ media_release_stamper_container_gid | default('1000') }}"
+            mode: "0600"
+            content: |
+              QBIT_API={{ media_release_stamper_qbit_container_api }}
+              QBIT_USER={{ media_release_stamper_qbit_user }}
+              QBIT_PASS={{ media_release_stamper_qbit_password }}
+              QBIT_STAMP_CATEGORIES={{ media_release_stamper_qbit_categories | join(',') }}
+              DA_ORIGINAL_LANGUAGES={{ media_release_stamper_da_original_languages | join(',') }}
+              SONARR_API={{ media_release_stamper_sonarr_api }}
+              SONARR_API_KEY={{ media_release_stamper_sonarr_api_key }}
+              RADARR_API={{ media_release_stamper_radarr_api }}
+              RADARR_API_KEY={{ media_release_stamper_radarr_api_key }}
+          no_log: true
+
+        - name: Log in to qBittorrent API
+          ansible.builtin.uri:
+            url: "{{ media_release_stamper_qbit_host_api }}/auth/login"
+            method: POST
+            body_format: form-urlencoded
+            body:
+              username: "{{ media_release_stamper_qbit_user }}"
+              password: "{{ media_release_stamper_qbit_password }}"
+            status_code: [200, 204]
+            return_content: true
+          register: media_release_stamper_qbit_login
+          changed_when: false
+          no_log: true
+          check_mode: false
+          retries: "{{ media_release_stamper_qbit_api_retries | default(5) }}"
+          delay: "{{ media_release_stamper_qbit_api_retry_delay | default(3) }}"
+          until: media_release_stamper_qbit_login is succeeded
+
+        - name: Read qBittorrent preferences
+          ansible.builtin.uri:
+            url: "{{ media_release_stamper_qbit_host_api }}/app/preferences"
+            method: GET
+            headers:
+              Cookie: "{{ media_release_stamper_qbit_login.cookies_string }}"
+            return_content: true
+          register: media_release_stamper_qbit_preferences
+          changed_when: false
+          no_log: true
+          check_mode: false
+          retries: "{{ media_release_stamper_qbit_api_retries | default(5) }}"
+          delay: "{{ media_release_stamper_qbit_api_retry_delay | default(3) }}"
+          until: media_release_stamper_qbit_preferences is succeeded
+
+        - name: Enable qBittorrent completion hook
+          ansible.builtin.uri:
+            url: "{{ media_release_stamper_qbit_host_api }}/app/setPreferences"
+            method: POST
+            headers:
+              Cookie: "{{ media_release_stamper_qbit_login.cookies_string }}"
+            body_format: form-urlencoded
+            body:
+              json: >-
+                {{
+                  {
+                    'autorun_enabled': true,
+                    'autorun_program': media_release_stamper_qbit_autorun_program
+                  } | to_json
+                }}
+            status_code: [200, 204]
+          changed_when: true
+          no_log: true
+          retries: "{{ media_release_stamper_qbit_api_retries | default(5) }}"
+          delay: "{{ media_release_stamper_qbit_api_retry_delay | default(3) }}"
+          until: media_release_stamper_qbit_hook_update is succeeded
+          register: media_release_stamper_qbit_hook_update
+          when:
+            - not ansible_check_mode
+            - >-
+              media_release_stamper_qbit_preferences.json.autorun_enabled | default(false) != true
+              or media_release_stamper_qbit_preferences.json.autorun_program | default('') != media_release_stamper_qbit_autorun_program
+
+    - name: Configure SABnzbd release stamper
+      when:
+        - media_release_stamper_enabled | default(false)
+        - media_release_stamper_sab_enabled | default(false)
+      block:
+        - name: Ensure SABnzbd release stamper directory exists
+          ansible.builtin.file:
+            path: "{{ media_release_stamper_sab_script_dir }}"
+            state: directory
+            owner: root
+            group: root
+            mode: "0755"
+
+        - name: Deploy SABnzbd release stamper
+          ansible.builtin.copy:
+            src: ../files/sab-release-stamper.py
+            dest: "{{ media_release_stamper_sab_script_dir }}/{{ media_release_stamper_sab_script_name }}"
+            owner: root
+            group: root
+            mode: "0755"
+
+        - name: Deploy SABnzbd release stamper environment
+          ansible.builtin.copy:
+            dest: "{{ media_release_stamper_sab_env_path }}"
+            owner: "{{ media_release_stamper_container_uid | default('1000') }}"
+            group: "{{ media_release_stamper_container_gid | default('1000') }}"
+            mode: "0600"
+            content: |
+              SAB_STAMP_CATEGORIES={{ media_release_stamper_sab_categories | join(',') }}
+              DA_ORIGINAL_LANGUAGES={{ media_release_stamper_da_original_languages | join(',') }}
+              SONARR_API={{ media_release_stamper_sonarr_api }}
+              SONARR_API_KEY={{ media_release_stamper_sonarr_api_key }}
+              RADARR_API={{ media_release_stamper_radarr_api }}
+              RADARR_API_KEY={{ media_release_stamper_radarr_api_key }}
+          no_log: true
+
+        - name: Read SABnzbd config
+          ansible.builtin.slurp:
+            src: "{{ media_release_stamper_sab_config_dir }}/sabnzbd.ini"
+          register: media_release_stamper_sab_config
+          no_log: true
+          check_mode: false
+
+        - name: Extract SABnzbd API key
+          ansible.builtin.set_fact:
+            media_release_stamper_sab_api_key: >-
+              {{
+                (
+                  media_release_stamper_sab_config.content
+                  | b64decode
+                  | regex_search('(?m)^api_key = ([A-Za-z0-9]+)$', '\1')
+                )[0]
+              }}
+          no_log: true
+
+        - name: Extract current SABnzbd script directory
+          ansible.builtin.set_fact:
+            media_release_stamper_sab_current_script_dir: >-
+              {{
+                (
+                  media_release_stamper_sab_config.content
+                  | b64decode
+                  | regex_search('(?m)^script_dir = (.*)$', '\1')
+                )[0] | default('')
+              }}
+          no_log: true
+
+        - name: Set SABnzbd script directory
+          ansible.builtin.uri:
+            url: "{{ media_release_stamper_sab_api_url | default('http://127.0.0.1:8080/api') }}"
+            method: POST
+            body_format: form-urlencoded
+            body:
+              mode: set_config
+              section: misc
+              keyword: script_dir
+              value: scripts
+              apikey: "{{ media_release_stamper_sab_api_key }}"
+              output: json
+          changed_when: true
+          no_log: true
+          when:
+            - not ansible_check_mode
+            - media_release_stamper_sab_current_script_dir != 'scripts'
+
+        - name: Read SABnzbd categories
+          ansible.builtin.uri:
+            url: "{{ media_release_stamper_sab_api_url | default('http://127.0.0.1:8080/api') }}"
+            method: POST
+            body_format: form-urlencoded
+            body:
+              mode: get_config
+              section: categories
+              apikey: "{{ media_release_stamper_sab_api_key }}"
+              output: json
+            return_content: true
+          register: media_release_stamper_sab_categories_config
+          changed_when: false
+          no_log: true
+          check_mode: false
+
+        - name: Enable SABnzbd release stamper for media categories
+          ansible.builtin.uri:
+            url: "{{ media_release_stamper_sab_api_url | default('http://127.0.0.1:8080/api') }}"
+            method: POST
+            body_format: form-urlencoded
+            body:
+              mode: set_config
+              section: categories
+              name: "{{ item }}"
+              script: "{{ media_release_stamper_sab_script_name }}"
+              apikey: "{{ media_release_stamper_sab_api_key }}"
+              output: json
+          loop: "{{ media_release_stamper_sab_categories }}"
+          changed_when: true
+          no_log: true
+          when:
+            - not ansible_check_mode
+            - >-
+              (
+                media_release_stamper_sab_categories_config.json.config.categories
+                | selectattr('name', 'equalto', item)
+                | map(attribute='script')
+                | first
+                | default('')
+              ) != media_release_stamper_sab_script_name

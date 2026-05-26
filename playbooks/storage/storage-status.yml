@@ -1,0 +1,25 @@
+---
+# Purpose: Deploy storage-status utility.
+# Hosts: linux_hosts.
+# Key vars: smb_shares, nfs_*, filesystem_mounts, mergerfs_*, zfs_*, virtiofs_*, vm_storage_gate_*.
+# Templates: templates/storage, templates/samba, templates/proxmox.
+# Scripts: scripts/storage.
+# Validation: ansible-playbook playbooks/storage/storage-status.yml --syntax-check.
+
+# Deploy storage-status utility to all Linux hosts
+# Shows accurate storage usage with ZFS pool-level stats and mergerfs breakdown
+
+- name: Deploy storage-status utility
+  hosts: linux_hosts
+  become: true
+  gather_facts: false
+
+  tasks:
+    - name: Deploy storage-status script
+      ansible.builtin.copy:
+        src: ../scripts/storage/storage-status
+        dest: /usr/local/bin/storage-status
+        mode: "0755"
+        owner: root
+        group: root
+      tags: storage-status

@@ -20,7 +20,7 @@ a separate policy because dual audio is the highest priority there.
 - Profilarr candidate/test profiles:
   - Sonarr: `shows-anime-profilarr-test` id `9`
   - Radarr: `movies-anime-profilarr-test` id `8`
-- Release metadata stamper: `playbooks/media-release-stamper.yml`
+- Release metadata stamper: `playbooks/media/media-release-stamper.yml`
 - Sonarr grab/import forensics: `scripts/media-release/sonarr_grab_forensics.py`
 - Sonarr transaction audit report: `scripts/media-release/sonarr_transaction_audit.py`
 - Sonarr targeted queue blocklist/removal helper:
@@ -143,7 +143,7 @@ check. It summarizes monitoring, per-season file/missing counts, active queue
 items, recent series history, and active/recent commands. Use it when a manual
 series/season search appears to grab only part of a show.
 
-`playbooks/sonarr-transaction-monitor.yml` deploys
+`playbooks/media/sonarr-transaction-monitor.yml` deploys
 `sonarr-transaction-monitor.timer`, which records Sonarr history events and
 queue snapshots to `/var/log/sonarr-transaction-monitor/events.jsonl`. The log
 is mode `0640` and rotated daily with 90 retained rotations. Keep it enabled
@@ -595,7 +595,7 @@ retention location. Do not let staging snapshots pile up indefinitely.
   container writes failed with `No space left on device`. `mergerfs_branch_subdirectories`
   in `inventory/group_vars/nas_server/mergerfs.yml` now manages both
   `plex/.sonarr-recycle-bin` and `plex/.radarr-recycle-bin` across every media
-  branch. After `ansible-playbook playbooks/mergerfs.yml`, writes from inside
+  branch. After `ansible-playbook playbooks/storage/mergerfs.yml`, writes from inside
   both Sonarr and Radarr containers succeeded, and Sonarr health no longer
   reported the recycle-bin error. The same pass removed 22 remaining SiQ Bleach
   single-episode queue downloads where the current imported file already had a
@@ -677,7 +677,7 @@ retention location. Do not let staging snapshots pile up indefinitely.
 
 ## Download Client Metadata Stamping
 
-`playbooks/media-release-stamper.yml` manages a conservative metadata stamper
+`playbooks/media/media-release-stamper.yml` manages a conservative metadata stamper
 for SABnzbd and qBittorrent on `docker-vm`.
 
 - qBittorrent script: `/opt/media-stack/qbittorrent/scripts/qbit-release-stamper.py`
@@ -835,7 +835,7 @@ Decision rule:
 7. Keep Recyclarr until Profilarr has been tested against real queue/history
    examples and rollback is clear.
 8. Profilarr native scheduled Arr upgrades should stay disabled. Overnight
-   proactive upgrades are triggered by `playbooks/nightly-media-maintenance.yml`
+   proactive upgrades are triggered by `playbooks/media/nightly-media-maintenance.yml`
    only when no mergerfs balance job is pending for that night. If future live
    runs expose bad grabs, fix the Sonarr/Radarr scoring, import metadata, or
    parsing cause rather than relying on cleanup-only handling.
@@ -911,7 +911,7 @@ Current deployed state on 2026-05-22:
   enabled so Profilarr can still refresh upstream PCD data without launching
   proactive Sonarr/Radarr searches. Rollback backup:
   `/opt/profilarr/config/data/backups/profilarr-pre-disable-upgrade-jobs-20260524T225353Z.db`.
-- Later on 2026-05-24, `playbooks/nightly-media-maintenance.yml` became the
+- Later on 2026-05-24, `playbooks/media/nightly-media-maintenance.yml` became the
   owner for overnight proactive upgrade launches. It keeps native Profilarr Arr
   scheduling disabled, queues explicit `arr.upgrade` jobs during midnight-7 AM
   windows when no balance job is pending, and reserves the whole night for

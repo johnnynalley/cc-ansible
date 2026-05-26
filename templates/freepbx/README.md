@@ -7,7 +7,7 @@
 
 ## Consumers
 
-- `playbooks/freepbx.yml`
+- `playbooks/apps/freepbx.yml`
 
 ## Safety Notes
 

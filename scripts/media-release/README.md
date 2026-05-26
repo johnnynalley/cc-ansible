@@ -14,6 +14,9 @@
   clones anime profiles for Profilarr testing.
 - `profilarr_candidate_audit.py`: Read-only audit of Profilarr PCD databases as
   release-policy candidates.
+- `profilarr_cf_definition_sync.py`: Syncs selected existing Arr custom-format
+  definitions from Profilarr PCD sources while preserving local profile
+  structure and scores.
 - `profilarr_disable_upgrade_jobs.py`: Disables Profilarr scheduled Arr upgrade
   jobs with a SQLite backup, without disabling PCD sync.
 - `profilarr_link_database.py`: Links a Profilarr database through the local

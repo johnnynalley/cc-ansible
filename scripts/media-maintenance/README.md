@@ -9,5 +9,5 @@
 ## Safety Notes
 
 - Mutates only through explicit subcommands and its configured state directory.
-- Validate playbook changes with `playbooks/nightly-media-maintenance.yml`
+- Validate playbook changes with `playbooks/media/nightly-media-maintenance.yml`
   before changing deployed timers or command paths.

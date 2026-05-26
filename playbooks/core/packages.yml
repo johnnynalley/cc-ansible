@@ -1,0 +1,348 @@
+# Purpose: Install baseline packages.
+# Hosts: localhost, linux_hosts, macos_hosts.
+# Key vars: packages_*, bootstrap_*, auto_updates_*, unattended_upgrades_*, swap_*, sysctl_*, logging_*, smartd_*, apcupsd_*.
+# Templates: templates/auto-updates, templates/logging, templates/motd, templates/smartmontools, templates/ups.
+# Scripts: scripts/repo/repo-audit for repo checks; otherwise none by default.
+# Validation: ansible-playbook playbooks/core/packages.yml --syntax-check.
+
+# =============================================================================
+# Packages Playbook - Multi-Platform Package Installation
+# =============================================================================
+# Supports: Debian/Ubuntu, Arch Linux, macOS
+# Usage: ansible-playbook playbooks/core/packages.yml
+# =============================================================================
+
+
+# -----------------------------------------------------------------------------
+# Tailnet policy (controller-local API call)
+# -----------------------------------------------------------------------------
+- name: Manage Tailscale tailnet policy
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  tasks:
+    - name: Ensure Tailscale tailnet policy
+      ansible.builtin.import_tasks: ../../tasks/tailscale-policy.yml
+      when: tailscale_policy_enabled | default(false)
+      tags: [tailscale, tailscale-policy]
+# -----------------------------------------------------------------------------
+# Linux hosts (with become/sudo)
+# -----------------------------------------------------------------------------
+- name: Install baseline packages (Linux hosts)
+  hosts: linux_hosts
+  become: true
+  gather_facts: false
+  serial: 1
+
+  tasks:
+    - name: Gather Linux package facts
+      ansible.builtin.setup:
+      tags:
+        - locale
+        - tailscale
+        - packages
+        - apt
+        - ppa
+        - pin
+        - deb
+        - flatpak
+        - docker
+        - pacman
+        - aur
+        - fastfetch
+        - qemu-guest-agent
+    # =========================================================================
+    # Locale baseline (Debian only)
+    # =========================================================================
+    - name: Ensure locale baseline (Debian)
+      ansible.builtin.import_tasks: ../../tasks/locale.yml
+      when: ansible_facts.os_family == "Debian"
+      tags: [locale]
+
+    # =========================================================================
+    # Tailscale repository and package (Linux only)
+    # =========================================================================
+    - name: Ensure Tailscale repo + package (Linux)
+      ansible.builtin.import_tasks: ../../tasks/tailscale.yml
+      tags: [tailscale]
+
+    # =========================================================================
+    # APT PPAs (Ubuntu hosts with apt_ppas defined)
+    # =========================================================================
+    - name: Ensure software-properties-common for PPA support
+      ansible.builtin.apt:
+        name: software-properties-common
+        state: present
+      when:
+        - ansible_facts.os_family == "Debian"
+        - apt_ppas is defined
+        - apt_ppas | length > 0
+      tags: [packages, apt, ppa]
+
+    - name: Add APT PPAs
+      ansible.builtin.command:
+        cmd: "add-apt-repository -y {{ item }}"
+      loop: "{{ apt_ppas }}"
+      register: ppa_result
+      changed_when: "'Found existing' not in (ppa_result.stdout | default(''))"
+      when:
+        - ansible_facts.os_family == "Debian"
+        - apt_ppas is defined
+        - apt_ppas | length > 0
+      tags: [packages, apt, ppa]
+
+    # =========================================================================
+    # APT Release Pin (prevents accidental major version upgrades)
+    # =========================================================================
+    - name: Pin APT to specific release
+      ansible.builtin.copy:
+        dest: /etc/apt/preferences.d/pin-release
+        content: |
+          Package: *
+          Pin: release n={{ apt_pin_release }}
+          Pin-Priority: 900
+
+          Package: *
+          Pin: release n={{ apt_pin_release }}-security
+          Pin-Priority: 900
+        mode: "0644"
+      when:
+        - ansible_facts.os_family == "Debian"
+        - apt_pin_release is defined
+      tags: [packages, apt, pin]
+
+    # =========================================================================
+    # Debian/Ubuntu Package Installation
+    # =========================================================================
+    - name: Check python3-apt availability (Debian)
+      ansible.builtin.command:
+        cmd: dpkg-query -W -f='${Status}' python3-apt
+      register: packages_python3_apt_check
+      changed_when: false
+      failed_when: false
+      check_mode: false
+      when: ansible_facts.os_family == "Debian"
+      tags: [packages, apt]
+
+    - name: Report skipped apt cache refresh in check mode
+      ansible.builtin.debug:
+        msg: "Skipping apt cache refresh in check mode because python3-apt is not installed yet; the real packages run will install it."
+      when:
+        - ansible_facts.os_family == "Debian"
+        - ansible_check_mode
+        - packages_python3_apt_check.rc != 0
+      tags: [packages, apt]
+
+    - name: Update apt cache (Debian)
+      ansible.builtin.apt:
+        update_cache: true
+        cache_valid_time: 3600
+      when:
+        - ansible_facts.os_family == "Debian"
+        - not ansible_check_mode or packages_python3_apt_check.rc == 0
+      tags: [packages, apt]
+
+    - name: Build Debian package list
+      ansible.builtin.set_fact:
+        packages_debian_all: >-
+          {{
+            (packages_linux_common | default([]))
+            + (packages_linux_extra | default([]))
+            + (packages_debian_extra | default([]))
+            + ((packages_ubuntu_extra | default([])) if ansible_facts.distribution == 'Ubuntu' else [])
+            + (packages_proxmox_extra | default([]))
+            + (packages_vms_lxcs_extra | default([]))
+            + (packages_vms_extra | default([]))
+            + (packages_lxcs_extra | default([]))
+            + (packages_orchestrator_extra | default([]))
+            + (packages_debian_workstations_extra | default([]))
+            + (packages_debian_development_extra | default([]))
+            + (packages_host_extra | default([]))
+            | flatten | unique
+          }}
+      when: ansible_facts.os_family == "Debian"
+      tags: [packages]
+
+    - name: Install packages (Debian)
+      ansible.builtin.apt:
+        name: "{{ packages_debian_all }}"
+        state: present
+      when: ansible_facts.os_family == "Debian"
+      tags: [packages, apt]
+
+    - name: Enable qemu guest agent service
+      ansible.builtin.systemd:
+        name: qemu-guest-agent.service
+        enabled: true
+        state: "{{ qemu_guest_agent_service_state | default(omit) }}"
+      when:
+        - ansible_facts.os_family == "Debian"
+        - qemu_guest_agent_enabled | default(false)
+      tags: [packages, qemu-guest-agent]
+
+    - name: Remove unwanted packages (Debian)
+      ansible.builtin.apt:
+        name: "{{ packages_remove | default([]) }}"
+        state: absent
+      when:
+        - ansible_facts.os_family == "Debian"
+        - (packages_remove | default([])) | length > 0
+      tags: [packages, apt]
+
+    # =========================================================================
+    # GitHub .deb packages (Debian workstations — version-checked)
+    # =========================================================================
+    - name: Install GitHub .deb packages
+      ansible.builtin.include_tasks: ../../tasks/github-debs.yml
+      when:
+        - ansible_facts.os_family == "Debian"
+        - (deb_debian_workstations | default([])) | length > 0
+      tags: [packages, apt, deb]
+
+    # =========================================================================
+    # Flatpak apps (Debian workstations — apps not in apt repos)
+    # =========================================================================
+    - name: Install Flatpak apps from Flathub
+      ansible.builtin.include_tasks: ../../tasks/flatpak.yml
+      when:
+        - ansible_facts.os_family == "Debian"
+        - (flatpak_workstations | default([])) | length > 0
+      tags: [packages, flatpak]
+
+    # =========================================================================
+    # Docker (Official Repo) - for hosts with install_docker: true
+    # =========================================================================
+    - name: Install Docker from official repo
+      ansible.builtin.include_tasks:
+        file: ../../tasks/docker.yml
+        apply:
+          tags:
+            - packages
+            - docker
+      when:
+        - ansible_facts.os_family == "Debian"
+        - install_docker | default(false)
+      tags: [packages, docker]
+
+    # =========================================================================
+    # Arch Linux Package Installation
+    # =========================================================================
+    - name: Build Arch package list
+      ansible.builtin.set_fact:
+        packages_arch_all: >-
+          {{
+            (packages_linux_common | default([]))
+            + (packages_linux_extra | default([]))
+            + (packages_arch_extra | default([]))
+            + (packages_arch_workstations_extra | default([]))
+            + (packages_arch_development_extra | default([]))
+            + (packages_host_extra | default([]))
+            | flatten | unique
+          }}
+      when: ansible_facts.os_family == "Archlinux"
+      tags: [packages]
+
+    - name: Update pacman cache (Arch)
+      community.general.pacman:
+        update_cache: true
+      when: ansible_facts.os_family == "Archlinux"
+      tags: [packages, pacman]
+
+    - name: Install packages (Arch)
+      community.general.pacman:
+        name: "{{ packages_arch_all }}"
+        state: present
+      when: ansible_facts.os_family == "Archlinux"
+      tags: [packages, pacman]
+
+    # =========================================================================
+    # Arch Linux AUR Package Installation (requires kewlfft.aur collection)
+    # =========================================================================
+    - name: Build AUR package list
+      ansible.builtin.set_fact:
+        packages_aur_all: >-
+          {{
+            (packages_aur_extra | default([]))
+            | flatten | unique
+          }}
+      when: ansible_facts.os_family == "Archlinux"
+      tags: [packages, aur]
+
+    - name: Install AUR packages (Arch)
+      kewlfft.aur.aur:
+        name: "{{ packages_aur_all }}"
+        state: present
+      become: true
+      become_user: "{{ admin_user }}"
+      when:
+        - ansible_facts.os_family == "Archlinux"
+        - (packages_aur_all | default([])) | length > 0
+      tags: [packages, aur]
+
+    # =========================================================================
+    # Fastfetch (Linux)
+    # =========================================================================
+    - name: Install fastfetch + login hook
+      ansible.builtin.import_tasks: ../../tasks/fastfetch.yml
+      tags: [fastfetch]
+
+
+# -----------------------------------------------------------------------------
+# macOS hosts (no sudo needed for Homebrew)
+# -----------------------------------------------------------------------------
+- name: Install baseline packages (macOS hosts)
+  hosts: macos_hosts
+  become: false
+  gather_facts: false
+  serial: 1
+
+  tasks:
+    - name: Gather macOS package facts
+      ansible.builtin.setup:
+      tags:
+        - packages
+        - homebrew
+        - casks
+        - fastfetch
+    # =========================================================================
+    # macOS Package Installation (Homebrew)
+    # =========================================================================
+    - name: Ensure Homebrew is installed (macOS)
+      ansible.builtin.stat:
+        path: /opt/homebrew/bin/brew
+      register: homebrew_check
+      tags: [packages, homebrew]
+
+    - name: Build macOS package list
+      ansible.builtin.set_fact:
+        packages_macos_all: >-
+          {{
+            (packages_macos_common | default([]))
+            + (packages_host_extra | default([]))
+            | flatten | unique
+          }}
+      tags: [packages]
+
+    - name: Install Homebrew packages (macOS)
+      community.general.homebrew:
+        name: "{{ packages_macos_all }}"
+        state: present
+      when: homebrew_check.stat.exists | default(false)
+      tags: [packages, homebrew]
+
+    - name: Install Homebrew casks (macOS)
+      community.general.homebrew_cask:
+        name: "{{ packages_macos_casks }}"
+        state: present
+      when:
+        - homebrew_check.stat.exists | default(false)
+        - (packages_macos_casks | default([])) | length > 0
+      tags: [packages, homebrew, casks]
+
+    # =========================================================================
+    # Fastfetch (macOS)
+    # =========================================================================
+    - name: Install fastfetch + login hook
+      ansible.builtin.import_tasks: ../../tasks/fastfetch.yml
+      tags: [fastfetch]

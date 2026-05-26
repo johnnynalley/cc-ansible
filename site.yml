@@ -6,209 +6,209 @@
 # =============================================================================
 
 - name: Configure swap files
-  ansible.builtin.import_playbook: playbooks/swap.yml
+  ansible.builtin.import_playbook: playbooks/core/swap.yml
   tags: [swap]
 
 - name: Configure kernel sysctl settings
-  ansible.builtin.import_playbook: playbooks/sysctl.yml
+  ansible.builtin.import_playbook: playbooks/core/sysctl.yml
   tags: [sysctl, kernel]
 
 - name: Configure separated automation and operational users
-  ansible.builtin.import_playbook: playbooks/user-separation.yml
+  ansible.builtin.import_playbook: playbooks/core/user-separation.yml
   tags: [users, user-separation]
 
 - name: Install baseline packages
-  ansible.builtin.import_playbook: playbooks/packages.yml
+  ansible.builtin.import_playbook: playbooks/core/packages.yml
   tags: [packages]
 
 - name: Configure FreePBX/Asterisk guardrails
-  ansible.builtin.import_playbook: playbooks/freepbx.yml
+  ansible.builtin.import_playbook: playbooks/apps/freepbx.yml
   tags: [freepbx, asterisk, logging]
 
 - name: Configure Codex CLI
-  ansible.builtin.import_playbook: playbooks/codex-cli.yml
+  ansible.builtin.import_playbook: playbooks/agents/codex-cli.yml
   tags: [codex, codex-cli, npm]
 
 - name: Configure SMART disk monitoring
-  ansible.builtin.import_playbook: playbooks/smartmontools.yml
+  ansible.builtin.import_playbook: playbooks/core/smartmontools.yml
   tags: [smartmontools, smart, monitoring]
 
 - name: Configure Plex appliance
-  ansible.builtin.import_playbook: playbooks/plex-appliance.yml
+  ansible.builtin.import_playbook: playbooks/media/plex-appliance.yml
   tags: [plex-appliance, plex]
 
 - name: Tune e1000e NICs (disable EEE/TSO)
-  ansible.builtin.import_playbook: playbooks/e1000e-tuning.yml
+  ansible.builtin.import_playbook: playbooks/network/e1000e-tuning.yml
   tags: [e1000e, nic, network]
 
 - name: Configure apcupsd UPS monitoring
-  ansible.builtin.import_playbook: playbooks/apcupsd.yml
+  ansible.builtin.import_playbook: playbooks/core/apcupsd.yml
   tags: [apcupsd, ups]
 
 - name: Configure SSH hardening
-  ansible.builtin.import_playbook: playbooks/ssh-hardening.yml
+  ansible.builtin.import_playbook: playbooks/core/ssh-hardening.yml
   tags: [ssh, harden]
 
 - name: Configure automatic updates
-  ansible.builtin.import_playbook: playbooks/auto-updates.yml
+  ansible.builtin.import_playbook: playbooks/core/auto-updates.yml
   tags: [auto-updates]
 
 - name: Configure unattended-upgrades (security patches)
-  ansible.builtin.import_playbook: playbooks/unattended-upgrades.yml
+  ansible.builtin.import_playbook: playbooks/core/unattended-upgrades.yml
   tags: [unattended-upgrades, security]
 
 - name: Configure network recovery
-  ansible.builtin.import_playbook: playbooks/network-recovery.yml
+  ansible.builtin.import_playbook: playbooks/network/network-recovery.yml
   tags: [network, recovery]
 
 - name: Configure WiFi power management
-  ansible.builtin.import_playbook: playbooks/wifi.yml
+  ansible.builtin.import_playbook: playbooks/network/wifi.yml
   tags: [wifi]
 
 - name: Configure power management
-  ansible.builtin.import_playbook: playbooks/power-management.yml
+  ansible.builtin.import_playbook: playbooks/core/power-management.yml
   tags: [power]
 
 - name: Configure Windows gaming tuning
-  ansible.builtin.import_playbook: playbooks/windows-gaming-tuning.yml
+  ansible.builtin.import_playbook: playbooks/windows/windows-gaming-tuning.yml
   tags: [windows, gaming, tuning]
 
 - name: Configure Windows Performance Mode automation
-  ansible.builtin.import_playbook: playbooks/windows-performance-mode.yml
+  ansible.builtin.import_playbook: playbooks/windows/windows-performance-mode.yml
   tags: [windows, gaming, performance-mode]
 
 - name: Configure Windows SignalRGB lock and unlock automation
-  ansible.builtin.import_playbook: playbooks/windows-signalrgb.yml
+  ansible.builtin.import_playbook: playbooks/windows/windows-signalrgb.yml
   tags: [windows, signalrgb]
 
 - name: Configure Windows gaming monitoring
-  ansible.builtin.import_playbook: playbooks/windows-gaming-monitoring.yml
+  ansible.builtin.import_playbook: playbooks/windows/windows-gaming-monitoring.yml
   tags: [windows, gaming, monitoring]
 
 - name: Configure Windows gaming benchmark capture
-  ansible.builtin.import_playbook: playbooks/windows-gaming-benchmark.yml
+  ansible.builtin.import_playbook: playbooks/windows/windows-gaming-benchmark.yml
   tags: [windows, gaming, benchmark]
 
 - name: Configure restic backups (B2 offsite)
-  ansible.builtin.import_playbook: playbooks/restic.yml
+  ansible.builtin.import_playbook: playbooks/backup-sync/restic.yml
   tags: [restic, backups]
 
 - name: Configure local restic backups (ts440 ZFS)
-  ansible.builtin.import_playbook: playbooks/local-restic.yml
+  ansible.builtin.import_playbook: playbooks/backup-sync/local-restic.yml
   tags: [local-restic, backups]
 
 - name: Configure NFS server and clients
-  ansible.builtin.import_playbook: playbooks/nfs.yml
+  ansible.builtin.import_playbook: playbooks/storage/nfs.yml
   tags: [nfs]
 
 - name: Configure filesystem mounts (NTFS, exFAT, etc.)
-  ansible.builtin.import_playbook: playbooks/filesystem-mounts.yml
+  ansible.builtin.import_playbook: playbooks/storage/filesystem-mounts.yml
   tags: [mounts, filesystem]
 
 - name: Configure Samba server
-  ansible.builtin.import_playbook: playbooks/samba.yml
+  ansible.builtin.import_playbook: playbooks/storage/samba.yml
   tags: [samba, smb]
 
 - name: Configure MergerFS media pool
-  ansible.builtin.import_playbook: playbooks/mergerfs.yml
+  ansible.builtin.import_playbook: playbooks/storage/mergerfs.yml
   tags: [mergerfs, storage]
 
 - name: Configure nightly media maintenance
-  ansible.builtin.import_playbook: playbooks/nightly-media-maintenance.yml
+  ansible.builtin.import_playbook: playbooks/media/nightly-media-maintenance.yml
   tags: [media-maintenance, mergerfs, profilarr, storage]
 
 - name: Configure MergerFS branch recovery (udev + watchdog + media-app refresh)
-  ansible.builtin.import_playbook: playbooks/mergerfs-recovery.yml
+  ansible.builtin.import_playbook: playbooks/storage/mergerfs-recovery.yml
   tags: [mergerfs, recovery, watchdog, storage]
 
 - name: Configure ZFS (snapshots, scrub, tuning, properties, ACLs)
-  ansible.builtin.import_playbook: playbooks/zfs.yml
+  ansible.builtin.import_playbook: playbooks/storage/zfs.yml
   tags: [zfs, snapshots, sanoid]
 
 - name: Configure VirtioFS shares
-  ansible.builtin.import_playbook: playbooks/virtiofs.yml
+  ansible.builtin.import_playbook: playbooks/storage/virtiofs.yml
   tags: [virtiofs, mounts]
 
 - name: Configure Proxmox guest hardware settings
-  ansible.builtin.import_playbook: playbooks/proxmox-vm-hardware.yml
+  ansible.builtin.import_playbook: playbooks/proxmox/proxmox-vm-hardware.yml
   tags: [proxmox, vm-hardware, guest-hardware]
 
 - name: Deploy Docker Compose stacks
-  ansible.builtin.import_playbook: playbooks/docker-stacks.yml
+  ansible.builtin.import_playbook: playbooks/docker/docker-stacks.yml
   tags: [docker, stacks]
 
 - name: Configure Gluetun VPN watchdog
-  ansible.builtin.import_playbook: playbooks/gluetun-watchdog.yml
+  ansible.builtin.import_playbook: playbooks/docker/gluetun-watchdog.yml
   tags: [gluetun, watchdog, vpn]
 
 - name: Configure media release metadata stamping
-  ansible.builtin.import_playbook: playbooks/media-release-stamper.yml
+  ansible.builtin.import_playbook: playbooks/media/media-release-stamper.yml
   tags: [media-release, release-stamper]
 
 - name: Configure Sonarr transaction monitor
-  ansible.builtin.import_playbook: playbooks/sonarr-transaction-monitor.yml
+  ansible.builtin.import_playbook: playbooks/media/sonarr-transaction-monitor.yml
   tags: [media-release, sonarr-monitor]
 
 - name: Configure media stack health monitor
-  ansible.builtin.import_playbook: playbooks/media-stack-health.yml
+  ansible.builtin.import_playbook: playbooks/media/media-stack-health.yml
   tags: [media-stack, media-health, monitoring]
 
 - name: Configure stream relay
-  ansible.builtin.import_playbook: playbooks/stream-relay.yml
+  ansible.builtin.import_playbook: playbooks/media/stream-relay.yml
   tags: [stream-relay, streaming, twitch]
 
 - name: Configure Docker container auto-updates
-  ansible.builtin.import_playbook: playbooks/docker-auto-update.yml
+  ansible.builtin.import_playbook: playbooks/docker/docker-auto-update.yml
   tags: [docker, auto-update]
 
 - name: Deploy OpenClaw AI agent
-  ansible.builtin.import_playbook: playbooks/openclaw.yml
+  ansible.builtin.import_playbook: playbooks/agents/openclaw.yml
   tags: [openclaw]
 
 - name: Configure centralized logging (Loki + Alloy)
-  ansible.builtin.import_playbook: playbooks/logging.yml
+  ansible.builtin.import_playbook: playbooks/core/logging.yml
   tags: [logging, loki, alloy]
 
 - name: Configure rclone sync jobs
-  ansible.builtin.import_playbook: playbooks/rclone-sync.yml
+  ansible.builtin.import_playbook: playbooks/backup-sync/rclone-sync.yml
   tags: [rclone, sync]
 
 - name: Deploy storage-status utility
-  ansible.builtin.import_playbook: playbooks/storage-status.yml
+  ansible.builtin.import_playbook: playbooks/storage/storage-status.yml
   tags: [storage-status]
 
 - name: Configure git-sync timer (ts440)
-  ansible.builtin.import_playbook: playbooks/git-sync.yml
+  ansible.builtin.import_playbook: playbooks/backup-sync/git-sync.yml
   tags: [git-sync]
 
 - name: Configure Nextcloud external storage scan
-  ansible.builtin.import_playbook: playbooks/nextcloud-scan.yml
+  ansible.builtin.import_playbook: playbooks/backup-sync/nextcloud-scan.yml
   tags: [nextcloud, scan]
 
 - name: Configure Claude memory sync to NAS
-  ansible.builtin.import_playbook: playbooks/claude-memory-sync.yml
+  ansible.builtin.import_playbook: playbooks/agents/claude-memory-sync.yml
   tags: [claude-memory, sync]
 
 - name: Configure Codex memory sync to NAS
-  ansible.builtin.import_playbook: playbooks/codex-memory-sync.yml
+  ansible.builtin.import_playbook: playbooks/agents/codex-memory-sync.yml
   tags: [codex-memory, sync]
 
 - name: Configure Proxmox Backup Server
-  ansible.builtin.import_playbook: playbooks/proxmox-backup-server.yml
+  ansible.builtin.import_playbook: playbooks/proxmox/proxmox-backup-server.yml
   tags: [pbs, backup]
 
 - name: Configure Proxmox notification webhooks
-  ansible.builtin.import_playbook: playbooks/proxmox-notifications.yml
+  ansible.builtin.import_playbook: playbooks/proxmox/proxmox-notifications.yml
   tags: [proxmox, notifications]
 
 - name: Configure Proxmox firewall
-  ansible.builtin.import_playbook: playbooks/proxmox-firewall.yml
+  ansible.builtin.import_playbook: playbooks/proxmox/proxmox-firewall.yml
   tags: [proxmox, firewall]
 
 - name: Manage Proxmox HA service state
-  ansible.builtin.import_playbook: playbooks/proxmox-ha.yml
+  ansible.builtin.import_playbook: playbooks/proxmox/proxmox-ha.yml
   tags: [proxmox, ha]
 
 - name: Deploy per-VM storage gate hookscript
-  ansible.builtin.import_playbook: playbooks/vm-storage-gate.yml
+  ansible.builtin.import_playbook: playbooks/storage/vm-storage-gate.yml
   tags: [proxmox, vm-gate, storage]

@@ -1,0 +1,135 @@
+---
+# Purpose: Configure VirtioFS shares.
+# Hosts: proxmox_nodes, vms.
+# Key vars: smb_shares, nfs_*, filesystem_mounts, mergerfs_*, zfs_*, virtiofs_*, vm_storage_gate_*.
+# Templates: templates/storage, templates/samba, templates/proxmox.
+# Scripts: scripts/storage.
+# Validation: ansible-playbook playbooks/storage/virtiofs.yml --syntax-check.
+
+# =============================================================================
+# VirtioFS Playbook - Configure VirtioFS shares between Proxmox and VMs
+# =============================================================================
+# Configures VirtioFS on both Proxmox host and guest VM
+# Usage: ansible-playbook playbooks/storage/virtiofs.yml
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# Configure VirtioFS on Proxmox host (add to VM config)
+# -----------------------------------------------------------------------------
+- name: Configure VirtioFS shares on Proxmox hosts
+  hosts: proxmox_nodes
+  become: true
+  gather_facts: true
+
+  tasks:
+    - name: Configure VirtioFS for VMs on this host
+      when: virtiofs_host_configs is defined
+      block:
+        - name: Ensure VirtioFS source directories have correct permissions
+          ansible.builtin.file:
+            path: "{{ item.path }}"
+            state: directory
+            owner: "{{ item.owner | default(omit) }}"
+            group: "{{ item.group | default(omit) }}"
+            mode: "{{ item.mode | default(omit) }}"
+          loop: "{{ virtiofs_directory_mappings | default([]) }}"
+          loop_control:
+            label: "{{ item.path }}"
+          when: item.path is defined
+
+        - name: Ensure extra VirtioFS host directories exist
+          ansible.builtin.file:
+            path: "{{ item.path }}"
+            state: directory
+            owner: "{{ item.owner | default(omit) }}"
+            group: "{{ item.group | default(omit) }}"
+            mode: "{{ item.mode | default(omit) }}"
+          loop: "{{ virtiofs_extra_directories | default([]) }}"
+          loop_control:
+            label: "{{ item.path }}"
+          when: item.path is defined
+
+        - name: Deploy VirtioFS directory mappings
+          ansible.builtin.template:
+            src: ../templates/proxmox/proxmox-virtiofs-directory.cfg.j2
+            dest: /etc/pve/mapping/directory.cfg
+            mode: '0640'
+
+        - name: Add VirtioFS mount to VM config
+          ansible.builtin.lineinfile:
+            path: "/etc/pve/qemu-server/{{ item.vmid }}.conf"
+            regexp: "^virtiofs{{ item.index | default(0) }}:"
+            line: "virtiofs{{ item.index | default(0) }}: {{ item.name }},cache={{ item.cache | default('never') }}"
+            state: present
+          loop: "{{ virtiofs_host_configs }}"
+          loop_control:
+            label: "VM {{ item.vmid }}: {{ item.name }}"
+          notify: Note VM restart required
+
+  handlers:
+    - name: Note VM restart required
+      ansible.builtin.debug:
+        msg: "VirtioFS config changed - VM restart required for changes to take effect"
+
+# -----------------------------------------------------------------------------
+# Configure VirtioFS mounts on guest VMs
+# -----------------------------------------------------------------------------
+- name: Configure VirtioFS mounts on guest VMs
+  hosts: vms
+  become: true
+  gather_facts: true
+
+  tasks:
+    - name: Configure VirtioFS mounts
+      when: virtiofs_mounts is defined and virtiofs_mounts | length > 0
+      block:
+        - name: Check which mount points are already mounted
+          ansible.builtin.command:
+            cmd: findmnt -n {{ item.mount_point }}
+          register: virtiofs_mountcheck
+          check_mode: false
+          loop: "{{ virtiofs_mounts }}"
+          loop_control:
+            label: "{{ item.mount_point }}"
+          changed_when: false
+          failed_when: false
+
+        - name: Create VirtioFS mount points (skip already-mounted)
+          ansible.builtin.file:
+            path: "{{ item.item.mount_point }}"
+            state: directory
+            owner: "{{ item.item.owner | default('root') }}"
+            group: "{{ item.item.group | default('root') }}"
+            mode: "{{ item.item.mode | default('0755') }}"
+          loop: "{{ virtiofs_mountcheck.results }}"
+          loop_control:
+            label: "{{ item.item.mount_point }}"
+          when: item.rc != 0
+
+        - name: Add VirtioFS mounts to fstab
+          ansible.builtin.lineinfile:
+            path: /etc/fstab
+            regexp: "^{{ item.name }}\\s+{{ item.mount_point }}"
+            line: "{{ item.name }}  {{ item.mount_point }}  virtiofs  {{ item.options | default('defaults') }}  0  0"
+            state: present
+          loop: "{{ virtiofs_mounts }}"
+          loop_control:
+            label: "{{ item.name }} -> {{ item.mount_point }}"
+
+        - name: Mount VirtioFS shares
+          ansible.posix.mount:
+            path: "{{ item.item.mount_point }}"
+            src: "{{ item.item.name }}"
+            fstype: virtiofs
+            opts: "{{ item.item.options | default('defaults') }}"
+            state: mounted
+          register: virtiofs_mount_result
+          failed_when:
+            - virtiofs_mount_result is failed
+            - not (item.item.allow_unavailable | default(false) | bool)
+          loop: "{{ virtiofs_mountcheck.results }}"
+          loop_control:
+            label: "{{ item.item.mount_point }}"
+          when:
+            - not ansible_check_mode
+            - item.rc != 0

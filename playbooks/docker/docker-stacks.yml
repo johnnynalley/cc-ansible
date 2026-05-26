@@ -1,0 +1,404 @@
+# Purpose: Deploy Docker Compose stacks.
+# Hosts: docker_hosts.
+# Key vars: docker_stacks, docker_auto_update_*, gluetun_*, qbit_*.
+# Templates: templates/docker, templates/gluetun.
+# Scripts: scripts/docker.
+# Validation: ansible-playbook playbooks/docker/docker-stacks.yml --syntax-check.
+
+# =============================================================================
+# Docker Stacks Playbook - Deploy Docker Compose Services
+# =============================================================================
+# Deploys Docker Compose stacks defined in host_vars docker_stacks variable.
+# Shows per-service image changes with version labels when available.
+# Usage: ansible-playbook playbooks/docker/docker-stacks.yml
+# =============================================================================
+
+- name: Deploy Docker Compose stacks
+  hosts: docker_hosts
+  become: true
+  gather_facts: true
+  serial: 1
+
+  tasks:
+    # Create Docker networks before starting stacks
+    - name: Ensure Docker networks exist
+      ansible.builtin.import_tasks: ../../tasks/docker-network.yml
+
+    - name: Remove unmanaged Portainer server from edge-agent hosts
+      community.docker.docker_container:
+        name: portainer
+        state: absent
+      when:
+        - inventory_hostname != 'docker-vm'
+        - docker_stacks | default([]) | selectattr('name', 'equalto', 'portainer-agent') | list | length > 0
+        - docker_stacks | default([]) | selectattr('name', 'equalto', 'portainer') | list | length == 0
+
+    # Deploy Ansible-managed compose files from templates/docker/
+    # Any stack with a matching templates/docker/<name>.yml gets its compose file
+    # deployed automatically. Stacks without a template are assumed to have
+    # their compose file already on the host (manually managed).
+    - name: Ensure stack directory exists (Ansible-managed stacks)
+      ansible.builtin.file:
+        path: "{{ item.path }}"
+        state: directory
+        owner: root
+        group: root
+        mode: "0755"
+      loop: "{{ docker_stacks | default([]) }}"
+      loop_control:
+        label: "{{ item.name }}"
+      when:
+        - item.name != 'caddy'
+        - >-
+          item.compose_template is defined
+          or
+          lookup('ansible.builtin.fileglob', playbook_dir + '/../templates/docker/' + item.name + '.yml') | length > 0
+
+    - name: Deploy compose file (Ansible-rendered stacks)
+      ansible.builtin.template:
+        src: "../templates/{{ item.compose_template | default('docker/' + item.name + '.yml.j2') }}"
+        dest: "{{ item.path }}/docker-compose.yml"
+        owner: root
+        group: root
+        mode: "{{ item.compose_mode | default('0644') }}"
+      loop: "{{ docker_stacks | default([]) }}"
+      loop_control:
+        label: "{{ item.name }}"
+      when:
+        - item.name != 'caddy'
+        - item.compose_template is defined
+        - item.compose_template is search('\.j2$')
+
+    - name: Deploy compose file (Ansible-managed stacks)
+      ansible.builtin.copy:
+        src: "../templates/{{ item.compose_template | default('docker/' + item.name + '.yml') }}"
+        dest: "{{ item.path }}/docker-compose.yml"
+        owner: root
+        group: root
+        mode: "{{ item.compose_mode | default('0644') }}"
+      loop: "{{ docker_stacks | default([]) }}"
+      loop_control:
+        label: "{{ item.name }}"
+      when:
+        - item.name != 'caddy'
+        - >-
+          (item.compose_template is defined and item.compose_template is not search('\.j2$'))
+          or (
+            item.compose_template is not defined
+            and lookup('ansible.builtin.fileglob', playbook_dir + '/../templates/docker/' + item.name + '.yml') | length > 0
+          )
+
+    - name: Find Caddy stack path
+      ansible.builtin.set_fact:
+        caddy_stack_paths: >-
+          {{ docker_stacks | default([])
+             | selectattr('name', 'equalto', 'caddy')
+             | map(attribute='path')
+             | list }}
+      tags: [caddy]
+
+    - name: Ensure Caddy stack directory exists
+      ansible.builtin.file:
+        path: "{{ caddy_stack_paths[0] }}"
+        state: directory
+        owner: johnny
+        group: johnny
+        mode: "0775"
+      when: caddy_stack_paths | length > 0
+      tags: [caddy]
+
+    - name: Deploy Caddy compose file
+      ansible.builtin.copy:
+        src: ../templates/docker/caddy.yml
+        dest: "{{ caddy_stack_paths[0] }}/docker-compose.yml"
+        owner: johnny
+        group: ansible
+        mode: "0664"
+      when:
+        - caddy_stack_paths | length > 0
+        - lookup('ansible.builtin.fileglob', playbook_dir + '/../templates/docker/caddy.yml') | length > 0
+      tags: [caddy]
+
+    - name: Deploy Caddyfile
+      ansible.builtin.template:
+        src: ../templates/docker/Caddyfile.j2
+        dest: "{{ caddy_stack_paths[0] }}/Caddyfile"
+        owner: root
+        group: root
+        mode: "0644"
+      register: caddyfile_deploy
+      when:
+        - caddy_stack_paths | length > 0
+        - lookup('ansible.builtin.fileglob', playbook_dir + '/../templates/docker/Caddyfile.j2') | length > 0
+      tags: [caddy]
+
+    - name: Deploy Caddy Dockerfile
+      ansible.builtin.copy:
+        src: ../templates/docker/caddy.Dockerfile
+        dest: "{{ caddy_stack_paths[0] }}/Dockerfile"
+        owner: johnny
+        group: ansible
+        mode: "0664"
+      when:
+        - caddy_stack_paths | length > 0
+        - lookup('ansible.builtin.fileglob', playbook_dir + '/../templates/docker/caddy.Dockerfile') | length > 0
+      tags: [caddy]
+
+    # Create systemd service to start stacks with proper network dependencies
+    - name: Create docker-stacks systemd service
+      ansible.builtin.template:
+        src: ../templates/docker/docker-stacks.service.j2
+        dest: /etc/systemd/system/docker-stacks.service
+        owner: root
+        group: root
+        mode: "0644"
+      notify: Reload systemd
+
+    - name: Enable docker-stacks service
+      ansible.builtin.systemd:
+        name: docker-stacks
+        enabled: true
+        daemon_reload: true
+      when: not ansible_check_mode
+
+    # -------------------------------------------------------------------------
+    # Stacks with build: true - rebuild images from Dockerfile
+    # -------------------------------------------------------------------------
+    - name: Build and pull images (build stacks)
+      ansible.builtin.shell: |
+        cd "{{ item.path }}" && docker compose build --pull 2>&1
+      loop: "{{ docker_stacks | selectattr('build', 'equalto', true) | list }}"
+      loop_control:
+        label: "{{ item.name }}"
+      retries: 3
+      delay: 10
+      register: build_result
+      until: build_result.rc == 0
+      changed_when: false
+
+    - name: Detect per-service image changes (build stacks)
+      ansible.builtin.script: "{{ playbook_dir }}/../scripts/docker/docker-stack-diff --check-major {{ item.item.path }}"
+      args:
+        executable: /bin/bash
+      loop: "{{ build_result.results | default([]) }}"
+      loop_control:
+        label: "{{ item.item.name }}"
+      register: build_diff_result
+      changed_when: "'(no image changes detected)' not in build_diff_result.stdout"
+      failed_when: build_diff_result.rc not in [0, 2]
+      when: build_result.results is defined
+
+    - name: Show pending image updates (build stacks)
+      ansible.builtin.debug:
+        msg: "{{ item.stdout_lines | reject('equalto', '') | list }}"
+      loop: "{{ build_diff_result.results | default([]) }}"
+      loop_control:
+        label: "{{ item.item.item.name }}"
+      when:
+        - item is not skipped
+        - item.changed | default(false)
+
+    - name: Collect major version bumps (build stacks)
+      ansible.builtin.set_fact:
+        _build_major_lines: >-
+          {{ build_diff_result.results | default([])
+             | selectattr('stdout_lines', 'defined')
+             | map(attribute='stdout_lines') | flatten
+             | select('search', 'MAJOR:') | list }}
+
+    - name: Confirm major version updates (build stacks)
+      ansible.builtin.pause:
+        prompt: |-
+
+          *** MAJOR VERSION BUMPS DETECTED ***
+          {{ ansible_play_batch
+             | map('extract', hostvars, '_build_major_lines')
+             | flatten | join('\n') }}
+
+          Review changelogs for breaking changes before proceeding.
+          Press Enter to continue, or Ctrl+C then A to abort.
+      when: >-
+        ansible_play_batch
+        | map('extract', hostvars, '_build_major_lines')
+        | flatten | length > 0
+      run_once: true
+
+    - name: Determine build stacks needing update
+      ansible.builtin.set_fact:
+        build_stacks_to_update: >-
+          {{ build_diff_result.results | default([])
+             | selectattr('changed', 'defined')
+             | selectattr('changed', 'equalto', true)
+             | map(attribute='item.item')
+             | list }}
+
+    - name: Validate Caddyfile before applying
+      ansible.builtin.command: docker compose run --rm --no-deps caddy caddy validate --config /etc/caddy/Caddyfile
+      args:
+        chdir: "{{ caddy_stack_paths[0] }}"
+      changed_when: false
+      when:
+        - caddy_stack_paths | length > 0
+        - caddyfile_deploy is defined
+        - caddyfile_deploy.changed
+      tags: [caddy]
+
+    - name: Update containers if images changed (build stacks)
+      ansible.builtin.shell: |
+        cd "{{ item.path }}" && docker compose up -d{% if item.remove_orphans | default(false) %} --remove-orphans{% endif %} 2>&1
+      loop: "{{ build_stacks_to_update | default([]) }}"
+      loop_control:
+        label: "{{ item.name }}"
+      register: up_build_result
+      changed_when: "'Recreat' in up_build_result.stdout or 'Creat' in up_build_result.stdout or 'Start' in up_build_result.stdout"
+
+    - name: Show recreated containers (build stacks)
+      ansible.builtin.debug:
+        msg: "{{ item.stdout_lines }}"
+      loop: "{{ up_build_result.results | default([]) }}"
+      loop_control:
+        label: "{{ item.item.name }}"
+      when:
+        - item is not skipped
+        - item.changed | default(false)
+
+    # -------------------------------------------------------------------------
+    # Stacks with build: false - pull prebuilt images only
+    # -------------------------------------------------------------------------
+    - name: Pull images (pull-only stacks)
+      ansible.builtin.shell: |
+        cd "{{ item.path }}" && docker compose pull 2>&1
+      loop: "{{ docker_stacks | selectattr('build', 'equalto', false) | list }}"
+      loop_control:
+        label: "{{ item.name }}"
+      retries: 3
+      delay: 10
+      register: pull_result
+      until: pull_result.rc == 0
+      changed_when: "'Pull complete' in pull_result.stdout or 'Downloaded newer' in pull_result.stdout"
+
+    - name: Detect per-service image changes (pull-only stacks)
+      ansible.builtin.script: "{{ playbook_dir }}/../scripts/docker/docker-stack-diff --check-major {{ item.item.path }}"
+      args:
+        executable: /bin/bash
+      loop: "{{ pull_result.results | default([]) }}"
+      loop_control:
+        label: "{{ item.item.name }}"
+      register: pull_diff_result
+      changed_when: false
+      failed_when: pull_diff_result.rc not in [0, 2]
+      when:
+        - pull_result.results is defined
+        - item.changed
+
+    - name: Show pending image updates (pull-only stacks)
+      ansible.builtin.debug:
+        msg: "{{ item.stdout_lines | reject('equalto', '') | list }}"
+      loop: "{{ pull_diff_result.results | default([]) }}"
+      loop_control:
+        label: "{{ item.item.item.name }}"
+      when:
+        - item is not skipped
+        - item.stdout_lines | default([]) | reject('equalto', '') | list | length > 0
+        - item.stdout_lines | reject('equalto', '') | list != ['(no image changes detected)']
+
+    - name: Collect major version bumps (pull-only stacks)
+      ansible.builtin.set_fact:
+        _pull_major_lines: >-
+          {{ pull_diff_result.results | default([])
+             | selectattr('stdout_lines', 'defined')
+             | map(attribute='stdout_lines') | flatten
+             | select('search', 'MAJOR:') | list }}
+
+    - name: Confirm major version updates (pull-only stacks)
+      ansible.builtin.pause:
+        prompt: |-
+
+          *** MAJOR VERSION BUMPS DETECTED ***
+          {{ ansible_play_batch
+             | map('extract', hostvars, '_pull_major_lines')
+             | flatten | join('\n') }}
+
+          Review changelogs for breaking changes before proceeding.
+          Press Enter to continue, or Ctrl+C then A to abort.
+      when: >-
+        ansible_play_batch
+        | map('extract', hostvars, '_pull_major_lines')
+        | flatten | length > 0
+      run_once: true
+
+    - name: Update containers if images changed (pull-only stacks)
+      ansible.builtin.shell: |
+        cd "{{ item.item.path }}" && docker compose up -d{% if item.item.remove_orphans | default(false) %} --remove-orphans{% endif %} 2>&1
+      loop: "{{ pull_result.results | default([]) }}"
+      loop_control:
+        label: "{{ item.item.name }}"
+      register: up_pull_result
+      changed_when: "'Recreat' in up_pull_result.stdout or 'Creat' in up_pull_result.stdout or 'Start' in up_pull_result.stdout"
+      when:
+        - pull_result.results is defined
+        - item.changed or item.stdout is search('Pull complete') or item.stdout is search('Downloaded newer')
+
+    - name: Recreate Caddy container if Caddyfile changed
+      ansible.builtin.command: docker compose up -d --force-recreate caddy
+      args:
+        chdir: "{{ caddy_stack_paths[0] }}"
+      when:
+        - caddy_stack_paths | length > 0
+        - caddyfile_deploy is defined
+        - caddyfile_deploy.changed
+      tags: [caddy]
+
+    - name: Verify running Caddy config
+      ansible.builtin.command: docker compose exec -T caddy caddy validate --config /etc/caddy/Caddyfile
+      args:
+        chdir: "{{ caddy_stack_paths[0] }}"
+      changed_when: false
+      when: caddy_stack_paths | length > 0
+      tags: [caddy]
+
+    - name: Show recreated containers (pull-only stacks)
+      ansible.builtin.debug:
+        msg: "{{ item.stdout_lines }}"
+      loop: "{{ up_pull_result.results | default([]) }}"
+      loop_control:
+        label: "{{ item.item.item.name }}"
+      when:
+        - item is not skipped
+        - item.changed | default(false)
+
+    # -------------------------------------------------------------------------
+    # Ensure stacks are in desired state (start: true/false, default true)
+    # -------------------------------------------------------------------------
+    - name: Start stacks (start=true or undefined)
+      ansible.builtin.shell: |
+        cd "{{ item.path }}" && docker compose up -d{% if item.remove_orphans | default(false) %} --remove-orphans{% endif %} 2>&1
+      loop: "{{ docker_stacks | selectattr('start', 'undefined') | list + docker_stacks | selectattr('start', 'defined') | selectattr('start', 'equalto', true) | list }}"
+      loop_control:
+        label: "{{ item.name }}"
+      register: start_result
+      changed_when: "'Started' in start_result.stdout or 'Created' in start_result.stdout"
+
+    - name: Stop stacks (start=false)
+      ansible.builtin.shell: |
+        cd "{{ item.path }}" && docker compose stop 2>&1
+      loop: "{{ docker_stacks | selectattr('start', 'defined') | selectattr('start', 'equalto', false) | list }}"
+      loop_control:
+        label: "{{ item.name }}"
+      register: stop_result
+      changed_when: "'Stopped' in stop_result.stdout"
+
+    - name: Prune dangling Docker images
+      community.docker.docker_prune:
+        images: true
+      register: prune_result
+
+    - name: Report pruned images
+      ansible.builtin.debug:
+        msg: "Reclaimed {{ prune_result.images_space_reclaimed | default(0) | human_readable }} from {{ prune_result.images | default([]) | length }} image(s)"
+      when: prune_result.images | default([]) | length > 0
+
+  handlers:
+    - name: Reload systemd
+      ansible.builtin.systemd:
+        daemon_reload: true

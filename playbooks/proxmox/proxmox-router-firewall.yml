@@ -1,0 +1,126 @@
+---
+# Purpose: Configure router firewall rules on Proxmox nodes.
+# Hosts: proxmox_nodes.
+# Key vars: proxmox_*, pve_*, pbs_*, pdm_*.
+# Templates: templates/proxmox.
+# Scripts: none by default.
+# Validation: ansible-playbook playbooks/proxmox/proxmox-router-firewall.yml --syntax-check.
+
+# =============================================================================
+# Proxmox Router/Firewall Foundation
+# =============================================================================
+# Prepares opt-in Proxmox hosts for an inline room router/firewall VM.
+#
+# This playbook only creates the downstream LAN bridge. It deliberately leaves
+# the existing management/upstream bridge alone so the Proxmox node remains
+# reachable while the firewall VM is built and tested.
+#
+# Usage:
+#   ansible-playbook playbooks/proxmox/proxmox-router-firewall.yml --check --diff
+#   ansible-playbook playbooks/proxmox/proxmox-router-firewall.yml
+# =============================================================================
+
+- name: Prepare Proxmox router/firewall bridge foundation
+  hosts: proxmox_nodes
+  become: true
+  gather_facts: false
+
+  vars:
+    router_firewall_backup_dir: /root/network-config-backups
+
+  tasks:
+    - name: Skip hosts that are not router/firewall candidates
+      ansible.builtin.meta: end_host
+      when: not (router_firewall_enabled | default(false))
+
+    - name: Assert required router/firewall variables are defined
+      ansible.builtin.assert:
+        that:
+          - router_firewall_upstream_bridge is defined
+          - router_firewall_upstream_interface is defined
+          - router_firewall_lan_bridge is defined
+          - router_firewall_lan_interface is defined
+          - router_firewall_lan_bridge != router_firewall_upstream_bridge
+          - router_firewall_lan_interface != router_firewall_upstream_interface
+        fail_msg: >-
+          Router/firewall bridge variables are incomplete or unsafe for
+          {{ inventory_hostname }}.
+
+    - name: Verify upstream physical interface exists
+      ansible.builtin.command: "ip link show {{ router_firewall_upstream_interface }}"
+      changed_when: false
+      check_mode: false
+
+    - name: Verify LAN physical interface exists
+      ansible.builtin.command: "ip link show {{ router_firewall_lan_interface }}"
+      changed_when: false
+      check_mode: false
+
+    - name: Read current network interfaces file
+      ansible.builtin.slurp:
+        src: /etc/network/interfaces
+      register: router_firewall_interfaces_raw
+      check_mode: false
+
+    - name: Build managed LAN bridge block
+      ansible.builtin.set_fact:
+        router_firewall_lan_bridge_block: |
+          auto {{ router_firewall_lan_bridge }}
+          iface {{ router_firewall_lan_bridge }} inet manual
+              bridge-ports {{ router_firewall_lan_interface }}
+              bridge-stp off
+              bridge-fd 0
+        router_firewall_interfaces_current: "{{ router_firewall_interfaces_raw.content | b64decode }}"
+
+    - name: Decide whether interfaces file needs a backup
+      ansible.builtin.set_fact:
+        router_firewall_interfaces_needs_change: >-
+          {{ router_firewall_lan_bridge_block not in router_firewall_interfaces_current }}
+
+    - name: Ensure network config backup directory exists
+      ansible.builtin.file:
+        path: "{{ router_firewall_backup_dir }}"
+        state: directory
+        owner: root
+        group: root
+        mode: "0700"
+      when: router_firewall_interfaces_needs_change
+
+    - name: Capture UTC timestamp for network config backup
+      ansible.builtin.command: date -u +%Y%m%dT%H%M%SZ
+      register: router_firewall_backup_timestamp
+      changed_when: false
+      check_mode: false
+      when: router_firewall_interfaces_needs_change
+
+    - name: Back up current network interfaces file before mutation
+      ansible.builtin.copy:
+        src: /etc/network/interfaces
+        dest: "{{ router_firewall_backup_dir }}/interfaces.{{ router_firewall_backup_timestamp.stdout }}"
+        remote_src: true
+        owner: root
+        group: root
+        mode: "0600"
+      when:
+        - router_firewall_interfaces_needs_change
+        - not ansible_check_mode
+
+    - name: Add downstream LAN bridge for router/firewall VM
+      ansible.builtin.blockinfile:
+        path: /etc/network/interfaces
+        marker: "# {mark} ANSIBLE MANAGED BLOCK router-firewall-lan-bridge"
+        insertafter: EOF
+        block: "{{ router_firewall_lan_bridge_block }}"
+      notify: Reload Proxmox network interfaces
+
+    - name: Show router/firewall bridge mapping
+      ansible.builtin.debug:
+        msg:
+          - "upstream={{ router_firewall_upstream_bridge }} via {{ router_firewall_upstream_interface }}"
+          - "room_lan={{ router_firewall_lan_bridge }} via {{ router_firewall_lan_interface }}"
+          - "planned_room_subnet={{ router_firewall_room_subnet | default('unset') }}"
+          - "planned_room_gateway={{ router_firewall_room_gateway | default('unset') }}"
+
+  handlers:
+    - name: Reload Proxmox network interfaces
+      ansible.builtin.command: ifreload -a

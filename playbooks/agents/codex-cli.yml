@@ -1,0 +1,111 @@
+# Purpose: Configure Codex CLI.
+# Hosts: orchestrator.
+# Key vars: codex_*, claude_memory_sync_*, openclaw_*.
+# Templates: templates/openclaw.
+# Scripts: none by default.
+# Validation: ansible-playbook playbooks/agents/codex-cli.yml --syntax-check.
+
+# =============================================================================
+# Codex CLI Playbook
+# =============================================================================
+# Keeps Codex installed through johnny's user-owned npm prefix so `codex`
+# self-updates do not need write access to /usr/local.
+#
+# Usage: ansible-playbook playbooks/agents/codex-cli.yml
+# =============================================================================
+
+- name: Configure Codex CLI
+  hosts: orchestrator
+  become: true
+  gather_facts: true
+
+  tasks:
+    - name: Ensure npm runtime is installed
+      ansible.builtin.apt:
+        name:
+          - nodejs
+          - npm
+        state: present
+      when: ansible_facts.os_family == "Debian"
+      tags: [codex, npm, packages]
+
+    - name: Ensure user npm prefix directories exist
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: directory
+        owner: "{{ codex_cli_user }}"
+        group: "{{ codex_cli_user }}"
+      loop:
+        - "{{ codex_npm_prefix }}"
+        - "{{ codex_npm_prefix }}/bin"
+        - "{{ codex_npm_prefix }}/lib"
+        - "{{ codex_npm_prefix }}/lib/node_modules"
+      tags: [codex, npm]
+
+    - name: Check for legacy system Codex install
+      ansible.builtin.stat:
+        path: /usr/local/lib/node_modules/@openai/codex
+      register: codex_legacy_system_install
+      tags: [codex, npm, cleanup]
+
+    - name: Remove legacy system Codex npm package
+      ansible.builtin.command:
+        cmd: "npm --prefix /usr/local uninstall -g {{ codex_npm_package }}"
+      when:
+        - codex_legacy_system_install.stat.exists
+        - not ansible_check_mode
+      changed_when: true
+      tags: [codex, npm, cleanup]
+
+    - name: Add npm user bin to shell PATH
+      ansible.builtin.blockinfile:
+        path: "{{ item }}"
+        create: true
+        owner: "{{ codex_cli_user }}"
+        group: "{{ codex_cli_user }}"
+        mode: "0644"
+        marker: "# {mark} ANSIBLE MANAGED BLOCK - Codex npm prefix"
+        block: |
+          case ":$PATH:" in
+            *":{{ codex_npm_prefix }}/bin:"*) ;;
+            *) export PATH="{{ codex_npm_prefix }}/bin:$PATH" ;;
+          esac
+      loop:
+        - "/home/{{ codex_cli_user }}/.profile"
+        - "/home/{{ codex_cli_user }}/.bashrc"
+      tags: [codex, npm]
+
+    - name: Install or update Codex CLI through user npm prefix
+      ansible.builtin.command:
+        cmd: "sudo -iu {{ codex_cli_user }} npm --prefix {{ codex_npm_prefix }} install -g {{ codex_npm_package }}@latest"
+      register: codex_npm_install
+      changed_when: >-
+        'added' in (codex_npm_install.stdout | default(''))
+        or 'changed' in (codex_npm_install.stdout | default(''))
+        or 'removed' in (codex_npm_install.stdout | default(''))
+        or 'updated' in (codex_npm_install.stdout | default(''))
+      when: not ansible_check_mode
+      tags: [codex, npm]
+
+    - name: Verify Codex npm prefix
+      ansible.builtin.command:
+        cmd: "sudo -iu {{ codex_cli_user }} npm --prefix {{ codex_npm_prefix }} config get prefix"
+      register: codex_npm_prefix_check
+      changed_when: false
+      tags: [codex, npm, verify]
+
+    - name: Verify Codex resolves from user prefix
+      ansible.builtin.shell:
+        cmd: "sudo -iu {{ codex_cli_user }} bash -lc 'command -v codex'"
+      register: codex_command_path
+      changed_when: false
+      failed_when: codex_command_path.stdout != codex_npm_prefix + '/bin/codex'
+      when: not ansible_check_mode
+      tags: [codex, verify]
+
+    - name: Show Codex CLI install path
+      ansible.builtin.debug:
+        msg:
+          - "npm prefix: {{ codex_npm_prefix_check.stdout }}"
+          - "codex path: {{ codex_command_path.stdout | default('not checked in check mode') }}"
+      tags: [codex, verify]

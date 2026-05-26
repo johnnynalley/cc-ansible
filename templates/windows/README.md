@@ -13,10 +13,10 @@
 
 ## Consumers
 
-- `playbooks/windows-gaming-benchmark.yml`
-- `playbooks/windows-gaming-monitoring.yml`
-- `playbooks/windows-performance-mode.yml`
-- `playbooks/windows-signalrgb.yml`
+- `playbooks/windows/windows-gaming-benchmark.yml`
+- `playbooks/windows/windows-gaming-monitoring.yml`
+- `playbooks/windows/windows-performance-mode.yml`
+- `playbooks/windows/windows-signalrgb.yml`
 
 ## Safety Notes
 

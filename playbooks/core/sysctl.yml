@@ -1,0 +1,51 @@
+---
+# Purpose: Configure kernel sysctl settings.
+# Hosts: proxmox_nodes, linux_hosts.
+# Key vars: packages_*, bootstrap_*, auto_updates_*, unattended_upgrades_*, swap_*, sysctl_*, logging_*, smartd_*, apcupsd_*.
+# Templates: templates/auto-updates, templates/logging, templates/motd, templates/smartmontools, templates/ups.
+# Scripts: scripts/repo/repo-audit for repo checks; otherwise none by default.
+# Validation: ansible-playbook playbooks/core/sysctl.yml --syntax-check.
+
+# =============================================================================
+# Sysctl Playbook - Kernel runtime tuning
+# =============================================================================
+# Usage: ansible-playbook playbooks/core/sysctl.yml
+# =============================================================================
+
+- name: Configure Proxmox sysctl settings
+  hosts: proxmox_nodes
+  become: true
+  gather_facts: false
+
+  tasks:
+    - name: Apply Proxmox sysctl settings
+      ansible.posix.sysctl:
+        name: "{{ item.key }}"
+        value: "{{ item.value | string }}"
+        sysctl_file: /etc/sysctl.d/99-ansible.conf
+        sysctl_set: true
+        reload: true
+        state: present
+      loop: "{{ proxmox_sysctl_settings | default({}) | dict2items }}"
+      loop_control:
+        label: "{{ item.key }}={{ item.value }}"
+      when: proxmox_sysctl_settings is defined
+
+- name: Configure Linux host sysctl settings
+  hosts: linux_hosts
+  become: true
+  gather_facts: false
+
+  tasks:
+    - name: Apply Linux host sysctl settings
+      ansible.posix.sysctl:
+        name: "{{ item.key }}"
+        value: "{{ item.value | string }}"
+        sysctl_file: /etc/sysctl.d/99-ansible.conf
+        sysctl_set: true
+        reload: true
+        state: present
+      loop: "{{ sysctl_settings | default({}) | dict2items }}"
+      loop_control:
+        label: "{{ item.key }}={{ item.value }}"
+      when: sysctl_settings is defined

@@ -58,5 +58,5 @@ pbs_backup_schedule: "*/6:00"
 pbs_backup_exclude: "103,104,105,142"
 
 # HA disabled cluster-wide. Provides no value (no HA resources configured) and
-# adds risk (watchdog fencing). Re-enable: set true and re-run playbooks/proxmox-ha.yml.
+# adds risk (watchdog fencing). Re-enable: set true and re-run playbooks/proxmox/proxmox-ha.yml.
 pve_ha_enabled: false

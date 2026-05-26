@@ -16,10 +16,10 @@ BLUE='\033[0;34m'
 CYAN='\033[0;36m'
 NC='\033[0m' # No Color
 
-# Get list of playbooks
+# Get list of playbooks relative to playbooks/
 get_playbooks() {
-    find "$PLAYBOOKS_DIR" -maxdepth 1 -name "*.yml" -type f | sort | while read -r f; do
-        basename "$f"
+    find "$PLAYBOOKS_DIR" -mindepth 2 -maxdepth 2 -name "*.yml" -type f | sort | while read -r f; do
+        realpath --relative-to="$PLAYBOOKS_DIR" "$f"
     done
 }
 
@@ -86,7 +86,7 @@ main() {
     while true; do
         show_menu
 
-        echo -ne "${CYAN}Select playbook(s) [1-9, a, i, c, q]: ${NC}"
+    echo -ne "${CYAN}Select playbook(s) [number/range, a, i, c, q]: ${NC}"
         read -r choice
 
         case "$choice" in

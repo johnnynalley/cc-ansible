@@ -138,7 +138,7 @@ zfs_arc_max_bytes: 4294967296
 # ZFS Dataset Properties (documentation + validation)
 # =============================================================================
 # These properties define how each dataset should be configured.
-# Enforced by playbooks/zfs.yml - automatically fixes drift via zfs set.
+# Enforced by playbooks/storage/zfs.yml - automatically fixes drift via zfs set.
 # On a new NAS, use these values when creating datasets:
 #   zfs create -o compression=lz4 -o acltype=posixacl nas_zfs
 

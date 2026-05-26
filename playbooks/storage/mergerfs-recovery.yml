@@ -1,0 +1,122 @@
+# Purpose: Configure MergerFS branch recovery (udev + watchdog + media-app refresh).
+# Hosts: nas_server.
+# Key vars: smb_shares, nfs_*, filesystem_mounts, mergerfs_*, zfs_*, virtiofs_*, vm_storage_gate_*.
+# Templates: templates/storage, templates/samba, templates/proxmox.
+# Scripts: scripts/storage.
+# Validation: ansible-playbook playbooks/storage/mergerfs-recovery.yml --syntax-check.
+
+# =============================================================================
+# MergerFS Recovery Playbook - auto-remount + watchdog + media-app refresh
+# =============================================================================
+# Deploys three layers of automated recovery for USB-SATA mergerfs branches:
+#   1. udev rule  — auto-remount on device re-attach (within seconds)
+#   2. Watchdog   — periodic backstop (every 60s by default), alerts on persistent failure
+#   3. Recovery hook — refreshes Plex/Sonarr/Radarr libraries after a successful remount
+#
+# Opt-in via mergerfs_recovery_enabled (default: true in nas_server group_vars).
+# Configuration in inventory/group_vars/nas_server/mergerfs-recovery.yml.
+# API tokens in inventory/group_vars/nas_server/vault.yml (encrypted).
+#
+# Usage:
+#   ansible-playbook playbooks/storage/mergerfs-recovery.yml --check --diff
+#   ansible-playbook playbooks/storage/mergerfs-recovery.yml
+# =============================================================================
+
+- name: Configure mergerfs branch recovery (udev + watchdog + media-app refresh)
+  hosts: nas_server
+  become: true
+  gather_facts: true
+
+  tasks:
+    # =========================================================================
+    # Disable path — stop and remove if explicitly disabled
+    # =========================================================================
+    - name: Stop and disable watchdog timer (recovery disabled)
+      ansible.builtin.systemd:
+        name: mergerfs-mount-watchdog.timer
+        enabled: false
+        state: stopped
+      when: not (mergerfs_recovery_enabled | default(false))
+      failed_when: false
+
+    - name: Skip remaining tasks (recovery disabled)
+      ansible.builtin.meta: end_host
+      when: not (mergerfs_recovery_enabled | default(false))
+
+    # =========================================================================
+    # Recovery hook script (called by both udev rule and watchdog)
+    # =========================================================================
+    - name: Deploy recovery hook script (mergerfs-branch-recovered)
+      ansible.builtin.template:
+        src: ../templates/storage/mergerfs-branch-recovered.sh.j2
+        dest: /usr/local/sbin/mergerfs-branch-recovered
+        mode: "0750"
+        owner: root
+        group: root
+
+    # =========================================================================
+    # udev rule - auto-remount on device add
+    # =========================================================================
+    - name: Deploy udev rule for branch auto-remount
+      ansible.builtin.template:
+        src: ../templates/storage/mergerfs-remount.rules.j2
+        dest: /etc/udev/rules.d/99-mergerfs-remount.rules
+        mode: "0644"
+        owner: root
+        group: root
+      register: udev_rule
+
+    - name: Reload udev rules
+      ansible.builtin.command: udevadm control --reload-rules
+      changed_when: false
+      when: udev_rule.changed
+
+    # =========================================================================
+    # Mount watchdog - periodic check + remount + alert
+    # =========================================================================
+    - name: Create state directory for mergerfs-mount-watchdog
+      ansible.builtin.file:
+        path: /var/lib/mergerfs-mount-watchdog
+        state: directory
+        owner: root
+        group: root
+        mode: "0755"
+
+    - name: Deploy mergerfs-mount-watchdog script
+      ansible.builtin.template:
+        src: ../templates/storage/mergerfs-mount-watchdog.sh.j2
+        dest: /usr/local/sbin/mergerfs-mount-watchdog
+        mode: "0750"
+        owner: root
+        group: root
+      notify: Reload systemd
+
+    - name: Deploy mergerfs-mount-watchdog.service
+      ansible.builtin.template:
+        src: ../templates/storage/mergerfs-mount-watchdog.service.j2
+        dest: /etc/systemd/system/mergerfs-mount-watchdog.service
+        mode: "0644"
+        owner: root
+        group: root
+      notify: Reload systemd
+
+    - name: Deploy mergerfs-mount-watchdog.timer
+      ansible.builtin.template:
+        src: ../templates/storage/mergerfs-mount-watchdog.timer.j2
+        dest: /etc/systemd/system/mergerfs-mount-watchdog.timer
+        mode: "0644"
+        owner: root
+        group: root
+      notify: Reload systemd
+
+    - name: Enable and start mergerfs-mount-watchdog timer
+      ansible.builtin.systemd:
+        name: mergerfs-mount-watchdog.timer
+        enabled: true
+        state: started
+        daemon_reload: true
+
+  handlers:
+    - name: Reload systemd
+      ansible.builtin.systemd:
+        daemon_reload: true

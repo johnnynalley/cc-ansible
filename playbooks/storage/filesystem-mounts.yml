@@ -1,0 +1,21 @@
+# Purpose: Configure filesystem mounts (NTFS, exFAT, etc.).
+# Hosts: linux_hosts.
+# Key vars: smb_shares, nfs_*, filesystem_mounts, mergerfs_*, zfs_*, virtiofs_*, vm_storage_gate_*.
+# Templates: templates/storage, templates/samba, templates/proxmox.
+# Scripts: scripts/storage.
+# Validation: ansible-playbook playbooks/storage/filesystem-mounts.yml --syntax-check.
+
+# =============================================================================
+# Filesystem Mounts Playbook
+# =============================================================================
+# Mounts local filesystems (NTFS, exFAT, etc.) - not NFS
+# Configure mounts in host_vars/<hostname>/mounts.yml with filesystem_mounts variable
+
+---
+- name: Configure filesystem mounts
+  hosts: linux_hosts
+  become: true
+  tasks:
+    - name: Import filesystem mount tasks
+      ansible.builtin.import_tasks: ../../tasks/filesystem-mounts.yml
+      when: filesystem_mounts is defined

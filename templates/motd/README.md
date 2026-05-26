@@ -9,7 +9,7 @@
 
 ## Consumers
 
-- `playbooks/ssh-hardening.yml`
+- `playbooks/core/ssh-hardening.yml`
 
 ## Safety Notes
 

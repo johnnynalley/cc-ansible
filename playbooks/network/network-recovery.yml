@@ -1,0 +1,273 @@
+# Purpose: Configure network recovery.
+# Hosts: linux_hosts:!workstations.
+# Key vars: network_recovery_*, netplan_*, wifi_*, e1000e_*.
+# Templates: templates/network.
+# Scripts: none by default.
+# Validation: ansible-playbook playbooks/network/network-recovery.yml --syntax-check.
+
+# =============================================================================
+# Network Recovery Playbook - Automatic recovery after router/WiFi restarts
+# =============================================================================
+# Deploys:
+#   - network-watchdog: periodic connectivity check and recovery (timer)
+#   - tailscale-online.target: systemd target for actual Tailscale connectivity
+#
+# Usage: ansible-playbook playbooks/network/network-recovery.yml
+# =============================================================================
+
+- name: Configure network recovery mechanisms
+  hosts: linux_hosts:!workstations
+  become: true
+  gather_facts: true
+
+  vars:
+    # Watchdog configuration (can be overridden in host_vars)
+    network_watchdog_enabled: true
+    network_watchdog_interval: 60
+    network_watchdog_gateway_failures: 3
+    network_watchdog_tailscale_failures: 5
+
+  tasks:
+    # =========================================================================
+    # Prerequisites
+    # =========================================================================
+    - name: Install jq for JSON parsing (Debian)
+      ansible.builtin.apt:
+        name: jq
+        state: present
+      when:
+        - network_watchdog_enabled | default(true)
+        - ansible_facts.os_family == "Debian"
+
+    - name: Install jq for JSON parsing (Arch)
+      community.general.pacman:
+        name: jq
+        state: present
+      when:
+        - network_watchdog_enabled | default(true)
+        - ansible_facts.os_family == "Archlinux"
+
+    # =========================================================================
+    # Optional Static Netplan - opt-in for hosts with fixed LAN service IPs
+    # =========================================================================
+    - name: Manage static netplan configuration
+      ansible.builtin.template:
+        src: ../templates/network/netplan-static.yaml.j2
+        dest: "{{ network_static_netplan_path | default('/etc/netplan/50-cloud-init.yaml') }}"
+        owner: root
+        group: root
+        mode: "0600"
+        backup: true
+      when: network_static_netplan_enabled | default(false)
+      notify:
+        - Validate netplan
+        - Apply netplan
+
+    # =========================================================================
+    # Tailscale Online Target - waits for actual Tailscale connectivity
+    # =========================================================================
+    - name: Create wait-for-tailscale script
+      ansible.builtin.copy:
+        dest: /usr/local/sbin/wait-for-tailscale
+        mode: "0755"
+        owner: root
+        group: root
+        content: |
+          #!/bin/bash
+          # Wait for Tailscale to be fully connected
+          # Managed by Ansible - do not edit manually
+
+          set -euo pipefail
+
+          LOG_TAG="tailscale-online"
+          MAX_WAIT="${MAX_WAIT:-120}"
+          CHECK_INTERVAL="${CHECK_INTERVAL:-5}"
+          TAILSCALE_CHECK_HOST="${TAILSCALE_CHECK_HOST:-100.100.100.100}"
+
+          log() { logger -t "$LOG_TAG" "$*"; echo "$*"; }
+
+          check_tailscale_connected() {
+              if ! systemctl is-active --quiet tailscaled; then
+                  return 1
+              fi
+
+              local status
+              status=$(tailscale status --json 2>/dev/null | jq -r '.BackendState // "Unknown"' 2>/dev/null || echo "Unknown")
+              if [[ "$status" != "Running" ]]; then
+                  return 1
+              fi
+
+              if ! ping -c 1 -W 3 "$TAILSCALE_CHECK_HOST" &>/dev/null; then
+                  return 1
+              fi
+
+              return 0
+          }
+
+          main() {
+              log "Waiting for Tailscale to be fully connected..."
+
+              local elapsed=0
+              while [[ $elapsed -lt $MAX_WAIT ]]; do
+                  if check_tailscale_connected; then
+                      log "Tailscale is connected and reachable"
+                      exit 0
+                  fi
+
+                  sleep "$CHECK_INTERVAL"
+                  elapsed=$((elapsed + CHECK_INTERVAL))
+                  log "Still waiting for Tailscale... (${elapsed}s/${MAX_WAIT}s)"
+              done
+
+              log "ERROR: Tailscale did not become connected within ${MAX_WAIT}s"
+              exit 1
+          }
+
+          main "$@"
+      when: network_watchdog_enabled | default(true)
+      notify: Reload systemd
+
+    - name: Create tailscale-online-check.service
+      ansible.builtin.copy:
+        dest: /etc/systemd/system/tailscale-online-check.service
+        mode: "0644"
+        owner: root
+        group: root
+        content: |
+          [Unit]
+          Description=Wait for Tailscale to be fully connected
+          After=network-online.target tailscaled.service
+          Wants=tailscaled.service
+          Before=tailscale-online.target
+          FailureAction=none
+
+          [Service]
+          Type=oneshot
+          RemainAfterExit=yes
+          ExecStart=/usr/local/sbin/wait-for-tailscale
+          TimeoutStartSec=180
+
+          [Install]
+          WantedBy=tailscale-online.target
+      when: network_watchdog_enabled | default(true)
+      notify: Reload systemd
+
+    - name: Create tailscale-online.target
+      ansible.builtin.copy:
+        dest: /etc/systemd/system/tailscale-online.target
+        mode: "0644"
+        owner: root
+        group: root
+        content: |
+          [Unit]
+          Description=Tailscale VPN is connected and reachable
+          Requires=tailscale-online-check.service
+          After=tailscale-online-check.service
+
+          [Install]
+          WantedBy=multi-user.target
+      when: network_watchdog_enabled | default(true)
+      notify: Reload systemd
+
+    - name: Enable tailscale-online.target
+      ansible.builtin.systemd:
+        name: tailscale-online.target
+        enabled: true
+        daemon_reload: true
+      when: network_watchdog_enabled | default(true)
+
+    # =========================================================================
+    # Network Watchdog - periodic connectivity check and recovery
+    # =========================================================================
+    - name: Create state directory for network-watchdog
+      ansible.builtin.file:
+        path: /var/lib/network-watchdog
+        state: directory
+        owner: root
+        group: root
+        mode: "0755"
+      when: network_watchdog_enabled | default(true)
+
+    - name: Create network-watchdog script
+      ansible.builtin.template:
+        src: ../templates/network/network-watchdog.sh.j2
+        dest: /usr/local/sbin/network-watchdog
+        mode: "0755"
+        owner: root
+        group: root
+      when: network_watchdog_enabled | default(true)
+      notify: Reload systemd
+
+    - name: Create network-watchdog.service
+      ansible.builtin.copy:
+        dest: /etc/systemd/system/network-watchdog.service
+        mode: "0644"
+        owner: root
+        group: root
+        content: |
+          [Unit]
+          Description=Network Connectivity Watchdog
+          After=network.target tailscaled.service
+
+          [Service]
+          Type=oneshot
+          ExecStart=/usr/local/sbin/network-watchdog
+          StandardOutput=journal
+          StandardError=journal
+          User=root
+          TimeoutStartSec=120
+      when: network_watchdog_enabled | default(true)
+      notify: Reload systemd
+
+    - name: Create network-watchdog.timer
+      ansible.builtin.copy:
+        dest: /etc/systemd/system/network-watchdog.timer
+        mode: "0644"
+        owner: root
+        group: root
+        content: |
+          [Unit]
+          Description=Run network watchdog periodically
+
+          [Timer]
+          OnBootSec={{ network_watchdog_interval }}
+          OnUnitActiveSec={{ network_watchdog_interval }}
+          AccuracySec=10
+
+          [Install]
+          WantedBy=timers.target
+      when: network_watchdog_enabled | default(true)
+      notify: Reload systemd
+
+    - name: Enable and start network-watchdog timer
+      ansible.builtin.systemd:
+        name: network-watchdog.timer
+        enabled: true
+        state: started
+        daemon_reload: true
+      when:
+        - network_watchdog_enabled | default(true)
+        - not ansible_check_mode
+
+    - name: Stop and disable network-watchdog timer (disabled hosts)
+      ansible.builtin.systemd:
+        name: network-watchdog.timer
+        enabled: false
+        state: stopped
+        daemon_reload: true
+      when: not (network_watchdog_enabled | default(true))
+      failed_when: false
+
+  handlers:
+    - name: Validate netplan
+      ansible.builtin.command:
+        cmd: netplan generate
+      changed_when: false
+
+    - name: Apply netplan
+      ansible.builtin.command:
+        cmd: netplan apply
+
+    - name: Reload systemd
+      ansible.builtin.systemd:
+        daemon_reload: true

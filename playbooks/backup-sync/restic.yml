@@ -1,0 +1,260 @@
+# Purpose: Configure restic backups (B2 offsite).
+# Hosts: backup_clients:!macos_hosts.
+# Key vars: restic_*, local_restic_*, rclone_sync_*, git_sync_*, nextcloud_scan_*.
+# Templates: templates/storage, templates/docker when sync jobs consume generated configs.
+# Scripts: none by default.
+# Validation: ansible-playbook playbooks/backup-sync/restic.yml --syntax-check.
+
+# =============================================================================
+# Restic Backup Playbook - Backblaze B2 Offsite Backups
+# =============================================================================
+# Usage: ansible-playbook playbooks/backup-sync/restic.yml
+# =============================================================================
+
+- name: Configure restic backups to Backblaze B2
+  hosts: backup_clients:!macos_hosts
+  become: true
+  gather_facts: true
+  serial: 1
+
+  vars:
+    restic_repo: "b2:{{ restic_bucket }}:{{ restic_prefix }}"
+    restic_env_file: /etc/restic/backup.env
+    restic_script: /usr/local/sbin/restic-backup
+    restic_cache_dir: /var/cache/restic
+
+  tasks:
+    # =========================================================================
+    # Install restic
+    # =========================================================================
+    - name: Install restic (Debian)
+      ansible.builtin.apt:
+        name: restic
+        state: present
+        update_cache: true
+      when: ansible_facts.os_family == "Debian"
+      tags: [install]
+
+    - name: Install restic (Arch)
+      community.general.pacman:
+        name: restic
+        state: present
+      when: ansible_facts.os_family == "Archlinux"
+      tags: [install]
+
+    # =========================================================================
+    # Create directories
+    # =========================================================================
+    - name: Create /etc/restic directory
+      ansible.builtin.file:
+        path: /etc/restic
+        state: directory
+        owner: root
+        group: root
+        mode: "0700"
+      tags: [config]
+
+    - name: Create restic cache directory
+      ansible.builtin.file:
+        path: "{{ restic_cache_dir }}"
+        state: directory
+        owner: root
+        group: root
+        mode: "0700"
+      tags: [config]
+
+    # =========================================================================
+    # Environment file with credentials
+    # =========================================================================
+    - name: Create restic environment file
+      ansible.builtin.copy:
+        content: |
+          # Restic backup configuration
+          # Managed by Ansible - do not edit manually
+
+          # Repository location
+          RESTIC_REPOSITORY={{ restic_repo }}
+
+          # B2 credentials
+          B2_ACCOUNT_ID={{ b2_key_id }}
+          B2_ACCOUNT_KEY={{ b2_application_key }}
+
+          # Repository password
+          RESTIC_PASSWORD={{ restic_password }}
+
+          # Cache directory
+          RESTIC_CACHE_DIR={{ restic_cache_dir }}
+        dest: "{{ restic_env_file }}"
+        owner: root
+        group: root
+        mode: "0600"
+      no_log: true
+      tags: [config]
+
+    # =========================================================================
+    # Initialize repository (idempotent)
+    # =========================================================================
+    - name: Check if restic repo exists
+      ansible.builtin.shell: |
+        set -a; source {{ restic_env_file }}; set +a
+        restic snapshots --json 2>/dev/null | head -c 1
+      register: restic_repo_check
+      changed_when: false
+      failed_when: false
+      tags: [init]
+
+    - name: Initialize restic repository
+      ansible.builtin.shell: |
+        set -a; source {{ restic_env_file }}; set +a
+        restic init
+      when: restic_repo_check.rc != 0
+      tags: [init]
+
+    # =========================================================================
+    # Backup script
+    # =========================================================================
+    - name: Build backup paths list
+      ansible.builtin.set_fact:
+        restic_all_paths: "{{ (restic_backup_paths_common | default([])) + (restic_backup_paths_extra | default([])) }}"
+      tags: [script]
+
+    - name: Build exclude list (merge global + per-host)
+      ansible.builtin.set_fact:
+        restic_all_excludes: "{{ (restic_excludes | default([])) + (restic_excludes_extra | default([])) }}"
+      tags: [script]
+
+    - name: Create restic backup script
+      ansible.builtin.copy:
+        content: |
+          #!/bin/bash
+          set -euo pipefail
+
+          LOG_TAG="restic-backup"
+          log() { logger -t "$LOG_TAG" "$*"; echo "$*"; }
+
+          # Load environment
+          set -a
+          source {{ restic_env_file }}
+          set +a
+
+          # Ensure HOME is set for restic
+          export HOME=/root
+
+          log "Starting backup to {{ restic_repo }}..."
+
+          # Run backup
+          restic backup \
+            --verbose \
+            --tag "{{ inventory_hostname }}" \
+            --tag "automated" \
+          {% for exclude in restic_all_excludes | default([]) %}
+            --exclude "{{ exclude }}" \
+          {% endfor %}
+          {% for path in restic_all_paths %}
+            "{{ path }}" \
+          {% endfor %}
+
+          log "Backup complete. Running retention policy..."
+
+          # Apply retention policy
+          restic forget \
+            --verbose \
+            --prune \
+            --keep-daily {{ restic_retention.keep_daily }} \
+            --keep-weekly {{ restic_retention.keep_weekly }} \
+            --keep-monthly {{ restic_retention.keep_monthly }}
+
+          log "Retention complete. Verifying repository..."
+
+          # Quick integrity check
+          restic check --read-data-subset=1%
+
+          log "Backup and maintenance complete"
+        dest: "{{ restic_script }}"
+        owner: root
+        group: root
+        mode: "0700"
+      tags: [script]
+
+    # =========================================================================
+    # Systemd service and timer
+    # =========================================================================
+    - name: Create restic-backup systemd service
+      ansible.builtin.copy:
+        content: |
+          [Unit]
+          Description=Restic Backup to B2
+          After=network-online.target
+          Wants=network-online.target
+          {% if restic_require_ac_power | default(false) %}
+          ConditionACPower=true
+          {% endif %}
+
+          [Service]
+          Type=oneshot
+          ExecStart={{ restic_script }}
+          StandardOutput=journal
+          StandardError=journal
+
+          # Run as root
+          User=root
+
+          # Environment for restic
+          Environment=HOME=/root
+          Environment=RESTIC_CACHE_DIR={{ restic_cache_dir }}
+
+          # Resource limits
+          Nice=19
+          IOSchedulingClass=idle
+
+          # Timeout (2 hours should be plenty)
+          TimeoutStartSec=7200
+        dest: /etc/systemd/system/restic-backup.service
+        owner: root
+        group: root
+        mode: "0644"
+      notify: Reload systemd
+      tags: [systemd]
+
+    - name: Create restic-backup systemd timer
+      ansible.builtin.copy:
+        content: |
+          [Unit]
+          Description=Daily restic backup timer
+
+          [Timer]
+          OnCalendar=*-*-* 00:00:00
+          RandomizedDelaySec=30m
+          Persistent=true
+
+          [Install]
+          WantedBy=timers.target
+        dest: /etc/systemd/system/restic-backup.timer
+        owner: root
+        group: root
+        mode: "0644"
+      notify:
+        - Reload systemd
+        - Enable restic timer
+      tags: [systemd]
+
+    - name: Ensure restic-backup timer is enabled and started
+      ansible.builtin.systemd:
+        name: restic-backup.timer
+        enabled: true
+        state: started
+        daemon_reload: true
+      when: not ansible_check_mode
+      tags: [systemd]
+
+  handlers:
+    - name: Reload systemd
+      ansible.builtin.systemd:
+        daemon_reload: true
+
+    - name: Enable restic timer
+      ansible.builtin.systemd:
+        name: restic-backup.timer
+        enabled: true
+        state: started
+      when: not ansible_check_mode

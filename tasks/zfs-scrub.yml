@@ -1,7 +1,7 @@
 # =============================================================================
 # ZFS Scrub + ARC Tuning Tasks
 # =============================================================================
-# Imported by playbooks/zfs.yml
+# Imported by playbooks/storage/zfs.yml
 # Expects variables: zfs_pools, zfs_scrub_schedule, zfs_arc_max_bytes
 
 - name: Skip ZFS scrub if not configured
@@ -27,7 +27,7 @@
     group: root
     mode: "0644"
     content: |
-      # Managed by Ansible - playbooks/zfs.yml
+      # Managed by Ansible - playbooks/storage/zfs.yml
       [Unit]
       Description=Weekly ZFS scrub
 
@@ -48,7 +48,7 @@
     group: root
     mode: "0644"
     content: |
-      # Managed by Ansible - playbooks/zfs.yml
+      # Managed by Ansible - playbooks/storage/zfs.yml
       [Unit]
       Description=ZFS pool scrub
 
@@ -75,7 +75,7 @@
     group: root
     mode: "0644"
     content: |
-      # Managed by Ansible - playbooks/zfs.yml
+      # Managed by Ansible - playbooks/storage/zfs.yml
       # ZFS ARC max size (takes effect on reboot)
       options zfs zfs_arc_max={{ zfs_arc_max_bytes }}
   when: zfs_arc_max_bytes is defined

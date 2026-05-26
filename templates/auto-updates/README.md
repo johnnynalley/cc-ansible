@@ -11,8 +11,8 @@
 
 ## Consumers
 
-- `playbooks/auto-updates.yml`
-- `playbooks/unattended-upgrades.yml`
+- `playbooks/core/auto-updates.yml`
+- `playbooks/core/unattended-upgrades.yml`
 
 ## Safety Notes
 

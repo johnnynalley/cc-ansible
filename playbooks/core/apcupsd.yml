@@ -1,0 +1,156 @@
+# Purpose: Configure apcupsd UPS monitoring.
+# Hosts: proxmox_nodes.
+# Key vars: packages_*, bootstrap_*, auto_updates_*, unattended_upgrades_*, swap_*, sysctl_*, logging_*, smartd_*, apcupsd_*.
+# Templates: templates/auto-updates, templates/logging, templates/motd, templates/smartmontools, templates/ups.
+# Scripts: scripts/repo/repo-audit for repo checks; otherwise none by default.
+# Validation: ansible-playbook playbooks/core/apcupsd.yml --syntax-check.
+
+# =============================================================================
+# apcupsd Playbook - UPS Monitoring (Master/Slave)
+# =============================================================================
+# Configures apcupsd for UPS power monitoring:
+#   - Master: USB-connected UPS (ts440)
+#   - Slaves: Network clients that monitor master (pve-m70q, pve-alto, pve-herc)
+#
+# VMs don't need apcupsd - the Proxmox host handles VM shutdown.
+#
+# Usage: ansible-playbook playbooks/core/apcupsd.yml
+# =============================================================================
+
+- name: Configure apcupsd UPS monitoring
+  hosts: proxmox_nodes
+  become: true
+  gather_facts: true
+
+  tasks:
+    - name: Skip hosts without apcupsd enabled
+      ansible.builtin.meta: end_host
+      when: not (apcupsd_enabled | default(false))
+
+    - name: Install apcupsd (Debian)
+      ansible.builtin.apt:
+        name: apcupsd
+        state: present
+        update_cache: true
+        cache_valid_time: 3600
+      when: ansible_facts.os_family == "Debian"
+
+    - name: Configure apcupsd
+      ansible.builtin.template:
+        src: ../templates/ups/apcupsd.conf.j2
+        dest: /etc/apcupsd/apcupsd.conf
+        owner: root
+        group: root
+        mode: "0644"
+        backup: true
+      notify: Restart apcupsd
+
+    - name: Enable apcupsd in default config (Debian)
+      ansible.builtin.lineinfile:
+        path: /etc/default/apcupsd
+        regexp: "^ISCONFIGURED="
+        line: "ISCONFIGURED=yes"
+        create: true
+      when: ansible_facts.os_family == "Debian"
+      notify: Restart apcupsd
+
+    - name: Deploy apcupsd event notification script
+      ansible.builtin.template:
+        src: ../templates/ups/apcupsd-event-notify.sh.j2
+        dest: /etc/apcupsd/event-notify.sh
+        owner: root
+        group: root
+        mode: "0755"
+      when: apcupsd_notify_enabled | default(false)
+
+    - name: Configure apcupsd event hooks
+      ansible.builtin.copy:
+        content: |
+          #!/bin/bash
+          # Managed by Ansible - do not edit manually
+          /etc/apcupsd/event-notify.sh "{{ item }}"
+        dest: "/etc/apcupsd/{{ item }}"
+        owner: root
+        group: root
+        mode: "0755"
+      loop:
+        - onbattery
+        - offbattery
+        - commfailure
+        - commok
+      when: apcupsd_notify_enabled | default(false)
+
+    - name: Create apcupsd systemd override directory
+      ansible.builtin.file:
+        path: /etc/systemd/system/apcupsd.service.d
+        state: directory
+        owner: root
+        group: root
+        mode: "0755"
+      when: apcupsd_startup_delay | default(0) | int > 0
+
+    - name: Add startup delay to stagger slave polls
+      ansible.builtin.copy:
+        content: |
+          # Managed by Ansible - do not edit manually
+          # Stagger slave startup to desynchronize NIS polls and avoid
+          # mutex contention on the master's NIS server
+          [Service]
+          ExecStartPre=/bin/sleep {{ apcupsd_startup_delay }}
+        dest: /etc/systemd/system/apcupsd.service.d/startup-delay.conf
+        owner: root
+        group: root
+        mode: "0644"
+      when: apcupsd_startup_delay | default(0) | int > 0
+      notify:
+        - Reload systemd
+        - Restart apcupsd
+
+    - name: Remove startup delay override if not needed
+      ansible.builtin.file:
+        path: /etc/systemd/system/apcupsd.service.d/startup-delay.conf
+        state: absent
+      when: apcupsd_startup_delay | default(0) | int == 0
+      notify:
+        - Reload systemd
+
+    - name: Disable USB autosuspend for APC UPS devices
+      ansible.builtin.copy:
+        content: |
+          # Managed by Ansible - do not edit manually
+          # Disable USB autosuspend for APC UPS devices to prevent
+          # intermittent communication loss (kernel suspends the port)
+          ACTION=="add|change", SUBSYSTEM=="usb", ATTR{idVendor}=="051d", ATTR{power/control}="on"
+        dest: /etc/udev/rules.d/99-apc-ups-no-autosuspend.rules
+        owner: root
+        group: root
+        mode: "0644"
+      when: apcupsd_upstype == 'usb'
+      notify: Reload udev and apply UPS rule
+
+    - name: Remove USB autosuspend rule from non-USB hosts
+      ansible.builtin.file:
+        path: /etc/udev/rules.d/99-apc-ups-no-autosuspend.rules
+        state: absent
+      when: apcupsd_upstype != 'usb'
+
+    - name: Ensure apcupsd is enabled and running
+      ansible.builtin.systemd:
+        name: apcupsd
+        enabled: true
+        state: started
+
+  handlers:
+    - name: Reload systemd
+      ansible.builtin.systemd:
+        daemon_reload: true
+
+    - name: Reload udev and apply UPS rule
+      ansible.builtin.shell: |
+        udevadm control --reload-rules
+        udevadm trigger --subsystem-match=usb --attr-match=idVendor=051d
+
+    - name: Restart apcupsd
+      ansible.builtin.systemd:
+        name: apcupsd
+        state: restarted

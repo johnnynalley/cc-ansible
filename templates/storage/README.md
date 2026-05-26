@@ -18,8 +18,8 @@
 - `tasks/nfs-server.yml`
 - `tasks/sanoid.yml`
 - `tasks/zfs-scrub.yml`
-- `playbooks/mergerfs.yml`
-- `playbooks/mergerfs-recovery.yml`
+- `playbooks/storage/mergerfs.yml`
+- `playbooks/storage/mergerfs-recovery.yml`
 
 ## Safety Notes
 

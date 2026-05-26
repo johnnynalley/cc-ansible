@@ -1,0 +1,158 @@
+#!/usr/bin/env python3
+"""Static repository organization checks for cc-ansible."""
+
+from __future__ import annotations
+
+import re
+import subprocess
+import sys
+from pathlib import Path
+
+
+ROOT = Path(__file__).resolve().parents[2]
+TEXT_SUFFIXES = {
+    "",
+    ".cfg",
+    ".conf",
+    ".ini",
+    ".j2",
+    ".json",
+    ".md",
+    ".ps1",
+    ".py",
+    ".service",
+    ".sh",
+    ".timer",
+    ".toml",
+    ".txt",
+    ".yaml",
+    ".yml",
+}
+
+
+def tracked_files() -> list[Path]:
+    result = subprocess.run(
+        ["git", "ls-files"],
+        cwd=ROOT,
+        check=True,
+        text=True,
+        stdout=subprocess.PIPE,
+    )
+    skipped = {"CLAUDE.md"}
+    return [
+        ROOT / line
+        for line in result.stdout.splitlines()
+        if line and line not in skipped and (ROOT / line).exists()
+    ]
+
+
+def read_text(path: Path) -> str | None:
+    if path.suffix not in TEXT_SUFFIXES:
+        return None
+    try:
+        return path.read_text()
+    except UnicodeDecodeError:
+        return None
+
+
+def clean_ref(value: str) -> str:
+    return value.strip().strip("`'\"),.;:")
+
+
+def reference_errors(files: list[Path], prefix: str, pattern: re.Pattern[str]) -> list[str]:
+    errors: list[str] = []
+    for path in files:
+        text = read_text(path)
+        if text is None:
+            continue
+        for match in pattern.finditer(text):
+            ref = clean_ref(match.group(1))
+            if any(token in ref for token in ("{{", "{%", "*", "<", ">")):
+                continue
+            if "/" not in ref and "." not in ref and not (ROOT / prefix / ref).exists():
+                continue
+            target = ROOT / prefix / ref
+            if not target.exists():
+                errors.append(f"{path.relative_to(ROOT)} references missing {prefix}/{ref}")
+    return errors
+
+
+def main() -> int:
+    errors: list[str] = []
+    files = tracked_files()
+
+    for path in (ROOT / "templates").iterdir():
+        if path.is_file() and path.name != "README.md":
+            errors.append(f"flat template file is not allowed: {path.relative_to(ROOT)}")
+
+    for path in (ROOT / "scripts").iterdir():
+        if path.is_file() and path.name != "README.md":
+            errors.append(f"flat script file is not allowed: {path.relative_to(ROOT)}")
+
+    for path in (ROOT / "playbooks").iterdir():
+        if path.is_file() and path.name != "README.md":
+            errors.append(f"flat playbook file is not allowed: {path.relative_to(ROOT)}")
+
+    errors.extend(
+        reference_errors(
+            files,
+            "templates",
+            re.compile(r"(?:templates/|\.\./templates/)([^\s`'\")\]\(]+)"),
+        )
+    )
+    errors.extend(
+        reference_errors(
+            files,
+            "scripts",
+            re.compile(r"(?<!/)scripts/([^\s`'\")\]\(]+)"),
+        )
+    )
+    errors.extend(
+        reference_errors(
+            files,
+            "playbooks",
+            re.compile(r"playbooks/([^\s`'\")\]\(]+\.yml)"),
+        )
+    )
+
+    docs_readme = (ROOT / "docs" / "README.md").read_text() if (ROOT / "docs" / "README.md").exists() else ""
+    agents = (ROOT / "AGENTS.md").read_text() if (ROOT / "AGENTS.md").exists() else ""
+    repo_readme = (ROOT / "README.md").read_text() if (ROOT / "README.md").exists() else ""
+    for doc in sorted((ROOT / "docs").glob("*.md")):
+        if doc.name == "README.md":
+            continue
+        rel = doc.relative_to(ROOT).as_posix()
+        if rel not in docs_readme:
+            errors.append(f"docs/README.md is missing pointer for {rel}")
+        if rel not in agents:
+            errors.append(f"AGENTS.md is missing pointer for {rel}")
+        if rel not in repo_readme:
+            errors.append(f"README.md is missing pointer for {rel}")
+
+    scripts_readme = (ROOT / "scripts" / "README.md").read_text()
+    for directory in sorted(p for p in (ROOT / "scripts").iterdir() if p.is_dir()):
+        if f"`{directory.name}/`" not in scripts_readme:
+            errors.append(f"scripts/README.md is missing directory pointer for scripts/{directory.name}/")
+
+    templates_readme = (ROOT / "templates" / "README.md").read_text()
+    for directory in sorted(p for p in (ROOT / "templates").iterdir() if p.is_dir()):
+        if f"`{directory.name}/`" not in templates_readme:
+            errors.append(f"templates/README.md is missing directory pointer for templates/{directory.name}/")
+
+    playbooks_readme = (ROOT / "playbooks" / "README.md").read_text()
+    for directory in sorted(p for p in (ROOT / "playbooks").iterdir() if p.is_dir()):
+        if f"`{directory.name}/`" not in playbooks_readme:
+            errors.append(f"playbooks/README.md is missing directory pointer for playbooks/{directory.name}/")
+
+    if errors:
+        print("repo-audit failed:")
+        for error in errors:
+            print(f"- {error}")
+        return 1
+
+    print("repo-audit passed")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

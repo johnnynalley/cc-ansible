@@ -5,7 +5,7 @@
 The Windows benchmark harness is deployed by:
 
 ```bash
-ansible-playbook playbooks/windows-gaming-benchmark.yml
+ansible-playbook playbooks/windows/windows-gaming-benchmark.yml
 ```
 
 The persistent operator wrapper is:
@@ -126,6 +126,6 @@ Then verify from the controller:
 bin/windows-gaming-benchmark status
 ```
 
-`playbooks/windows-gaming-tuning.yml` also manages a startup/logon scheduled task named `\Johnny\Johnny Ensure OpenSSH Server` to nudge `sshd` back on after boot or login. Apply that playbook after SSH is reachable.
+`playbooks/windows/windows-gaming-tuning.yml` also manages a startup/logon scheduled task named `\Johnny\Johnny Ensure OpenSSH Server` to nudge `sshd` back on after boot or login. Apply that playbook after SSH is reachable.
 
 There is also a best-effort bootstrap self-heal in `windows-performance-run-hidden.vbs`: when the existing Performance Mode watcher task starts at logon, the runner attempts to set `sshd` to automatic and start it before launching the watcher. This exists specifically to recover controller access when OpenSSH is down before Ansible can apply the managed scheduled task.

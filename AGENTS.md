@@ -9,7 +9,14 @@ This file provides guidance to Codex CLI when working with code in this reposito
 
 ### Project Structure & Module Organization
 
-This repository manages homelab infrastructure with Ansible. `site.yml` is the top-level playbook and `playbooks/` contains targeted runs such as `packages.yml`, `docker-stacks.yml`, and `proxmox-firewall.yml`. Shared task files live in `tasks/`, Jinja2 templates in `templates/`, helper executables in `scripts/` and `bin/`, and all host/group configuration under `inventory/`. Use `inventory/group_vars/` for group defaults and `inventory/host_vars/<hostname>/` for host-specific overrides.
+This repository manages homelab infrastructure with Ansible. `site.yml` is the top-level playbook and `playbooks/` contains domain-owned targeted runs such as `playbooks/core/packages.yml`, `playbooks/docker/docker-stacks.yml`, and `playbooks/proxmox/proxmox-firewall.yml`. Shared task files live in `tasks/`, Jinja2 templates in `templates/`, helper executables in `scripts/` and `bin/`, static non-template files in `files/`, operator docs in `docs/`, and all host/group configuration under `inventory/`. Start with `playbooks/README.md`, `templates/README.md`, `scripts/README.md`, `docs/README.md`, `inventory/README.md`, and `files/README.md` before adding or moving assets in those areas. Use `inventory/group_vars/` for group defaults and `inventory/host_vars/<hostname>/` for host-specific overrides.
+
+### Playbook Inventory & Domain Ownership
+
+Treat playbooks as managed domain-owned entrypoints. Before adding, moving, or renaming a playbook, read `playbooks/README.md` and the relevant `playbooks/<domain>/README.md` to find the current owner folder, validation command, and related templates/scripts. Do not add new playbooks directly under `playbooks/`; put them in the appropriate `playbooks/<domain>/` directory and update the playbook metadata header, `playbooks/README.md`, the domain README, `site.yml` when applicable, and every operator command or doc reference in the same change.
+
+When moving a playbook, update task imports for the new depth, especially `../../tasks/...` imports, and re-run `scripts/repo/repo-audit` plus targeted syntax checks before committing.
+
 
 ### Script Inventory & Reusable Diagnostics
 
@@ -25,9 +32,9 @@ When moving, renaming, deleting, or replacing a template, update every playbook,
 
 ### Documentation Cross-References
 
-When creating or materially updating operator docs, policy docs, runbooks, or troubleshooting guides under `docs/`, add or update the matching pointer in `AGENTS.md` in the relevant operational section. The point is discoverability: future agents should know where to find the source of truth without guessing filenames or relying on memory. If a new doc captures behavior that should persist across sessions, also add a concise Codex memory note when the user explicitly asks for memory persistence.
+When creating or materially updating operator docs, policy docs, runbooks, or troubleshooting guides under `docs/`, update `docs/README.md` and add or update the matching pointer in `AGENTS.md` in the relevant operational section. The point is discoverability: future agents should know where to find the source of truth without guessing filenames or relying on memory. Current source-of-truth docs include `docs/capture-card-streaming-plan.md`, `docs/fortnite-performance-investigation.md`, `docs/gaming-benchmark.md`, `docs/media-release-policy.md`, `docs/openclaw-heartbeats.md`, and `docs/streaming-runbook.md`. If a new doc captures behavior that should persist across sessions, also add a concise Codex memory note when the user explicitly asks for memory persistence.
 
-When a change affects repository layout, operator entrypoints, common commands, source-of-truth document locations, or human-facing workflow guidance, update `README.md` in the same scoped change. Do not leave `README.md` pointing at old paths, stale command examples, or outdated directory structure after moving files, scripts, templates, playbooks, or docs.
+When a change affects repository layout, operator entrypoints, common commands, source-of-truth document locations, or human-facing workflow guidance, update `README.md` in the same scoped change. Do not leave `README.md` pointing at old paths, stale command examples, or outdated directory structure after moving files, scripts, templates, playbooks, or docs. Also update the relevant catalog README (`docs/README.md`, `playbooks/README.md`, `templates/README.md`, `scripts/README.md`, `inventory/README.md`, or `files/README.md`) and run or extend `scripts/repo/repo-audit` when the change affects paths or references. Docs, README files, AGENTS guidance, and cross-references must not go stale; keeping them current is part of the implementation, not a follow-up.
 
 When renaming, moving, deleting, or replacing a source-of-truth doc, tracker, script, or runbook that OpenClaw references, update the matching OpenClaw workspace skills, hubs, heartbeat prompts, cron jobs, and guidance files in the same change. Do not leave OpenClaw pointing at stale paths after repo-side file moves.
 
@@ -39,13 +46,13 @@ When the user asks Codex to name a session, consider the full context of the ses
 
 - `ansible-galaxy collection install -r requirements.yml`: install required collections.
 - `ansible-playbook site.yml`: apply the full configuration.
-- `ansible-playbook playbooks/samba.yml --check --diff`: dry-run a change and show rendered diffs before applying.
-- `ansible-playbook playbooks/packages.yml --tags fastfetch`: run a tagged subset.
+- `ansible-playbook playbooks/storage/samba.yml --check --diff`: dry-run a change and show rendered diffs before applying.
+- `ansible-playbook playbooks/core/packages.yml --tags fastfetch`: run a tagged subset.
 - `./bin/ansible-menu`: launch the interactive playbook runner.
 
 ### Coding Style & Naming Conventions
 
-Write YAML with two-space indentation and descriptive task names. Keep playbooks focused on orchestration and move reusable logic into `tasks/*.yml`. Name playbooks and task files with lowercase hyphenated names, for example `network-recovery.yml`. Keep variables lowercase snake_case. Prefer modular variable files named for their concern, such as `host_vars/<hostname>/backup.yml`, `docker.yml`, `firewall.yml`, or `performance-mode.yml`; do not pile unrelated settings into a monolithic `vars.yml`. Templates should live under `templates/<domain>/`, use `.j2` suffixes when rendered, and render service/config names clearly, such as `templates/samba/smb.conf.j2`.
+Write YAML with two-space indentation and descriptive task names. Keep playbooks focused on orchestration and move reusable logic into `tasks/*.yml`. Name playbooks and task files with lowercase hyphenated names, for example `network-recovery.yml`, and keep playbooks under the owning `playbooks/<domain>/` directory. Keep variables lowercase snake_case. Prefer modular variable files named for their concern, such as `host_vars/<hostname>/backup.yml`, `docker.yml`, `firewall.yml`, or `performance-mode.yml`; do not pile unrelated settings into a monolithic `vars.yml`. Templates should live under `templates/<domain>/`, use `.j2` suffixes when rendered, and render service/config names clearly, such as `templates/samba/smb.conf.j2`.
 
 ### Testing Guidelines
 
@@ -53,7 +60,7 @@ There is no dedicated unit-test suite. Validate changes with full-playbook Ansib
 
 ### Playbook Scope & Site Safety
 
-Prefer integrating behavior into existing playbooks, shared task files, host/group variables, tags, or inventory groups instead of creating host-specific one-off playbooks. Add a new playbook only when it is a reusable feature boundary that matches the repo's flat-playbook structure. When adding one, import it from `site.yml` when it belongs in normal convergence.
+Prefer integrating behavior into existing playbooks, shared task files, host/group variables, tags, or inventory groups instead of creating host-specific one-off playbooks. Add a new playbook only when it is a reusable feature boundary that matches the repo's domain-owned playbook structure. When adding one, place it under the owning `playbooks/<domain>/` directory and import it from `site.yml` when it belongs in normal convergence.
 
 `site.yml` must be safe to run at any point. Every playbook should be scoped so it can run across its configured `hosts:` target without `--limit` and without destructive side effects on unrelated hosts. Use explicit inventory opt-ins, groups, and variables; skip unrelated hosts without changing them. Do not disable, remove, or reset services on hosts unless that host explicitly opts into that state.
 
@@ -166,14 +173,14 @@ The repository is hosted on GitHub (public): https://github.com/johnnynalley/cc-
 **Workflow:**
 1. Make changes on jn-t14s-lin (`~/cc-ansible`)
 2. Commit and push to GitHub
-3. ts440 automatically pulls every 5 minutes via `git-sync.timer` (deployed by `playbooks/git-sync.yml`), keeping `/srv/nas-zfs/configs/ansible/cc-ansible` in sync for Nextcloud External Storage access
+3. ts440 automatically pulls every 5 minutes via `git-sync.timer` (deployed by `playbooks/backup-sync/git-sync.yml`), keeping `/srv/nas-zfs/configs/ansible/cc-ansible` in sync for Nextcloud External Storage access
 4. Raspberry Pi hosts are regular managed clients. They should not be treated as Ansible controllers or given a separate repo-copy workflow.
 
 **git-sync on ts440:**
 - Systemd timer runs every 5 minutes
 - Pulls latest from GitHub to `/srv/nas-zfs/configs/ansible/cc-ansible`
 - Keeps Nextcloud External Storage (Configs folder) up to date automatically
-- Deploy with: `ansible-playbook playbooks/git-sync.yml`
+- Deploy with: `ansible-playbook playbooks/backup-sync/git-sync.yml`
 
 ## Common Commands
 
@@ -184,15 +191,15 @@ All commands should be run from jn-t14s-lin (`~/cc-ansible`).
 ansible-playbook site.yml
 
 # Run a specific playbook
-ansible-playbook playbooks/packages.yml
+ansible-playbook playbooks/core/packages.yml
 
 # Do not use --limit; fix playbooks/inventory so full target runs are safe
 
 # Dry run with diff
-ansible-playbook playbooks/packages.yml --check --diff
+ansible-playbook playbooks/core/packages.yml --check --diff
 
 # Run specific tags
-ansible-playbook playbooks/packages.yml --tags fastfetch
+ansible-playbook playbooks/core/packages.yml --tags fastfetch
 
 # Interactive menu
 ./bin/ansible-menu
@@ -202,7 +209,7 @@ ansible-inventory --list --yaml
 
 # Bootstrap new host (copy key to admin user first, then use su)
 ssh-copy-id -i ~/.ssh/ansible_ed25519.pub johnny@<LAN_IP>
-ansible-playbook playbooks/bootstrap.yml --ask-become-pass
+ansible-playbook playbooks/core/bootstrap.yml --ask-become-pass
 
 # Run ad-hoc command with sudo (when SSH doesn't have sudo access)
 ansible <hostname> -m shell -a "command here" --become
@@ -238,7 +245,7 @@ Ansible on jn-t14s-lin uses a **dedicated passwordless SSH key** (`~/.ssh/ansibl
 **Deploying the key to a new host:**
 ```bash
 # For Linux hosts (via Tailscale SSH or bootstrap)
-ansible-playbook playbooks/bootstrap.yml -u root --ask-pass
+ansible-playbook playbooks/core/bootstrap.yml -u root --ask-pass
 
 # For macOS (manual first-time copy, then bootstrap handles future hosts)
 ssh-copy-id -i ~/.ssh/ansible_ed25519.pub johnny@<tailscale-ip>
@@ -301,7 +308,7 @@ TS440 is the primary NAS server (currently the sole `nas_server` group member). 
 
 **Archive Dataset**: `nas_zfs/archive` at `/srv/nas-zfs/archive` for ISOs and general-purpose archival storage. Shared via VirtioFS to media-vm (read-write, mounted at `/srv/archive`, mapped as `/archive` in the qBittorrent container) and nextcloud-vm (read-only, at `/srv/external/archive` for Nextcloud External Storage). qBittorrent's `isos` category saves to `/archive/isos` with per-torrent subdirectory overrides (e.g., `/archive/isos/linux/kubuntu`).
 
-**Media ZFS Pools**: Two 3TB single-drive pools (`media-01`, `media-02`) for plex/podcast overflow. Properties enforced by `playbooks/zfs.yml` (compression=lz4, atime=off, recordsize=1M, acltype=posixacl). Sanoid snapshots: daily:7, weekly:4, monthly:3.
+**Media ZFS Pools**: Two 3TB single-drive pools (`media-01`, `media-02`) for plex/podcast overflow. Properties enforced by `playbooks/storage/zfs.yml` (compression=lz4, atime=off, recordsize=1M, acltype=posixacl). Sanoid snapshots: daily:7, weekly:4, monthly:3.
 
 **MergerFS**: `/srv/media` aggregates 8 branches into a unified media pool: nas-01 (2TB SSD), nas-02 (2TB LUKS), nas_zfs, media-01 (3TB ZFS), media-02 (3TB ZFS), media-03 (2TB ext4 via USB-SATA), media-04 (2TB ext4 via USB-SATA, ex-PBS drive), media-05 (2TB ext4 via USB, ex-Xbox WD My Passport). Create policy: `epmfs` (existing path most free space) — keeps files in the same directory on the same branch, which is critical for Sonarr/Radarr hardlinks. Falls back to mfs when no existing path found. Branches and options defined in `group_vars/nas_server/mergerfs.yml`. Boot ordering uses `After=` directives only — `Requires=` and `RequiresMountsFor=` caused dependency failures with the mixed ZFS/fstab setup.
 
@@ -313,7 +320,7 @@ Do not remove, disable, exclude, remount around, or otherwise take a mergerfs br
 
 **media-05 (USB My Passport)**: 2TB WD My Passport (WD20NMVW-11EDZS6, ex-Xbox One game drive) added 2026-05-12 via USB. Integrated USB-on-PCB, not shuckable. SMART clean (0 reallocated/pending/UDMA-CRC). Same `nofail`/`x-systemd.device-timeout=60s` pattern. Added to mergerfs to drain nas_zfs/media (which had filled to 96% from non-media pool consumers); first balance moved 1.4 TiB across 858 files, freed 750 GiB on nas_zfs, ended at 4.9% spread.
 
-**MergerFS Recovery (auto-remount + watchdog + media-app refresh)**: Deployed by `playbooks/mergerfs-recovery.yml`. Three layers handle USB-SATA branch disconnects automatically so users don't see "missing files" in Plex:
+**MergerFS Recovery (auto-remount + watchdog + media-app refresh)**: Deployed by `playbooks/storage/mergerfs-recovery.yml`. Three layers handle USB-SATA branch disconnects automatically so users don't see "missing files" in Plex:
 
 1. **udev auto-remount** (`/etc/udev/rules.d/99-mergerfs-remount.rules`) — when a known UUID re-attaches, systemd-mounts the corresponding fstab unit within seconds. Configured per-branch via `mergerfs_recovery_branches` in `group_vars/nas_server/mergerfs-recovery.yml`.
 2. **Mount watchdog** (`mergerfs-mount-watchdog.timer`, every 60s) — backstop that checks every protected branch via `findmnt`. If missing, attempts `systemctl start <mount-unit>`. After 3 consecutive failures (~3 min), sends a loud Apprise alert (`push,dbc`). State in `/var/lib/mergerfs-mount-watchdog/`. 6-hour alert dedup so it doesn't spam.
@@ -323,13 +330,13 @@ API tokens live in `inventory/group_vars/nas_server/vault.yml` (encrypted): `vau
 
 This addresses the recurring USB-SATA disconnect class of failure (see `~/.codex/memories/` for retained diagnostic memory and runbooks) and the hardware swap-test runbook to identify the actual bad component.
 
-**mergerfs-balance**: Balances files across mergerfs branches by moving from the fullest to the emptiest. Default path excludes in `/etc/mergerfs-balance.conf` (deployed by `playbooks/mergerfs.yml` from `mergerfs_balance_exclude_paths` variable) protect irreplaceable data on mirrored nas_zfs (photos, archive, books) from being moved to single-drive pools. CLI `-E` flags are merged with config excludes. `--evacuate <branch>` drains a single branch to the least-used eligible destination branches before planned removal or reformat; dry-run first. Overnight balance jobs are now queued through `nightly-media-maintenance balance add ...` and run under `playbooks/nightly-media-maintenance.yml`; balance jobs own the whole midnight-7 AM window, skip Profilarr for that night, record state under `/var/lib/nightly-media-maintenance/`, use rsync partial files for next-window resume, and can pause/resume docker-vm `media-stack` while leaving Plex on media-vm up.
+**mergerfs-balance**: Balances files across mergerfs branches by moving from the fullest to the emptiest. Default path excludes in `/etc/mergerfs-balance.conf` (deployed by `playbooks/storage/mergerfs.yml` from `mergerfs_balance_exclude_paths` variable) protect irreplaceable data on mirrored nas_zfs (photos, archive, books) from being moved to single-drive pools. CLI `-E` flags are merged with config excludes. `--evacuate <branch>` drains a single branch to the least-used eligible destination branches before planned removal or reformat; dry-run first. Overnight balance jobs are now queued through `nightly-media-maintenance balance add ...` and run under `playbooks/media/nightly-media-maintenance.yml`; balance jobs own the whole midnight-7 AM window, skip Profilarr for that night, record state under `/var/lib/nightly-media-maintenance/`, use rsync partial files for next-window resume, and can pause/resume docker-vm `media-stack` while leaving Plex on media-vm up.
 
 **Incomplete Downloads**: The Lacie SSD (`/srv/nas-01`) has a downloads directory **outside** the mergerfs branch tree, bind-mounted to `/srv/media-downloads` (defined in `group_vars/nas_server/mounts.yml`). This abstracts the underlying drive — to move downloads to a different SSD, just update `mounts.yml`. docker-vm mounts it over NFS as `/srv/incomplete_downloads`, while media-vm's old VirtioFS mount is disabled with the migrated media automation. The NFS export manages writable temp roots for qBittorrent and SABnzbd under the historical `/srv/media-downloads/incomplete/` layout (`incomplete/torrents`, `incomplete/torrents/tv-sonarr`, `incomplete/torrents/sonarr`, `incomplete/torrents/radarr`, and `incomplete/usenet`) as UID/GID 1000; if qBittorrent logs `mkdir ... Permission denied` or `missing files` under `/incomplete`, check these NAS-side directory owners and the docker-vm compose bind paths first.
 
 **VirtioFS**: media-vm and nextcloud-vm access storage via VirtioFS (not NFS). Config in `host_vars/ts440/virtiofs.yml` (host side) and `host_vars/<vm>/virtiofs.yml` (guest side). All mounts use `cache=never` to prevent virtiofsd from consuming 5GB+ per mount on the host. Guest page cache still works, so streaming performance is unaffected.
 
-**VirtioFS ACL Limitation**: VirtioFS does **not** pass through POSIX ACLs to guests. Files must have adequate **base permissions** (`chmod`) — ACLs set via `setfacl` on the host are invisible inside VMs. ZFS ACLs are managed by `playbooks/zfs.yml`; normal runs set dataset-root ACLs and default ACLs for new files. Existing-tree recursive ACL repair is intentionally opt-in with `zfs_acl_recursive_repair: true` because it can walk large datasets.
+**VirtioFS ACL Limitation**: VirtioFS does **not** pass through POSIX ACLs to guests. Files must have adequate **base permissions** (`chmod`) — ACLs set via `setfacl` on the host are invisible inside VMs. ZFS ACLs are managed by `playbooks/storage/zfs.yml`; normal runs set dataset-root ACLs and default ACLs for new files. Existing-tree recursive ACL repair is intentionally opt-in with `zfs_acl_recursive_repair: true` because it can walk large datasets.
 
 **Config Storage**: Application configs are stored locally at `/opt/` on each VM (not NFS). This eliminates NFS boot dependencies and improves performance. Configs are backed up hourly to ts440 ZFS via `local-restic.yml`.
 
@@ -341,7 +348,7 @@ This addresses the recurring USB-SATA disconnect class of failure (see `~/.codex
 
 ### Samba/SMB Shares (ts440)
 
-Managed by `playbooks/samba.yml`, which runs on any `linux_hosts` host with `smb_shares` defined — currently ts440 (nas_server) and pve-herc. Uses `@smbusers` group for authentication and fruit VFS module (`catia fruit streams_xattr`) for macOS compatibility and Time Machine support. Avahi mDNS advertisement runs on each Samba host.
+Managed by `playbooks/storage/samba.yml`, which runs on any `linux_hosts` host with `smb_shares` defined — currently ts440 (nas_server) and pve-herc. Uses `@smbusers` group for authentication and fruit VFS module (`catia fruit streams_xattr`) for macOS compatibility and Time Machine support. Avahi mDNS advertisement runs on each Samba host.
 
 **ts440 shares**: NAS-ZFS, Configs, Backups, NAS-01, NAS-02 — defined in `group_vars/nas_server/samba.yml`.
 
@@ -380,7 +387,7 @@ Lightweight VM (6 cores, 6GB RAM) running infrastructure services. Stacks define
 
 #### nextcloud-vm (VM 101 on ts440)
 
-Nextcloud AIO with VirtioFS storage access (mounts in `host_vars/nextcloud-vm/virtiofs.yml`). Public via Cloudflare Tunnel at `nextcloud.jnalley.me`. Email via iCloud SMTP (same account as smartmontools alerts; credentials in vault). Stacks: Nextcloud AIO, Diun. VM 101 uses Proxmox CPU model `host`, managed by `playbooks/proxmox-vm-hardware.yml`, so fulltextsearch receives AVX/AVX2/FMA CPU flags. CPU model changes require a Proxmox-level VM stop/start, not just a guest reboot.
+Nextcloud AIO with VirtioFS storage access (mounts in `host_vars/nextcloud-vm/virtiofs.yml`). Public via Cloudflare Tunnel at `nextcloud.jnalley.me`. Email via iCloud SMTP (same account as smartmontools alerts; credentials in vault). Stacks: Nextcloud AIO, Diun. VM 101 uses Proxmox CPU model `host`, managed by `playbooks/proxmox/proxmox-vm-hardware.yml`, so fulltextsearch receives AVX/AVX2/FMA CPU flags. CPU model changes require a Proxmox-level VM stop/start, not just a guest reboot.
 
 #### media-vm (VM 100 on ts440)
 
@@ -388,21 +395,21 @@ Primary media VM (10GB RAM, 4 cores, 200GB disk, Quadro P2200 GPU passthrough). 
 
 **Critical**: Plex stays on media-vm and reads `/srv/plex-library` locally through the ts440 storage path. The migrated Sonarr/Radarr/download automation now runs on docker-vm in the `/opt/media-stack` compose project. Those containers must keep one shared in-container parent path (`/data`) backed by docker-vm's single NFS parent mount (`/srv/media/plex:/data`), so downloads and final libraries remain on one visible filesystem for hardlinks. Do not split container mounts back into separate `/downloads`, `/movies`, `/tv`, or per-library mounts. Hardlinks were verified after migration with a real `ln` test across `/data/downloads/complete` and `/data/Anime` from inside the Sonarr container and on the ts440 backing branch.
 
-**Stream relay**: `playbooks/stream-relay.yml` deploys `stream-relay.service`, which receives OBS SRT on UDP 9000, encodes video once with the Quadro's `h264_nvenc`, copies OBS's incoming AAC audio, and fans the encoded feed out locally over MPEG-TS/TCP to `stream-relay-output@<platform>.service` workers that push configured RTMP platforms. media-vm's LAN IP is `192.168.1.136`, managed as static netplan by `playbooks/network-recovery.yml`. Twitch copies the audio to RTMP; YouTube re-encodes audio with `aresample=async=1:first_pts=0` to give YouTube fresh 48 kHz audio timestamps. The relay intentionally avoids FFmpeg `nobuffer`/`low_delay` flags because the SRT path already has explicit latency and overly aggressive buffering caused audible artifacts in live testing. The same playbook also deploys `stream-relay-vertical.service`, a disabled-by-default Aitum Vertical RTMP ingest on TCP 1936 for a standalone YouTube vertical/Shorts stream. These services use the live-only root-readable `/etc/stream-relay/stream-relay.env` with platform stream keys; never commit stream keys. With the current TCP fanout, a platform worker that disconnects after latching usually needs a full landscape relay restart, not an output-only restart. The landscape relay binds to media-vm's LAN IP and firewall access is through the Proxmox datacenter `streaming-pc` IP set, which includes the gaming PC's LAN IP; Windows also needs a persistent host route for `192.168.1.136/32` through Ethernet because Tailscale advertises `192.168.1.0/24`. Landscape VOD recording discards tiny header-only fragments, salvages stale readable incoming files through `stream-vod-mover`, and alerts only when real files hit the failed queue or stay stuck. The operator-facing Twitch/YouTube/TikTok/Mac OBS/Aitum/SleepyChat runbook is `docs/streaming-runbook.md`; start there before changing or troubleshooting the streaming setup. Hands-off streaming automation has two health layers: `stream-relay-health.timer` on media-vm for local Apprise/DBC alerts, and Astra's live OpenClaw heartbeat file `/home/johnny/.openclaw/workspace/HEARTBEAT.md` on the OpenClaw host for external checks. Do not say Astra is wired unless that live heartbeat file contains the stream relay/VOD section and the OpenClaw host can run `ssh dbc@100.66.6.113 '/usr/local/sbin/stream-relay-health --no-alert'` successfully.
+**Stream relay**: `playbooks/media/stream-relay.yml` deploys `stream-relay.service`, which receives OBS SRT on UDP 9000, encodes video once with the Quadro's `h264_nvenc`, copies OBS's incoming AAC audio, and fans the encoded feed out locally over MPEG-TS/TCP to `stream-relay-output@<platform>.service` workers that push configured RTMP platforms. media-vm's LAN IP is `192.168.1.136`, managed as static netplan by `playbooks/network/network-recovery.yml`. Twitch copies the audio to RTMP; YouTube re-encodes audio with `aresample=async=1:first_pts=0` to give YouTube fresh 48 kHz audio timestamps. The relay intentionally avoids FFmpeg `nobuffer`/`low_delay` flags because the SRT path already has explicit latency and overly aggressive buffering caused audible artifacts in live testing. The same playbook also deploys `stream-relay-vertical.service`, a disabled-by-default Aitum Vertical RTMP ingest on TCP 1936 for a standalone YouTube vertical/Shorts stream. These services use the live-only root-readable `/etc/stream-relay/stream-relay.env` with platform stream keys; never commit stream keys. With the current TCP fanout, a platform worker that disconnects after latching usually needs a full landscape relay restart, not an output-only restart. The landscape relay binds to media-vm's LAN IP and firewall access is through the Proxmox datacenter `streaming-pc` IP set, which includes the gaming PC's LAN IP; Windows also needs a persistent host route for `192.168.1.136/32` through Ethernet because Tailscale advertises `192.168.1.0/24`. Landscape VOD recording discards tiny header-only fragments, salvages stale readable incoming files through `stream-vod-mover`, and alerts only when real files hit the failed queue or stay stuck. The operator-facing Twitch/YouTube/TikTok/Mac OBS/Aitum/SleepyChat runbook is `docs/streaming-runbook.md`; start there before changing or troubleshooting the streaming setup. Hands-off streaming automation has two health layers: `stream-relay-health.timer` on media-vm for local Apprise/DBC alerts, and Astra's live OpenClaw heartbeat file `/home/johnny/.openclaw/workspace/HEARTBEAT.md` on the OpenClaw host for external checks. Do not say Astra is wired unless that live heartbeat file contains the stream relay/VOD section and the OpenClaw host can run `ssh dbc@100.66.6.113 '/usr/local/sbin/stream-relay-health --no-alert'` successfully.
 
 **Immich**: Photo/video management at `photos.jnalley.me`. ML container capped at `mem_limit: 3g` to prevent OOM-freezing the VM. External library (`/srv/untitled`) is auto-locked by `immich_folder_album_creator` every 6 hours.
 
-**Recyclarr / Profilarr**: Recyclarr syncs TRaSH Guides custom formats to Sonarr/Radarr. Config at `/opt/media-stack/recyclarr/recyclarr.yml` on docker-vm. Runs daily at midnight. Profilarr is a managed stack at `/opt/profilarr` on docker-vm for profile/CF evaluation and proactive upgrade searches; native Profilarr scheduled Arr upgrades should stay disabled. `playbooks/nightly-media-maintenance.yml` is the owner for overnight proactive upgrades: it queues controlled hourly Profilarr upgrade cycles from midnight through 6 AM only when no balance job is pending for that night. The media release-selection policy is documented in `docs/media-release-policy.md`; update that document whenever changing Sonarr/Radarr quality profiles, custom-format scores, Recyclarr/Profilarr assignments, local/manual CFs, recycle-bin behavior, proactive upgrade-search behavior, or grab regression monitoring. Before mutating live Sonarr/Radarr/Recyclarr/Profilarr release-selection state, take timestamped exports or app-native backups of the affected live configs unless the user explicitly waives backups for that operation. For anime policy changes, audit all existing profile CF scores before changing score bands, because the `+100000` dual-audio model makes old `-10000` penalties too small for hard rejects and too large for soft avoids.
+**Recyclarr / Profilarr**: Recyclarr syncs TRaSH Guides custom formats to Sonarr/Radarr. Config at `/opt/media-stack/recyclarr/recyclarr.yml` on docker-vm. Runs daily at midnight. Profilarr is a managed stack at `/opt/profilarr` on docker-vm for profile/CF evaluation and proactive upgrade searches; native Profilarr scheduled Arr upgrades should stay disabled. `playbooks/media/nightly-media-maintenance.yml` is the owner for overnight proactive upgrades: it queues controlled hourly Profilarr upgrade cycles from midnight through 6 AM only when no balance job is pending for that night. The media release-selection policy is documented in `docs/media-release-policy.md`; update that document whenever changing Sonarr/Radarr quality profiles, custom-format scores, Recyclarr/Profilarr assignments, local/manual CFs, recycle-bin behavior, proactive upgrade-search behavior, or grab regression monitoring. Before mutating live Sonarr/Radarr/Recyclarr/Profilarr release-selection state, take timestamped exports or app-native backups of the affected live configs unless the user explicitly waives backups for that operation. For anime policy changes, audit all existing profile CF scores before changing score bands, because the `+100000` dual-audio model makes old `-10000` penalties too small for hard rejects and too large for soft avoids.
 
 **Anime policy checks**: `scripts/media-release/sonarr_release_expectation_check.py` and `scripts/media-release/radarr_release_expectation_check.py` are the read-only live checks for the active `shows-anime` and `movies-anime` profiles. Run them on `docker-vm` after anime release-policy changes to verify DA/x265 scores, native quality grouping, quality-rank CFs, rename-format preservation of audio languages/video codec, DA/x265 title-side matching, profile assignment counts, and score math such as `1080p DA > 720p DA + x265 + top tier` and `lowest DA > strongest single-tier non-DA`. Radarr's checker also verifies `x265 (HD)` excludes 2160p.
 
 **Profilarr candidate checks**: `scripts/media-release/arr_stage_profilarr_test_profiles.py` snapshots live Sonarr/Radarr release-policy state under `/opt/media-stack/release-policy-snapshots/` and creates/refreshed unassigned Profilarr test profiles. `scripts/media-release/profilarr_state_audit.py` checks linked Profilarr databases, upgrade configs, filters, queued/running scheduler jobs, and recent upgrade errors. `scripts/media-release/profilarr_disable_upgrade_jobs.py` disables Profilarr's scheduled Arr upgrade configs and cancels queued scheduled `arr.upgrade` jobs with a SQLite backup; it does not disable Profilarr database auto-pull/sync. `scripts/media-release/profilarr_sonarr_upgrade_strategy.py` updates supported stored Sonarr upgrade-filter settings with a SQLite backup and must not be used to patch Profilarr application code; current Sonarr selector is `random` because Profilarr normalizes Sonarr series scores to `0`, making `lowest_score` ineffective for current episode CF rank. `scripts/media-release/profilarr_candidate_audit.py` materializes linked PCD repositories in memory and compares candidate CF/profile material with live Arr names. `scripts/media-release/profilarr_selective_cf_import.py` is the controlled Profilarr-to-Arr bridge: it reads Profilarr's locally synced Dictionarry/Dumpstarr data, copies only curated CF definitions as `Dumpstarr ...` formats, and scores only the unassigned anime test profiles. Profilarr can keep pulling upstream databases, but copied Arr CFs update only when this importer is rerun; do not import upstream full profiles or stock x265 penalties unless the user explicitly changes the policy. Use these before assigning media to a Profilarr-derived test profile or syncing candidate CFs.
 
-**Sonarr queue regression check**: `sonarr-transaction-monitor.timer` on docker-vm records Sonarr history and queue snapshots to `/var/log/sonarr-transaction-monitor/events.jsonl` for later release-policy audits; the log is rotated daily by the same playbook. It is managed by `playbooks/sonarr-transaction-monitor.yml` and should stay enabled while Profilarr upgrade searches are active. `scripts/media-release/sonarr_transaction_audit.py --hours 24 --limit 25` is the compact report over that log plus the live queue. `scripts/media-release/sonarr_grab_forensics.py` is the first-line read-only classifier for queued grabs: it groups queue rows by download, compares queued vs current custom-format scores, and flags likely payload score loss, pack collateral/mapping issues, stalled/warning downloads, and active valid upgrades. Run it before deleting anything so repeated non-better grabs are fixed at the cause instead of cleaned up after bandwidth is spent. `scripts/media-release/sonarr_grab_diagnostics.py` compares queued Sonarr downloads against current imported episode files and can remove inspected current-better queue rows with `--remove-current-better --remove-from-client`; it uses Sonarr deletion with `blocklist=false`. Use removal only after inspecting output. `scripts/media-release/sonarr_series_audit.py <series>` is the read-only per-series state check for monitoring, season/file/missing counts, queue items, recent history, and active/recent commands.
+**Sonarr queue regression check**: `sonarr-transaction-monitor.timer` on docker-vm records Sonarr history and queue snapshots to `/var/log/sonarr-transaction-monitor/events.jsonl` for later release-policy audits; the log is rotated daily by the same playbook. It is managed by `playbooks/media/sonarr-transaction-monitor.yml` and should stay enabled while Profilarr upgrade searches are active. `scripts/media-release/sonarr_transaction_audit.py --hours 24 --limit 25` is the compact report over that log plus the live queue. `scripts/media-release/sonarr_grab_forensics.py` is the first-line read-only classifier for queued grabs: it groups queue rows by download, compares queued vs current custom-format scores, and flags likely payload score loss, pack collateral/mapping issues, stalled/warning downloads, and active valid upgrades. Run it before deleting anything so repeated non-better grabs are fixed at the cause instead of cleaned up after bandwidth is spent. `scripts/media-release/sonarr_grab_diagnostics.py` compares queued Sonarr downloads against current imported episode files and can remove inspected current-better queue rows with `--remove-current-better --remove-from-client`; it uses Sonarr deletion with `blocklist=false`. Use removal only after inspecting output. `scripts/media-release/sonarr_series_audit.py <series>` is the read-only per-series state check for monitoring, season/file/missing counts, queue items, recent history, and active/recent commands.
 
-**Media stack health**: `media-stack-health.timer` on docker-vm runs every 5 minutes and validates the migrated media automation end to end: docker-vm NFS mounts, visible library directories, Sonarr/Radarr/Prowlarr/Bazarr/SABnzbd/qBittorrent/Byparr/Recyclarr/Profilarr containers, local HTTP endpoints, qBittorrent forwarded-port sync, and an in-container hardlink test from `/data/downloads/complete` to `/data/Anime`. It is managed by `playbooks/media-stack-health.yml`. Astra's live OpenClaw heartbeat should check the cached sentinel status from outside the VM with `ssh dbc@100.108.254.100 'sudo -n /usr/local/sbin/media-stack-health --status'`, so heartbeat reads do not start fresh NFS/mergerfs-touching probes. Do not say Astra is wired unless that live heartbeat section exists in `/home/johnny/.openclaw/workspace/HEARTBEAT.md` and the SSH command succeeds from the current OpenClaw host. Operator-facing heartbeat documentation is `docs/openclaw-heartbeats.md`.
+**Media stack health**: `media-stack-health.timer` on docker-vm runs every 5 minutes and validates the migrated media automation end to end: docker-vm NFS mounts, visible library directories, Sonarr/Radarr/Prowlarr/Bazarr/SABnzbd/qBittorrent/Byparr/Recyclarr/Profilarr containers, local HTTP endpoints, qBittorrent forwarded-port sync, and an in-container hardlink test from `/data/downloads/complete` to `/data/Anime`. It is managed by `playbooks/media/media-stack-health.yml`. Astra's live OpenClaw heartbeat should check the cached sentinel status from outside the VM with `ssh dbc@100.108.254.100 'sudo -n /usr/local/sbin/media-stack-health --status'`, so heartbeat reads do not start fresh NFS/mergerfs-touching probes. Do not say Astra is wired unless that live heartbeat section exists in `/home/johnny/.openclaw/workspace/HEARTBEAT.md` and the SSH command succeeds from the current OpenClaw host. Operator-facing heartbeat documentation is `docs/openclaw-heartbeats.md`.
 
-**Release metadata stamper**: `playbooks/media-release-stamper.yml` deploys SABnzbd and qBittorrent post-download stampers that preserve grab-time evidence before Sonarr/Radarr import. qBittorrent renames payload files through its Web API to keep seeding state intact. DA evidence is stamped as language-combo tags such as `[JA+EN]`, `[KO+EN]`, or `[JA+KO+EN]`, per file only when audio metadata shows English plus the configured original language; qBittorrent can optionally get that original language from Sonarr/Radarr by torrent hash/download ID, and SABnzbd can optionally get it by release/job title. Arr lookup must stay bounded and non-fatal; fallback default is `jpn`, so `eng+kor` does not qualify when context is unavailable. `[x265]` is stamped per file only after the payload itself contains HEVC markers or MKV video-track CodecID evidence. Platform/source tags and release-group suffixes may be copied from the parent release/job/torrent title to preserve release-context custom formats at import, but generic quality/resolution/source labels are not copied. If Sonarr context is available and a TV payload basename starts with bare `SxxEyy`, the stamper may prefix the canonical series title so Sonarr can parse the imported file. Existing-tag checks must use the payload basename, not the parent torrent directory. Stamper env files must remain readable by the media containers' UID/GID `1000` without exposing them world-readable. Document behavior changes in `docs/media-release-policy.md`.
+**Release metadata stamper**: `playbooks/media/media-release-stamper.yml` deploys SABnzbd and qBittorrent post-download stampers that preserve grab-time evidence before Sonarr/Radarr import. qBittorrent renames payload files through its Web API to keep seeding state intact. DA evidence is stamped as language-combo tags such as `[JA+EN]`, `[KO+EN]`, or `[JA+KO+EN]`, per file only when audio metadata shows English plus the configured original language; qBittorrent can optionally get that original language from Sonarr/Radarr by torrent hash/download ID, and SABnzbd can optionally get it by release/job title. Arr lookup must stay bounded and non-fatal; fallback default is `jpn`, so `eng+kor` does not qualify when context is unavailable. `[x265]` is stamped per file only after the payload itself contains HEVC markers or MKV video-track CodecID evidence. Platform/source tags and release-group suffixes may be copied from the parent release/job/torrent title to preserve release-context custom formats at import, but generic quality/resolution/source labels are not copied. If Sonarr context is available and a TV payload basename starts with bare `SxxEyy`, the stamper may prefix the canonical series title so Sonarr can parse the imported file. Existing-tag checks must use the payload basename, not the parent torrent directory. Stamper env files must remain readable by the media containers' UID/GID `1000` without exposing them world-readable. Document behavior changes in `docs/media-release-policy.md`.
 
 **Tdarr** (disabled 2026-04-13): Media transcoding service. Commented out in `/opt/media-stack/docker-compose.yml` and `templates/docker/Caddyfile.j2`. Compose config and `/opt/media-stack/tdarr/` data preserved for easy re-enable.
 
@@ -426,7 +433,7 @@ qBittorrent uses `network_mode: "service:gluetun"`, so all traffic goes through 
 
 **qBittorrent Tuning**: `max_active_downloads: 5` (reduced from 10 — active downloads starve uploads of libtorrent I/O resources). `max_active_uploads: 200`, `max_uploads: 200` (global upload slots). `dont_count_slow_torrents: true` lets stalled 0-seed torrents bypass the active download limit so they don't block well-seeded torrents. Queue uses FIFO ordering (by add time, not by seed availability). Seeding upload speed is primarily limited by over-seeded swarms (~17:1 seed:leech ratio on anime torrents), not connection or settings.
 
-**Automatic Port Sync** (Ansible-managed by `playbooks/gluetun-watchdog.yml`): ProtonVPN assigns dynamic forwarded ports that change on reconnect. A systemd-based automation keeps qBittorrent's listening port in sync:
+**Automatic Port Sync** (Ansible-managed by `playbooks/docker/gluetun-watchdog.yml`): ProtonVPN assigns dynamic forwarded ports that change on reconnect. A systemd-based automation keeps qBittorrent's listening port in sync:
 
 1. **Gluetun** writes the forwarded port to `/opt/media-stack/gluetun/forwarded_port` via `VPN_PORT_FORWARDING_UP_COMMAND`
 2. **systemd path unit** (`qbit-port-sync.path`) watches that file for changes
@@ -440,7 +447,7 @@ qBittorrent uses `network_mode: "service:gluetun"`, so all traffic goes through 
 
 #### Docker Auto-Update
 
-Systemd timer on each Docker VM that auto-pulls/builds and recreates selected containers every 6 hours. Deployed via `playbooks/docker-auto-update.yml`. Containers opt-in via flags in `host_vars/<hostname>/docker.yml`:
+Systemd timer on each Docker VM that auto-pulls/builds and recreates selected containers every 6 hours. Deployed via `playbooks/docker/docker-auto-update.yml`. Containers opt-in via flags in `host_vars/<hostname>/docker.yml`:
 
 ```yaml
 docker_stacks:
@@ -522,7 +529,7 @@ All hosts (Alloy) ──→ Loki (docker-vm:3100) ←── Grafana (caddy-proxy
 
 **Server** (docker-vm): Loki + Grafana Docker Compose stack at `/opt/loki-grafana/`. Loki stores logs with TSDB schema v13, 30-day retention, filesystem storage. Grafana auto-provisioned with Loki datasource. Grafana accessible at `grafana.jnalley.me` via Caddy (Tailscale only, not publicly exposed). Admin password in `host_vars/docker-vm/vault.yml`.
 
-**Clients**: Alloy agent deployed to all `managed_hosts` by `playbooks/logging.yml`:
+**Clients**: Alloy agent deployed to all `managed_hosts` by `playbooks/core/logging.yml`:
 - **Linux**: systemd journal logs with relabeling (unit, transport, level labels). Alloy installed from Grafana APT repo (Debian) or AUR `alloy-bin` (Arch).
 - **Docker hosts**: additionally scrape container logs via Docker socket (`discovery.docker`).
 - **macOS**: tails `/var/log/system.log` via `loki.source.file`. Installed via Homebrew (`grafana-alloy`), runs as LaunchAgent.
@@ -568,7 +575,7 @@ Enable local backups: set `local_restic_enabled: true` and `local_restic_backup_
 
 ### Proxmox Notification Webhooks
 
-PVE's notification system routes alerts via webhook to Apprise → Pushover. Deployed by `playbooks/proxmox-notifications.yml`. Config is cluster-wide (pmxcfs) — playbook runs on one node with `run_once: true`.
+PVE's notification system routes alerts via webhook to Apprise → Pushover. Deployed by `playbooks/proxmox/proxmox-notifications.yml`. Config is cluster-wide (pmxcfs) — playbook runs on one node with `run_once: true`.
 
 **Webhook targets** (two, for severity-based routing):
 - `apprise-infra` — warnings/errors → `push` tag (Time Sensitive)
@@ -585,11 +592,11 @@ PVE's notification system routes alerts via webhook to Apprise → Pushover. Dep
 
 ### rclone Sync (OneDrive to Nextcloud)
 
-One-way sync from UTD OneDrive to Nextcloud via `playbooks/rclone-sync.yml`. Runs on macbook-pro because UTD's Microsoft 365 tenant blocks third-party OAuth — OneDrive desktop app syncs locally, then rclone copies to Nextcloud WebDAV every 2 hours. Monitored via Uptime Kuma push monitor. rclone remote config is manual (not Ansible-managed) at `~/.config/rclone/rclone.conf`.
+One-way sync from UTD OneDrive to Nextcloud via `playbooks/backup-sync/rclone-sync.yml`. Runs on macbook-pro because UTD's Microsoft 365 tenant blocks third-party OAuth — OneDrive desktop app syncs locally, then rclone copies to Nextcloud WebDAV every 2 hours. Monitored via Uptime Kuma push monitor. rclone remote config is manual (not Ansible-managed) at `~/.config/rclone/rclone.conf`.
 
 ### Unattended-Upgrades (Daily Security Patches)
 
-Deployed via `playbooks/unattended-upgrades.yml` to all `debian_hosts` (including workstations — security patches shouldn't wait). Complements the weekly `auto-updates.yml` full-upgrade (Sundays, staggered per-host).
+Deployed via `playbooks/core/unattended-upgrades.yml` to all `debian_hosts` (including workstations — security patches shouldn't wait). Complements the weekly `auto-updates.yml` full-upgrade (Sundays, staggered per-host).
 
 **Proxmox update window**: Proxmox nodes run the weekly full-upgrade on a staggered schedule, but `group_vars/proxmox_nodes/vars.yml` sets `auto_updates_reboot_if_required: false`, so they notify on reboot-required instead of rebooting themselves. Per-host `auto_updates_oncalendar` overrides in host_vars with `auto_updates_randomized_delay_sec: "0"`: ts440 05:00 → pve-alto 05:20 → pve-herc 05:40 → pve-m70q 06:00. pve-m70q goes last because it hosts docker-vm and several control-plane guests. VMs/LXCs use `group_vars/vms_lxcs/vars.yml` to run after the Proxmox update window (`Sun *-*-* 07:00:00` + 30m random delay), so host updates do not interrupt guest dpkg transactions. Other Debian hosts use the default schedule from `group_vars/debian_hosts/packages.yml` (`Sun *-*-* 05:00:00` + 15m random delay).
 
@@ -605,7 +612,7 @@ Deployed via `playbooks/unattended-upgrades.yml` to all `debian_hosts` (includin
 
 Three of four Proxmox nodes (ts440, pve-m70q, pve-alto) have Intel e1000e NICs (I217/I218/I219) prone to "Detected Hardware Unit Hang" errors where the TX descriptor ring gets stuck. The driver resets the NIC, which unregisters it from the bridge — dropping all connectivity until the network watchdog reattaches it.
 
-**Mitigations** (`playbooks/e1000e-tuning.yml`):
+**Mitigations** (`playbooks/network/e1000e-tuning.yml`):
 - **EEE (Energy Efficient Ethernet)**: Disabled via udev rule. Low-power link negotiation stalls the TX ring. The old `modprobe e1000e EEE=0` parameter was removed from newer kernels and silently ignored.
 - **TSO/GSO (TCP/Generic Segmentation Offload)**: Disabled via the same udev rule. Large segment offloads can wedge TX descriptors on these NICs.
 - **ASPM (Active State Power Management)**: Already disabled kernel-wide via `pcie_aspm=off` boot parameter on ts440.
@@ -614,7 +621,7 @@ The udev rule (`/etc/udev/rules.d/99-e1000e-disable-eee-tso.rules`) fires on NIC
 
 ### Network Recovery
 
-Deployed via `playbooks/network-recovery.yml` to `linux_hosts:!workstations`.
+Deployed via `playbooks/network/network-recovery.yml` to `linux_hosts:!workstations`.
 
 **Network Watchdog** (`network-watchdog.timer`, every 60s):
 - Optionally manages static netplan for fixed LAN service IPs, such as media-vm's `192.168.1.136` OBS/Plex address
@@ -637,7 +644,7 @@ Workstations inherit `network_watchdog_enabled: false` and `auto_updates_enabled
 
 ### Swap Configuration
 
-Managed by `playbooks/swap.yml`. Opt-in via `swap_size_gb` in host_vars. Auto-detects root filesystem type via `findmnt`:
+Managed by `playbooks/core/swap.yml`. Opt-in via `swap_size_gb` in host_vars. Auto-detects root filesystem type via `findmnt`:
 - **ZFS hosts** (Proxmox): Creates a zvol at `rpool/swap` (swap files don't work on ZFS — CoW creates holes that `swapon` rejects, even with `dd`)
 - **Non-ZFS hosts**: Creates a swap file at `/swapfile`
 
@@ -647,11 +654,11 @@ Currently enabled on pve-m70q and pve-herc (8GB each). Pool name configurable vi
 
 Playbooks are imported via `site.yml` (with tags). Browse with: `ls playbooks/ tasks/ templates/ scripts/ bin/`. Each file has a descriptive header comment. Docker stacks and VirtioFS configs are defined in `host_vars/<hostname>/docker.yml` and `virtiofs.yml`.
 
-**media-vm / docker-vm specific files**: stream relay remains Ansible-managed on media-vm (`/usr/local/sbin/stream-relay`, `/usr/local/sbin/stream-relay-output`, `stream-relay.service`, `stream-relay-output@.service`, `stream-relay-vertical-broker.service`). qBittorrent port sync is Ansible-managed on docker-vm by `playbooks/gluetun-watchdog.yml` (`/usr/local/bin/qbit-port-sync`, `/etc/qbit-port-sync.env`, systemd path unit `qbit-port-sync.path`). Release metadata stamping is Ansible-managed on docker-vm by `playbooks/media-release-stamper.yml` (`/opt/media-stack/qbittorrent/scripts/qbit-release-stamper.py`, `/opt/media-stack/sabnzbd/scripts/sab-release-stamper.py`).
+**media-vm / docker-vm specific files**: stream relay remains Ansible-managed on media-vm (`/usr/local/sbin/stream-relay`, `/usr/local/sbin/stream-relay-output`, `stream-relay.service`, `stream-relay-output@.service`, `stream-relay-vertical-broker.service`). qBittorrent port sync is Ansible-managed on docker-vm by `playbooks/docker/gluetun-watchdog.yml` (`/usr/local/bin/qbit-port-sync`, `/etc/qbit-port-sync.env`, systemd path unit `qbit-port-sync.path`). Release metadata stamping is Ansible-managed on docker-vm by `playbooks/media/media-release-stamper.yml` (`/opt/media-stack/qbittorrent/scripts/qbit-release-stamper.py`, `/opt/media-stack/sabnzbd/scripts/sab-release-stamper.py`).
 
 ### Proxmox Firewall (Ansible-Managed)
 
-Three-level firewall managed by `playbooks/proxmox-firewall.yml`:
+Three-level firewall managed by `playbooks/proxmox/proxmox-firewall.yml`:
 1. **Datacenter** (`cluster.fw`): IP sets and security groups — `group_vars/proxmox_nodes/firewall.yml`
 2. **Node** (`host.fw`): Per-node rules — `host_vars/<node>/firewall.yml` under `pve_node_firewall`
 3. **VM/CT** (`<vmid>.fw`): Per-VM rules — `host_vars/<node>/firewall.yml` under `pve_vm_firewalls`
@@ -660,7 +667,7 @@ Security model: default deny (`policy_in: DROP`) on all VMs. Caddy (docker-vm) i
 
 ### Proxmox HA (disabled)
 
-`pve-ha-lrm` and `pve-ha-crm` are stopped, disabled, and **masked** cluster-wide via `playbooks/proxmox-ha.yml`. Driven by `pve_ha_enabled` in `group_vars/proxmox_nodes/vars.yml` (default `false`). HA had zero resources configured anyway, so its only effect was unnecessary watchdog/fencing risk during boot or transient cluster blips. To re-enable later: set `pve_ha_enabled: true` and re-run the playbook.
+`pve-ha-lrm` and `pve-ha-crm` are stopped, disabled, and **masked** cluster-wide via `playbooks/proxmox/proxmox-ha.yml`. Driven by `pve_ha_enabled` in `group_vars/proxmox_nodes/vars.yml` (default `false`). HA had zero resources configured anyway, so its only effect was unnecessary watchdog/fencing risk during boot or transient cluster blips. To re-enable later: set `pve_ha_enabled: true` and re-run the playbook.
 
 ### Per-VM Storage Gate (Ansible-Managed)
 
@@ -670,11 +677,11 @@ A Proxmox hookscript refuses to start a VM/CT until that VM's declared host moun
 - Per-VM declarations: `host_vars/<vm>/storage.yml` with `vmid` and `required_host_mounts: [/srv/...]`
 - Aggregated cluster-wide config: `/etc/pve/wait-for-mounts.json` (lives on pmxcfs, so it travels with VM migrations automatically)
 - Wired per-VM via `qm set <vmid> --hookscript local:snippets/wait-for-mounts.sh`
-- Playbook: `playbooks/vm-storage-gate.yml`
+- Playbook: `playbooks/storage/vm-storage-gate.yml`
 
 To gate a new VM:
 1. Add `host_vars/<vm>/storage.yml` with `vmid` + `required_host_mounts` list.
-2. Run `ansible-playbook playbooks/vm-storage-gate.yml`.
+2. Run `ansible-playbook playbooks/storage/vm-storage-gate.yml`.
 3. The next time that VM starts (auto or manual), the hookscript checks all required paths via `mountpoint -q` first. Missing → start aborted, Apprise `push,dbc` alert fired. All present → start proceeds.
 
 Initial gates: `media-vm` → `[/srv/media, /srv/nas-zfs]`, `nextcloud-vm` → `[/srv/nas-zfs]`. `homebridge-lxc` and the dev/openclaw/docker-vm class have no host storage dependency and are unaffected.
@@ -683,7 +690,7 @@ USB drive timeout standard: all USB drives in `group_vars/nas_server/mounts.yml`
 
 ### freepbx-vm (VM 130 on pve-herc)
 
-FreePBX 17 PBX server (Asterisk 22, Debian 12 Bookworm). Provides a second phone number via VoIP.ms SIP trunk and Yealink SIP-T54W desk phone, with call forwarding to iPhone. Web GUI: `http://100.97.139.95/admin`. LAN IP: `192.168.1.241`, managed in `/etc/network/interfaces` by `playbooks/freepbx.yml` from `templates/freepbx/interfaces.j2`. APT pinned to `bookworm` via `apt_pin_release` to prevent accidental Debian 13 upgrades. FreePBX/Asterisk packages are held (`apt-mark hold`) by the install script — module updates done through the web GUI. Sangoma Smart Firewall enabled with Tailscale CGNAT (`100.64.0.0/10`) trusted. Proxmox firewall rules: SIP (UDP 5060 from LAN + VoIP.ms), RTP (UDP 10000-20000), web GUI (TCP 80/443 Tailscale only), SSH. Config: `host_vars/freepbx-vm/` (vars.yml, packages.yml). Local restic backups: `/etc/asterisk`, `/var/lib/asterisk`, `/var/spool/asterisk`. `playbooks/freepbx.yml` manages Asterisk open-file guardrails, Asterisk logrotate size caps, journald retention, and the static LAN interface config so the small root disk does not fill from PBX log storms or lose DHCP after bridge events.
+FreePBX 17 PBX server (Asterisk 22, Debian 12 Bookworm). Provides a second phone number via VoIP.ms SIP trunk and Yealink SIP-T54W desk phone, with call forwarding to iPhone. Web GUI: `http://100.97.139.95/admin`. LAN IP: `192.168.1.241`, managed in `/etc/network/interfaces` by `playbooks/apps/freepbx.yml` from `templates/freepbx/interfaces.j2`. APT pinned to `bookworm` via `apt_pin_release` to prevent accidental Debian 13 upgrades. FreePBX/Asterisk packages are held (`apt-mark hold`) by the install script — module updates done through the web GUI. Sangoma Smart Firewall enabled with Tailscale CGNAT (`100.64.0.0/10`) trusted. Proxmox firewall rules: SIP (UDP 5060 from LAN + VoIP.ms), RTP (UDP 10000-20000), web GUI (TCP 80/443 Tailscale only), SSH. Config: `host_vars/freepbx-vm/` (vars.yml, packages.yml). Local restic backups: `/etc/asterisk`, `/var/lib/asterisk`, `/var/spool/asterisk`. `playbooks/apps/freepbx.yml` manages Asterisk open-file guardrails, Asterisk logrotate size caps, journald retention, and the static LAN interface config so the small root disk does not fill from PBX log storms or lose DHCP after bridge events.
 
 ### OpenClaw Host (jn-t14s-lin)
 
@@ -699,7 +706,7 @@ OpenClaw AI agent platform (Node.js gateway daemon). Provides a web UI and Disco
 - **Astra heartbeat**: The active heartbeat prompt is `/home/johnny/.openclaw/workspace/HEARTBEAT.md` on the OpenClaw host. Treat it as live OpenClaw workspace content that Astra may edit; update it directly when changing heartbeat behavior and document the expectation in this repo. Do not create an OpenClaw cron when the right primitive is the heartbeat file. Heartbeat procedure details, including stream relay and Plex appliance verified-corruption checks, live in `docs/openclaw-heartbeats.md`.
 - **Linting tools**: `ansible-lint`, `yamllint` in venv at `/opt/openclaw-venv/`
 - **Timers**: repo-sync (git pull every 5 min), update-check (daily at 08:00 with Apprise notification)
-- **Playbook**: `playbooks/openclaw.yml` (opt-in via `openclaw_enabled` variable)
+- **Playbook**: `playbooks/agents/openclaw.yml` (opt-in via `openclaw_enabled` variable)
 - **Config**: `host_vars/jn-t14s-lin/openclaw.yml`, `packages.yml`, `backup.yml`, and `docker.yml`
 - **Firewall**: Caddy proxies OpenClaw through the T14s Tailscale address; avoid opening LAN access unless explicitly required.
 
@@ -736,7 +743,7 @@ Home Assistant OS. Some devices chain: Device → Homebridge → Home Assistant 
 
 ### VirtioFS Ansible Management
 
-`playbooks/virtiofs.yml` manages VirtioFS on both sides: host-side config in `host_vars/<proxmox-node>/virtiofs.yml` (directory mappings + VM attachments), guest-side in `host_vars/<vm>/virtiofs.yml` (mount points + fstab entries). `virtiofs_directory_mappings` is the canonical list of available shares. **VM restart required** after adding VirtioFS config to host.
+`playbooks/storage/virtiofs.yml` manages VirtioFS on both sides: host-side config in `host_vars/<proxmox-node>/virtiofs.yml` (directory mappings + VM attachments), guest-side in `host_vars/<vm>/virtiofs.yml` (mount points + fstab entries). `virtiofs_directory_mappings` is the canonical list of available shares. **VM restart required** after adding VirtioFS config to host.
 
 **VirtioFS + MergerFS caveat**: virtiofsd caches directory state from when it starts. If mergerfs branches change (e.g., after `mergerfs-balance` moves files between drives), virtiofsd won't see the new layout. A guest reboot is NOT enough — the VM must be fully stopped and started from Proxmox (`qm stop`/`qm start`) to restart the virtiofsd process on the host side.
 
@@ -746,9 +753,9 @@ Provides access to ZFS paths via VirtioFS without duplicating data. Nextcloud AI
 
 Ansible config references: VirtioFS mounts in `host_vars/nextcloud-vm/virtiofs.yml`, bind mounts in `host_vars/nextcloud-vm/mounts.yml`, Docker compose with `NEXTCLOUD_MOUNT=/srv/external` at `/opt/nextcloud/docker-compose.yml`.
 
-**External Storage Scanning**: Nextcloud's `filesystem_check_changes: 1` only detects changes when a user browses into the folder — there's no proactive background scan. `playbooks/nextcloud-scan.yml` deploys a systemd timer on nextcloud-vm that runs `occ files:scan` every 10 minutes (offset by 3 min from git-sync) for the Configs and Photo Library external storage paths. This ensures git-sync changes and photo uploads appear in Nextcloud automatically.
+**External Storage Scanning**: Nextcloud's `filesystem_check_changes: 1` only detects changes when a user browses into the folder — there's no proactive background scan. `playbooks/backup-sync/nextcloud-scan.yml` deploys a systemd timer on nextcloud-vm that runs `occ files:scan` every 10 minutes (offset by 3 min from git-sync) for the Configs and Photo Library external storage paths. This ensures git-sync changes and photo uploads appear in Nextcloud automatically.
 
-**Codex Memory Sync**: Codex CLI's project memory (`~/.codex/memories/`) lives on the Ansible controller outside the git repo (kept private because the repo is public). `playbooks/codex-memory-sync.yml` deploys a timer on `orchestrator` that rsyncs the memory directory to `ts440:/srv/nas-zfs/configs/codex-memory/` every 10 minutes (offset by 2 min). The sync normalizes destination permissions to directories `0775` and files `0664` so Nextcloud can read them through VirtioFS. This appears in Nextcloud at `Configs/codex-memory/` and syncs to the Mac via Nextcloud desktop app for use with Codex on the Mac.
+**Codex Memory Sync**: Codex CLI's project memory (`~/.codex/memories/`) lives on the Ansible controller outside the git repo (kept private because the repo is public). `playbooks/agents/codex-memory-sync.yml` deploys a timer on `orchestrator` that rsyncs the memory directory to `ts440:/srv/nas-zfs/configs/codex-memory/` every 10 minutes (offset by 2 min). The sync normalizes destination permissions to directories `0775` and files `0664` so Nextcloud can read them through VirtioFS. This appears in Nextcloud at `Configs/codex-memory/` and syncs to the Mac via Nextcloud desktop app for use with Codex on the Mac.
 
 ## Future Considerations
 
@@ -801,7 +808,7 @@ Internet
 
 **Phase 2: Ansible Playbook** (preferred over manual script)
 
-Create `playbooks/wan-failover.yml` targeting pve-m70q:
+Create a domain playbook such as `playbooks/proxmox/<feature>.yml` targeting pve-m70q:
 
 ```yaml
 # host_vars/pve-m70q/failover.yml

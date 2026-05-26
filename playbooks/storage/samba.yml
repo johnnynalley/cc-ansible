@@ -1,0 +1,35 @@
+# Purpose: Configure Samba server.
+# Hosts: samba_hosts.
+# Key vars: smb_shares, nfs_*, filesystem_mounts, mergerfs_*, zfs_*, virtiofs_*, vm_storage_gate_*.
+# Templates: templates/storage, templates/samba, templates/proxmox.
+# Scripts: scripts/storage.
+# Validation: ansible-playbook playbooks/storage/samba.yml --syntax-check.
+
+# =============================================================================
+# Samba Playbook - SMB Share Configuration
+# =============================================================================
+# Usage: ansible-playbook playbooks/storage/samba.yml
+#        ansible-playbook playbooks/storage/samba.yml --check --diff
+# =============================================================================
+
+- name: Configure Samba server
+  hosts: samba_hosts
+  become: true
+  gather_facts: true
+
+  tasks:
+    - name: Setup Samba server
+      ansible.builtin.import_tasks: ../../tasks/samba.yml
+      when: smb_shares is defined
+      tags: [samba, smb]
+
+  handlers:
+    - name: Reload Samba
+      ansible.builtin.systemd:
+        name: smbd
+        state: reloaded
+
+    - name: Restart Avahi
+      ansible.builtin.systemd:
+        name: avahi-daemon
+        state: restarted

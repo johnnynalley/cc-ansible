@@ -7,7 +7,7 @@
 
 ## Consumers
 
-- `playbooks/apcupsd.yml`
+- `playbooks/core/apcupsd.yml`
 
 ## Safety Notes
 

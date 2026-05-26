@@ -1,0 +1,162 @@
+# Purpose: Bootstrap new managed hosts.
+# Hosts: bootstrap_hosts.
+# Key vars: packages_*, bootstrap_*, auto_updates_*, unattended_upgrades_*, swap_*, sysctl_*, logging_*, smartd_*, apcupsd_*.
+# Templates: templates/auto-updates, templates/logging, templates/motd, templates/smartmontools, templates/ups.
+# Scripts: scripts/repo/repo-audit for repo checks; otherwise none by default.
+# Validation: ansible-playbook playbooks/core/bootstrap.yml --syntax-check.
+
+# =============================================================================
+# Bootstrap Playbook - Create admin user
+# =============================================================================
+# One-time setup for new Linux hosts. Add hosts to [bootstrap_hosts] in inventory.
+# Default privilege escalation uses su because sudo may not be installed yet;
+# already-reachable hosts can set bootstrap_become_method: sudo in host_vars.
+# Copy the Ansible SSH key to the admin user first when needed, then run:
+#   ssh-copy-id -i ~/.ssh/ansible_ed25519.pub johnny@<LAN_IP>
+#   ansible-playbook playbooks/core/bootstrap.yml --ask-become-pass
+#
+# After bootstrap, run site.yml to complete configuration (packages, SSH hardening, etc.)
+# The admin_user variable controls which user is created (default: jnalley, legacy hosts: johnny)
+# =============================================================================
+
+- name: Bootstrap admin user
+  hosts: bootstrap_hosts
+  become: true
+  become_method: "{{ bootstrap_become_method | default('su') }}"
+  become_flags: "{{ bootstrap_become_flags | default('-') }}"
+  gather_facts: true
+
+  vars:
+    ssh_pubkey_path: "~/.ssh/id_ed25519.pub"
+    ansible_pubkey_path: "~/.ssh/ansible_ed25519.pub"
+
+  tasks:
+    # =========================================================================
+    # Set timezone
+    # =========================================================================
+    - name: Set timezone
+      community.general.timezone:
+        name: "{{ global_timezone }}"
+      tags: [timezone]
+
+    # =========================================================================
+    # Install sudo (not installed by default on Proxmox)
+    # =========================================================================
+    - name: Install sudo package (Debian)
+      ansible.builtin.apt:
+        name: sudo
+        state: present
+        update_cache: true
+      when: ansible_facts.os_family == "Debian"
+      tags: [sudo]
+
+    - name: Install sudo package (Arch)
+      community.general.pacman:
+        name: sudo
+        state: present
+      when: ansible_facts.os_family == "Archlinux"
+      tags: [sudo]
+
+    # =========================================================================
+    # Create admin user
+    # =========================================================================
+    - name: Create admin user
+      ansible.builtin.user:
+        name: "{{ admin_user }}"
+        shell: "{{ admin_shell }}"
+        groups: "{{ 'wheel' if ansible_facts.os_family == 'Archlinux' else 'sudo' }}"
+        append: true
+        create_home: true
+        password: "{{ admin_default_password | password_hash('sha512') }}"
+        update_password: on_create
+      tags: [user]
+
+    - name: Ensure .ssh directory exists
+      ansible.builtin.file:
+        path: "/home/{{ admin_user }}/.ssh"
+        state: directory
+        owner: "{{ admin_user }}"
+        group: "{{ admin_user }}"
+        mode: "0700"
+      tags: [ssh]
+
+    - name: Install SSH public key for admin user
+      ansible.posix.authorized_key:
+        user: "{{ admin_user }}"
+        key: "{{ lookup('file', ssh_pubkey_path) }}"
+        state: present
+      tags: [ssh]
+
+    - name: Install Ansible automation SSH key
+      ansible.posix.authorized_key:
+        user: "{{ admin_user }}"
+        key: "{{ lookup('file', ansible_pubkey_path) }}"
+        state: present
+      tags: [ssh]
+
+    # =========================================================================
+    # Sudo configuration for Ansible
+    # =========================================================================
+    - name: Check if host uses sudo-rs
+      ansible.builtin.stat:
+        path: /usr/lib/cargo/bin/sudo
+      register: sudo_rs_check
+      tags: [sudo]
+
+    # sudo-rs (Ubuntu 25.10+) doesn't support !requiretty and wraps custom
+    # prompts in [sudo: ...], breaking Ansible's nonce detection. Use NOPASSWD.
+    - name: Configure passwordless sudo for Ansible (sudo-rs)
+      ansible.builtin.copy:
+        content: |
+          # Passwordless sudo for Ansible automation (sudo-rs compatible)
+          # sudo-rs cannot use password-based become with Ansible
+          {{ admin_user }} ALL=(ALL) NOPASSWD: ALL
+        dest: /etc/sudoers.d/ansible-{{ admin_user }}
+        owner: root
+        group: root
+        mode: "0440"
+        validate: "visudo -cf %s"
+      when: sudo_rs_check.stat.exists
+      tags: [sudo]
+
+    - name: Allow sudo without TTY (regular sudo)
+      ansible.builtin.copy:
+        content: |
+          # Allow {{ admin_user }} to use sudo without TTY (required for Ansible)
+          # Password is still required - provided via ansible_become_password in vault
+          Defaults:{{ admin_user }} !requiretty
+        dest: /etc/sudoers.d/ansible-{{ admin_user }}
+        owner: root
+        group: root
+        mode: "0440"
+        validate: "visudo -cf %s"
+      when: not sudo_rs_check.stat.exists
+      tags: [sudo]
+
+    # =========================================================================
+    # Enable PubkeyAuthentication (required before disabling password auth)
+    # =========================================================================
+    - name: Enable SSH public key authentication
+      ansible.builtin.lineinfile:
+        path: /etc/ssh/sshd_config
+        regexp: '^#?PubkeyAuthentication'
+        line: 'PubkeyAuthentication yes'
+        validate: "sshd -t -f %s"
+      notify: Reload SSH
+      tags: [ssh]
+
+    # =========================================================================
+    # Clean up root SSH keys (no longer needed after admin user is configured)
+    # =========================================================================
+    - name: Remove Ansible SSH key from root
+      ansible.posix.authorized_key:
+        user: root
+        key: "{{ lookup('file', ansible_pubkey_path) }}"
+        state: absent
+      tags: [ssh]
+
+  handlers:
+    - name: Reload SSH
+      ansible.builtin.systemd:
+        name: "{{ 'ssh' if ansible_facts.os_family == 'Debian' else 'sshd' }}"
+        state: reloaded

@@ -1,0 +1,428 @@
+# Purpose: Configure stream relay.
+# Hosts: media-vm.
+# Key vars: nightly_media_*, media_release_stamper_*, media_stack_health_*, stream_relay_*, plex_appliance_*.
+# Templates: templates/media-maintenance, templates/streaming, templates/plex-appliance, templates/docker.
+# Scripts: scripts/media-maintenance, scripts/media-release, scripts/streaming.
+# Validation: ansible-playbook playbooks/media/stream-relay.yml --syntax-check.
+
+# =============================================================================
+# Stream Relay Playbook - OBS SRT ingest to streaming RTMP via media-vm NVENC
+# =============================================================================
+# Usage:
+#   ansible-playbook playbooks/media/stream-relay.yml
+#   ansible-playbook playbooks/media/stream-relay.yml --check --diff
+# =============================================================================
+
+- name: Configure stream relay
+  hosts: media-vm
+  become: true
+  gather_facts: true
+
+  handlers:
+    - name: Reload systemd
+      ansible.builtin.systemd:
+        daemon_reload: true
+
+    - name: Restart vertical stream broker
+      ansible.builtin.systemd:
+        name: stream-relay-vertical-broker.service
+        state: restarted
+      when:
+        - stream_relay_vertical_broker_enabled | default(false)
+        - not ansible_check_mode
+
+    - name: Restart stream relay broker
+      ansible.builtin.systemd:
+        name: stream-relay-broker.service
+        state: restarted
+      when:
+        - stream_relay_broker_enabled | default(false)
+        - not ansible_check_mode
+
+  tasks:
+    - name: Ensure stream relay package dependencies are installed
+      ansible.builtin.apt:
+        name:
+          - curl
+          - ffmpeg
+          - psmisc
+          - rsync
+        state: present
+        update_cache: true
+        cache_valid_time: 3600
+      when: ansible_facts.os_family == "Debian"
+
+    - name: Configure stream relay network buffers
+      ansible.builtin.copy:
+        dest: /etc/sysctl.d/90-stream-relay.conf
+        owner: root
+        group: root
+        mode: "0644"
+        content: |
+          # Managed by Ansible: playbooks/media/stream-relay.yml
+          {% for key, value in (stream_relay_sysctl | default({})).items() | sort %}
+          {{ key }} = {{ value }}
+          {% endfor %}
+      register: stream_relay_sysctl_file
+      when: stream_relay_sysctl is defined
+
+    - name: Apply stream relay network buffers
+      ansible.builtin.command: sysctl -p /etc/sysctl.d/90-stream-relay.conf
+      when:
+        - stream_relay_sysctl is defined
+        - stream_relay_sysctl_file.changed
+      changed_when: true
+
+    - name: Configure stream relay recording spool filesystem
+      ansible.builtin.shell: |
+        set -euo pipefail
+        mount_point="{{ stream_relay_recording_spool_mount }}"
+        label="{{ stream_relay_recording_spool_label }}"
+        device_glob="{{ stream_relay_recording_spool_device_glob }}"
+        device=""
+
+        for candidate in $device_glob; do
+          if [ -e "$candidate" ]; then
+            device="$(readlink -f "$candidate")"
+            break
+          fi
+        done
+
+        if [ -z "$device" ]; then
+          echo "missing device for stream VOD spool: $device_glob"
+          exit 0
+        fi
+
+        changed=0
+        mkdir -p "$mount_point"
+
+        if ! blkid "$device" >/dev/null 2>&1; then
+          mkfs.ext4 -F -L "$label" "$device"
+          changed=1
+        fi
+
+        if ! grep -Eq "^LABEL=${label}[[:space:]]+${mount_point}[[:space:]]+" /etc/fstab; then
+          printf 'LABEL=%s  %s  ext4  defaults,nofail,x-systemd.device-timeout=30s  0  2\n' "$label" "$mount_point" >> /etc/fstab
+          changed=1
+        fi
+
+        if ! mountpoint -q "$mount_point"; then
+          mount "$mount_point"
+          changed=1
+        fi
+
+        mkdir -p \
+          "$mount_point/incoming" \
+          "$mount_point/ready" \
+          "$mount_point/remuxing" \
+          "$mount_point/remuxed" \
+          "$mount_point/failed" \
+          "$mount_point/discarded"
+
+        if [ "$changed" -eq 1 ]; then
+          echo "updated=1 device=$device mount=$mount_point"
+        else
+          echo "unchanged device=$device mount=$mount_point"
+        fi
+      args:
+        executable: /bin/bash
+      register: stream_relay_recording_spool
+      changed_when: "'updated=1' in stream_relay_recording_spool.stdout"
+      when: stream_relay_recording_enabled | default(false)
+
+    - name: Create stream relay config directory
+      ansible.builtin.file:
+        path: /etc/stream-relay
+        state: directory
+        owner: root
+        group: root
+        mode: "0700"
+
+    - name: Ensure MediaMTX service user exists
+      ansible.builtin.user:
+        name: mediamtx
+        system: true
+        shell: /usr/sbin/nologin
+        home: /nonexistent
+        create_home: false
+      when: (stream_relay_broker_enabled | default(false) | bool) or (stream_relay_vertical_broker_enabled | default(false) | bool)
+
+    - name: Ensure MediaMTX directories exist
+      ansible.builtin.file:
+        path: "{{ item.path }}"
+        state: directory
+        owner: "{{ item.owner }}"
+        group: "{{ item.group }}"
+        mode: "{{ item.mode }}"
+      loop:
+        - { path: "/opt/mediamtx/{{ stream_relay_mediamtx_version }}", owner: root, group: root, mode: "0755" }
+        - { path: "/etc/mediamtx", owner: root, group: mediamtx, mode: "0750" }
+      when: (stream_relay_broker_enabled | default(false) | bool) or (stream_relay_vertical_broker_enabled | default(false) | bool)
+
+    - name: Download MediaMTX release archive
+      ansible.builtin.get_url:
+        url: "https://github.com/bluenviron/mediamtx/releases/download/v{{ stream_relay_mediamtx_version }}/mediamtx_v{{ stream_relay_mediamtx_version }}_{{ stream_relay_mediamtx_arch }}.tar.gz"
+        dest: "/tmp/mediamtx_v{{ stream_relay_mediamtx_version }}_{{ stream_relay_mediamtx_arch }}.tar.gz"
+        mode: "0644"
+      when: (stream_relay_broker_enabled | default(false) | bool) or (stream_relay_vertical_broker_enabled | default(false) | bool)
+
+    - name: Extract MediaMTX release archive
+      ansible.builtin.unarchive:
+        src: "/tmp/mediamtx_v{{ stream_relay_mediamtx_version }}_{{ stream_relay_mediamtx_arch }}.tar.gz"
+        dest: "/opt/mediamtx/{{ stream_relay_mediamtx_version }}"
+        remote_src: true
+        creates: "/opt/mediamtx/{{ stream_relay_mediamtx_version }}/mediamtx"
+      when: (stream_relay_broker_enabled | default(false) | bool) or (stream_relay_vertical_broker_enabled | default(false) | bool)
+
+    - name: Install MediaMTX binary symlink
+      ansible.builtin.file:
+        src: "/opt/mediamtx/{{ stream_relay_mediamtx_version }}/mediamtx"
+        dest: /usr/local/sbin/mediamtx
+        state: link
+        owner: root
+        group: root
+      when: (stream_relay_broker_enabled | default(false) | bool) or (stream_relay_vertical_broker_enabled | default(false) | bool)
+
+    - name: Deploy vertical stream broker config
+      ansible.builtin.template:
+        src: ../templates/streaming/mediamtx-vertical-broker.yml.j2
+        dest: /etc/mediamtx/vertical-broker.yml
+        owner: root
+        group: mediamtx
+        mode: "0640"
+      notify: Restart vertical stream broker
+      when: stream_relay_vertical_broker_enabled | default(false)
+
+    - name: Deploy landscape stream relay broker config
+      ansible.builtin.template:
+        src: ../templates/streaming/mediamtx-stream-relay-broker.yml.j2
+        dest: /etc/mediamtx/stream-relay-broker.yml
+        owner: root
+        group: mediamtx
+        mode: "0640"
+      notify: Restart stream relay broker
+      when: stream_relay_broker_enabled | default(false)
+
+    - name: Check for generic stream relay env
+      ansible.builtin.stat:
+        path: "{{ stream_relay_env_file }}"
+      register: stream_relay_env_stat
+
+    - name: Create stream relay env example
+      ansible.builtin.copy:
+        dest: /etc/stream-relay/stream-relay.env.example
+        owner: root
+        group: root
+        mode: "0600"
+        content: |
+          # Copy to {{ stream_relay_env_file }} and set the real key there.
+          # Keep this file and the live env file root-readable only.
+          # Output workers are enabled from inventory with stream_relay_outputs.
+          STREAM_RELAY_BROKER_INPUT_URL={{ stream_relay_broker_input_url }}
+          STREAM_RELAY_OUTPUT_RETRY_SECONDS={{ stream_relay_output_retry_seconds | default(10) }}
+          TWITCH_RTMP_URL={{ stream_relay_twitch_rtmp_base }}
+          TWITCH_STREAM_KEY=live_000000000_placeholder
+          TWITCH_BANDWIDTH_TEST={{ stream_relay_twitch_bandwidth_test | lower }}
+          YOUTUBE_RTMP_URL={{ stream_relay_youtube_rtmp_base }}
+          YOUTUBE_STREAM_KEY=xxxx-xxxx-xxxx-xxxx-xxxx
+          YOUTUBE_BACKUP_RTMP_URL={{ stream_relay_youtube_backup_rtmp_base }}
+          YOUTUBE_BACKUP_RTMP_QUERY=backup=1
+          YOUTUBE_VERTICAL_RTMP_URL={{ stream_relay_youtube_rtmp_base }}
+          YOUTUBE_VERTICAL_STREAM_KEY=xxxx-xxxx-xxxx-xxxx-xxxx
+
+    - name: Deploy generic stream relay script
+      ansible.builtin.template:
+        src: ../templates/streaming/stream-relay.sh.j2
+        dest: /usr/local/sbin/stream-relay
+        owner: root
+        group: root
+        mode: "0755"
+
+    - name: Deploy stream relay output worker script
+      ansible.builtin.template:
+        src: ../templates/streaming/stream-relay-output.sh.j2
+        dest: /usr/local/sbin/stream-relay-output
+        owner: root
+        group: root
+        mode: "0755"
+
+    - name: Deploy stream VOD mover script
+      ansible.builtin.template:
+        src: ../templates/streaming/stream-vod-mover.sh.j2
+        dest: /usr/local/sbin/stream-vod-mover
+        owner: root
+        group: root
+        mode: "0755"
+      when: stream_relay_recording_enabled | default(false)
+
+    - name: Deploy stream relay health check script
+      ansible.builtin.template:
+        src: ../templates/streaming/stream-relay-health.sh.j2
+        dest: /usr/local/sbin/stream-relay-health
+        owner: root
+        group: root
+        mode: "0755"
+      when: stream_relay_health_enabled | default(false)
+
+    - name: Deploy vertical stream relay script
+      ansible.builtin.template:
+        src: ../templates/streaming/stream-relay-vertical.sh.j2
+        dest: /usr/local/sbin/stream-relay-vertical
+        owner: root
+        group: root
+        mode: "0755"
+
+    - name: Deploy stream relay service
+      ansible.builtin.template:
+        src: ../templates/streaming/stream-relay.service.j2
+        dest: /etc/systemd/system/stream-relay.service
+        owner: root
+        group: root
+        mode: "0644"
+      notify: Reload systemd
+
+    - name: Deploy stream relay output worker service template
+      ansible.builtin.template:
+        src: ../templates/streaming/stream-relay-output@.service.j2
+        dest: /etc/systemd/system/stream-relay-output@.service
+        owner: root
+        group: root
+        mode: "0644"
+      notify: Reload systemd
+
+    - name: Deploy stream relay broker service
+      ansible.builtin.template:
+        src: ../templates/streaming/stream-relay-broker.service.j2
+        dest: /etc/systemd/system/stream-relay-broker.service
+        owner: root
+        group: root
+        mode: "0644"
+      notify:
+        - Reload systemd
+        - Restart stream relay broker
+      when: stream_relay_broker_enabled | default(false)
+
+    - name: Deploy stream VOD mover service
+      ansible.builtin.template:
+        src: ../templates/streaming/stream-vod-mover.service.j2
+        dest: /etc/systemd/system/stream-vod-mover.service
+        owner: root
+        group: root
+        mode: "0644"
+      notify: Reload systemd
+      when: stream_relay_recording_enabled | default(false)
+
+    - name: Deploy stream VOD mover retry timer
+      ansible.builtin.template:
+        src: ../templates/streaming/stream-vod-mover.timer.j2
+        dest: /etc/systemd/system/stream-vod-mover.timer
+        owner: root
+        group: root
+        mode: "0644"
+      notify: Reload systemd
+      when: stream_relay_recording_enabled | default(false)
+
+    - name: Deploy stream relay health check service
+      ansible.builtin.template:
+        src: ../templates/streaming/stream-relay-health.service.j2
+        dest: /etc/systemd/system/stream-relay-health.service
+        owner: root
+        group: root
+        mode: "0644"
+      notify: Reload systemd
+      when: stream_relay_health_enabled | default(false)
+
+    - name: Deploy stream relay health check timer
+      ansible.builtin.template:
+        src: ../templates/streaming/stream-relay-health.timer.j2
+        dest: /etc/systemd/system/stream-relay-health.timer
+        owner: root
+        group: root
+        mode: "0644"
+      notify: Reload systemd
+      when: stream_relay_health_enabled | default(false)
+
+    - name: Deploy vertical stream relay service
+      ansible.builtin.template:
+        src: ../templates/streaming/stream-relay-vertical.service.j2
+        dest: /etc/systemd/system/stream-relay-vertical.service
+        owner: root
+        group: root
+        mode: "0644"
+      notify: Reload systemd
+
+    - name: Deploy vertical stream broker service
+      ansible.builtin.template:
+        src: ../templates/streaming/stream-relay-vertical-broker.service.j2
+        dest: /etc/systemd/system/stream-relay-vertical-broker.service
+        owner: root
+        group: root
+        mode: "0644"
+      notify:
+        - Reload systemd
+        - Restart vertical stream broker
+      when: stream_relay_vertical_broker_enabled | default(false)
+
+    - name: Set stream relay broker service state
+      ansible.builtin.systemd:
+        name: stream-relay-broker.service
+        enabled: "{{ stream_relay_broker_enabled | default(false) }}"
+        state: "{{ (stream_relay_broker_enabled | default(false)) | ternary('started', 'stopped') }}"
+        daemon_reload: true
+      failed_when: false
+      when: stream_relay_broker_enabled is defined
+
+    - name: Set stream relay producer service state
+      ansible.builtin.systemd:
+        name: stream-relay.service
+        enabled: "{{ stream_relay_enabled | default(false) }}"
+        state: "{{ (stream_relay_enabled | default(false)) | ternary('started', 'stopped') }}"
+        daemon_reload: true
+      failed_when: false
+
+    - name: Set stream relay output worker states
+      ansible.builtin.systemd:
+        name: "stream-relay-output@{{ item }}.service"
+        enabled: "{{ stream_relay_output_enabled | default(false) }}"
+        state: "{{ (stream_relay_output_enabled | default(false)) | ternary('started', 'stopped') }}"
+        daemon_reload: true
+      loop: "{{ stream_relay_outputs | default([]) }}"
+      failed_when: false
+
+    - name: Set stream VOD mover retry timer state
+      ansible.builtin.systemd:
+        name: stream-vod-mover.timer
+        enabled: "{{ stream_relay_recording_enabled | default(false) }}"
+        state: "{{ (stream_relay_recording_enabled | default(false)) | ternary('started', 'stopped') }}"
+        daemon_reload: true
+      failed_when: false
+
+    - name: Set stream relay health check timer state
+      ansible.builtin.systemd:
+        name: stream-relay-health.timer
+        enabled: "{{ stream_relay_health_enabled | default(false) }}"
+        state: "{{ (stream_relay_health_enabled | default(false)) | ternary('started', 'stopped') }}"
+        daemon_reload: true
+      failed_when: false
+
+    - name: Set vertical stream relay service state
+      ansible.builtin.systemd:
+        name: stream-relay-vertical.service
+        enabled: "{{ stream_relay_vertical_enabled | default(false) }}"
+        state: "{{ (stream_relay_vertical_enabled | default(false)) | ternary('started', 'stopped') }}"
+        daemon_reload: true
+      failed_when: false
+
+    - name: Clear parked vertical stream relay failed state
+      ansible.builtin.command: systemctl reset-failed stream-relay-vertical.service
+      when: not (stream_relay_vertical_enabled | default(false) | bool)
+      changed_when: false
+      failed_when: false
+
+    - name: Set vertical stream broker service state
+      ansible.builtin.systemd:
+        name: stream-relay-vertical-broker.service
+        enabled: "{{ stream_relay_vertical_broker_enabled | default(false) }}"
+        state: "{{ (stream_relay_vertical_broker_enabled | default(false)) | ternary('started', 'stopped') }}"
+        daemon_reload: true
+      failed_when: false
