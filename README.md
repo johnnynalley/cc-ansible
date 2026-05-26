@@ -400,6 +400,8 @@ ansible pve-herc -m shell -a "pdbedit -L" --become
 
 Automatic recovery after router/WiFi restarts via `network-recovery.yml`:
 
+- Optional static netplan management for hosts with fixed LAN service IPs, such
+  as media-vm's `192.168.1.136` OBS/Plex address.
 - **Network Watchdog** runs every 60 seconds:
   - Ensures interfaces are UP (catches link flaps where carrier recovers but interface stays DOWN)
   - Fixes Proxmox bridge interfaces that got detached (`eno1`, VM firewall ports like `fwpr100p0`, or plain VM tap ports like `tap130i0` removed from `vmbr0`)
@@ -532,7 +534,7 @@ ansible media-vm -m shell -a "docker exec immich_folder_album_creator python3 -m
 
 ## Stream Relay (OBS to platforms via media-vm)
 
-`playbooks/stream-relay.yml` deploys the media-vm stream relay. `stream-relay.service` receives one OBS SRT feed on UDP 9000 and encodes once with `h264_nvenc` on the Quadro P2200. It fans that encoded feed out locally over MPEG-TS/TCP to `stream-relay-output@<platform>.service` workers, which push to Twitch, YouTube, and any future RTMP platform. Stream keys are live-only in `/etc/stream-relay/stream-relay.env`; do not commit them.
+`playbooks/stream-relay.yml` deploys the media-vm stream relay. media-vm's LAN IP is `192.168.1.136`, managed as static netplan by `playbooks/network-recovery.yml`. `stream-relay.service` receives one OBS SRT feed on UDP 9000 and encodes once with `h264_nvenc` on the Quadro P2200. It fans that encoded feed out locally over MPEG-TS/TCP to `stream-relay-output@<platform>.service` workers, which push to Twitch, YouTube, and any future RTMP platform. Stream keys are live-only in `/etc/stream-relay/stream-relay.env`; do not commit them.
 
 ```bash
 # Deploy relay files and apply the configured service state

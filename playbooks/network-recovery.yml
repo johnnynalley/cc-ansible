@@ -41,6 +41,22 @@
         - ansible_facts.os_family == "Archlinux"
 
     # =========================================================================
+    # Optional Static Netplan - opt-in for hosts with fixed LAN service IPs
+    # =========================================================================
+    - name: Manage static netplan configuration
+      ansible.builtin.template:
+        src: ../templates/network/netplan-static.yaml.j2
+        dest: "{{ network_static_netplan_path | default('/etc/netplan/50-cloud-init.yaml') }}"
+        owner: root
+        group: root
+        mode: "0600"
+        backup: true
+      when: network_static_netplan_enabled | default(false)
+      notify:
+        - Validate netplan
+        - Apply netplan
+
+    # =========================================================================
     # Tailscale Online Target - waits for actual Tailscale connectivity
     # =========================================================================
     - name: Create wait-for-tailscale script
@@ -236,6 +252,15 @@
       failed_when: false
 
   handlers:
+    - name: Validate netplan
+      ansible.builtin.command:
+        cmd: netplan generate
+      changed_when: false
+
+    - name: Apply netplan
+      ansible.builtin.command:
+        cmd: netplan apply
+
     - name: Reload systemd
       ansible.builtin.systemd:
         daemon_reload: true

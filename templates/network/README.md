@@ -2,6 +2,8 @@
 
 ## Templates
 
+- `netplan-static.yaml.j2`: Opt-in static netplan config for fixed LAN service
+  addresses.
 - `network-watchdog.sh.j2`: Network and Tailscale recovery watchdog.
 
 ## Consumers

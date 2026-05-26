@@ -9,3 +9,14 @@ admin_user: johnny
 gluetun_watchdog_enabled: false
 gluetun_watchdog_compose_dir: /opt/media-stack
 gluetun_watchdog_notify_tag: "push-quiet,dbc"
+
+# Static LAN address for Plex and stream relay ingress.
+network_static_netplan_enabled: true
+network_static_netplan_path: /etc/netplan/50-cloud-init.yaml
+network_static_netplan_interface: enp6s18
+network_static_netplan_addresses:
+  - 192.168.1.136/24
+network_static_netplan_gateway: 192.168.1.1
+network_static_netplan_nameservers:
+  - 192.168.1.1
+  - 1.1.1.1

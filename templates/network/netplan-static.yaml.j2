@@ -1,0 +1,18 @@
+# Managed by Ansible - do not edit manually.
+network:
+  version: 2
+  ethernets:
+    {{ network_static_netplan_interface }}:
+      dhcp4: false
+      addresses:
+{% for address in network_static_netplan_addresses %}
+        - {{ address }}
+{% endfor %}
+      routes:
+        - to: default
+          via: {{ network_static_netplan_gateway }}
+      nameservers:
+        addresses:
+{% for nameserver in network_static_netplan_nameservers %}
+          - {{ nameserver }}
+{% endfor %}
