@@ -429,7 +429,7 @@ docker_stacks:
       - gluetun
 ```
 
-**Currently auto-updated**: Caddy, Seerr, and Loki-Grafana (docker-vm), Gluetun and LazyLibrarian (media-vm), Diun (all 3 VMs). Change by editing `docker.yml` and re-running the playbook.
+**Currently auto-updated**: Caddy, Seerr, Loki-Grafana, and Gluetun (docker-vm), LazyLibrarian (media-vm), Diun (all 3 VMs). Change by editing `docker.yml` and re-running the playbook.
 
 **How it works**: The script (`/usr/local/sbin/docker-auto-update`) is templated by Ansible with the auto-update stack list baked in. For each stack, it pulls/builds, runs `docker-stack-diff` to detect changes, and only recreates if images actually changed. Gluetun uses `--force-recreate` with dependent containers (qBittorrent) to clear the network namespace. Sends `push-quiet` Apprise notification summarizing updates. Timer runs at :30 past 00/06/12/18 with 30m random delay.
 
