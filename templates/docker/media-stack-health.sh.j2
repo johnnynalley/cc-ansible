@@ -156,8 +156,8 @@ check_mount() {
     return
   fi
 
-  fstype="$(findmnt -rn --target "$path" -o FSTYPE 2>/dev/null | head -n1 || true)"
-  source="$(findmnt -rn --target "$path" -o SOURCE 2>/dev/null | head -n1 || true)"
+  fstype="$(findmnt -rn --target "$path" -o FSTYPE 2>/dev/null | tail -n1 || true)"
+  source="$(findmnt -rn --target "$path" -o SOURCE 2>/dev/null | tail -n1 || true)"
 
   if ! expected_fstype_matches "$fstype" "$expected_fstype"; then
     add_problem "$path has fstype ${fstype:-unknown} from ${source:-unknown}, expected $expected_fstype"
@@ -183,23 +183,43 @@ check_library_probe() {
   fi
 }
 
+resolve_container() {
+  local container="$1"
+  local id
+
+  if docker inspect "$container" >/dev/null 2>&1; then
+    printf '%s\n' "$container"
+    return
+  fi
+
+  id="$(docker ps -q \
+    --filter "label=com.docker.compose.service=$container" \
+    --filter status=running \
+    | head -n1)"
+  if [[ -n "$id" ]]; then
+    printf '%s\n' "$id"
+  fi
+}
+
 check_container() {
   local container="$1"
+  local resolved
   local state
   local health
 
-  if ! docker inspect "$container" >/dev/null 2>&1; then
+  resolved="$(resolve_container "$container")"
+  if [[ -z "$resolved" ]]; then
     add_problem "$container container is missing"
     return
   fi
 
-  state="$(docker inspect --format {% raw %}'{{.State.Status}}'{% endraw %} "$container" 2>/dev/null || true)"
+  state="$(docker inspect --format {% raw %}'{{.State.Status}}'{% endraw %} "$resolved" 2>/dev/null || true)"
   if [[ "$state" != "running" ]]; then
     add_problem "$container container state is ${state:-unknown}"
     return
   fi
 
-  health="$(docker inspect --format {% raw %}'{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}'{% endraw %} "$container" 2>/dev/null || true)"
+  health="$(docker inspect --format {% raw %}'{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}'{% endraw %} "$resolved" 2>/dev/null || true)"
   case "$health" in
     healthy|none)
       ;;
@@ -297,6 +317,7 @@ check_hardlinks() {
   local container="$1"
   local source_dir="$2"
   local target_dir="$3"
+  local resolved
   local output
   local src_line
   local dst_line
@@ -307,12 +328,13 @@ check_hardlinks() {
   local dst_inode
   local dst_links
 
-  if ! docker inspect "$container" >/dev/null 2>&1; then
+  resolved="$(resolve_container "$container")"
+  if [[ -z "$resolved" ]]; then
     add_problem "hardlink test container is missing: $container"
     return
   fi
 
-  output="$(docker exec --user 1000:1000 "$container" sh -c '
+  output="$(docker exec --user 1000:1000 "$resolved" sh -c '
     set -eu
     source_dir="$1"
     target_dir="$2"

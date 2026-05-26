@@ -39,6 +39,10 @@ Recyclarr manages the TRaSH custom formats and profile scores that are in its
 config. Local custom formats created directly in Sonarr/Radarr are still valid,
 but they must be documented here and checked after Recyclarr preview. Keep
 `delete_old_custom_formats: false` unless the local CFs have been migrated.
+Recyclarr's live `base_url` values point at the docker-vm local compose service
+names (`http://sonarr:8989` and `http://radarr:7878`). Recyclarr no longer owns
+`quality_definition` sync; Sonarr/Radarr quality-size caps are local policy and
+must be checked after any Recyclarr config edit.
 
 Sonarr/Radarr naming must preserve the fields that local CFs depend on. On
 2026-05-22, Sonarr and Radarr naming formats were updated to include
@@ -47,6 +51,28 @@ Sonarr/Radarr naming must preserve the fields that local CFs depend on. On
 codec did not, so existing HEVC/x265 files could lose the `x265` CF after import
 and then be treated as cutoff-unmet later. Rename previews confirmed Sonarr will
 render existing HEVC files as `[h265]`, which matches the current x265 regex.
+
+## Quality Size Guard
+
+Quality-size definitions are set globally in Sonarr/Radarr as MB/minute caps.
+They are intentionally loose outlier guards, not small-encode targets. The goal
+is to stop very large "upgrades" such as a 22 GiB single 1080p episode from
+winning only because it matches `x265`, while still allowing high-bitrate
+Bluray and remux candidates.
+
+Current local caps:
+
+- 480p: preferred `35`, max `60`
+- 576p: preferred `50`, max `80`
+- 720p: preferred `90`, max `140`
+- 1080p: preferred `200`, max `300`
+- 1080p remux: preferred `300`, max `450`
+- 2160p: preferred `350`, max `550`
+- 2160p remux: preferred `650`, max `900`
+
+These values apply to both Sonarr and Radarr for matching qualities. Recyclarr
+preview should show no `Quality Definition` changes; if it does, stop before
+syncing and reconcile this local policy first.
 
 ## Anime Priority Order
 
@@ -416,6 +442,12 @@ rollback artifacts from the Profilarr staging pass:
   `/opt/media-stack/arr-policy-backups/20260524T211853Z-sonarr-blocklist-queue-matches`,
   and
   `/opt/media-stack/arr-policy-backups/20260524T211910Z-sonarr-blocklist-queue-matches`
+- Recyclarr URL/quality-definition ownership and size-guard backups:
+  `/opt/media-stack/recyclarr/recyclarr.yml.codex-pre-docker-vm-url-fix-20260526T192212Z`,
+  `/opt/media-stack/recyclarr/recyclarr.yml.codex-pre-quality-size-guard-20260526T192435Z`,
+  `/opt/media-stack/release-policy-snapshots/20260526T192435Z-quality-size-guard`,
+  and
+  `/opt/media-stack/release-policy-snapshots/20260526T193707Z-loose-quality-size-guard`
 
 Keep these while the Profilarr candidate path is still being validated. After
 the final profile migration is accepted or abandoned, clean up the temporary
