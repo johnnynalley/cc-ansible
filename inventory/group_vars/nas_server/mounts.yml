@@ -45,11 +45,12 @@ filesystem_mounts:
     group: smbusers
     mode: "2775"
 
-  # LUKS-encrypted drive (ext4 on dm-crypt)
-  - path: /srv/nas-02
-    src: /dev/mapper/nas02_crypt
+  # 2TB WD Elements via USB (ext4) - mergerfs media branch
+  # WDC WD20JDRW-11C7VS0, formerly encrypted nas-02
+  - path: /srv/media-06
+    src: "UUID=8b70c770-3335-4dcb-b618-f9336ca39b59"
     fstype: ext4
-    opts: "noatime,nofail"
+    opts: "noatime,nofail,x-systemd.device-timeout=60s"
     owner: johnny
     group: smbusers
     mode: "2775"
@@ -85,5 +86,9 @@ filesystem_mounts:
 
 # Retired bind mounts from the old Pi NFS configs workflow.
 filesystem_mounts_absent:
+  - path: /srv/nas-02
   - path: /srv/exports/configs
   - path: /srv/exports/ansible
+
+filesystem_crypttab_absent:
+  - nas02_crypt

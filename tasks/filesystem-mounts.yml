@@ -59,6 +59,15 @@
   loop_control:
     label: "{{ item.path }}"
 
+- name: Remove retired crypttab entries
+  ansible.builtin.lineinfile:
+    path: /etc/crypttab
+    regexp: "^{{ item | regex_escape() }}\\s+"
+    state: absent
+  loop: "{{ filesystem_crypttab_absent | default([]) }}"
+  loop_control:
+    label: "{{ item }}"
+
 - name: Check ext filesystem reserved block settings
   ansible.builtin.command:
     cmd: "tune2fs -l {{ item.src }}"

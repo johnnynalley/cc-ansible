@@ -11,13 +11,13 @@ mergerfs_mount_type: fuse.mergerfs
 # Branches (source paths combined into the pool)
 mergerfs_branches:
   - /srv/nas-01/media
-  - /srv/nas-02/media
   - /srv/nas-zfs/media
   - /srv/media-01/media
   - /srv/media-02/media
   - /srv/media-03/media
   - /srv/media-04/media
   - /srv/media-05/media
+  - /srv/media-06/media
 
 mergerfs_branch_subdirectories:
   - path: plex/.sonarr-recycle-bin
@@ -42,15 +42,14 @@ mergerfs_options: "allow_other,inodecalc=path-hash,func.getattr=newest,cache.fil
 # Systemd dependencies (After= only, NOT Requires= - mixed ZFS/fstab breaks Requires=)
 mergerfs_after_units:
   - zfs-mount.service
-  - cryptsetup.target
   - srv-nas\x2d01.mount
-  - srv-nas\x2d02.mount
   - srv-nas\x2dzfs-media.mount
   - srv-media\x2d01-media.mount
   - srv-media\x2d02-media.mount
   - srv-media\x2d03-media.mount
   - srv-media\x2d04.mount
   - srv-media\x2d05.mount
+  - srv-media\x2d06.mount
 
 # Default path excludes for mergerfs-balance
 # These paths should stay on nas_zfs (mirrored) and not be moved to single-drive pools

@@ -22,5 +22,5 @@ smb_shares:
   - name: NAS-01
     path: /srv/nas-01
 
-  - name: NAS-02
-    path: /srv/nas-02
+  - name: Media-06
+    path: /srv/media-06
