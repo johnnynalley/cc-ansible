@@ -55,6 +55,10 @@ OK: cached media-stack health passed <age>s ago
 ```
 
 Any nonzero exit or `CRITICAL:` output should alert Discord `#astra`.
+If the command exits zero but includes a `WARNINGS:` section, Astra should report
+the warning without treating the stack as down. Current expected warning class:
+recent qBittorrent imports that were copied instead of hardlinked because
+mergerfs placed the download and library file on different backing branches.
 
 This reads the cached result from the local `media-stack-health.timer` on `docker-vm`, which runs the full checks and alerts through Apprise/DBC. The cached heartbeat read avoids starting fresh NFS/mergerfs-touching probes from Astra. The timer covers the migrated Sonarr/Radarr/download automation on docker-vm while Plex stays on media-vm.
 

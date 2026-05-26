@@ -31,17 +31,25 @@ HARDLINK_CONTAINER="{{ media_stack_health_hardlink_container | default('sonarr')
 HARDLINK_SOURCE_DIR="{{ media_stack_health_hardlink_source_dir | default('/data/downloads/complete') }}"
 HARDLINK_TARGET_DIR="{{ media_stack_health_hardlink_target_dir | default('/data/Anime') }}"
 LIBRARY_PROBE_PATH="{{ media_stack_health_library_probe_path | default('/srv/media/plex/Movies') }}"
+DATA_HOST_ROOT="{{ media_stack_health_data_host_root | default('/srv/media/plex') }}"
+QBIT_IMPORT_AUDIT_ENABLED="{{ media_stack_health_qbit_import_audit_enabled | default(true) }}"
+QBIT_IMPORT_AUDIT_HOURS="{{ media_stack_health_qbit_import_audit_hours | default(24) }}"
+QBIT_IMPORT_AUDIT_MAX_RECORDS="{{ media_stack_health_qbit_import_audit_max_records | default(200) }}"
+QBIT_IMPORT_AUDIT_FAIL_ON_COPY="{{ media_stack_health_qbit_import_audit_fail_on_copy | default(false) }}"
 STATUS_FILE="$STATE_DIR/status.env"
 PROBLEMS_FILE="$STATE_DIR/problems.txt"
+WARNINGS_FILE="$STATE_DIR/warnings.txt"
 RUNNING_FILE="$STATE_DIR/running"
 
 mkdir -p "$STATE_DIR"
 
 problems=()
+warnings=()
 
 write_status() {
   local status="$1"
   local body="${2:-}"
+  local warning_body="${3:-}"
   local now
 
   now="$(date +%s)"
@@ -51,6 +59,13 @@ write_status() {
     : > "${PROBLEMS_FILE}.tmp"
   fi
   mv "${PROBLEMS_FILE}.tmp" "$PROBLEMS_FILE"
+
+  if [[ -n "$warning_body" ]]; then
+    printf '%s\n' "$warning_body" > "${WARNINGS_FILE}.tmp"
+  else
+    : > "${WARNINGS_FILE}.tmp"
+  fi
+  mv "${WARNINGS_FILE}.tmp" "$WARNINGS_FILE"
 
   {
     printf 'STATUS=%q\n' "$status"
@@ -102,10 +117,18 @@ show_cached_status() {
   case "${STATUS:-}" in
     ok)
       printf 'OK: cached media-stack health passed %ss ago\n' "$age"
+      if [[ -s "$WARNINGS_FILE" ]]; then
+        printf 'WARNINGS:\n'
+        cat "$WARNINGS_FILE"
+      fi
       ;;
     failed)
       printf 'CRITICAL: cached media-stack health failed %ss ago\n' "$age" >&2
       [[ -s "$PROBLEMS_FILE" ]] && cat "$PROBLEMS_FILE" >&2
+      if [[ -s "$WARNINGS_FILE" ]]; then
+        printf 'WARNINGS:\n' >&2
+        cat "$WARNINGS_FILE" >&2
+      fi
       exit 2
       ;;
     *)
@@ -125,6 +148,39 @@ trap 'rm -f "$RUNNING_FILE"' EXIT
 
 add_problem() {
   problems+=("$1")
+}
+
+add_warning() {
+  warnings+=("$1")
+}
+
+join_warnings() {
+  local item
+  local joined=""
+
+  for item in "${warnings[@]}"; do
+    if [[ -n "$joined" ]]; then
+      joined+=$'\n'
+    fi
+    joined+="$item"
+  done
+
+  printf '%s' "$joined"
+}
+
+array_has_items() {
+  [[ "$#" -gt 0 ]]
+}
+
+is_truthy() {
+  case "${1,,}" in
+    1|true|yes|on)
+      return 0
+      ;;
+    *)
+      return 1
+      ;;
+  esac
 }
 
 expected_fstype_matches() {
@@ -371,6 +427,188 @@ check_hardlinks() {
   fi
 }
 
+map_data_path_to_host() {
+  local container_path="$1"
+
+  case "$container_path" in
+    /data/*)
+      printf '%s/%s\n' "$DATA_HOST_ROOT" "${container_path#/data/}"
+      ;;
+    /data)
+      printf '%s\n' "$DATA_HOST_ROOT"
+      ;;
+    *)
+      printf '%s\n' "$container_path"
+      ;;
+  esac
+}
+
+read_arr_api_key() {
+  local container="$1"
+  local resolved
+
+  resolved="$(resolve_container "$container")"
+  if [[ -z "$resolved" ]]; then
+    return 1
+  fi
+
+  docker exec "$resolved" sed -n 's:.*<ApiKey>\(.*\)</ApiKey>.*:\1:p' /config/config.xml 2>/dev/null | head -n1
+}
+
+check_qbit_import_audit_app() {
+  local app="$1"
+  local port="$2"
+  local key
+  local since
+  local response
+  local records
+  local checked=0
+  local hardlink_like=0
+  local copied=0
+  local missing=0
+  local invalid=0
+  local sample_count=0
+  local samples=()
+  local date
+  local title
+  local dropped_path
+  local imported_path
+  local dropped_host
+  local imported_host
+  local src_stat
+  local dst_stat
+  local src_dev
+  local src_inode
+  local src_links
+  local src_size
+  local dst_dev
+  local dst_inode
+  local dst_links
+  local dst_size
+  local message
+
+  key="$(read_arr_api_key "$app" || true)"
+  if [[ -z "$key" ]]; then
+    add_warning "qBittorrent import audit could not read $app API key"
+    return
+  fi
+
+  since="$(date -u -d "${QBIT_IMPORT_AUDIT_HOURS} hours ago" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || true)"
+  if [[ -z "$since" ]]; then
+    add_warning "qBittorrent import audit has invalid lookback hours: $QBIT_IMPORT_AUDIT_HOURS"
+    return
+  fi
+
+  response="$(curl -fsS -H "X-Api-Key: $key" \
+    --connect-timeout 3 --max-time "$HTTP_MAX_TIME" \
+    "http://127.0.0.1:${port}/api/v3/history/since?date=${since}" 2>/dev/null || true)"
+  if [[ -z "$response" ]]; then
+    add_warning "qBittorrent import audit could not read $app history"
+    return
+  fi
+
+  if [[ ! "$QBIT_IMPORT_AUDIT_MAX_RECORDS" =~ ^[0-9]+$ || "$QBIT_IMPORT_AUDIT_MAX_RECORDS" -lt 1 ]]; then
+    add_warning "qBittorrent import audit has invalid max records: $QBIT_IMPORT_AUDIT_MAX_RECORDS"
+    return
+  fi
+
+  records="$(printf '%s' "$response" | jq -r --argjson max "$QBIT_IMPORT_AUDIT_MAX_RECORDS" '
+    [
+      .[]
+      | select(.eventType == "downloadFolderImported")
+      | select(((.data.downloadClientName // .downloadClientName // .downloadClient // .data.downloadClient // "") | ascii_downcase | contains("qbittorrent")))
+      | [
+          (.date // ""),
+          (.sourceTitle // ""),
+          (.data.droppedPath // ""),
+          (.data.importedPath // "")
+        ]
+    ][0:$max]
+    | .[]
+    | @tsv
+  ' 2>/dev/null || true)"
+
+  while IFS=$'\t' read -r date title dropped_path imported_path; do
+    [[ -n "${date:-}" ]] || continue
+    checked=$((checked + 1))
+
+    if [[ -z "${dropped_path:-}" || -z "${imported_path:-}" ]]; then
+      invalid=$((invalid + 1))
+      continue
+    fi
+
+    dropped_host="$(map_data_path_to_host "$dropped_path")"
+    imported_host="$(map_data_path_to_host "$imported_path")"
+
+    if [[ ! -e "$dropped_host" || ! -e "$imported_host" ]]; then
+      missing=$((missing + 1))
+      continue
+    fi
+
+    src_stat="$(stat -c '%d %i %h %s' "$dropped_host" 2>/dev/null || true)"
+    dst_stat="$(stat -c '%d %i %h %s' "$imported_host" 2>/dev/null || true)"
+    if [[ -z "$src_stat" || -z "$dst_stat" ]]; then
+      invalid=$((invalid + 1))
+      continue
+    fi
+
+    read -r src_dev src_inode src_links src_size <<< "$src_stat"
+    read -r dst_dev dst_inode dst_links dst_size <<< "$dst_stat"
+
+    if [[ "$src_size" != "$dst_size" ]]; then
+      copied=$((copied + 1))
+      if (( sample_count < 5 )); then
+        samples+=("$app size-mismatch $(printf '%s' "$title" | cut -c1-120)")
+        sample_count=$((sample_count + 1))
+      fi
+      continue
+    fi
+
+    # MergerFS inodecalc=path-hash can expose different inodes for two names of
+    # the same underlying hardlink, so link count is the reliable signal here.
+    if [[ "$src_links" -ge 2 && "$dst_links" -ge 2 ]]; then
+      hardlink_like=$((hardlink_like + 1))
+    else
+      copied=$((copied + 1))
+      if (( sample_count < 5 )); then
+        samples+=("$app src_links=$src_links dst_links=$dst_links $(printf '%s' "$title" | cut -c1-120)")
+        sample_count=$((sample_count + 1))
+      fi
+    fi
+  done <<< "$records"
+
+  if (( checked == 0 )); then
+    return
+  fi
+
+  if (( copied > 0 )); then
+    message="qBittorrent import audit found copied imports for $app: copied=$copied hardlink_like=$hardlink_like source_missing=$missing invalid=$invalid lookback=${QBIT_IMPORT_AUDIT_HOURS}h"
+    if (( sample_count > 0 )); then
+      message+="; samples: $(printf '%s; ' "${samples[@]}")"
+    fi
+
+    if is_truthy "$QBIT_IMPORT_AUDIT_FAIL_ON_COPY"; then
+      add_problem "$message"
+    else
+      add_warning "$message"
+    fi
+  fi
+}
+
+check_qbit_import_audit() {
+  if ! is_truthy "$QBIT_IMPORT_AUDIT_ENABLED"; then
+    return
+  fi
+
+  if ! command -v jq >/dev/null 2>&1; then
+    add_warning "qBittorrent import audit skipped because jq is not installed"
+    return
+  fi
+
+  check_qbit_import_audit_app sonarr 8989
+  check_qbit_import_audit_app radarr 7878
+}
+
 {% for mount in media_stack_health_mounts | default(media_stack_health_default_mounts) %}
 check_mount {{ mount.path | quote }} {{ mount.fstype | default('') | quote }} {{ mount.require_path | default('') | quote }}
 {% endfor %}
@@ -387,17 +625,26 @@ check_http {{ endpoint.name | quote }} {{ endpoint.url | quote }}
 
 check_qbit_port_sync
 check_hardlinks "$HARDLINK_CONTAINER" "$HARDLINK_SOURCE_DIR" "$HARDLINK_TARGET_DIR"
+check_qbit_import_audit
 
-{% raw %}if [[ "${#problems[@]}" -eq 0 ]]; then{% endraw %}
+if ! array_has_items "${problems[@]}"; then
   rm -f "$STATE_DIR/last-alert"
-  write_status ok
+  warning_body="$(join_warnings)"
+  write_status ok "" "$warning_body"
   printf 'OK: media-stack health checks passed\n'
+  if [[ -n "$warning_body" ]]; then
+    printf 'WARNINGS:\n%s\n' "$warning_body"
+  fi
   exit 0
 fi
 
 body="$(printf '%s\n' "${problems[@]}")"
-write_status failed "$body"
+warning_body="$(join_warnings)"
+write_status failed "$body" "$warning_body"
 printf 'CRITICAL: media-stack health check failed\n%s\n' "$body" >&2
+if [[ -n "$warning_body" ]]; then
+  printf 'WARNINGS:\n%s\n' "$warning_body" >&2
+fi
 
 if [[ "$ALERT_MODE" -eq 1 ]]; then
   now="$(date +%s)"

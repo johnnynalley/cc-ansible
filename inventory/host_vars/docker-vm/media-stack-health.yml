@@ -10,6 +10,11 @@ media_stack_health_alert_cooldown_seconds: 1800
 media_stack_health_alert_tags: "push,dbc"
 media_stack_health_qbit_env_file: /etc/qbit-port-sync.env
 media_stack_health_library_probe_path: /srv/media/plex/Movies
+media_stack_health_data_host_root: /srv/media/plex
 media_stack_health_hardlink_container: sonarr
 media_stack_health_hardlink_source_dir: /data/downloads/complete
 media_stack_health_hardlink_target_dir: /data/Anime
+media_stack_health_qbit_import_audit_enabled: true
+media_stack_health_qbit_import_audit_hours: 24
+media_stack_health_qbit_import_audit_max_records: 200
+media_stack_health_qbit_import_audit_fail_on_copy: false
