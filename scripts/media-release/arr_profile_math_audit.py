@@ -34,6 +34,12 @@ REGULAR_X265_MIN_SCORE = 5000
 ANIME_BLURAY_SOURCE_RANK = 0
 SERVICE_MAX_SCORE = 3
 REPACK_MAX_SCORE = 3
+REGULAR_WEB_QUALITY_GROUPS = (
+    ("WEB 480p", ("WEBDL-480p", "WEBRip-480p")),
+    ("WEB 720p", ("WEBDL-720p", "WEBRip-720p")),
+    ("WEB 1080p", ("WEBDL-1080p", "WEBRip-1080p")),
+    ("WEB 2160p", ("WEBDL-2160p", "WEBRip-2160p")),
+)
 SERVICE_FORMAT_NAMES = {
     "ABEMA",
     "ADN",
@@ -314,6 +320,71 @@ def custom_format_name_from_item(
     return str(item.get("name") or f"id:{cf_id}")
 
 
+def is_group_item(item: dict[str, Any]) -> bool:
+    return "quality" not in item and isinstance(item.get("items"), list)
+
+
+def is_quality_item(item: dict[str, Any]) -> bool:
+    return isinstance(item.get("quality"), dict)
+
+
+def quality_item_name(item: dict[str, Any]) -> str:
+    quality = item.get("quality")
+    if isinstance(quality, dict) and quality.get("name"):
+        return str(quality["name"])
+    return str(item.get("name") or "")
+
+
+def iter_quality_locations(profile: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    locations: dict[str, dict[str, Any]] = {}
+    for item in profile.get("items") or []:
+        if is_quality_item(item):
+            locations[quality_item_name(item)] = {
+                "allowed": bool(item.get("allowed")),
+                "group": None,
+            }
+            continue
+        if is_group_item(item):
+            group_name = str(item.get("name") or "")
+            for child in item.get("items") or []:
+                if not is_quality_item(child):
+                    continue
+                locations[quality_item_name(child)] = {
+                    "allowed": bool(child.get("allowed")),
+                    "group": group_name,
+                }
+    return locations
+
+
+def regular_web_quality_group_report(
+    profile: dict[str, Any],
+    failures: list[str],
+    profile_name: str,
+) -> dict[str, Any]:
+    locations = iter_quality_locations(profile)
+    report: dict[str, Any] = {}
+    for group_name, quality_names in REGULAR_WEB_QUALITY_GROUPS:
+        present = [name for name in quality_names if name in locations]
+        if len(present) != len(quality_names):
+            continue
+        allowed = [name for name in present if locations[name]["allowed"]]
+        if not allowed:
+            continue
+        groups = {locations[name]["group"] for name in present}
+        report[group_name] = {
+            "qualities": list(quality_names),
+            "allowed_qualities": allowed,
+            "groups": sorted(str(group) for group in groups),
+        }
+        if groups != {group_name}:
+            actual = ", ".join(sorted(str(group) for group in groups))
+            failures.append(
+                f"{profile_name}: {', '.join(quality_names)} must be grouped as "
+                f"{group_name}; actual groups: {actual}"
+            )
+    return report
+
+
 def find_one(items: list[dict[str, Any]], name: str, kind: str) -> dict[str, Any]:
     matches = [item for item in items if item.get("name") == name]
     if len(matches) != 1:
@@ -503,6 +574,7 @@ def audit_profile(
             f"must be {ANIME_BLURAY_SOURCE_RANK}"
         )
     if profile_check.kind == "anime":
+        regular_quality_groups: dict[str, Any] = {}
         da_score = scores.get("Anime Dual Audio", 0)
         if da_score < ANIME_DUAL_AUDIO_SCORE:
             failures.append(f"{profile_check.name}: Anime Dual Audio score {da_score} is below {ANIME_DUAL_AUDIO_SCORE}")
@@ -541,6 +613,7 @@ def audit_profile(
                 f"must beat max 720p DA {max_720p_da}"
             )
     else:
+        regular_quality_groups = regular_web_quality_group_report(profile, failures, profile_check.name)
         release_stack = max(bluray_stack, web_stack) + max_fallback_score + max_incidental_score
         if release_stack >= x265_score:
             failures.append(
@@ -564,6 +637,7 @@ def audit_profile(
         "max_fallback_score": max_fallback_score,
         "min_positive_dictionarry_score": min_positive_dictionarry,
         "dual_audio_score": scores.get("Anime Dual Audio"),
+        "regular_web_quality_groups": regular_quality_groups,
         "unexpected_legacy_tier_scores": legacy_scores,
         "failures": failures,
     }
@@ -619,6 +693,10 @@ def print_text(report: dict[str, Any]) -> None:
                     da=profile["dual_audio_score"],
                 )
             )
+            if profile["regular_web_quality_groups"]:
+                print("    regular WEB quality groups:")
+                for group_name, item in sorted(profile["regular_web_quality_groups"].items()):
+                    print(f"      - {group_name}: {', '.join(item['qualities'])}")
             if profile["unexpected_legacy_tier_scores"]:
                 print("    unexpected legacy/fallback tiers:")
                 for name, score in sorted(profile["unexpected_legacy_tier_scores"].items()):

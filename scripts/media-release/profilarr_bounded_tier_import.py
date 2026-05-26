@@ -71,6 +71,12 @@ REGULAR_X265_SCORE = 5000
 ANIME_BLURAY_SOURCE_RANK = 0
 SERVICE_MAX_SCORE = 3
 REPACK_MAX_SCORE = 3
+REGULAR_WEB_QUALITY_GROUPS = (
+    ("WEB 480p", ("WEBDL-480p", "WEBRip-480p")),
+    ("WEB 720p", ("WEBDL-720p", "WEBRip-720p")),
+    ("WEB 1080p", ("WEBDL-1080p", "WEBRip-1080p")),
+    ("WEB 2160p", ("WEBDL-2160p", "WEBRip-2160p")),
+)
 SERVICE_FORMAT_NAMES = {
     "ABEMA",
     "ADN",
@@ -1024,6 +1030,139 @@ def clone_profile_payload(source: dict[str, Any], target_name: str, target_id: i
     return payload
 
 
+def is_group_item(item: dict[str, Any]) -> bool:
+    return "quality" not in item and isinstance(item.get("items"), list)
+
+
+def is_quality_item(item: dict[str, Any]) -> bool:
+    return isinstance(item.get("quality"), dict)
+
+
+def quality_item_name(item: dict[str, Any]) -> str:
+    quality = item.get("quality")
+    if isinstance(quality, dict) and quality.get("name"):
+        return str(quality["name"])
+    return str(item.get("name") or "")
+
+
+def iter_quality_items(profile: dict[str, Any]) -> list[dict[str, Any]]:
+    items: list[dict[str, Any]] = []
+    for item in profile.get("items") or []:
+        if is_quality_item(item):
+            items.append(item)
+        elif is_group_item(item):
+            items.extend(child for child in item.get("items") or [] if is_quality_item(child))
+    return items
+
+
+def existing_group_id(profile: dict[str, Any], group_name: str) -> int | None:
+    for item in profile.get("items") or []:
+        if is_group_item(item) and item.get("name") == group_name and isinstance(item.get("id"), int):
+            return int(item["id"])
+    return None
+
+
+def used_quality_group_ids(profile: dict[str, Any]) -> set[int]:
+    return {
+        int(item["id"])
+        for item in profile.get("items") or []
+        if is_group_item(item) and isinstance(item.get("id"), int)
+    }
+
+
+def next_quality_group_id(used_ids: set[int]) -> int:
+    candidate = max({999, *used_ids}) + 1
+    used_ids.add(candidate)
+    return candidate
+
+
+def remove_quality_items(
+    profile_items: list[dict[str, Any]],
+    names: set[str],
+) -> tuple[list[dict[str, Any]], dict[str, dict[str, Any]], int]:
+    remaining: list[dict[str, Any]] = []
+    selected: dict[str, dict[str, Any]] = {}
+    first_index: int | None = None
+
+    for index, item in enumerate(profile_items):
+        if is_quality_item(item):
+            name = quality_item_name(item)
+            if name in names:
+                selected[name] = copy.deepcopy(item)
+                first_index = index if first_index is None else min(first_index, index)
+                continue
+            remaining.append(item)
+            continue
+
+        if is_group_item(item):
+            group = copy.deepcopy(item)
+            children: list[dict[str, Any]] = []
+            removed_from_group = False
+            for child in item.get("items") or []:
+                name = quality_item_name(child)
+                if name in names:
+                    selected[name] = copy.deepcopy(child)
+                    removed_from_group = True
+                    first_index = index if first_index is None else min(first_index, index)
+                else:
+                    children.append(child)
+            if children:
+                group["items"] = children
+                group["allowed"] = any(bool(child.get("allowed")) for child in children)
+                remaining.append(group)
+            elif not removed_from_group:
+                remaining.append(group)
+            continue
+
+        remaining.append(item)
+
+    return remaining, selected, first_index if first_index is not None else len(remaining)
+
+
+def group_regular_web_qualities(profile: dict[str, Any]) -> list[str]:
+    """Group same-resolution WEBRip/WEBDL qualities in regular test profiles.
+
+    This lets x265 and release-tier custom formats break WEBRip vs WEBDL ties
+    without allowing HDTV, Bluray, or cross-resolution replacements to bypass
+    Sonarr/Radarr's native quality order.
+    """
+
+    changes: list[str] = []
+    used_group_ids = used_quality_group_ids(profile)
+
+    for group_name, quality_names in REGULAR_WEB_QUALITY_GROUPS:
+        qualities_by_name = {quality_item_name(item): item for item in iter_quality_items(profile)}
+        present = [name for name in quality_names if name in qualities_by_name]
+        if len(present) != len(quality_names):
+            continue
+        if not any(bool(qualities_by_name[name].get("allowed")) for name in present):
+            continue
+
+        group_id = existing_group_id(profile, group_name)
+        if group_id is None:
+            group_id = next_quality_group_id(used_group_ids)
+        else:
+            used_group_ids.add(group_id)
+
+        profile_items = profile.get("items") or []
+        remaining, selected, first_index = remove_quality_items(profile_items, set(quality_names))
+        grouped_items = [selected[name] for name in quality_names if name in selected]
+        if len(grouped_items) != len(quality_names):
+            continue
+
+        group = {
+            "allowed": any(bool(item.get("allowed")) for item in grouped_items),
+            "id": group_id,
+            "items": grouped_items,
+            "name": group_name,
+        }
+        remaining.insert(min(first_index, len(remaining)), group)
+        profile["items"] = remaining
+        changes.append(f"{group_name}: {', '.join(quality_names)}")
+
+    return changes
+
+
 def add_missing_format_item(profile: dict[str, Any], custom_format: dict[str, Any]) -> None:
     cf_id = int(custom_format["id"])
     for item in profile.get("formatItems", []):
@@ -1267,6 +1406,7 @@ def process_instance(
     updated: list[str] = []
     profile_actions: dict[str, str] = {}
     profile_score_changes: dict[str, dict[str, dict[str, int]]] = {}
+    profile_quality_group_changes: dict[str, list[str]] = {}
     all_zero_deleted: list[dict[str, Any]] = []
     all_zero_planned: list[dict[str, Any]] = []
 
@@ -1289,6 +1429,9 @@ def process_instance(
             target_id = int(existing["id"]) if existing and isinstance(existing.get("id"), int) else None
             profile = clone_profile_payload(source, pair.test_name, target_id)
             profile_actions[pair.test_name] = "would-refresh" if target_id is not None else "would-create"
+            quality_group_changes = group_regular_web_qualities(profile) if pair.kind == "regular" else []
+            if quality_group_changes:
+                profile_quality_group_changes[pair.test_name] = quality_group_changes
             profile_formats = formats_for_profile([curated for curated, _payload in payloads], pair)
             profile_target_scores = {curated.target_name: curated.score for curated in profile_formats}
             for curated in profile_formats:
@@ -1338,6 +1481,9 @@ def process_instance(
         custom_formats_by_name = {str(item["name"]): item for item in custom_formats}
         for pair in instance.profile_pairs:
             profile = find_one(profiles, pair.test_name, "quality profile")
+            quality_group_changes = group_regular_web_qualities(profile) if pair.kind == "regular" else []
+            if quality_group_changes:
+                profile_quality_group_changes[pair.test_name] = quality_group_changes
             profile_formats = formats_for_profile([curated for curated, _payload in payloads], pair)
             profile_target_scores = {curated.target_name: curated.score for curated in profile_formats}
             for curated in profile_formats:
@@ -1386,6 +1532,7 @@ def process_instance(
         "created": created,
         "updated": updated,
         "profile_score_changes": profile_score_changes,
+        "profile_quality_group_changes": profile_quality_group_changes,
         "all_zero_non_rename_custom_formats": all_zero_planned if dry_run else all_zero_deleted,
         "cleanup_all_zero": cleanup_all_zero,
     }
@@ -1458,6 +1605,12 @@ def print_text(report: dict[str, Any]) -> None:
                 print(f"    {profile_name}:")
                 for name, scores in sorted(changes.items()):
                     print(f"      - {name}: {scores['old']} -> {scores['new']}")
+        if result["profile_quality_group_changes"]:
+            print("  profile quality group changes:")
+            for profile_name, changes in result["profile_quality_group_changes"].items():
+                print(f"    {profile_name}:")
+                for change in changes:
+                    print(f"      - {change}")
         if result["created"]:
             print("  created:")
             for name in result["created"]:

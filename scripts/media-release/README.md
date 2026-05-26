@@ -13,7 +13,11 @@
 - `arr_profile_math_audit.py`: Read-only Sonarr/Radarr Profilarr test-profile
   score-band audit that checks DA, x265, quality rank, Bluray source rank,
   Dictionarry tier stacks, bounded TRaSH fallback tiers, Bluray/WEB source
-  ordering, service/repack tiebreakers, legacy tier drift, and the CF limit.
+  ordering, regular WEB quality grouping, service/repack tiebreakers, legacy
+  tier drift, and the CF limit.
+- `arr_quality_profile_report.py`: Read-only Sonarr/Radarr report of native
+  quality-profile groups, useful for checking whether profile quality order is
+  still blocking custom-format upgrades.
 - `arr_stage_profilarr_test_profiles.py`: Snapshots live Arr policy state and
   clones anime profiles for Profilarr testing.
 - `profilarr_candidate_audit.py`: Read-only audit of Profilarr PCD databases as
@@ -24,8 +28,8 @@
 - `profilarr_bounded_tier_import.py`: Imports curated Dictionarry primary tiers
   plus Profilarr-synced TRaSH fallback tiers into refreshed Arr test profiles
   with backups, x265 held at `+5000`, ordered service/repack compression, anime
-  source-rank zeroing, legacy tier drift checks, and cleanup of all-zero
-  non-rename CFs.
+  source-rank zeroing, regular same-resolution WEB quality grouping, legacy
+  tier drift checks, and cleanup of all-zero non-rename CFs.
 - `profilarr_disable_upgrade_jobs.py`: Disables Profilarr scheduled Arr upgrade
   jobs with a SQLite backup, without disabling PCD sync.
 - `profilarr_link_database.py`: Links a Profilarr database through the local

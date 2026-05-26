@@ -318,15 +318,22 @@ That is below the minimum score and should not be eligible.
 
 ## Regular Profiles
 
-The regular TV/movie profiles still use the smaller TRaSH-style scoring scale.
-Their existing `-10000` unwanted penalties are already larger than the normal
-positive score ceiling, so they are not the same risk as anime's `+100000`
-dual-audio band.
+Production regular TV/movie profiles still use the smaller TRaSH-style scoring
+scale. Their existing `-10000` unwanted penalties are already larger than the
+normal positive score ceiling, so they are not the same risk as anime's
+`+100000` dual-audio band.
 
 Do not copy anime score bands into `shows-regular` or `movies-regular` without a
 separate audit. Regular profiles should be improved deliberately by reviewing
 the current TRaSH profile, quality definitions, release groups, codec policy,
 language policy, and observed grabs.
+
+The Profilarr regular test profiles are more aggressive than production about
+same-resolution WEB upgrades. They group `WEBRip` and `WEBDL` together at each
+enabled WEB resolution, so x265/HEVC and release-tier custom formats can decide
+between `WEBRip-1080p` and `WEBDL-1080p`. HDTV, Bluray, remux, and
+cross-resolution replacements remain outside those WEB groups, so native
+quality order still blocks obvious source or resolution downgrades.
 
 ## Change Procedure
 
@@ -442,9 +449,9 @@ Current Profilarr tier replacement test plan:
   - `scripts/media-release/profilarr_bounded_tier_import.py`
   - `scripts/media-release/arr_profile_math_audit.py`
 - Latest dry-run snapshot:
-  `/opt/media-stack/release-policy-snapshots/20260526T225536Z-dictionarry-bounded-tiers-dry-run`
+  `/opt/media-stack/release-policy-snapshots/20260526T234518Z-dictionarry-bounded-tiers-dry-run`
 - Latest applied snapshot:
-  `/opt/media-stack/release-policy-snapshots/20260526T225621Z-dictionarry-bounded-tiers`
+  `/opt/media-stack/release-policy-snapshots/20260526T234529Z-dictionarry-bounded-tiers`
 - Current CF counts after bounded-tier apply:
   - Sonarr: `96/100`
   - Radarr: `79/100`
@@ -457,6 +464,17 @@ Current Profilarr tier replacement test plan:
 - This is still test-profile only. It is the proposed main-profile replacement
   model staged for inspection before moving any series/movie to the test
   profiles and before changing production profile scores.
+- Regular test-profile quality structure:
+  - Sonarr `shows-regular-profilarr-test` groups `WEBDL-480p` with
+    `WEBRip-480p`, `WEBDL-720p` with `WEBRip-720p`, and `WEBDL-1080p` with
+    `WEBRip-1080p`.
+  - Radarr `movies-regular-profilarr-test` groups `WEBDL-720p` with
+    `WEBRip-720p` and `WEBDL-1080p` with `WEBRip-1080p`; the disabled existing
+    `WEB 2160p` group remains disabled.
+  - HDTV and Bluray are deliberately not grouped with WEB. A same-resolution
+    WEBRip x265 release can beat a WEBDL x264 release by custom-format score,
+    but an HDTV x265 release should not automatically replace a WEBDL release
+    just because it is HEVC.
 - Test profiles are staged in replacement mode, not stacked mode. Dictionarry
   release-group tiers are the primary ranking band. Profilarr-synced TRaSH
   Guides tiers are retained as low-score fallback only when Dictionarry misses.
@@ -518,6 +536,16 @@ Current Profilarr tier replacement test plan:
   2 (`+620`), Radarr Efficient WEB Tier 1 (`+600`) is below Efficient Bluray
   Tier 2 (`+800`), and Radarr Compact WEB Tier 1 (`+440`) is below Compact
   Bluray Tier 2 (`+600`).
+- Validation after the 2026-05-26 regular WEB grouping apply:
+  - `scripts/media-release/arr_profile_math_audit.py` passed with no failures
+    and reported the expected regular WEB groups.
+  - `scripts/media-release/arr_quality_profile_report.py` confirmed the actual
+    Sonarr/Radarr test-profile quality groups.
+  - A targeted American Dad S21E01 release check showed the
+    `WEBRip-1080p x265-DH` candidate no longer carries the native-quality
+    rejection against the existing `WEBDL-1080p` file. It still has Sonarr's
+    separate `Episode wasn't requested: 22x1` rejection, which should be
+    handled as series/season mapping metadata rather than release-score math.
 - These scores are intentionally below DA (`+100000`), anime quality ranks, and
   x265/HEVC (`+5000` in the test profiles). Dictionarry tiers can stack with
   the low TRaSH fallback tier only inside the proven `1982` release-stack
