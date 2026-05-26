@@ -23,3 +23,22 @@
       loop_control:
         label: "{{ item.key }}={{ item.value }}"
       when: proxmox_sysctl_settings is defined
+
+- name: Configure Linux host sysctl settings
+  hosts: linux_hosts
+  become: true
+  gather_facts: false
+
+  tasks:
+    - name: Apply Linux host sysctl settings
+      ansible.posix.sysctl:
+        name: "{{ item.key }}"
+        value: "{{ item.value | string }}"
+        sysctl_file: /etc/sysctl.d/99-ansible.conf
+        sysctl_set: true
+        reload: true
+        state: present
+      loop: "{{ sysctl_settings | default({}) | dict2items }}"
+      loop_control:
+        label: "{{ item.key }}={{ item.value }}"
+      when: sysctl_settings is defined

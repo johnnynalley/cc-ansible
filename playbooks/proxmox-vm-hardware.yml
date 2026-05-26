@@ -247,6 +247,21 @@
           fi
           {% endif %}
 
+          {% if item.agent is defined %}
+          current_agent="$(printf '%s\n' "$config" | awk -F': ' '/^agent:/ { print $2; exit }')"
+          current_agent="${current_agent:-0}"
+          desired_agent="{{ '1' if item.agent | bool else '0' }}"
+          case "$current_agent" in
+            1|enabled=1*) current_agent_enabled=1 ;;
+            0|enabled=0*) current_agent_enabled=0 ;;
+            *) current_agent_enabled="$current_agent" ;;
+          esac
+          if [ "$current_agent_enabled" != "$desired_agent" ]; then
+            args+=(--agent "enabled=$desired_agent")
+            changes="$changes agent=$current_agent->enabled=$desired_agent"
+          fi
+          {% endif %}
+
           {% if item.onboot is defined %}
           current_onboot="$(printf '%s\n' "$config" | awk -F': ' '/^onboot:/ { print $2; exit }')"
           current_onboot="${current_onboot:-0}"

@@ -18,6 +18,7 @@
         require_path: /srv/media/plex/Movies
       - path: /srv/incomplete_downloads
         fstype: nfs
+        require_path: /srv/incomplete_downloads/incomplete/torrents/tv-sonarr
       - path: /srv/archive
         fstype: nfs
     media_stack_health_default_containers:
@@ -140,6 +141,17 @@
           [Install]
           WantedBy=timers.target
       notify: Reload systemd
+
+    - name: Allow dbc to run media-stack-health no-alert check for Astra
+      ansible.builtin.copy:
+        dest: /etc/sudoers.d/media-stack-health-dbc
+        owner: root
+        group: root
+        mode: "0440"
+        validate: "visudo -cf %s"
+        content: |
+          dbc ALL=(root) NOPASSWD: /usr/local/sbin/media-stack-health --status
+          dbc ALL=(root) NOPASSWD: /usr/local/sbin/media-stack-health --no-alert
 
     - name: Flush systemd reload before validation
       ansible.builtin.meta: flush_handlers

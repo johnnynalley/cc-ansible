@@ -10,6 +10,14 @@ proxmox_lxc_hardware:
     swap: 512
     onboot: false
 
+proxmox_vm_hardware:
+  - name: docker-vm
+    vmid: 110
+    memory: 10240
+    balloon: 8192
+    agent: true
+    onboot: true
+
 proxmox_vm_disk_resizes:
   - name: docker-vm root disk
     vmid: 110

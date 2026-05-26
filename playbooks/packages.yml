@@ -44,6 +44,7 @@
         - pacman
         - aur
         - fastfetch
+        - qemu-guest-agent
     # =========================================================================
     # Locale baseline (Debian only)
     # =========================================================================
@@ -162,6 +163,16 @@
         state: present
       when: ansible_facts.os_family == "Debian"
       tags: [packages, apt]
+
+    - name: Enable qemu guest agent service
+      ansible.builtin.systemd:
+        name: qemu-guest-agent.service
+        enabled: true
+        state: "{{ qemu_guest_agent_service_state | default(omit) }}"
+      when:
+        - ansible_facts.os_family == "Debian"
+        - qemu_guest_agent_enabled | default(false)
+      tags: [packages, qemu-guest-agent]
 
     - name: Remove unwanted packages (Debian)
       ansible.builtin.apt:

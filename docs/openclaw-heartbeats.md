@@ -45,18 +45,18 @@ Current VOD recording covers the landscape relay only. Vertical/mobile recording
 Astra should run this from the current OpenClaw host:
 
 ```bash
-ssh dbc@100.108.254.100 '/usr/local/sbin/media-stack-health --no-alert'
+ssh dbc@100.108.254.100 'sudo -n /usr/local/sbin/media-stack-health --status'
 ```
 
 Healthy output:
 
 ```text
-OK: media-stack health checks passed
+OK: cached media-stack health passed <age>s ago
 ```
 
 Any nonzero exit or `CRITICAL:` output should alert Discord `#astra`.
 
-This is separate from the local `media-stack-health.timer` on `docker-vm`, which also runs the same checks and alerts through Apprise/DBC. The check covers the migrated Sonarr/Radarr/download automation on docker-vm while Plex stays on media-vm.
+This reads the cached result from the local `media-stack-health.timer` on `docker-vm`, which runs the full checks and alerts through Apprise/DBC. The cached heartbeat read avoids starting fresh NFS/mergerfs-touching probes from Astra. The timer covers the migrated Sonarr/Radarr/download automation on docker-vm while Plex stays on media-vm.
 
 ## Plex Appliance Verified Corruption Check
 
@@ -98,7 +98,7 @@ ansible jn-t14s-lin -m command -a "grep -n 'Media Stack Health' /home/johnny/.op
 Check the exact media stack command Astra uses:
 
 ```bash
-ansible jn-t14s-lin -m shell -a "ssh -o BatchMode=yes -o ConnectTimeout=8 dbc@100.108.254.100 '/usr/local/sbin/media-stack-health --no-alert'"
+ansible jn-t14s-lin -m shell -a "ssh -o BatchMode=yes -o ConnectTimeout=8 dbc@100.108.254.100 'sudo -n /usr/local/sbin/media-stack-health --status'"
 ```
 
 Check the exact stream relay command Astra uses:

@@ -2,25 +2,126 @@
 set -euo pipefail
 
 ALERT_MODE=1
-if [[ "${1:-}" == "--no-alert" ]]; then
-  ALERT_MODE=0
-fi
+STATUS_MODE=0
+for arg in "$@"; do
+  case "$arg" in
+    --no-alert)
+      ALERT_MODE=0
+      ;;
+    --status)
+      STATUS_MODE=1
+      ;;
+    *)
+      printf 'unknown argument: %s\n' "$arg" >&2
+      exit 64
+      ;;
+  esac
+done
 
 HOSTNAME="$(hostname)"
 STATE_DIR="{{ media_stack_health_state_dir | default('/var/lib/media-stack-health') }}"
 ALERT_COOLDOWN_SECONDS="{{ media_stack_health_alert_cooldown_seconds | default(1800) }}"
+STATUS_STALE_SECONDS="{{ media_stack_health_status_stale_seconds | default(900) }}"
 APPRISE_ENDPOINT="{{ apprise_endpoint }}"
 APPRISE_TOKEN="{{ apprise_token }}"
 APPRISE_TAGS="{{ media_stack_health_alert_tags | default(apprise_alert_tags) }}"
 QBIT_ENV_FILE="{{ media_stack_health_qbit_env_file | default('/etc/qbit-port-sync.env') }}"
+HTTP_MAX_TIME="{{ media_stack_health_http_max_time | default(20) }}"
 HARDLINK_CONTAINER="{{ media_stack_health_hardlink_container | default('sonarr') }}"
 HARDLINK_SOURCE_DIR="{{ media_stack_health_hardlink_source_dir | default('/data/downloads/complete') }}"
 HARDLINK_TARGET_DIR="{{ media_stack_health_hardlink_target_dir | default('/data/Anime') }}"
 LIBRARY_PROBE_PATH="{{ media_stack_health_library_probe_path | default('/srv/media/plex/Movies') }}"
+STATUS_FILE="$STATE_DIR/status.env"
+PROBLEMS_FILE="$STATE_DIR/problems.txt"
+RUNNING_FILE="$STATE_DIR/running"
 
 mkdir -p "$STATE_DIR"
 
 problems=()
+
+write_status() {
+  local status="$1"
+  local body="${2:-}"
+  local now
+
+  now="$(date +%s)"
+  if [[ -n "$body" ]]; then
+    printf '%s\n' "$body" > "${PROBLEMS_FILE}.tmp"
+  else
+    : > "${PROBLEMS_FILE}.tmp"
+  fi
+  mv "${PROBLEMS_FILE}.tmp" "$PROBLEMS_FILE"
+
+  {
+    printf 'STATUS=%q\n' "$status"
+    printf 'TIMESTAMP=%q\n' "$now"
+    printf 'HOSTNAME=%q\n' "$HOSTNAME"
+  } > "${STATUS_FILE}.tmp"
+  mv "${STATUS_FILE}.tmp" "$STATUS_FILE"
+}
+
+show_cached_status() {
+  local now
+  local age
+  local running_started
+  local running_age
+
+  now="$(date +%s)"
+
+  if [[ -f "$RUNNING_FILE" ]]; then
+    running_started="$(cat "$RUNNING_FILE" 2>/dev/null || echo 0)"
+    if [[ "$running_started" =~ ^[0-9]+$ ]]; then
+      running_age=$((now - running_started))
+      if (( running_age > STATUS_STALE_SECONDS )); then
+        printf 'CRITICAL: media-stack health probe has been running for %ss, stale threshold is %ss\n' "$running_age" "$STATUS_STALE_SECONDS" >&2
+        exit 2
+      fi
+    fi
+  fi
+
+  if [[ ! -r "$STATUS_FILE" ]]; then
+    printf 'CRITICAL: no cached media-stack health status found at %s\n' "$STATUS_FILE" >&2
+    exit 2
+  fi
+
+  # shellcheck disable=SC1090
+  . "$STATUS_FILE"
+
+  if [[ -z "${TIMESTAMP:-}" || ! "$TIMESTAMP" =~ ^[0-9]+$ ]]; then
+    printf 'CRITICAL: cached media-stack health status has invalid timestamp\n' >&2
+    exit 2
+  fi
+
+  age=$((now - TIMESTAMP))
+  if (( age > STATUS_STALE_SECONDS )); then
+    printf 'CRITICAL: cached media-stack health status is stale: age=%ss threshold=%ss\n' "$age" "$STATUS_STALE_SECONDS" >&2
+    [[ -s "$PROBLEMS_FILE" ]] && cat "$PROBLEMS_FILE" >&2
+    exit 2
+  fi
+
+  case "${STATUS:-}" in
+    ok)
+      printf 'OK: cached media-stack health passed %ss ago\n' "$age"
+      ;;
+    failed)
+      printf 'CRITICAL: cached media-stack health failed %ss ago\n' "$age" >&2
+      [[ -s "$PROBLEMS_FILE" ]] && cat "$PROBLEMS_FILE" >&2
+      exit 2
+      ;;
+    *)
+      printf 'CRITICAL: cached media-stack health status is unknown: %s\n' "${STATUS:-unset}" >&2
+      exit 2
+      ;;
+  esac
+}
+
+if [[ "$STATUS_MODE" -eq 1 ]]; then
+  show_cached_status
+  exit 0
+fi
+
+printf '%s\n' "$(date +%s)" > "$RUNNING_FILE"
+trap 'rm -f "$RUNNING_FILE"' EXIT
 
 add_problem() {
   problems+=("$1")
@@ -116,7 +217,7 @@ check_http() {
   local url="$2"
   local code
 
-  code="$(curl -sS -o /dev/null -w '%{http_code}' --connect-timeout 3 --max-time 8 "$url" 2>/dev/null || true)"
+  code="$(curl -sS -o /dev/null -w '%{http_code}' --connect-timeout 3 --max-time "$HTTP_MAX_TIME" "$url" 2>/dev/null || true)"
   case "$code" in
     2*|3*|401|403)
       ;;
@@ -265,13 +366,15 @@ check_http {{ endpoint.name | quote }} {{ endpoint.url | quote }}
 check_qbit_port_sync
 check_hardlinks "$HARDLINK_CONTAINER" "$HARDLINK_SOURCE_DIR" "$HARDLINK_TARGET_DIR"
 
-if [[ "${#problems[@]}" -eq 0 ]]; then
+{% raw %}if [[ "${#problems[@]}" -eq 0 ]]; then{% endraw %}
   rm -f "$STATE_DIR/last-alert"
+  write_status ok
   printf 'OK: media-stack health checks passed\n'
   exit 0
 fi
 
 body="$(printf '%s\n' "${problems[@]}")"
+write_status failed "$body"
 printf 'CRITICAL: media-stack health check failed\n%s\n' "$body" >&2
 
 if [[ "$ALERT_MODE" -eq 1 ]]; then
