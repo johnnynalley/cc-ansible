@@ -19,6 +19,16 @@
         state: restarted
 
   tasks:
+    - name: Manage FreePBX primary network interface
+      ansible.builtin.template:
+        src: ../templates/freepbx/interfaces.j2
+        dest: /etc/network/interfaces
+        owner: root
+        group: root
+        mode: "0644"
+        backup: true
+      tags: [freepbx, network]
+
     - name: Raise Asterisk soft open-file limit from the SysV startup environment
       ansible.builtin.lineinfile:
         path: /etc/default/asterisk

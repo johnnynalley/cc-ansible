@@ -2,6 +2,7 @@
 
 ## Templates
 
+- `interfaces.j2`: Static primary interface config for FreePBX.
 - `freepbx-asterisk-logrotate.j2`: Asterisk logrotate policy for FreePBX.
 
 ## Consumers

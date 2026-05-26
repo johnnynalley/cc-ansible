@@ -8,6 +8,14 @@ local_restic_backup_paths:
   - /var/lib/asterisk
   - /var/spool/asterisk
 
+freepbx_network_interface: ens18
+freepbx_network_address: 192.168.1.241
+freepbx_network_netmask: 255.255.255.0
+freepbx_network_gateway: 192.168.1.1
+freepbx_network_dns_servers:
+  - 192.168.1.1
+  - 1.1.1.1
+
 freepbx_asterisk_nofile_limit: 65535
 freepbx_asterisk_logrotate_maxsize: 100M
 freepbx_asterisk_logrotate_rotate: 7

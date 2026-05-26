@@ -402,7 +402,7 @@ Automatic recovery after router/WiFi restarts via `network-recovery.yml`:
 
 - **Network Watchdog** runs every 60 seconds:
   - Ensures interfaces are UP (catches link flaps where carrier recovers but interface stays DOWN)
-  - Fixes Proxmox bridge interfaces that got detached (`eno1` or VM firewall ports like `fwpr100p0` removed from `vmbr0`)
+  - Fixes Proxmox bridge interfaces that got detached (`eno1`, VM firewall ports like `fwpr100p0`, or plain VM tap ports like `tap130i0` removed from `vmbr0`)
   - Restarts networking/DHCP after gateway failures
   - Restarts Tailscale after connectivity failures
   - Restarts all Docker containers on recovery to clear stale state
@@ -866,7 +866,7 @@ ts440 auto-pulls from GitHub every 5 minutes (`git-sync.timer`) to keep the Next
 
 ## FreePBX (freepbx-vm, VM 130 on pve-herc)
 
-FreePBX 17 / Asterisk 22 PBX server on Debian 12. VoIP.ms SIP trunk with Yealink T54W desk phone. Web GUI: `http://100.97.139.95/admin`. APT pinned to bookworm (`apt_pin_release: bookworm` in host_vars). Sangoma Smart Firewall enabled with Tailscale trusted. Proxmox firewall: SIP, RTP, SSH, web GUI (Tailscale only).
+FreePBX 17 / Asterisk 22 PBX server on Debian 12. VoIP.ms SIP trunk with Yealink T54W desk phone. Web GUI: `http://100.97.139.95/admin`. LAN IP: `192.168.1.241`, managed in `/etc/network/interfaces` by `playbooks/freepbx.yml`. APT pinned to bookworm (`apt_pin_release: bookworm` in host_vars). Sangoma Smart Firewall enabled with Tailscale trusted. Proxmox firewall: SIP, RTP, SSH, web GUI (Tailscale only).
 
 ## HomeKit / Home Assistant
 

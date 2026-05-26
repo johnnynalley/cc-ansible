@@ -182,6 +182,7 @@ fix_proxmox_bridge() {
     done < /etc/network/interfaces
 
     fix_proxmox_vm_firewall_ports
+    fix_proxmox_vm_tap_ports
 }
 
 get_proxmox_firewall_bridge() {
@@ -200,6 +201,28 @@ get_proxmox_firewall_bridge() {
             return 0
         fi
     done
+
+    return 1
+}
+
+get_proxmox_vm_tap_bridge() {
+    local vmid="$1"
+    local netidx="$2"
+    local config="/etc/pve/qemu-server/${vmid}.conf"
+    local line
+
+    [[ -r "$config" ]] || return 1
+    line=$(grep -E "^net${netidx}:" "$config" | head -n 1 || true)
+    [[ -n "$line" ]] || return 1
+
+    # Firewall-enabled guests attach tap ports to fwbr*, while fwpr* attaches
+    # to the real bridge. Do not bypass that firewall bridge here.
+    [[ "$line" == *"firewall=1"* ]] && return 1
+
+    if [[ "$line" =~ bridge=([^,[:space:]]+) ]]; then
+        echo "${BASH_REMATCH[1]}"
+        return 0
+    fi
 
     return 1
 }
@@ -229,6 +252,38 @@ fix_proxmox_vm_firewall_ports() {
         current_master="${current_master##*/}"
         if [[ "$current_master" != "$expected_bridge" ]]; then
             log "Reattaching VM firewall port $iface to $expected_bridge (was ${current_master:-detached})"
+            ip link set "$iface" master "$expected_bridge" 2>/dev/null || true
+        fi
+
+        ip link set "$iface" up 2>/dev/null || true
+    done
+    shopt -u nullglob
+}
+
+fix_proxmox_vm_tap_ports() {
+    # Guests without Proxmox firewall attach tap<vmid>i<netidx> directly to the
+    # configured bridge. Link flaps can detach those dynamic tap ports too.
+    [[ -d /etc/pve/qemu-server ]] || return 0
+
+    local iface_path iface vmid netidx expected_bridge current_master
+
+    shopt -s nullglob
+    for iface_path in /sys/class/net/tap*i*; do
+        iface=$(basename "$iface_path")
+        if [[ ! "$iface" =~ ^tap([0-9]+)i([0-9]+)$ ]]; then
+            continue
+        fi
+
+        vmid="${BASH_REMATCH[1]}"
+        netidx="${BASH_REMATCH[2]}"
+        expected_bridge=$(get_proxmox_vm_tap_bridge "$vmid" "$netidx" || true)
+        [[ -n "$expected_bridge" ]] || continue
+        [[ -e "/sys/class/net/$expected_bridge" ]] || continue
+
+        current_master=$(readlink "/sys/class/net/$iface/master" 2>/dev/null || true)
+        current_master="${current_master##*/}"
+        if [[ "$current_master" != "$expected_bridge" ]]; then
+            log "Reattaching VM tap port $iface to $expected_bridge (was ${current_master:-detached})"
             ip link set "$iface" master "$expected_bridge" 2>/dev/null || true
         fi
 

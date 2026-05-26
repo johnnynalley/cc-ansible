@@ -618,7 +618,7 @@ Deployed via `playbooks/network-recovery.yml` to `linux_hosts:!workstations`.
 
 **Network Watchdog** (`network-watchdog.timer`, every 60s):
 - Ensures interfaces are UP (catches link flaps)
-- On Proxmox: fixes bridge interfaces detached during router restarts or switch moves (e.g., `eno1` or VM firewall ports like `fwpr100p0` removed from `vmbr0`)
+- On Proxmox: fixes bridge interfaces detached during router restarts or switch moves (e.g., `eno1`, VM firewall ports like `fwpr100p0`, or plain VM tap ports like `tap130i0` removed from `vmbr0`)
 - After 3 gateway failures: restarts networking/DHCP
 - After 5 Tailscale failures: restarts tailscaled
 - After 5 DHCP recovery failures: reboots (only if router is reachable, to avoid boot loops)
@@ -682,7 +682,7 @@ USB drive timeout standard: all USB drives in `group_vars/nas_server/mounts.yml`
 
 ### freepbx-vm (VM 130 on pve-herc)
 
-FreePBX 17 PBX server (Asterisk 22, Debian 12 Bookworm). Provides a second phone number via VoIP.ms SIP trunk and Yealink SIP-T54W desk phone, with call forwarding to iPhone. Web GUI: `http://100.97.139.95/admin`. APT pinned to `bookworm` via `apt_pin_release` to prevent accidental Debian 13 upgrades. FreePBX/Asterisk packages are held (`apt-mark hold`) by the install script — module updates done through the web GUI. Sangoma Smart Firewall enabled with Tailscale CGNAT (`100.64.0.0/10`) trusted. Proxmox firewall rules: SIP (UDP 5060 from LAN + VoIP.ms), RTP (UDP 10000-20000), web GUI (TCP 80/443 Tailscale only), SSH. Config: `host_vars/freepbx-vm/` (vars.yml, packages.yml). Local restic backups: `/etc/asterisk`, `/var/lib/asterisk`, `/var/spool/asterisk`. `playbooks/freepbx.yml` manages Asterisk open-file guardrails, Asterisk logrotate size caps, and journald retention so the small root disk does not fill from PBX log storms.
+FreePBX 17 PBX server (Asterisk 22, Debian 12 Bookworm). Provides a second phone number via VoIP.ms SIP trunk and Yealink SIP-T54W desk phone, with call forwarding to iPhone. Web GUI: `http://100.97.139.95/admin`. LAN IP: `192.168.1.241`, managed in `/etc/network/interfaces` by `playbooks/freepbx.yml` from `templates/freepbx/interfaces.j2`. APT pinned to `bookworm` via `apt_pin_release` to prevent accidental Debian 13 upgrades. FreePBX/Asterisk packages are held (`apt-mark hold`) by the install script — module updates done through the web GUI. Sangoma Smart Firewall enabled with Tailscale CGNAT (`100.64.0.0/10`) trusted. Proxmox firewall rules: SIP (UDP 5060 from LAN + VoIP.ms), RTP (UDP 10000-20000), web GUI (TCP 80/443 Tailscale only), SSH. Config: `host_vars/freepbx-vm/` (vars.yml, packages.yml). Local restic backups: `/etc/asterisk`, `/var/lib/asterisk`, `/var/spool/asterisk`. `playbooks/freepbx.yml` manages Asterisk open-file guardrails, Asterisk logrotate size caps, journald retention, and the static LAN interface config so the small root disk does not fill from PBX log storms or lose DHCP after bridge events.
 
 ### OpenClaw Host (jn-t14s-lin)
 

@@ -1,0 +1,17 @@
+# This file describes the network interfaces available on your system
+# and how to activate them. For more information, see interfaces(5).
+# Managed by Ansible - do not edit manually.
+
+source /etc/network/interfaces.d/*
+
+# The loopback network interface
+auto lo
+iface lo inet loopback
+
+# The primary network interface
+allow-hotplug {{ freepbx_network_interface | default('ens18') }}
+iface {{ freepbx_network_interface | default('ens18') }} inet static
+    address {{ freepbx_network_address }}
+    netmask {{ freepbx_network_netmask | default('255.255.255.0') }}
+    gateway {{ freepbx_network_gateway | default('192.168.1.1') }}
+    dns-nameservers {{ freepbx_network_dns_servers | default(['192.168.1.1', '1.1.1.1']) | join(' ') }}
