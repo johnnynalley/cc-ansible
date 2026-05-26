@@ -7,8 +7,9 @@
 # Enable local backups per-host by setting local_restic_enabled: true in host_vars
 local_restic_enabled: false
 
-# ts440 Tailscale IP for SFTP access
-local_restic_target_host: "100.71.188.16"
+# ts440 LAN IP for SFTP access. This intentionally uses regular OpenSSH over
+# LAN so local backups do not depend on Tailscale SSH tags/policy.
+local_restic_target_host: "192.168.1.146"
 local_restic_target_user: "johnny"
 local_restic_target_path: "/srv/nas-zfs/backups"
 

@@ -329,7 +329,6 @@
           }
 
           $results
-
     - name: Apply Windows gaming power plan settings
       ansible.windows.win_powershell:
         parameters:
@@ -405,7 +404,6 @@
           }
 
           $results
-
     - name: Apply Windows gaming registry settings
       ansible.windows.win_regedit:
         path: "{{ item.path }}"
@@ -462,84 +460,6 @@
               DesiredGuid = $SchemeGuid
               Changed = $Ansible.Changed
           }
-
-    - name: Apply game INI performance settings
-      ansible.windows.win_powershell:
-        parameters:
-          IniFiles: "{{ windows_gaming_ini_files | default([]) }}"
-        script: |
-          [CmdletBinding(SupportsShouldProcess)]
-          param(
-              [object[]]$IniFiles
-          )
-
-          $Ansible.Changed = $false
-          $results = @()
-
-          foreach ($ini in $IniFiles) {
-              $path = [string]$ini.path
-              $settings = @($ini.settings)
-
-              if (-not (Test-Path -LiteralPath $path)) {
-                  $results += [pscustomobject]@{
-                      Path = $path
-                      Exists = $false
-                      Changed = $false
-                  }
-                  continue
-              }
-
-              $lines = [System.Collections.Generic.List[string]]::new()
-              foreach ($line in (Get-Content -LiteralPath $path)) {
-                  $lines.Add([string]$line)
-              }
-
-              $fileChanged = $false
-
-              foreach ($setting in $settings) {
-                  $key = [string]$setting.key
-                  $value = [string]$setting.value
-                  $desiredLine = "$key=$value"
-                  $keyPattern = "^\s*" + [regex]::Escape($key) + "\s*="
-                  $found = $false
-
-                  for ($i = 0; $i -lt $lines.Count; $i++) {
-                      if ($lines[$i] -match $keyPattern) {
-                          $found = $true
-                          if ($lines[$i] -cne $desiredLine) {
-                              $lines[$i] = $desiredLine
-                              $fileChanged = $true
-                          }
-                          break
-                      }
-                  }
-
-                  if (-not $found) {
-                      $lines.Add($desiredLine)
-                      $fileChanged = $true
-                  }
-              }
-
-              if ($fileChanged) {
-                  $Ansible.Changed = $true
-                  if (-not $Ansible.CheckMode) {
-                      $backupPath = "$path.pre-ansible-gaming-tuning.bak"
-                      if (-not (Test-Path -LiteralPath $backupPath)) {
-                          Copy-Item -LiteralPath $path -Destination $backupPath
-                      }
-                      Set-Content -LiteralPath $path -Value $lines -Encoding UTF8
-                  }
-              }
-
-              $results += [pscustomobject]@{
-                  Path = $path
-                  Exists = $true
-                  Changed = $fileChanged
-              }
-          }
-
-          $results
-
     - name: Apply RTSS profile settings
       ansible.windows.win_powershell:
         parameters:
