@@ -76,7 +76,7 @@ Before closing any repo-mutating session, run `git status --short --branch`. If 
 
 ### Security & Configuration Tips
 
-Do not commit real secrets. Encrypted values belong in `vault.yml` files beside the relevant `vars.yml`; examples may use `vault.yml.example`. The configured vault password path is `~/.ansible/vault_pass.txt`. Prefer full-playbook `--check --diff` runs for changes touching Proxmox, storage, firewall, backup, or Docker automation.
+Do not commit real secrets. Encrypted values belong in `vault.yml` files beside the relevant `vars.yml`; examples may use `vault.yml.example`. The configured vault password path is `~/.ansible/vault_pass.txt`. Run `scripts/repo/repo-audit` before committing repo layout or source changes; it calls `scripts/repo/secrets-scan` by default so secret scanning is part of the normal audit path. Use `scripts/repo/repo-audit --require-gitleaks` when Gitleaks must be present, such as CI parity checks. Prefer full-playbook `--check --diff` runs for changes touching Proxmox, storage, firewall, backup, or Docker automation.
 
 ### Live Change Backups
 

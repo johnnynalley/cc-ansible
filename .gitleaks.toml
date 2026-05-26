@@ -1,0 +1,14 @@
+title = "cc-ansible secret scanning"
+
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "Repository-specific false positives"
+paths = [
+  '''(^|/)inventory/(group_vars|host_vars)/.*/vault\.yml$''',
+]
+
+regexes = [
+  '''(?i)(your|example|placeholder|redacted)[-_ a-z0-9]*(password|secret|token|api[_-]?key)''',
+]

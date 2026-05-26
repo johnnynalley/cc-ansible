@@ -77,7 +77,43 @@ def reference_errors(files: list[Path], prefix: str, pattern: re.Pattern[str]) -
     return errors
 
 
+def run_secrets_scan(require_gitleaks: bool) -> list[str]:
+    command = [str(ROOT / "scripts" / "repo" / "secrets-scan"), "--quiet"]
+    if require_gitleaks:
+        command.extend(["--external", "gitleaks", "--require-external"])
+
+    result = subprocess.run(
+        command,
+        cwd=ROOT,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+    )
+    if result.returncode == 0:
+        return []
+
+    output = result.stdout.strip()
+    if not output:
+        return ["secrets-scan failed without output"]
+    return output.splitlines()
+
+
+def parse_args() -> tuple[bool, bool]:
+    require_gitleaks = "--require-gitleaks" in sys.argv[1:]
+    no_secrets = "--no-secrets" in sys.argv[1:]
+    unknown = [
+        arg
+        for arg in sys.argv[1:]
+        if arg not in {"--require-gitleaks", "--no-secrets"}
+    ]
+    if unknown:
+        print(f"usage: {Path(sys.argv[0]).name} [--require-gitleaks] [--no-secrets]", file=sys.stderr)
+        sys.exit(2)
+    return require_gitleaks, no_secrets
+
+
 def main() -> int:
+    require_gitleaks, no_secrets = parse_args()
     errors: list[str] = []
     files = tracked_files()
 
@@ -143,6 +179,9 @@ def main() -> int:
     for directory in sorted(p for p in (ROOT / "playbooks").iterdir() if p.is_dir()):
         if f"`{directory.name}/`" not in playbooks_readme:
             errors.append(f"playbooks/README.md is missing directory pointer for playbooks/{directory.name}/")
+
+    if not no_secrets:
+        errors.extend(run_secrets_scan(require_gitleaks=require_gitleaks))
 
     if errors:
         print("repo-audit failed:")

@@ -47,7 +47,22 @@ Source-of-truth docs currently include:
 - [scripts/README.md](scripts/README.md): script ownership and reusable helper rules.
 - [inventory/README.md](inventory/README.md): group hierarchy, host var layout, and where settings live.
 - [files/README.md](files/README.md): static file inventory and root clutter notes.
-- [scripts/repo/repo-audit](scripts/repo/repo-audit): static repo layout and reference audit.
+- [scripts/repo/repo-audit](scripts/repo/repo-audit): static repo layout, reference, and secret audit.
+
+
+## Repository Audit
+
+Run the repository audit before committing layout, docs, script, template,
+inventory, or playbook changes:
+
+```bash
+scripts/repo/repo-audit
+```
+
+`repo-audit` calls `scripts/repo/secrets-scan` by default. The built-in scanner
+checks tracked text files for likely plaintext secrets and redacts findings. If
+Gitleaks is installed locally, the scan also uses `.gitleaks.toml`; CI runs
+`repo-audit --require-gitleaks` so Gitleaks is mandatory there.
 
 ## Directory Structure
 
