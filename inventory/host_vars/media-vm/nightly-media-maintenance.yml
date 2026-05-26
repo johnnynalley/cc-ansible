@@ -2,7 +2,7 @@
 # media-vm - Nightly Media Maintenance Endpoint / Plex Maintenance Window
 # =============================================================================
 
-nightly_media_maintenance_profilarr_endpoint_enabled: true
+nightly_media_maintenance_profilarr_endpoint_enabled: false
 nightly_media_maintenance_profilarr_ssh_user: johnny
 
 nightly_media_maintenance_plex_preferences_enabled: true

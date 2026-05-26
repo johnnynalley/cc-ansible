@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Blocklist queued Sonarr downloads whose titles match a regex.
 
-Run this on media-vm. It reads Sonarr's local config.xml for the API key,
+Run this on docker-vm. It reads Sonarr's local config.xml for the API key,
 backs up Sonarr DB/config plus queue/history snapshots, then optionally removes
 matching queue entries with blocklist=true.
 """

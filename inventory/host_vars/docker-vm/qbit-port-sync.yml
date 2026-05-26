@@ -1,8 +1,8 @@
 # =============================================================================
-# media-vm - qBittorrent Port Sync
+# docker-vm - qBittorrent Port Sync
 # =============================================================================
 
-qbit_port_sync_enabled: false
+qbit_port_sync_enabled: true
 qbit_port_sync_env_file: /etc/qbit-port-sync.env
 qbit_port_sync_port_file: /opt/media-stack/gluetun/forwarded_port
 qbit_port_sync_api: http://localhost:8085/api/v2

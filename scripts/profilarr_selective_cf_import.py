@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Import selected Profilarr database custom formats into Arr test profiles.
 
-Run this on media-vm. It reads the local Profilarr database and linked PCD
+Run this on docker-vm. It reads the local Profilarr database and linked PCD
 repositories, copies only curated custom-format definitions into Sonarr/Radarr,
 then scores those copied formats in the anime Profilarr test profiles.
 

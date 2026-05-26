@@ -39,16 +39,15 @@ mergerfs_recovery_branches:
     device_uuid: "f356a268-d53b-41fa-95a7-3df47c1c22bc"
 
 # Media app endpoints — reachable from ts440 over Tailscale.
-# 100.66.6.113 is media-vm. Ports are the standard *arr defaults (verify against
-# /opt/media-stack/docker-compose.yml on media-vm if changed).
+# Plex stays on media-vm. Sonarr/Radarr run on docker-vm in media-stack.
 # API tokens come from inventory/group_vars/nas_server/vault.yml (encrypted).
 mergerfs_recovery_api_targets:
   plex:
     url: "http://100.66.6.113:32400"
     token: "{{ vault_media_api_plex_token }}"
   sonarr:
-    url: "http://100.66.6.113:8989"
+    url: "http://100.108.254.100:8989"
     api_key: "{{ vault_media_api_sonarr_key }}"
   radarr:
-    url: "http://100.66.6.113:7878"
+    url: "http://100.108.254.100:7878"
     api_key: "{{ vault_media_api_radarr_key }}"

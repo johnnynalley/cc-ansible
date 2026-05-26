@@ -5,7 +5,7 @@
 # =============================================================================
 
 - name: Configure Sonarr transaction monitor
-  hosts: gluetun_hosts
+  hosts: gluetun_hosts:media-vm
   become: true
   gather_facts: false
 
@@ -69,7 +69,7 @@
 
           [Service]
           Type=oneshot
-          ExecStart=/usr/local/bin/sonarr-transaction-monitor --bootstrap-records {{ sonarr_transaction_monitor_bootstrap_records }} --max-history-pages {{ sonarr_transaction_monitor_max_history_pages }}
+          ExecStart=/usr/local/bin/sonarr-transaction-monitor --base-url {{ sonarr_transaction_monitor_base_url | default('http://127.0.0.1:8989') }} --config {{ sonarr_transaction_monitor_config_path | default('/opt/media-stack/sonarr/config.xml') }} --bootstrap-records {{ sonarr_transaction_monitor_bootstrap_records }} --max-history-pages {{ sonarr_transaction_monitor_max_history_pages }}
       when: sonarr_transaction_monitor_enabled | default(false)
       notify: Reload systemd
 

@@ -1,8 +1,8 @@
 # Media Release Policy
 
-Last updated: 2026-05-24
+Last updated: 2026-05-26
 
-This documents the current Sonarr/Radarr release selection policy on `media-vm`.
+This documents the current Sonarr/Radarr release selection policy on `docker-vm`.
 The goal is better grabbed releases, not just smaller files. Anime is handled as
 a separate policy because dual audio is the highest priority there.
 
@@ -12,9 +12,11 @@ a separate policy because dual audio is the highest priority there.
 - Sonarr regular profile: `shows-regular`
 - Radarr anime profile: `movies-anime`
 - Radarr regular profile: `movies-regular`
+- Media stack: `/opt/media-stack` on `docker-vm`
 - Recyclarr config: `/opt/media-stack/recyclarr/recyclarr.yml`
 - Recyclarr schedule: daily at midnight
-- Profilarr stack: `/opt/profilarr`, published at `profilarr.jnalley.me`
+- Profilarr stack: `/opt/profilarr` on `docker-vm`, published at
+  `profilarr.jnalley.me`
 - Profilarr candidate/test profiles:
   - Sonarr: `shows-anime-profilarr-test` id `9`
   - Radarr: `movies-anime-profilarr-test` id `8`
@@ -29,9 +31,9 @@ a separate policy because dual audio is the highest priority there.
   `/var/log/sonarr-transaction-monitor/events.jsonl`, rotated daily
 - Sonarr recycle bin: disabled
 - Radarr recycle bin: disabled
-- Media container library bind: `/srv/plex:/data`, backed by the dedicated
-  `plex_library` VirtioFS mount. Completed downloads and libraries stay under
-  `/data` inside the containers so hardlinks still work.
+- Media-stack container library bind: `/srv/media/plex:/data`, backed by the single
+  `/srv/media` NFS parent mount from TS440. Completed downloads and libraries
+  stay under `/data` inside the containers so hardlinks still work.
 
 Recyclarr manages the TRaSH custom formats and profile scores that are in its
 config. Local custom formats created directly in Sonarr/Radarr are still valid,
@@ -103,7 +105,7 @@ matching, so they were not deleted.
 
 The read-only live expectation checkers are
 `scripts/sonarr_release_expectation_check.py` and
-`scripts/radarr_release_expectation_check.py`. Run them on `media-vm` through
+`scripts/radarr_release_expectation_check.py`. Run them on `docker-vm` through
 Ansible when changing anime release policy. They verify the live anime profile
 scores, confirm enabled anime qualities are in one native quality group, check
 rename-format preservation of audio languages and video codec, check DA/x265
@@ -128,7 +130,7 @@ queue-count movement, recent grabbed/imported/deleted groups, and the current
 queue's grouped classifications. Use it for periodic Profilarr review:
 
 ```bash
-ansible media-vm --become -m script -a "scripts/sonarr_transaction_audit.py --hours 24 --limit 25"
+ansible docker-vm --become -m script -a "scripts/sonarr_transaction_audit.py --hours 24 --limit 25"
 ```
 
 `scripts/arr_stage_profilarr_test_profiles.py` snapshots live Arr policy state
@@ -377,12 +379,12 @@ penalty.
 Before assigning any series/movie to a Profilarr-derived profile, run:
 
 ```bash
-ansible media-vm --become -m script -a "scripts/arr_stage_profilarr_test_profiles.py --dry-run"
-ansible media-vm -m script -a scripts/profilarr_candidate_audit.py
-ansible media-vm --become -m script -a "scripts/profilarr_selective_cf_import.py --dry-run"
-ansible media-vm --become -m script -a "scripts/sonarr_transaction_audit.py --hours 24 --limit 25"
-ansible media-vm -m script -a scripts/sonarr_release_expectation_check.py
-ansible media-vm -m script -a scripts/radarr_release_expectation_check.py
+ansible docker-vm --become -m script -a "scripts/arr_stage_profilarr_test_profiles.py --dry-run"
+ansible docker-vm -m script -a scripts/profilarr_candidate_audit.py
+ansible docker-vm --become -m script -a "scripts/profilarr_selective_cf_import.py --dry-run"
+ansible docker-vm --become -m script -a "scripts/sonarr_transaction_audit.py --hours 24 --limit 25"
+ansible docker-vm -m script -a scripts/sonarr_release_expectation_check.py
+ansible docker-vm -m script -a scripts/radarr_release_expectation_check.py
 ```
 
 Only after the candidate profile proves the same DA/x265/quality math should a
@@ -644,7 +646,7 @@ retention location. Do not let staging snapshots pile up indefinitely.
 ## Download Client Metadata Stamping
 
 `playbooks/media-release-stamper.yml` manages a conservative metadata stamper
-for SABnzbd and qBittorrent on `media-vm`.
+for SABnzbd and qBittorrent on `docker-vm`.
 
 - qBittorrent script: `/opt/media-stack/qbittorrent/scripts/qbit-release-stamper.py`
 - qBittorrent env: `/opt/media-stack/qbittorrent/scripts/qbit-release-stamper.env`
@@ -809,10 +811,10 @@ Decision rule:
 Current deployed state on 2026-05-22:
 
 - Profilarr was bootstrapped through HTTP form/API calls, not the browser UI.
-  The generated local admin password is stored root-only on `media-vm` at
+  The generated local admin password is stored root-only on `docker-vm` at
   `/root/profilarr-admin.initial-password`.
-- `Sonarr` and `Radarr` are registered in Profilarr using the media-vm
-  Tailscale service URLs and the public external URLs.
+- `Sonarr` and `Radarr` are registered in Profilarr using docker-vm-local
+  service URLs and the public external URLs.
 - Upgrade scheduler configs are currently disabled and should stay disabled.
   Sonarr has one cutoff-unmet monitored-series filter (`count: 1`), and Radarr
   has one cutoff-unmet monitored-movies filter (`count: 5`). The nightly media

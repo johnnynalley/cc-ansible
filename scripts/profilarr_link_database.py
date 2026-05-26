@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Link a Profilarr database through the local authenticated web app.
 
-Run this on media-vm with privileges that can read the Profilarr admin password
+Run this on docker-vm with privileges that can read the Profilarr admin password
 file. The password is used only for the local login form and is never printed.
 """
 

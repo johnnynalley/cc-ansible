@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Compare Sonarr queued grabs against the current episode files.
 
-Run on media-vm. By default this is read-only and prints no API keys. Cleanup
+Run on docker-vm. By default this is read-only and prints no API keys. Cleanup
 requires explicit flags and never blocklists unless asked.
 """
 

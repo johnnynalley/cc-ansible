@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Audit Profilarr PCD databases as release-policy candidates.
 
-Run this on media-vm. It reads Profilarr's local SQLite database and cloned
+Run this on docker-vm. It reads Profilarr's local SQLite database and cloned
 PCD repositories, materializes each PCD database in memory, and compares
 candidate custom formats/profiles with live Sonarr/Radarr names.
 """

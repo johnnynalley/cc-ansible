@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Audit Sonarr/Radarr release profiles and custom-format usage.
 
-Run this on media-vm. It reads the local Arr config.xml files for API keys,
+Run this on docker-vm. It reads the local Arr config.xml files for API keys,
 queries localhost APIs only, and does not print secrets.
 """
 

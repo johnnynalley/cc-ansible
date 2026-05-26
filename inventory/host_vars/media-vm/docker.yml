@@ -14,12 +14,9 @@ docker_stacks:
   - name: media-stack
     path: /opt/media-stack
     build: false
+    remove_orphans: true
     auto_update_services:
-      - gluetun
       - lazylibrarian
-  - name: profilarr
-    path: /opt/profilarr
-    build: false
   - name: portainer-agent
     path: /opt/portainer-agent
     build: false

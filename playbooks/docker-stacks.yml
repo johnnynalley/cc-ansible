@@ -42,21 +42,44 @@
         label: "{{ item.name }}"
       when:
         - item.name != 'caddy'
-        - lookup('ansible.builtin.fileglob', playbook_dir + '/../templates/' + item.name + '.yml') | length > 0
+        - >-
+          item.compose_template is defined
+          or
+          lookup('ansible.builtin.fileglob', playbook_dir + '/../templates/' + item.name + '.yml') | length > 0
 
-    - name: Deploy compose file (Ansible-managed stacks)
-      ansible.builtin.copy:
-        src: "../templates/{{ item.name }}.yml"
+    - name: Deploy compose file (Ansible-rendered stacks)
+      ansible.builtin.template:
+        src: "../templates/{{ item.compose_template | default(item.name + '.yml.j2') }}"
         dest: "{{ item.path }}/docker-compose.yml"
         owner: root
         group: root
-        mode: "0644"
+        mode: "{{ item.compose_mode | default('0644') }}"
       loop: "{{ docker_stacks | default([]) }}"
       loop_control:
         label: "{{ item.name }}"
       when:
         - item.name != 'caddy'
-        - lookup('ansible.builtin.fileglob', playbook_dir + '/../templates/' + item.name + '.yml') | length > 0
+        - item.compose_template is defined
+        - item.compose_template is search('\.j2$')
+
+    - name: Deploy compose file (Ansible-managed stacks)
+      ansible.builtin.copy:
+        src: "../templates/{{ item.compose_template | default(item.name + '.yml') }}"
+        dest: "{{ item.path }}/docker-compose.yml"
+        owner: root
+        group: root
+        mode: "{{ item.compose_mode | default('0644') }}"
+      loop: "{{ docker_stacks | default([]) }}"
+      loop_control:
+        label: "{{ item.name }}"
+      when:
+        - item.name != 'caddy'
+        - >-
+          (item.compose_template is defined and item.compose_template is not search('\.j2$'))
+          or (
+            item.compose_template is not defined
+            and lookup('ansible.builtin.fileglob', playbook_dir + '/../templates/' + item.name + '.yml') | length > 0
+          )
 
     - name: Find Caddy stack path
       ansible.builtin.set_fact:
@@ -215,7 +238,7 @@
 
     - name: Update containers if images changed (build stacks)
       ansible.builtin.shell: |
-        cd "{{ item.path }}" && docker compose up -d 2>&1
+        cd "{{ item.path }}" && docker compose up -d{% if item.remove_orphans | default(false) %} --remove-orphans{% endif %} 2>&1
       loop: "{{ build_stacks_to_update | default([]) }}"
       loop_control:
         label: "{{ item.name }}"
@@ -299,7 +322,7 @@
 
     - name: Update containers if images changed (pull-only stacks)
       ansible.builtin.shell: |
-        cd "{{ item.item.path }}" && docker compose up -d 2>&1
+        cd "{{ item.item.path }}" && docker compose up -d{% if item.item.remove_orphans | default(false) %} --remove-orphans{% endif %} 2>&1
       loop: "{{ pull_result.results | default([]) }}"
       loop_control:
         label: "{{ item.item.name }}"
@@ -342,7 +365,7 @@
     # -------------------------------------------------------------------------
     - name: Start stacks (start=true or undefined)
       ansible.builtin.shell: |
-        cd "{{ item.path }}" && docker compose up -d 2>&1
+        cd "{{ item.path }}" && docker compose up -d{% if item.remove_orphans | default(false) %} --remove-orphans{% endif %} 2>&1
       loop: "{{ docker_stacks | selectattr('start', 'undefined') | list + docker_stacks | selectattr('start', 'defined') | selectattr('start', 'equalto', true) | list }}"
       loop_control:
         label: "{{ item.name }}"

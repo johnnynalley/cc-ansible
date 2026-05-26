@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Queue controlled Profilarr upgrade jobs for the overnight coordinator.
 
-Run on media-vm as the johnny user. The helper keeps Profilarr's native
+Run on docker-vm as the johnny user. The helper keeps Profilarr's native
 scheduled Arr upgrades disabled and queues explicit nightly arr.upgrade jobs.
 """
 

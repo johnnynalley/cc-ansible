@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Check live Radarr anime release-selection expectations.
 
-Run this on media-vm. It reads Radarr's local config.xml for the API key,
+Run this on docker-vm. It reads Radarr's local config.xml for the API key,
 queries localhost only, and prints no secrets.
 """
 

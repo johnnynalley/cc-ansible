@@ -13,6 +13,9 @@ services:
       - ./config:/config
     ports:
       - "6868:6868"
+    networks:
+      - default
+      - caddy-proxy
     depends_on:
       profilarr-parser:
         condition: service_healthy
@@ -24,3 +27,8 @@ services:
     expose:
       - "5000"
     restart: unless-stopped
+
+networks:
+  default:
+  caddy-proxy:
+    external: true

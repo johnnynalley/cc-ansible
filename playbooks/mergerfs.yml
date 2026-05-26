@@ -242,7 +242,7 @@
         - not ansible_check_mode
 
 - name: Configure mergerfs-balance media stack control endpoint
-  hosts: media-vm
+  hosts: gluetun_hosts
   become: true
   gather_facts: false
 

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Disable Profilarr scheduled Arr upgrade jobs with a SQLite backup.
 
-Run this on media-vm. It disables the Profilarr upgrade_configs rows for
+Run this on docker-vm. It disables the Profilarr upgrade_configs rows for
 Sonarr/Radarr and cancels queued scheduled arr.upgrade jobs. It does not modify
 PCD database auto-pull/sync jobs.
 """

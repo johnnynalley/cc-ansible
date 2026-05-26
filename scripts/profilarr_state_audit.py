@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Audit local Profilarr database, scheduler, and upgrade-job state.
 
-Run this on media-vm. It reads Profilarr's SQLite database only and prints no
+Run this on docker-vm. It reads Profilarr's SQLite database only and prints no
 secrets.
 """
 

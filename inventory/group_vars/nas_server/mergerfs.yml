@@ -60,6 +60,6 @@ mergerfs_balance_exclude_paths:
   - "/srv/nas-zfs/media/books/*"
 
 mergerfs_balance_media_stack_control_enabled: true
-mergerfs_balance_media_stack_ssh_host: "192.168.1.136"
+mergerfs_balance_media_stack_ssh_host: "192.168.1.153"
 mergerfs_balance_media_stack_ssh_user: johnny
 mergerfs_balance_media_stack_ssh_key_path: /root/.ssh/mergerfs_balance_media_stack_ed25519

@@ -9,7 +9,7 @@
 # =============================================================================
 
 - name: Configure Gluetun VPN watchdog
-  hosts: gluetun_hosts
+  hosts: gluetun_hosts:media-vm
   become: true
   gather_facts: false
 

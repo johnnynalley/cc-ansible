@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Summarize Sonarr grab/import history and current queue state.
 
-Run this on media-vm. It reads the Sonarr transaction monitor JSONL log and,
+Run this on docker-vm. It reads the Sonarr transaction monitor JSONL log and,
 unless disabled, the live Sonarr API. It is intentionally read-only.
 """
 

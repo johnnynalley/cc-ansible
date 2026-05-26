@@ -33,3 +33,17 @@ nfs_exports:
         options: "rw,sync,no_subtree_check,no_root_squash,fsid=11"
       - host: 192.168.1.153
         options: "rw,sync,no_subtree_check,no_root_squash,fsid=11"
+
+  # Archive/ISO storage used by downloader categories. This is deliberately
+  # separate from the media hardlink path; completed Arr imports stay under
+  # /srv/media/plex via the single media export above.
+  - name: archive
+    bind_source: /srv/nas-zfs/archive
+    owner: johnny
+    group: johnny
+    mode: "0775"
+    clients:
+      - host: 100.108.254.100
+        options: "rw,sync,no_subtree_check,no_root_squash,fsid=12"
+      - host: 192.168.1.153
+        options: "rw,sync,no_subtree_check,no_root_squash,fsid=12"

@@ -117,7 +117,7 @@
       when: not ansible_check_mode
 
 - name: Configure Profilarr nightly upgrade endpoint
-  hosts: media-vm
+  hosts: media-vm:docker-vm
   become: true
   gather_facts: false
 

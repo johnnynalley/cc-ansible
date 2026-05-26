@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Summarize one Sonarr series' monitoring, files, queue, and grab history.
 
-Run this on media-vm. It is read-only and prints no API keys.
+Run this on docker-vm. It is read-only and prints no API keys.
 """
 
 from __future__ import annotations

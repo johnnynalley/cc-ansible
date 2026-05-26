@@ -4,6 +4,10 @@
 
 admin_user: johnny
 
+# Local Ansible tasks must use the system Python; the OpenClaw venv can be the
+# controller process interpreter and does not include Ansible module deps.
+ansible_python_interpreter: /usr/bin/python3
+
 # sudo-rs (Kubuntu default) uses a non-standard prompt that Ansible doesn't recognize.
 # -S reads password from stdin instead of tty prompt.
 ansible_become_flags: "-S"

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Snapshot Arr release policy and clone anime profiles for Profilarr testing.
 
-Run this on media-vm. It reads local Sonarr/Radarr config.xml files for API
+Run this on docker-vm. It reads local Sonarr/Radarr config.xml files for API
 keys, writes JSON snapshots under /opt/media-stack, and creates or refreshes
 test quality profiles without changing any series/movie assignments.
 """

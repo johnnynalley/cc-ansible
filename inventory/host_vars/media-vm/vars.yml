@@ -6,6 +6,6 @@
 admin_user: johnny
 
 # Gluetun VPN watchdog - auto-restart on crash loops
-gluetun_watchdog_enabled: true
+gluetun_watchdog_enabled: false
 gluetun_watchdog_compose_dir: /opt/media-stack
 gluetun_watchdog_notify_tag: "push-quiet,dbc"

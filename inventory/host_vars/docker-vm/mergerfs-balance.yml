@@ -1,0 +1,21 @@
+# =============================================================================
+# docker-vm - MergerFS Balance Coordination
+# =============================================================================
+
+mergerfs_balance_media_stack_control_enabled: true
+mergerfs_balance_media_stack_ssh_user: johnny
+mergerfs_balance_media_stack_compose_targets:
+  - path: /opt/media-stack
+    services:
+      - sonarr
+      - radarr
+      - prowlarr
+      - bazarr
+      - recyclarr
+      - byparr
+      - qbittorrent
+      - sabnzbd
+  - path: /opt/profilarr
+    services:
+      - profilarr
+      - profilarr-parser

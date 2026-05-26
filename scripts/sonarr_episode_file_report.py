@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Report current Sonarr episode-file scores for one series.
 
-Run this on media-vm. It reads Sonarr's local config.xml for the API key and
+Run this on docker-vm. It reads Sonarr's local config.xml for the API key and
 prints no secrets.
 """
 

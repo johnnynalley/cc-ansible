@@ -1,0 +1,6 @@
+# =============================================================================
+# docker-vm - Nightly Media Maintenance Endpoint
+# =============================================================================
+
+nightly_media_maintenance_profilarr_endpoint_enabled: true
+nightly_media_maintenance_profilarr_ssh_user: johnny

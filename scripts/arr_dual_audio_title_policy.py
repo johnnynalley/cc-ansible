@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Patch Arr dual-audio custom formats to trust explicit title markers.
 
-Run this on media-vm. It reads local Sonarr/Radarr config.xml files for API
+Run this on docker-vm. It reads local Sonarr/Radarr config.xml files for API
 keys, backs up current custom formats and quality profiles, then updates:
 
 - Anime Dual Audio: title marker based, no parsed-language dependency.

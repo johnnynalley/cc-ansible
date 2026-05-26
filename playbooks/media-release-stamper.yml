@@ -35,14 +35,14 @@
 
         - name: Read Sonarr config for qBittorrent release stamper
           ansible.builtin.slurp:
-            src: /opt/media-stack/sonarr/config.xml
+            src: "{{ media_release_stamper_sonarr_config_path | default('/opt/media-stack/sonarr/config.xml') }}"
           register: media_release_stamper_sonarr_config
           no_log: true
           check_mode: false
 
         - name: Read Radarr config for qBittorrent release stamper
           ansible.builtin.slurp:
-            src: /opt/media-stack/radarr/config.xml
+            src: "{{ media_release_stamper_radarr_config_path | default('/opt/media-stack/radarr/config.xml') }}"
           register: media_release_stamper_radarr_config
           no_log: true
           check_mode: false
@@ -99,6 +99,9 @@
           changed_when: false
           no_log: true
           check_mode: false
+          retries: "{{ media_release_stamper_qbit_api_retries | default(5) }}"
+          delay: "{{ media_release_stamper_qbit_api_retry_delay | default(3) }}"
+          until: media_release_stamper_qbit_login is succeeded
 
         - name: Read qBittorrent preferences
           ansible.builtin.uri:
@@ -111,6 +114,9 @@
           changed_when: false
           no_log: true
           check_mode: false
+          retries: "{{ media_release_stamper_qbit_api_retries | default(5) }}"
+          delay: "{{ media_release_stamper_qbit_api_retry_delay | default(3) }}"
+          until: media_release_stamper_qbit_preferences is succeeded
 
         - name: Enable qBittorrent completion hook
           ansible.builtin.uri:
@@ -130,6 +136,10 @@
             status_code: [200, 204]
           changed_when: true
           no_log: true
+          retries: "{{ media_release_stamper_qbit_api_retries | default(5) }}"
+          delay: "{{ media_release_stamper_qbit_api_retry_delay | default(3) }}"
+          until: media_release_stamper_qbit_hook_update is succeeded
+          register: media_release_stamper_qbit_hook_update
           when:
             - not ansible_check_mode
             - >-
@@ -205,7 +215,7 @@
 
         - name: Set SABnzbd script directory
           ansible.builtin.uri:
-            url: "http://127.0.0.1:8080/api"
+            url: "{{ media_release_stamper_sab_api_url | default('http://127.0.0.1:8080/api') }}"
             method: POST
             body_format: form-urlencoded
             body:
@@ -223,7 +233,7 @@
 
         - name: Read SABnzbd categories
           ansible.builtin.uri:
-            url: "http://127.0.0.1:8080/api"
+            url: "{{ media_release_stamper_sab_api_url | default('http://127.0.0.1:8080/api') }}"
             method: POST
             body_format: form-urlencoded
             body:
@@ -239,7 +249,7 @@
 
         - name: Enable SABnzbd release stamper for media categories
           ansible.builtin.uri:
-            url: "http://127.0.0.1:8080/api"
+            url: "{{ media_release_stamper_sab_api_url | default('http://127.0.0.1:8080/api') }}"
             method: POST
             body_format: form-urlencoded
             body:

@@ -1,0 +1,79 @@
+services:
+  tautulli:
+    image: lscr.io/linuxserver/tautulli:latest
+    container_name: tautulli
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=America/Chicago
+    volumes:
+      - ./tautulli:/config
+      - "./plex/Library/Application Support/Plex Media Server/Logs:/plex-logs:ro"
+    ports:
+      - 8181:8181
+    restart: unless-stopped
+
+  plex:
+    image: lscr.io/linuxserver/plex:latest
+    container_name: plex
+    runtime: nvidia
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=America/Chicago
+      - VERSION=docker
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=compute,video,utility
+    volumes:
+      - ./plex:/config
+      - /srv/plex:/data:ro
+      - /srv/archive:/archive
+    ports:
+      - 32400:32400
+    restart: unless-stopped
+
+  audiobookshelf:
+    image: ghcr.io/advplyr/audiobookshelf:latest
+    container_name: audiobookshelf
+    ports:
+      - "13378:80"
+    volumes:
+      - ./audiobookshelf/config:/config
+      - ./audiobookshelf/metadata:/metadata
+      - /srv/media/podcasts:/podcasts
+    environment:
+      - TZ=America/Chicago
+      - NODE_OPTIONS=--max-old-space-size=2048
+    restart: unless-stopped
+
+  bookshelf:
+    image: ghcr.io/pennydreadful/bookshelf:hardcover
+    container_name: bookshelf
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=America/Chicago
+    volumes:
+      - ./bookshelf:/config
+      - /srv/plex:/data
+      - /srv/archive:/archive
+      - /srv/books:/books
+    ports:
+      - 8787:8787
+    restart: unless-stopped
+
+  lazylibrarian:
+    image: lscr.io/linuxserver/lazylibrarian:latest
+    container_name: lazylibrarian
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=America/Chicago
+    volumes:
+      - ./lazylibrarian:/config
+      - /srv/plex:/data
+      - /srv/archive:/archive
+      - /srv/books:/books
+    ports:
+      - 5299:5299
+    restart: unless-stopped

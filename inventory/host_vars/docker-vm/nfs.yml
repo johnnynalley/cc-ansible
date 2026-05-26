@@ -1,0 +1,31 @@
+# =============================================================================
+# docker-vm - NFS Client Configuration
+# =============================================================================
+
+nfs_mounts:
+  # Single parent media mount from ts440.
+  # Arr/download containers should bind /srv/media/plex as /data so
+  # downloads/complete and final libraries stay under one visible filesystem
+  # for Sonarr/Radarr hardlinks.
+  - path: /srv/media
+    src: 192.168.1.146:/media
+    opts: "rw,_netdev,nofail,hard,timeo=600,retrans=2,noatime,x-systemd.automount,x-systemd.requires=network-online.target"
+    owner: johnny
+    group: johnny
+    mode: "2775"
+
+  # Temp/incomplete downloads live on ts440's dedicated SSD export. Completed
+  # downloads still land under /srv/media/plex/downloads/complete before Arr import.
+  - path: /srv/incomplete_downloads
+    src: 192.168.1.146:/incomplete-downloads
+    opts: "rw,_netdev,nofail,hard,timeo=600,retrans=2,noatime,x-systemd.automount,x-systemd.requires=network-online.target"
+    owner: johnny
+    group: johnny
+    mode: "0775"
+
+  - path: /srv/archive
+    src: 192.168.1.146:/archive
+    opts: "rw,_netdev,nofail,hard,timeo=600,retrans=2,noatime,x-systemd.automount,x-systemd.requires=network-online.target"
+    owner: johnny
+    group: johnny
+    mode: "0775"

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Adjust Profilarr's Sonarr upgrade filter using supported stored settings.
 
-Run this on media-vm. It updates Profilarr's SQLite config and creates a
+Run this on docker-vm. It updates Profilarr's SQLite config and creates a
 SQLite backup before mutation. It does not patch Profilarr application code.
 """
 

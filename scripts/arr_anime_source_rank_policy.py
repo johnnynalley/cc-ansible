@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Add anime Bluray source ranking to Sonarr/Radarr anime profiles.
 
-Run this on media-vm. It reads local Arr config.xml files for API keys, backs
+Run this on docker-vm. It reads local Arr config.xml files for API keys, backs
 up current custom formats and quality profiles, then creates/updates:
 
 - Local Anime Source Rank - Bluray
