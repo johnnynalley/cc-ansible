@@ -17,6 +17,10 @@ When creating or materially updating operator docs, policy docs, runbooks, or tr
 
 When renaming, moving, deleting, or replacing a source-of-truth doc, tracker, script, or runbook that OpenClaw references, update the matching OpenClaw workspace skills, hubs, heartbeat prompts, cron jobs, and guidance files in the same change. Do not leave OpenClaw pointing at stale paths after repo-side file moves.
 
+### Session Naming
+
+When the user asks Codex to name a session, consider the full context of the session before proposing a title. Use a natural-language title that describes what the session was really about; do not force lowercase slugs or replace spaces with hyphens unless the user explicitly asks for a filename-safe form.
+
 ### Build, Test, and Development Commands
 
 - `ansible-galaxy collection install -r requirements.yml`: install required collections.
