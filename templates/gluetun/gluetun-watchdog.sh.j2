@@ -19,10 +19,29 @@ COMPOSE_DIR="{{ gluetun_watchdog_compose_dir | default('/opt/media-stack') }}"
 CONTAINER_NAME="{{ gluetun_watchdog_container | default('gluetun') }}"
 # Containers sharing gluetun's network namespace (must be recreated together)
 DEPENDENT_CONTAINERS="{{ gluetun_watchdog_dependent_containers | default('qbittorrent') }}"
+COMPOSE_LOCK_FILE="{{ gluetun_watchdog_compose_lock_file | default('/run/media-stack-compose.lock') }}"
+COMPOSE_LOCK_WAIT="{{ gluetun_watchdog_compose_lock_wait | default(900) }}"
 
 mkdir -p "$STATE_DIR"
 
 log() { logger -t "$LOG_TAG" "$*"; }
+
+run_compose() {
+    local output
+    local rc
+
+    output=$(cd "$COMPOSE_DIR" && flock -w "$COMPOSE_LOCK_WAIT" "$COMPOSE_LOCK_FILE" docker compose "$@" 2>&1)
+    rc=$?
+    while IFS= read -r line; do
+        [[ -n "$line" ]] && log "$line"
+    done <<< "$output"
+
+    if [[ "$rc" -ne 0 ]]; then
+        log "ERROR: docker compose $* failed with exit code $rc"
+    fi
+
+    return "$rc"
+}
 
 send_notification() {
     local title="$1"
@@ -173,9 +192,13 @@ restart_gluetun() {
     # Dependent containers (e.g. qbittorrent) share gluetun's namespace and must
     # be recreated together, otherwise they're orphaned on the old namespace.
     # shellcheck disable=SC2086
-    cd "$COMPOSE_DIR" && docker compose up -d --force-recreate "$CONTAINER_NAME" $DEPENDENT_CONTAINERS 2>&1 | while read -r line; do
-        log "$line"
-    done
+    if ! run_compose up -d --force-recreate "$CONTAINER_NAME" $DEPENDENT_CONTAINERS; then
+        send_notification \
+            "Gluetun watchdog: compose recreate failed" \
+            "docker compose failed while recreating $CONTAINER_NAME + dependents on $(hostname). Check journalctl -u gluetun-watchdog." \
+            "failure"
+        return 1
+    fi
 
     # Wait for container to stabilize
     sleep 30

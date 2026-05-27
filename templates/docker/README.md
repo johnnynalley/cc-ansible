@@ -28,3 +28,6 @@
   live edits under `/opt/caddy/` must be backported here.
 - Compose templates can restart services when rendered output changes. Use
   `--check --diff` and review rendered diffs before applying stack changes.
+- `docker-auto-update.sh.j2` uses per-stack Compose locks. The media stack lock
+  must stay aligned with the Gluetun/qBittorrent helpers so updates cannot race
+  VPN recovery.

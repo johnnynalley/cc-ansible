@@ -19,24 +19,43 @@ fi
 # shellcheck disable=SC1090
 . "$ENV_FILE"
 
-for required_var in PORT_FILE QBIT_API QBIT_USER QBIT_PASS COMPOSE_DIR QBIT_SERVICE LOCK_FILE MAX_RETRIES RETRY_DELAY; do
+for required_var in PORT_FILE QBIT_API QBIT_USER QBIT_PASS COMPOSE_DIR QBIT_SERVICE LOCK_FILE MAX_RETRIES RETRY_DELAY COMPOSE_LOCK_FILE COMPOSE_LOCK_WAIT; do
     if [[ -z "${!required_var:-}" ]]; then
         log "Missing required setting: $required_var"
         exit 1
     fi
 done
 
+run_compose() {
+    local output
+    local rc
+
+    cd "$COMPOSE_DIR" || exit 1
+    output=$(flock -w "$COMPOSE_LOCK_WAIT" "$COMPOSE_LOCK_FILE" docker compose "$@" 2>&1)
+    rc=$?
+    while IFS= read -r line; do
+        [[ -n "$line" ]] && log "$line"
+    done <<< "$output"
+
+    if [[ "$rc" -ne 0 ]]; then
+        log "ERROR: docker compose $* failed with exit code $rc"
+    fi
+
+    return "$rc"
+}
+
 restart_qbit() {
     log "qBittorrent API not reachable, recreating container..."
-    cd "$COMPOSE_DIR" || exit 1
-    docker compose stop "$QBIT_SERVICE"
+    if ! run_compose stop "$QBIT_SERVICE"; then
+        return 1
+    fi
 
     if [[ -f "$LOCK_FILE" ]]; then
         mv "$LOCK_FILE" "${LOCK_FILE}.stale-$(date +%Y%m%d%H%M%S)"
         log "Moved stale qBittorrent lockfile aside"
     fi
 
-    docker compose up -d "$QBIT_SERVICE"
+    run_compose up -d "$QBIT_SERVICE"
 }
 
 if [[ ! -f "$PORT_FILE" ]]; then
@@ -79,7 +98,10 @@ for ((i=1; i<=MAX_RETRIES; i++)); do
 
     # After repeated connection failures, recreate qBittorrent with stale lockfile cleanup.
     if [[ $i -eq 5 ]] && [[ "$RESTARTED_QBIT" == "false" ]]; then
-        restart_qbit
+        if ! restart_qbit; then
+            log "qBittorrent recreate failed"
+            exit 1
+        fi
         RESTARTED_QBIT=true
         sleep 10
         continue

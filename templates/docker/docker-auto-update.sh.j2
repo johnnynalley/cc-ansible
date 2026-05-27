@@ -21,6 +21,7 @@ set -uo pipefail
 LOG_TAG="docker-auto-update"
 STACK_DIFF="/usr/local/bin/docker-stack-diff"
 STATE_DIR="/var/lib/docker-auto-update"
+COMPOSE_LOCK_WAIT="{{ docker_auto_update_compose_lock_wait | default(900) }}"
 SUMMARY=""
 BLOCKED_SUMMARY=""
 UPDATE_COUNT=0
@@ -30,6 +31,41 @@ ERRORS=0
 mkdir -p "$STATE_DIR"
 
 log() { logger -t "$LOG_TAG" "$*"; echo "$*"; }
+
+compose_lock_file() {
+    local stack_name="$1"
+    case "$stack_name" in
+        media-stack)
+            echo "{{ gluetun_watchdog_compose_lock_file | default('/run/media-stack-compose.lock') }}"
+            ;;
+        *)
+            echo "/run/docker-compose-${stack_name}.lock"
+            ;;
+    esac
+}
+
+run_compose_logged() {
+    local stack_name="$1"
+    local compose_dir="$2"
+    shift 2
+
+    local lock_file
+    local output
+    local rc
+
+    lock_file=$(compose_lock_file "$stack_name")
+    output=$(cd "$compose_dir" && flock -w "$COMPOSE_LOCK_WAIT" "$lock_file" docker compose "$@" 2>&1)
+    rc=$?
+    while IFS= read -r line; do
+        [[ -n "$line" ]] && log "${stack_name}: $line"
+    done <<< "$output"
+
+    if [[ "$rc" -ne 0 ]]; then
+        log "ERROR: ${stack_name}: docker compose $* failed with exit code $rc"
+    fi
+
+    return "$rc"
+}
 
 send_notification() {
     local title="$1"
@@ -78,8 +114,9 @@ cleanup_state() {
 }
 
 pull_with_retry() {
-    local compose_dir="$1"
-    shift
+    local stack_name="$1"
+    local compose_dir="$2"
+    shift 2
     local services="$*"
     local attempt=0
     local max_attempts=3
@@ -88,7 +125,7 @@ pull_with_retry() {
     while [[ $attempt -lt $max_attempts ]]; do
         attempt=$((attempt + 1))
         # shellcheck disable=SC2086
-        if cd "$compose_dir" && docker compose pull $services 2>&1; then
+        if cd "$compose_dir" && flock -w "$COMPOSE_LOCK_WAIT" "$(compose_lock_file "$stack_name")" docker compose pull $services 2>&1; then
             return 0
         fi
         if [[ $attempt -lt $max_attempts ]]; then
@@ -101,14 +138,15 @@ pull_with_retry() {
 }
 
 build_with_retry() {
-    local compose_dir="$1"
+    local stack_name="$1"
+    local compose_dir="$2"
     local attempt=0
     local max_attempts=3
     local delay=10
 
     while [[ $attempt -lt $max_attempts ]]; do
         attempt=$((attempt + 1))
-        if cd "$compose_dir" && docker compose build --pull 2>&1; then
+        if cd "$compose_dir" && flock -w "$COMPOSE_LOCK_WAIT" "$(compose_lock_file "$stack_name")" docker compose build --pull 2>&1; then
             return 0
         fi
         if [[ $attempt -lt $max_attempts ]]; then
@@ -132,9 +170,9 @@ log "Starting Docker auto-update..."
 # --- {{ stack.name }} (full stack{% if stack.build | default(false) %}, build{% endif %}{% if use_major_guard %}, major guard{% endif %}) ---
 log "Checking {{ stack.name }}..."
 {% if stack.build | default(false) %}
-if build_with_retry "{{ stack.path }}"; then
+if build_with_retry "{{ stack.name }}" "{{ stack.path }}"; then
 {% else %}
-if pull_with_retry "{{ stack.path }}"; then
+if pull_with_retry "{{ stack.name }}" "{{ stack.path }}"; then
 {% endif %}
 {% if use_major_guard %}
     diff_output=$("$STACK_DIFF" --check-major "{{ stack.path }}" 2>/dev/null)
@@ -170,23 +208,25 @@ if pull_with_retry "{{ stack.path }}"; then
         fi
     else
         log "{{ stack.name }}: updates available, recreating..."
-        cd "{{ stack.path }}" && docker compose up -d 2>&1 | while read -r line; do
-            log "{{ stack.name }}: $line"
-        done
-        UPDATE_COUNT=$((UPDATE_COUNT + 1))
-        SUMMARY="${SUMMARY}{{ stack.name }}:\n${diff_output}\n\n"
-        # Clear any stale state file (stack is now up to date)
-        rm -f "${STATE_DIR}/blocked-{{ stack.name }}"
+        if run_compose_logged "{{ stack.name }}" "{{ stack.path }}" up -d; then
+            UPDATE_COUNT=$((UPDATE_COUNT + 1))
+            SUMMARY="${SUMMARY}{{ stack.name }}:\n${diff_output}\n\n"
+            # Clear any stale state file (stack is now up to date)
+            rm -f "${STATE_DIR}/blocked-{{ stack.name }}"
+        else
+            ERRORS=$((ERRORS + 1))
+        fi
     fi
 {% else %}
     diff_output=$("$STACK_DIFF" "{{ stack.path }}" 2>/dev/null || echo "(diff check failed)")
     if [[ "$diff_output" != *"(no image changes detected)"* && "$diff_output" != *"(diff check failed)"* ]]; then
         log "{{ stack.name }}: updates available, recreating..."
-        cd "{{ stack.path }}" && docker compose up -d 2>&1 | while read -r line; do
-            log "{{ stack.name }}: $line"
-        done
-        UPDATE_COUNT=$((UPDATE_COUNT + 1))
-        SUMMARY="${SUMMARY}{{ stack.name }}:\n${diff_output}\n\n"
+        if run_compose_logged "{{ stack.name }}" "{{ stack.path }}" up -d; then
+            UPDATE_COUNT=$((UPDATE_COUNT + 1))
+            SUMMARY="${SUMMARY}{{ stack.name }}:\n${diff_output}\n\n"
+        else
+            ERRORS=$((ERRORS + 1))
+        fi
     else
         log "{{ stack.name }}: up to date"
     fi
@@ -200,7 +240,7 @@ fi
 {% set use_major_guard = stack.major_guard | default(docker_auto_update_major_guard | default(true)) %}
 # --- {{ stack.name }} (services: {{ stack.auto_update_services | join(', ') }}{% if use_major_guard %}, major guard{% endif %}) ---
 log "Checking {{ stack.name }} ({{ stack.auto_update_services | join(', ') }})..."
-if pull_with_retry "{{ stack.path }}" "{{ stack.auto_update_services | join(' ') }}"; then
+if pull_with_retry "{{ stack.name }}" "{{ stack.path }}" "{{ stack.auto_update_services | join(' ') }}"; then
 {% if use_major_guard %}
     diff_output=$("$STACK_DIFF" --check-major "{{ stack.path }}" 2>/dev/null)
     diff_exit=$?
@@ -232,16 +272,20 @@ if pull_with_retry "{{ stack.path }}" "{{ stack.auto_update_services | join(' ')
         # Gluetun: force-recreate to clear network namespace (stale tun0 routes)
         # Dependent containers share the namespace and must be recreated together
         log "{{ stack.name }}/{{ svc }}: force-recreating with dependents..."
-        cd "{{ stack.path }}" && docker compose up -d --force-recreate {{ svc }} {{ gluetun_watchdog_dependent_containers | default('qbittorrent') }} 2>&1 | while read -r line; do
-            log "{{ stack.name }}: $line"
-        done
+        if run_compose_logged "{{ stack.name }}" "{{ stack.path }}" up -d --force-recreate {{ svc }} {{ gluetun_watchdog_dependent_containers | default('qbittorrent') }}; then
+            UPDATE_COUNT=$((UPDATE_COUNT + 1))
+            SUMMARY="${SUMMARY}{{ stack.name }}/{{ svc }}:\n${svc_diff}\n\n"
+        else
+            ERRORS=$((ERRORS + 1))
+        fi
 {% else %}
-        cd "{{ stack.path }}" && docker compose up -d {{ svc }} 2>&1 | while read -r line; do
-            log "{{ stack.name }}: $line"
-        done
+        if run_compose_logged "{{ stack.name }}" "{{ stack.path }}" up -d {{ svc }}; then
+            UPDATE_COUNT=$((UPDATE_COUNT + 1))
+            SUMMARY="${SUMMARY}{{ stack.name }}/{{ svc }}:\n${svc_diff}\n\n"
+        else
+            ERRORS=$((ERRORS + 1))
+        fi
 {% endif %}
-        UPDATE_COUNT=$((UPDATE_COUNT + 1))
-        SUMMARY="${SUMMARY}{{ stack.name }}/{{ svc }}:\n${svc_diff}\n\n"
     else
         log "{{ stack.name }}/{{ svc }}: up to date"
     fi

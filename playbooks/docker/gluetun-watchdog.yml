@@ -89,7 +89,7 @@
               ExecStart=/usr/local/sbin/gluetun-watchdog
               StandardOutput=journal
               StandardError=journal
-              TimeoutStartSec=120
+              TimeoutStartSec={{ gluetun_watchdog_timeout_start_sec | default(900) }}
           notify: Reload systemd
 
         - name: Create gluetun-watchdog.timer
@@ -137,6 +137,8 @@
               LOCK_FILE={{ qbit_port_sync_lock_file | default('/opt/media-stack/qbittorrent/qBittorrent/lockfile') | quote }}
               MAX_RETRIES={{ qbit_port_sync_max_retries | default(30) | quote }}
               RETRY_DELAY={{ qbit_port_sync_retry_delay | default(5) | quote }}
+              COMPOSE_LOCK_FILE={{ qbit_port_sync_compose_lock_file | default(gluetun_watchdog_compose_lock_file | default('/run/media-stack-compose.lock')) | quote }}
+              COMPOSE_LOCK_WAIT={{ qbit_port_sync_compose_lock_wait | default(gluetun_watchdog_compose_lock_wait | default(900)) | quote }}
           no_log: true
 
         - name: Create qBittorrent port sync script
@@ -165,7 +167,7 @@
               ExecStart=/usr/local/bin/qbit-port-sync
               StandardOutput=journal
               StandardError=journal
-              TimeoutStartSec=180
+              TimeoutStartSec={{ qbit_port_sync_timeout_start_sec | default(900) }}
           notify: Reload systemd
 
         - name: Create qbit-port-sync.path
