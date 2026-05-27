@@ -95,20 +95,24 @@ This means any acceptable dual-audio release beats a non-dual-audio release,
 but within dual audio, a higher enabled quality still beats a lower quality even
 when the lower quality has x265 and a better release group.
 
-## Anime Quality Rank
+## Quality Rank
 
 Sonarr `shows-anime` enabled qualities are grouped together so upgrades are
 driven by custom-format scores instead of Sonarr's native quality order.
 
-- `Local Anime Quality Rank - 480p`: `+10000`
-- `Local Anime Quality Rank - 576p`: `+20000`
-- `Local Anime Quality Rank - 720p`: `+30000`
-- `Local Anime Quality Rank - 1080p`: `+40000`
+- `Local Quality Rank - 480p`: `+10000`
+- `Local Quality Rank - 576p`: `+20000`
+- `Local Quality Rank - 720p`: `+30000`
+- `Local Quality Rank - 1080p`: `+40000`
 
 Radarr `movies-anime` currently only enables 720p and 1080p movie qualities.
 
-- `Local Anime Quality Rank - 720p`: `+30000`
-- `Local Anime Quality Rank - 1080p`: `+40000`
+- `Local Quality Rank - 720p`: `+30000`
+- `Local Quality Rank - 1080p`: `+40000`
+
+These are generic resolution custom formats, not anime-specific matchers. They
+are shared by anime and regular Profilarr test profiles so custom-format math
+can rank enabled qualities consistently without spending extra CF slots.
 
 ## Anime Source Rank
 
@@ -132,11 +136,12 @@ The audit script `scripts/media-release/arr_release_policy_audit.py` checks
 current CF counts, profile scores, queue status, and unused/all-zero CFs.
 `scripts/media-release/arr_profile_math_audit.py` checks the Profilarr test
 profiles as a whole: DA beats all non-DA paths, x265 stays above tier and
-service/repack stacking, 1080p DA beats any 720p DA stack, best Bluray HEVC and
-best WEB HEVC Dictionarry stacks are source-ordered, service and repack CFs
-stay below the smallest release-tier gap, Profilarr-synced TRaSH fallback tiers
-have only the expected bounded scores, no unexpected legacy tier score remains,
-and the CF limit is still obeyed.
+service/repack stacking, quality-rank scores beat lower-quality x265+tier
+stacks, 1080p DA beats any 720p DA stack, best Bluray HEVC and best WEB HEVC
+Dictionarry stacks are source-ordered, service and repack CFs stay below the
+smallest release-tier gap, Profilarr-synced TRaSH fallback tiers have only the
+expected bounded scores, no unexpected legacy tier score remains, and the CF
+limit is still obeyed.
 
 The read-only live expectation checkers are
 `scripts/media-release/sonarr_release_expectation_check.py` and
@@ -328,12 +333,12 @@ separate audit. Regular profiles should be improved deliberately by reviewing
 the current TRaSH profile, quality definitions, release groups, codec policy,
 language policy, and observed grabs.
 
-The Profilarr regular test profiles are more aggressive than production about
-same-resolution WEB upgrades. They group `WEBRip` and `WEBDL` together at each
-enabled WEB resolution, so x265/HEVC and release-tier custom formats can decide
-between `WEBRip-1080p` and `WEBDL-1080p`. HDTV, Bluray, remux, and
-cross-resolution replacements remain outside those WEB groups, so native
-quality order still blocks obvious source or resolution downgrades.
+The Profilarr regular test profiles use the same native-quality strategy as
+anime: every enabled quality is grouped into `Regular Enabled Qualities`, then
+the generic `Local Quality Rank - ...` CFs provide the resolution order. This
+lets x265/HEVC and release-tier custom formats matter across source labels
+while still keeping the math bounded so a lower resolution with x265 plus the
+best tier stack cannot beat a bare higher-resolution rank.
 
 ## Change Procedure
 
@@ -449,9 +454,9 @@ Current Profilarr tier replacement test plan:
   - `scripts/media-release/profilarr_bounded_tier_import.py`
   - `scripts/media-release/arr_profile_math_audit.py`
 - Latest dry-run snapshot:
-  `/opt/media-stack/release-policy-snapshots/20260526T234518Z-dictionarry-bounded-tiers-dry-run`
+  `/opt/media-stack/release-policy-snapshots/20260527T001017Z-dictionarry-bounded-tiers-dry-run`
 - Latest applied snapshot:
-  `/opt/media-stack/release-policy-snapshots/20260526T234529Z-dictionarry-bounded-tiers`
+  `/opt/media-stack/release-policy-snapshots/20260527T001049Z-dictionarry-bounded-tiers`
 - Current CF counts after bounded-tier apply:
   - Sonarr: `96/100`
   - Radarr: `79/100`
@@ -465,16 +470,16 @@ Current Profilarr tier replacement test plan:
   model staged for inspection before moving any series/movie to the test
   profiles and before changing production profile scores.
 - Regular test-profile quality structure:
-  - Sonarr `shows-regular-profilarr-test` groups `WEBDL-480p` with
-    `WEBRip-480p`, `WEBDL-720p` with `WEBRip-720p`, and `WEBDL-1080p` with
-    `WEBRip-1080p`.
-  - Radarr `movies-regular-profilarr-test` groups `WEBDL-720p` with
-    `WEBRip-720p` and `WEBDL-1080p` with `WEBRip-1080p`; the disabled existing
-    `WEB 2160p` group remains disabled.
-  - HDTV and Bluray are deliberately not grouped with WEB. A same-resolution
-    WEBRip x265 release can beat a WEBDL x264 release by custom-format score,
-    but an HDTV x265 release should not automatically replace a WEBDL release
-    just because it is HEVC.
+  - Sonarr `shows-regular-profilarr-test` groups all enabled regular qualities
+    into `Regular Enabled Qualities`; disabled qualities remain outside the
+    group.
+  - Radarr `movies-regular-profilarr-test` does the same; disabled 2160p movie
+    qualities remain disabled and outside the active group.
+  - The regular test cutoff points at `Regular Enabled Qualities`, and
+    `cutoffFormatScore` is `45000`, which means 1080p plus x265 meets cutoff.
+  - `Local Anime Quality Rank - ...` was only a resolution matcher. It was
+    renamed in place to `Local Quality Rank - ...` and reused for anime and
+    regular test profiles instead of creating duplicate CFs.
 - Test profiles are staged in replacement mode, not stacked mode. Dictionarry
   release-group tiers are the primary ranking band. Profilarr-synced TRaSH
   Guides tiers are retained as low-score fallback only when Dictionarry misses.
@@ -530,22 +535,29 @@ Current Profilarr tier replacement test plan:
     `+100000`
   - Max 720p DA path: `100000 + 30000 + 5000 + 1982 = 136982`, still below
     the 1080p DA floor of `140000`
+  - Max regular 720p path: `30000 + 5000 + 1982 = 36982`, still below the
+    bare 1080p rank of `40000`; lower regular quality ranks have even more
+    headroom.
 - Source ordering checks deliberately keep WEB below Bluray at the near-tier
   boundary: Sonarr Efficient WEB Tier 1 (`+600`) is below Efficient Bluray Tier
   2 (`+820`), Sonarr Compact WEB Tier 1 (`+440`) is below Compact Bluray Tier
   2 (`+620`), Radarr Efficient WEB Tier 1 (`+600`) is below Efficient Bluray
   Tier 2 (`+800`), and Radarr Compact WEB Tier 1 (`+440`) is below Compact
   Bluray Tier 2 (`+600`).
-- Validation after the 2026-05-26 regular WEB grouping apply:
+- Validation after the 2026-05-27 generic quality-rank apply:
+  - `scripts/media-release/profilarr_bounded_tier_import.py --dry-run` showed
+    no new CFs, planned in-place CF renames, and the regular enabled-quality
+    grouping.
+  - `scripts/media-release/profilarr_bounded_tier_import.py` applied the same
+    changes with the snapshot above.
   - `scripts/media-release/arr_profile_math_audit.py` passed with no failures
-    and reported the expected regular WEB groups.
+    and reported `Regular Enabled Qualities` in both regular test profiles.
   - `scripts/media-release/arr_quality_profile_report.py` confirmed the actual
-    Sonarr/Radarr test-profile quality groups.
-  - A targeted American Dad S21E01 release check showed the
-    `WEBRip-1080p x265-DH` candidate no longer carries the native-quality
-    rejection against the existing `WEBDL-1080p` file. It still has Sonarr's
-    separate `Episode wasn't requested: 22x1` rejection, which should be
-    handled as series/season mapping metadata rather than release-score math.
+    Sonarr/Radarr test-profile quality groups and `cutoffFormatScore=45000`.
+  - `scripts/media-release/sonarr_release_expectation_check.py` and
+    `scripts/media-release/radarr_release_expectation_check.py` both passed,
+    confirming the production anime profiles still score DA, x265, and the
+    renamed generic quality ranks as expected.
 - These scores are intentionally below DA (`+100000`), anime quality ranks, and
   x265/HEVC (`+5000` in the test profiles). Dictionarry tiers can stack with
   the low TRaSH fallback tier only inside the proven `1982` release-stack

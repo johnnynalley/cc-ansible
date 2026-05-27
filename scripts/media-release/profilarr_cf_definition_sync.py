@@ -130,7 +130,7 @@ LOCAL_CUSTOM_NAMES = {
     "x265",
     "x265 (HD)",
 }
-LOCAL_PREFIXES = ("Local Anime Quality Rank -",)
+LOCAL_PREFIXES = ("Local Quality Rank -", "Local Anime Quality Rank -")
 
 INTERESTING_KEYWORDS = (
     "tier",

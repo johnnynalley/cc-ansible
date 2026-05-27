@@ -23,7 +23,8 @@ LEGACY_TIER_PATTERN = re.compile(r"^(?!Dictionarry ).*\bTier \d{2}$", re.IGNOREC
 LEGACY_TIER_NAMES = {"WEB Scene"}
 
 ANIME_DUAL_AUDIO_SCORE = 100000
-ANIME_QUALITY_RANKS = {
+QUALITY_RANK_PREFIX = "Local Quality Rank - "
+QUALITY_RANK_SCORES = {
     "480p": 10000,
     "576p": 20000,
     "720p": 30000,
@@ -31,15 +32,11 @@ ANIME_QUALITY_RANKS = {
 }
 ANIME_X265_MIN_SCORE = 5000
 REGULAR_X265_MIN_SCORE = 5000
+REGULAR_CUTOFF_FORMAT_SCORE = QUALITY_RANK_SCORES["1080p"] + REGULAR_X265_MIN_SCORE
 ANIME_BLURAY_SOURCE_RANK = 0
 SERVICE_MAX_SCORE = 3
 REPACK_MAX_SCORE = 3
-REGULAR_WEB_QUALITY_GROUPS = (
-    ("WEB 480p", ("WEBDL-480p", "WEBRip-480p")),
-    ("WEB 720p", ("WEBDL-720p", "WEBRip-720p")),
-    ("WEB 1080p", ("WEBDL-1080p", "WEBRip-1080p")),
-    ("WEB 2160p", ("WEBDL-2160p", "WEBRip-2160p")),
-)
+REGULAR_QUALITY_GROUP_NAME = "Regular Enabled Qualities"
 SERVICE_FORMAT_NAMES = {
     "ABEMA",
     "ADN",
@@ -356,32 +353,43 @@ def iter_quality_locations(profile: dict[str, Any]) -> dict[str, dict[str, Any]]
     return locations
 
 
-def regular_web_quality_group_report(
+def regular_enabled_quality_group_report(
     profile: dict[str, Any],
     failures: list[str],
     profile_name: str,
 ) -> dict[str, Any]:
     locations = iter_quality_locations(profile)
-    report: dict[str, Any] = {}
-    for group_name, quality_names in REGULAR_WEB_QUALITY_GROUPS:
-        present = [name for name in quality_names if name in locations]
-        if len(present) != len(quality_names):
-            continue
-        allowed = [name for name in present if locations[name]["allowed"]]
-        if not allowed:
-            continue
-        groups = {locations[name]["group"] for name in present}
-        report[group_name] = {
-            "qualities": list(quality_names),
-            "allowed_qualities": allowed,
+    allowed = [name for name, location in locations.items() if location["allowed"]]
+    groups = {locations[name]["group"] for name in allowed}
+    report = {
+        REGULAR_QUALITY_GROUP_NAME: {
+            "qualities": allowed,
             "groups": sorted(str(group) for group in groups),
         }
-        if groups != {group_name}:
-            actual = ", ".join(sorted(str(group) for group in groups))
+    }
+    if len(allowed) < 2:
+        failures.append(f"{profile_name}: expected multiple enabled qualities in regular test profile")
+    if groups != {REGULAR_QUALITY_GROUP_NAME}:
+        actual = ", ".join(sorted(str(group) for group in groups))
+        failures.append(
+            f"{profile_name}: all enabled regular qualities must be grouped as "
+            f"{REGULAR_QUALITY_GROUP_NAME}; actual groups: {actual}"
+        )
+    if profile.get("cutoff") is not None:
+        cutoff_group = None
+        for item in profile.get("items") or []:
+            if is_group_item(item) and item.get("id") == profile.get("cutoff"):
+                cutoff_group = str(item.get("name") or "")
+                break
+        if cutoff_group != REGULAR_QUALITY_GROUP_NAME:
             failures.append(
-                f"{profile_name}: {', '.join(quality_names)} must be grouped as "
-                f"{group_name}; actual groups: {actual}"
+                f"{profile_name}: cutoff must point at {REGULAR_QUALITY_GROUP_NAME}; actual {cutoff_group}"
             )
+    if int(profile.get("cutoffFormatScore") or 0) != REGULAR_CUTOFF_FORMAT_SCORE:
+        failures.append(
+            f"{profile_name}: cutoffFormatScore {profile.get('cutoffFormatScore')} "
+            f"must be {REGULAR_CUTOFF_FORMAT_SCORE}"
+        )
     return report
 
 
@@ -437,6 +445,26 @@ def active_repack_scores(scores: dict[str, int]) -> dict[str, int]:
         for name, score in scores.items()
         if name in REPACK_FORMAT_NAMES and score != 0
     }
+
+
+def quality_resolution_from_name(name: str) -> str | None:
+    match = re.search(r"\b(480p|576p|720p|1080p)\b", name, flags=re.IGNORECASE)
+    return match.group(1).lower() if match else None
+
+
+def quality_rank_score_report(scores: dict[str, int], failures: list[str], profile_name: str) -> dict[str, int]:
+    report: dict[str, int] = {}
+    for quality, expected in QUALITY_RANK_SCORES.items():
+        name = f"{QUALITY_RANK_PREFIX}{quality}"
+        if name not in scores:
+            continue
+        actual = scores[name]
+        report[quality] = actual
+        if actual != expected:
+            failures.append(f"{profile_name}: {name} score {actual} must be {expected}")
+    if not report:
+        failures.append(f"{profile_name}: no generic quality-rank custom formats are scored")
+    return report
 
 
 def min_configured_tier_gap(instance_name: str, scores: dict[str, int], failures: list[str], profile_name: str) -> int:
@@ -558,6 +586,7 @@ def audit_profile(
     x265_floor = ANIME_X265_MIN_SCORE if profile_check.kind == "anime" else REGULAR_X265_MIN_SCORE
     if x265_score < x265_floor:
         failures.append(f"{profile_check.name}: {instance.x265_name} score {x265_score} is below {x265_floor}")
+    quality_rank_scores = quality_rank_score_report(scores, failures, profile_check.name)
 
     negative_guardrails = (
         ANIME_NEGATIVE_GUARDRAILS if profile_check.kind == "anime" else REGULAR_NEGATIVE_GUARDRAILS
@@ -588,7 +617,7 @@ def audit_profile(
             )
 
         max_non_da_1080p = (
-            ANIME_QUALITY_RANKS["1080p"]
+            QUALITY_RANK_SCORES["1080p"]
             + x265_score
             + source_rank
             + release_stack
@@ -601,25 +630,71 @@ def audit_profile(
 
         max_720p_da = (
             da_score
-            + ANIME_QUALITY_RANKS["720p"]
+            + QUALITY_RANK_SCORES["720p"]
             + x265_score
             + source_rank
             + release_stack
         )
-        min_1080p_da = da_score + ANIME_QUALITY_RANKS["1080p"]
+        min_1080p_da = da_score + QUALITY_RANK_SCORES["1080p"]
         if min_1080p_da <= max_720p_da:
             failures.append(
                 f"{profile_check.name}: 1080p DA floor {min_1080p_da} "
                 f"must beat max 720p DA {max_720p_da}"
             )
     else:
-        regular_quality_groups = regular_web_quality_group_report(profile, failures, profile_check.name)
+        regular_quality_groups = regular_enabled_quality_group_report(profile, failures, profile_check.name)
         release_stack = max(bluray_stack, web_stack) + max_fallback_score + max_incidental_score
         if release_stack >= x265_score:
             failures.append(
                 f"{profile_check.name}: tier stack {release_stack} "
                 f"must stay below x265 {x265_score}"
             )
+        grouped_qualities = next(iter(regular_quality_groups.values()), {}).get("qualities", [])
+        grouped_resolutions = sorted(
+            {
+                resolution
+                for quality_name in grouped_qualities
+                if (resolution := quality_resolution_from_name(quality_name)) is not None
+            },
+            key=lambda value: QUALITY_RANK_SCORES.get(value, 0),
+        )
+        unranked_qualities = [
+            quality_name
+            for quality_name in grouped_qualities
+            if quality_resolution_from_name(quality_name) is None
+        ]
+        if unranked_qualities:
+            max_unranked_stack = x265_score + release_stack
+            lowest_rank = min(QUALITY_RANK_SCORES.values())
+            if max_unranked_stack >= lowest_rank:
+                failures.append(
+                    f"{profile_check.name}: unranked qualities {', '.join(unranked_qualities)} "
+                    f"can score {max_unranked_stack}, which must stay below lowest quality rank {lowest_rank}"
+                )
+        missing_ranks = [
+            resolution
+            for resolution in grouped_resolutions
+            if quality_rank_scores.get(resolution, 0) != QUALITY_RANK_SCORES[resolution]
+        ]
+        if missing_ranks:
+            failures.append(
+                f"{profile_check.name}: enabled regular qualities lack matching quality-rank scores: "
+                + ", ".join(missing_ranks)
+            )
+        ordered_scores = [QUALITY_RANK_SCORES[resolution] for resolution in grouped_resolutions]
+        for lower, higher, lower_score, higher_score in zip(
+            grouped_resolutions[:-1],
+            grouped_resolutions[1:],
+            ordered_scores[:-1],
+            ordered_scores[1:],
+            strict=True,
+        ):
+            max_lower_stack = lower_score + x265_score + release_stack
+            if max_lower_stack >= higher_score:
+                failures.append(
+                    f"{profile_check.name}: max {lower} regular stack {max_lower_stack} "
+                    f"must stay below bare {higher} rank {higher_score}"
+                )
 
     return {
         "profile": profile_check.name,
@@ -637,7 +712,8 @@ def audit_profile(
         "max_fallback_score": max_fallback_score,
         "min_positive_dictionarry_score": min_positive_dictionarry,
         "dual_audio_score": scores.get("Anime Dual Audio"),
-        "regular_web_quality_groups": regular_quality_groups,
+        "quality_rank_scores": quality_rank_scores,
+        "regular_enabled_quality_group": regular_quality_groups,
         "unexpected_legacy_tier_scores": legacy_scores,
         "failures": failures,
     }
@@ -693,9 +769,9 @@ def print_text(report: dict[str, Any]) -> None:
                     da=profile["dual_audio_score"],
                 )
             )
-            if profile["regular_web_quality_groups"]:
-                print("    regular WEB quality groups:")
-                for group_name, item in sorted(profile["regular_web_quality_groups"].items()):
+            if profile["regular_enabled_quality_group"]:
+                print("    regular enabled quality group:")
+                for group_name, item in sorted(profile["regular_enabled_quality_group"].items()):
                     print(f"      - {group_name}: {', '.join(item['qualities'])}")
             if profile["unexpected_legacy_tier_scores"]:
                 print("    unexpected legacy/fallback tiers:")

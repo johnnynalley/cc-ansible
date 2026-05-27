@@ -128,18 +128,18 @@ def heuristic_score(path: Path) -> tuple[int, list[str], str]:
     quality = "unknown"
     if re.search(r"(?i)\b1080p\b", name):
         score += 40000
-        cfs.append("Local Anime Quality Rank - 1080p")
+        cfs.append("Local Quality Rank - 1080p")
         quality = "Bluray-1080p" if BLURAY_RE.search(name) else "WEBDL-1080p"
     elif re.search(r"(?i)\b720p\b", name):
         score += 30000
-        cfs.append("Local Anime Quality Rank - 720p")
+        cfs.append("Local Quality Rank - 720p")
         quality = "Bluray-720p" if BLURAY_RE.search(name) else "WEBDL-720p"
     elif re.search(r"(?i)\b576p\b", name):
         score += 20000
-        cfs.append("Local Anime Quality Rank - 576p")
+        cfs.append("Local Quality Rank - 576p")
     elif re.search(r"(?i)\b480p\b", name):
         score += 10000
-        cfs.append("Local Anime Quality Rank - 480p")
+        cfs.append("Local Quality Rank - 480p")
     if LANGUAGE_COMBO_RE.search(name):
         score += 100000
         cfs.insert(0, "Anime Dual Audio")

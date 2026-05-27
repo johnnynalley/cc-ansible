@@ -6,8 +6,8 @@ creates or updates a curated set of release-tier custom formats in Sonarr/Radarr
 refreshes test profiles from their current source profiles, and scores only
 those test profiles.
 
-The script does not import upstream quality profiles, does not change profile
-cutoffs, and does not modify production profile scores.
+The script does not import upstream quality profiles and does not modify
+production profile scores.
 """
 
 from __future__ import annotations
@@ -53,14 +53,20 @@ PROTECTED_CLEANUP_NAMES = {
     "x265 (HD)",
 }
 
-PROTECTED_CLEANUP_PREFIXES = ("Local Anime Quality Rank -",)
+QUALITY_RANK_PREFIX = "Local Quality Rank - "
+LEGACY_QUALITY_RANK_PREFIX = "Local Anime Quality Rank - "
+QUALITY_RANK_RENAMES = {
+    f"{LEGACY_QUALITY_RANK_PREFIX}{resolution}": f"{QUALITY_RANK_PREFIX}{resolution}"
+    for resolution in ("480p", "576p", "720p", "1080p")
+}
+PROTECTED_CLEANUP_PREFIXES = (QUALITY_RANK_PREFIX, LEGACY_QUALITY_RANK_PREFIX)
 LEGACY_TIER_PATTERN = re.compile(r"^(?!Dictionarry ).*\bTier \d{2}$", re.IGNORECASE)
 LEGACY_TIER_NAMES = {
     "WEB Scene",
 }
 
 ANIME_DUAL_AUDIO_SCORE = 100000
-ANIME_QUALITY_RANKS = {
+QUALITY_RANK_SCORES = {
     "480p": 10000,
     "576p": 20000,
     "720p": 30000,
@@ -68,15 +74,11 @@ ANIME_QUALITY_RANKS = {
 }
 ANIME_X265_SCORE = 5000
 REGULAR_X265_SCORE = 5000
+REGULAR_CUTOFF_FORMAT_SCORE = QUALITY_RANK_SCORES["1080p"] + REGULAR_X265_SCORE
 ANIME_BLURAY_SOURCE_RANK = 0
 SERVICE_MAX_SCORE = 3
 REPACK_MAX_SCORE = 3
-REGULAR_WEB_QUALITY_GROUPS = (
-    ("WEB 480p", ("WEBDL-480p", "WEBRip-480p")),
-    ("WEB 720p", ("WEBDL-720p", "WEBRip-720p")),
-    ("WEB 1080p", ("WEBDL-1080p", "WEBRip-1080p")),
-    ("WEB 2160p", ("WEBDL-2160p", "WEBRip-2160p")),
-)
+REGULAR_QUALITY_GROUP_NAME = "Regular Enabled Qualities"
 SERVICE_FORMAT_NAMES = {
     "ABEMA",
     "ADN",
@@ -580,7 +582,7 @@ def score_model_report() -> dict[str, Any]:
             )
 
         max_non_da_1080p = (
-            ANIME_QUALITY_RANKS["1080p"]
+            QUALITY_RANK_SCORES["1080p"]
             + ANIME_X265_SCORE
             + ANIME_BLURAY_SOURCE_RANK
             + max_release_stack
@@ -593,12 +595,12 @@ def score_model_report() -> dict[str, Any]:
 
         max_720p_da = (
             ANIME_DUAL_AUDIO_SCORE
-            + ANIME_QUALITY_RANKS["720p"]
+            + QUALITY_RANK_SCORES["720p"]
             + ANIME_X265_SCORE
             + ANIME_BLURAY_SOURCE_RANK
             + max_release_stack
         )
-        min_1080p_da = ANIME_DUAL_AUDIO_SCORE + ANIME_QUALITY_RANKS["1080p"]
+        min_1080p_da = ANIME_DUAL_AUDIO_SCORE + QUALITY_RANK_SCORES["1080p"]
         if min_1080p_da <= max_720p_da:
             errors.append(
                 f"{arr_name} 1080p DA floor ({min_1080p_da}) "
@@ -1020,6 +1022,44 @@ def find_optional(items: list[dict[str, Any]], name: str, kind: str) -> dict[str
     return matches[0] if matches else None
 
 
+def quality_rank_renames(custom_formats: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    current_names = {str(item.get("name") or "") for item in custom_formats}
+    renames: list[dict[str, Any]] = []
+    for old_name, new_name in QUALITY_RANK_RENAMES.items():
+        old_format = find_optional(custom_formats, old_name, "custom format")
+        if old_format is None:
+            continue
+        if new_name in current_names:
+            raise RuntimeError(
+                f"cannot rename {old_name!r} to {new_name!r}; target custom format already exists"
+            )
+        renames.append({"id": int(old_format["id"]), "old": old_name, "new": new_name})
+    return renames
+
+
+def simulate_quality_rank_renames(custom_formats: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    renamed = copy.deepcopy(custom_formats)
+    rename_map = {item["old"]: item["new"] for item in quality_rank_renames(renamed)}
+    for item in renamed:
+        name = str(item.get("name") or "")
+        if name in rename_map:
+            item["name"] = rename_map[name]
+    return renamed
+
+
+def apply_quality_rank_renames(
+    instance: ArrInstance,
+    api_key: str,
+    custom_formats: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    renames = quality_rank_renames(custom_formats)
+    for item in renames:
+        payload = copy.deepcopy(find_one(custom_formats, item["old"], "custom format"))
+        payload["name"] = item["new"]
+        request_json(instance, api_key, "PUT", f"/api/v3/customformat/{item['id']}", payload)
+    return renames
+
+
 def clone_profile_payload(source: dict[str, Any], target_name: str, target_id: int | None) -> dict[str, Any]:
     payload = copy.deepcopy(source)
     payload["name"] = target_name
@@ -1119,47 +1159,53 @@ def remove_quality_items(
     return remaining, selected, first_index if first_index is not None else len(remaining)
 
 
-def group_regular_web_qualities(profile: dict[str, Any]) -> list[str]:
-    """Group same-resolution WEBRip/WEBDL qualities in regular test profiles.
+def group_regular_enabled_qualities(profile: dict[str, Any]) -> list[str]:
+    """Group all enabled qualities in regular test profiles.
 
-    This lets x265 and release-tier custom formats break WEBRip vs WEBDL ties
-    without allowing HDTV, Bluray, or cross-resolution replacements to bypass
-    Sonarr/Radarr's native quality order.
+    This lets custom-format quality ranks, x265, and release tiers decide
+    upgrades across the enabled quality set instead of allowing native Arr
+    quality order to block an otherwise preferred codec/rank candidate.
     """
 
-    changes: list[str] = []
+    quality_names = [
+        quality_item_name(item)
+        for item in iter_quality_items(profile)
+        if bool(item.get("allowed"))
+    ]
+    if len(quality_names) < 2:
+        return []
+
     used_group_ids = used_quality_group_ids(profile)
+    group_id = existing_group_id(profile, REGULAR_QUALITY_GROUP_NAME)
+    if group_id is None:
+        group_id = next_quality_group_id(used_group_ids)
+    else:
+        used_group_ids.add(group_id)
 
-    for group_name, quality_names in REGULAR_WEB_QUALITY_GROUPS:
-        qualities_by_name = {quality_item_name(item): item for item in iter_quality_items(profile)}
-        present = [name for name in quality_names if name in qualities_by_name]
-        if len(present) != len(quality_names):
-            continue
-        if not any(bool(qualities_by_name[name].get("allowed")) for name in present):
-            continue
+    profile_items = profile.get("items") or []
+    remaining, selected, first_index = remove_quality_items(profile_items, set(quality_names))
+    grouped_items = [selected[name] for name in quality_names if name in selected]
+    if len(grouped_items) != len(quality_names):
+        return []
 
-        group_id = existing_group_id(profile, group_name)
-        if group_id is None:
-            group_id = next_quality_group_id(used_group_ids)
-        else:
-            used_group_ids.add(group_id)
+    group = {
+        "allowed": True,
+        "id": group_id,
+        "items": grouped_items,
+        "name": REGULAR_QUALITY_GROUP_NAME,
+    }
+    remaining.insert(min(first_index, len(remaining)), group)
+    profile["items"] = remaining
 
-        profile_items = profile.get("items") or []
-        remaining, selected, first_index = remove_quality_items(profile_items, set(quality_names))
-        grouped_items = [selected[name] for name in quality_names if name in selected]
-        if len(grouped_items) != len(quality_names):
-            continue
-
-        group = {
-            "allowed": any(bool(item.get("allowed")) for item in grouped_items),
-            "id": group_id,
-            "items": grouped_items,
-            "name": group_name,
-        }
-        remaining.insert(min(first_index, len(remaining)), group)
-        profile["items"] = remaining
-        changes.append(f"{group_name}: {', '.join(quality_names)}")
-
+    changes = [f"{REGULAR_QUALITY_GROUP_NAME}: {', '.join(quality_names)}"]
+    old_cutoff = profile.get("cutoff")
+    if old_cutoff != group_id:
+        profile["cutoff"] = group_id
+        changes.append(f"cutoff: {old_cutoff} -> {group_id}")
+    old_cutoff_score = int(profile.get("cutoffFormatScore") or 0)
+    if old_cutoff_score != REGULAR_CUTOFF_FORMAT_SCORE:
+        profile["cutoffFormatScore"] = REGULAR_CUTOFF_FORMAT_SCORE
+        changes.append(f"cutoffFormatScore: {old_cutoff_score} -> {REGULAR_CUTOFF_FORMAT_SCORE}")
     return changes
 
 
@@ -1199,6 +1245,14 @@ def set_profile_scores(
             changes[name] = {"old": old_score, "new": new_score}
         item["score"] = new_score
     return changes
+
+
+def quality_rank_target_scores(custom_formats_by_name: dict[str, dict[str, Any]]) -> dict[str, int]:
+    return {
+        f"{QUALITY_RANK_PREFIX}{quality}": score
+        for quality, score in QUALITY_RANK_SCORES.items()
+        if f"{QUALITY_RANK_PREFIX}{quality}" in custom_formats_by_name
+    }
 
 
 def zero_legacy_tier_scores(
@@ -1373,6 +1427,12 @@ def process_instance(
     before = snapshot_instance(instance, api_key, snapshot_dir)
     before_formats = before["custom_formats"]
     before_profiles = before["quality_profiles"]
+    quality_rank_rename_actions = quality_rank_renames(before_formats)
+    if dry_run:
+        before_formats = simulate_quality_rank_renames(before_formats)
+    elif quality_rank_rename_actions:
+        apply_quality_rank_renames(instance, api_key, before_formats)
+        before_formats = request_json(instance, api_key, "GET", "/api/v3/customformat")
     selected = [item for item in CURATED_FORMATS if instance.name in item.targets]
     current_by_name = {str(item["name"]): item for item in before_formats}
     to_create = [item for item in selected if item.target_name not in current_by_name]
@@ -1429,11 +1489,16 @@ def process_instance(
             target_id = int(existing["id"]) if existing and isinstance(existing.get("id"), int) else None
             profile = clone_profile_payload(source, pair.test_name, target_id)
             profile_actions[pair.test_name] = "would-refresh" if target_id is not None else "would-create"
-            quality_group_changes = group_regular_web_qualities(profile) if pair.kind == "regular" else []
+            quality_group_changes = group_regular_enabled_qualities(profile) if pair.kind == "regular" else []
             if quality_group_changes:
                 profile_quality_group_changes[pair.test_name] = quality_group_changes
             profile_formats = formats_for_profile([curated for curated, _payload in payloads], pair)
-            profile_target_scores = {curated.target_name: curated.score for curated in profile_formats}
+            profile_target_scores = {
+                **quality_rank_target_scores(simulated_by_name),
+                **{curated.target_name: curated.score for curated in profile_formats},
+            }
+            for cf_name in quality_rank_target_scores(simulated_by_name):
+                add_missing_format_item(profile, simulated_by_name[cf_name])
             for curated in profile_formats:
                 add_missing_format_item(profile, simulated_by_name[curated.target_name])
             changes = merge_score_changes(
@@ -1481,11 +1546,16 @@ def process_instance(
         custom_formats_by_name = {str(item["name"]): item for item in custom_formats}
         for pair in instance.profile_pairs:
             profile = find_one(profiles, pair.test_name, "quality profile")
-            quality_group_changes = group_regular_web_qualities(profile) if pair.kind == "regular" else []
+            quality_group_changes = group_regular_enabled_qualities(profile) if pair.kind == "regular" else []
             if quality_group_changes:
                 profile_quality_group_changes[pair.test_name] = quality_group_changes
             profile_formats = formats_for_profile([curated for curated, _payload in payloads], pair)
-            profile_target_scores = {curated.target_name: curated.score for curated in profile_formats}
+            profile_target_scores = {
+                **quality_rank_target_scores(custom_formats_by_name),
+                **{curated.target_name: curated.score for curated in profile_formats},
+            }
+            for cf_name in quality_rank_target_scores(custom_formats_by_name):
+                add_missing_format_item(profile, custom_formats_by_name[cf_name])
             for curated in profile_formats:
                 add_missing_format_item(profile, custom_formats_by_name[curated.target_name])
             changes = merge_score_changes(
@@ -1531,6 +1601,7 @@ def process_instance(
         "skipped_formats": skipped,
         "created": created,
         "updated": updated,
+        "quality_rank_renames": quality_rank_rename_actions,
         "profile_score_changes": profile_score_changes,
         "profile_quality_group_changes": profile_quality_group_changes,
         "all_zero_non_rename_custom_formats": all_zero_planned if dry_run else all_zero_deleted,
@@ -1591,6 +1662,11 @@ def print_text(report: dict[str, Any]) -> None:
             print("  test profile actions:")
             for name, action in result["profile_actions"].items():
                 print(f"    - {name}: {action}")
+        if result["quality_rank_renames"]:
+            label = "would rename quality-rank CFs" if result["dry_run"] else "renamed quality-rank CFs"
+            print(f"  {label}:")
+            for item in result["quality_rank_renames"]:
+                print(f"    - {item['old']} -> {item['new']} (id={item['id']})")
         for item in result["selected_formats"]:
             print(
                 "  - {action:6} {target}: score={score}, specs={specifications}, source={source}".format(
