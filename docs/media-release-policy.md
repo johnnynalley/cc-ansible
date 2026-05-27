@@ -180,7 +180,14 @@ relying on memory. If an older log needs redaction, use
 log plus the live Sonarr queue. It summarizes recent history event types,
 queue-count movement, storage-size deltas, recent grabbed/imported/deleted
 groups, release-stamper events, and the current queue's grouped
-classifications. Use it for periodic Profilarr review:
+classifications. The monitor and audit report also flag low-confidence release
+scoring with `riskFlags`: `tierless_x265` means an x265/HEVC release did not
+match any release-tier CF, `release_group_unranked` means the title appears to
+name a release group but no tier CF matched it, and `bare_quality_x265` means
+the effective CF set is only local quality/source rank plus x265. Treat those
+as review prompts, not automatic rejection reasons; they are meant to catch
+cases such as 1080p+x265-only grabs that may be winning despite lacking release
+group confidence. Use it for periodic Profilarr review:
 
 ```bash
 ansible docker-vm --become -m script -a "scripts/media-release/sonarr_transaction_audit.py --hours 24 --limit 25"

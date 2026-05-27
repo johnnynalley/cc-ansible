@@ -19,8 +19,15 @@ import xml.etree.ElementTree as ET
 from typing import Any
 
 
-DA_RE = re.compile(r"(?i)\b(?:dual[ ._-]?audio|multi[ ._-]?audio|JA\+EN|JP\+EN|ZH\+EN|KO\+EN)\b")
+DA_RE = re.compile(
+    r"(?i)\b(?:dual[ ._-]?audio|multi[ ._-]?audio|"
+    r"dual\b(?![ ._-]sub(?:s|titles?)?\b)|"
+    r"JA\+EN|JP\+EN|ZH\+EN|KO\+EN)\b"
+)
 X265_RE = re.compile(r"(?i)(?:\b[xh][\s._-]?265\b|\bhevc\b)")
+TIER_CF_RE = re.compile(r"(?i)\btier\b")
+LOCAL_QUALITY_RANK_RE = re.compile(r"(?i)^Local Quality Rank - ")
+LOCAL_SOURCE_RANK_RE = re.compile(r"(?i)^Local .*Source Rank - ")
 PLATFORM_RE = re.compile(
     r"(?i)(?:^|[\s._\-\[\(])"
     r"(?:CR|Crunchyroll|NF|Netflix|DSNP|Disney\+?|DisneyPlus|AMZN|Amazon|"
@@ -46,8 +53,10 @@ NON_RELEASE_GROUPS = {
     "bdrip",
     "bit",
     "bluray",
+    "dual",
     "dual-audio",
     "dvd",
+    "eac3",
     "eng-sub",
     "english",
     "flac",
@@ -68,6 +77,11 @@ NON_RELEASE_GROUPS = {
     "webdl",
     "webrip",
     "x264",
+    "x265",
+}
+BROAD_OR_LOCAL_CF_NAMES = {
+    "br-disk",
+    "no-rlsgroup",
     "x265",
 }
 
@@ -144,16 +158,58 @@ def release_group_from_title(title: str) -> str | None:
     return None
 
 
+def has_x265_signal(title: str, custom_formats: list[str]) -> bool:
+    haystack = " ".join([title, *custom_formats])
+    return X265_RE.search(haystack) is not None or any(
+        "x265" in cf.casefold() or "hevc" in cf.casefold() for cf in custom_formats
+    )
+
+
+def has_tier_cf(custom_formats: list[str]) -> bool:
+    return any(TIER_CF_RE.search(custom_format) for custom_format in custom_formats)
+
+
+def is_broad_or_local_cf(custom_format: str) -> bool:
+    lowered = custom_format.casefold()
+    return (
+        lowered in BROAD_OR_LOCAL_CF_NAMES
+        or LOCAL_QUALITY_RANK_RE.search(custom_format) is not None
+        or LOCAL_SOURCE_RANK_RE.search(custom_format) is not None
+    )
+
+
+def risk_flags(title: str, custom_formats: list[str]) -> list[str]:
+    flags: list[str] = []
+    x265 = has_x265_signal(title, custom_formats)
+    tier = has_tier_cf(custom_formats)
+    group = release_group_from_title(title)
+    has_quality_rank = any(LOCAL_QUALITY_RANK_RE.search(custom_format) for custom_format in custom_formats)
+
+    if x265 and not tier:
+        flags.append("tierless_x265")
+    if group and not tier:
+        flags.append("release_group_unranked")
+    if x265 and has_quality_rank and not tier and all(is_broad_or_local_cf(item) for item in custom_formats):
+        flags.append("bare_quality_x265")
+    return flags
+
+
 def release_signals(title: str, custom_formats: list[str]) -> list[str]:
     haystack = " ".join([title, *custom_formats])
     signals: list[str] = []
+    group = release_group_from_title(title)
+    tier = has_tier_cf(custom_formats)
     if DA_RE.search(haystack) or any("dual audio" in cf.casefold() for cf in custom_formats):
         signals.append("dual_audio")
-    if X265_RE.search(haystack) or any("x265" in cf.casefold() or "hevc" in cf.casefold() for cf in custom_formats):
+    if has_x265_signal(title, custom_formats):
         signals.append("x265_hevc")
     if PLATFORM_RE.search(haystack):
         signals.append("platform")
-    if release_group_from_title(title) or any("tier" in cf.casefold() for cf in custom_formats):
+    if group:
+        signals.append("release_group_in_title")
+    if tier:
+        signals.append("release_tier_cf")
+    if group or tier:
         signals.append("release_group_or_tier")
     return signals
 
@@ -208,6 +264,8 @@ def summarize_queue_record(
         "status": record.get("status"),
         "tracked_state": record.get("trackedDownloadState"),
         "signals": release_signals(queued_title, queued_cfs),
+        "risk_flags": risk_flags(queued_title, queued_cfs),
+        "inferred_release_group": release_group_from_title(queued_title),
         "messages": messages,
     }
 
@@ -304,6 +362,14 @@ def group_queue(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
                     }
                 ),
                 "signals": sorted({signal for row in group_rows for signal in row["signals"]}),
+                "risk_flags": sorted({flag for row in group_rows for flag in row["risk_flags"]}),
+                "inferred_release_groups": sorted(
+                    {
+                        str(row["inferred_release_group"])
+                        for row in group_rows
+                        if row.get("inferred_release_group")
+                    }
+                ),
                 "sample_message": messages[0] if messages else "",
                 "sample_rows": group_rows[:3],
             }
@@ -313,6 +379,8 @@ def group_queue(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
         key=lambda item: (
             "current_file_score_higher" in item["classifications"],
             "payload_score_loss" in item["classifications"],
+            "bare_quality_x265" in item["risk_flags"],
+            "tierless_x265" in item["risk_flags"],
             item["rows"],
         ),
         reverse=True,
@@ -326,16 +394,19 @@ def print_text(report: dict[str, Any]) -> None:
     for group in report["groups"]:
         print(f"- {group['title']}")
         print(
-            "  rows={rows} labels={labels} states={states} signals={signals}".format(
+            "  rows={rows} labels={labels} states={states} signals={signals} risks={risks}".format(
                 rows=group["rows"],
                 labels=", ".join(group["classifications"]),
                 states=group["score_states"],
                 signals=", ".join(group["signals"]) or "(none)",
+                risks=", ".join(group["risk_flags"]) or "(none)",
             )
         )
         print(f"  key={group['key']}")
         print(f"  queued_scores={group['queued_scores']} current_scores={group['current_scores']}")
         print(f"  series={', '.join(group['series'])} client={group['download_client']}")
+        if group["inferred_release_groups"]:
+            print(f"  inferred_groups={', '.join(group['inferred_release_groups'])}")
         if group["sample_message"]:
             print(f"  sample_message={group['sample_message']}")
         if report["details"]:

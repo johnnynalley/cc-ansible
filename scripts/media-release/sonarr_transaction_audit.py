@@ -28,8 +28,15 @@ DEFAULT_STAMPER_LOGS = (
     Path("/opt/media-stack/sabnzbd/scripts/release-stamper-events.jsonl"),
 )
 
-DA_RE = re.compile(r"(?i)\b(?:dual[ ._-]?audio|multi[ ._-]?audio|JA\+EN|JP\+EN|ZH\+EN|KO\+EN)\b")
+DA_RE = re.compile(
+    r"(?i)\b(?:dual[ ._-]?audio|multi[ ._-]?audio|"
+    r"dual\b(?![ ._-]sub(?:s|titles?)?\b)|"
+    r"JA\+EN|JP\+EN|ZH\+EN|KO\+EN)\b"
+)
 X265_RE = re.compile(r"(?i)(?:\b[xh][\s._-]?265\b|\bhevc\b)")
+TIER_CF_RE = re.compile(r"(?i)\btier\b")
+LOCAL_QUALITY_RANK_RE = re.compile(r"(?i)^Local Quality Rank - ")
+LOCAL_SOURCE_RANK_RE = re.compile(r"(?i)^Local .*Source Rank - ")
 PLATFORM_RE = re.compile(
     r"(?i)(?:^|[\s._\-\[\(])"
     r"(?:CR|Crunchyroll|NF|Netflix|DSNP|Disney\+?|DisneyPlus|AMZN|Amazon|"
@@ -55,8 +62,10 @@ NON_RELEASE_GROUPS = {
     "bdrip",
     "bit",
     "bluray",
+    "dual",
     "dual-audio",
     "dvd",
+    "eac3",
     "eng-sub",
     "english",
     "flac",
@@ -77,6 +86,11 @@ NON_RELEASE_GROUPS = {
     "webdl",
     "webrip",
     "x264",
+    "x265",
+}
+BROAD_OR_LOCAL_CF_NAMES = {
+    "br-disk",
+    "no-rlsgroup",
     "x265",
 }
 
@@ -164,16 +178,58 @@ def release_group_from_title(title: str) -> str | None:
     return None
 
 
+def has_x265_signal(title: str, custom_formats: list[str]) -> bool:
+    haystack = " ".join([title, *custom_formats])
+    return X265_RE.search(haystack) is not None or any(
+        "x265" in cf.casefold() or "hevc" in cf.casefold() for cf in custom_formats
+    )
+
+
+def has_tier_cf(custom_formats: list[str]) -> bool:
+    return any(TIER_CF_RE.search(custom_format) for custom_format in custom_formats)
+
+
+def is_broad_or_local_cf(custom_format: str) -> bool:
+    lowered = custom_format.casefold()
+    return (
+        lowered in BROAD_OR_LOCAL_CF_NAMES
+        or LOCAL_QUALITY_RANK_RE.search(custom_format) is not None
+        or LOCAL_SOURCE_RANK_RE.search(custom_format) is not None
+    )
+
+
+def risk_flags(title: str, custom_formats: list[str]) -> list[str]:
+    flags: list[str] = []
+    x265 = has_x265_signal(title, custom_formats)
+    tier = has_tier_cf(custom_formats)
+    group = release_group_from_title(title)
+    has_quality_rank = any(LOCAL_QUALITY_RANK_RE.search(custom_format) for custom_format in custom_formats)
+
+    if x265 and not tier:
+        flags.append("tierless_x265")
+    if group and not tier:
+        flags.append("release_group_unranked")
+    if x265 and has_quality_rank and not tier and all(is_broad_or_local_cf(item) for item in custom_formats):
+        flags.append("bare_quality_x265")
+    return flags
+
+
 def release_signals(title: str, custom_formats: list[str]) -> list[str]:
     haystack = " ".join([title, *custom_formats])
     signals: list[str] = []
+    group = release_group_from_title(title)
+    tier = has_tier_cf(custom_formats)
     if DA_RE.search(haystack) or any("dual audio" in cf.casefold() for cf in custom_formats):
         signals.append("dual_audio")
-    if X265_RE.search(haystack) or any("x265" in cf.casefold() or "hevc" in cf.casefold() for cf in custom_formats):
+    if has_x265_signal(title, custom_formats):
         signals.append("x265_hevc")
     if PLATFORM_RE.search(haystack):
         signals.append("platform")
-    if release_group_from_title(title) or any("tier" in cf.casefold() for cf in custom_formats):
+    if group:
+        signals.append("release_group_in_title")
+    if tier:
+        signals.append("release_tier_cf")
+    if group or tier:
         signals.append("release_group_or_tier")
     return signals
 
@@ -301,6 +357,8 @@ def summarize_history(events: list[dict[str, Any]], limit: int, include_bootstra
                 "scores": set(),
                 "qualities": set(),
                 "formats": set(),
+                "risk_flags": set(),
+                "inferred_groups": set(),
                 "rows": 0,
             },
         )
@@ -315,6 +373,19 @@ def summarize_history(events: list[dict[str, Any]], limit: int, include_bootstra
             group["qualities"].add(str(record["quality"]))
         for custom_format in record.get("customFormats") or []:
             group["formats"].add(str(custom_format))
+        record_flags = record.get("riskFlags")
+        if isinstance(record_flags, list):
+            group["risk_flags"].update(str(flag) for flag in record_flags)
+        else:
+            group["risk_flags"].update(
+                risk_flags(
+                    str(record.get("sourceTitle") or group["title"]),
+                    [str(item) for item in record.get("customFormats") or []],
+                )
+            )
+        inferred_group = record.get("inferredReleaseGroup") or release_group_from_title(str(record.get("sourceTitle") or ""))
+        if inferred_group:
+            group["inferred_groups"].add(str(inferred_group))
 
     recent_groups = sorted(
         groups.values(),
@@ -328,6 +399,8 @@ def summarize_history(events: list[dict[str, Any]], limit: int, include_bootstra
         group["qualities"] = sorted(group["qualities"])
         group["signals"] = release_signals(str(group["title"]), sorted(group["formats"]))
         group["formats"] = sorted(group["formats"])
+        group["risk_flags"] = sorted(group["risk_flags"])
+        group["inferred_groups"] = sorted(group["inferred_groups"])
     return {
         "count": len(history),
         "bootstrap_skipped": 0 if include_bootstrap else bootstrap_count,
@@ -467,6 +540,8 @@ def summarize_queue_record(
         "tracked_state": record.get("trackedDownloadState"),
         "messages": status_messages(record),
         "signals": release_signals(title, queued_cfs),
+        "risk_flags": risk_flags(title, queued_cfs),
+        "inferred_release_group": release_group_from_title(title),
     }
 
 
@@ -560,6 +635,14 @@ def summarize_live_queue(base_url: str, api_key: str, limit: int) -> dict[str, A
                     {str(row["current_score"]) for row in group_rows if row.get("current_score") is not None}
                 ),
                 "signals": sorted({signal for row in group_rows for signal in row["signals"]}),
+                "risk_flags": sorted({flag for row in group_rows for flag in row["risk_flags"]}),
+                "inferred_release_groups": sorted(
+                    {
+                        str(row["inferred_release_group"])
+                        for row in group_rows
+                        if row.get("inferred_release_group")
+                    }
+                ),
                 "sample_message": messages[0] if messages else "",
             }
         )
@@ -567,11 +650,14 @@ def summarize_live_queue(base_url: str, api_key: str, limit: int) -> dict[str, A
     classification_counts = collections.Counter(
         label for group in summaries for label in group["classifications"]
     )
+    risk_flag_counts = collections.Counter(flag for group in summaries for flag in group["risk_flags"])
     summaries.sort(
         key=lambda item: (
             "current_file_score_higher" in item["classifications"],
             "payload_score_loss" in item["classifications"],
             "pack_collateral_or_mapping" in item["classifications"],
+            "bare_quality_x265" in item["risk_flags"],
+            "tierless_x265" in item["risk_flags"],
             "download_failed" in item["classifications"],
             "download_stalled_or_warning" in item["classifications"],
             item["rows"],
@@ -583,6 +669,7 @@ def summarize_live_queue(base_url: str, api_key: str, limit: int) -> dict[str, A
         "queue_count": len(rows),
         "group_count": len(summaries),
         "classification_counts": dict(classification_counts),
+        "risk_flag_counts": dict(risk_flag_counts),
         "groups": summaries[:limit],
     }
 
@@ -660,30 +747,34 @@ def print_text(report: dict[str, Any]) -> None:
         print("  (none in window)")
     for group in history["recent_groups"]:
         print(
-            "  - {title} rows={rows} events={events} scores={scores} signals={signals}".format(
+            "  - {title} rows={rows} events={events} scores={scores} signals={signals} risks={risks}".format(
                 title=group["title"],
                 rows=group["rows"],
                 events=group["events"],
                 scores=group["scores"],
                 signals=", ".join(group["signals"]) or "(none)",
+                risks=", ".join(group["risk_flags"]) or "(none)",
             )
         )
         if group["series"]:
             print(f"    series={', '.join(group['series'])}")
+        if group["inferred_groups"]:
+            print(f"    inferred_groups={', '.join(group['inferred_groups'])}")
 
     live_queue = report.get("live_queue")
     if live_queue:
         print()
         print(
-            "current queue: records={queue_count}/{queue_total} groups={group_count} labels={labels}".format(
+            "current queue: records={queue_count}/{queue_total} groups={group_count} labels={labels} risks={risks}".format(
                 labels=live_queue["classification_counts"],
+                risks=live_queue["risk_flag_counts"],
                 **live_queue,
             )
         )
         for group in live_queue["groups"]:
             print(
                 "  - {title} rows={rows} labels={labels} states={states} "
-                "queued={queued} current={current} signals={signals}".format(
+                "queued={queued} current={current} signals={signals} risks={risks}".format(
                     title=group["title"],
                     rows=group["rows"],
                     labels=", ".join(group["classifications"]),
@@ -691,9 +782,12 @@ def print_text(report: dict[str, Any]) -> None:
                     queued=group["queued_scores"],
                     current=group["current_scores"],
                     signals=", ".join(group["signals"]) or "(none)",
+                    risks=", ".join(group["risk_flags"]) or "(none)",
                 )
             )
             print(f"    series={', '.join(group['series'])} client={group['download_client']} key={group['key']}")
+            if group["inferred_release_groups"]:
+                print(f"    inferred_groups={', '.join(group['inferred_release_groups'])}")
             if group["sample_message"]:
                 print(f"    sample_message={group['sample_message']}")
 

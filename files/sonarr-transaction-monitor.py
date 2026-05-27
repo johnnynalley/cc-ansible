@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import datetime as dt
 import json
+import re
 import sys
 import urllib.error
 import urllib.parse
@@ -24,6 +25,64 @@ SAFE_HISTORY_DATA_KEYS = {
     "releaseSource",
     "releaseType",
     "size",
+}
+DA_RE = re.compile(
+    r"(?i)\b(?:dual[ ._-]?audio|multi[ ._-]?audio|"
+    r"dual\b(?![ ._-]sub(?:s|titles?)?\b)|"
+    r"JA\+EN|JP\+EN|ZH\+EN|KO\+EN)\b"
+)
+X265_RE = re.compile(r"(?i)(?:\b[xh][\s._-]?265\b|\bhevc\b)")
+TIER_CF_RE = re.compile(r"(?i)\btier\b")
+LOCAL_QUALITY_RANK_RE = re.compile(r"(?i)^Local Quality Rank - ")
+LOCAL_SOURCE_RANK_RE = re.compile(r"(?i)^Local .*Source Rank - ")
+LEADING_GROUP_RE = re.compile(r"^\[([A-Za-z0-9][A-Za-z0-9._-]{1,31})\]")
+TRAILING_GROUP_RE = re.compile(r"-([A-Za-z0-9][A-Za-z0-9._]{1,31})$")
+NON_RELEASE_GROUPS = {
+    "1080p",
+    "10bit",
+    "2160p",
+    "480p",
+    "576p",
+    "720p",
+    "8bit",
+    "aac",
+    "audio",
+    "av1",
+    "batch",
+    "bd",
+    "bdrip",
+    "bit",
+    "bluray",
+    "dual",
+    "dual-audio",
+    "dvd",
+    "eac3",
+    "eng-sub",
+    "english",
+    "flac",
+    "h264",
+    "h265",
+    "hdtv",
+    "hevc",
+    "japanese",
+    "multi-audio",
+    "proper",
+    "repack",
+    "season",
+    "sub",
+    "v2",
+    "v3",
+    "web",
+    "web-dl",
+    "webdl",
+    "webrip",
+    "x264",
+    "x265",
+}
+BROAD_OR_LOCAL_CF_NAMES = {
+    "br-disk",
+    "no-rlsgroup",
+    "x265",
 }
 
 
@@ -94,6 +153,84 @@ def cf_names(items: list[dict[str, Any]] | None) -> list[str]:
     return [str(item.get("name") or item.get("id")) for item in items or []]
 
 
+def release_group_candidate(value: str | None) -> str | None:
+    if not value:
+        return None
+    group = value.strip().strip("[]()")
+    if not group or len(group) > 32 or " " in group:
+        return None
+    if group.casefold() in NON_RELEASE_GROUPS or group.isdigit():
+        return None
+    return group
+
+
+def release_group_from_title(title: str) -> str | None:
+    for raw_title in title.split(" || "):
+        stripped = raw_title.strip()
+        trailing = TRAILING_GROUP_RE.search(stripped)
+        if trailing and (group := release_group_candidate(trailing.group(1))):
+            return group
+        leading = LEADING_GROUP_RE.search(stripped)
+        if leading and (group := release_group_candidate(leading.group(1))):
+            return group
+    return None
+
+
+def has_x265_signal(title: str, custom_formats: list[str]) -> bool:
+    haystack = " ".join([title, *custom_formats])
+    return X265_RE.search(haystack) is not None or any(
+        "x265" in custom_format.casefold() or "hevc" in custom_format.casefold()
+        for custom_format in custom_formats
+    )
+
+
+def has_tier_cf(custom_formats: list[str]) -> bool:
+    return any(TIER_CF_RE.search(custom_format) for custom_format in custom_formats)
+
+
+def is_broad_or_local_cf(custom_format: str) -> bool:
+    lowered = custom_format.casefold()
+    return (
+        lowered in BROAD_OR_LOCAL_CF_NAMES
+        or LOCAL_QUALITY_RANK_RE.search(custom_format) is not None
+        or LOCAL_SOURCE_RANK_RE.search(custom_format) is not None
+    )
+
+
+def risk_flags(title: str, custom_formats: list[str]) -> list[str]:
+    flags: list[str] = []
+    x265 = has_x265_signal(title, custom_formats)
+    tier = has_tier_cf(custom_formats)
+    group = release_group_from_title(title)
+    has_quality_rank = any(LOCAL_QUALITY_RANK_RE.search(custom_format) for custom_format in custom_formats)
+
+    if x265 and not tier:
+        flags.append("tierless_x265")
+    if group and not tier:
+        flags.append("release_group_unranked")
+    if x265 and has_quality_rank and not tier and all(is_broad_or_local_cf(item) for item in custom_formats):
+        flags.append("bare_quality_x265")
+    return flags
+
+
+def release_signals(title: str, custom_formats: list[str]) -> list[str]:
+    haystack = " ".join([title, *custom_formats])
+    signals: list[str] = []
+    group = release_group_from_title(title)
+    tier = has_tier_cf(custom_formats)
+    if DA_RE.search(haystack) or any("dual audio" in cf.casefold() for cf in custom_formats):
+        signals.append("dual_audio")
+    if has_x265_signal(title, custom_formats):
+        signals.append("x265_hevc")
+    if group:
+        signals.append("release_group_in_title")
+    if tier:
+        signals.append("release_tier_cf")
+    if group or tier:
+        signals.append("release_group_or_tier")
+    return signals
+
+
 def quality_name(item: dict[str, Any] | None) -> str | None:
     if not isinstance(item, dict):
         return None
@@ -158,6 +295,7 @@ def summarize_history(record: dict[str, Any]) -> dict[str, Any]:
     source_title = record.get("sourceTitle") or record.get("downloadId") or ""
     series = record.get("series") or {}
     episode = record.get("episode") or {}
+    custom_formats = cf_names(record.get("customFormats"))
     return {
         "id": record.get("id"),
         "date": record.get("date"),
@@ -171,7 +309,10 @@ def summarize_history(record: dict[str, Any]) -> dict[str, Any]:
         "episodeNumber": episode.get("episodeNumber"),
         "quality": quality_name(record.get("quality")),
         "customFormatScore": record.get("customFormatScore"),
-        "customFormats": cf_names(record.get("customFormats")),
+        "customFormats": custom_formats,
+        "releaseSignals": release_signals(str(source_title), custom_formats),
+        "riskFlags": risk_flags(str(source_title), custom_formats),
+        "inferredReleaseGroup": release_group_from_title(str(source_title)),
         "data": summarize_history_data(record.get("data") or {}),
     }
 
@@ -191,10 +332,12 @@ def status_messages(record: dict[str, Any]) -> list[str]:
 def summarize_queue(record: dict[str, Any]) -> dict[str, Any]:
     series = record.get("series") or {}
     episode = record.get("episode") or {}
+    title = record.get("title") or record.get("downloadTitle") or ""
+    custom_formats = cf_names(record.get("customFormats"))
     return {
         "id": record.get("id"),
         "downloadId": record.get("downloadId"),
-        "title": record.get("title") or record.get("downloadTitle"),
+        "title": title,
         "seriesId": series.get("id"),
         "seriesTitle": series.get("title"),
         "episodeId": episode.get("id") or record.get("episodeId"),
@@ -204,7 +347,10 @@ def summarize_queue(record: dict[str, Any]) -> dict[str, Any]:
         "customFormatScore": record.get("customFormatScore")
         if record.get("customFormatScore") is not None
         else (record.get("trackedDownload") or {}).get("customFormatScore"),
-        "customFormats": cf_names(record.get("customFormats")),
+        "customFormats": custom_formats,
+        "releaseSignals": release_signals(str(title), custom_formats),
+        "riskFlags": risk_flags(str(title), custom_formats),
+        "inferredReleaseGroup": release_group_from_title(str(title)),
         "status": record.get("status"),
         "trackedDownloadState": record.get("trackedDownloadState"),
         "downloadClient": record.get("downloadClient"),
