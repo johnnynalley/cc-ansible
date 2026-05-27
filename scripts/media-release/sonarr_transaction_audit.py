@@ -23,6 +23,10 @@ from typing import Any
 
 DEFAULT_CONFIG = Path("/opt/media-stack/sonarr/config.xml")
 DEFAULT_LOG = Path("/var/log/sonarr-transaction-monitor/events.jsonl")
+DEFAULT_STAMPER_LOGS = (
+    Path("/opt/media-stack/qbittorrent/scripts/release-stamper-events.jsonl"),
+    Path("/opt/media-stack/sabnzbd/scripts/release-stamper-events.jsonl"),
+)
 
 DA_RE = re.compile(r"(?i)\b(?:dual[ ._-]?audio|multi[ ._-]?audio|JA\+EN|JP\+EN|ZH\+EN|KO\+EN)\b")
 X265_RE = re.compile(r"(?i)(?:\b[xh][\s._-]?265\b|\bhevc\b)")
@@ -194,6 +198,81 @@ def monitor_events(path: Path, since: dt.datetime) -> list[dict[str, Any]]:
     return events
 
 
+def format_bytes(value: int | float | None) -> str:
+    size = float(value or 0)
+    sign = "-" if size < 0 else ""
+    size = abs(size)
+    for suffix in ("B", "KiB", "MiB", "GiB", "TiB", "PiB"):
+        if size < 1024 or suffix == "PiB":
+            if suffix == "B":
+                return f"{sign}{int(size)} {suffix}"
+            return f"{sign}{size:.2f} {suffix}"
+        size /= 1024
+    return f"{sign}{size:.2f} PiB"
+
+
+def stamper_events(paths: list[Path], since: dt.datetime) -> list[dict[str, Any]]:
+    events: list[dict[str, Any]] = []
+    for path in paths:
+        if not path.exists():
+            continue
+        with path.open("r", encoding="utf-8") as handle:
+            for line_number, line in enumerate(handle, start=1):
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    event = json.loads(line)
+                except json.JSONDecodeError as exc:
+                    print(f"warning: skipped malformed stamper log {path}:{line_number}: {exc}", file=sys.stderr)
+                    continue
+                observed_at = parse_time(event.get("observedAt"))
+                if observed_at and observed_at >= since:
+                    event["_log_path"] = str(path)
+                    events.append(event)
+    events.sort(key=lambda item: parse_time(item.get("observedAt")) or dt.datetime.min.replace(tzinfo=dt.UTC))
+    return events
+
+
+def summarize_stamper_events(events: list[dict[str, Any]], limit: int) -> dict[str, Any]:
+    by_result = collections.Counter(
+        f"{event.get('client') or 'unknown'}:{event.get('result') or 'unknown'}"
+        for event in events
+    )
+    zero_rename_completed = [
+        event
+        for event in events
+        if event.get("result") == "completed"
+        and int(event.get("changes") or 0) == 0
+        and int(event.get("videos_scanned") or 0) > 0
+    ]
+    errors = [event for event in events if event.get("result") == "error"]
+    recent = sorted(
+        events,
+        key=lambda item: parse_time(item.get("observedAt")) or dt.datetime.min.replace(tzinfo=dt.UTC),
+        reverse=True,
+    )[:limit]
+    return {
+        "count": len(events),
+        "by_result": dict(sorted(by_result.items())),
+        "zero_rename_completed": len(zero_rename_completed),
+        "errors": len(errors),
+        "recent": [
+            {
+                "observedAt": event.get("observedAt"),
+                "client": event.get("client"),
+                "result": event.get("result"),
+                "reason": event.get("reason"),
+                "changes": event.get("changes"),
+                "videos_scanned": event.get("videos_scanned"),
+                "skipped_no_stamp": event.get("skipped_no_stamp"),
+                "download_name": event.get("download_name"),
+            }
+            for event in recent
+        ],
+    }
+
+
 def summarize_history(events: list[dict[str, Any]], limit: int, include_bootstrap: bool) -> dict[str, Any]:
     history_events = [
         event
@@ -273,6 +352,63 @@ def summarize_snapshots(events: list[dict[str, Any]]) -> dict[str, Any]:
         "last_count": last.get("count"),
         "min_count": min_count,
         "max_count": max_count,
+    }
+
+
+def storage_app_delta(snapshots: list[dict[str, Any]], app: str) -> dict[str, Any]:
+    valid: list[tuple[dict[str, Any], dict[str, Any]]] = []
+    for snapshot in snapshots:
+        apps = snapshot.get("apps") if isinstance(snapshot.get("apps"), dict) else {}
+        app_data = apps.get(app) if isinstance(apps, dict) else None
+        if isinstance(app_data, dict) and app_data.get("ok"):
+            valid.append((snapshot, app_data))
+    if not valid:
+        return {"ok": False}
+    first_snapshot, first = valid[0]
+    last_snapshot, last = valid[-1]
+    first_bytes = int(first.get("bytes") or 0)
+    last_bytes = int(last.get("bytes") or 0)
+    first_files = int(first.get("files") or 0)
+    last_files = int(last.get("files") or 0)
+    codec_delta: dict[str, dict[str, int]] = {}
+    codec_names = set((first.get("byCodec") or {}).keys()) | set((last.get("byCodec") or {}).keys())
+    for codec in sorted(codec_names):
+        first_codec = (first.get("byCodec") or {}).get(codec) or {}
+        last_codec = (last.get("byCodec") or {}).get(codec) or {}
+        codec_delta[codec] = {
+            "files": int(last_codec.get("files") or 0) - int(first_codec.get("files") or 0),
+            "bytes": int(last_codec.get("bytes") or 0) - int(first_codec.get("bytes") or 0),
+        }
+    return {
+        "ok": True,
+        "first_observed_at": first_snapshot.get("observedAt"),
+        "last_observed_at": last_snapshot.get("observedAt"),
+        "first_bytes": first_bytes,
+        "last_bytes": last_bytes,
+        "delta_bytes": last_bytes - first_bytes,
+        "first_files": first_files,
+        "last_files": last_files,
+        "delta_files": last_files - first_files,
+        "by_codec_delta": codec_delta,
+    }
+
+
+def summarize_storage_snapshots(events: list[dict[str, Any]]) -> dict[str, Any]:
+    snapshots = [
+        event
+        for event in events
+        if event.get("kind") == "storage_snapshot" and isinstance(event.get("apps"), dict)
+    ]
+    if not snapshots:
+        return {"count": 0, "apps": {}}
+    return {
+        "count": len(snapshots),
+        "first_observed_at": snapshots[0].get("observedAt"),
+        "last_observed_at": snapshots[-1].get("observedAt"),
+        "apps": {
+            "sonarr": storage_app_delta(snapshots, "sonarr"),
+            "radarr": storage_app_delta(snapshots, "radarr"),
+        },
     }
 
 
@@ -474,6 +610,50 @@ def print_text(report: dict[str, Any]) -> None:
     else:
         print("queue snapshots: 0")
 
+    storage = report["storage"]
+    if storage.get("count"):
+        print()
+        print(
+            "storage snapshots: {count} first={first_observed_at} last={last_observed_at}".format(
+                **storage
+            )
+        )
+        for app, app_data in storage["apps"].items():
+            if not app_data.get("ok"):
+                print(f"  - {app}: no valid snapshots")
+                continue
+            print(
+                "  - {app}: {first_bytes} -> {last_bytes} delta={delta_bytes} "
+                "files={first_files}->{last_files} delta_files={delta_files}".format(
+                    app=app,
+                    first_bytes=format_bytes(app_data["first_bytes"]),
+                    last_bytes=format_bytes(app_data["last_bytes"]),
+                    delta_bytes=format_bytes(app_data["delta_bytes"]),
+                    first_files=app_data["first_files"],
+                    last_files=app_data["last_files"],
+                    delta_files=app_data["delta_files"],
+                )
+            )
+            codec_bits = [
+                f"{codec}:{format_bytes(delta['bytes'])}/{delta['files']} files"
+                for codec, delta in sorted(app_data["by_codec_delta"].items())
+                if delta["bytes"] or delta["files"]
+            ]
+            if codec_bits:
+                print("    codec_delta=" + ", ".join(codec_bits))
+
+    stamper = report["stamper"]
+    print()
+    print(
+        "stamper events: count={count} zero_rename_completed={zero_rename_completed} "
+        "errors={errors} by_result={by_result}".format(**stamper)
+    )
+    for event in stamper["recent"]:
+        print(
+            "  - {observedAt} {client} {result} changes={changes} videos={videos_scanned} "
+            "skipped={skipped_no_stamp} reason={reason} {download_name}".format(**event)
+        )
+
     print()
     print("recent grabbed/import groups:")
     if not history["recent_groups"]:
@@ -528,6 +708,13 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--base-url", default="http://127.0.0.1:8989")
     parser.add_argument("--config", type=Path, default=DEFAULT_CONFIG)
     parser.add_argument("--log", type=Path, default=DEFAULT_LOG)
+    parser.add_argument(
+        "--stamper-log",
+        action="append",
+        type=Path,
+        default=list(DEFAULT_STAMPER_LOGS),
+        help="release stamper event JSONL path; may be repeated",
+    )
     return parser.parse_args()
 
 
@@ -536,12 +723,15 @@ def main() -> int:
     checked_at = dt.datetime.now(dt.UTC)
     since = checked_at - dt.timedelta(hours=args.hours)
     events = monitor_events(args.log, since)
+    stampers = stamper_events(args.stamper_log, since)
     report: dict[str, Any] = {
         "checked_at": checked_at.isoformat().replace("+00:00", "Z"),
         "since": since.isoformat().replace("+00:00", "Z"),
         "log_path": str(args.log),
         "history": summarize_history(events, args.limit, args.include_bootstrap),
         "snapshots": summarize_snapshots(events),
+        "storage": summarize_storage_snapshots(events),
+        "stamper": summarize_stamper_events(stampers, args.limit),
     }
     if not args.no_live:
         api_key = read_api_key(args.config)

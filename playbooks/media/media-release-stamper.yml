@@ -32,6 +32,16 @@
             group: root
             mode: "0755"
 
+        - name: Ensure qBittorrent release stamper event log exists
+          ansible.builtin.file:
+            path: "{{ media_release_stamper_qbit_script_dir }}/release-stamper-events.jsonl"
+            state: touch
+            owner: "{{ media_release_stamper_container_uid | default('1000') }}"
+            group: "{{ media_release_stamper_container_gid | default('1000') }}"
+            mode: "0640"
+            access_time: preserve
+            modification_time: preserve
+
         - name: Deploy qBittorrent release stamper
           ansible.builtin.copy:
             src: ../../files/qbit-release-stamper.py
@@ -85,6 +95,7 @@
               QBIT_USER={{ media_release_stamper_qbit_user }}
               QBIT_PASS={{ media_release_stamper_qbit_password }}
               QBIT_STAMP_CATEGORIES={{ media_release_stamper_qbit_categories | join(',') }}
+              STAMPER_EVENT_LOG=/config/scripts/release-stamper-events.jsonl
               DA_ORIGINAL_LANGUAGES={{ media_release_stamper_da_original_languages | join(',') }}
               SONARR_API={{ media_release_stamper_sonarr_api }}
               SONARR_API_KEY={{ media_release_stamper_sonarr_api_key }}
@@ -166,6 +177,16 @@
             group: root
             mode: "0755"
 
+        - name: Ensure SABnzbd release stamper event log exists
+          ansible.builtin.file:
+            path: "{{ media_release_stamper_sab_script_dir }}/release-stamper-events.jsonl"
+            state: touch
+            owner: "{{ media_release_stamper_container_uid | default('1000') }}"
+            group: "{{ media_release_stamper_container_gid | default('1000') }}"
+            mode: "0640"
+            access_time: preserve
+            modification_time: preserve
+
         - name: Deploy SABnzbd release stamper
           ansible.builtin.copy:
             src: ../../files/sab-release-stamper.py
@@ -182,6 +203,7 @@
             mode: "0600"
             content: |
               SAB_STAMP_CATEGORIES={{ media_release_stamper_sab_categories | join(',') }}
+              STAMPER_EVENT_LOG=/config/scripts/release-stamper-events.jsonl
               DA_ORIGINAL_LANGUAGES={{ media_release_stamper_da_original_languages | join(',') }}
               SONARR_API={{ media_release_stamper_sonarr_api }}
               SONARR_API_KEY={{ media_release_stamper_sonarr_api_key }}

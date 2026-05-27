@@ -76,7 +76,7 @@
 
           [Service]
           Type=oneshot
-          ExecStart=/usr/local/bin/sonarr-transaction-monitor --base-url {{ sonarr_transaction_monitor_base_url | default('http://127.0.0.1:8989') }} --config {{ sonarr_transaction_monitor_config_path | default('/opt/media-stack/sonarr/config.xml') }} --bootstrap-records {{ sonarr_transaction_monitor_bootstrap_records }} --max-history-pages {{ sonarr_transaction_monitor_max_history_pages }}
+          ExecStart=/usr/local/bin/sonarr-transaction-monitor --base-url {{ sonarr_transaction_monitor_base_url | default('http://127.0.0.1:8989') }} --config {{ sonarr_transaction_monitor_config_path | default('/opt/media-stack/sonarr/config.xml') }} --radarr-base-url {{ sonarr_transaction_monitor_radarr_base_url | default('http://127.0.0.1:7878') }} --radarr-config {{ sonarr_transaction_monitor_radarr_config_path | default('/opt/media-stack/radarr/config.xml') }} --bootstrap-records {{ sonarr_transaction_monitor_bootstrap_records }} --max-history-pages {{ sonarr_transaction_monitor_max_history_pages }} --storage-snapshot-interval-sec {{ sonarr_transaction_monitor_storage_snapshot_interval_sec | default(900) }}
       when: sonarr_transaction_monitor_enabled | default(false)
       notify: Reload systemd
 

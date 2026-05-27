@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import datetime as dt
 import os
 import json
 import re
@@ -117,6 +118,27 @@ MKV_LANGUAGE_IETF_ID = 0x22B59D
 
 def log(message: str) -> None:
     print(f"sab-release-stamper: {message}", flush=True)
+
+
+def utc_now() -> str:
+    return dt.datetime.now(dt.UTC).isoformat().replace("+00:00", "Z")
+
+
+def write_event(event: dict[str, object]) -> None:
+    path = os.environ.get("STAMPER_EVENT_LOG", "/config/scripts/release-stamper-events.jsonl")
+    if not path:
+        return
+    event.setdefault("observedAt", utc_now())
+    event.setdefault("client", "sabnzbd")
+    try:
+        event_path = Path(path)
+        event_path.parent.mkdir(parents=True, exist_ok=True)
+        with event_path.open("a", encoding="utf-8") as handle:
+            json.dump(event, handle, sort_keys=True, separators=(",", ":"))
+            handle.write("\n")
+        event_path.chmod(0o640)
+    except Exception as exc:  # noqa: BLE001 - telemetry must not block imports
+        log(f"event log write failed: {exc}")
 
 
 def load_env(path: str) -> None:
@@ -717,17 +739,26 @@ def main() -> int:
 
     download_dir = os.environ.get("SAB_COMPLETE_DIR") or (argv[0] if argv else "")
     category = os.environ.get("SAB_CAT") or (argv[5] if len(argv) > 5 else "")
+    event: dict[str, object] = {
+        "client": "sabnzbd",
+        "download_name": Path(download_dir).name if download_dir else "",
+        "category": category,
+        "dry_run": dry_run,
+    }
     if category and category not in allowed_categories:
         log(f"category {category!r} is not enabled for stamping")
+        write_event({**event, "result": "skipped", "reason": "category_disabled"})
         return 0
 
     if not download_dir:
         log("no completed download directory supplied")
+        write_event({**event, "result": "skipped", "reason": "missing_download_dir"})
         return 0
 
     path = Path(download_dir)
     if not path.exists():
         log(f"completed download directory does not exist: {download_dir}")
+        write_event({**event, "result": "skipped", "reason": "download_dir_missing"})
         return 0
 
     try:
@@ -781,8 +812,20 @@ def main() -> int:
             f"completed with {changes} {action}; "
             f"videos_scanned={videos_scanned} skipped_no_stamp={skipped_no_stamp}"
         )
+        write_event(
+            {
+                **event,
+                "result": "completed",
+                "parent_title": parent_title,
+                "original_languages": sorted(original_languages),
+                "changes": changes,
+                "videos_scanned": videos_scanned,
+                "skipped_no_stamp": skipped_no_stamp,
+            }
+        )
     except Exception as exc:  # noqa: BLE001 - post-processing must not fail imports
         log(f"error: {exc}")
+        write_event({**event, "result": "error", "error": str(exc)})
 
     return 0
 

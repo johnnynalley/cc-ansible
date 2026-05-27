@@ -159,17 +159,23 @@ series/season search appears to grab only part of a show.
 
 `playbooks/media/sonarr-transaction-monitor.yml` deploys
 `sonarr-transaction-monitor.timer`, which records Sonarr history events and
-queue snapshots to `/var/log/sonarr-transaction-monitor/events.jsonl`. The log
-is mode `0640`, rotated daily with 90 retained rotations, and must not store
-raw indexer/API URLs or API keys. Keep it enabled while Profilarr upgrade
-searches are active so later reviews can compare grab-time, queue-time, and
-import/delete outcomes without relying on memory. If an older log needs
-redaction, use `scripts/media-release/sonarr_transaction_log_sanitize.py`.
+queue snapshots to `/var/log/sonarr-transaction-monitor/events.jsonl`. It also
+records Sonarr and Radarr storage snapshots every 15 minutes by default. Sonarr
+uses series statistics for total bytes/file counts plus root/profile buckets;
+Radarr includes total bytes/file counts plus quality/codec/root/profile buckets.
+That is enough to check whether x265 upgrade passes are moving real library
+size instead of relying on release names. The log is mode `0640`, rotated daily
+with 90 retained rotations, and must not store raw indexer/API URLs or API keys.
+Keep it enabled while Profilarr upgrade searches are active so later reviews can
+compare grab-time, queue-time, import/delete, and storage outcomes without
+relying on memory. If an older log needs redaction, use
+`scripts/media-release/sonarr_transaction_log_sanitize.py`.
 
 `scripts/media-release/sonarr_transaction_audit.py` is the compact report over that monitor
 log plus the live Sonarr queue. It summarizes recent history event types,
-queue-count movement, recent grabbed/imported/deleted groups, and the current
-queue's grouped classifications. Use it for periodic Profilarr review:
+queue-count movement, storage-size deltas, recent grabbed/imported/deleted
+groups, release-stamper events, and the current queue's grouped
+classifications. Use it for periodic Profilarr review:
 
 ```bash
 ansible docker-vm --become -m script -a "scripts/media-release/sonarr_transaction_audit.py --hours 24 --limit 25"
@@ -957,9 +963,13 @@ for SABnzbd and qBittorrent on `docker-vm`.
 
 - qBittorrent script: `/opt/media-stack/qbittorrent/scripts/qbit-release-stamper.py`
 - qBittorrent env: `/opt/media-stack/qbittorrent/scripts/qbit-release-stamper.env`
+- qBittorrent event log:
+  `/opt/media-stack/qbittorrent/scripts/release-stamper-events.jsonl`
 - qBittorrent hook: `/usr/bin/python3 /config/scripts/qbit-release-stamper.py --hash "%I" --name "%N" --category "%L"`
 - SABnzbd script: `/opt/media-stack/sabnzbd/scripts/sab-release-stamper.py`
 - SABnzbd script directory: `scripts`
+- SABnzbd event log:
+  `/opt/media-stack/sabnzbd/scripts/release-stamper-events.jsonl`
 - SABnzbd categories using the stamper: `shows`, `movies`
 - Stamper env files are owned by UID/GID `1000` with mode `0600`, matching the
   media containers' `PUID=1000` / `PGID=1000`. Root-only env files cause
@@ -1000,6 +1010,12 @@ Stamping rules:
 - The scripts are intentionally non-fatal. If stamping fails, they log the
   error and exit successfully so they do not block SABnzbd or qBittorrent
   completion/import flows.
+- Both stampers write compact JSONL event logs with result, rename count,
+  scanned-video count, skipped-no-stamp count, category, and download name.
+  `scripts/media-release/sonarr_transaction_audit.py` summarizes these logs
+  alongside Sonarr history. A completed event with `changes=0` is not
+  automatically bad: it is expected when payload files already include all
+  needed evidence such as `H.265`, service tags, and release group.
 
 Verification on 2026-05-22:
 

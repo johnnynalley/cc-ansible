@@ -11,6 +11,7 @@ state stay aligned with the filesystem rename.
 from __future__ import annotations
 
 import argparse
+import datetime as dt
 import json
 import os
 import re
@@ -128,6 +129,27 @@ MKV_LANGUAGE_IETF_ID = 0x22B59D
 
 def log(message: str) -> None:
     print(f"qbit-release-stamper: {message}", flush=True)
+
+
+def utc_now() -> str:
+    return dt.datetime.now(dt.UTC).isoformat().replace("+00:00", "Z")
+
+
+def write_event(event: dict[str, object]) -> None:
+    path = os.environ.get("STAMPER_EVENT_LOG", "/config/scripts/release-stamper-events.jsonl")
+    if not path:
+        return
+    event.setdefault("observedAt", utc_now())
+    event.setdefault("client", "qbittorrent")
+    try:
+        event_path = Path(path)
+        event_path.parent.mkdir(parents=True, exist_ok=True)
+        with event_path.open("a", encoding="utf-8") as handle:
+            json.dump(event, handle, sort_keys=True, separators=(",", ":"))
+            handle.write("\n")
+        event_path.chmod(0o640)
+    except Exception as exc:  # noqa: BLE001 - telemetry must not block imports
+        log(f"event log write failed: {exc}")
 
 
 def load_env(path: str) -> None:
@@ -785,9 +807,16 @@ def main() -> int:
     allowed_categories = parse_categories(
         os.environ.get("QBIT_STAMP_CATEGORIES", "tv-sonarr,sonarr,radarr")
     )
+    event: dict[str, object] = {
+        "client": "qbittorrent",
+        "download_name": args.name,
+        "category": args.category,
+        "dry_run": args.dry_run,
+    }
 
     if not username or not password:
         log("missing QBIT_USER/QBIT_PASS; skipping")
+        write_event({**event, "result": "skipped", "reason": "missing_credentials"})
         return 0
 
     try:
@@ -796,17 +825,21 @@ def main() -> int:
         torrent = client.torrent_by_hash_or_name(args.hash, args.name)
         if not torrent:
             log("torrent not found; skipping")
+            write_event({**event, "result": "skipped", "reason": "torrent_not_found"})
             return 0
 
         category = args.category if args.category and not args.category.startswith("%") else ""
         category = category or torrent.get("category", "")
+        event.update({"download_name": torrent.get("name", args.name), "category": category})
         if category not in allowed_categories:
             log(f"category {category!r} is not enabled for stamping")
+            write_event({**event, "result": "skipped", "reason": "category_disabled"})
             return 0
 
         progress = float(torrent.get("progress") or 0)
         if not args.force and progress < 0.999:
             log(f"torrent {torrent.get('name', '')!r} is not complete; skipping")
+            write_event({**event, "result": "skipped", "reason": "torrent_incomplete"})
             return 0
 
         torrent_hash = torrent.get("hash") or args.hash
@@ -889,8 +922,20 @@ def main() -> int:
             f"completed with {changes} {action}; "
             f"videos_scanned={videos_scanned} skipped_no_stamp={skipped_no_stamp}"
         )
+        write_event(
+            {
+                **event,
+                "result": "completed",
+                "parent_title": parent_title,
+                "original_languages": sorted(original_languages),
+                "changes": changes,
+                "videos_scanned": videos_scanned,
+                "skipped_no_stamp": skipped_no_stamp,
+            }
+        )
     except Exception as exc:  # noqa: BLE001 - post-processing must not fail imports
         log(f"error: {exc}")
+        write_event({**event, "result": "error", "error": str(exc)})
         return 0
 
     return 0
