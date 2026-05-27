@@ -2,7 +2,7 @@
 """Coordinate overnight media maintenance.
 
 Runs on the NAS host. Balance jobs take the whole overnight window; if no
-balance job is pending, this queues controlled Profilarr upgrade work.
+balance job is pending, this opens Profilarr's native upgrade window.
 """
 
 from __future__ import annotations
@@ -26,7 +26,8 @@ DEFAULT_WINDOW = "00:00-07:00"
 DEFAULT_MOUNT_PATH = "/srv/media"
 DEFAULT_MIN_FREE = "100G"
 DEFAULT_MEDIA_STACK_COMMAND = "/usr/local/sbin/mergerfs-balance-media-stack"
-DEFAULT_PROFILARR_COMMAND = "/usr/local/sbin/nightly-media-profilarr enqueue"
+DEFAULT_PROFILARR_COMMAND = "/usr/local/sbin/nightly-media-profilarr open-window"
+DEFAULT_PROFILARR_CLOSE_COMMAND = "/usr/local/sbin/nightly-media-profilarr close-window"
 LOCK_PATH = Path("/run/nightly-media-maintenance.lock")
 SAFE_NAME = re.compile(r"^[A-Za-z0-9_.-]+$")
 
@@ -396,9 +397,8 @@ def run_balance(job: dict[str, Any], args: argparse.Namespace) -> dict[str, Any]
     return result
 
 
-def trigger_profilarr(args: argparse.Namespace, window_id: str, slot: str) -> int:
-    command = f"{args.profilarr_command} --window-id {shlex.quote(window_id)} --slot {shlex.quote(slot)}"
-    return run_shell(command)
+def open_profilarr_window(args: argparse.Namespace) -> int:
+    return run_shell(args.profilarr_command)
 
 
 def cmd_run_window(args: argparse.Namespace) -> int:
@@ -493,15 +493,15 @@ def cmd_run_window(args: argparse.Namespace) -> int:
                 print("Balance already owned this maintenance window; skipping Profilarr.")
                 return 0
 
-            slot = dt.datetime.now().strftime("%Y%m%dT%H")
+            slot = window_id
             if slot in state.get("profilarr_slots", []):
-                print(f"Profilarr slot {slot} already handled.")
+                print(f"Profilarr upgrade window {slot} already opened.")
                 return 0
 
-            rc = trigger_profilarr(args, window_id, slot)
+            rc = open_profilarr_window(args)
             if rc == 0:
                 state["mode"] = "profilarr"
-                state["status"] = "profilarr-queued"
+                state["status"] = "profilarr-window-open"
                 if balance_deferred:
                     state["balance_deferred"] = True
                 state.setdefault("profilarr_slots", []).append(slot)
@@ -518,13 +518,15 @@ def cmd_run_window(args: argparse.Namespace) -> int:
 def cmd_restore(args: argparse.Namespace) -> int:
     state_dir = Path(args.state_dir)
     state = load_state(state_dir)
-    rc = run_shell(f"{args.media_stack_command} start")
+    media_rc = run_shell(f"{args.media_stack_command} start")
+    profilarr_rc = run_shell(args.profilarr_close_command)
     state["restore"] = {
-        "returncode": rc,
+        "media_stack_returncode": media_rc,
+        "profilarr_close_returncode": profilarr_rc,
         "ran_at": now_iso(),
     }
     save_state(state_dir, state)
-    return rc
+    return media_rc or profilarr_rc
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -590,6 +592,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     restore = sub.add_parser("restore")
     restore.add_argument("--media-stack-command", default=DEFAULT_MEDIA_STACK_COMMAND)
+    restore.add_argument("--profilarr-close-command", default=DEFAULT_PROFILARR_CLOSE_COMMAND)
     restore.set_defaults(func=cmd_restore)
 
     return parser

@@ -43,8 +43,8 @@
 - `profilarr_link_database.py`: Links a Profilarr database through the local
   authenticated web app or a direct SQLite/clone fallback, taking a Profilarr
   DB backup first and without printing secrets.
-- `profilarr_nightly_upgrade.py`: Queues controlled Profilarr upgrade jobs for
-  the overnight maintenance coordinator.
+- `profilarr_nightly_upgrade.py`: Opens and closes Profilarr's native Arr
+  upgrade scheduler for the overnight maintenance coordinator.
 - `profilarr_selective_cf_import.py`: Imports curated Profilarr custom formats
   into Arr test profiles without importing upstream quality profiles.
 - `profilarr_sonarr_upgrade_strategy.py`: Adjusts Profilarr's Sonarr upgrade

@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Queue controlled Profilarr upgrade jobs for the overnight coordinator.
+"""Gate Profilarr upgrade scheduling for the overnight coordinator.
 
-Run on docker-vm as the johnny user. The helper keeps Profilarr's native
-scheduled Arr upgrades disabled and queues explicit nightly arr.upgrade jobs.
+Run on docker-vm as the johnny user. The helper opens and closes Profilarr's
+native Arr upgrade scheduler instead of inserting queue rows directly.
 """
 
 from __future__ import annotations
@@ -14,6 +14,7 @@ import os
 import shlex
 import shutil
 import sqlite3
+import subprocess
 import sys
 from pathlib import Path
 from typing import Any
@@ -21,6 +22,8 @@ from typing import Any
 
 DEFAULT_DB = Path("/opt/profilarr/config/data/profilarr.db")
 DEFAULT_BACKUP_DIR = Path("/opt/profilarr/config/data/backups")
+DEFAULT_WAKE_COMMAND = "docker restart profilarr"
+DEFAULT_UPGRADE_CRON = "0 * * * *"
 
 
 def argv_from_forced_command() -> list[str]:
@@ -93,7 +96,7 @@ def upgrade_configs(conn: sqlite3.Connection) -> list[dict[str, Any]]:
         conn,
         """
         SELECT u.id AS config_id, a.id AS instance_id, a.name AS arr, a.type,
-               a.enabled AS arr_enabled, u.enabled, u.filters
+               a.enabled AS arr_enabled, u.enabled, u.cron, u.next_run_at, u.filters
         FROM upgrade_configs u
         JOIN arr_instances a ON a.id = u.arr_instance_id
         WHERE a.enabled != 0
@@ -110,6 +113,7 @@ def scheduled_upgrade_work(conn: sqlite3.Connection) -> tuple[list[dict[str, Any
         FROM upgrade_configs u
         JOIN arr_instances a ON a.id = u.arr_instance_id
         WHERE u.enabled != 0
+          AND (NULLIF(TRIM(u.cron), '') IS NOT NULL OR u.next_run_at IS NOT NULL)
         ORDER BY a.name
         """,
     )
@@ -127,11 +131,57 @@ def scheduled_upgrade_work(conn: sqlite3.Connection) -> tuple[list[dict[str, Any
     return enabled, queued
 
 
-def ensure_native_scheduler_disabled(conn: sqlite3.Connection, db_path: Path, backup_dir: Path) -> Path | None:
-    enabled, queued = scheduled_upgrade_work(conn)
-    if not enabled and not queued:
-        return None
-    backup_path = create_sqlite_backup(db_path, backup_dir, "pre-disable-native")
+def filter_enabled(config: dict[str, Any]) -> bool:
+    try:
+        filters = json.loads(config.get("filters") or "[]")
+    except json.JSONDecodeError:
+        return False
+    return any(item.get("enabled") for item in filters)
+
+
+def configured_upgrade_configs(conn: sqlite3.Connection) -> list[dict[str, Any]]:
+    return [config for config in upgrade_configs(conn) if filter_enabled(config)]
+
+
+def open_upgrade_window(
+    conn: sqlite3.Connection,
+    db_path: Path,
+    backup_dir: Path,
+    cron: str,
+    run_now: bool,
+) -> tuple[Path | None, int]:
+    configs = configured_upgrade_configs(conn)
+    if not configs:
+        return None, 0
+
+    run_at = iso_now() if run_now else None
+    backup_path = create_sqlite_backup(db_path, backup_dir, "pre-open-upgrade-window")
+    for config in configs:
+        conn.execute(
+            """
+            UPDATE upgrade_configs
+            SET enabled = 1,
+                cron = ?,
+                next_run_at = COALESCE(?, next_run_at),
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id = ?
+            """,
+            (cron, run_at, config["config_id"]),
+        )
+    return backup_path, len(configs)
+
+
+def close_upgrade_window(
+    conn: sqlite3.Connection,
+    db_path: Path,
+    backup_dir: Path,
+) -> tuple[Path | None, int, int]:
+    active_configs = [config for config in upgrade_configs(conn) if config.get("enabled") != 0]
+    _, queued = scheduled_upgrade_work(conn)
+    if not active_configs and not queued:
+        return None, 0, 0
+
+    backup_path = create_sqlite_backup(db_path, backup_dir, "pre-close-upgrade-window")
     conn.execute(
         """
         UPDATE upgrade_configs
@@ -141,7 +191,7 @@ def ensure_native_scheduler_disabled(conn: sqlite3.Connection, db_path: Path, ba
         WHERE enabled != 0
         """
     )
-    conn.execute(
+    cancelled = conn.execute(
         """
         UPDATE job_queue
         SET status = 'cancelled',
@@ -151,71 +201,65 @@ def ensure_native_scheduler_disabled(conn: sqlite3.Connection, db_path: Path, ba
           AND source = 'schedule'
           AND status IN ('queued', 'pending', 'retry')
         """
-    )
-    return backup_path
+    ).rowcount
+    return backup_path, len(active_configs), int(cancelled or 0)
 
 
-def filter_enabled(config: dict[str, Any]) -> bool:
-    try:
-        filters = json.loads(config.get("filters") or "[]")
-    except json.JSONDecodeError:
-        return False
-    return any(item.get("enabled") for item in filters)
+def wake_dispatcher(args: argparse.Namespace, reason: str) -> int:
+    if args.no_wake:
+        return 0
+    command = shlex.split(args.wake_command)
+    if not command:
+        return 0
+    result = subprocess.run(command, check=False, text=True, capture_output=True)
+    if result.stdout:
+        print(result.stdout.strip())
+    if result.stderr:
+        print(result.stderr.strip(), file=sys.stderr)
+    if result.returncode != 0:
+        print(
+            f"Failed to wake Profilarr dispatcher after {reason}; command exited {result.returncode}.",
+            file=sys.stderr,
+        )
+        return result.returncode
+    print(f"Woke Profilarr dispatcher after {reason}: {args.wake_command}")
+    return 0
 
 
-def cmd_enqueue(args: argparse.Namespace) -> int:
+def cmd_open_window(args: argparse.Namespace) -> int:
     conn = connect(args.db)
     try:
-        backup = ensure_native_scheduler_disabled(conn, args.db, args.backup_dir)
-        if backup:
-            print(f"Disabled native Profilarr scheduled Arr upgrades; backup={backup}")
-
-        active = active_upgrade_jobs(conn)
-        if active:
-            print("Profilarr arr.upgrade job already active; not queueing another cycle.")
-            for row in active:
-                print(
-                    "  - #{id} {status} run_at={run_at} source={source} dedupe={dedupe_key}".format(**row)
-                )
-            conn.commit()
-            return 0
-
-        configs = [config for config in upgrade_configs(conn) if filter_enabled(config)]
-        if not configs:
-            print("No enabled Profilarr upgrade filters found.")
-            conn.commit()
-            return 0
-
-        run_at = iso_now()
-        queued = 0
-        for config in configs:
-            dedupe = f"arr.upgrade.nightly:{args.window_id}:{args.slot}:{config['instance_id']}"
-            exists = conn.execute(
-                "SELECT id FROM job_queue WHERE dedupe_key = ?",
-                (dedupe,),
-            ).fetchone()
-            if exists:
-                print(f"{config['arr']} nightly job already exists for {args.slot}.")
-                continue
-            payload = json.dumps(
-                {"instanceId": config["instance_id"], "dryRun": False},
-                separators=(",", ":"),
-            )
-            conn.execute(
-                """
-                INSERT INTO job_queue (
-                    job_type, status, run_at, payload, source, dedupe_key,
-                    created_at, updated_at
-                )
-                VALUES ('arr.upgrade', 'queued', ?, ?, 'nightly', ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-                """,
-                (run_at, payload, dedupe),
-            )
-            queued += 1
-            print(f"Queued {config['arr']} Profilarr upgrade for slot {args.slot}.")
-
+        backup, opened = open_upgrade_window(
+            conn,
+            args.db,
+            args.backup_dir,
+            args.cron,
+            args.run_now,
+        )
         conn.commit()
-        print(f"Queued {queued} Profilarr upgrade job(s).")
+        if backup:
+            print(f"Opened Profilarr upgrade window for {opened} config(s); backup={backup}")
+            return wake_dispatcher(args, "opening the upgrade window")
+        print("No Profilarr upgrade filters found; upgrade window was not opened.")
+        return 0
+    finally:
+        conn.close()
+
+
+def cmd_close_window(args: argparse.Namespace) -> int:
+    conn = connect(args.db)
+    try:
+        backup, disabled, cancelled = close_upgrade_window(conn, args.db, args.backup_dir)
+        conn.commit()
+        if backup:
+            print(
+                "Closed Profilarr upgrade window: "
+                f"disabled={disabled} cancelled_scheduled_jobs={cancelled} backup={backup}"
+            )
+            if cancelled:
+                return wake_dispatcher(args, "closing the upgrade window")
+            return 0
+        print("Profilarr upgrade window already closed.")
         return 0
     finally:
         conn.close()
@@ -242,10 +286,28 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--backup-dir", type=Path, default=DEFAULT_BACKUP_DIR)
     sub = parser.add_subparsers(dest="command", required=True)
 
-    enqueue = sub.add_parser("enqueue")
-    enqueue.add_argument("--window-id", required=True)
-    enqueue.add_argument("--slot", required=True)
-    enqueue.set_defaults(func=cmd_enqueue)
+    open_window = sub.add_parser("open-window")
+    open_window.add_argument("--cron", default=DEFAULT_UPGRADE_CRON)
+    open_window.add_argument("--run-now", dest="run_now", action="store_true", default=True)
+    open_window.add_argument("--no-run-now", dest="run_now", action="store_false")
+    open_window.add_argument("--wake-command", default=DEFAULT_WAKE_COMMAND)
+    open_window.add_argument("--no-wake", action="store_true")
+    open_window.set_defaults(func=cmd_open_window)
+
+    close_window = sub.add_parser("close-window")
+    close_window.add_argument("--wake-command", default=DEFAULT_WAKE_COMMAND)
+    close_window.add_argument("--no-wake", action="store_true")
+    close_window.set_defaults(func=cmd_close_window)
+
+    enqueue = sub.add_parser("enqueue", help=argparse.SUPPRESS)
+    enqueue.add_argument("--window-id")
+    enqueue.add_argument("--slot")
+    enqueue.add_argument("--cron", default=DEFAULT_UPGRADE_CRON)
+    enqueue.add_argument("--run-now", dest="run_now", action="store_true", default=True)
+    enqueue.add_argument("--no-run-now", dest="run_now", action="store_false")
+    enqueue.add_argument("--wake-command", default=DEFAULT_WAKE_COMMAND)
+    enqueue.add_argument("--no-wake", action="store_true")
+    enqueue.set_defaults(func=cmd_open_window)
 
     status = sub.add_parser("status")
     status.set_defaults(func=cmd_status)

@@ -6,4 +6,4 @@ Wants=network-online.target
 [Service]
 Type=oneshot
 Environment=PYTHONUNBUFFERED=1
-ExecStart=/usr/local/bin/nightly-media-maintenance --state-dir {{ nightly_media_maintenance_state_dir | quote }} run-window --window {{ nightly_media_maintenance_window | quote }} --profilarr-command {{ '/usr/local/sbin/nightly-media-profilarr enqueue' | quote }} --media-stack-command {{ '/usr/local/sbin/mergerfs-balance-media-stack' | quote }}
+ExecStart=/usr/local/bin/nightly-media-maintenance --state-dir {{ nightly_media_maintenance_state_dir | quote }} run-window --window {{ nightly_media_maintenance_window | quote }} --profilarr-command {{ '/usr/local/sbin/nightly-media-profilarr open-window' | quote }} --media-stack-command {{ '/usr/local/sbin/mergerfs-balance-media-stack' | quote }}
