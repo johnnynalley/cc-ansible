@@ -8,6 +8,11 @@ recording_incoming=""
 recording_ready=""
 recording_discarded=""
 recording_min_valid_bytes="{{ stream_relay_recording_min_valid_bytes | default(1048576) }}"
+producer_audio_maps=(
+{% for audio_map in stream_relay_audio_maps | default(['0:a:0?']) %}
+  {{ audio_map | quote }}
+{% endfor %}
+)
 
 {% for output in stream_relay_outputs | default([]) %}
 {% if stream_relay_output_fanout_transport | default('udp') == 'tcp' %}
@@ -31,7 +36,11 @@ if mountpoint -q "$recording_spool"; then
   recording_incoming="$recording_spool/incoming/${recording_base}.ts.recording"
   recording_ready="$recording_spool/ready/${recording_base}.ts"
   recording_discarded="$recording_spool/discarded/${recording_base}.ts.discarded"
-  tee_outputs+=("[f=mpegts:onfail=ignore]${recording_incoming}")
+  recording_tee_options="f=mpegts:onfail=ignore"
+{% if stream_relay_recording_tee_select is defined and stream_relay_recording_tee_select %}
+  recording_tee_options="select='{{ stream_relay_recording_tee_select }}':${recording_tee_options}"
+{% endif %}
+  tee_outputs+=("[${recording_tee_options}]${recording_incoming}")
   echo "stream-relay: recording local VOD spool ${recording_incoming}" >&2
 else
   echo "stream-relay: recording enabled but spool mount unavailable: ${recording_spool}" >&2
@@ -46,6 +55,10 @@ audio_args=(-c:a copy)
 {% else %}
 audio_args=(-c:a {{ stream_relay_audio_codec | default('aac') }} -b:a {{ stream_relay_audio_bitrate }} -ar {{ stream_relay_audio_sample_rate }} -ac 2)
 {% endif %}
+map_args=(-map 0:v:0)
+for audio_map in "${producer_audio_maps[@]}"; do
+  map_args+=(-map "$audio_map")
+done
 
 set +e
 /usr/bin/ffmpeg \
@@ -54,8 +67,7 @@ set +e
   -loglevel warning \
   -stats_period 30 \
   -i "$srt_url" \
-  -map 0:v:0 \
-  -map 0:a:0? \
+  "${map_args[@]}" \
   -c:v {{ stream_relay_video_encoder }} \
   -preset {{ stream_relay_video_preset }} \
   -tune {{ stream_relay_video_tune }} \

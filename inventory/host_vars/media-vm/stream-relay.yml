@@ -36,6 +36,20 @@ stream_relay_output_audio_codecs:
   youtube: aac
 stream_relay_output_audio_filters:
   youtube: "aresample=async=1:first_pts=0"
+# Audio policy from gaming PC OBS:
+#   OBS track 1 = full stream mix with Apple Music
+#   OBS track 2 = clean stream mix without Apple Music
+# Ubuntu 26.04's FFmpeg 8 FLV muxer accepts both Twitch tracks; YouTube
+# receives only the clean track.
+stream_relay_audio_maps:
+  - "0:a:0?"
+  - "0:a:1?"
+stream_relay_output_audio_maps:
+  twitch:
+    - "0:a:0?"
+    - "0:a:1?"
+  youtube:
+    - "0:a:1?"
 stream_relay_output_fifo_size: 50000000
 stream_relay_output_retry_seconds: 10
 
@@ -103,6 +117,7 @@ stream_relay_recording_uid: 33
 stream_relay_recording_gid: 33
 stream_relay_recording_min_valid_bytes: 1048576
 stream_relay_recording_stale_incoming_minutes: 10
+stream_relay_recording_tee_select: "v:0,a:1"
 
 stream_relay_health_enabled: true
 stream_relay_health_oncalendar: "*-*-* *:0/5"

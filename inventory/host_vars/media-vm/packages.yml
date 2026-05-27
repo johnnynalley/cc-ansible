@@ -6,5 +6,11 @@
 packages_host_extra:
   - ffmpeg
 
+# Keep Secure Boot on Ubuntu's signed Nvidia kernel module path. The 26.04
+# upgrade installed nvidia-dkms-580, which shadows the signed module and causes
+# Secure Boot to reject the Quadro driver.
+packages_remove:
+  - nvidia-dkms-580
+
 # Install Docker from official repo
 install_docker: true

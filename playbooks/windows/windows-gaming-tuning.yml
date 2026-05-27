@@ -1,9 +1,9 @@
 ---
 # Purpose: Configure Windows gaming tuning.
 # Hosts: localhost, windows_gaming_tuning_targets.
-# Key vars: windows_gaming_*, windows_performance_mode_*, windows_signalrgb_*, gaming_benchmark_*.
+# Key vars: windows_gaming_*, windows_performance_mode_*, windows_signalrgb_*, gaming_benchmark_*, windows_streaming_*.
 # Templates: templates/windows.
-# Scripts: scripts/gaming.
+# Scripts: scripts/gaming, scripts/streaming.
 # Validation: ansible-playbook playbooks/windows/windows-gaming-tuning.yml --syntax-check.
 
 - name: Select reachable Windows hosts for gaming tuning
@@ -276,6 +276,18 @@
               }
           }
       tags: [windows-ssh]
+
+    - name: Ensure Windows streaming script directory exists
+      ansible.windows.win_file:
+        path: "{{ windows_streaming_script_dir | default('C:\\ProgramData\\Johnny\\Streaming') }}"
+        state: directory
+      tags: [streaming]
+
+    - name: Deploy gaming OBS VOD audio-track helper
+      ansible.windows.win_copy:
+        src: "{{ ansible_config_file | dirname }}/scripts/streaming/configure-gaming-obs-vod-audio-tracks.ps1"
+        dest: "{{ windows_streaming_script_dir | default('C:\\ProgramData\\Johnny\\Streaming') }}\\configure-gaming-obs-vod-audio-tracks.ps1"
+      tags: [streaming]
 
     - name: Apply low-latency NIC advanced properties
       ansible.windows.win_powershell:

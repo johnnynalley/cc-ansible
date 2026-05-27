@@ -6,6 +6,8 @@
   settings for TikTok streaming.
 - `configure-gaming-obs-apple-music-ndi.ps1`: Configures Windows OBS Apple
   Music NDI source and monitoring settings.
+- `configure-gaming-obs-vod-audio-tracks.ps1`: Configures gaming PC OBS
+  landscape output for Track 1 full/music and Track 2 clean/no-music routing.
 - `configure-mac-apple-music-ndi.py`: Configures Mac OBS Apple Music
   application-audio NDI output.
 - `configure-mac-apple-music-sonobus.py`: Configures Mac OBS Apple Music app

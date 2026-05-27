@@ -1,6 +1,6 @@
 # Streaming Runbook
 
-> Last updated: 2026-05-25
+> Last updated: 2026-05-27
 
 This is the current streaming setup across the gaming PC, media-vm, and MacBook.
 It is meant to answer one question first: "what do I do to go live?"
@@ -65,16 +65,32 @@ Mac OBS
     -> SteelSeries Sonar Media
 ```
 
+## Audio Track Policy
+
+The gaming PC OBS landscape stream uses two audio tracks:
+
+- Track 1 is the full live mix: game, mic, alerts, and Apple Music.
+- Track 2 is the clean mix: game, mic, and alerts without Apple Music.
+
+The media-vm relay carries both tracks from the gaming PC over SRT. Twitch uses the FFmpeg 8 FLV/RTMP path on Ubuntu 26.04 so live Twitch receives Track 1 and the Twitch VOD should use Track 2. YouTube receives only Track 2, so YouTube landscape is clean/no-music by default. The local relay VOD recording is also Track 2 only.
+
+TikTok uses the Aitum vertical output, which stays on Track 1 so TikTok receives the full mix with Apple Music.
+
+This does not protect against live copyright enforcement. It only keeps music out of recordings/VODs on paths that use the clean track.
+
 ## Production Paths
 
 These are the paths to rely on for a real stream.
 
 - Landscape encoding and VOD are handled by `stream-relay.service` on `media-vm`.
 - Landscape fanout is handled by local MPEG-TS/TCP feeds from `stream-relay.service` to one `stream-relay-output@<platform>.service` worker per platform.
-- The producer copies OBS's incoming AAC audio instead of adding another producer-side AAC encode.
-- Twitch copies that audio to RTMP.
-- YouTube re-encodes audio with `aresample=async=1:first_pts=0` so YouTube gets fresh 48 kHz audio timestamps.
+- The producer copies OBS's incoming AAC audio tracks instead of adding another producer-side AAC encode.
+- The relay uses `h264_nvenc`, not CPU `x264`. Keep the normal landscape relay on H.264 because Twitch's standard RTMP ingest and cross-platform compatibility are better there; only test H.265/HEVC on a separate path when a target platform explicitly supports it.
+- Twitch uses the FFmpeg 8 FLV/RTMP output path, which requires Ubuntu 26.04's FFmpeg 8.x package. Ubuntu 24.04's FFmpeg 6.1 FLV muxer rejects multiple audio streams.
+- YouTube maps the clean audio track and re-encodes it with `aresample=async=1:first_pts=0` so YouTube gets fresh 48 kHz audio timestamps.
 - The relay does not use FFmpeg `nobuffer`/`low_delay` flags; the SRT path already has explicit latency, and aggressive low-delay buffering caused audible artifacts in live testing.
+- `media-vm` keeps Secure Boot enabled, but `nvidia-dkms-580` must stay removed so the Quadro uses Ubuntu's Canonical-signed `linux-modules-nvidia-580-generic` module.
+- Local validation on 2026-05-27 proved FFmpeg 8.0.1 can write an FLV file with one H.264 video stream and two AAC audio streams. A real short Twitch stream is still required to confirm Twitch assigns Track 2 to the VOD as intended.
 - With the current TCP fanout, if a platform worker disconnects after latching, restart the full landscape relay set instead of only restarting that output worker.
 - TikTok LIVE Studio runs on the MacBook, not the gaming PC.
 - TikTok receives video from the Mac OBS virtual camera.
@@ -148,7 +164,19 @@ Landscape output:
 - Service: Custom
 - Server: `srt://192.168.1.136:9000?mode=caller&transtype=live&latency=5000000`
 - Stream key: any non-empty placeholder, for example `obs`
+- Output mode: Advanced
+- Encoder: NVIDIA NVENC H.264
 - Streaming bitrate: `12000 Kbps`
+- Streaming audio mixes: Track 1 and Track 2
+
+Gaming PC OBS source track assignments:
+
+- `Stream Mix`: Track 1 and Track 2
+- `Game Capture`: Track 1 and Track 2
+- `MacBook Webcam`: Track 1 and Track 2
+- `Apple Music Sonobus`: Track 1 only
+
+If Track 2 has Apple Music, check Sonar first: Apple Music must not be baked into the Sonar Stream Mix. The `Apple Music Sonobus` OBS source is the only Apple Music source that should feed the landscape stream.
 
 Starting the OBS stream is a real go-live action for any platform enabled in `stream_relay_outputs`. The media-vm output workers forward that feed to Twitch and YouTube using the live stream keys on media-vm.
 
@@ -210,6 +238,7 @@ Repo-managed files:
 
 - `playbooks/media/stream-relay.yml`
 - `inventory/host_vars/media-vm/stream-relay.yml`
+- `scripts/streaming/configure-gaming-obs-vod-audio-tracks.ps1`
 - `templates/streaming/stream-relay.sh.j2`
 - `templates/streaming/stream-relay.service.j2`
 - `templates/streaming/stream-relay-output.sh.j2`
@@ -239,6 +268,14 @@ stream_relay_outputs:
 ```
 
 `/etc/stream-relay/stream-relay.env` still holds the live-only platform URLs, stream keys, and per-output query flags. Do not commit stream keys.
+
+Gaming PC OBS audio-track routing can be reapplied while OBS is closed with:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File C:\ProgramData\Johnny\Streaming\configure-gaming-obs-vod-audio-tracks.ps1
+```
+
+That script writes a targeted backup under `%LOCALAPPDATA%\CodexBackups\` before changing OBS profile or scene files.
 
 ## Health Checks And VOD Delivery
 
