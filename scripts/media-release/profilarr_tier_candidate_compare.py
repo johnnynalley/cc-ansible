@@ -414,6 +414,7 @@ def summarize_candidate(
     arr_name: str,
     live_tokens: set[str],
     live_names: set[str],
+    token_regex: re.Pattern[str] | None = None,
 ) -> dict[str, Any] | None:
     conditions = fetch_all(
         conn,
@@ -473,6 +474,13 @@ def summarize_candidate(
 
     if pattern_count == 0:
         return None
+    matched_tokens: list[str] = []
+    token_filter_name_match = False
+    if token_regex:
+        matched_tokens = sorted(token for token in tokens if token_regex.search(token))
+        token_filter_name_match = bool(token_regex.search(cf_name))
+        if not matched_tokens and not token_filter_name_match:
+            return None
 
     overlap = tokens & live_tokens
     new_tokens = tokens - live_tokens
@@ -496,6 +504,8 @@ def summarize_candidate(
         "new_token_count": len(new_tokens),
         "new_tokens_sample": sorted(new_tokens)[:20],
         "overlap_tokens_sample": sorted(overlap)[:20],
+        "matched_tokens": matched_tokens,
+        "token_filter_name_match": token_filter_name_match,
     }
 
 
@@ -591,6 +601,7 @@ def summarize_families(candidates: list[dict[str, Any]]) -> list[dict[str, Any]]
 
 def build_report(args: argparse.Namespace) -> dict[str, Any]:
     name_regex = re.compile(args.name_regex, re.IGNORECASE)
+    token_regex = re.compile(args.token_regex, re.IGNORECASE) if args.token_regex else None
     databases = load_candidate_databases(
         Path(args.profilarr_db),
         Path(args.data_root),
@@ -613,6 +624,7 @@ def build_report(args: argparse.Namespace) -> dict[str, Any]:
                     instance.name,
                     live["live_tokens"],
                     live["live_names"],
+                    token_regex,
                 )
                 if summary is None:
                     continue
@@ -702,6 +714,14 @@ def print_text(report: dict[str, Any]) -> None:
             )
             if candidate["new_tokens_sample"]:
                 print(f"      new token sample: {', '.join(candidate['new_tokens_sample'][:12])}")
+            if candidate["matched_tokens"] or candidate["token_filter_name_match"]:
+                token_text = ", ".join(candidate["matched_tokens"]) or "none"
+                print(
+                    "      token filter: matched_tokens={token_text}; name_match={name_match}".format(
+                        token_text=token_text,
+                        name_match=str(candidate["token_filter_name_match"]).lower(),
+                    )
+                )
 
         if report["family_summary"]:
             print("  candidate family summary:")
@@ -728,6 +748,10 @@ def parse_args() -> argparse.Namespace:
         "--name-regex",
         default=r"(compact|balanced|efficient|tier|group)",
         help="case-insensitive regex for candidate custom format names",
+    )
+    parser.add_argument(
+        "--token-regex",
+        help="case-insensitive regex that must match a candidate name or extracted release-group token",
     )
     parser.add_argument("--include-disabled-databases", action="store_true")
     parser.add_argument("--only-missing", action="store_true")

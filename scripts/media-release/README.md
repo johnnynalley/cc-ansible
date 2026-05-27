@@ -52,7 +52,9 @@
 - `profilarr_state_audit.py`: Read-only audit of Profilarr database, scheduler,
   and upgrade-job state.
 - `profilarr_tier_candidate_compare.py`: Read-only comparison of live Arr
-  release-tier custom formats against Profilarr/Dictionarry tier candidates.
+  release-tier custom formats against Profilarr/Dictionarry tier candidates,
+  including optional token filtering for checking whether specific release
+  groups are present upstream.
 - `radarr_release_expectation_check.py`: Read-only check of live Radarr anime
   release-selection expectations.
 - `seerr_arr_endpoint_update.py`: Audits or updates Seerr's Sonarr/Radarr
@@ -74,7 +76,8 @@
   without dumping every episode row.
 - `sonarr_release_rejection_report.py`: Read-only manual-search report for a
   series, season, or episode that shows current file scores, candidate releases,
-  custom formats, and Sonarr rejection reasons.
+  custom formats, and Sonarr rejection reasons, with optional unique-title
+  output for suspicious grab investigations.
 - `sonarr_release_expectation_check.py`: Read-only check of live Sonarr anime
   release-selection expectations.
 - `sonarr_restore_local_better_files.py`: Dry-run by default helper for

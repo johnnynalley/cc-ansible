@@ -94,6 +94,18 @@ def release_title(release: dict[str, Any]) -> str:
     return str(release.get("title") or release.get("releaseTitle") or "")
 
 
+def dedupe_releases_by_title(releases: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    seen: set[str] = set()
+    result = []
+    for release in releases:
+        key = release_title(release).casefold()
+        if key in seen:
+            continue
+        seen.add(key)
+        result.append(release)
+    return result
+
+
 def current_file_report(
     base_url: str,
     api_key: str,
@@ -179,6 +191,8 @@ def audit(args: argparse.Namespace) -> dict[str, Any]:
             release_title(release).lower(),
         )
     )
+    if args.unique_titles:
+        filtered = dedupe_releases_by_title(filtered)
 
     files = current_file_report(args.base_url, api_key, episodes)
     episode_rows = []
@@ -208,6 +222,7 @@ def audit(args: argparse.Namespace) -> dict[str, Any]:
             "search_episode_id": search_episode.get("id"),
             "search_episode": f"S{int(search_episode.get('seasonNumber') or 0):02}E{int(search_episode.get('episodeNumber') or 0):02}",
         },
+        "show_current_files": not args.no_current_files,
         "episodes": episode_rows,
         "release_count": len(releases),
         "filtered_release_count": len(filtered),
@@ -235,15 +250,16 @@ def print_text(report: dict[str, Any]) -> None:
         f"{series['title']} id={series['id']} profile_id={series['quality_profile_id']} "
         f"search={basis['search_episode']} season={basis['season']}"
     )
-    print("current files:")
-    for episode in report["episodes"]:
-        label = f"S{int(episode['season'] or 0):02}E{int(episode['episode'] or 0):02}"
-        current = episode["file"]
-        if current:
-            print(f"  {label}: {current['quality']} score={current['score']} {current['path']}")
-            print(f"    CFs: {', '.join(current['custom_formats']) or '(none)'}")
-        else:
-            print(f"  {label}: missing monitored={episode['monitored']}")
+    if report["show_current_files"]:
+        print("current files:")
+        for episode in report["episodes"]:
+            label = f"S{int(episode['season'] or 0):02}E{int(episode['episode'] or 0):02}"
+            current = episode["file"]
+            if current:
+                print(f"  {label}: {current['quality']} score={current['score']} {current['path']}")
+                print(f"    CFs: {', '.join(current['custom_formats']) or '(none)'}")
+            else:
+                print(f"  {label}: missing monitored={episode['monitored']}")
     print(f"releases: {report['filtered_release_count']} shown/filter matches out of {report['release_count']}")
     for release in report["releases"]:
         print(f"- {release['quality']} score={release['score']} seeders={release['seeders']} {release['title']}")
@@ -261,6 +277,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--season", type=int)
     parser.add_argument("--episode", type=int)
     parser.add_argument("--title-regex", help="case-insensitive release title filter")
+    parser.add_argument("--unique-titles", action="store_true", help="deduplicate release rows by title after sorting")
+    parser.add_argument("--no-current-files", action="store_true", help="hide current episode-file detail in text output")
     parser.add_argument("--limit", type=int, default=30)
     parser.add_argument("--base-url", default="http://127.0.0.1:8989")
     parser.add_argument("--config", default="/opt/media-stack/sonarr/config.xml")
