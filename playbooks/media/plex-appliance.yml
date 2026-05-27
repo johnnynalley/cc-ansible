@@ -31,12 +31,12 @@
       become: false
       delegate_to: localhost
       register: plex_appliance_connection
-      when: (ansible_connection | default('ssh')) != "local"
+      when: (hostvars[inventory_hostname].ansible_connection | default('ssh')) != "local"
 
     - name: Skip unreachable Plex appliance
       ansible.builtin.meta: end_host
       when:
-        - (ansible_connection | default('ssh')) != "local"
+        - (hostvars[inventory_hostname].ansible_connection | default('ssh')) != "local"
         - plex_appliance_connection.failed | default(false)
 
     - name: Gather facts for reachable Plex appliance
