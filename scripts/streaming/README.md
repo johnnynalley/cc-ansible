@@ -8,6 +8,8 @@
   Music NDI source and monitoring settings.
 - `configure-gaming-obs-vod-audio-tracks.ps1`: Configures gaming PC OBS
   landscape output for Track 1 full/music and Track 2 clean/no-music routing.
+- `check-gaming-obs-stream-routing.ps1`: Read-only preflight for gaming PC OBS
+  output, audio-track, and Aitum vertical audio routing.
 - `configure-mac-apple-music-ndi.py`: Configures Mac OBS Apple Music
   application-audio NDI output.
 - `configure-mac-apple-music-sonobus.py`: Configures Mac OBS Apple Music app

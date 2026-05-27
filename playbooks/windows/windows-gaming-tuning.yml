@@ -289,6 +289,12 @@
         dest: "{{ windows_streaming_script_dir | default('C:\\ProgramData\\Johnny\\Streaming') }}\\configure-gaming-obs-vod-audio-tracks.ps1"
       tags: [streaming]
 
+    - name: Deploy gaming OBS streaming preflight helper
+      ansible.windows.win_copy:
+        src: "{{ ansible_config_file | dirname }}/scripts/streaming/check-gaming-obs-stream-routing.ps1"
+        dest: "{{ windows_streaming_script_dir | default('C:\\ProgramData\\Johnny\\Streaming') }}\\check-gaming-obs-stream-routing.ps1"
+      tags: [streaming]
+
     - name: Apply low-latency NIC advanced properties
       ansible.windows.win_powershell:
         parameters:

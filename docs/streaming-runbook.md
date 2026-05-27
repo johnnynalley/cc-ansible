@@ -278,6 +278,12 @@ powershell -ExecutionPolicy Bypass -File C:\ProgramData\Johnny\Streaming\configu
 
 That script writes a targeted backup under `%LOCALAPPDATA%\CodexBackups\` before changing OBS profile or scene files.
 
+Gaming PC OBS stream routing can be checked read-only with:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File C:\ProgramData\Johnny\Streaming\check-gaming-obs-stream-routing.ps1
+```
+
 ## Health Checks And VOD Delivery
 
 The stream relay has two health layers:
