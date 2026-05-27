@@ -30,6 +30,7 @@ LANG_NOT_ORIGINAL_CF_NAME = "Language - Not Original"
 
 DA_TITLE_REGEX = (
     r"dual[ ._-]?audio|multi[ ._-]?audio|"
+    r"\bdual\b(?![ ._-]sub(?:s|titles?)?\b)|"
     r"\b(ja|jp|jpn|japanese|zh|chi|zho|chinese|ko|kor|korean)"
     r"\b[ ._+&-]*\b(en|eng|english)\b|"
     r"\b(en|eng|english)\b[ ._+&-]*\b"
@@ -259,6 +260,8 @@ def patch_arr(arr: Arr, backup_root: Path, timestamp: str, apply: bool) -> dict[
 
     smoke_titles = [
         "[Judas] Bleach 056-111 [BD 1080p][HEVC x265 10bit][Dual-Audio][Eng-Sub]",
+        "JoJos.Bizarre.Adventure.2012.S03E04.1080p.BluRay.x265.SDR.Opus.2.0.Dual.Yogi-HONE",
+        "JoJos Bizarre Adventure - S05E38 - DUAL 1080p WEB H.264 -NanDesuKa (NF)",
         "[EMBER] Jujutsu Kaisen S3 - 11 [JA+EN] [x265].mkv",
         "[EMBER] Jujutsu Kaisen S3 - 11 [JA] [x265].mkv",
     ]

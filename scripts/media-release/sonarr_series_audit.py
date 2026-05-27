@@ -114,9 +114,34 @@ def queue_summary(
     return {"season_rows": dict(sorted(seasons.items())), "downloads": list(titles.values())}
 
 
-def history_summary(history: dict[str, Any]) -> list[dict[str, Any]]:
+def record_series_id(
+    base_url: str,
+    api_key: str,
+    record: dict[str, Any],
+    episode_cache: dict[int, dict[str, Any]],
+) -> int | None:
+    series = record.get("series")
+    if isinstance(series, dict) and isinstance(series.get("id"), int):
+        return int(series["id"])
+
+    episode = record.get("episode")
+    if isinstance(episode, dict) and isinstance(episode.get("seriesId"), int):
+        return int(episode["seriesId"])
+
+    episode_id = record.get("episodeId")
+    if isinstance(episode_id, int):
+        episode = episode_cache.get(episode_id)
+        if episode is None:
+            episode = api_get(base_url, api_key, f"/api/v3/episode/{episode_id}")
+            episode_cache[episode_id] = episode
+        if isinstance(episode.get("seriesId"), int):
+            return int(episode["seriesId"])
+    return None
+
+
+def history_summary(history_records: list[dict[str, Any]]) -> list[dict[str, Any]]:
     rows = []
-    for record in history.get("records") or []:
+    for record in history_records:
         rows.append(
             {
                 "date": record.get("date"),
@@ -185,6 +210,16 @@ def audit(args: argparse.Namespace) -> dict[str, Any]:
     episode_cache: dict[int, dict[str, Any]] = {
         episode["id"]: episode for episode in episodes if isinstance(episode.get("id"), int)
     }
+    queue_records = [
+        record
+        for record in queue.get("records") or []
+        if record_series_id(args.base_url, api_key, record, episode_cache) == series["id"]
+    ]
+    history_records = [
+        record
+        for record in history.get("records") or []
+        if record_series_id(args.base_url, api_key, record, episode_cache) == series["id"]
+    ]
     return {
         "series": {
             "id": series["id"],
@@ -207,8 +242,8 @@ def audit(args: argparse.Namespace) -> dict[str, Any]:
             }
             for episode in monitored_missing[:20]
         ],
-        "queue": queue_summary(args.base_url, api_key, queue.get("records") or [], episode_cache),
-        "history": history_summary(history),
+        "queue": queue_summary(args.base_url, api_key, queue_records, episode_cache),
+        "history": history_summary(history_records),
         "commands": command_summary(commands, series["id"]),
     }
 

@@ -388,6 +388,24 @@ def main() -> int:
         ("single EN only", "[EMBER] Jujutsu Kaisen S3 - 11 [EN] [x265].mkv", False, True),
         ("generic Dual-Audio", "[EMBER] Jujutsu Kaisen S3 - 11 [Dual-Audio] [x265].mkv", True, True),
         (
+            "standalone Dual marker",
+            "JoJos.Bizarre.Adventure.2012.S03E04.1080p.BluRay.x265.SDR.Opus.2.0.Dual.Yogi-HONE",
+            True,
+            True,
+        ),
+        (
+            "standalone DUAL before quality",
+            "JoJos Bizarre Adventure - S05E38 - DUAL 1080p WEB H.264 -NanDesuKa (NF)",
+            True,
+            False,
+        ),
+        (
+            "Dual subtitles only",
+            "[EMBER] Jujutsu Kaisen S3 - 11 [Dual-Subs] [x265].mkv",
+            False,
+            True,
+        ),
+        (
             "Dual-Audio with Eng-Sub",
             "[Judas] Bleach 056-111 [BD 1080p][HEVC x265 10bit][Dual-Audio][Eng-Sub]",
             True,

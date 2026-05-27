@@ -859,6 +859,15 @@ retention location. Do not let staging snapshots pile up indefinitely.
   changed `Language - Not Original` so it does not apply when those explicit DA
   markers are present. This preserves the DA-first score model without relying
   on parsed language metadata being stable through search, queue, and import.
+- Standalone dual marker expansion, 2026-05-27 UTC: JoJo searches showed
+  higher-tier HEVC releases such as
+  `JoJos.Bizarre.Adventure.2012.S03E04.1080p.BluRay.x265.SDR.Opus.2.0.Dual.Yogi-HONE`
+  matching release-tier and x265 CFs but not `Anime Dual Audio`, while lower
+  tier/no-tier releases with explicit `Dual-Audio` won on the DA score. The
+  dual-audio title regex now also trusts standalone `Dual`/`DUAL` markers,
+  except `Dual-Subs`/`Dual-Subtitles`, so these common anime titles receive the
+  DA score and can outrank weaker DA+x265-only releases when the release group
+  tier is better.
 - Historical Recyclarr ownership note for that fix: the stock TRaSH/Recyclarr
   `Anime Dual Audio` custom formats were removed from
   `/opt/media-stack/recyclarr/recyclarr.yml` for Sonarr trash ID

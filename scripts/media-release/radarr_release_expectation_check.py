@@ -384,6 +384,8 @@ def main() -> int:
         ("single JA only", "Akira (1988) [1080p] [JA] [x265].mkv", False, True),
         ("single EN only", "Akira (1988) [1080p] [EN] [x265].mkv", False, True),
         ("generic Dual-Audio", "Akira (1988) [1080p] [Dual-Audio] [x265].mkv", True, True),
+        ("standalone Dual marker", "Akira (1988) 1080p BluRay x265 Dual-Yogi", True, True),
+        ("Dual subtitles only", "Akira (1988) [1080p] [Dual-Subs] [x265].mkv", False, True),
         ("Dual-Audio with Eng-Sub", "One Piece Film Red (2022) [1080p] [Dual-Audio] [Eng-Sub] [x265].mkv", True, True),
         ("Eng-Sub without DA marker", "One Piece Film Red (2022) [1080p] [Eng-Sub] [x265].mkv", False, True),
         ("x264 DA 1080p", "Akira (1988) [1080p] [JA+EN] [x264].mkv", True, False),
