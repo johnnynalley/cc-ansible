@@ -9,6 +9,25 @@ Use this doc for quick operator actions on the managed Plex TV appliances.
 - Bedroom Plex: `jn-t14s-lin` / T14s HDMI appliance.
 - Living room Plex: `mercury` / Raspberry Pi 5 appliance.
 
+## Bedroom HDMI Display Ownership
+
+The T14s HDMI appliance uses mpv with direct DRM on VT8. When no real local
+seat session is active, the HDMI watcher stops `sddm.service` before starting
+playback and starts it again when HDMI appliance mode exits.
+
+This prevents the SDDM Wayland greeter/KWin on VT1 from contending with mpv for
+the same AMD DRM device. The failure signature that led to this rule was:
+
+- TV shows the login screen or black video while HDMI audio continues.
+- `sddm.service` repeatedly logs `Using VT 1`, `Jumping to VT 1`, or greeter
+  restart messages.
+- Kernel logs show AMDGPU/DMCUB DRM errors near the same timestamp.
+- mpv logs show video configuration or AMDGPU initialization failures.
+
+Do not treat a player restart or VT switch as the fix for this class of
+incident. Preserve the logs and prove which process owned the display stack
+before changing recovery behavior.
+
 ## Skip Current Bedroom Plex Episode
 
 Run this on `jn-t14s-lin` from any shell. It stops the HDMI watcher and player,
