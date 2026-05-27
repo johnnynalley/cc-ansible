@@ -38,7 +38,7 @@ if mountpoint -q "$recording_spool"; then
   recording_discarded="$recording_spool/discarded/${recording_base}.ts.discarded"
   recording_tee_options="f=mpegts:onfail=ignore"
 {% if stream_relay_recording_tee_select is defined and stream_relay_recording_tee_select %}
-  recording_tee_options="select='{{ stream_relay_recording_tee_select }}':${recording_tee_options}"
+  recording_tee_options="select='{{ stream_relay_recording_tee_select | replace(':', '\\:') }}':${recording_tee_options}"
 {% endif %}
   tee_outputs+=("[${recording_tee_options}]${recording_incoming}")
   echo "stream-relay: recording local VOD spool ${recording_incoming}" >&2

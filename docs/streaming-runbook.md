@@ -72,7 +72,7 @@ The gaming PC OBS landscape stream uses two audio tracks:
 - Track 1 is the full live mix: game, mic, alerts, and Apple Music.
 - Track 2 is the clean mix: game, mic, and alerts without Apple Music.
 
-The media-vm relay carries both tracks from the gaming PC over SRT. Twitch uses the FFmpeg 8 FLV/RTMP path on Ubuntu 26.04 so live Twitch receives Track 1 and the Twitch VOD should use Track 2. YouTube receives only Track 2, so YouTube landscape is clean/no-music by default. The local relay VOD recording is also Track 2 only.
+The media-vm relay carries both tracks from the gaming PC over SRT. Twitch uses the FFmpeg 8 FLV/RTMP path on Ubuntu 26.04 so live Twitch receives Track 1 and the Twitch VOD uses Track 2. YouTube receives only Track 2, so YouTube landscape is clean/no-music by default. The local relay VOD recording is also Track 2 only.
 
 TikTok uses the Aitum vertical output, which stays on Track 1 so TikTok receives the full mix with Apple Music.
 
@@ -91,7 +91,7 @@ These are the paths to rely on for a real stream.
 - H.265/HEVC for the gaming-PC-to-media-vm SRT ingest is technically possible, but it is not the production default. A 2026-05-27 media-vm synthetic test proved Quadro HEVC decode to H.264 NVENC output works, but H.264 ingest was slightly faster on that relay-side test and the 20-30 Mbps H.264 LAN feed is already tiny on 1Gb Ethernet. Only switch the OBS SRT ingest to HEVC after a gaming-PC A/B capture shows equal or better Fortnite frame times and OBS stats.
 - The relay does not use FFmpeg `nobuffer`/`low_delay` flags; the SRT path already has explicit latency, and aggressive low-delay buffering caused audible artifacts in live testing.
 - `media-vm` keeps Secure Boot enabled, but `nvidia-dkms-580` must stay removed so the Quadro uses Ubuntu's Canonical-signed `linux-modules-nvidia-580-generic` module.
-- Local validation on 2026-05-27 proved FFmpeg 8.0.1 can write an FLV file with one H.264 video stream and two AAC audio streams. A real short Twitch stream is still required to confirm Twitch assigns Track 2 to the VOD as intended.
+- Live validation on 2026-05-27 proved Twitch accepts the FFmpeg 8.0.1 two-audio-track FLV/RTMP output: live Twitch used Track 1, and the Twitch VOD used clean Track 2.
 - With the current TCP fanout, if a platform worker disconnects after latching, restart the full landscape relay set instead of only restarting that output worker.
 - TikTok LIVE Studio runs on the MacBook, not the gaming PC.
 - TikTok receives video from the Mac OBS virtual camera.
