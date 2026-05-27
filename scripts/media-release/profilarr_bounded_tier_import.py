@@ -7,7 +7,7 @@ refreshes test profiles from their current source profiles, and scores only
 those test profiles.
 
 The script does not import upstream quality profiles and does not modify
-production profile scores.
+efficient profile scores unless a generated test profile is later promoted.
 """
 
 from __future__ import annotations
@@ -164,8 +164,8 @@ INSTANCES = (
         base_url="http://127.0.0.1:8989",
         config_path="/opt/media-stack/sonarr/config.xml",
         profile_pairs=(
-            ProfilePair("shows-anime", "shows-anime-profilarr-test", "anime"),
-            ProfilePair("shows-regular", "shows-regular-profilarr-test", "regular"),
+            ProfilePair("shows-anime-efficient", "shows-anime-profilarr-test", "anime"),
+            ProfilePair("shows-regular-efficient", "shows-regular-profilarr-test", "regular"),
         ),
     ),
     ArrInstance(
@@ -173,8 +173,8 @@ INSTANCES = (
         base_url="http://127.0.0.1:7878",
         config_path="/opt/media-stack/radarr/config.xml",
         profile_pairs=(
-            ProfilePair("movies-anime", "movies-anime-profilarr-test", "anime"),
-            ProfilePair("movies-regular", "movies-regular-profilarr-test", "regular"),
+            ProfilePair("movies-anime-efficient", "movies-anime-profilarr-test", "anime"),
+            ProfilePair("movies-regular-efficient", "movies-regular-profilarr-test", "regular"),
         ),
     ),
 )

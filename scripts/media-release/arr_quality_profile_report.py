@@ -117,7 +117,7 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--profile-regex",
-        default="profilarr-test|shows-regular|movies-regular",
+        default="efficient|balanced|profilarr-test",
         help="regular expression for quality profile names to print",
     )
     parser.add_argument("--json", action="store_true")

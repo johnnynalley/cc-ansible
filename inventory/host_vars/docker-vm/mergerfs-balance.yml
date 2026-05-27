@@ -11,7 +11,6 @@ mergerfs_balance_media_stack_compose_targets:
       - radarr
       - prowlarr
       - bazarr
-      - recyclarr
       - byparr
       - qbittorrent
       - sabnzbd

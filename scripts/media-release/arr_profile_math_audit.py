@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Audit Arr test-profile release-policy score math.
+"""Audit Arr efficient-profile release-policy score math.
 
 Run this on docker-vm. It reads local Sonarr/Radarr API keys, checks the
-Profilarr test profiles, and exits non-zero if the configured score bands can
+efficient profiles, and exits non-zero if the configured score bands can
 violate the intended DA/x265/quality/source/tier ordering.
 """
 
@@ -89,8 +89,8 @@ INSTANCES = (
         config_path="/opt/media-stack/sonarr/config.xml",
         x265_name="x265",
         profile_checks=(
-            ProfileCheck("shows-anime-profilarr-test", "anime"),
-            ProfileCheck("shows-regular-profilarr-test", "regular"),
+            ProfileCheck("shows-anime-efficient", "anime"),
+            ProfileCheck("shows-regular-efficient", "regular"),
         ),
     ),
     ArrInstance(
@@ -99,8 +99,8 @@ INSTANCES = (
         config_path="/opt/media-stack/radarr/config.xml",
         x265_name="x265 (HD)",
         profile_checks=(
-            ProfileCheck("movies-anime-profilarr-test", "anime"),
-            ProfileCheck("movies-regular-profilarr-test", "regular"),
+            ProfileCheck("movies-anime-efficient", "anime"),
+            ProfileCheck("movies-regular-efficient", "regular"),
         ),
     ),
 )

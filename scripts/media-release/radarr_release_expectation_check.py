@@ -20,15 +20,15 @@ from typing import Any
 
 RADARR_URL = "http://127.0.0.1:7878"
 RADARR_CONFIG = "/opt/media-stack/radarr/config.xml"
-ANIME_PROFILE_NAME = "movies-anime"
+ANIME_PROFILE_NAME = "movies-anime-efficient"
 DUAL_AUDIO_CF_NAME = "Anime Dual Audio"
 X265_CF_NAME = "x265 (HD)"
 QUALITY_RANK_PREFIX = "Local Quality Rank - "
 SOURCE_RANK_CF_NAME = "Local Anime Source Rank - Bluray"
 EXPECTED_DA_SCORE = 100000
-EXPECTED_X265_SCORE = 2000
-EXPECTED_SOURCE_RANK_SCORE = 1500
-EXPECTED_CUTOFF_SCORE = 144900
+EXPECTED_X265_SCORE = 5000
+EXPECTED_SOURCE_RANK_SCORE = 0
+EXPECTED_CUTOFF_SCORE = 146978
 EXPECTED_QUALITY_SCORES = {
     "720p": 30000,
     "1080p": 40000,
@@ -229,10 +229,10 @@ def main() -> int:
     x265_score = profile_score(profile, int(x265_cf["id"]))
     source_rank_score = profile_score(profile, int(source_rank_cf["id"]))
     checks.append(("DA score is +100000", da_score == EXPECTED_DA_SCORE, str(da_score)))
-    checks.append(("x265 score is +2000", x265_score == EXPECTED_X265_SCORE, str(x265_score)))
+    checks.append(("x265 score is +5000", x265_score == EXPECTED_X265_SCORE, str(x265_score)))
     checks.append(
         (
-            "Bluray source rank is +1500",
+            "Bluray source rank is zero",
             source_rank_score == EXPECTED_SOURCE_RANK_SCORE,
             str(source_rank_score),
         )
@@ -240,7 +240,7 @@ def main() -> int:
     checks.append(("minimum score is 0", profile.get("minFormatScore") == 0, str(profile.get("minFormatScore"))))
     checks.append(
         (
-            "cutoff score is at least 1080p DA + x265 + Bluray source + top tier",
+            "cutoff score is at least the efficient-profile maximum",
             int(profile.get("cutoffFormatScore") or 0) >= EXPECTED_CUTOFF_SCORE,
             str(profile.get("cutoffFormatScore")),
         )
@@ -318,16 +318,9 @@ def main() -> int:
     )
     checks.append(
         (
-            "1080p DA beats 720p DA + x265 + Bluray source + top single tier",
+            "1080p DA beats 720p DA + x265 + top single tier",
             high_da_score > lower_da_best_score,
             f"{high_da_score}>{lower_da_best_score}; max other +{max_other_positive} {max_other_names}",
-        )
-    )
-    checks.append(
-        (
-            "1080p DA Bluray x264 beats 1080p DA Web x264 + best web tier",
-            high_da_bluray_x264_score > high_da_web_x264_best_score,
-            f"{high_da_bluray_x264_score}>{high_da_web_x264_best_score}; max web +{max_web_tier_score} {max_web_tier_names}",
         )
     )
     checks.append(

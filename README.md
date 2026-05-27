@@ -437,7 +437,7 @@ Balances files across mergerfs branches by moving from fullest to emptiest. ZFS-
 - **CLI excludes**: `-E` flags merge with config excludes (additive)
 - **Evacuation mode**: `--evacuate <branch>` drains one branch to the least-used eligible branches before planned removal or reformat. Dry-run first.
 - **Nightly coordinator**: `playbooks/media/nightly-media-maintenance.yml` owns the midnight-7 AM window. Balance jobs are queued with `nightly-media-maintenance balance add ...`; if a balance job is pending, Profilarr upgrades are skipped for that night.
-- **Media stack pause/resume**: balance jobs run `/usr/local/sbin/mergerfs-balance-media-stack stop|start` through a forced SSH key to `media-vm`. Current balance jobs pause Sonarr, Radarr, Prowlarr, Bazarr, Recyclarr, Byparr, qBittorrent, SABnzbd, and Profilarr while Plex stays up.
+- **Media stack pause/resume**: balance jobs run `/usr/local/sbin/mergerfs-balance-media-stack stop|start` through a forced SSH key to docker-vm. Current balance jobs pause Sonarr, Radarr, Prowlarr, Bazarr, Byparr, qBittorrent, SABnzbd, and Profilarr while Plex stays up.
 - **VirtioFS caveat**: After balancing, media-vm needs a full stop/start (`qm stop`/`qm start`) to clear virtiofsd's stale directory cache
 
 ```bash
@@ -507,30 +507,36 @@ Set `stream_relay_outputs` in `inventory/host_vars/media-vm/stream-relay.yml` to
 
 The Proxmox firewall uses the `streaming-pc` datacenter IP set. Current entries include lj-gaming-pc's Windows LAN IP and Tailscale IP. Because Tailscale advertises `192.168.1.0/24`, Windows also needs a persistent host route for media-vm's LAN IP so OBS traffic to `192.168.1.136` uses Ethernet instead of the Tailscale tunnel.
 
-## Recyclarr Configuration
+## Profilarr Release Policy
 
-Recyclarr syncs TRaSH Guides custom formats to Sonarr/Radarr on media-vm.
+Sonarr/Radarr now run on docker-vm. The active library and request defaults use
+the promoted efficient profiles: `shows-regular-efficient`,
+`shows-anime-efficient`, `movies-regular-efficient`, and
+`movies-anime-efficient`. Recyclarr is disabled and removed from the active
+media-stack compose service list; future profile/CF work should go through
+Profilarr-backed repo scripts.
 The detailed release-selection policy and score-band rules are documented in
 [docs/media-release-policy.md](docs/media-release-policy.md).
 
-- **Config**: `/opt/media-stack/recyclarr/recyclarr.yml`
-- **Profiles**: `1080p-Anime`, `1080p`
+- **Profiles**: efficient profiles for live media; balanced profiles for
+  future experiments after they get the same efficient-policy treatment
 - **Anime scoring**: Dual Audio +100000, quality-rank CFs
-  +10000/+20000/+30000/+40000 by enabled resolution tier, x265 +2000,
-  release-group tiers unchanged, hard rejects -1000000, soft avoids kept small
-  enough not to outrank quality
+  +10000/+20000/+30000/+40000 by enabled resolution tier, x265 +5000,
+  Dictionarry primary tiers plus Profilarr-synced TRaSH fallback tiers below
+  x265, hard rejects -1000000, soft avoids kept small enough not to outrank
+  quality
 - **Live check**: run
-  `ansible media-vm -m script -a scripts/media-release/sonarr_release_expectation_check.py`
+  `ansible docker-vm -m script -a scripts/media-release/sonarr_release_expectation_check.py`
   and
-  `ansible media-vm -m script -a scripts/media-release/radarr_release_expectation_check.py`
+  `ansible docker-vm -m script -a scripts/media-release/radarr_release_expectation_check.py`
   to verify the active anime scores, native quality grouping, DA/x265
   title-side custom-format matching, rename-format preservation of audio
   languages and video codec, and profile assignment counts
 - **Queue check**: run
-  `ansible media-vm -m script -a scripts/media-release/sonarr_grab_forensics.py` first to
+  `ansible docker-vm -m script -a scripts/media-release/sonarr_grab_forensics.py` first to
   classify queued grabs as valid upgrades, payload score loss, pack
   collateral/mapping issues, or client warnings. Then run
-  `ansible media-vm -m script -a scripts/media-release/sonarr_grab_diagnostics.py` before
+  `ansible docker-vm -m script -a scripts/media-release/sonarr_grab_diagnostics.py` before
   clearing suspected bad grabs; cleanup requires explicit flags and does not
   blocklist by default
 - **Import metadata stamping**: `playbooks/media/media-release-stamper.yml` deploys
@@ -541,30 +547,25 @@ The detailed release-selection policy and score-band rules are documented in
   available, bare `SxxEyy` TV payload names can be prefixed with the canonical
   series title so multi-file packs stay parseable at import.
 - **Series check**: run
-  `ansible media-vm -m script -a "scripts/media-release/sonarr_series_audit.py Bleach"` to
+  `ansible docker-vm -m script -a "scripts/media-release/sonarr_series_audit.py Bleach"` to
   inspect one show's monitored seasons, missing episode counts, queue, recent
   history, and active commands
 - **Profilarr staging**: run
-  `ansible media-vm --become -m script -a "scripts/media-release/arr_stage_profilarr_test_profiles.py --dry-run"`
+  `ansible docker-vm --become -m script -a "scripts/media-release/arr_stage_profilarr_test_profiles.py --dry-run"`
   before changing candidate profiles; the script snapshots live Arr policy and
   enforces the current CF limit
 - **Selective Profilarr CF sync**: run
-  `ansible media-vm --become -m script -a "scripts/media-release/profilarr_selective_cf_import.py --dry-run"`
+  `ansible docker-vm --become -m script -a "scripts/media-release/profilarr_selective_cf_import.py --dry-run"`
   before applying curated Dictionarry/Dumpstarr CF definition refreshes; this
-  imports selected CFs as `Dumpstarr ...` formats and scores only the
-  unassigned anime test profiles, not production profiles
+  imports selected CFs and scores only candidate profiles until explicitly
+  promoted
 - **Manual/local CFs**: Local anime quality-rank CFs, Local Anime Raw Group -
   DBD-Raws (-1000000), Portuguese (No English) (-1000000), 2160p guards
   (-1000000) - created directly in Sonarr/Radarr
 
-```bash
-# Manual sync
-ansible media-vm -m shell -a "docker exec recyclarr recyclarr sync" --become
-```
-
 ## Profilarr Upgrade Automation
 
-Profilarr is staged on media-vm as a managed Docker stack at `/opt/profilarr`
+Profilarr is staged on docker-vm as a managed Docker stack at `/opt/profilarr`
 and is published at `profilarr.jnalley.me`. It is being evaluated as the
 proactive library-upgrade layer: upgrade jobs with filters, selectors,
 cooldowns, dry runs, and live searches. Native Profilarr scheduled Arr upgrades
@@ -585,17 +586,17 @@ Operational rules:
   it enabled and let Prowlarr's temporary cooldown skip it until quota resets.
 - Run Profilarr dry-run jobs first and compare results against the DA-first,
   quality-rank-second anime policy before enabling live jobs.
-- Keep Recyclarr until Profilarr has proven it can preserve local custom
-  formats, the CF limit, and rollback paths.
+- Keep Recyclarr disabled; do not reintroduce it unless the policy-management
+  direction explicitly changes.
 - Evaluate linked Profilarr databases with
-  `ansible media-vm -m script -a scripts/media-release/profilarr_candidate_audit.py` before
+  `ansible docker-vm -m script -a scripts/media-release/profilarr_candidate_audit.py` before
   syncing any candidate CF/profile into Sonarr or Radarr.
 - For curated CF sync, use
-  `ansible media-vm --become -m script -a "scripts/media-release/profilarr_selective_cf_import.py --dry-run"`
+  `ansible docker-vm --become -m script -a "scripts/media-release/profilarr_selective_cf_import.py --dry-run"`
   first, then rerun without `--dry-run` only if the CF count remains under the
   limit and the upstream profile scores are not being imported.
 - Check scheduler health with
-  `ansible media-vm -m script -a scripts/media-release/profilarr_state_audit.py` after
+  `ansible docker-vm -m script -a scripts/media-release/profilarr_state_audit.py` after
   Profilarr restarts or coordinator-triggered upgrade runs.
 
 Current deployment notes:
@@ -611,8 +612,9 @@ Current deployment notes:
   maintenance is not reserving the night. Sonarr uses one cutoff-unmet
   monitored-series search per run; Radarr uses up to five cutoff-unmet
   monitored-movie searches per run.
-- Test profiles currently exist but are not assigned to media:
-  `shows-anime-profilarr-test` id 9 and `movies-anime-profilarr-test` id 8.
+- Temporary Profilarr test profiles are removed after the 2026-05-27 promotion;
+  recreate them only through the managed staging scripts for the next candidate
+  policy.
 - Dictionarry and Dumpstarr are linked in Profilarr. Dumpstarr is candidate
   material only for now; its stock `TV 1080p` profile penalizes `x265 (HD)` at
   `-10000`, which conflicts with this library's preferred HD x265/HEVC policy.

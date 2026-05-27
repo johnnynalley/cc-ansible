@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
-"""Add anime Bluray source ranking to Sonarr/Radarr anime profiles.
+"""Add anime Bluray source ranking to legacy balanced anime profiles.
 
 Run this on docker-vm. It reads local Arr config.xml files for API keys, backs
 up current custom formats and quality profiles, then creates/updates:
 
 - Local Anime Source Rank - Bluray
 
-The CF is scored only in anime profiles. It sits below x265/HEVC and above
+The CF is scored only in balanced anime profiles. It sits below x265/HEVC and above
 release-group tiers so a same-resolution Web x264 tier release cannot replace a
 same-resolution Bluray x264 release just because of group tier points.
 """
@@ -242,14 +242,14 @@ def main() -> int:
             "sonarr",
             args.sonarr_url,
             Path(args.sonarr_config),
-            ("shows-anime", "shows-anime-profilarr-test"),
+            ("shows-anime-balanced",),
             6,
         ),
         Arr(
             "radarr",
             args.radarr_url,
             Path(args.radarr_config),
-            ("movies-anime", "movies-anime-profilarr-test"),
+            ("movies-anime-balanced",),
             9,
         ),
     )

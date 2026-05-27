@@ -95,6 +95,10 @@ def skip_path(state_dir: Path) -> Path:
     return state_dir / "skip-until.json"
 
 
+def balance_defer_path(state_dir: Path) -> Path:
+    return state_dir / "balance-defer-until.json"
+
+
 def load_queue(state_dir: Path) -> dict[str, Any]:
     data = read_json(queue_path(state_dir), {"version": 1, "jobs": []})
     data.setdefault("version", 1)
@@ -164,6 +168,12 @@ def skip_is_active(skip: dict[str, Any]) -> bool:
     until = parse_datetime(str(skip.get("until", "")))
     now = dt.datetime.now(until.tzinfo) if until.tzinfo else dt.datetime.now()
     return now < until
+
+
+def active_until_marker(marker: dict[str, Any]) -> bool:
+    if not marker.get("until"):
+        return False
+    return skip_is_active(marker)
 
 
 def pending_jobs(queue: dict[str, Any]) -> list[dict[str, Any]]:
@@ -253,6 +263,59 @@ def cmd_balance_remove(args: argparse.Namespace) -> int:
     else:
         save_queue(Path(args.state_dir), queue)
         print(f"Removed balance job {args.name!r}.")
+    return 0
+
+
+def defer_until_from_args(args: argparse.Namespace) -> dt.datetime:
+    if args.until and args.for_days:
+        raise SystemExit("use either --until or --for-days, not both")
+    if args.until:
+        return parse_datetime(args.until)
+    if args.for_days:
+        return dt.datetime.now() + dt.timedelta(days=args.for_days)
+    raise SystemExit("one of --until or --for-days is required")
+
+
+def cmd_balance_defer_set(args: argparse.Namespace) -> int:
+    state_dir = Path(args.state_dir)
+    state_dir.mkdir(parents=True, exist_ok=True)
+    until = defer_until_from_args(args)
+    payload = {
+        "version": 1,
+        "until": until.isoformat(timespec="seconds"),
+        "reason": args.reason,
+        "created_at": now_iso(),
+    }
+    atomic_write_json(balance_defer_path(state_dir), payload)
+    print(f"Deferring balance jobs until {payload['until']}: {args.reason}")
+    return 0
+
+
+def cmd_balance_defer_clear(args: argparse.Namespace) -> int:
+    path = balance_defer_path(Path(args.state_dir))
+    try:
+        path.unlink()
+        print("Cleared balance deferral marker.")
+    except FileNotFoundError:
+        print("No balance deferral marker exists.")
+    return 0
+
+
+def cmd_balance_defer_status(args: argparse.Namespace) -> int:
+    marker = read_json(balance_defer_path(Path(args.state_dir)), {})
+    active = active_until_marker(marker)
+    report = {
+        "active": active,
+        "marker": marker or None,
+    }
+    if args.json:
+        json.dump(report, sys.stdout, indent=2, sort_keys=True)
+        print()
+    elif marker:
+        state = "active" if active else "expired"
+        print(f"Balance deferral is {state} until {marker.get('until')}: {marker.get('reason')}")
+    else:
+        print("No balance deferral marker exists.")
     return 0
 
 
@@ -384,7 +447,22 @@ def cmd_run_window(args: argparse.Namespace) -> int:
                     return 0
                 skip_file.unlink(missing_ok=True)
 
-            jobs = pending_jobs(queue)
+            balance_defer_file = balance_defer_path(state_dir)
+            balance_defer = read_json(balance_defer_file, {})
+            balance_deferred = False
+            if balance_defer.get("until"):
+                if active_until_marker(balance_defer):
+                    balance_deferred = True
+                    state["balance_defer_until"] = balance_defer["until"]
+                    state["balance_defer_reason"] = balance_defer.get("reason")
+                    print(
+                        "Deferring balance jobs until "
+                        f"{balance_defer['until']}: {balance_defer.get('reason') or 'no reason provided'}"
+                    )
+                else:
+                    balance_defer_file.unlink(missing_ok=True)
+
+            jobs = [] if balance_deferred else pending_jobs(queue)
             if jobs:
                 job = jobs[0]
                 state["mode"] = "balance"
@@ -409,7 +487,7 @@ def cmd_run_window(args: argparse.Namespace) -> int:
                 save_state(state_dir, state)
                 return 0
 
-            if state.get("mode") == "balance":
+            if state.get("mode") == "balance" and not balance_deferred:
                 state["status"] = "balance-night-reserved"
                 save_state(state_dir, state)
                 print("Balance already owned this maintenance window; skipping Profilarr.")
@@ -424,6 +502,8 @@ def cmd_run_window(args: argparse.Namespace) -> int:
             if rc == 0:
                 state["mode"] = "profilarr"
                 state["status"] = "profilarr-queued"
+                if balance_deferred:
+                    state["balance_deferred"] = True
                 state.setdefault("profilarr_slots", []).append(slot)
             else:
                 state["status"] = "profilarr-error"
@@ -476,6 +556,21 @@ def build_parser() -> argparse.ArgumentParser:
     remove = balance_sub.add_parser("remove")
     remove.add_argument("name")
     remove.set_defaults(func=cmd_balance_remove)
+
+    defer = balance_sub.add_parser("defer")
+    defer_sub = defer.add_subparsers(dest="balance_defer_command", required=True)
+    defer_set = defer_sub.add_parser("set")
+    defer_set.add_argument("--until")
+    defer_set.add_argument("--for-days", type=int)
+    defer_set.add_argument("--reason", default="manual balance deferral")
+    defer_set.set_defaults(func=cmd_balance_defer_set)
+
+    defer_clear = defer_sub.add_parser("clear")
+    defer_clear.set_defaults(func=cmd_balance_defer_clear)
+
+    defer_status = defer_sub.add_parser("status")
+    defer_status.add_argument("--json", action="store_true")
+    defer_status.set_defaults(func=cmd_balance_defer_status)
 
     skip = sub.add_parser("skip")
     skip_sub = skip.add_subparsers(dest="skip_command", required=True)

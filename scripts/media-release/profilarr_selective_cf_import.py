@@ -5,8 +5,8 @@ Run this on docker-vm. It reads the local Profilarr database and linked PCD
 repositories, copies only curated custom-format definitions into Sonarr/Radarr,
 then scores those copied formats in the anime Profilarr test profiles.
 
-The production anime profiles are not assigned to media and are not modified by
-default. This script intentionally does not import upstream quality profiles.
+The efficient anime profiles are not modified by default. This script
+intentionally does not import upstream quality profiles.
 """
 
 from __future__ import annotations
@@ -56,7 +56,7 @@ INSTANCES = (
         name="sonarr",
         base_url="http://127.0.0.1:8989",
         config_path="/opt/media-stack/sonarr/config.xml",
-        source_profile_name="shows-anime",
+        source_profile_name="shows-anime-efficient",
         test_profile_name="shows-anime-profilarr-test",
         assignment_path="/api/v3/series",
     ),
@@ -64,7 +64,7 @@ INSTANCES = (
         name="radarr",
         base_url="http://127.0.0.1:7878",
         config_path="/opt/media-stack/radarr/config.xml",
-        source_profile_name="movies-anime",
+        source_profile_name="movies-anime-efficient",
         test_profile_name="movies-anime-profilarr-test",
         assignment_path="/api/v3/movie",
     ),

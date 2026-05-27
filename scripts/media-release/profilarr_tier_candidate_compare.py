@@ -80,10 +80,10 @@ INSTANCES = (
         base_url="http://127.0.0.1:8989",
         config_path="/opt/media-stack/sonarr/config.xml",
         profile_names=(
-            "shows-anime",
-            "shows-regular",
-            "shows-anime-profilarr-test",
-            "shows-regular-profilarr-test",
+            "shows-anime-efficient",
+            "shows-regular-efficient",
+            "shows-anime-balanced",
+            "shows-regular-balanced",
         ),
     ),
     ArrInstance(
@@ -91,10 +91,10 @@ INSTANCES = (
         base_url="http://127.0.0.1:7878",
         config_path="/opt/media-stack/radarr/config.xml",
         profile_names=(
-            "movies-anime",
-            "movies-regular",
-            "movies-anime-profilarr-test",
-            "movies-regular-profilarr-test",
+            "movies-anime-efficient",
+            "movies-regular-efficient",
+            "movies-anime-balanced",
+            "movies-regular-balanced",
         ),
     ),
 )

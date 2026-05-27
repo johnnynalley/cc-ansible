@@ -4,7 +4,7 @@
 
 # Configs stored locally at /opt (migrated from VirtioFS)
 # Plex-side media services stay on media-vm. Sonarr/Radarr/Prowlarr/Bazarr,
-# SABnzbd, qBittorrent, Gluetun, Recyclarr, and Byparr are managed on docker-vm
+# SABnzbd, qBittorrent, Gluetun, and Byparr are managed on docker-vm
 # in that host's /opt/media-stack compose project.
 # VirtioFS still provides media-vm storage access for Plex-side services:
 #   /srv/media -> /srv/media (mergerfs pool)

@@ -34,7 +34,6 @@
       - prowlarr
       - bazarr
       - sabnzbd
-      - recyclarr
       - gluetun
       - qbittorrent
       - byparr

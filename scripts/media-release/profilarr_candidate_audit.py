@@ -37,13 +37,13 @@ ARR_INSTANCES = (
         name="sonarr",
         base_url="http://127.0.0.1:8989",
         config_path="/opt/media-stack/sonarr/config.xml",
-        profile_names=("shows-anime", "shows-anime-profilarr-test"),
+        profile_names=("shows-anime-efficient", "shows-anime-balanced"),
     ),
     ArrInstance(
         name="radarr",
         base_url="http://127.0.0.1:7878",
         config_path="/opt/media-stack/radarr/config.xml",
-        profile_names=("movies-anime", "movies-anime-profilarr-test"),
+        profile_names=("movies-anime-efficient", "movies-anime-balanced"),
     ),
 )
 

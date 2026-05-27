@@ -88,18 +88,6 @@ services:
       - caddy-proxy
     restart: unless-stopped
 
-  recyclarr:
-    image: ghcr.io/recyclarr/recyclarr:latest
-    container_name: recyclarr
-    user: "1000:1000"
-    environment:
-      - TZ=America/Chicago
-    volumes:
-      - ./recyclarr:/config
-    networks:
-      - default
-    restart: unless-stopped
-
   gluetun:
     image: qmcgaw/gluetun:latest
     container_name: gluetun

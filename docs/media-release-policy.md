@@ -8,20 +8,27 @@ a separate policy because dual audio is the highest priority there.
 
 ## Managed Systems
 
-- Sonarr anime profile: `shows-anime`
-- Sonarr regular profile: `shows-regular`
-- Radarr anime profile: `movies-anime`
-- Radarr regular profile: `movies-regular`
+- Sonarr regular efficient profile: `shows-regular-efficient` id `1`
+- Sonarr anime efficient profile: `shows-anime-efficient` id `7`
+- Radarr regular efficient profile: `movies-regular-efficient` id `6`
+- Radarr anime efficient profile: `movies-anime-efficient` id `7`
+- Frozen legacy/balanced profiles:
+  - Sonarr: `shows-regular-balanced` id `11`
+  - Sonarr: `shows-anime-balanced` id `12`
+  - Radarr: `movies-regular-balanced` id `10`
+  - Radarr: `movies-anime-balanced` id `11`
 - Media stack: `/opt/media-stack` on `docker-vm`
-- Recyclarr config: `/opt/media-stack/recyclarr/recyclarr.yml`
-- Recyclarr schedule: daily at midnight
+- Recyclarr: disabled and removed from the active media-stack compose service
+  list on 2026-05-27; its old config directory may remain on disk as a
+  rollback artifact, but no container or scheduled sync should run
 - Profilarr stack: `/opt/profilarr` on `docker-vm`, published at
   `profilarr.jnalley.me`
-- Profilarr candidate/test profiles:
-  - Sonarr: `shows-anime-profilarr-test` id `9`
-  - Sonarr: `shows-regular-profilarr-test` id `10`
-  - Radarr: `movies-anime-profilarr-test` id `8`
-  - Radarr: `movies-regular-profilarr-test` id `9`
+- Seerr stack: `/opt/seerr` on `docker-vm`, published at
+  `requests.jnalley.me`; Sonarr entries point at `sonarr:8989`, Radarr entries
+  point at `radarr:7878`, and request defaults use the efficient profiles
+- Profilarr candidate/test profiles: absent after the 2026-05-27 promotion.
+  Recreate them only through the repo-managed staging/import scripts when a new
+  candidate policy needs review.
 - Release metadata stamper: `playbooks/media/media-release-stamper.yml`
 - Sonarr grab/import forensics: `scripts/media-release/sonarr_grab_forensics.py`
 - Sonarr transaction audit report: `scripts/media-release/sonarr_transaction_audit.py`
@@ -37,14 +44,11 @@ a separate policy because dual audio is the highest priority there.
   `/srv/media` NFS parent mount from TS440. Completed downloads and libraries
   stay under `/data` inside the containers so hardlinks still work.
 
-Recyclarr manages the TRaSH custom formats and profile scores that are in its
-config. Local custom formats created directly in Sonarr/Radarr are still valid,
-but they must be documented here and checked after Recyclarr preview. Keep
-`delete_old_custom_formats: false` unless the local CFs have been migrated.
-Recyclarr's live `base_url` values point at the docker-vm local compose service
-names (`http://sonarr:8989` and `http://radarr:7878`). Recyclarr no longer owns
-`quality_definition` sync; Sonarr/Radarr quality-size caps are local policy and
-must be checked after any Recyclarr config edit.
+Recyclarr is no longer part of the active release-policy path. Local custom
+formats created directly in Sonarr/Radarr are still valid, but they must be
+documented here. Profilarr-backed repo scripts are now the controlled path for
+pulling upstream CF definitions into Arr while preserving local scoring,
+quality groups, cutoffs, DA/x265 behavior, and the CF limit.
 
 Sonarr/Radarr naming must preserve the fields that local CFs depend on. On
 2026-05-22, Sonarr and Radarr naming formats were updated to include
@@ -72,9 +76,9 @@ Current local caps:
 - 2160p: preferred `350`, max `550`
 - 2160p remux: preferred `650`, max `900`
 
-These values apply to both Sonarr and Radarr for matching qualities. Recyclarr
-preview should show no `Quality Definition` changes; if it does, stop before
-syncing and reconcile this local policy first.
+These values apply to both Sonarr and Radarr for matching qualities. No active
+sync tool should own `Quality Definition` changes; if a future profile manager
+tries to change them, stop and reconcile this local policy first.
 
 ## Anime Priority Order
 
@@ -84,8 +88,7 @@ overridden by incidental format bonuses.
 1. Hard rejects: `-1000000`
 2. Dual audio: `+100000`
 3. Quality rank: `+10000`, `+20000`, `+30000`, `+40000`
-4. x265/HEVC preference: production anime `+2000`; Profilarr test profiles
-   currently use `+5000`
+4. x265/HEVC preference: efficient profiles `+5000`
 5. Release-group tiers: bounded Profilarr/Dictionarry primary tiers and TRaSH
    fallback tiers below x265
 6. Service/source tags: ordered tie-breakers below the lowest tier gap
@@ -97,7 +100,7 @@ when the lower quality has x265 and a better release group.
 
 ## Quality Rank
 
-Sonarr `shows-anime` enabled qualities are grouped together so upgrades are
+Sonarr `shows-anime-efficient` enabled qualities are grouped together so upgrades are
 driven by custom-format scores instead of Sonarr's native quality order.
 
 - `Local Quality Rank - 480p`: `+10000`
@@ -105,23 +108,22 @@ driven by custom-format scores instead of Sonarr's native quality order.
 - `Local Quality Rank - 720p`: `+30000`
 - `Local Quality Rank - 1080p`: `+40000`
 
-Radarr `movies-anime` currently only enables 720p and 1080p movie qualities.
+Radarr `movies-anime-efficient` currently only enables 720p and 1080p movie
+qualities.
 
 - `Local Quality Rank - 720p`: `+30000`
 - `Local Quality Rank - 1080p`: `+40000`
 
 These are generic resolution custom formats, not anime-specific matchers. They
-are shared by anime and regular Profilarr test profiles so custom-format math
-can rank enabled qualities consistently without spending extra CF slots.
+are shared by anime and regular efficient profiles so custom-format math can
+rank enabled qualities consistently without spending extra CF slots.
 
 ## Anime Source Rank
 
-`Local Anime Source Rank - Bluray` remains scored `+1500` in the current
-production anime profiles, Sonarr `shows-anime` and Radarr `movies-anime`,
-until the Profilarr-derived test profile is approved for migration.
-
-The Profilarr test profiles zero this score. The proposed replacement policy
-should not use a broad local Bluray source bonus, because it can make a
+`Local Anime Source Rank - Bluray` is zero in the efficient profiles. The
+balanced profiles are inactive parking profiles for future policy experiments.
+The efficient policy should not use a broad local Bluray source bonus, because
+it can make a
 same-resolution DA Bluray release beat a same-resolution DA WEB release even
 when WEB has stronger release-tier, service, or codec evidence. The custom
 format row may still be visible in Arr profile pages because Sonarr/Radarr
@@ -134,14 +136,17 @@ Radarr `79`; the working limit for staging checks is `100`.
 
 The audit script `scripts/media-release/arr_release_policy_audit.py` checks
 current CF counts, profile scores, queue status, and unused/all-zero CFs.
-`scripts/media-release/arr_profile_math_audit.py` checks the Profilarr test
-profiles as a whole: DA beats all non-DA paths, x265 stays above tier and
+`scripts/media-release/arr_profile_math_audit.py` checks the efficient profiles
+as a whole: DA beats all non-DA paths, x265 stays above tier and
 service/repack stacking, quality-rank scores beat lower-quality x265+tier
 stacks, 1080p DA beats any 720p DA stack, best Bluray HEVC and best WEB HEVC
 Dictionarry stacks are source-ordered, service and repack CFs stay below the
 smallest release-tier gap, Profilarr-synced TRaSH fallback tiers have only the
 expected bounded scores, no unexpected legacy tier score remains, and the CF
 limit is still obeyed.
+`scripts/media-release/arr_profile_assignment_check.py` verifies that all
+Sonarr/Radarr media assignments and Seerr request defaults use only efficient
+profiles and fails if balanced, test, old, or unknown profile names appear.
 
 The read-only live expectation checkers are
 `scripts/media-release/sonarr_release_expectation_check.py` and
@@ -182,9 +187,10 @@ ansible docker-vm --become -m script -a "scripts/media-release/sonarr_transactio
 ```
 
 `scripts/media-release/arr_stage_profilarr_test_profiles.py` snapshots live Arr policy state
-and creates or refreshes the Profilarr test profiles by cloning the current
-anime profiles. It does not assign any series or movies to the test profiles.
-It refuses to stage if the live CF count exceeds the configured CF limit.
+and creates or refreshes future Profilarr test profiles by cloning the current
+efficient anime profiles. It does not assign any series or movies to the test
+profiles. It refuses to stage if the live CF count exceeds the configured CF
+limit.
 
 `scripts/media-release/profilarr_state_audit.py` checks the local Profilarr SQLite database,
 linked PCD databases, upgrade configs, recent sync/link/upgrade jobs, and
@@ -230,7 +236,7 @@ reviewing any tier-list replacement.
 Hard rejects use `-1000000`. They must stay far below zero even if combined
 with dual audio and the highest quality rank.
 
-Sonarr `shows-anime` hard rejects:
+Sonarr `shows-anime-efficient` hard rejects:
 
 - `Anime LQ Groups`
 - `Anime Raws`
@@ -242,7 +248,7 @@ Sonarr `shows-anime` hard rejects:
 - `UHD 2160p - Non-Dual (Block)`
 - `2160p`
 
-Radarr `movies-anime` hard rejects:
+Radarr `movies-anime-efficient` hard rejects:
 
 - `Anime LQ Groups`
 - `Anime Raws`
@@ -255,14 +261,14 @@ Radarr `movies-anime` hard rejects:
 Soft avoids are deliberately small. A soft avoid must not allow a lower-quality
 dual-audio release to beat a higher-quality dual-audio release.
 
-Sonarr `shows-anime` soft avoids:
+Sonarr `shows-anime-efficient` soft avoids:
 
 - `AV1`: `-2000`
 - `No AV1`: `-2000`
 - `Language - Not Original`: `-1000`
 - `No German Audio`: `-500`
 
-Radarr `movies-anime` soft avoids:
+Radarr `movies-anime-efficient` soft avoids:
 
 - `AV1`: `-2000`
 - `Language - Not Original`: `-1000`
@@ -271,49 +277,46 @@ Radarr `movies-anime` soft avoids:
 match releases that are otherwise valid dual audio. The dual-audio CF is the
 source of truth for anime language preference.
 
-## Verified Anime Score Math
+## Verified Efficient Score Math
 
-The verification targets are:
+The efficient profile verification targets are:
 
-- `720p DA + x265 + best group`: `100000 + 30000 + 2000 + 1400 = 133400`
+- `720p DA + x265 + max release stack`: `100000 + 30000 + 5000 + 1982 = 136982`
 - `1080p DA`: `100000 + 40000 = 140000`
-- `1080p DA Bluray x264`: `100000 + 40000 + 1500 = 141500`
-- `1080p DA Web x264 + best Web tier`: `100000 + 40000 + 600 = 140600`
-- `1080p DA Web x265 + best Web tier`: `100000 + 40000 + 2000 + 600 = 142600`
-- `1080p DA + x265 + Bluray + top single tier`: `100000 + 40000 + 2000 + 1500 + 1400 = 144900`
+- `1080p DA + x265 + max release stack`: `100000 + 40000 + 5000 + 1982 = 146982`
+- `Max non-DA 1080p path`: `40000 + 5000 + 1982 = 46982`
+- `Bare 1080p rank`: `40000`, which still beats any regular 720p path
+  (`30000 + 5000 + 1982 = 36982`)
 
-The live Sonarr check on 2026-05-22 confirmed:
+The live Sonarr check on 2026-05-27 confirmed:
 
-- `shows-anime` has one native quality group named `Anime Enabled Qualities`.
+- `shows-anime-efficient` has one native quality group named `Anime Enabled Qualities`.
 - That group covers the enabled anime resolutions `480`, `576`, `720`, and
   `1080`.
-- The largest single non-core positive CF was `Anime BD Tier 01` at `+1400`.
+- `Anime Dual Audio` is scored `+100000`; `x265` is scored `+5000`.
+- `Local Anime Source Rank - Bluray` is scored `0`.
 - Lowest enabled DA quality beats strongest single-tier non-DA:
-  `110000 > 43400`.
-- `1080p DA` beats `720p DA + x265 + top single tier`: `140000 > 133400`.
-- `1080p DA Bluray x264` beats `1080p DA Web x264 + Web Tier 01`:
-  `141500 > 140600`.
-- `1080p DA Web x265 + Web Tier 01` beats bare `1080p DA Bluray x264`:
-  `142600 > 141500`.
+  `110000 > 46979`.
+- `1080p DA` beats `720p DA + x265 + top stack`: `140000 > 136979`.
 - Sonarr renaming is enabled, and the anime rename format includes both
   `{MediaInfo AudioLanguages}` and `{MediaInfo VideoCodec}`.
-- Series profile distribution was `shows-anime: 150`, `shows-regular: 71`, with
-  no series pointing at an unknown quality profile.
+- Series profile distribution was `shows-anime-efficient: 151` and
+  `shows-regular-efficient: 70`, with no series on balanced or test profiles.
 
-The live Radarr check on 2026-05-22 confirmed:
+The live Radarr check on 2026-05-27 confirmed:
 
-- `movies-anime` has one native quality group named `Anime Enabled Qualities`.
+- `movies-anime-efficient` has one native quality group named `Anime Enabled Qualities`.
 - That group covers the enabled anime movie resolutions `720` and `1080`.
-- `Anime Dual Audio` is scored `+100000`; `x265 (HD)` is scored `+2000`.
-- The largest single non-core positive CF was `Anime BD Tier 01` at `+1400`.
+- `Anime Dual Audio` is scored `+100000`; `x265 (HD)` is scored `+5000`.
+- `Local Anime Source Rank - Bluray` is scored `0`.
 - Lowest enabled DA quality beats strongest single-tier non-DA:
-  `130000 > 43400`.
-- `1080p DA` beats `720p DA + x265 + top single tier`: `140000 > 133400`.
+  `130000 > 46979`.
+- `1080p DA` beats `720p DA + x265 + top stack`: `140000 > 136978`.
 - `x265 (HD)` matches HD HEVC/x265 but excludes `2160p`.
 - Radarr renaming is enabled, and the movie rename format includes both
   `{MediaInfo AudioLanguages}` and `{MediaInfo VideoCodec}`.
-- Movie profile distribution was `movies-anime: 32`, `movies-regular: 238`,
-  with no movie pointing at an unknown quality profile.
+- Movie profile distribution was `movies-anime-efficient: 32` and
+  `movies-regular-efficient: 251`, with no movies on balanced or test profiles.
 - Radarr queue status was empty: `totalCount=0`.
 
 After soft avoids:
@@ -331,22 +334,18 @@ That is below the minimum score and should not be eligible.
 
 ## Regular Profiles
 
-Production regular TV/movie profiles still use the smaller TRaSH-style scoring
-scale. Their existing `-10000` unwanted penalties are already larger than the
-normal positive score ceiling, so they are not the same risk as anime's
-`+100000` dual-audio band.
-
-Do not copy anime score bands into `shows-regular` or `movies-regular` without a
-separate audit. Regular profiles should be improved deliberately by reviewing
-the current TRaSH profile, quality definitions, release groups, codec policy,
-language policy, and observed grabs.
-
-The Profilarr regular test profiles use the same native-quality strategy as
-anime: every enabled quality is grouped into `Regular Enabled Qualities`, then
+The active regular TV/movie profiles are now `shows-regular-efficient` and
+`movies-regular-efficient`. They use the same native-quality strategy as anime:
+every enabled quality is grouped into `Regular Enabled Qualities`, then
 the generic `Local Quality Rank - ...` CFs provide the resolution order. This
 lets x265/HEVC and release-tier custom formats matter across source labels
 while still keeping the math bounded so a lower resolution with x265 plus the
 best tier stack cannot beat a bare higher-resolution rank.
+
+The frozen balanced profiles are parking profiles for future comparison and
+custom experimentation after they receive the same efficient-policy treatment.
+Do not point users or request defaults at the balanced profiles unless
+explicitly testing a different policy.
 
 ## Change Procedure
 
@@ -357,7 +356,7 @@ For future release-policy changes:
    codec preference, release-group preference, or soft avoid.
 3. Check the math against realistic competing releases before applying.
 4. Apply live changes with backups.
-5. Run Recyclarr `sync --preview` and confirm it will not undo the policy.
+5. Confirm Recyclarr remains disabled and no scheduled sync can undo the policy.
 6. Run Sonarr/Radarr queue/history checks for regressions. For Sonarr, use
    `scripts/media-release/sonarr_grab_forensics.py` before any cleanup so the queue is
    classified as valid upgrade, payload score loss, pack collateral, or client
@@ -370,27 +369,33 @@ anime `100000`-point dual-audio model.
 
 ## Profilarr Candidate Migration
 
-Current migration posture as of 2026-05-26:
+Current migration posture as of 2026-05-27:
 
-- Live Sonarr/Radarr source profiles are still active:
-  - Sonarr `shows-anime`: 150 series
-  - Radarr `movies-anime`: 32 movies
-- The current rollout did not move any series or movies between profiles.
-  A post-apply Sonarr expectation check saw two series already assigned to
-  `shows-regular-profilarr-test`; treat profile assignment changes as a
-  separate pilot step.
+- The accepted Profilarr-derived test policy has been promoted into the
+  preserved production profile IDs and renamed with the `-efficient` suffix.
+- All Sonarr/Radarr media is assigned to efficient profiles:
+  - Sonarr `shows-anime-efficient`: 151 series
+  - Sonarr `shows-regular-efficient`: 70 series
+  - Radarr `movies-anime-efficient`: 32 movies
+  - Radarr `movies-regular-efficient`: 251 movies
+- Temporary `*-profilarr-test` profiles were removed after promotion.
+- The old production profiles were cloned before promotion and are retained as
+  `*-balanced` side profiles. No media should be assigned to balanced profiles.
+- Seerr request defaults were updated to the efficient profiles and its Arr
+  endpoints were corrected to docker-vm compose DNS (`sonarr:8989` and
+  `radarr:7878`) after validation through Seerr's own test API.
 - Dictionarry is linked in Profilarr, enabled, and auto-pulls hourly.
 - TRaSH Guides is linked in Profilarr from
   `https://github.com/Dictionarry-Hub/trash-pcd`, enabled, and auto-pulls
   hourly. It is now the intended source for TRaSH-equivalent fallback custom
-  formats during the Recyclarr retirement path.
+  formats now that Recyclarr is disabled.
 - Dumpstarr is linked in Profilarr but currently disabled. Do not use
   disabled/stale PCD sources for production definition sync unless the source
   is explicitly re-enabled and revalidated first.
 - Dictionarry primary release-tier custom formats and bounded TRaSH fallback
-  tiers have been copied into Arr and scored only in the Profilarr test
-  profiles. Production `shows-anime`, `shows-regular`, `movies-anime`, and
-  `movies-regular` still use the existing active scores and cutoffs.
+  tiers have been copied into Arr and scored in the efficient profiles. The old
+  balanced profiles are not active assignments and should be treated as future
+  experiment slots, not live policy.
 - Selected existing Arr CF definitions were safely refreshed from enabled
   Profilarr sources on 2026-05-26. Custom-format definitions are global in
   Sonarr/Radarr, so this can affect matching behavior everywhere; it did not
@@ -400,8 +405,8 @@ Current migration posture as of 2026-05-26:
 The candidate audit found useful material in Dumpstarr and Dictionarry, but
 also confirmed that stock Dumpstarr scoring conflicts with this library's codec
 policy. Dumpstarr's `TV 1080p` profile scores `x265 (HD)` at `-10000`; this
-library wants HD x265/HEVC preferred, with production anime currently at
-`+2000` and the Profilarr test profiles at `+5000`. Any future Profilarr
+library wants HD x265/HEVC preferred, with `+5000` in the efficient profiles.
+Any future Profilarr
 migration must override upstream x265 penalties before assigning real media or
 syncing replacement profiles.
 
@@ -454,7 +459,7 @@ Historical selective Dumpstarr import state:
   - `Banned Groups (Title)`
   - `Bad Source` on Radarr
 
-Current Profilarr tier replacement test plan:
+Current Profilarr tier replacement policy:
 
 - Scripts:
   - `scripts/media-release/profilarr_tier_candidate_compare.py`
@@ -468,38 +473,33 @@ Current Profilarr tier replacement test plan:
 - Current CF counts after bounded-tier apply:
   - Sonarr: `96/100`
   - Radarr: `79/100`
-- Refreshed test profiles only:
-  - Sonarr `shows-anime-profilarr-test` id `9`
-  - Sonarr `shows-regular-profilarr-test` id `10`
-  - Radarr `movies-anime-profilarr-test` id `8`
-  - Radarr `movies-regular-profilarr-test` id `9`
-- Production profile scores, cutoffs, and media assignments were not changed.
-- This is still test-profile only. It is the proposed main-profile replacement
-  model staged for inspection before moving any series/movie to the test
-  profiles and before changing production profile scores.
-- Regular test-profile quality structure:
-  - Sonarr `shows-regular-profilarr-test` groups all enabled regular qualities
+- The former test profiles were promoted into:
+  - Sonarr `shows-anime-efficient` id `7`
+  - Sonarr `shows-regular-efficient` id `1`
+  - Radarr `movies-anime-efficient` id `7`
+  - Radarr `movies-regular-efficient` id `6`
+- Regular efficient quality structure:
+  - Sonarr `shows-regular-efficient` groups all enabled regular qualities
     into `Regular Enabled Qualities`; disabled qualities remain outside the
     group.
-  - Radarr `movies-regular-profilarr-test` does the same; disabled 2160p movie
+  - Radarr `movies-regular-efficient` does the same; disabled 2160p movie
     qualities remain disabled and outside the active group.
-  - The regular test cutoff points at `Regular Enabled Qualities`.
-  - Every test profile's `cutoffFormatScore` is computed from that profile's
+  - The regular efficient cutoff points at `Regular Enabled Qualities`.
+  - Every efficient profile's `cutoffFormatScore` is computed from that profile's
     actual maximum applicable CF path, not just `1080p + x265`.
     Current values are Sonarr anime `146979`, Sonarr regular `46982`, Radarr
     anime `146978`, and Radarr regular `46979`.
   - `Local Anime Quality Rank - ...` was only a resolution matcher. It was
     renamed in place to `Local Quality Rank - ...` and reused for anime and
-    regular test profiles instead of creating duplicate CFs.
-- Test profiles are staged in replacement mode, not stacked mode. Dictionarry
+    regular efficient profiles instead of creating duplicate CFs.
+- Efficient profiles are in replacement mode, not stacked mode. Dictionarry
   release-group tiers are the primary ranking band. Profilarr-synced TRaSH
   Guides tiers are retained as low-score fallback only when Dictionarry misses.
   Any old release-tier row that is not part of the expected fallback map must
   be zero, because Sonarr/Radarr require every custom format to stay present in
   profile `formatItems`; only nonzero score affects release selection.
-- `Local Anime Source Rank - Bluray` is zeroed in the test profiles after
-  cloning production anime profiles, so the proposed replacement does not add a
-  broad local Bluray source preference.
+- `Local Anime Source Rank - Bluray` is zeroed in the efficient profiles, so
+  the replacement does not add a broad local Bluray source preference.
 - Imported Sonarr Dictionarry TV tiers:
   - Efficient Bluray Tier 1..6: `+900`, `+820`, `+700`, `+620`, `+540`,
     `+460`
@@ -525,7 +525,7 @@ Current Profilarr tier replacement test plan:
   - Radarr regular HD Bluray Tier 01..03: `+96`, `+88`, `+80`; WEB Tier
     01..03: `+80`, `+72`, `+64`
 - Positive service/source tags such as `AMZN`, `NF`, `DSNP`, `CR`, and `VRV`
-  are compressed into an ordered tie-breaker ladder in the test profiles:
+  are compressed into an ordered tie-breaker ladder in the efficient profiles:
   high-priority positive services become `+3`, mid positives become `+2`, and
   smaller positives become `+1`. Zero-scored service tags stay zero. Repack
   scores are capped to `Repack/Proper=+1`, `Repack2=+2`, and `Repack3=+3`.
@@ -540,7 +540,7 @@ Current Profilarr tier replacement test plan:
   - Max fallback score: `+96`
   - Max incidental score: `+6`
   - Max release stack: `1880 + 96 + 6 = 1982`
-  - x265/HEVC in the test profiles: `+5000`, leaving `3018` points of margin
+  - x265/HEVC in the efficient profiles: `+5000`, leaving `3018` points of margin
     over the strongest release-stack path
   - Max non-DA 1080p path: `40000 + 5000 + 1982 = 46982`, still below DA at
     `+100000`
@@ -560,24 +560,24 @@ Current Profilarr tier replacement test plan:
   2 (`+620`), Radarr Efficient WEB Tier 1 (`+600`) is below Efficient Bluray
   Tier 2 (`+800`), and Radarr Compact WEB Tier 1 (`+440`) is below Compact
   Bluray Tier 2 (`+600`).
-- Validation after the 2026-05-27 generic quality-rank apply:
+- Validation after the 2026-05-27 promotion:
   - `scripts/media-release/profilarr_bounded_tier_import.py --dry-run` showed
     no new CFs, planned in-place CF renames, and the regular enabled-quality
     grouping.
   - `scripts/media-release/profilarr_bounded_tier_import.py` applied the same
     changes with the snapshot above.
   - `scripts/media-release/arr_profile_math_audit.py` passed with no failures
-    and reported `Regular Enabled Qualities` in both regular test profiles.
+    and reported `Regular Enabled Qualities` in both regular efficient profiles.
   - `scripts/media-release/arr_quality_profile_report.py` confirmed the actual
-    Sonarr/Radarr test-profile quality groups and max-path cutoff scores:
+    Sonarr/Radarr efficient-profile quality groups and max-path cutoff scores:
     Sonarr anime `146979`, Sonarr regular `46982`, Radarr anime `146978`, and
     Radarr regular `46979`.
   - `scripts/media-release/sonarr_release_expectation_check.py` and
     `scripts/media-release/radarr_release_expectation_check.py` both passed,
-    confirming the production anime profiles still score DA, x265, and the
+    confirming the efficient anime profiles still score DA, x265, and the
     renamed generic quality ranks as expected.
 - These scores are intentionally below DA (`+100000`), anime quality ranks, and
-  x265/HEVC (`+5000` in the test profiles). Dictionarry tiers can stack with
+  x265/HEVC (`+5000` in the efficient profiles). Dictionarry tiers can stack with
   the low TRaSH fallback tier only inside the proven `1982` release-stack
   ceiling, so they still cannot outrank x265 or collapse the DA/quality bands.
 - The bounded-tier import cleanup deletes only all-zero non-rename custom
@@ -632,19 +632,19 @@ Current existing-definition sync state:
 - Validation after the apply:
   - Sonarr and Radarr DA/x265/quality-rank expectation checks passed for the
     active anime profiles.
-  - Profilarr test-profile math audit passed.
+  - Efficient-profile math audit passed.
   - CF counts remained Sonarr `96/100`, Radarr `79/100`.
 
 Profilarr remains the upstream refresh source for imported CFs, but Profilarr
 itself is not directly managing the copied Arr formats yet. The sync path is:
 Profilarr auto-pulls Dictionarry/TRaSH Guides/Dumpstarr, then repo-managed
 scripts refresh selected Arr definitions and reapply local scores. Use
-`scripts/media-release/profilarr_bounded_tier_import.py` for the current
-Profilarr tier replacement test profiles. This preserves upstream
+`scripts/media-release/profilarr_bounded_tier_import.py` for future
+Profilarr tier replacement tests. This preserves upstream
 CF-definition updates without accepting upstream profile scoring such as the
 stock x265 penalty.
 
-Before assigning any series/movie to a Profilarr-derived profile, run:
+Before staging any future Profilarr-derived replacement profile, run:
 
 ```bash
 ansible docker-vm --become -m script -a "scripts/media-release/arr_stage_profilarr_test_profiles.py --dry-run"
@@ -658,13 +658,23 @@ ansible docker-vm -m script -a scripts/media-release/sonarr_release_expectation_
 ansible docker-vm -m script -a scripts/media-release/radarr_release_expectation_check.py
 ```
 
-Only after the candidate profile proves the same DA/x265/quality math should a
-small pilot set be moved to the test profile.
+Only after a future candidate proves the same DA/x265/quality math should a
+small pilot set be moved to the recreated test profile.
 
 ## Backups And Cleanup
 
 Live release-policy changes require targeted backups before mutation. Current
-rollback artifacts from the Profilarr staging pass:
+rollback artifacts from the Profilarr migration and staging passes:
+
+- Efficient profile promotion snapshot:
+  `/opt/media-stack/release-policy-snapshots/20260527T015400Z-efficient-profile-promotion`
+- Seerr Arr endpoint correction snapshot:
+  `/opt/media-stack/release-policy-snapshots/20260527T020309Z-seerr-arr-endpoint-update`
+- Recyclarr compose-disable backup:
+  `/opt/media-stack/docker-compose.yml.codex-pre-disable-recyclarr-20260527T022517Z`
+- Historical Recyclarr balanced-profile retarget backup from before Recyclarr
+  was disabled:
+  `/opt/media-stack/recyclarr/recyclarr.yml.codex-pre-balanced-profile-retarget-20260527T015745Z`
 
 - Arr policy dry-run snapshot:
   `/opt/media-stack/release-policy-snapshots/20260523T014538Z`
@@ -732,8 +742,9 @@ retention location. Do not let staging snapshots pile up indefinitely.
 
 ## Current Notes
 
-- Recyclarr preview must be treated as part of verification because Recyclarr
-  can overwrite managed TRaSH CF scores on its next scheduled sync.
+- Recyclarr is disabled. If it reappears in `docker compose ps`, media-stack
+  health, or scheduled jobs, treat that as drift and disable it again before
+  changing release policy.
 - Do not write raw API keys or random tokens into Profilarr's `auth_settings`
   table. Profilarr v2.0.6 crashed when a raw DB-edited API-key hash was used
   during the TRaSH Guides link attempt. The safe path is the authenticated UI
@@ -741,7 +752,7 @@ retention location. Do not let staging snapshots pile up indefinitely.
   fallback followed by a Profilarr restart.
 - Local/manual CFs such as `Local Anime Raw Group - DBD-Raws`,
   `Portuguese (No English)`, and the quality-rank CFs must remain documented
-  because they are not all represented by TRaSH/Recyclarr defaults.
+  because they are not all represented by upstream Profilarr sources.
 - Sonarr and Radarr failed-download auto-redownload is intentionally disabled.
   Proactive improvement searches should be owned by a paced tool such as
   Profilarr, not by hidden per-item redownload retries that can spawn searches
@@ -848,12 +859,13 @@ retention location. Do not let staging snapshots pile up indefinitely.
   changed `Language - Not Original` so it does not apply when those explicit DA
   markers are present. This preserves the DA-first score model without relying
   on parsed language metadata being stable through search, queue, and import.
-- Recyclarr ownership note for that fix: the stock TRaSH/Recyclarr `Anime Dual
-  Audio` custom formats were removed from `/opt/media-stack/recyclarr/recyclarr.yml`
-  for Sonarr trash ID `418f50b10f1907201b6cfdf881f467b7` and Radarr trash ID
-  `4a3b087eea2ce012fcc1ce319259a3be`, because future Recyclarr syncs would
-  otherwise overwrite the local title-marker DA behavior. Rollback backups from
-  the live change are `/opt/media-stack/arr-policy-backups/20260523T045221Z-dual-audio-title-policy`
+- Historical Recyclarr ownership note for that fix: the stock TRaSH/Recyclarr
+  `Anime Dual Audio` custom formats were removed from
+  `/opt/media-stack/recyclarr/recyclarr.yml` for Sonarr trash ID
+  `418f50b10f1907201b6cfdf881f467b7` and Radarr trash ID
+  `4a3b087eea2ce012fcc1ce319259a3be`, because Recyclarr syncs would otherwise
+  overwrite the local title-marker DA behavior. Recyclarr is now disabled, but
+  rollback backups from the live change are `/opt/media-stack/arr-policy-backups/20260523T045221Z-dual-audio-title-policy`
   and `/opt/media-stack/recyclarr/recyclarr.yml.codex-pre-da-title-policy-20260523T045211Z`.
   A dry-run backup also exists at `/opt/media-stack/arr-policy-backups/20260523T045113Z-dual-audio-title-policy`;
   clean these temporary rollback aids after the policy has survived normal
@@ -1129,8 +1141,8 @@ Decision rule:
 5. Compare Profilarr's anime scoring against the verified math in this document.
 6. Preserve DA-first, quality-rank-second behavior unless the user explicitly
    changes the policy.
-7. Keep Recyclarr until Profilarr has been tested against real queue/history
-   examples and rollback is clear.
+7. Recyclarr should stay disabled unless the policy-management direction is
+   explicitly changed.
 8. Profilarr native scheduled Arr upgrades should stay disabled. Overnight
    proactive upgrades are triggered by `playbooks/media/nightly-media-maintenance.yml`
    only when no mergerfs balance job is pending for that night. If future live
