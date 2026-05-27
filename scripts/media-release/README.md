@@ -72,6 +72,8 @@
   files, queue, and grab history.
 - `sonarr_transaction_audit.py`: Read-only summary of Sonarr transaction-monitor
   history and current queue state.
+- `sonarr_transaction_log_sanitize.py`: Redacts secret-looking fields and URL
+  query parameters from Sonarr transaction-monitor JSONL logs.
 
 ## Safety Notes
 

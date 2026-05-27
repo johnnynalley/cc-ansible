@@ -1,6 +1,6 @@
 # Media Release Policy
 
-Last updated: 2026-05-26
+Last updated: 2026-05-27
 
 This documents the current Sonarr/Radarr release selection policy on `docker-vm`.
 The goal is better grabbed releases, not just smaller files. Anime is handled as
@@ -160,9 +160,11 @@ series/season search appears to grab only part of a show.
 `playbooks/media/sonarr-transaction-monitor.yml` deploys
 `sonarr-transaction-monitor.timer`, which records Sonarr history events and
 queue snapshots to `/var/log/sonarr-transaction-monitor/events.jsonl`. The log
-is mode `0640` and rotated daily with 90 retained rotations. Keep it enabled
-while Profilarr upgrade searches are active so later reviews can compare
-grab-time, queue-time, and import/delete outcomes without relying on memory.
+is mode `0640`, rotated daily with 90 retained rotations, and must not store
+raw indexer/API URLs or API keys. Keep it enabled while Profilarr upgrade
+searches are active so later reviews can compare grab-time, queue-time, and
+import/delete outcomes without relying on memory. If an older log needs
+redaction, use `scripts/media-release/sonarr_transaction_log_sanitize.py`.
 
 `scripts/media-release/sonarr_transaction_audit.py` is the compact report over that monitor
 log plus the live Sonarr queue. It summarizes recent history event types,
@@ -697,6 +699,10 @@ rollback artifacts from the Profilarr staging pass:
   `/opt/media-stack/release-policy-snapshots/20260526T225536Z-dictionarry-bounded-tiers-dry-run`
   and
   `/opt/media-stack/release-policy-snapshots/20260526T225621Z-dictionarry-bounded-tiers`
+- Sonarr transaction-monitor log sanitized rollback copies:
+  `/var/log/sonarr-transaction-monitor/sanitized-backups/events.jsonl.sanitized-backup-20260527T003941Z`
+  and
+  `/var/log/sonarr-transaction-monitor/sanitized-backups/events.jsonl.sanitized-backup-20260527T004021Z`
 - JoJo Stardust blocklist / wrong-import repair backups:
   `/opt/media-stack/arr-policy-backups/20260524T210710Z-jojo-stardust-s01-repair`
   and

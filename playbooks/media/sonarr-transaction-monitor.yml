@@ -37,7 +37,7 @@
 
     - name: Deploy Sonarr transaction monitor
       ansible.builtin.copy:
-        src: ../files/sonarr-transaction-monitor.py
+        src: ../../files/sonarr-transaction-monitor.py
         dest: /usr/local/bin/sonarr-transaction-monitor
         owner: root
         group: root

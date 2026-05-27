@@ -15,6 +15,16 @@ from pathlib import Path
 from typing import Any
 
 PRIVATE_FILE_MODE = 0o640
+SAFE_HISTORY_DATA_KEYS = {
+    "ageHours",
+    "downloadClientName",
+    "indexer",
+    "publishedDate",
+    "releaseGroup",
+    "releaseSource",
+    "releaseType",
+    "size",
+}
 
 
 def utc_now() -> str:
@@ -81,6 +91,14 @@ def quality_name(item: dict[str, Any] | None) -> str | None:
     return str(item.get("name") or "unknown")
 
 
+def summarize_history_data(data: dict[str, Any]) -> dict[str, Any]:
+    return {
+        key: value
+        for key in sorted(SAFE_HISTORY_DATA_KEYS)
+        if (value := data.get(key)) is not None
+    }
+
+
 def summarize_history(record: dict[str, Any]) -> dict[str, Any]:
     source_title = record.get("sourceTitle") or record.get("downloadId") or ""
     series = record.get("series") or {}
@@ -99,7 +117,7 @@ def summarize_history(record: dict[str, Any]) -> dict[str, Any]:
         "quality": quality_name(record.get("quality")),
         "customFormatScore": record.get("customFormatScore"),
         "customFormats": cf_names(record.get("customFormats")),
-        "data": record.get("data") or {},
+        "data": summarize_history_data(record.get("data") or {}),
     }
 
 
