@@ -22,4 +22,4 @@ proxmox_vm_disk_resizes:
   - name: docker-vm root disk
     vmid: 110
     slot: scsi0
-    size: 80G
+    size: 110G
