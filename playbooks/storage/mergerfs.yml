@@ -269,6 +269,18 @@
         mode: "0755"
       when: mergerfs_balance_media_stack_control_enabled | default(false)
 
+    - name: Grant media stack control user read access to compose files
+      ansible.posix.acl:
+        path: "{{ item.path }}/docker-compose.yml"
+        etype: user
+        entity: "{{ mergerfs_balance_media_stack_ssh_user | default('johnny') }}"
+        permissions: r
+        state: present
+      loop: "{{ mergerfs_balance_media_stack_compose_targets | default([]) }}"
+      loop_control:
+        label: "{{ item.path }}/docker-compose.yml"
+      when: mergerfs_balance_media_stack_control_enabled | default(false)
+
     - name: Authorize mergerfs-balance media stack control key
       ansible.posix.authorized_key:
         user: "{{ mergerfs_balance_media_stack_ssh_user | default('johnny') }}"
