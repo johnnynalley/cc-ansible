@@ -20,7 +20,7 @@
     # Datacenter firewall
     - name: Template datacenter firewall to temp
       ansible.builtin.template:
-        src: ../templates/proxmox/proxmox-cluster-firewall.fw.j2
+        src: "{{ ansible_config_file | dirname }}/templates/proxmox/proxmox-cluster-firewall.fw.j2"
         dest: /tmp/cluster.fw
       run_once: true
       when: pve_firewall_ipsets is defined or pve_firewall_groups is defined
@@ -33,7 +33,7 @@
     # Node firewall
     - name: Template node firewall to temp
       ansible.builtin.template:
-        src: ../templates/proxmox/proxmox-node-firewall.fw.j2
+        src: "{{ ansible_config_file | dirname }}/templates/proxmox/proxmox-node-firewall.fw.j2"
         dest: /tmp/host.fw
       when: pve_node_firewall is defined
 
@@ -44,7 +44,7 @@
     # VM/CT firewalls
     - name: Template VM/CT firewalls to temp
       ansible.builtin.template:
-        src: ../templates/proxmox/proxmox-vm-firewall.fw.j2
+        src: "{{ ansible_config_file | dirname }}/templates/proxmox/proxmox-vm-firewall.fw.j2"
         dest: "/tmp/{{ item.key }}.fw"
       loop: "{{ pve_vm_firewalls | dict2items }}"
       when: pve_vm_firewalls is defined

@@ -168,7 +168,7 @@
 
     - name: Deploy Alloy configuration
       ansible.builtin.template:
-        src: ../templates/logging/alloy-config.alloy.j2
+        src: "{{ ansible_config_file | dirname }}/templates/logging/alloy-config.alloy.j2"
         dest: /etc/alloy/config.alloy
         owner: alloy
         group: alloy
@@ -255,7 +255,7 @@
 
     - name: Deploy Alloy configuration (macOS)
       ansible.builtin.template:
-        src: ../templates/logging/alloy-config.alloy.j2
+        src: "{{ ansible_config_file | dirname }}/templates/logging/alloy-config.alloy.j2"
         dest: "{{ alloy_config_dir }}/config.alloy"
         mode: "0644"
       register: alloy_config_result

@@ -4,5 +4,5 @@
 
 tailscale_tailnet: "-"
 tailscale_policy_enabled: true
-tailscale_policy_file: "{{ playbook_dir }}/../files/tailscale-policy.hujson"
+tailscale_policy_file: "{{ ansible_config_file | dirname }}/files/tailscale-policy.hujson"
 tailscale_policy_oauth_scope: policy_file

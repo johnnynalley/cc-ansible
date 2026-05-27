@@ -39,7 +39,7 @@
 
     - name: Deploy wait-for-mounts.sh hookscript
       ansible.builtin.template:
-        src: ../templates/proxmox/wait-for-mounts.sh.j2
+        src: "{{ ansible_config_file | dirname }}/templates/proxmox/wait-for-mounts.sh.j2"
         dest: /var/lib/vz/snippets/wait-for-mounts.sh
         owner: root
         group: root

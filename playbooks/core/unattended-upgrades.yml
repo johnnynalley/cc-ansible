@@ -58,7 +58,7 @@
     # =========================================================================
     - name: Deploy unattended-upgrades configuration
       ansible.builtin.template:
-        src: ../templates/auto-updates/50unattended-upgrades.j2
+        src: "{{ ansible_config_file | dirname }}/templates/auto-updates/50unattended-upgrades.j2"
         dest: /etc/apt/apt.conf.d/50unattended-upgrades
         owner: root
         group: root
@@ -86,7 +86,7 @@
     # =========================================================================
     - name: Deploy unattended-upgrades notification script
       ansible.builtin.template:
-        src: ../templates/auto-updates/unattended-upgrades-notify.sh.j2
+        src: "{{ ansible_config_file | dirname }}/templates/auto-updates/unattended-upgrades-notify.sh.j2"
         dest: /usr/local/sbin/unattended-upgrades-notify
         owner: root
         group: root

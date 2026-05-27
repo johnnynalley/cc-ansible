@@ -48,7 +48,7 @@
     # =========================================================================
     - name: Deploy recovery hook script (mergerfs-branch-recovered)
       ansible.builtin.template:
-        src: ../templates/storage/mergerfs-branch-recovered.sh.j2
+        src: "{{ ansible_config_file | dirname }}/templates/storage/mergerfs-branch-recovered.sh.j2"
         dest: /usr/local/sbin/mergerfs-branch-recovered
         mode: "0750"
         owner: root
@@ -59,7 +59,7 @@
     # =========================================================================
     - name: Deploy udev rule for branch auto-remount
       ansible.builtin.template:
-        src: ../templates/storage/mergerfs-remount.rules.j2
+        src: "{{ ansible_config_file | dirname }}/templates/storage/mergerfs-remount.rules.j2"
         dest: /etc/udev/rules.d/99-mergerfs-remount.rules
         mode: "0644"
         owner: root
@@ -84,7 +84,7 @@
 
     - name: Deploy mergerfs-mount-watchdog script
       ansible.builtin.template:
-        src: ../templates/storage/mergerfs-mount-watchdog.sh.j2
+        src: "{{ ansible_config_file | dirname }}/templates/storage/mergerfs-mount-watchdog.sh.j2"
         dest: /usr/local/sbin/mergerfs-mount-watchdog
         mode: "0750"
         owner: root
@@ -93,7 +93,7 @@
 
     - name: Deploy mergerfs-mount-watchdog.service
       ansible.builtin.template:
-        src: ../templates/storage/mergerfs-mount-watchdog.service.j2
+        src: "{{ ansible_config_file | dirname }}/templates/storage/mergerfs-mount-watchdog.service.j2"
         dest: /etc/systemd/system/mergerfs-mount-watchdog.service
         mode: "0644"
         owner: root
@@ -102,7 +102,7 @@
 
     - name: Deploy mergerfs-mount-watchdog.timer
       ansible.builtin.template:
-        src: ../templates/storage/mergerfs-mount-watchdog.timer.j2
+        src: "{{ ansible_config_file | dirname }}/templates/storage/mergerfs-mount-watchdog.timer.j2"
         dest: /etc/systemd/system/mergerfs-mount-watchdog.timer
         mode: "0644"
         owner: root

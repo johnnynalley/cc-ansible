@@ -52,7 +52,7 @@
     # =========================================================================
     - name: Manage static netplan configuration
       ansible.builtin.template:
-        src: ../templates/network/netplan-static.yaml.j2
+        src: "{{ ansible_config_file | dirname }}/templates/network/netplan-static.yaml.j2"
         dest: "{{ network_static_netplan_path | default('/etc/netplan/50-cloud-init.yaml') }}"
         owner: root
         group: root
@@ -190,7 +190,7 @@
 
     - name: Create network-watchdog script
       ansible.builtin.template:
-        src: ../templates/network/network-watchdog.sh.j2
+        src: "{{ ansible_config_file | dirname }}/templates/network/network-watchdog.sh.j2"
         dest: /usr/local/sbin/network-watchdog
         mode: "0755"
         owner: root

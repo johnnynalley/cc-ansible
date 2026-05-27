@@ -37,7 +37,7 @@
 
     - name: Configure apcupsd
       ansible.builtin.template:
-        src: ../templates/ups/apcupsd.conf.j2
+        src: "{{ ansible_config_file | dirname }}/templates/ups/apcupsd.conf.j2"
         dest: /etc/apcupsd/apcupsd.conf
         owner: root
         group: root
@@ -56,7 +56,7 @@
 
     - name: Deploy apcupsd event notification script
       ansible.builtin.template:
-        src: ../templates/ups/apcupsd-event-notify.sh.j2
+        src: "{{ ansible_config_file | dirname }}/templates/ups/apcupsd-event-notify.sh.j2"
         dest: /etc/apcupsd/event-notify.sh
         owner: root
         group: root

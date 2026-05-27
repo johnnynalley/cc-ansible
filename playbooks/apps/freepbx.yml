@@ -28,7 +28,7 @@
   tasks:
     - name: Manage FreePBX primary network interface
       ansible.builtin.template:
-        src: ../templates/freepbx/interfaces.j2
+        src: "{{ ansible_config_file | dirname }}/templates/freepbx/interfaces.j2"
         dest: /etc/network/interfaces
         owner: root
         group: root
@@ -51,7 +51,7 @@
 
     - name: Manage Asterisk logrotate config with size guardrails
       ansible.builtin.template:
-        src: ../templates/freepbx/freepbx-asterisk-logrotate.j2
+        src: "{{ ansible_config_file | dirname }}/templates/freepbx/freepbx-asterisk-logrotate.j2"
         dest: /etc/logrotate.d/asterisk
         owner: root
         group: root

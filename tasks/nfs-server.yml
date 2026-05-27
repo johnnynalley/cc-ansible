@@ -54,7 +54,7 @@
 
 - name: Configure /etc/exports
   ansible.builtin.template:
-    src: ../templates/storage/exports.j2
+    src: "{{ ansible_config_file | dirname }}/templates/storage/exports.j2"
     dest: /etc/exports
     owner: root
     group: root

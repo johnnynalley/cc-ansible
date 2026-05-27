@@ -95,7 +95,7 @@
 
     - name: Install Windows gaming capture script
       ansible.windows.win_template:
-        src: ../templates/windows/windows-gaming-capture.ps1.j2
+        src: "{{ ansible_config_file | dirname }}/templates/windows/windows-gaming-capture.ps1.j2"
         dest: "{{ windows_gaming_monitor_script_dir }}\\windows-gaming-capture.ps1"
 
     - name: Remove legacy Windows gaming monitor script directories

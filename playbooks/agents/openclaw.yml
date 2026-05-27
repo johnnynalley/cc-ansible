@@ -446,7 +446,7 @@
     # --- Deploy update-check timer (daily at 08:00) ---
     - name: Create openclaw-update-check script
       ansible.builtin.template:
-        src: ../templates/openclaw/openclaw-update-check.sh.j2
+        src: "{{ ansible_config_file | dirname }}/templates/openclaw/openclaw-update-check.sh.j2"
         dest: /usr/local/sbin/openclaw-update-check
         mode: "0755"
         owner: root

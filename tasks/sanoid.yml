@@ -24,7 +24,7 @@
 
 - name: Configure sanoid
   ansible.builtin.template:
-    src: ../templates/storage/sanoid.conf.j2
+    src: "{{ ansible_config_file | dirname }}/templates/storage/sanoid.conf.j2"
     dest: /etc/sanoid/sanoid.conf
     owner: root
     group: root
