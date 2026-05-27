@@ -34,7 +34,7 @@
 
         - name: Deploy qBittorrent release stamper
           ansible.builtin.copy:
-            src: ../files/qbit-release-stamper.py
+            src: ../../files/qbit-release-stamper.py
             dest: "{{ media_release_stamper_qbit_script_dir }}/qbit-release-stamper.py"
             owner: root
             group: root
@@ -168,7 +168,7 @@
 
         - name: Deploy SABnzbd release stamper
           ansible.builtin.copy:
-            src: ../files/sab-release-stamper.py
+            src: ../../files/sab-release-stamper.py
             dest: "{{ media_release_stamper_sab_script_dir }}/{{ media_release_stamper_sab_script_name }}"
             owner: root
             group: root

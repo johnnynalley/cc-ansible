@@ -978,7 +978,9 @@ Stamping rules:
   by release/job title. If Arr lookup fails, times out, or finds no match, both
   scripts fall back to the configured default `jpn`, so `eng+jpn` becomes
   `[JA+EN]` and `eng+kor` gets no language-combo tag. A release/job/torrent
-  title saying `Dual-Audio` is not enough by itself.
+  title saying `Dual-Audio` is not enough by itself. English is never treated
+  as the original-language side of a DA tag, so English-original content does
+  not get a duplicate `[EN+EN]` marker.
 - `[x265]` is file-by-file only. The scripts scan the individual video file for
   HEVC markers (`V_MPEGH/ISO/HEVC`, `hvc1`, `hev1`, `x265`, `HEVC`) and MKV
   video-track `CodecID` data, and only stamp that specific file when the
@@ -1012,6 +1014,10 @@ Verification on 2026-05-22:
   fallback, `eng+kor` with Korean as the expected original language becomes
   `[KO+EN]`, and `eng+jpn+kor` with Japanese as the expected original language
   becomes `[JA+KO+EN]`.
+- Local predicate test on 2026-05-27 confirmed English-original audio no
+  longer emits `[EN+EN]`; English-only and English-original `eng+jpn` files get
+  no language-combo tag, while `jpn+eng`, `kor+eng`, and `jpn+kor+eng` still
+  emit `[JA+EN]`, `[KO+EN]`, and `[JA+KO+EN]`.
 - The deployed qBittorrent stamper env sets `DA_ORIGINAL_LANGUAGES=jpn`. That
   prevents an `eng+kor` file from being tagged as DA-compatible for a
   Japanese-original series.

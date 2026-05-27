@@ -613,17 +613,19 @@ def ffprobe_audio_languages(path: Path) -> set[str]:
 
 def language_combo_tag(path: Path, original_languages: set[str]) -> str | None:
     languages = file_audio_languages(path)
+    original_languages = {language for language in original_languages if language != "eng"}
     if "eng" not in languages or not languages & original_languages:
         return None
 
     ordered_languages: list[str] = []
     for language in sorted(original_languages):
-        if language in languages and language in LANGUAGE_TAGS:
+        if language in languages and language in LANGUAGE_TAGS and language not in ordered_languages:
             ordered_languages.append(language)
     for language in ("jpn", "zho", "kor"):
         if language in languages and language not in ordered_languages:
             ordered_languages.append(language)
-    ordered_languages.append("eng")
+    if "eng" not in ordered_languages:
+        ordered_languages.append("eng")
 
     return "[" + "+".join(LANGUAGE_TAGS[language] for language in ordered_languages) + "]"
 
