@@ -22,24 +22,72 @@
       ansible.builtin.template:
         src: "{{ ansible_config_file | dirname }}/templates/proxmox/proxmox-cluster-firewall.fw.j2"
         dest: /tmp/cluster.fw
+      check_mode: false
+      changed_when: false
+      run_once: true
+      when: pve_firewall_ipsets is defined or pve_firewall_groups is defined
+
+    - name: Compare datacenter firewall with pmxcfs
+      ansible.builtin.command: cmp -s /tmp/cluster.fw /etc/pve/firewall/cluster.fw
+      check_mode: false
+      changed_when: false
+      failed_when: pve_cluster_firewall_cmp.rc not in [0, 1, 2]
+      register: pve_cluster_firewall_cmp
       run_once: true
       when: pve_firewall_ipsets is defined or pve_firewall_groups is defined
 
     - name: Copy datacenter firewall to pmxcfs
       ansible.builtin.shell: cp /tmp/cluster.fw /etc/pve/firewall/cluster.fw
+      changed_when: true
       run_once: true
-      when: pve_firewall_ipsets is defined or pve_firewall_groups is defined
+      when:
+        - pve_firewall_ipsets is defined or pve_firewall_groups is defined
+        - pve_cluster_firewall_cmp.rc | default(0) != 0
+        - not ansible_check_mode
+
+    - name: Report pending datacenter firewall update
+      ansible.builtin.debug:
+        msg: Datacenter firewall would be updated in pmxcfs
+      changed_when: true
+      run_once: true
+      when:
+        - pve_firewall_ipsets is defined or pve_firewall_groups is defined
+        - pve_cluster_firewall_cmp.rc | default(0) != 0
+        - ansible_check_mode
 
     # Node firewall
     - name: Template node firewall to temp
       ansible.builtin.template:
         src: "{{ ansible_config_file | dirname }}/templates/proxmox/proxmox-node-firewall.fw.j2"
         dest: /tmp/host.fw
+      check_mode: false
+      changed_when: false
+      when: pve_node_firewall is defined
+
+    - name: Compare node firewall with pmxcfs
+      ansible.builtin.command: "cmp -s /tmp/host.fw /etc/pve/nodes/{{ ansible_facts.hostname }}/host.fw"
+      check_mode: false
+      changed_when: false
+      failed_when: pve_node_firewall_cmp.rc not in [0, 1, 2]
+      register: pve_node_firewall_cmp
       when: pve_node_firewall is defined
 
     - name: Copy node firewall to pmxcfs
       ansible.builtin.shell: "cp /tmp/host.fw /etc/pve/nodes/{{ ansible_facts.hostname }}/host.fw"
-      when: pve_node_firewall is defined
+      changed_when: true
+      when:
+        - pve_node_firewall is defined
+        - pve_node_firewall_cmp.rc | default(0) != 0
+        - not ansible_check_mode
+
+    - name: Report pending node firewall update
+      ansible.builtin.debug:
+        msg: "Node firewall for {{ ansible_facts.hostname }} would be updated in pmxcfs"
+      changed_when: true
+      when:
+        - pve_node_firewall is defined
+        - pve_node_firewall_cmp.rc | default(0) != 0
+        - ansible_check_mode
 
     # VM/CT firewalls
     - name: Template VM/CT firewalls to temp
@@ -47,9 +95,32 @@
         src: "{{ ansible_config_file | dirname }}/templates/proxmox/proxmox-vm-firewall.fw.j2"
         dest: "/tmp/{{ item.key }}.fw"
       loop: "{{ pve_vm_firewalls | dict2items }}"
+      check_mode: false
+      changed_when: false
+      when: pve_vm_firewalls is defined
+
+    - name: Compare VM/CT firewalls with pmxcfs
+      ansible.builtin.command: "cmp -s /tmp/{{ item.key }}.fw /etc/pve/firewall/{{ item.key }}.fw"
+      loop: "{{ pve_vm_firewalls | dict2items }}"
+      check_mode: false
+      changed_when: false
+      failed_when: pve_vm_firewall_cmp.rc not in [0, 1, 2]
+      register: pve_vm_firewall_cmp
       when: pve_vm_firewalls is defined
 
     - name: Copy VM/CT firewalls to pmxcfs
-      ansible.builtin.shell: "cp /tmp/{{ item.key }}.fw /etc/pve/firewall/{{ item.key }}.fw"
-      loop: "{{ pve_vm_firewalls | dict2items }}"
-      when: pve_vm_firewalls is defined
+      ansible.builtin.shell: "cp /tmp/{{ item.item.key }}.fw /etc/pve/firewall/{{ item.item.key }}.fw"
+      loop: "{{ pve_vm_firewall_cmp.results | default([]) }}"
+      changed_when: true
+      when:
+        - item.rc != 0
+        - not ansible_check_mode
+
+    - name: Report pending VM/CT firewall updates
+      ansible.builtin.debug:
+        msg: "VM/CT firewall {{ item.item.key }} would be updated in pmxcfs"
+      loop: "{{ pve_vm_firewall_cmp.results | default([]) }}"
+      changed_when: true
+      when:
+        - item.rc != 0
+        - ansible_check_mode
