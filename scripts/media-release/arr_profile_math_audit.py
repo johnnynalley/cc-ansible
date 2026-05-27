@@ -32,7 +32,6 @@ QUALITY_RANK_SCORES = {
 }
 ANIME_X265_MIN_SCORE = 5000
 REGULAR_X265_MIN_SCORE = 5000
-REGULAR_CUTOFF_FORMAT_SCORE = QUALITY_RANK_SCORES["1080p"] + REGULAR_X265_MIN_SCORE
 ANIME_BLURAY_SOURCE_RANK = 0
 SERVICE_MAX_SCORE = 3
 REPACK_MAX_SCORE = 3
@@ -385,11 +384,6 @@ def regular_enabled_quality_group_report(
             failures.append(
                 f"{profile_name}: cutoff must point at {REGULAR_QUALITY_GROUP_NAME}; actual {cutoff_group}"
             )
-    if int(profile.get("cutoffFormatScore") or 0) != REGULAR_CUTOFF_FORMAT_SCORE:
-        failures.append(
-            f"{profile_name}: cutoffFormatScore {profile.get('cutoffFormatScore')} "
-            f"must be {REGULAR_CUTOFF_FORMAT_SCORE}"
-        )
     return report
 
 
@@ -641,6 +635,7 @@ def audit_profile(
                 f"{profile_check.name}: 1080p DA floor {min_1080p_da} "
                 f"must beat max 720p DA {max_720p_da}"
             )
+        expected_cutoff_score = da_score + max(quality_rank_scores.values() or [0]) + x265_score + source_rank + release_stack
     else:
         regular_quality_groups = regular_enabled_quality_group_report(profile, failures, profile_check.name)
         release_stack = max(bluray_stack, web_stack) + max_fallback_score + max_incidental_score
@@ -695,6 +690,14 @@ def audit_profile(
                     f"{profile_check.name}: max {lower} regular stack {max_lower_stack} "
                     f"must stay below bare {higher} rank {higher_score}"
                 )
+        expected_cutoff_score = max(quality_rank_scores.values() or [0]) + x265_score + source_rank + release_stack
+
+    actual_cutoff_score = int(profile.get("cutoffFormatScore") or 0)
+    if actual_cutoff_score != expected_cutoff_score:
+        failures.append(
+            f"{profile_check.name}: cutoffFormatScore {actual_cutoff_score} "
+            f"must equal max applicable score {expected_cutoff_score}"
+        )
 
     return {
         "profile": profile_check.name,
@@ -714,6 +717,8 @@ def audit_profile(
         "dual_audio_score": scores.get("Anime Dual Audio"),
         "quality_rank_scores": quality_rank_scores,
         "regular_enabled_quality_group": regular_quality_groups,
+        "expected_cutoff_format_score": expected_cutoff_score,
+        "actual_cutoff_format_score": actual_cutoff_score,
         "unexpected_legacy_tier_scores": legacy_scores,
         "failures": failures,
     }
@@ -754,7 +759,8 @@ def print_text(report: dict[str, Any]) -> None:
                 "  {profile}: Bluray HEVC stack={bluray}; second Bluray={second}; "
                 "WEB HEVC stack={web}; fallback max={fallback}; incidental max={incidental}; "
                 "service max={service}; repack max={repack}; min tier gap={gap}; "
-                "x265={x265}; Bluray source={source}; DA={da}".format(
+                "x265={x265}; Bluray source={source}; DA={da}; "
+                "cutoff={cutoff}/{expected_cutoff}".format(
                     profile=profile["profile"],
                     bluray=stacks["best_bluray_hevc"]["score"],
                     second=stacks["second_bluray_hevc"]["score"],
@@ -767,6 +773,8 @@ def print_text(report: dict[str, Any]) -> None:
                     x265=profile["x265_score"],
                     source=profile["source_rank_bluray_score"],
                     da=profile["dual_audio_score"],
+                    cutoff=profile["actual_cutoff_format_score"],
+                    expected_cutoff=profile["expected_cutoff_format_score"],
                 )
             )
             if profile["regular_enabled_quality_group"]:

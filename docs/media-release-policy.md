@@ -454,9 +454,9 @@ Current Profilarr tier replacement test plan:
   - `scripts/media-release/profilarr_bounded_tier_import.py`
   - `scripts/media-release/arr_profile_math_audit.py`
 - Latest dry-run snapshot:
-  `/opt/media-stack/release-policy-snapshots/20260527T001017Z-dictionarry-bounded-tiers-dry-run`
+  `/opt/media-stack/release-policy-snapshots/20260527T001506Z-dictionarry-bounded-tiers-dry-run`
 - Latest applied snapshot:
-  `/opt/media-stack/release-policy-snapshots/20260527T001049Z-dictionarry-bounded-tiers`
+  `/opt/media-stack/release-policy-snapshots/20260527T001517Z-dictionarry-bounded-tiers`
 - Current CF counts after bounded-tier apply:
   - Sonarr: `96/100`
   - Radarr: `79/100`
@@ -475,8 +475,11 @@ Current Profilarr tier replacement test plan:
     group.
   - Radarr `movies-regular-profilarr-test` does the same; disabled 2160p movie
     qualities remain disabled and outside the active group.
-  - The regular test cutoff points at `Regular Enabled Qualities`, and
-    `cutoffFormatScore` is `45000`, which means 1080p plus x265 meets cutoff.
+  - The regular test cutoff points at `Regular Enabled Qualities`.
+  - Every test profile's `cutoffFormatScore` is computed from that profile's
+    actual maximum applicable CF path, not just `1080p + x265`.
+    Current values are Sonarr anime `146979`, Sonarr regular `46982`, Radarr
+    anime `146978`, and Radarr regular `46979`.
   - `Local Anime Quality Rank - ...` was only a resolution matcher. It was
     renamed in place to `Local Quality Rank - ...` and reused for anime and
     regular test profiles instead of creating duplicate CFs.
@@ -538,6 +541,11 @@ Current Profilarr tier replacement test plan:
   - Max regular 720p path: `30000 + 5000 + 1982 = 36982`, still below the
     bare 1080p rank of `40000`; lower regular quality ranks have even more
     headroom.
+  - Cutoff scores are set to each profile's actual max applicable score:
+    Sonarr anime `100000 + 40000 + 5000 + 1979 = 146979`, Sonarr regular
+    `40000 + 5000 + 1982 = 46982`, Radarr anime
+    `100000 + 40000 + 5000 + 1978 = 146978`, and Radarr regular
+    `40000 + 5000 + 1979 = 46979`.
 - Source ordering checks deliberately keep WEB below Bluray at the near-tier
   boundary: Sonarr Efficient WEB Tier 1 (`+600`) is below Efficient Bluray Tier
   2 (`+820`), Sonarr Compact WEB Tier 1 (`+440`) is below Compact Bluray Tier
@@ -553,7 +561,9 @@ Current Profilarr tier replacement test plan:
   - `scripts/media-release/arr_profile_math_audit.py` passed with no failures
     and reported `Regular Enabled Qualities` in both regular test profiles.
   - `scripts/media-release/arr_quality_profile_report.py` confirmed the actual
-    Sonarr/Radarr test-profile quality groups and `cutoffFormatScore=45000`.
+    Sonarr/Radarr test-profile quality groups and max-path cutoff scores:
+    Sonarr anime `146979`, Sonarr regular `46982`, Radarr anime `146978`, and
+    Radarr regular `46979`.
   - `scripts/media-release/sonarr_release_expectation_check.py` and
     `scripts/media-release/radarr_release_expectation_check.py` both passed,
     confirming the production anime profiles still score DA, x265, and the

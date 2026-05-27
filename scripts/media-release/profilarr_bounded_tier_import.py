@@ -74,7 +74,6 @@ QUALITY_RANK_SCORES = {
 }
 ANIME_X265_SCORE = 5000
 REGULAR_X265_SCORE = 5000
-REGULAR_CUTOFF_FORMAT_SCORE = QUALITY_RANK_SCORES["1080p"] + REGULAR_X265_SCORE
 ANIME_BLURAY_SOURCE_RANK = 0
 SERVICE_MAX_SCORE = 3
 REPACK_MAX_SCORE = 3
@@ -1202,10 +1201,6 @@ def group_regular_enabled_qualities(profile: dict[str, Any]) -> list[str]:
     if old_cutoff != group_id:
         profile["cutoff"] = group_id
         changes.append(f"cutoff: {old_cutoff} -> {group_id}")
-    old_cutoff_score = int(profile.get("cutoffFormatScore") or 0)
-    if old_cutoff_score != REGULAR_CUTOFF_FORMAT_SCORE:
-        profile["cutoffFormatScore"] = REGULAR_CUTOFF_FORMAT_SCORE
-        changes.append(f"cutoffFormatScore: {old_cutoff_score} -> {REGULAR_CUTOFF_FORMAT_SCORE}")
     return changes
 
 
@@ -1247,12 +1242,91 @@ def set_profile_scores(
     return changes
 
 
+def profile_score_map(
+    profile: dict[str, Any],
+    custom_formats_by_id: dict[int, dict[str, Any]],
+) -> dict[str, int]:
+    scores: dict[str, int] = {}
+    for item in profile.get("formatItems", []):
+        cf_id = custom_format_id_from_item(item)
+        if cf_id is None:
+            continue
+        name = str(custom_formats_by_id.get(cf_id, {}).get("name") or item.get("name") or "")
+        if name:
+            scores[name] = int(item.get("score") or 0)
+    return scores
+
+
 def quality_rank_target_scores(custom_formats_by_name: dict[str, dict[str, Any]]) -> dict[str, int]:
     return {
         f"{QUALITY_RANK_PREFIX}{quality}": score
         for quality, score in QUALITY_RANK_SCORES.items()
         if f"{QUALITY_RANK_PREFIX}{quality}" in custom_formats_by_name
     }
+
+
+def profile_trash_fallback_max(instance_name: str, profile_kind: str, scores: dict[str, int]) -> int:
+    expected_names = {
+        curated.target_name
+        for curated in CURATED_FORMATS
+        if curated.database_name == TRASH_DATABASE
+        and instance_name in curated.targets
+        and profile_kind in curated.profile_kinds
+    }
+    return max((scores.get(name, 0) for name in expected_names), default=0)
+
+
+def profile_dictionarry_stack_max(instance_name: str, scores: dict[str, int]) -> int:
+    stack_scores: list[int] = []
+    for component_names in CURATED_SCORE_STACKS[instance_name].values():
+        stack_scores.append(sum(scores.get(f"Dictionarry {name}", 0) for name in component_names))
+    return max(stack_scores or [0])
+
+
+def profile_incidental_max(scores: dict[str, int]) -> int:
+    service_max = max((score for name, score in scores.items() if name in SERVICE_FORMAT_NAMES), default=0)
+    repack_max = max((score for name, score in scores.items() if name in REPACK_FORMAT_NAMES), default=0)
+    return max(service_max, 0) + max(repack_max, 0)
+
+
+def profile_max_cutoff_score(
+    instance_name: str,
+    profile_kind: str,
+    profile: dict[str, Any],
+    custom_formats_by_id: dict[int, dict[str, Any]],
+) -> int:
+    scores = profile_score_map(profile, custom_formats_by_id)
+    top_quality_rank = max(
+        (
+            score
+            for name, score in scores.items()
+            if name.startswith(QUALITY_RANK_PREFIX) and score > 0
+        ),
+        default=0,
+    )
+    x265_score = max((scores.get(name, 0) for name in X265_FORMAT_NAMES), default=0)
+    source_rank = max(scores.get("Local Anime Source Rank - Bluray", 0), 0)
+    dual_audio_score = scores.get("Anime Dual Audio", 0) if profile_kind == "anime" else 0
+    release_stack = (
+        profile_dictionarry_stack_max(instance_name, scores)
+        + profile_trash_fallback_max(instance_name, profile_kind, scores)
+        + profile_incidental_max(scores)
+    )
+    return dual_audio_score + top_quality_rank + x265_score + source_rank + release_stack
+
+
+def set_cutoff_format_score(
+    instance_name: str,
+    profile_kind: str,
+    profile: dict[str, Any],
+    custom_formats_by_id: dict[int, dict[str, Any]],
+) -> dict[str, dict[str, int]]:
+    old_score = int(profile.get("cutoffFormatScore") or 0)
+    new_score = profile_max_cutoff_score(instance_name, profile_kind, profile, custom_formats_by_id)
+    if old_score == new_score:
+        return {}
+    profile["cutoffFormatScore"] = new_score
+    return {"cutoffFormatScore": {"old": old_score, "new": new_score}}
 
 
 def zero_legacy_tier_scores(
@@ -1509,6 +1583,10 @@ def process_instance(
                 set_x265_scores(profile, custom_formats_by_id),
                 set_profile_scores(profile, custom_formats_by_id, profile_target_scores),
             )
+            changes = merge_score_changes(
+                changes,
+                set_cutoff_format_score(instance.name, pair.kind, profile, custom_formats_by_id),
+            )
             if changes:
                 profile_score_changes[pair.test_name] = changes
             replace_profile(simulated_profiles, profile)
@@ -1565,6 +1643,10 @@ def process_instance(
                 cap_repack_scores(profile, custom_formats_by_id),
                 set_x265_scores(profile, custom_formats_by_id),
                 set_profile_scores(profile, custom_formats_by_id, profile_target_scores),
+            )
+            changes = merge_score_changes(
+                changes,
+                set_cutoff_format_score(instance.name, pair.kind, profile, custom_formats_by_id),
             )
             request_json(instance, api_key, "PUT", f"/api/v3/qualityprofile/{profile['id']}", profile)
             if changes:
