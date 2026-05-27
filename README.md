@@ -38,6 +38,7 @@ Source-of-truth docs currently include:
 - [docs/gaming-benchmark.md](docs/gaming-benchmark.md)
 - [docs/media-release-policy.md](docs/media-release-policy.md)
 - [docs/openclaw-heartbeats.md](docs/openclaw-heartbeats.md)
+- [docs/plex-appliance-operations.md](docs/plex-appliance-operations.md)
 - [docs/streaming-runbook.md](docs/streaming-runbook.md)
 
 ## Repository Catalogs

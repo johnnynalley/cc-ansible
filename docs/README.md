@@ -11,6 +11,7 @@ ownership.
 | `docs/gaming-benchmark.md` | Windows gaming capture workflow | Benchmark capture commands, PresentMon handling, OBS/RTSS capture flow, or gaming test interpretation changes. | `playbooks/windows/windows-gaming-benchmark.yml`, `playbooks/windows/windows-gaming-tuning.yml`, `scripts/gaming/` |
 | `docs/media-release-policy.md` | Sonarr/Radarr/Recyclarr/Profilarr release policy | Quality profiles, custom formats, scores, upgrade search behavior, import stamping, or queue cleanup policy changes. | `playbooks/media/media-release-stamper.yml`, `playbooks/media/nightly-media-maintenance.yml`, `scripts/media-release/`, `templates/media-maintenance/` |
 | `docs/openclaw-heartbeats.md` | OpenClaw/Astra external heartbeat checks | Heartbeat commands, target hosts, sentinel files, or OpenClaw monitoring responsibilities change. | `playbooks/agents/openclaw.yml`, `playbooks/media/media-stack-health.yml`, `templates/openclaw/` |
+| `docs/plex-appliance-operations.md` | Plex appliance operator actions | Bedroom/living-room Plex appliance host mapping, skip-current-episode steps, shuffle-state handling, or appliance operator commands change. | `playbooks/media/plex-appliance.yml`, `templates/plex-appliance/`, `inventory/host_vars/*/plex-appliance.yml` |
 | `docs/streaming-runbook.md` | Live streaming operations | Twitch/YouTube/TikTok/Mac OBS/Aitum/SleepyChat routing, stream relay services, VOD handling, or operator steps change. | `playbooks/media/stream-relay.yml`, `templates/streaming/`, `scripts/streaming/` |
 
 ## Operating Rules
