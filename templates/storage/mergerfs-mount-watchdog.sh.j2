@@ -61,11 +61,48 @@ mark_alerted() {
     date +%s > "${STATE_DIR}/${1}.last_alert"
 }
 
+branch_is_healthy() {
+    local name="$1"
+    local mount_path="$2"
+    local device_uuid="$3"
+    local source options expected actual
+
+    if ! source=$(findmnt -rn "$mount_path" -o SOURCE 2>/dev/null); then
+        log "${name} is not mounted at ${mount_path}"
+        return 1
+    fi
+
+    options=$(findmnt -rn "$mount_path" -o OPTIONS 2>/dev/null || true)
+    if [[ "$options" == *shutdown* ]]; then
+        log "${name} is mounted at ${mount_path} but ext4 reports shutdown options: ${options}"
+        return 1
+    fi
+
+    if [[ -n "$device_uuid" ]]; then
+        expected=$(readlink -f "/dev/disk/by-uuid/${device_uuid}" 2>/dev/null || true)
+        if [[ -z "$expected" ]]; then
+            log "${name} UUID ${device_uuid} is not present under /dev/disk/by-uuid"
+            return 1
+        fi
+
+        actual=$(readlink -f "$source" 2>/dev/null || true)
+        if [[ -z "$actual" || "$actual" != "$expected" ]]; then
+            log "${name} source mismatch: mounted source ${source} resolves to ${actual:-unknown}, UUID resolves to ${expected}"
+            return 1
+        fi
+    fi
+
+    if ! timeout 5 ls -la "$mount_path" >/dev/null 2>&1; then
+        log "${name} is mounted at ${mount_path} but directory read failed"
+        return 1
+    fi
+}
+
 # Check each protected branch
 {% for branch in mergerfs_recovery_branches %}
 
 # --- {{ branch.name }} ({{ branch.mount_path }}) ---
-if findmnt -n "{{ branch.mount_path }}" >/dev/null 2>&1; then
+if branch_is_healthy "{{ branch.name }}" "{{ branch.mount_path }}" "{{ branch.device_uuid | default('') }}"; then
     # Mount is healthy. If we'd been failing, log recovery and call hook.
     prev=$(get_count "{{ branch.name }}")
     if [[ "$prev" -gt 0 ]]; then
@@ -74,23 +111,23 @@ if findmnt -n "{{ branch.mount_path }}" >/dev/null 2>&1; then
         "$RECOVERY_HOOK" "{{ branch.name }}" || true
     fi
 else
-    # Mount is missing — increment counter, attempt remount
+    # Mount is missing or unhealthy — increment counter, attempt remount
     new_count=$(( $(get_count "{{ branch.name }}") + 1 ))
     set_count "{{ branch.name }}" "$new_count"
-    log "{{ branch.name }} missing (failure ${new_count}/${FAILURE_THRESHOLD}) — attempting systemctl start {{ branch.mount_unit }}"
+    log "{{ branch.name }} missing or unhealthy (failure ${new_count}/${FAILURE_THRESHOLD}) — attempting systemctl start {{ branch.mount_unit }}"
 
     if systemctl start "{{ branch.mount_unit }}" 2>/dev/null; then
         # Verify it actually mounted
         sleep 2
-        if findmnt -n "{{ branch.mount_path }}" >/dev/null 2>&1; then
+        if branch_is_healthy "{{ branch.name }}" "{{ branch.mount_path }}" "{{ branch.device_uuid | default('') }}"; then
             log "{{ branch.name }} remounted successfully"
             reset_count "{{ branch.name }}"
             "$RECOVERY_HOOK" "{{ branch.name }}" || true
         else
-            log "{{ branch.name }} systemctl start succeeded but findmnt still empty"
+            log "{{ branch.name }} systemctl start succeeded but branch is still unhealthy"
         fi
     else
-        log "{{ branch.name }} systemctl start failed — device probably absent"
+        log "{{ branch.name }} systemctl start failed — device probably absent or zombie mount needs manual repair"
     fi
 
     # Alert if past threshold AND not recently alerted
@@ -98,7 +135,7 @@ else
         if [[ $(last_alert_age_seconds "{{ branch.name }}") -ge "$ALERT_DEDUP_SECONDS" ]]; then
             send_alert \
               "MergerFS branch missing: {{ branch.name }}" \
-              "{{ branch.mount_path }} has been unmounted for ${new_count} consecutive checks ({{ branch.mount_unit }}). Device may be physically disconnected. See diagnostic runbook in Claude Code memory."
+              "{{ branch.mount_path }} has been missing or unhealthy for ${new_count} consecutive checks ({{ branch.mount_unit }}). Device may be disconnected or mounted as an ext4 shutdown zombie. Do not rescan media apps until the branch is verified healthy."
             mark_alerted "{{ branch.name }}"
             log "{{ branch.name }} alert sent"
         else

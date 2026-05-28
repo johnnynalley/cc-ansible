@@ -39,6 +39,59 @@ SONARR_KEY="{{ mergerfs_recovery_api_targets.sonarr.api_key }}"
 RADARR_URL="{{ mergerfs_recovery_api_targets.radarr.url }}"
 RADARR_KEY="{{ mergerfs_recovery_api_targets.radarr.api_key }}"
 
+BRANCH_MOUNT_PATH=""
+BRANCH_DEVICE_UUID=""
+
+case "$BRANCH_NAME" in
+{% for branch in mergerfs_recovery_branches %}
+    "{{ branch.name }}")
+        BRANCH_MOUNT_PATH="{{ branch.mount_path }}"
+        BRANCH_DEVICE_UUID="{{ branch.device_uuid | default('') }}"
+        ;;
+{% endfor %}
+esac
+
+branch_is_healthy() {
+    local mount_path="$1"
+    local device_uuid="$2"
+    local source options expected actual
+
+    if [[ -z "$mount_path" ]]; then
+        log "branch '${BRANCH_NAME}' has no known mount path; skipping media refresh"
+        return 1
+    fi
+
+    if ! source=$(findmnt -rn "$mount_path" -o SOURCE 2>/dev/null); then
+        log "branch '${BRANCH_NAME}' is not mounted at ${mount_path}; skipping media refresh"
+        return 1
+    fi
+
+    options=$(findmnt -rn "$mount_path" -o OPTIONS 2>/dev/null || true)
+    if [[ "$options" == *shutdown* ]]; then
+        log "branch '${BRANCH_NAME}' is mounted with ext4 shutdown options (${options}); skipping media refresh"
+        return 1
+    fi
+
+    if [[ -n "$device_uuid" ]]; then
+        expected=$(readlink -f "/dev/disk/by-uuid/${device_uuid}" 2>/dev/null || true)
+        if [[ -z "$expected" ]]; then
+            log "branch '${BRANCH_NAME}' UUID ${device_uuid} is absent; skipping media refresh"
+            return 1
+        fi
+
+        actual=$(readlink -f "$source" 2>/dev/null || true)
+        if [[ -z "$actual" || "$actual" != "$expected" ]]; then
+            log "branch '${BRANCH_NAME}' source mismatch: mounted source ${source} resolves to ${actual:-unknown}, UUID resolves to ${expected}; skipping media refresh"
+            return 1
+        fi
+    fi
+
+    if ! timeout 5 ls -la "$mount_path" >/dev/null 2>&1; then
+        log "branch '${BRANCH_NAME}' directory read failed at ${mount_path}; skipping media refresh"
+        return 1
+    fi
+}
+
 results=()
 
 call_plex_refresh() {
@@ -68,6 +121,10 @@ call_arr_command() {
         results+=("${app}=fail($code)")
     fi
 }
+
+if ! branch_is_healthy "$BRANCH_MOUNT_PATH" "$BRANCH_DEVICE_UUID"; then
+    exit 0
+fi
 
 log "branch '${BRANCH_NAME}' recovered — refreshing media app libraries"
 

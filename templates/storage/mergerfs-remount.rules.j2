@@ -2,7 +2,8 @@
 # Managed by Ansible via playbooks/storage/mergerfs-recovery.yml — do not edit manually
 #
 # When a known UUID re-attaches to the system, systemd starts the corresponding
-# fstab mount unit and runs the recovery hook to refresh media app libraries.
+# fstab mount unit. The watchdog verifies the branch is readable and mounted on
+# the expected live device before running the recovery hook.
 #
 # This handles the common failure mode where a USB-SATA bridge briefly drops
 # off the bus (causing a clean ext4 unmount + USB re-enumeration as a new
@@ -12,5 +13,5 @@
 # Mount unit is idempotent — if the device is already mounted, no-op.
 
 {% for branch in mergerfs_recovery_branches %}
-ACTION=="add", SUBSYSTEM=="block", ENV{ID_FS_UUID}=="{{ branch.device_uuid }}", RUN+="/bin/systemctl --no-block start {{ branch.mount_unit }}", RUN+="/usr/local/sbin/mergerfs-branch-recovered {{ branch.name }}"
+ACTION=="add", SUBSYSTEM=="block", ENV{ID_FS_UUID}=="{{ branch.device_uuid }}", RUN+="/bin/systemctl --no-block start {{ branch.mount_unit }}"
 {% endfor %}
