@@ -47,6 +47,11 @@ auto_updates_randomized_delay_sec: "0"
 # quorum; notify instead so reboots can be coordinated.
 auto_updates_reboot_if_required: false
 
+# Proxmox nodes must not self-reboot from network recovery either. A transient
+# vmbr0, DHCP, or Tailscale issue during boot can otherwise turn a recoverable
+# network fault into a host reboot loop.
+network_watchdog_allow_reboot: false
+
 # Proxmox hosts should prefer reclaiming page cache over swapping QEMU guest RAM.
 proxmox_sysctl_settings:
   vm.swappiness: 10
