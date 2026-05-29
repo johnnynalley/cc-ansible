@@ -1,6 +1,6 @@
-# Purpose: Configure filesystem mounts (NTFS, exFAT, etc.).
+# Purpose: Configure filesystem mounts and USB storage quirks.
 # Hosts: linux_hosts.
-# Key vars: smb_shares, nfs_*, filesystem_mounts, mergerfs_*, zfs_*, virtiofs_*, vm_storage_gate_*.
+# Key vars: smb_shares, nfs_*, filesystem_mounts, usb_storage_quirks, mergerfs_*, zfs_*, virtiofs_*, vm_storage_gate_*.
 # Templates: templates/storage, templates/samba, templates/proxmox.
 # Scripts: scripts/storage.
 # Validation: ansible-playbook playbooks/storage/filesystem-mounts.yml --syntax-check.
@@ -8,7 +8,8 @@
 # =============================================================================
 # Filesystem Mounts Playbook
 # =============================================================================
-# Mounts local filesystems (NTFS, exFAT, etc.) - not NFS
+# Mounts local filesystems (NTFS, exFAT, etc.) - not NFS.
+# Also manages optional USB storage module quirks for hosts with flaky USB-SATA bridges.
 # Configure mounts in host_vars/<hostname>/mounts.yml with filesystem_mounts variable
 
 ---
@@ -16,6 +17,40 @@
   hosts: linux_hosts
   become: true
   tasks:
+    - name: Deploy USB storage module quirks
+      ansible.builtin.copy:
+        dest: /etc/modprobe.d/usb-storage-quirks.conf
+        owner: root
+        group: root
+        mode: "0644"
+        content: |
+          # Managed by Ansible - playbooks/storage/filesystem-mounts.yml
+          # Format: vendor:product:flags. The "u" flag disables UAS for matching USB storage bridges.
+          options usb-storage quirks={{ usb_storage_quirks | join(',') }}
+      when: usb_storage_quirks | default([]) | length > 0
+
+    - name: Check live USB storage quirk parameter
+      ansible.builtin.command:
+        cmd: cat /sys/module/usb_storage/parameters/quirks
+      register: usb_storage_quirks_live
+      changed_when: false
+      failed_when: false
+      check_mode: false
+      when: usb_storage_quirks | default([]) | length > 0
+
+    - name: Apply live USB storage quirk parameter for future USB probes
+      ansible.builtin.shell: |
+        set -eu
+        printf '%s\n' '{{ usb_storage_quirks | join(",") }}' > /sys/module/usb_storage/parameters/quirks
+      args:
+        executable: /bin/bash
+      changed_when: true
+      when:
+        - not ansible_check_mode
+        - usb_storage_quirks | default([]) | length > 0
+        - usb_storage_quirks_live.rc | default(1) == 0
+        - usb_storage_quirks_live.stdout | trim != usb_storage_quirks | join(',')
+
     - name: Import filesystem mount tasks
       ansible.builtin.import_tasks: ../../tasks/filesystem-mounts.yml
       when: filesystem_mounts is defined
