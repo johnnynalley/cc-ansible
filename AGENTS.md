@@ -82,6 +82,8 @@ Do not commit real secrets. Encrypted values belong in `vault.yml` files beside 
 
 Before mutating live infrastructure state, application configs, databases, service data, or generated controller/runtime files, take a targeted timestamped backup, snapshot, export, or app-native backup of the affected state unless the change is trivial and fully reproducible or the user explicitly waives backups for that operation. Record the backup path in the working notes, docs, or final response when it matters for rollback. Treat these as temporary rollback aids: keep them while the rollout is being validated, then document or perform cleanup/retention once the change is proven. Read-only diagnostics and dry runs do not need backups.
 
+Do not introduce live or repository mitigation changes during an incident merely because they seem prudent or adjacent to the symptom. If the user did not explicitly ask for that change and it is not strictly required to complete the requested action, stop and ask permission first. When the user narrows scope, drop unrelated safety ideas and focus only on the requested investigation or fix.
+
 ### Migration Cleanup
 
 When migrating a managed script, service, scheduled task, config path, binary, or generated artifact, include Ansible-managed cleanup for the legacy path in the same change whenever it is safe. Verify all consumers such as scheduled tasks, startup entries, service units, OBS hooks, wrapper scripts, or documented operator commands point at the new path before considering the migration complete.
