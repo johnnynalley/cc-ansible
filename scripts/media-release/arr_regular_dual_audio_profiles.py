@@ -4,8 +4,8 @@
 Run this on docker-vm. It reads local Sonarr/Radarr config.xml files for API
 keys, snapshots the touched Arr state, creates a parsed-language based
 `Regular Dual Audio` custom format, clones the regular efficient profiles into
-dual-audio-efficient profiles, and can optionally assign matching media to the
-new profile.
+dual-audio-efficient profiles, can optionally assign matching media to the new
+profile, and can queue follow-up searches.
 
 The script prints no API keys. Dry-run is the default.
 """
@@ -227,6 +227,70 @@ def assignment_endpoint(instance: ArrInstance, item_id: int) -> str:
     return f"{instance.assignment_path}/{item_id}"
 
 
+def item_language_name(item: dict[str, Any]) -> str:
+    value = item.get("originalLanguage")
+    if isinstance(value, dict):
+        return str(value.get("name") or value.get("id") or "")
+    return str(value or "")
+
+
+def item_genres(item: dict[str, Any]) -> list[str]:
+    genres = item.get("genres")
+    if not isinstance(genres, list):
+        return []
+    return [str(genre) for genre in genres if genre]
+
+
+def profile_names_by_id(profiles: list[dict[str, Any]]) -> dict[int, str]:
+    return {
+        int(profile["id"]): str(profile.get("name") or profile["id"])
+        for profile in profiles
+        if isinstance(profile.get("id"), int)
+    }
+
+
+def is_probably_anime(instance: ArrInstance, item: dict[str, Any], profile_name: str | None) -> bool:
+    if profile_name and "anime" in profile_name.casefold():
+        return True
+    if instance.name == "sonarr" and str(item.get("seriesType") or "").casefold() == "anime":
+        return True
+    genres = {genre.casefold() for genre in item_genres(item)}
+    if "anime" in genres:
+        return True
+    if instance.name == "radarr" and item_language_name(item).casefold() == "japanese" and "animation" in genres:
+        return True
+    return False
+
+
+def is_non_english_regular_candidate(
+    instance: ArrInstance,
+    item: dict[str, Any],
+    profile_name: str | None,
+) -> bool:
+    original_language = item_language_name(item).casefold()
+    if not original_language or original_language in {"english", "unknown"}:
+        return False
+    if is_probably_anime(instance, item, profile_name):
+        return False
+    return profile_name in {instance.source_profile_name, instance.target_profile_name}
+
+
+def item_matches_assignment_policy(
+    instance: ArrInstance,
+    item: dict[str, Any],
+    profile_name: str | None,
+    title_pattern: str | None,
+    include_non_english_regular: bool,
+) -> tuple[bool, list[str]]:
+    reasons: list[str] = []
+    title = str(item.get("title") or "")
+    if title_matches(title, title_pattern):
+        reasons.append("title_regex")
+    if include_non_english_regular and is_non_english_regular_candidate(instance, item, profile_name):
+        reasons.append("non_english_regular")
+    return bool(reasons), reasons
+
+
 def upsert_custom_format(
     instance: ArrInstance,
     api_key: str,
@@ -269,25 +333,39 @@ def assign_matching_media(
     instance: ArrInstance,
     api_key: str,
     assignments: list[dict[str, Any]],
+    profiles: list[dict[str, Any]],
     target_profile_id: int,
     pattern: str | None,
+    include_non_english_regular: bool,
     apply: bool,
 ) -> list[dict[str, Any]]:
     changes: list[dict[str, Any]] = []
-    if not pattern:
-        return changes
+    names_by_id = profile_names_by_id(profiles)
     for item in assignments:
         title = str(item.get("title") or "")
         item_id = item.get("id")
-        if not isinstance(item_id, int) or not title_matches(title, pattern):
+        profile_id = item.get("qualityProfileId")
+        profile_name = names_by_id.get(profile_id)
+        matched, reasons = item_matches_assignment_policy(
+            instance,
+            item,
+            profile_name,
+            pattern,
+            include_non_english_regular,
+        )
+        if not isinstance(item_id, int) or not matched:
             continue
-        before = item.get("qualityProfileId")
+        before = profile_id
         row = {
             "id": item_id,
             "title": title,
+            "original_language": item_language_name(item),
+            "genres": item_genres(item),
+            "profile": profile_name,
             "from": before,
             "to": target_profile_id,
             "changed": before != target_profile_id,
+            "reasons": reasons,
         }
         if apply and before != target_profile_id:
             payload = copy.deepcopy(item)
@@ -297,10 +375,36 @@ def assign_matching_media(
     return changes
 
 
+def queue_search(
+    instance: ArrInstance,
+    api_key: str,
+    item: dict[str, Any],
+    apply: bool,
+) -> dict[str, Any]:
+    if instance.name == "sonarr":
+        body = {"name": "SeriesSearch", "seriesId": item["id"]}
+    elif instance.name == "radarr":
+        body = {"name": "MoviesSearch", "movieIds": [item["id"]]}
+    else:
+        raise RuntimeError(f"unknown Arr instance {instance.name}")
+    if not apply:
+        return {"title": item["title"], "command": body, "queued": False}
+    command = request_json(instance, api_key, "POST", "/api/v3/command", body, timeout=30)
+    return {
+        "title": item["title"],
+        "command": body,
+        "queued": True,
+        "id": command.get("id") if isinstance(command, dict) else None,
+        "name": command.get("name") if isinstance(command, dict) else body["name"],
+    }
+
+
 def process_instance(
     instance: ArrInstance,
     backup_dir: Path,
     assign_pattern: str | None,
+    include_non_english_regular: bool,
+    search_matches: bool,
     apply: bool,
 ) -> dict[str, Any]:
     api_key = read_api_key(instance.config_path)
@@ -337,10 +441,24 @@ def process_instance(
         instance,
         api_key,
         snapshot["assignments"],
+        snapshot["quality_profiles"],
         int(target_profile_id),
         assign_pattern,
+        include_non_english_regular,
         apply,
     )
+    search_commands: list[dict[str, Any]] = []
+    search_errors: list[dict[str, Any]] = []
+    if search_matches:
+        assignments_by_id = {item["id"]: item for item in assignments}
+        for item in snapshot["assignments"]:
+            item_id = item.get("id")
+            if item_id not in assignments_by_id:
+                continue
+            try:
+                search_commands.append(queue_search(instance, api_key, item, apply))
+            except Exception as exc:  # noqa: BLE001 - keep other queued searches moving.
+                search_errors.append({"id": item_id, "title": item.get("title"), "error": str(exc)})
     return {
         "instance": instance.name,
         "custom_format": {
@@ -357,7 +475,11 @@ def process_instance(
             "cutoffFormatScore": profile.get("cutoffFormatScore"),
         },
         "assignment_pattern": assign_pattern,
+        "include_non_english_regular": include_non_english_regular,
         "assignments": assignments,
+        "search_matches": search_matches,
+        "search_commands": search_commands,
+        "search_errors": search_errors,
     }
 
 
@@ -372,6 +494,16 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--assign-radarr-title-regex",
         help="optional case-insensitive Radarr title regex to assign to the new profile",
+    )
+    parser.add_argument(
+        "--assign-non-english-regular",
+        action="store_true",
+        help="assign regular-profile non-anime media whose original language is not English",
+    )
+    parser.add_argument(
+        "--search-matches",
+        action="store_true",
+        help="queue a SeriesSearch/MoviesSearch for every matched assignment candidate",
     )
     parser.add_argument("--json", action="store_true")
     return parser.parse_args()
@@ -391,7 +523,14 @@ def main() -> int:
         "mode": "apply" if args.apply else "dry-run",
         "backup_dir": str(backup_dir),
         "instances": [
-            process_instance(instance, backup_dir, patterns.get(instance.name), args.apply)
+            process_instance(
+                instance,
+                backup_dir,
+                patterns.get(instance.name),
+                args.assign_non_english_regular,
+                args.search_matches,
+                args.apply,
+            )
             for instance in INSTANCES
         ],
     }
@@ -414,7 +553,22 @@ def main() -> int:
                 print(f"  assignments matching {instance['assignment_pattern']!r}:")
                 for item in instance["assignments"]:
                     status = "changed" if item["changed"] else "already"
-                    print(f"    - {status}: {item['title']} ({item['from']} -> {item['to']})")
+                    reasons = ",".join(item["reasons"])
+                    language = item["original_language"] or "unknown"
+                    print(
+                        f"    - {status}: {item['title']} ({item['from']} -> {item['to']}) "
+                        f"language={language} reasons={reasons}"
+                    )
+            if instance["search_commands"]:
+                print("  searches:")
+                for command in instance["search_commands"]:
+                    action = "queued" if command["queued"] else "would-queue"
+                    command_id = f" id={command['id']}" if command.get("id") else ""
+                    print(f"    - {action}:{command_id} {command['title']}")
+            if instance["search_errors"]:
+                print("  search errors:")
+                for error in instance["search_errors"]:
+                    print(f"    - {error['title']}: {error['error']}")
     return 0
 
 

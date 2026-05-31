@@ -544,6 +544,13 @@ The detailed release-selection policy and score-band rules are documented in
   `ansible docker-vm -b -m script -a "scripts/media-release/arr_regular_dual_audio_profiles.py --apply --assign-sonarr-title-regex '<title regex>'"`
   when a non-English regular series should move to the dual-audio efficient
   profile.
+- **Profile classification**: run
+  `ansible docker-vm -b -m script -a "scripts/media-release/arr_profile_classification.py --no-backup"`
+  to verify every series/movie is on the expected efficient profile. The
+  classifier maps anime to anime efficient profiles, English-original regular
+  media to regular efficient profiles, and non-English non-anime media to the
+  regular dual-audio efficient profiles. Apply with `--apply --search-changed`
+  only after reviewing the dry-run output.
 - **Queue check**: run
   `ansible docker-vm -m script -a scripts/media-release/sonarr_grab_forensics.py` first to
   classify queued grabs as valid upgrades, payload score loss, pack

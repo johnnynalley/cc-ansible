@@ -19,6 +19,10 @@
 - `arr_profile_assignment_check.py`: Read-only Sonarr/Radarr and Seerr check
   that fails if any media assignment or request default uses balanced, test,
   old, or unknown profiles instead of efficient profiles.
+- `arr_profile_classification.py`: Audits or repairs Sonarr/Radarr media
+  profile classification so anime uses anime efficient profiles,
+  English-original regular media uses regular efficient profiles, and
+  non-English non-anime media uses regular dual-audio efficient profiles.
 - `arr_quality_profile_report.py`: Read-only Sonarr/Radarr report of native
   quality-profile groups, useful for checking whether profile quality order is
   still blocking custom-format upgrades.

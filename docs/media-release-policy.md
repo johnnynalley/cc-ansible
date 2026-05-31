@@ -40,6 +40,8 @@ a separate policy because dual audio is the highest priority there.
   `scripts/media-release/sonarr_blocklist_queue_matches.py`
 - Sonarr JoJo Stardust arc-local repair helper:
   `scripts/media-release/sonarr_jojo_stardust_s01_repair.py`
+- Arr profile classification audit/repair:
+  `scripts/media-release/arr_profile_classification.py`
 - Sonarr transaction monitor: `sonarr-transaction-monitor.timer` writes
   `/var/log/sonarr-transaction-monitor/events.jsonl`, rotated daily
 - Sonarr recycle bin: disabled
@@ -119,17 +121,59 @@ release-title marker. This keeps original-only releases acceptable when no dub
 exists, but makes original+English beat original-only x265 when both are
 available.
 
-Current live assignment: `Asterix & Obelix: The Big Fight` uses
-`shows-regular-dual-audio-efficient`. Seerr defaults remain on
-`shows-regular-efficient`, `shows-anime-efficient`, `movies-regular-efficient`,
-and `movies-anime-efficient`; the dual-audio regular profiles are for explicit
-non-English media assignments, not default user requests.
+Current live assignment after the 2026-05-31 sweep:
+
+- Sonarr `shows-regular-dual-audio-efficient`: 3 series
+- Radarr `movies-regular-dual-audio-efficient`: 19 movies
+
+Seerr defaults remain on `shows-regular-efficient`, `shows-anime-efficient`,
+`movies-regular-efficient`, and `movies-anime-efficient`; the dual-audio
+regular profiles are for explicit non-English media assignments, not default
+user requests.
 
 The profile creation/update helper is
 `scripts/media-release/arr_regular_dual_audio_profiles.py`. The retained live
 rollback backup for the 2026-05-31 rollout is
-`/opt/media-stack/arr-policy-backups/20260531T050546Z-regular-dual-audio-profiles`.
-The dry-run backup from that rollout was removed after validation.
+`/opt/media-stack/arr-policy-backups/20260531T051612Z-regular-dual-audio-profiles`.
+Dry-run backups from that rollout were removed after validation.
+
+## Profile Classification
+
+All existing Sonarr/Radarr library items should stay on the expected efficient
+profile class:
+
+- Anime series and movies: `shows-anime-efficient` or
+  `movies-anime-efficient`
+- English-original regular series and movies: `shows-regular-efficient` or
+  `movies-regular-efficient`
+- Non-English non-anime regular series and movies:
+  `shows-regular-dual-audio-efficient` or
+  `movies-regular-dual-audio-efficient`
+
+The classifier treats Sonarr `seriesType=anime`, an `Anime` genre, or a
+Japanese-language Radarr movie with `Animation` genre as anime. That keeps
+Japanese animated films such as Ghibli movies on the anime movie profile while
+leaving live-action Japanese movies such as `Shin Godzilla` on the non-English
+regular dual-audio profile.
+
+Run this read-only audit after profile migrations or library-wide sweeps:
+
+```bash
+ansible docker-vm -b -m script -a "scripts/media-release/arr_profile_classification.py --no-backup"
+```
+
+When the dry-run output is correct, apply and queue searches for the changed
+items:
+
+```bash
+ansible docker-vm -b -m script -a "scripts/media-release/arr_profile_classification.py --apply --search-changed"
+```
+
+The 2026-05-31 profile-classification repair moved 8 Japanese animated Radarr
+movies from `movies-regular-efficient` to `movies-anime-efficient` and queued
+movie searches for each. The retained live rollback backup is
+`/opt/media-stack/arr-policy-backups/20260531T052016Z-profile-classification`.
+The dry-run backup from that repair was removed after validation.
 
 ## Quality Rank
 
@@ -414,10 +458,12 @@ Current migration posture as of 2026-05-27:
 - The accepted Profilarr-derived test policy has been promoted into the
   preserved production profile IDs and renamed with the `-efficient` suffix.
 - All Sonarr/Radarr media is assigned to efficient profiles:
-  - Sonarr `shows-anime-efficient`: 151 series
-  - Sonarr `shows-regular-efficient`: 70 series
-  - Radarr `movies-anime-efficient`: 32 movies
-  - Radarr `movies-regular-efficient`: 251 movies
+  - Sonarr `shows-anime-efficient`: 152 series
+  - Sonarr `shows-regular-efficient`: 71 series
+  - Sonarr `shows-regular-dual-audio-efficient`: 3 series
+  - Radarr `movies-anime-efficient`: 44 movies
+  - Radarr `movies-regular-efficient`: 237 movies
+  - Radarr `movies-regular-dual-audio-efficient`: 19 movies
 - Temporary `*-profilarr-test` profiles were removed after promotion.
 - The old production profiles were cloned before promotion and are retained as
   `*-balanced` side profiles. No media should be assigned to balanced profiles.
