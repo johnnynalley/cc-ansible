@@ -113,6 +113,17 @@ English-original regular shows and movies stay on `shows-regular-efficient` or
 Audio` at `0` so a show such as Family Guy does not prefer unrelated multi-audio
 releases over normal English releases.
 
+Radarr English-original regular movies also score
+`Regular English - Foreign/Multi Audio Guard` at `-100000` on
+`movies-regular-efficient` only. This is a title-side block for explicit
+foreign/multi-audio release markers such as `German.DL`, `FRENCH.DL`,
+standalone `DL.1080p`-style markers, `multi-audio`, `multi-language`,
+`VOSTFR`, or technical `DUAL.COMPLETE.BLURAY` / quality-tagged `DUAL` markers.
+It exists because Radarr can parse those releases as English when the title
+still clearly says the release is foreign-first or multi-audio. The guard stays
+at `0` on anime and `movies-regular-dual-audio-efficient` so non-English
+original-language+English movies are not penalized.
+
 Non-English regular shows/movies that should prefer original-language+English
 audio use the separate `shows-regular-dual-audio-efficient` or
 `movies-regular-dual-audio-efficient` profiles. These are cloned from the
@@ -138,6 +149,15 @@ The profile creation/update helper is
 rollback backup for the 2026-05-31 rollout is
 `/opt/media-stack/arr-policy-backups/20260531T051612Z-regular-dual-audio-profiles`.
 Dry-run backups from that rollout were removed after validation.
+
+The Radarr English-original foreign/multi-audio guard helper is
+`scripts/media-release/radarr_regular_english_language_guard.py`. It snapshots
+Radarr custom formats, quality profiles, media-management config, queue status,
+and command state before applying. The retained live rollback backups for the
+2026-05-31 guard rollout are
+`/opt/media-stack/arr-policy-backups/20260531T214817Z-radarr-regular-english-language-guard`
+and
+`/opt/media-stack/arr-policy-backups/20260531T215012Z-radarr-regular-english-language-guard`.
 
 ## Profile Classification
 
@@ -261,7 +281,16 @@ against the visible `/srv/media/plex` library, including untracked files in
 series/movie folders and parsed duplicate episode keys. Run it on the NAS host
 with `--mode branch` to scan the underlying mergerfs branch roots for hidden
 same-relative-path duplicates and parsed episode duplicates that the union mount
-may mask.
+may mask. Cleanup is opt-in with `--apply-delete`; it writes a JSON manifest
+before unlinking files and only targets generated cleanup candidates: untracked
+Arr-visible duplicate files with a tracked file for the same episode/movie, or
+hidden same-relative-path branch duplicates with matching file sizes. The
+Arr-visible cleanup path is conservative: it skips candidates that appear to
+have higher resolution, higher source rank, x265/HEVC, or dual-audio signals
+that the tracked comparator lacks. Because `docker-vm` currently does not have
+`ffprobe`/`mediainfo` available for hidden audio-track verification, it also
+skips candidates with unknown title-side audio-language markers when the
+tracked file has explicit language markers.
 
 `scripts/media-release/sonarr_transaction_audit.py` is the compact report over that monitor
 log plus the live Sonarr queue. It summarizes recent history event types,

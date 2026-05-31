@@ -10,7 +10,9 @@
 - `arr_duplicate_media_audit.py`: Read-only duplicate media audit. On
   `docker-vm`, compares Sonarr/Radarr tracked files with the visible library;
   on the NAS host with `--mode branch`, checks mergerfs branch roots for hidden
-  same-path and parsed episode duplicates.
+  same-path and parsed episode duplicates. Optional `--apply-delete` writes a
+  manifest and removes only conservative generated cleanup candidates, skipping
+  title-side language ambiguities instead of guessing hidden audio tracks.
 - `arr_dual_audio_title_policy.py`: Updates Arr dual-audio custom formats so
   explicit title markers can be trusted at grab/import time.
 - `arr_release_policy_audit.py`: Read-only Sonarr/Radarr release profile and
@@ -68,6 +70,10 @@
   groups are present upstream.
 - `radarr_release_expectation_check.py`: Read-only check of live Radarr anime
   release-selection expectations.
+- `radarr_regular_english_language_guard.py`: Creates or updates a Radarr
+  title-side negative custom format for English-original regular movies so
+  explicit foreign/multi-audio release markers such as `German.DL` are rejected
+  only on `movies-regular-efficient`, with live backups before apply.
 - `radarr_grab_forensics.py`: Classifies Radarr queue items against current
   movie files and Radarr's own import-rejection score messages. Optional
   cleanup is manual and can remove only safe current-better groups after
@@ -83,7 +89,9 @@
   episode files; cleanup requires explicit flags and can be restricted to
   safe current-better groups so mixed packs are skipped.
 - `sonarr_grab_forensics.py`: Classifies why Sonarr queue items were grabbed
-  and why they may not import.
+  and why they may not import; supports focused `--filter`, recent grab
+  `--history-size`, and read-only `--manual-import` rescoring checks for queue
+  pollution investigations.
 - `sonarr_jojo_stardust_s01_repair.py`: Narrow JoJo Stardust Crusaders S01
   mismatch repair and blocklist helper.
 - `sonarr_manual_import_candidates.py`: Read-only manual-import candidate report
