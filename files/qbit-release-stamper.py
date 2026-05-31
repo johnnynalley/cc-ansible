@@ -810,6 +810,19 @@ def absolute_file_path(torrent: dict, file_name: str) -> Path | None:
     return None
 
 
+def fallback_single_torrent_files(torrent: dict) -> list[dict[str, str]]:
+    torrent_name = str(torrent.get("name") or "").strip()
+    content_path = str(torrent.get("content_path") or "").strip()
+    candidates = [
+        PurePosixPath(content_path).name if content_path else "",
+        torrent_name,
+    ]
+    for candidate in candidates:
+        if PurePosixPath(candidate).suffix.lower() in VIDEO_EXTENSIONS:
+            return [{"name": candidate}]
+    return []
+
+
 def wanted_tags(
     file_name: str,
     media_path: Path | None,
@@ -947,7 +960,15 @@ def main() -> int:
         changes = 0
         videos_scanned = 0
         skipped_no_stamp = 0
-        for torrent_file in client.files(torrent_hash):
+        try:
+            torrent_files = client.files(torrent_hash)
+        except RuntimeError as exc:
+            torrent_files = fallback_single_torrent_files(torrent)
+            if not torrent_files:
+                raise
+            log(f"torrents/files failed; using single-file torrent fallback: {exc}")
+
+        for torrent_file in torrent_files:
             old_path = torrent_file.get("name", "")
             if PurePosixPath(old_path).suffix.lower() not in VIDEO_EXTENSIONS:
                 continue

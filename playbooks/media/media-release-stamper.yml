@@ -95,9 +95,9 @@
               QBIT_USER={{ media_release_stamper_qbit_user }}
               QBIT_PASS={{ media_release_stamper_qbit_password }}
               QBIT_STAMP_CATEGORIES={{ media_release_stamper_qbit_categories | join(',') }}
-              QBIT_API_RETRIES={{ media_release_stamper_qbit_script_api_retries | default(media_release_stamper_qbit_api_retries | default(5)) }}
-              QBIT_API_RETRY_DELAY={{ media_release_stamper_qbit_script_api_retry_delay | default(media_release_stamper_qbit_api_retry_delay | default(3)) }}
-              QBIT_API_TIMEOUT={{ media_release_stamper_qbit_script_api_timeout | default(60) }}
+              QBIT_API_RETRIES={{ media_release_stamper_qbit_script_api_retries | default(3) }}
+              QBIT_API_RETRY_DELAY={{ media_release_stamper_qbit_script_api_retry_delay | default(2) }}
+              QBIT_API_TIMEOUT={{ media_release_stamper_qbit_script_api_timeout | default(30) }}
               STAMPER_EVENT_LOG=/config/scripts/release-stamper-events.jsonl
               DA_ORIGINAL_LANGUAGES={{ media_release_stamper_da_original_languages | join(',') }}
               SONARR_API={{ media_release_stamper_sonarr_api }}
