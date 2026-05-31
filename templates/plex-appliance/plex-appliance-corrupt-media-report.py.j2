@@ -11,6 +11,10 @@ from typing import Any, Dict, List, Tuple
 
 
 DEFAULT_LOG_PATH = "{{ plex_appliance_corrupt_media_log_path | default('/var/log/plex-appliance/corrupt-media.jsonl') }}"
+STORAGE_FAILURE_REASONS = {
+    "input/output error",
+    "plex_stream_unavailable_zero_bytes",
+}
 
 
 def numeric(value: object, default: float = 0.0) -> float:
@@ -56,32 +60,84 @@ def dedupe_records(records: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     return sorted(latest.values(), key=lambda row: numeric(row.get("timestamp")), reverse=True)
 
 
+def check_for_record(record: Dict[str, Any]) -> Dict[str, Any]:
+    check = record.get("check")
+    return check if isinstance(check, dict) else {}
+
+
+def is_storage_path_failure(record: Dict[str, Any]) -> bool:
+    """Return true for Plex HTTP/storage-path read failures, not file proof.
+
+    The appliance verifies playback failures by decoding the Plex HTTP part URL.
+    When the NAS, mergerfs, VirtioFS, or Plex stream path stalls, ffmpeg reports
+    an input/output error that looks like corruption even when the file later
+    decodes cleanly from the backing mount.
+    """
+    check = check_for_record(record)
+    reason = str(check.get("reason") or "").strip().lower()
+    stderr = str(check.get("stderr_tail") or "").lower()
+    if reason in STORAGE_FAILURE_REASONS:
+        return True
+    if "input/output error" in stderr and "[http @" in stderr:
+        return True
+    return False
+
+
+def format_record(record: Dict[str, Any]) -> str:
+    check = check_for_record(record)
+    title = str(record.get("title") or "Untitled media")
+    file_path = str(check.get("file") or "unknown file")
+    reason = str(check.get("reason") or "unknown reason")
+    position = int(numeric(record.get("position")))
+    return f"- {title} at {position}s: {reason}; {file_path}"
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--log-path", default=DEFAULT_LOG_PATH)
     parser.add_argument("--since-hours", type=float, default=168.0)
     parser.add_argument("--max-records", type=int, default=10)
+    parser.add_argument(
+        "--show-storage-failures",
+        action="store_true",
+        help="show suppressed Plex HTTP/storage-path failures without making them critical",
+    )
     args = parser.parse_args()
 
     log_path = Path(args.log_path)
     cutoff = time.time() - max(0.0, args.since_hours) * 3600
     records = dedupe_records(load_records(log_path, cutoff))
+    storage_failures = [record for record in records if is_storage_path_failure(record)]
+    corrupt_records = [record for record in records if not is_storage_path_failure(record)]
     host = socket.gethostname()
 
-    if not records:
-        print(f"OK: no verified corrupt Plex media on {host} in the last {args.since_hours:g}h")
+    if not corrupt_records:
+        suffix = ""
+        if storage_failures:
+            suffix = (
+                f"; suppressed {len(storage_failures)} Plex HTTP/storage-path read failure"
+                f"{'' if len(storage_failures) == 1 else 's'}"
+            )
+        print(f"OK: no actionable corrupt Plex media on {host} in the last {args.since_hours:g}h{suffix}")
+        if storage_failures and args.show_storage_failures:
+            print("SUPPRESSED_STORAGE_FAILURES:")
+            for record in storage_failures[: max(1, args.max_records)]:
+                print(format_record(record))
+            if len(storage_failures) > args.max_records:
+                print(f"- ... {len(storage_failures) - args.max_records} more")
         return 0
 
-    print(f"CRITICAL: {len(records)} verified corrupt Plex media item(s) on {host} in the last {args.since_hours:g}h")
-    for record in records[: max(1, args.max_records)]:
-        check = record.get("check") if isinstance(record.get("check"), dict) else {}
-        title = str(record.get("title") or "Untitled media")
-        file_path = str(check.get("file") or "unknown file")
-        reason = str(check.get("reason") or "unknown reason")
-        position = int(numeric(record.get("position")))
-        print(f"- {title} at {position}s: {reason}; {file_path}")
-    if len(records) > args.max_records:
-        print(f"- ... {len(records) - args.max_records} more")
+    print(f"CRITICAL: {len(corrupt_records)} actionable corrupt Plex media item(s) on {host} in the last {args.since_hours:g}h")
+    for record in corrupt_records[: max(1, args.max_records)]:
+        print(format_record(record))
+    if len(corrupt_records) > args.max_records:
+        print(f"- ... {len(corrupt_records) - args.max_records} more")
+    if storage_failures and args.show_storage_failures:
+        print("SUPPRESSED_STORAGE_FAILURES:")
+        for record in storage_failures[: max(1, args.max_records)]:
+            print(format_record(record))
+        if len(storage_failures) > args.max_records:
+            print(f"- ... {len(storage_failures) - args.max_records} more")
     return 1
 
 

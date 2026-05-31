@@ -64,10 +64,10 @@ This reads the cached result from the local `media-stack-health.timer` on `docke
 
 ## Plex Appliance Verified Corruption Check
 
-The Plex appliances do not scan media on a schedule. They only write verified
-corruption records after normal playback fails the same item repeatedly and an
-automatic targeted `ffmpeg` decode check confirms the file is truncated or
-corrupt.
+The Plex appliances do not scan media on a schedule. They only write playback
+failure records after normal playback fails the same item repeatedly and an
+automatic targeted `ffmpeg` decode check confirms the Plex stream could not be
+decoded.
 
 Astra should check the verified-corruption report from the current OpenClaw host:
 
@@ -79,11 +79,18 @@ Astra should check the verified-corruption report from the current OpenClaw host
 ssh dbc@100.81.29.94 '/usr/local/bin/plex-appliance-corrupt-media-report --since-hours 168'
 ```
 
-Healthy output starts with `OK:`. Any output starting with `CRITICAL:` means the
-appliance verified a corrupt media file during attempted playback. Alert Johnny
-in Discord `#astra` with the title, timestamp/position, reason, and file path so
-the release can be replaced and the backing drive can be checked if patterns
-emerge.
+Healthy output starts with `OK:`. Plex HTTP/storage-path failures, especially
+`input/output error`, are suppressed by default because they can be transient
+NAS, mergerfs, VirtioFS, or Plex stream-path failures even when the media file
+later decodes cleanly from the backing mount. If the command reports suppressed
+storage failures in the `OK:` line, do not page Johnny as corrupt media; rely on
+the media mount and media-stack checks for storage-health paging, and inspect
+manually with `--show-storage-failures` when needed.
+
+Any output starting with `CRITICAL:` means the appliance found an actionable
+file-corruption signature during attempted playback. Alert Johnny in Discord
+`#astra` with the title, timestamp/position, reason, and file path so the
+release can be replaced and the backing drive can be checked if patterns emerge.
 
 De-duplicate by title, file path, and position in
 `memory/plex-corrupt-media-alerts.json`; alert once per finding per 24 hours and
