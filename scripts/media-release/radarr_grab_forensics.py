@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import argparse
 import collections
+import datetime as dt
 import json
 import re
 import sys
@@ -18,9 +19,11 @@ import urllib.error
 import urllib.parse
 import urllib.request
 import xml.etree.ElementTree as ET
+from pathlib import Path
 from typing import Any
 
 
+DEFAULT_BACKUP_DIR = "/opt/media-stack/arr-policy-backups"
 DA_RE = re.compile(
     r"(?i)\b(?:dual[ ._-]?audio|multi[ ._-]?audio|"
     r"dual\b(?![ ._-]sub(?:s|titles?)?\b)|"
@@ -118,6 +121,28 @@ def api_get(base_url: str, api_key: str, path: str, params: dict[str, Any] | Non
     except urllib.error.HTTPError as exc:
         body = exc.read().decode("utf-8", errors="replace")
         raise RuntimeError(f"GET {path} failed: {exc.code} {body}") from exc
+
+
+def api_delete(
+    base_url: str,
+    api_key: str,
+    path: str,
+    params: dict[str, Any] | None = None,
+) -> tuple[int, str]:
+    query = ""
+    if params:
+        query = "?" + urllib.parse.urlencode(params)
+    request = urllib.request.Request(
+        f"{base_url.rstrip('/')}{path}{query}",
+        headers={"X-Api-Key": api_key},
+        method="DELETE",
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=60) as response:
+            return response.getcode(), response.read().decode("utf-8", errors="replace")
+    except urllib.error.HTTPError as exc:
+        body = exc.read().decode("utf-8", errors="replace")
+        raise RuntimeError(f"DELETE {path} failed: {exc.code} {body}") from exc
 
 
 def quality_label(value: dict[str, Any] | None) -> str:
@@ -387,6 +412,82 @@ def group_queue(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     )
 
 
+def current_better(row: dict[str, Any]) -> bool:
+    return compare_scores(row) == "current_better"
+
+
+def cleanup_candidates(rows: list[dict[str, Any]], safe_groups_only: bool) -> tuple[list[dict[str, Any]], int]:
+    groups: dict[str, list[dict[str, Any]]] = {}
+    for row in rows:
+        key = str(row.get("download_id") or row.get("title") or f"queue:{row.get('queue_id')}")
+        groups.setdefault(key, []).append(row)
+
+    candidates: list[dict[str, Any]] = []
+    row_count = 0
+    for group_rows in groups.values():
+        current_better_rows = [row for row in group_rows if current_better(row)]
+        if not current_better_rows:
+            continue
+        if safe_groups_only and len(current_better_rows) != len(group_rows):
+            continue
+        row_count += len(current_better_rows)
+        candidates.append(current_better_rows[0])
+    return candidates, row_count
+
+
+def utc_stamp() -> str:
+    return dt.datetime.now(dt.UTC).strftime("%Y%m%dT%H%M%SZ")
+
+
+def write_cleanup_backup(
+    backup_dir: str,
+    queue_page: dict[str, Any] | list[Any],
+    rows: list[dict[str, Any]],
+    candidates: list[dict[str, Any]],
+    safe_groups_only: bool,
+) -> str | None:
+    if not candidates:
+        return None
+    path = Path(backup_dir) / f"{utc_stamp()}-radarr-queue-cleanup.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "created_at": dt.datetime.now(dt.UTC).isoformat(timespec="seconds").replace("+00:00", "Z"),
+        "mode": "safe-current-better-groups" if safe_groups_only else "current-better-downloads",
+        "queue_total": queue_page.get("totalRecords") if isinstance(queue_page, dict) else len(rows),
+        "candidate_downloads": len(candidates),
+        "candidates": candidates,
+        "queue": rows,
+    }
+    path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    return str(path)
+
+
+def remove_queue_items(
+    base_url: str,
+    api_key: str,
+    candidates: list[dict[str, Any]],
+    remove_from_client: bool,
+    blocklist: bool,
+) -> list[dict[str, Any]]:
+    results: list[dict[str, Any]] = []
+    for row in candidates:
+        queue_id = row.get("queue_id")
+        if not isinstance(queue_id, int):
+            results.append({**row, "cleanup_status": "skipped missing queue id"})
+            continue
+        api_delete(
+            base_url,
+            api_key,
+            f"/api/v3/queue/{queue_id}",
+            {
+                "removeFromClient": str(remove_from_client).lower(),
+                "blocklist": str(blocklist).lower(),
+            },
+        )
+        results.append({**row, "cleanup_status": "removed"})
+    return results
+
+
 def print_text(report: dict[str, Any]) -> None:
     label_counts = collections.Counter(
         label for group in report["groups"] for label in group["classifications"]
@@ -424,6 +525,30 @@ def print_text(report: dict[str, Any]) -> None:
                 print(f"    queued_cfs={', '.join(row['queued_cfs']) or '(none)'}")
                 print(f"    current_cfs={', '.join(row['current_cfs']) or '(none)'}")
         print()
+    if report["cleanup_candidates"]:
+        print("cleanup candidates:")
+        print(
+            "  rows={cleanup_candidate_rows} downloads={downloads}".format(
+                cleanup_candidate_rows=report["cleanup_candidate_rows"],
+                downloads=len(report["cleanup_candidates"]),
+            )
+        )
+        for row in report["cleanup_candidates"]:
+            print(
+                f"  - queue_id={row['queue_id']} download_id={row['download_id']} "
+                f"{row['movie']}: {row['title']}"
+            )
+        print()
+    if report["cleanup_results"]:
+        print(f"cleanup removed downloads: {len(report['cleanup_results'])}")
+        if report.get("cleanup_backup"):
+            print(f"cleanup backup: {report['cleanup_backup']}")
+        for row in report["cleanup_results"]:
+            print(
+                f"  - queue_id={row['queue_id']} download_id={row['download_id']} "
+                f"{row['cleanup_status']}: {row['title']}"
+            )
+        print()
 
 
 def parse_args() -> argparse.Namespace:
@@ -433,6 +558,30 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--base-url", default="http://127.0.0.1:7878")
     parser.add_argument("--config", default="/opt/media-stack/radarr/config.xml")
     parser.add_argument("--page-size", type=int, default=1000)
+    parser.add_argument(
+        "--remove-current-better",
+        action="store_true",
+        help="remove queue downloads where the existing file has a higher CF score",
+    )
+    parser.add_argument(
+        "--safe-groups-only",
+        action="store_true",
+        help=(
+            "with --remove-current-better, remove only download groups where every "
+            "queued row is current-better; skips mixed packs"
+        ),
+    )
+    parser.add_argument(
+        "--remove-from-client",
+        action="store_true",
+        help="also remove matching downloads from the download client",
+    )
+    parser.add_argument(
+        "--blocklist",
+        action="store_true",
+        help="blocklist removed releases; default is false",
+    )
+    parser.add_argument("--backup-dir", default=DEFAULT_BACKUP_DIR)
     return parser.parse_args()
 
 
@@ -453,11 +602,33 @@ def main() -> int:
     )
     records = queue_page.get("records", queue_page if isinstance(queue_page, list) else [])
     rows = [summarize_queue_record(args.base_url, api_key, record) for record in records]
+    candidates, candidate_rows = cleanup_candidates(rows, args.safe_groups_only)
+    cleanup_backup = None
+    cleanup_results: list[dict[str, Any]] = []
+    if args.remove_current_better:
+        cleanup_backup = write_cleanup_backup(
+            args.backup_dir,
+            queue_page,
+            rows,
+            candidates,
+            args.safe_groups_only,
+        )
+        cleanup_results = remove_queue_items(
+            args.base_url,
+            api_key,
+            candidates,
+            remove_from_client=args.remove_from_client,
+            blocklist=args.blocklist,
+        )
     report = {
         "queue_total": queue_page.get("totalRecords") if isinstance(queue_page, dict) else len(records),
         "queue_count": len(rows),
         "details": args.details,
         "groups": group_queue(rows),
+        "cleanup_candidate_rows": candidate_rows,
+        "cleanup_candidates": candidates,
+        "cleanup_backup": cleanup_backup,
+        "cleanup_results": cleanup_results,
     }
     if args.json:
         json.dump(report, sys.stdout, indent=2, sort_keys=True)

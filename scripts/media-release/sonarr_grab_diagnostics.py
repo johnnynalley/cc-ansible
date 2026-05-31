@@ -8,13 +8,18 @@ requires explicit flags and never blocklists unless asked.
 from __future__ import annotations
 
 import argparse
+import datetime as dt
 import json
 import sys
 import urllib.error
 import urllib.parse
 import urllib.request
 import xml.etree.ElementTree as ET
+from pathlib import Path
 from typing import Any
+
+
+DEFAULT_BACKUP_DIR = "/opt/media-stack/arr-policy-backups"
 
 
 def read_api_key(path: str) -> str:
@@ -189,6 +194,8 @@ def print_text(report: dict[str, Any]) -> None:
     if report["cleanup_results"]:
         print()
         print(f"cleanup removed downloads: {len(report['cleanup_results'])}")
+        if report.get("cleanup_backup"):
+            print(f"cleanup backup: {report['cleanup_backup']}")
         for item in report["cleanup_results"]:
             print(f"- queue_id={item['queue_id']} download_id={item['download_id']} {item['status']}: {item['queued_title']}")
     print()
@@ -215,6 +222,14 @@ def parse_args() -> argparse.Namespace:
         help="remove queue downloads where the existing file has a higher CF score",
     )
     parser.add_argument(
+        "--safe-groups-only",
+        action="store_true",
+        help=(
+            "with --remove-current-better, remove only download groups where every "
+            "queued row is current-better; skips mixed packs"
+        ),
+    )
+    parser.add_argument(
         "--remove-from-client",
         action="store_true",
         help="also remove matching downloads from the download client",
@@ -224,7 +239,12 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="blocklist removed releases; default is false",
     )
+    parser.add_argument("--backup-dir", default=DEFAULT_BACKUP_DIR)
     return parser.parse_args()
+
+
+def download_key(item: dict[str, Any]) -> str:
+    return str(item.get("download_id") or item.get("queued_title") or f"queue:{item.get('queue_id')}")
 
 
 def queue_groups(queue: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -285,20 +305,49 @@ def current_better(item: dict[str, Any]) -> bool:
     )
 
 
-def cleanup_candidates(queue: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], int]:
-    seen: set[str] = set()
+def cleanup_candidates(queue: list[dict[str, Any]], safe_groups_only: bool) -> tuple[list[dict[str, Any]], int]:
     candidates: list[dict[str, Any]] = []
     row_count = 0
+    groups: dict[str, list[dict[str, Any]]] = {}
     for item in queue:
-        if not current_better(item):
+        groups.setdefault(download_key(item), []).append(item)
+
+    for rows in groups.values():
+        current_better_rows = [item for item in rows if current_better(item)]
+        if not current_better_rows:
             continue
-        row_count += 1
-        key = str(item.get("download_id") or f"queue:{item.get('queue_id')}")
-        if key in seen:
+        if safe_groups_only and len(current_better_rows) != len(rows):
             continue
-        seen.add(key)
-        candidates.append(item)
+        row_count += len(current_better_rows)
+        candidates.append(current_better_rows[0])
     return candidates, row_count
+
+
+def utc_stamp() -> str:
+    return dt.datetime.now(dt.UTC).strftime("%Y%m%dT%H%M%SZ")
+
+
+def write_cleanup_backup(
+    backup_dir: str,
+    queue_page: dict[str, Any] | list[Any],
+    queue: list[dict[str, Any]],
+    candidates: list[dict[str, Any]],
+    safe_groups_only: bool,
+) -> str | None:
+    if not candidates:
+        return None
+    path = Path(backup_dir) / f"{utc_stamp()}-sonarr-queue-cleanup.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "created_at": dt.datetime.now(dt.UTC).isoformat(timespec="seconds").replace("+00:00", "Z"),
+        "mode": "safe-current-better-groups" if safe_groups_only else "current-better-downloads",
+        "queue_total": queue_page.get("totalRecords") if isinstance(queue_page, dict) else len(queue),
+        "candidate_downloads": len(candidates),
+        "candidates": candidates,
+        "queue": queue,
+    }
+    path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    return str(path)
 
 
 def remove_queue_items(
@@ -366,9 +415,17 @@ def main() -> int:
         )
         for record in records
     ]
-    candidates, candidate_rows = cleanup_candidates(queue)
+    candidates, candidate_rows = cleanup_candidates(queue, args.safe_groups_only)
     cleanup_results: list[dict[str, Any]] = []
+    cleanup_backup = None
     if args.remove_current_better:
+        cleanup_backup = write_cleanup_backup(
+            args.backup_dir,
+            queue_page,
+            queue,
+            candidates,
+            args.safe_groups_only,
+        )
         cleanup_results = remove_queue_items(
             args.base_url,
             api_key,
@@ -383,6 +440,7 @@ def main() -> int:
         "queue": queue,
         "cleanup_candidate_rows": candidate_rows,
         "cleanup_candidates": candidates,
+        "cleanup_backup": cleanup_backup,
         "cleanup_results": cleanup_results,
         "recent_grabs": [
             summarize_history_record(record)

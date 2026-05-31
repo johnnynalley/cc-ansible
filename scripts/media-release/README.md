@@ -65,7 +65,9 @@
 - `radarr_release_expectation_check.py`: Read-only check of live Radarr anime
   release-selection expectations.
 - `radarr_grab_forensics.py`: Classifies Radarr queue items against current
-  movie files and Radarr's own import-rejection score messages.
+  movie files and Radarr's own import-rejection score messages. Optional
+  cleanup is manual and can remove only safe current-better groups after
+  writing a queue snapshot.
 - `seerr_arr_endpoint_update.py`: Audits or updates Seerr's Sonarr/Radarr
   endpoints, validates candidates through Seerr's own Arr test API, and writes
   a snapshot before live changes.
@@ -74,7 +76,8 @@
 - `sonarr_episode_file_report.py`: Read-only report of current Sonarr
   episode-file scores for one series.
 - `sonarr_grab_diagnostics.py`: Compares queued Sonarr grabs against current
-  episode files; cleanup requires explicit flags.
+  episode files; cleanup requires explicit flags and can be restricted to
+  safe current-better groups so mixed packs are skipped.
 - `sonarr_grab_forensics.py`: Classifies why Sonarr queue items were grabbed
   and why they may not import.
 - `sonarr_jojo_stardust_s01_repair.py`: Narrow JoJo Stardust Crusaders S01

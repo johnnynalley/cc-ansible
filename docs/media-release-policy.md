@@ -447,7 +447,9 @@ For future release-policy changes:
    `scripts/media-release/radarr_grab_forensics.py` before any cleanup so the
    queue is classified as valid upgrade, payload score loss, pack
    collateral/mapping, or client failure instead of just deleted after
-   bandwidth has already been spent.
+   bandwidth has already been spent. Routine cleanup should remove only safe
+   current-better groups after writing a queue snapshot, so mixed packs with
+   any still-valid rows stay intact.
 7. Update this document and the short README summary in the same change.
 
 Never change a single score band in isolation without checking the rest of the
@@ -887,22 +889,26 @@ retention location. Do not let staging snapshots pile up indefinitely.
   Deleting current-better queue rows is a last cleanup step after inspection,
   not the steady-state behavior.
 - `scripts/media-release/sonarr_grab_diagnostics.py` is the queue regression check. By
-  default it is read-only. `--remove-current-better --remove-from-client`
-  removes only downloads where the existing imported file has a higher current
-  custom-format score than the queued item; it uses Sonarr queue deletion with
-  `blocklist=false`. On 2026-05-22, after inspection, it removed 168 stale
-  worse queue rows across 5 downloads. The follow-up check showed 69 remaining
-  queue rows, all with `queued_better` and no `current_better` candidates.
+  default it is read-only. `--remove-current-better --safe-groups-only
+  --remove-from-client` removes only download groups where every queued row is
+  worse than the current imported file; it uses Sonarr queue deletion with
+  `blocklist=false` unless `--blocklist` is explicitly passed. Each removal
+  pass writes a queue snapshot under `/opt/media-stack/arr-policy-backups/`.
+  On 2026-05-22, after inspection, it removed 168 stale worse queue rows across
+  5 downloads. The follow-up check showed 69 remaining queue rows, all with
+  `queued_better` and no `current_better` candidates.
 - `scripts/media-release/sonarr_grab_forensics.py` is the first-line read-only queue
   classifier for the same problem. It groups queue rows by download, compares
   queued vs current custom-format scores, flags likely payload score loss,
   pack collateral/mapping issues, stalled/warning downloads, and active valid
   upgrades, and prints the release signals Sonarr probably used at grab time.
   Use it before considering any queue removal or download-client cleanup.
-- `scripts/media-release/radarr_grab_forensics.py` is the matching read-only
-  Radarr classifier. It compares queued movie downloads against current movie
-  file scores when Radarr exposes them and also parses Radarr import-rejection
-  messages that say the existing file has a higher custom-format score.
+- `scripts/media-release/radarr_grab_forensics.py` is the matching Radarr
+  classifier. It compares queued movie downloads against current movie file
+  scores when Radarr exposes them and also parses Radarr import-rejection
+  messages that say the existing file has a higher custom-format score. It is
+  read-only by default; manual cleanup uses `--remove-current-better
+  --safe-groups-only --remove-from-client` and writes a queue snapshot first.
 - Bleach fresh-search incident, 2026-05-22 local time: after the show was
   deleted/re-added, the manual search began around `20:37` and then `media-vm`
   rebooted at `20:50` and again at `20:58`. Sonarr restarted at `20:50:35` and
