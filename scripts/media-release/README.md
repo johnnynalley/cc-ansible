@@ -7,6 +7,10 @@
   backups.
 - `arr_disable_recycle_bins.py`: Disables Sonarr/Radarr recycle bins after a
   timestamped live backup.
+- `arr_duplicate_media_audit.py`: Read-only duplicate media audit. On
+  `docker-vm`, compares Sonarr/Radarr tracked files with the visible library;
+  on the NAS host with `--mode branch`, checks mergerfs branch roots for hidden
+  same-path and parsed episode duplicates.
 - `arr_dual_audio_title_policy.py`: Updates Arr dual-audio custom formats so
   explicit title markers can be trusted at grab/import time.
 - `arr_release_policy_audit.py`: Read-only Sonarr/Radarr release profile and

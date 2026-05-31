@@ -37,6 +37,7 @@ a separate policy because dual audio is the highest priority there.
 - Sonarr grab/import forensics: `scripts/media-release/sonarr_grab_forensics.py`
 - Radarr grab/import forensics: `scripts/media-release/radarr_grab_forensics.py`
 - Sonarr transaction audit report: `scripts/media-release/sonarr_transaction_audit.py`
+- Arr duplicate media audit: `scripts/media-release/arr_duplicate_media_audit.py`
 - Sonarr targeted queue blocklist/removal helper:
   `scripts/media-release/sonarr_blocklist_queue_matches.py`
 - Sonarr JoJo Stardust arc-local repair helper:
@@ -253,6 +254,14 @@ Keep it enabled while Profilarr upgrade searches are active so later reviews can
 compare grab-time, queue-time, import/delete, and storage outcomes without
 relying on memory. If an older log needs redaction, use
 `scripts/media-release/sonarr_transaction_log_sanitize.py`.
+
+`scripts/media-release/arr_duplicate_media_audit.py` is the read-only duplicate
+media check. Run it on `docker-vm` to compare Sonarr/Radarr tracked file paths
+against the visible `/srv/media/plex` library, including untracked files in
+series/movie folders and parsed duplicate episode keys. Run it on the NAS host
+with `--mode branch` to scan the underlying mergerfs branch roots for hidden
+same-relative-path duplicates and parsed episode duplicates that the union mount
+may mask.
 
 `scripts/media-release/sonarr_transaction_audit.py` is the compact report over that monitor
 log plus the live Sonarr queue. It summarizes recent history event types,
