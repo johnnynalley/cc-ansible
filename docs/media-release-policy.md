@@ -1174,7 +1174,9 @@ unstamped. For obvious single-file video torrents, the stamper uses
 qBittorrent's torrent metadata instead of calling the `torrents/files`
 endpoint, because that endpoint has been observed to hang and wedge qBit's Web
 API on some completed torrents; the actual rename still goes through
-`renameFile`.
+`renameFile`. For one-off repair commands where Sonarr context is known but the
+qBit-side lookup cannot recover it, the script supports `--series-title` to
+provide the canonical Sonarr title explicitly.
 
 The SABnzbd script runs as a normal post-processing script for media
 categories. Usenet payloads are not seeded, so it renames completed files

@@ -870,6 +870,11 @@ def main() -> int:
     parser.add_argument("--env", default="/config/scripts/qbit-release-stamper.env")
     parser.add_argument("--force", action="store_true")
     parser.add_argument("--dry-run", action="store_true")
+    parser.add_argument(
+        "--series-title",
+        default="",
+        help="explicit canonical Sonarr series title for targeted repairs",
+    )
     args = parser.parse_args()
 
     load_env(args.env)
@@ -940,7 +945,7 @@ def main() -> int:
             or parse_languages(os.environ.get("DA_ORIGINAL_LANGUAGES", ""))
             or DEFAULT_DUAL_AUDIO_ORIGINAL_LANGUAGES
         )
-        series_title = series_title_from_arr_record(arr_record)
+        series_title = args.series_title.strip() or series_title_from_arr_record(arr_record)
         parent_title = parent_title_from_values(
             torrent.get("name"),
             args.name,
