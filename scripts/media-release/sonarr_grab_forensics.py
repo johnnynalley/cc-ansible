@@ -108,6 +108,18 @@ def api_get(base_url: str, api_key: str, path: str, params: dict[str, Any] | Non
         raise RuntimeError(f"GET {path} failed: {exc.code} {body}") from exc
 
 
+def try_api_get(
+    base_url: str,
+    api_key: str,
+    path: str,
+    params: dict[str, Any] | None = None,
+) -> tuple[Any | None, str | None]:
+    try:
+        return api_get(base_url, api_key, path, params), None
+    except RuntimeError as exc:
+        return None, str(exc)
+
+
 def quality_label(value: dict[str, Any] | None) -> str:
     if not isinstance(value, dict):
         return "unknown"
@@ -248,6 +260,9 @@ def summarize_queue_record(
     return {
         "queue_id": record.get("id"),
         "download_id": record.get("downloadId"),
+        "episode_id": record.get("episodeId"),
+        "series_id": (record.get("series") or {}).get("id")
+        or (record.get("episode") or episode or {}).get("seriesId"),
         "title": queued_title,
         "series": (record.get("series") or {}).get("title"),
         "season": (record.get("episode") or episode or {}).get("seasonNumber"),
@@ -267,6 +282,129 @@ def summarize_queue_record(
         "risk_flags": risk_flags(queued_title, queued_cfs),
         "inferred_release_group": release_group_from_title(queued_title),
         "messages": messages,
+    }
+
+
+def row_matches(row: dict[str, Any], filters: list[str]) -> bool:
+    if not filters:
+        return True
+    haystack = "\n".join(
+        [
+            str(row.get("download_id") or ""),
+            str(row.get("queue_id") or ""),
+            str(row.get("title") or ""),
+            str(row.get("series") or ""),
+            " ".join(row.get("queued_cfs") or []),
+            "\n".join(row.get("messages") or []),
+        ]
+    ).casefold()
+    return any(term.casefold() in haystack for term in filters)
+
+
+def summarize_manual_import_candidate(item: dict[str, Any]) -> dict[str, Any]:
+    episodes = item.get("episodes") or []
+    return {
+        "path": item.get("path"),
+        "relative_path": item.get("relativePath"),
+        "name": item.get("name"),
+        "quality": quality_label(item.get("quality")),
+        "score": item.get("customFormatScore"),
+        "custom_formats": cf_names(item.get("customFormats")),
+        "episodes": [
+            {
+                "id": episode.get("id"),
+                "season": episode.get("seasonNumber"),
+                "episode": episode.get("episodeNumber"),
+                "title": episode.get("title"),
+            }
+            for episode in episodes
+        ],
+        "rejections": [
+            str(rejection.get("reason") or rejection)
+            for rejection in item.get("rejections") or []
+        ],
+    }
+
+
+def manual_import_report(
+    base_url: str,
+    api_key: str,
+    group_rows: list[dict[str, Any]],
+) -> dict[str, Any]:
+    download_id = group_rows[0].get("download_id")
+    if not download_id:
+        return {"error": "download has no downloadId"}
+    series_ids = sorted({row.get("series_id") for row in group_rows if isinstance(row.get("series_id"), int)})
+    attempts: list[dict[str, Any]] = []
+    attempts.append({"downloadId": download_id, "filterExistingFiles": "false"})
+    if len(series_ids) == 1:
+        attempts.append(
+            {
+                "downloadId": download_id,
+                "seriesId": series_ids[0],
+                "filterExistingFiles": "false",
+            }
+        )
+
+    errors: list[str] = []
+    for params in attempts:
+        candidates, error = try_api_get(base_url, api_key, "/api/v3/manualimport", params)
+        if error:
+            errors.append(error)
+            continue
+        if isinstance(candidates, list):
+            return {
+                "params": params,
+                "candidate_count": len(candidates),
+                "candidates": [summarize_manual_import_candidate(item) for item in candidates[:25]],
+            }
+    return {"errors": errors}
+
+
+def history_matches(record: dict[str, Any], group_rows: list[dict[str, Any]]) -> bool:
+    download_ids = {
+        str(row.get("download_id"))
+        for row in group_rows
+        if row.get("download_id") is not None
+    }
+    titles = {
+        str(row.get("title") or "").casefold()
+        for row in group_rows
+        if row.get("title")
+    }
+    data = record.get("data") or {}
+    if str(data.get("downloadId") or data.get("download_id") or "") in download_ids:
+        return True
+    source_title = str(record.get("sourceTitle") or "").casefold()
+    return any(title and (title in source_title or source_title in title) for title in titles)
+
+
+def summarize_history_record(record: dict[str, Any]) -> dict[str, Any]:
+    data = record.get("data") or {}
+    return {
+        "date": record.get("date"),
+        "event_type": record.get("eventType"),
+        "series": (record.get("series") or {}).get("title"),
+        "season": (record.get("episode") or {}).get("seasonNumber"),
+        "episode": (record.get("episode") or {}).get("episodeNumber"),
+        "source_title": record.get("sourceTitle"),
+        "quality": quality_label(record.get("quality")),
+        "score": record.get("customFormatScore"),
+        "custom_formats": cf_names(record.get("customFormats")),
+        "data": {
+            key: data.get(key)
+            for key in (
+                "downloadId",
+                "indexer",
+                "releaseGroup",
+                "downloadClient",
+                "downloadClientName",
+                "publishedDate",
+                "droppedPath",
+                "importedPath",
+            )
+            if data.get(key) is not None
+        },
     }
 
 
@@ -323,7 +461,13 @@ def classify_group(rows: list[dict[str, Any]]) -> list[str]:
     return labels
 
 
-def group_queue(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def group_queue(
+    rows: list[dict[str, Any]],
+    base_url: str | None = None,
+    api_key: str | None = None,
+    include_manual_import: bool = False,
+    history_records: list[dict[str, Any]] | None = None,
+) -> list[dict[str, Any]]:
     groups: dict[str, list[dict[str, Any]]] = {}
     for row in rows:
         key = str(row.get("download_id") or row.get("title") or f"queue:{row.get('queue_id')}")
@@ -333,8 +477,7 @@ def group_queue(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     for key, group_rows in groups.items():
         states = [compare_scores(row) for row in group_rows]
         messages = [message for row in group_rows for message in row["messages"]]
-        summaries.append(
-            {
+        summary = {
                 "key": key,
                 "title": group_rows[0].get("title"),
                 "download_client": group_rows[0].get("download_client"),
@@ -372,8 +515,13 @@ def group_queue(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
                 ),
                 "sample_message": messages[0] if messages else "",
                 "sample_rows": group_rows[:3],
-            }
-        )
+        }
+        if include_manual_import and base_url and api_key:
+            summary["manual_import"] = manual_import_report(base_url, api_key, group_rows)
+        if history_records is not None:
+            matches = [record for record in history_records if history_matches(record, group_rows)]
+            summary["history"] = [summarize_history_record(record) for record in matches[:20]]
+        summaries.append(summary)
     return sorted(
         summaries,
         key=lambda item: (
@@ -409,6 +557,42 @@ def print_text(report: dict[str, Any]) -> None:
             print(f"  inferred_groups={', '.join(group['inferred_release_groups'])}")
         if group["sample_message"]:
             print(f"  sample_message={group['sample_message']}")
+        if group.get("history"):
+            print("  history:")
+            for item in group["history"][:5]:
+                label = (
+                    f"S{int(item['season']):02}E{int(item['episode']):02}"
+                    if item["season"] is not None and item["episode"] is not None
+                    else "unknown episode"
+                )
+                print(
+                    f"    {item['date']} {item['event_type']} {item['series']} {label} "
+                    f"score={item['score']} {item['source_title']}"
+                )
+                print(f"      CFs={', '.join(item['custom_formats']) or '(none)'}")
+        if group.get("manual_import"):
+            manual = group["manual_import"]
+            print(
+                "  manual_import: {count} candidates via {params}".format(
+                    count=manual.get("candidate_count", "unknown"),
+                    params=manual.get("params") or manual.get("errors") or manual.get("error"),
+                )
+            )
+            for item in manual.get("candidates", [])[:8]:
+                episodes = ",".join(
+                    "S{season:02}E{episode:02}".format(
+                        season=int(episode.get("season") or 0),
+                        episode=int(episode.get("episode") or 0),
+                    )
+                    for episode in item.get("episodes") or []
+                )
+                print(
+                    f"    {episodes or 'unknown'} score={item.get('score')} "
+                    f"quality={item.get('quality')} {item.get('path')}"
+                )
+                print(f"      CFs={', '.join(item.get('custom_formats') or []) or '(none)'}")
+                if item.get("rejections"):
+                    print(f"      rejections={'; '.join(item['rejections'])}")
         if report["details"]:
             for row in group["sample_rows"]:
                 label = (
@@ -418,7 +602,7 @@ def print_text(report: dict[str, Any]) -> None:
                 )
                 print(
                     f"  row queue_id={row['queue_id']} {row['series']} {label} "
-                    f"queued={row['queued_score']} current={row['current_score']}"
+                    f"episode_id={row['episode_id']} queued={row['queued_score']} current={row['current_score']}"
                 )
                 print(f"    queued_cfs={', '.join(row['queued_cfs']) or '(none)'}")
                 print(f"    current_cfs={', '.join(row['current_cfs']) or '(none)'}")
@@ -432,6 +616,23 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--base-url", default="http://127.0.0.1:8989")
     parser.add_argument("--config", default="/opt/media-stack/sonarr/config.xml")
     parser.add_argument("--page-size", type=int, default=1000)
+    parser.add_argument(
+        "--filter",
+        action="append",
+        default=[],
+        help="only include queue rows matching this text; may be passed multiple times",
+    )
+    parser.add_argument(
+        "--manual-import",
+        action="store_true",
+        help="ask Sonarr how filtered completed downloads would score during manual import",
+    )
+    parser.add_argument(
+        "--history-size",
+        type=int,
+        default=0,
+        help="include recent history rows matching filtered download IDs/titles",
+    )
     return parser.parse_args()
 
 
@@ -458,11 +659,35 @@ def main() -> int:
         summarize_queue_record(args.base_url, api_key, record, episode_cache, episode_file_cache)
         for record in records
     ]
+    rows = [row for row in rows if row_matches(row, args.filter)]
+    history_records = None
+    if args.history_size:
+        history = api_get(
+            args.base_url,
+            api_key,
+            "/api/v3/history",
+            {
+                "page": 1,
+                "pageSize": args.history_size,
+                "sortKey": "date",
+                "sortDirection": "descending",
+                "includeSeries": "true",
+                "includeEpisode": "true",
+            },
+        )
+        history_records = history.get("records", history if isinstance(history, list) else [])
     report = {
         "queue_total": queue_page.get("totalRecords") if isinstance(queue_page, dict) else len(records),
         "queue_count": len(rows),
         "details": args.details,
-        "groups": group_queue(rows),
+        "filters": args.filter,
+        "groups": group_queue(
+            rows,
+            args.base_url,
+            api_key,
+            args.manual_import,
+            history_records,
+        ),
     }
     if args.json:
         json.dump(report, sys.stdout, indent=2, sort_keys=True)

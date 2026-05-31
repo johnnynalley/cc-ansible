@@ -25,6 +25,7 @@ LEGACY_TIER_NAMES = {"WEB Scene"}
 ANIME_DUAL_AUDIO_SCORE = 100000
 REGULAR_DUAL_AUDIO_SCORE = 100000
 REGULAR_DUAL_AUDIO_CF_NAME = "Regular Dual Audio"
+RADARR_REGULAR_ENGLISH_GUARD_CF_NAME = "Regular English - Foreign/Multi Audio Guard"
 QUALITY_RANK_PREFIX = "Local Quality Rank - "
 QUALITY_RANK_SCORES = {
     "480p": 10000,
@@ -697,6 +698,20 @@ def audit_profile(
                     f"must stay below bare {higher} rank {higher_score}"
                 )
         regular_dual_audio_score = scores.get(REGULAR_DUAL_AUDIO_CF_NAME, 0)
+        radarr_regular_english_guard_score = scores.get(RADARR_REGULAR_ENGLISH_GUARD_CF_NAME, 0)
+        if instance.name == "radarr":
+            if profile_check.name == "movies-regular-efficient":
+                if radarr_regular_english_guard_score > -10000:
+                    failures.append(
+                        f"{profile_check.name}: {RADARR_REGULAR_ENGLISH_GUARD_CF_NAME} "
+                        f"must be a hard negative, got {radarr_regular_english_guard_score}"
+                    )
+            elif radarr_regular_english_guard_score:
+                failures.append(
+                    f"{profile_check.name}: {RADARR_REGULAR_ENGLISH_GUARD_CF_NAME} "
+                    f"must stay unscored outside the English regular profile, got "
+                    f"{radarr_regular_english_guard_score}"
+                )
         if profile_check.kind == "regular_dual_audio":
             if regular_dual_audio_score < REGULAR_DUAL_AUDIO_SCORE:
                 failures.append(
@@ -755,6 +770,7 @@ def audit_profile(
         "min_positive_dictionarry_score": min_positive_dictionarry,
         "dual_audio_score": scores.get("Anime Dual Audio"),
         "regular_dual_audio_score": scores.get(REGULAR_DUAL_AUDIO_CF_NAME),
+        "radarr_regular_english_guard_score": scores.get(RADARR_REGULAR_ENGLISH_GUARD_CF_NAME),
         "quality_rank_scores": quality_rank_scores,
         "regular_enabled_quality_group": regular_quality_groups,
         "expected_cutoff_format_score": expected_cutoff_score,

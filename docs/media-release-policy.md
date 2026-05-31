@@ -1417,6 +1417,69 @@ Current deployed state on 2026-05-22:
   (`/arr/new` and `/arr/<id>/upgrades?/save`). Treat those as authenticated
   HTTP endpoints when automating setup.
 
+## Queue Pollution Findings - 2026-05-31
+
+Focused Sonarr queue forensics used
+`scripts/media-release/sonarr_grab_forensics.py --filter ... --manual-import`
+against the live queue. The current bad rows are not one single CF math bug:
+
+- `[Judas] JoJo - S06E01` / Steel Ball Run was grabbed at `+145000`
+  (`Anime Dual Audio`, `Local Quality Rank - 1080p`, `x265`), but manual import
+  rescored the completed payload as `+40000` (`Local Quality Rank - 1080p`,
+  `Regular Dual Audio`). The qBittorrent stamper event for the original
+  completion was `result=error`, `error="timed out"` at
+  `2026-05-30T15:56:53Z`, so `[JA+EN]`/`[x265]` were not written to the file
+  before Sonarr rescored it. A later in-container dry-run proved the media file
+  really would stamp as `[JA+EN] [x265]`, but the current stamper still leaves
+  the ambiguous series name `JoJo`; Sonarr's parser does not map that title to
+  `JoJo's Bizarre Adventure (2012)` without the grab-history ID, so automatic
+  import remains blocked unless the stamper also prefixes or otherwise
+  preserves the full Arr series title for ambiguous payload names.
+- `Sonny Boy S01 1080p Dual Audio BDRip 10 bits DD x265-EMBER` was a valid
+  stamped payload after qBittorrent post-processing, but Sonarr parsed the
+  release title as absolute episode `10` because of the separated `10 bits`
+  token. It imported only S01E10 and rejected the other files with
+  `Episode 1xNN was not found in the grabbed release`. The Sonarr parse endpoint
+  showed `seasonNumber=0`, `absoluteEpisodeNumbers=[10]`,
+  `isAbsoluteNumbering=true`, and `releaseType=singleEpisode` for the original
+  pack title.
+- `Spider-Noir.2026.S01.1080p...` was accepted as a season pack at grab time,
+  but the extracted payload file is named
+  `Spider.2002.1080p... -DNU.TAoE.mkv`. Sonarr parses that payload as
+  `seriesTitle=Spider`, `seasonNumber=20`, `episodeNumbers=[2]`, with no
+  matching series. This should be treated as a bad/mispacked release rather than
+  a profile preference issue.
+- `Paris.has.Fallen.S01E03...POOTLED` was grabbed at `+45000` from title-side
+  `Local Quality Rank - 1080p` plus `x265`, then import rescored it as
+  `+35000` after `Language - Not Original` applied from the payload. The
+  existing file is `+35441`, so Sonarr correctly refused import at that point.
+  This is grab-time versus import-time metadata drift: the media language cannot
+  be fully known before download unless the release title exposes it.
+- The SAB release stamper's Arr queue matcher is too loose: it includes all SAB
+  script arguments as match terms and accepts substring matches. Short terms
+  such as `0` can match unrelated queued releases containing `1080p`, which
+  explains contaminated `parent_title` telemetry such as Spider-Noir inheriting
+  context from The Seven Deadly Sins and Paris inheriting context from JoJo.
+  Tighten matching to download IDs/exact release titles or ignore tiny/generic
+  argv tokens before trusting SAB-derived context.
+- The qBittorrent stamper needs retry/backoff around API calls and a repair path
+  for completed queue items whose first stamp timed out. A dry-run writes
+  telemetry but does not rename; use an explicit live backup/change window
+  before running non-dry-run repair on active torrents.
+
+Open prevention work:
+
+- Add qBittorrent stamper API retry/backoff and make timeout errors include the
+  failed endpoint.
+- Make the qBittorrent stamper prefix known Arr series/movie titles when the
+  payload's visible title is ambiguous or fails Arr parser lookup, not only when
+  the filename is a bare `SxxEyy`.
+- Tighten SAB queue-record matching so script arguments cannot pull context from
+  unrelated queue rows.
+- Decide whether to add a negative CF for anime season-pack titles with
+  separated `10 bits`/`8 bits` tokens that Sonarr parses as absolute episodes,
+  or handle these as manual/blocklist exceptions per release.
+
 Reference links:
 
 - <https://github.com/Dictionarry-Hub/profilarr>
