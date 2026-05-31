@@ -566,8 +566,8 @@ The detailed release-selection policy and score-band rules are documented in
   at grab time survives into payload filenames before Sonarr/Radarr import.
   DA/x265 are per-file media-verified; platform tags and release-group suffixes
   are copied only as parent-title release context. If Sonarr context is
-  available, bare `SxxEyy` TV payload names can be prefixed with the canonical
-  series title so multi-file packs stay parseable at import.
+  available, ambiguous TV payload names with episode tokens can be rewritten to
+  the canonical series title so multi-file packs stay parseable at import.
 - **Series check**: run
   `ansible docker-vm -m script -a "scripts/media-release/sonarr_series_audit.py Bleach"` to
   inspect one show's monitored seasons, missing episode counts, queue, recent
@@ -649,7 +649,9 @@ release-title evidence before Sonarr/Radarr import multi-file packs.
 - **Playbook**: `playbooks/media/media-release-stamper.yml`
 - **qBittorrent**: completion hook calls `/config/scripts/qbit-release-stamper.py`
   with torrent hash/name/category, then renames payload files through
-  qBittorrent's Web API so seeding state stays intact.
+  qBittorrent's Web API so seeding state stays intact. The script retries
+  transient Web API failures before giving up and logging a non-fatal stamper
+  error.
 - **SABnzbd**: `shows` and `movies` categories run
   `sab-release-stamper.py` from the configured `scripts` folder.
 - **DA rule**: language-combo tags such as `[JA+EN]`, `[KO+EN]`, or
@@ -663,9 +665,10 @@ release-title evidence before Sonarr/Radarr import multi-file packs.
 - **Mixed packs**: no bulk labels. Each video file must qualify for each tag.
 - **Arr dependency**: Sonarr/Radarr lookup is optional and bounded. If either is
   down, stamping continues with the configured fallback language.
-- **Bare episode names**: when Sonarr context is available, TV payload files
-  that start with only `SxxEyy` are prefixed with the canonical series title
-  before tagging so Sonarr can map them during import.
+- **Ambiguous episode names**: when Sonarr context is available, TV payload
+  files with an episode token but without the canonical series title are
+  rewritten to include the canonical series title before tagging so Sonarr can
+  map them during import.
 - **Env ownership**: stamper env files are mode `0600` and owned by UID/GID
   `1000`, matching the media containers' `PUID`/`PGID`.
 

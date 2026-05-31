@@ -1167,7 +1167,10 @@ The qBittorrent script runs when a torrent finishes. It looks up the finished
 torrent through the qBittorrent Web API, iterates each video file, and renames
 individual payload files through qBittorrent's `renameFile` API. Do not replace
 this with direct filesystem renames, because direct renames can break seeding or
-hash-check state.
+hash-check state. The deployed env also sets bounded qBittorrent API
+retry/backoff (`QBIT_API_RETRIES`, `QBIT_API_RETRY_DELAY`, `QBIT_API_TIMEOUT`)
+so transient Web API stalls do not immediately leave completed torrents
+unstamped.
 
 The SABnzbd script runs as a normal post-processing script for media
 categories. Usenet payloads are not seeded, so it renames completed files
@@ -1191,6 +1194,11 @@ Stamping rules:
   payload itself looks like HEVC.
 - Mixed or mislabeled packs should not be bulk-labeled. Each video file must
   qualify for each tag independently.
+- When Sonarr context is available, TV payload names with an episode token but
+  without the canonical series title are rewritten to use the canonical title
+  prefix before DA/x265/release-context tags are appended. A leading release
+  group such as `[Judas]` is preserved. This covers both bare `SxxEyy` names and
+  ambiguous short-title names such as `[Judas] JoJo - S06E01`.
 - Exact per-series/per-movie original-language matching depends on optional
   Sonarr/Radarr context. That context is an enhancement, not a dependency; if
   Sonarr/Radarr is down, download completion must continue and use the safe
@@ -1459,23 +1467,17 @@ against the live queue. The current bad rows are not one single CF math bug:
   script arguments as match terms and accepts substring matches. Short terms
   such as `0` can match unrelated queued releases containing `1080p`, which
   explains contaminated `parent_title` telemetry such as Spider-Noir inheriting
-  context from The Seven Deadly Sins and Paris inheriting context from JoJo.
-  Tighten matching to download IDs/exact release titles or ignore tiny/generic
-  argv tokens before trusting SAB-derived context.
+  context from The Seven Deadly Sins and Paris inheriting context from JoJo. The
+  2026-05-31 stamper update now filters tiny/generic terms and only accepts
+  exact or long-title containment matches.
 - The qBittorrent stamper needs retry/backoff around API calls and a repair path
-  for completed queue items whose first stamp timed out. A dry-run writes
-  telemetry but does not rename; use an explicit live backup/change window
-  before running non-dry-run repair on active torrents.
+  for completed queue items whose first stamp timed out. The 2026-05-31 stamper
+  update added bounded qBittorrent Web API retries and endpoint-specific retry
+  logging. A dry-run writes telemetry but does not rename; use an explicit live
+  backup/change window before running non-dry-run repair on active torrents.
 
 Open prevention work:
 
-- Add qBittorrent stamper API retry/backoff and make timeout errors include the
-  failed endpoint.
-- Make the qBittorrent stamper prefix known Arr series/movie titles when the
-  payload's visible title is ambiguous or fails Arr parser lookup, not only when
-  the filename is a bare `SxxEyy`.
-- Tighten SAB queue-record matching so script arguments cannot pull context from
-  unrelated queue rows.
 - Decide whether to add a negative CF for anime season-pack titles with
   separated `10 bits`/`8 bits` tokens that Sonarr parses as absolute episodes,
   or handle these as manual/blocklist exceptions per release.

@@ -18,6 +18,7 @@ import re
 import shutil
 import subprocess
 import sys
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -30,6 +31,10 @@ VIDEO_EXTENSIONS = {".mkv", ".mp4", ".m4v", ".avi", ".mov", ".wmv"}
 LANGUAGE_COMBO_RE = re.compile(r"(?i)\b(?:JA|ZH|KO|EN)(?:\s*\+\s*(?:JA|ZH|KO|EN))+\b")
 X265_RE = re.compile(r"(?i)(?:\b[xh][\s._-]?265\b|\bhevc\b)")
 BARE_EPISODE_RE = re.compile(r"(?i)^(?:\[[^\]]+\]\s*)?S\d{1,2}E\d{1,3}(?:\b|[\s._-])")
+EPISODE_TOKEN_RE = re.compile(r"(?i)\bS\d{1,2}E\d{1,3}\b")
+EPISODE_PREFIX_RE = re.compile(
+    r"(?i)^(?P<group>\[[^\]]+\]\s*)?.*?(?P<episode>S\d{1,2}E\d{1,3}.*)$"
+)
 PLATFORM_TAG_PATTERNS = (
     ("CR", re.compile(r"(?i)(?:^|[\s._\-\[\(])(?:CR|Crunchyroll)(?:$|[\s._\-\]\)])")),
     ("NF", re.compile(r"(?i)(?:^|[\s._\-\[\(])(?:NF|Netflix)(?:$|[\s._\-\]\)])")),
@@ -166,14 +171,32 @@ def load_env(path: str) -> None:
             os.environ.setdefault(key.strip(), value)
 
 
+def env_int(name: str, default: int, minimum: int = 1) -> int:
+    try:
+        return max(minimum, int(os.environ.get(name, str(default))))
+    except ValueError:
+        return default
+
+
 class QbitClient:
-    def __init__(self, api_url: str, username: str, password: str) -> None:
+    def __init__(
+        self,
+        api_url: str,
+        username: str,
+        password: str,
+        retries: int = 3,
+        retry_delay: int = 2,
+        timeout: int = 60,
+    ) -> None:
         self.api_url = api_url.rstrip("/")
         self.opener = urllib.request.build_opener(
             urllib.request.HTTPCookieProcessor(CookieJar())
         )
         self.username = username
         self.password = password
+        self.retries = retries
+        self.retry_delay = retry_delay
+        self.timeout = timeout
 
     def request(
         self,
@@ -185,20 +208,35 @@ class QbitClient:
         encoded = None
         if data is not None:
             encoded = urllib.parse.urlencode(data).encode("utf-8")
-        request = urllib.request.Request(url, data=encoded)
-        try:
-            with self.opener.open(request, timeout=30) as response:
-                status = response.getcode()
-                body = response.read()
-        except urllib.error.HTTPError as exc:
-            body = exc.read().decode("utf-8", errors="replace")
-            raise RuntimeError(f"{endpoint} failed with HTTP {exc.code}: {body}") from exc
-        except urllib.error.URLError as exc:
-            raise RuntimeError(f"{endpoint} failed: {exc}") from exc
+        last_error: Exception | None = None
+        for attempt in range(1, self.retries + 1):
+            request = urllib.request.Request(url, data=encoded)
+            try:
+                with self.opener.open(request, timeout=self.timeout) as response:
+                    status = response.getcode()
+                    body = response.read()
+            except urllib.error.HTTPError as exc:
+                body = exc.read().decode("utf-8", errors="replace")
+                last_error = RuntimeError(f"{endpoint} failed with HTTP {exc.code}: {body}")
+                if exc.code < 500 or attempt >= self.retries:
+                    raise last_error from exc
+            except (TimeoutError, urllib.error.URLError, OSError) as exc:
+                last_error = RuntimeError(
+                    f"{endpoint} failed on attempt {attempt}/{self.retries}: {exc}"
+                )
+                if attempt >= self.retries:
+                    raise last_error from exc
+            else:
+                if status not in expected:
+                    raise RuntimeError(f"{endpoint} returned unexpected HTTP {status}")
+                return body
+            log(
+                f"{endpoint} failed on attempt {attempt}/{self.retries}; "
+                f"retrying in {self.retry_delay}s"
+            )
+            time.sleep(self.retry_delay)
 
-        if status not in expected:
-            raise RuntimeError(f"{endpoint} returned unexpected HTTP {status}")
-        return body
+        raise RuntimeError(f"{endpoint} failed after {self.retries} attempts: {last_error}")
 
     def get_json(self, endpoint: str, params: dict[str, str] | None = None):
         if params:
@@ -688,16 +726,37 @@ def safe_title_component(title: str) -> str:
     return cleaned.strip(" ._-")
 
 
+def comparable_title_words(value: str) -> list[str]:
+    value = re.sub(r"\(\d{4}\)", " ", value)
+    return re.findall(r"[a-z0-9]+", value.casefold())
+
+
+def title_words_present(series_title: str, basename: str) -> bool:
+    needle = comparable_title_words(series_title)
+    haystack = comparable_title_words(title_without_extension(basename))
+    if not needle:
+        return True
+    for index in range(0, len(haystack) - len(needle) + 1):
+        if haystack[index : index + len(needle)] == needle:
+            return True
+    return False
+
+
 def path_with_episode_title_prefix(path: str, series_title: str | None) -> str:
     if not series_title:
         return path
     posix_path = PurePosixPath(path)
     basename = posix_path.name
-    if not BARE_EPISODE_RE.search(basename):
+    if not EPISODE_TOKEN_RE.search(basename) or title_words_present(series_title, basename):
         return path
     title = safe_title_component(series_title)
     if not title:
         return path
+    episode_match = EPISODE_PREFIX_RE.match(basename)
+    if episode_match:
+        leading_group = episode_match.group("group") or ""
+        remainder = episode_match.group("episode").lstrip(" ._-")
+        return str(posix_path.with_name(f"{leading_group}{title} - {remainder}"))
     return str(posix_path.with_name(f"{title} - {basename}"))
 
 
@@ -820,7 +879,14 @@ def main() -> int:
         return 0
 
     try:
-        client = QbitClient(api_url, username, password)
+        client = QbitClient(
+            api_url,
+            username,
+            password,
+            retries=env_int("QBIT_API_RETRIES", 3),
+            retry_delay=env_int("QBIT_API_RETRY_DELAY", 2),
+            timeout=env_int("QBIT_API_TIMEOUT", 60),
+        )
         client.login()
         torrent = client.torrent_by_hash_or_name(args.hash, args.name)
         if not torrent:

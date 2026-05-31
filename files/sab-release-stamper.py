@@ -19,6 +19,10 @@ VIDEO_EXTENSIONS = {".mkv", ".mp4", ".m4v", ".avi", ".mov", ".wmv"}
 LANGUAGE_COMBO_RE = re.compile(r"(?i)\b(?:JA|ZH|KO|EN)(?:\s*\+\s*(?:JA|ZH|KO|EN))+\b")
 X265_RE = re.compile(r"(?i)(?:\b[xh][\s._-]?265\b|\bhevc\b)")
 BARE_EPISODE_RE = re.compile(r"(?i)^(?:\[[^\]]+\]\s*)?S\d{1,2}E\d{1,3}(?:\b|[\s._-])")
+EPISODE_TOKEN_RE = re.compile(r"(?i)\bS\d{1,2}E\d{1,3}\b")
+EPISODE_PREFIX_RE = re.compile(
+    r"(?i)^(?P<group>\[[^\]]+\]\s*)?.*?(?P<episode>S\d{1,2}E\d{1,3}.*)$"
+)
 PLATFORM_TAG_PATTERNS = (
     ("CR", re.compile(r"(?i)(?:^|[\s._\-\[\(])(?:CR|Crunchyroll)(?:$|[\s._\-\]\)])")),
     ("NF", re.compile(r"(?i)(?:^|[\s._\-\[\(])(?:NF|Netflix)(?:$|[\s._\-\]\)])")),
@@ -243,6 +247,54 @@ def parent_title_from_values(*values: str | None) -> str:
     return " || ".join(titles)
 
 
+def normalized_match_text(value: str) -> str:
+    candidate = str(value or "").strip()
+    if not candidate:
+        return ""
+    if "/" in candidate or "\\" in candidate:
+        candidate = Path(candidate).name
+    candidate = title_without_extension(candidate)
+    candidate = re.sub(r"[\s._-]+", " ", candidate)
+    candidate = re.sub(r"[^A-Za-z0-9+ ]+", " ", candidate)
+    candidate = re.sub(r"\s+", " ", candidate)
+    return candidate.strip().casefold()
+
+
+def useful_match_terms(values: list[str]) -> list[str]:
+    terms: list[str] = []
+    seen: set[str] = set()
+    for value in values:
+        for candidate in (value, Path(value).name if value and ("/" in value or "\\" in value) else ""):
+            term = normalized_match_text(candidate)
+            if len(term) < 8 or not re.search(r"[a-z]", term):
+                continue
+            if term in {"movies", "shows", "movie", "show", "complete", "completed"}:
+                continue
+            if term in seen:
+                continue
+            seen.add(term)
+            terms.append(term)
+    return terms
+
+
+def queue_record_matches_terms(record: dict, normalized_terms: list[str]) -> bool:
+    record_terms = useful_match_terms(
+        [
+            str(record.get("title") or ""),
+            str(record.get("downloadTitle") or ""),
+        ]
+    )
+    for record_term in record_terms:
+        for match_term in normalized_terms:
+            if record_term == match_term:
+                return True
+            if len(record_term) >= 16 and record_term in match_term:
+                return True
+            if len(match_term) >= 16 and match_term in record_term:
+                return True
+    return False
+
+
 def arr_queue_record_from_terms(
     arr_api_url: str,
     arr_api_key: str,
@@ -272,12 +324,11 @@ def arr_queue_record_from_terms(
         log(f"optional Arr lookup failed for {arr_api_url}: {exc}")
         return None
 
-    normalized_terms = [term.casefold() for term in match_terms if term]
+    normalized_terms = useful_match_terms(match_terms)
+    if not normalized_terms:
+        return None
     for record in queue.get("records", []):
-        title = str(record.get("title") or "").casefold()
-        if not title:
-            continue
-        if not any(title == term or title in term or term in title for term in normalized_terms):
+        if not queue_record_matches_terms(record, normalized_terms):
             continue
         return record
 
@@ -309,14 +360,35 @@ def safe_title_component(title: str) -> str:
     return cleaned.strip(" ._-")
 
 
+def comparable_title_words(value: str) -> list[str]:
+    value = re.sub(r"\(\d{4}\)", " ", value)
+    return re.findall(r"[a-z0-9]+", value.casefold())
+
+
+def title_words_present(series_title: str, basename: str) -> bool:
+    needle = comparable_title_words(series_title)
+    haystack = comparable_title_words(title_without_extension(basename))
+    if not needle:
+        return True
+    for index in range(0, len(haystack) - len(needle) + 1):
+        if haystack[index : index + len(needle)] == needle:
+            return True
+    return False
+
+
 def path_with_episode_title_prefix(path: Path, series_title: str | None) -> Path:
     if not series_title:
         return path
-    if not BARE_EPISODE_RE.search(path.name):
+    if not EPISODE_TOKEN_RE.search(path.name) or title_words_present(series_title, path.name):
         return path
     title = safe_title_component(series_title)
     if not title:
         return path
+    episode_match = EPISODE_PREFIX_RE.match(path.name)
+    if episode_match:
+        leading_group = episode_match.group("group") or ""
+        remainder = episode_match.group("episode").lstrip(" ._-")
+        return path.with_name(f"{leading_group}{title} - {remainder}")
     return path.with_name(f"{title} - {path.name}")
 
 
@@ -762,23 +834,24 @@ def main() -> int:
         return 0
 
     try:
-        match_terms = [
+        raw_match_terms = [
             os.environ.get("SAB_FINAL_NAME", ""),
             os.environ.get("SAB_FILENAME", ""),
             path.name,
-            *argv,
+            argv[1] if len(argv) > 1 else "",
+            argv[2] if len(argv) > 2 else "",
         ]
         sonarr_record = arr_queue_record_from_terms(
             os.environ.get("SONARR_API", ""),
             os.environ.get("SONARR_API_KEY", ""),
-            match_terms,
+            raw_match_terms,
         )
         radarr_record = None
         if not sonarr_record:
             radarr_record = arr_queue_record_from_terms(
                 os.environ.get("RADARR_API", ""),
                 os.environ.get("RADARR_API_KEY", ""),
-                match_terms,
+                raw_match_terms,
             )
         arr_record = sonarr_record or radarr_record
         original_languages = (
@@ -793,7 +866,7 @@ def main() -> int:
             path.name,
             arr_record.get("title") if arr_record else None,
             arr_record.get("downloadTitle") if arr_record else None,
-            *argv,
+            *raw_match_terms,
         )
         log(
             "processing download_dir={download_dir!r} category={category!r} "
