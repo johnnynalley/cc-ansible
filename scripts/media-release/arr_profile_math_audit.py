@@ -23,6 +23,8 @@ LEGACY_TIER_PATTERN = re.compile(r"^(?!Dictionarry ).*\bTier \d{2}$", re.IGNOREC
 LEGACY_TIER_NAMES = {"WEB Scene"}
 
 ANIME_DUAL_AUDIO_SCORE = 100000
+REGULAR_DUAL_AUDIO_SCORE = 100000
+REGULAR_DUAL_AUDIO_CF_NAME = "Regular Dual Audio"
 QUALITY_RANK_PREFIX = "Local Quality Rank - "
 QUALITY_RANK_SCORES = {
     "480p": 10000,
@@ -91,6 +93,7 @@ INSTANCES = (
         profile_checks=(
             ProfileCheck("shows-anime-efficient", "anime"),
             ProfileCheck("shows-regular-efficient", "regular"),
+            ProfileCheck("shows-regular-dual-audio-efficient", "regular_dual_audio"),
         ),
     ),
     ArrInstance(
@@ -101,6 +104,7 @@ INSTANCES = (
         profile_checks=(
             ProfileCheck("movies-anime-efficient", "anime"),
             ProfileCheck("movies-regular-efficient", "regular"),
+            ProfileCheck("movies-regular-dual-audio-efficient", "regular_dual_audio"),
         ),
     ),
 )
@@ -480,6 +484,8 @@ def min_configured_tier_gap(instance_name: str, scores: dict[str, int], failures
 
 
 def expected_fallback_scores(instance_name: str, profile_kind: str) -> dict[str, int]:
+    if profile_kind == "regular_dual_audio":
+        profile_kind = "regular"
     return TRASH_FALLBACK_SCORES.get((instance_name, profile_kind), {})
 
 
@@ -690,7 +696,40 @@ def audit_profile(
                     f"{profile_check.name}: max {lower} regular stack {max_lower_stack} "
                     f"must stay below bare {higher} rank {higher_score}"
                 )
-        expected_cutoff_score = max(quality_rank_scores.values() or [0]) + x265_score + source_rank + release_stack
+        regular_dual_audio_score = scores.get(REGULAR_DUAL_AUDIO_CF_NAME, 0)
+        if profile_check.kind == "regular_dual_audio":
+            if regular_dual_audio_score < REGULAR_DUAL_AUDIO_SCORE:
+                failures.append(
+                    f"{profile_check.name}: {REGULAR_DUAL_AUDIO_CF_NAME} score "
+                    f"{regular_dual_audio_score} is below {REGULAR_DUAL_AUDIO_SCORE}"
+                )
+            max_non_da_1080p = max(quality_rank_scores.values() or [0]) + x265_score + release_stack
+            if max_non_da_1080p >= regular_dual_audio_score:
+                failures.append(
+                    f"{profile_check.name}: max non-DA 1080p score {max_non_da_1080p} "
+                    f"must stay below regular DA {regular_dual_audio_score}"
+                )
+            max_720p_da = regular_dual_audio_score + QUALITY_RANK_SCORES["720p"] + x265_score + release_stack
+            min_1080p_da = regular_dual_audio_score + QUALITY_RANK_SCORES["1080p"]
+            if min_1080p_da <= max_720p_da:
+                failures.append(
+                    f"{profile_check.name}: 1080p regular DA floor {min_1080p_da} "
+                    f"must beat max 720p regular DA {max_720p_da}"
+                )
+            expected_cutoff_score = (
+                regular_dual_audio_score
+                + max(quality_rank_scores.values() or [0])
+                + x265_score
+                + source_rank
+                + release_stack
+            )
+        else:
+            if regular_dual_audio_score:
+                failures.append(
+                    f"{profile_check.name}: {REGULAR_DUAL_AUDIO_CF_NAME} must stay unscored "
+                    f"on regular English-default profiles, got {regular_dual_audio_score}"
+                )
+            expected_cutoff_score = max(quality_rank_scores.values() or [0]) + x265_score + source_rank + release_stack
 
     actual_cutoff_score = int(profile.get("cutoffFormatScore") or 0)
     if actual_cutoff_score != expected_cutoff_score:
@@ -715,6 +754,7 @@ def audit_profile(
         "max_fallback_score": max_fallback_score,
         "min_positive_dictionarry_score": min_positive_dictionarry,
         "dual_audio_score": scores.get("Anime Dual Audio"),
+        "regular_dual_audio_score": scores.get(REGULAR_DUAL_AUDIO_CF_NAME),
         "quality_rank_scores": quality_rank_scores,
         "regular_enabled_quality_group": regular_quality_groups,
         "expected_cutoff_format_score": expected_cutoff_score,
@@ -759,7 +799,7 @@ def print_text(report: dict[str, Any]) -> None:
                 "  {profile}: Bluray HEVC stack={bluray}; second Bluray={second}; "
                 "WEB HEVC stack={web}; fallback max={fallback}; incidental max={incidental}; "
                 "service max={service}; repack max={repack}; min tier gap={gap}; "
-                "x265={x265}; Bluray source={source}; DA={da}; "
+                "x265={x265}; Bluray source={source}; DA={da}; regular DA={regular_da}; "
                 "cutoff={cutoff}/{expected_cutoff}".format(
                     profile=profile["profile"],
                     bluray=stacks["best_bluray_hevc"]["score"],
@@ -773,6 +813,7 @@ def print_text(report: dict[str, Any]) -> None:
                     x265=profile["x265_score"],
                     source=profile["source_rank_bluray_score"],
                     da=profile["dual_audio_score"],
+                    regular_da=profile["regular_dual_audio_score"],
                     cutoff=profile["actual_cutoff_format_score"],
                     expected_cutoff=profile["expected_cutoff_format_score"],
                 )

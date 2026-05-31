@@ -22,6 +22,9 @@
 - `arr_quality_profile_report.py`: Read-only Sonarr/Radarr report of native
   quality-profile groups, useful for checking whether profile quality order is
   still blocking custom-format upgrades.
+- `arr_regular_dual_audio_profiles.py`: Creates or updates non-English regular
+  dual-audio efficient profiles and the parsed-language `Regular Dual Audio`
+  custom format, with live backups before apply.
 - `arr_promote_efficient_profiles.py`: Promotes accepted Profilarr test
   profiles into preserved production profile IDs, creates frozen balanced
   clones, reassigns media to efficient profiles, updates Seerr defaults, and

@@ -38,14 +38,22 @@ INSTANCES = (
         base_url="http://127.0.0.1:8989",
         config_path="/opt/media-stack/sonarr/config.xml",
         assignment_path="/api/v3/series",
-        allowed_profiles=("shows-anime-efficient", "shows-regular-efficient"),
+        allowed_profiles=(
+            "shows-anime-efficient",
+            "shows-regular-efficient",
+            "shows-regular-dual-audio-efficient",
+        ),
     ),
     ArrInstance(
         name="radarr",
         base_url="http://127.0.0.1:7878",
         config_path="/opt/media-stack/radarr/config.xml",
         assignment_path="/api/v3/movie",
-        allowed_profiles=("movies-anime-efficient", "movies-regular-efficient"),
+        allowed_profiles=(
+            "movies-anime-efficient",
+            "movies-regular-efficient",
+            "movies-regular-dual-audio-efficient",
+        ),
     ),
 )
 

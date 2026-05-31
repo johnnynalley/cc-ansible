@@ -9,8 +9,12 @@ a separate policy because dual audio is the highest priority there.
 ## Managed Systems
 
 - Sonarr regular efficient profile: `shows-regular-efficient` id `1`
+- Sonarr non-English regular dual-audio efficient profile:
+  `shows-regular-dual-audio-efficient` id `13`
 - Sonarr anime efficient profile: `shows-anime-efficient` id `7`
 - Radarr regular efficient profile: `movies-regular-efficient` id `6`
+- Radarr non-English regular dual-audio efficient profile:
+  `movies-regular-dual-audio-efficient` id `12`
 - Radarr anime efficient profile: `movies-anime-efficient` id `7`
 - Frozen legacy/balanced profiles:
   - Sonarr: `shows-regular-balanced` id `11`
@@ -97,6 +101,35 @@ overridden by incidental format bonuses.
 This means any acceptable dual-audio release beats a non-dual-audio release,
 but within dual audio, a higher enabled quality still beats a lower quality even
 when the lower quality has x265 and a better release group.
+
+## Non-English Regular Dual Audio
+
+English-original regular shows and movies stay on `shows-regular-efficient` or
+`movies-regular-efficient`; those profiles intentionally score `Regular Dual
+Audio` at `0` so a show such as Family Guy does not prefer unrelated multi-audio
+releases over normal English releases.
+
+Non-English regular shows/movies that should prefer original-language+English
+audio use the separate `shows-regular-dual-audio-efficient` or
+`movies-regular-dual-audio-efficient` profiles. These are cloned from the
+regular efficient profiles, then add a parsed-language `Regular Dual Audio`
+custom format at `+100000`. That custom format requires both Sonarr/Radarr's
+dynamic `Original` language and `English` language metadata, rather than only a
+release-title marker. This keeps original-only releases acceptable when no dub
+exists, but makes original+English beat original-only x265 when both are
+available.
+
+Current live assignment: `Asterix & Obelix: The Big Fight` uses
+`shows-regular-dual-audio-efficient`. Seerr defaults remain on
+`shows-regular-efficient`, `shows-anime-efficient`, `movies-regular-efficient`,
+and `movies-anime-efficient`; the dual-audio regular profiles are for explicit
+non-English media assignments, not default user requests.
+
+The profile creation/update helper is
+`scripts/media-release/arr_regular_dual_audio_profiles.py`. The retained live
+rollback backup for the 2026-05-31 rollout is
+`/opt/media-stack/arr-policy-backups/20260531T050546Z-regular-dual-audio-profiles`.
+The dry-run backup from that rollout was removed after validation.
 
 ## Quality Rank
 
@@ -477,9 +510,10 @@ Current Profilarr tier replacement policy:
   `/opt/media-stack/release-policy-snapshots/20260527T001506Z-dictionarry-bounded-tiers-dry-run`
 - Latest applied snapshot:
   `/opt/media-stack/release-policy-snapshots/20260527T001517Z-dictionarry-bounded-tiers`
-- Current CF counts after bounded-tier apply:
-  - Sonarr: `96/100`
-  - Radarr: `79/100`
+- Current CF counts after bounded-tier apply and regular dual-audio profile
+  rollout:
+  - Sonarr: `97/100`
+  - Radarr: `80/100`
 - The former test profiles were promoted into:
   - Sonarr `shows-anime-efficient` id `7`
   - Sonarr `shows-regular-efficient` id `1`
@@ -494,8 +528,9 @@ Current Profilarr tier replacement policy:
   - The regular efficient cutoff points at `Regular Enabled Qualities`.
   - Every efficient profile's `cutoffFormatScore` is computed from that profile's
     actual maximum applicable CF path, not just `1080p + x265`.
-    Current values are Sonarr anime `146979`, Sonarr regular `46982`, Radarr
-    anime `146978`, and Radarr regular `46979`.
+    Current values are Sonarr anime `146979`, Sonarr regular `46982`, Sonarr
+    regular dual-audio `146982`, Radarr anime `146978`, Radarr regular
+    `46979`, and Radarr regular dual-audio `146979`.
   - `Local Anime Quality Rank - ...` was only a resolution matcher. It was
     renamed in place to `Local Quality Rank - ...` and reused for anime and
     regular efficient profiles instead of creating duplicate CFs.
@@ -558,9 +593,11 @@ Current Profilarr tier replacement policy:
     headroom.
   - Cutoff scores are set to each profile's actual max applicable score:
     Sonarr anime `100000 + 40000 + 5000 + 1979 = 146979`, Sonarr regular
-    `40000 + 5000 + 1982 = 46982`, Radarr anime
-    `100000 + 40000 + 5000 + 1978 = 146978`, and Radarr regular
-    `40000 + 5000 + 1979 = 46979`.
+    `40000 + 5000 + 1982 = 46982`, Sonarr regular dual-audio
+    `100000 + 40000 + 5000 + 1982 = 146982`, Radarr anime
+    `100000 + 40000 + 5000 + 1978 = 146978`, Radarr regular
+    `40000 + 5000 + 1979 = 46979`, and Radarr regular dual-audio
+    `100000 + 40000 + 5000 + 1979 = 146979`.
 - Source ordering checks deliberately keep WEB below Bluray at the near-tier
   boundary: Sonarr Efficient WEB Tier 1 (`+600`) is below Efficient Bluray Tier
   2 (`+820`), Sonarr Compact WEB Tier 1 (`+440`) is below Compact Bluray Tier
@@ -577,8 +614,9 @@ Current Profilarr tier replacement policy:
     and reported `Regular Enabled Qualities` in both regular efficient profiles.
   - `scripts/media-release/arr_quality_profile_report.py` confirmed the actual
     Sonarr/Radarr efficient-profile quality groups and max-path cutoff scores:
-    Sonarr anime `146979`, Sonarr regular `46982`, Radarr anime `146978`, and
-    Radarr regular `46979`.
+    Sonarr anime `146979`, Sonarr regular `46982`, Sonarr regular dual-audio
+    `146982`, Radarr anime `146978`, Radarr regular `46979`, and Radarr regular
+    dual-audio `146979`.
   - `scripts/media-release/sonarr_release_expectation_check.py` and
     `scripts/media-release/radarr_release_expectation_check.py` both passed,
     confirming the efficient anime profiles still score DA, x265, and the
@@ -880,12 +918,13 @@ retention location. Do not let staging snapshots pile up indefinitely.
   `2026-05-30T05:00:00Z`: 22 JoJo, 26 Umamusume, 5 Asterix, and 1 Second
   Prettiest Girl. Manual searches showed distinct causes:
   `Asterix & Obelix: The Big Fight` had an English+French EDITH candidate, but
-  regular profiles currently score original+English DA at `0`, so French-only
-  x265 TARDiS scored `45000` and beat EDITH at `40000`; this remains a future
-  regular-profile DA scoring issue. Umamusume and Second Prettiest Girl did not
-  show real original+English candidates; apparent English hits were subtitle
-  language tags or non-original-language rows below the Japanese x265 imports.
-  JoJo Golden Wind exposed a real anime-profile bug: `[KaiDubs] ... [Dual
+  the regular profile scored original+English DA at `0`, so French-only x265
+  TARDiS scored `45000` and beat EDITH at `40000`. That Asterix gap was later
+  closed with `shows-regular-dual-audio-efficient`, where EDITH now scores
+  `140000` from `Regular Dual Audio` and TARDiS remains `45000`. Umamusume and
+  Second Prettiest Girl did not show real original+English candidates; apparent
+  English hits were subtitle language tags or non-original-language rows below
+  the Japanese x265 imports. JoJo Golden Wind exposed a real anime-profile bug: `[KaiDubs] ... [Dual
   Audio] [JPBD]` was being caught by `Dubs Only (Block)` because the positive
   dub-title matcher included `kaidubs`. `arr_dual_audio_title_policy.py
   --apply` now makes `Dubs Only (Block)` require its positive dub-title matcher

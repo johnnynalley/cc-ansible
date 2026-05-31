@@ -519,7 +519,12 @@ The detailed release-selection policy and score-band rules are documented in
 [docs/media-release-policy.md](docs/media-release-policy.md).
 
 - **Profiles**: efficient profiles for live media; balanced profiles for
-  future experiments after they get the same efficient-policy treatment
+  future experiments after they get the same efficient-policy treatment.
+  Non-English regular media that should prefer original-language+English audio
+  can use `shows-regular-dual-audio-efficient` or
+  `movies-regular-dual-audio-efficient`; defaults stay on the normal efficient
+  profiles so English-original shows do not prefer unrelated multi-audio
+  releases.
 - **Anime scoring**: Dual Audio +100000, quality-rank CFs
   +10000/+20000/+30000/+40000 by enabled resolution tier, x265 +5000,
   Dictionarry primary tiers plus Profilarr-synced TRaSH fallback tiers below
@@ -535,7 +540,10 @@ The detailed release-selection policy and score-band rules are documented in
   original-language-only regressions, run
   `ansible docker-vm -m script -a "scripts/media-release/sonarr_original_language_audit.py --since <UTC timestamp> --history-only"`
   first, then targeted `sonarr_release_rejection_report.py` manual checks for
-  the affected patterns.
+  the affected patterns. Run
+  `ansible docker-vm -b -m script -a "scripts/media-release/arr_regular_dual_audio_profiles.py --apply --assign-sonarr-title-regex '<title regex>'"`
+  when a non-English regular series should move to the dual-audio efficient
+  profile.
 - **Queue check**: run
   `ansible docker-vm -m script -a scripts/media-release/sonarr_grab_forensics.py` first to
   classify queued grabs as valid upgrades, payload score loss, pack
