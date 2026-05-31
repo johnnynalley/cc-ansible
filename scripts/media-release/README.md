@@ -72,6 +72,9 @@
   mismatch repair and blocklist helper.
 - `sonarr_manual_import_candidates.py`: Read-only manual-import candidate report
   for one Sonarr series folder.
+- `sonarr_original_language_audit.py`: Read-only audit of recent
+  original-language-only imports against live manual-search candidates, useful
+  for checking whether original+English/DA releases were missed or outscored.
 - `sonarr_queue_status_summary.py`: Summarizes Sonarr queue status messages
   without dumping every episode row.
 - `sonarr_release_rejection_report.py`: Read-only manual-search report for a

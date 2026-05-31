@@ -390,6 +390,12 @@ def main() -> int:
         ("Eng-Sub without DA marker", "One Piece Film Red (2022) [1080p] [Eng-Sub] [x265].mkv", False, True),
         ("x264 DA 1080p", "Akira (1988) [1080p] [JA+EN] [x264].mkv", True, False),
         ("2160p x265 excluded", "Akira (1988) [2160p] [JA+EN] [x265].mkv", True, False),
+        (
+            "non-English multi-audio dubs",
+            "Sample Movie (2026) [1080p] [Multi-Audio] (Japanese, German/Deutsch Dubs).mkv",
+            False,
+            False,
+        ),
     ]
 
     print_header("Custom Format Title Checks")

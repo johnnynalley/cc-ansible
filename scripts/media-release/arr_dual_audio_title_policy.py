@@ -6,6 +6,8 @@ keys, backs up current custom formats and quality profiles, then updates:
 
 - Anime Dual Audio: title marker based, no parsed-language dependency.
 - Language - Not Original: does not apply when explicit DA title markers exist.
+- Dubs Only (Block): requires a dub-only title marker and does not apply when
+  explicit DA title markers exist.
 
 The backup contains no API keys.
 """
@@ -27,6 +29,7 @@ from typing import Any
 
 DA_CF_NAME = "Anime Dual Audio"
 LANG_NOT_ORIGINAL_CF_NAME = "Language - Not Original"
+DUBS_ONLY_CF_NAME = "Dubs Only (Block)"
 
 DA_TITLE_REGEX = (
     r"dual[ ._-]?audio|multi[ ._-]?audio|"
@@ -37,6 +40,13 @@ DA_TITLE_REGEX = (
     r"(ja|jp|jpn|japanese|zh|chi|zho|chinese|ko|kor|korean)\b"
 )
 SINGLE_ORIGINAL_LANGUAGE_REGEX = r"\[(JA|JP|JPN|ZH|CHI|ZHO|KO|KOR)\]"
+NON_ENGLISH_DUB_MARKER_REGEX = (
+    r"(?=.*\b(?:german|deutsch|spanish|espa(?:n|ñ)ol|castellano|latino|"
+    r"french|fran(?:c|ç)ais|italian|italiano|portuguese|portugu[eê]s|"
+    r"russian|russisch|hindi|arabic)\b)"
+    r"(?!.*\b(?:en|eng|english)\b)"
+    r".*\b(?:dub|dubs|dubbed|audio|synchro|synchro[nn]is(?:e|é|ee|ed))\b"
+)
 
 
 @dataclass(frozen=True)
@@ -129,6 +139,7 @@ def patch_dual_audio(custom_format: dict[str, Any]) -> bool:
     kept: list[dict[str, Any]] = []
     title_spec_found = False
     single_language_spec_found = False
+    non_english_dub_spec_found = False
 
     for spec in specs:
         if spec.get("implementation") == "LanguageSpecification":
@@ -147,6 +158,13 @@ def patch_dual_audio(custom_format: dict[str, Any]) -> bool:
             spec["required"] = True
             set_regex(spec, SINGLE_ORIGINAL_LANGUAGE_REGEX)
             single_language_spec_found = True
+        elif spec.get("name") == "Exclude Explicit Non-English Dub Markers":
+            spec["implementation"] = "ReleaseTitleSpecification"
+            spec["implementationName"] = "Release Title"
+            spec["negate"] = True
+            spec["required"] = True
+            set_regex(spec, NON_ENGLISH_DUB_MARKER_REGEX)
+            non_english_dub_spec_found = True
         kept.append(spec)
 
     if not title_spec_found:
@@ -156,6 +174,15 @@ def patch_dual_audio(custom_format: dict[str, Any]) -> bool:
             release_title_spec(
                 "Not Single Language Only",
                 SINGLE_ORIGINAL_LANGUAGE_REGEX,
+                negate=True,
+                required=True,
+            )
+        )
+    if not non_english_dub_spec_found:
+        kept.append(
+            release_title_spec(
+                "Exclude Explicit Non-English Dub Markers",
+                NON_ENGLISH_DUB_MARKER_REGEX,
                 negate=True,
                 required=True,
             )
@@ -182,6 +209,39 @@ def patch_language_not_original(custom_format: dict[str, Any]) -> bool:
             break
 
     if not found:
+        specs.append(
+            release_title_spec(
+                "Exclude Explicit Dual Audio Title Markers",
+                DA_TITLE_REGEX,
+                negate=True,
+                required=True,
+            )
+        )
+
+    after = json.dumps(custom_format, sort_keys=True)
+    return before != after
+
+
+def patch_dubs_only(custom_format: dict[str, Any]) -> bool:
+    before = json.dumps(custom_format, sort_keys=True)
+    specs = custom_format.setdefault("specifications", [])
+
+    exclude_da_found = False
+    for spec in specs:
+        if spec.get("name") == "No Dubs Title":
+            spec["implementation"] = "ReleaseTitleSpecification"
+            spec["implementationName"] = "Release Title"
+            spec["negate"] = False
+            spec["required"] = True
+        if spec.get("name") == "Exclude Explicit Dual Audio Title Markers":
+            spec["implementation"] = "ReleaseTitleSpecification"
+            spec["implementationName"] = "Release Title"
+            spec["negate"] = True
+            spec["required"] = True
+            set_regex(spec, DA_TITLE_REGEX)
+            exclude_da_found = True
+
+    if not exclude_da_found:
         specs.append(
             release_title_spec(
                 "Exclude Explicit Dual Audio Title Markers",
@@ -242,6 +302,7 @@ def patch_arr(arr: Arr, backup_root: Path, timestamp: str, apply: bool) -> dict[
     for name, patcher in (
         (DA_CF_NAME, patch_dual_audio),
         (LANG_NOT_ORIGINAL_CF_NAME, patch_language_not_original),
+        (DUBS_ONLY_CF_NAME, patch_dubs_only),
     ):
         custom_format = find_by_name(custom_formats, name)
         if custom_format is None:
@@ -262,6 +323,9 @@ def patch_arr(arr: Arr, backup_root: Path, timestamp: str, apply: bool) -> dict[
         "[Judas] Bleach 056-111 [BD 1080p][HEVC x265 10bit][Dual-Audio][Eng-Sub]",
         "JoJos.Bizarre.Adventure.2012.S03E04.1080p.BluRay.x265.SDR.Opus.2.0.Dual.Yogi-HONE",
         "JoJos Bizarre Adventure - S05E38 - DUAL 1080p WEB H.264 -NanDesuKa (NF)",
+        "[KaiDubs] JoJo's Bizarre Adventure - Golden Wind - 28 [1080p] [8-bit] [Dual Audio] [JPBD]",
+        "[KaiDubs] JoJo's Bizarre Adventure - Golden Wind - 28 [1080p] [English Dub] [CC] [AS-DL]",
+        "[Fuchs] Love, Chunibyo & Other Delusions! - S00E02 (BD 1080p AVC Opus 2.0) [Multi-Audio] (Japanese, German/Deutsch Dubs)",
         "[EMBER] Jujutsu Kaisen S3 - 11 [JA+EN] [x265].mkv",
         "[EMBER] Jujutsu Kaisen S3 - 11 [JA] [x265].mkv",
     ]

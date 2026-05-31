@@ -70,6 +70,10 @@ def cf_names(values: list[dict[str, Any]] | None) -> list[str]:
     return [str(value.get("name") or value.get("id")) for value in values or []]
 
 
+def language_names(values: list[dict[str, Any]] | None) -> list[str]:
+    return [str(value.get("name") or value.get("id")) for value in values or []]
+
+
 def release_score(release: dict[str, Any]) -> int | None:
     for key in ("customFormatScore", "preferredWordScore"):
         value = release.get(key)
@@ -231,6 +235,7 @@ def audit(args: argparse.Namespace) -> dict[str, Any]:
                 "title": release_title(release),
                 "indexer": release.get("indexer"),
                 "quality": quality_name(release.get("quality")),
+                "languages": language_names(release.get("languages")),
                 "score": release_score(release),
                 "custom_formats": cf_names(release.get("customFormats")),
                 "size": release.get("size"),
@@ -262,7 +267,11 @@ def print_text(report: dict[str, Any]) -> None:
                 print(f"  {label}: missing monitored={episode['monitored']}")
     print(f"releases: {report['filtered_release_count']} shown/filter matches out of {report['release_count']}")
     for release in report["releases"]:
-        print(f"- {release['quality']} score={release['score']} seeders={release['seeders']} {release['title']}")
+        languages = "+".join(release["languages"]) or "Unknown"
+        print(
+            f"- {release['quality']} lang={languages} score={release['score']} "
+            f"seeders={release['seeders']} {release['title']}"
+        )
         print(f"  CFs: {', '.join(release['custom_formats']) or '(none)'}")
         if release["rejections"]:
             for reason in release["rejections"]:

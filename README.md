@@ -531,7 +531,11 @@ The detailed release-selection policy and score-band rules are documented in
   `ansible docker-vm -m script -a scripts/media-release/radarr_release_expectation_check.py`
   to verify the active anime scores, native quality grouping, DA/x265
   title-side custom-format matching, rename-format preservation of audio
-  languages and video codec, and profile assignment counts
+  languages and video codec, and profile assignment counts. For suspected
+  original-language-only regressions, run
+  `ansible docker-vm -m script -a "scripts/media-release/sonarr_original_language_audit.py --since <UTC timestamp> --history-only"`
+  first, then targeted `sonarr_release_rejection_report.py` manual checks for
+  the affected patterns.
 - **Queue check**: run
   `ansible docker-vm -m script -a scripts/media-release/sonarr_grab_forensics.py` first to
   classify queued grabs as valid upgrades, payload score loss, pack

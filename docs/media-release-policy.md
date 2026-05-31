@@ -1,6 +1,6 @@
 # Media Release Policy
 
-Last updated: 2026-05-27
+Last updated: 2026-05-31
 
 This documents the current Sonarr/Radarr release selection policy on `docker-vm`.
 The goal is better grabbed releases, not just smaller files. Anime is handled as
@@ -875,6 +875,30 @@ retention location. Do not let staging snapshots pile up indefinitely.
   except `Dual-Subs`/`Dual-Subtitles`, so these common anime titles receive the
   DA score and can outrank weaker DA+x265-only releases when the release group
   tier is better.
+- Dual-audio false-positive and Dubs-only correction, 2026-05-31 UTC:
+  a same-day audit found 54 original-language-only Sonarr imports since
+  `2026-05-30T05:00:00Z`: 22 JoJo, 26 Umamusume, 5 Asterix, and 1 Second
+  Prettiest Girl. Manual searches showed distinct causes:
+  `Asterix & Obelix: The Big Fight` had an English+French EDITH candidate, but
+  regular profiles currently score original+English DA at `0`, so French-only
+  x265 TARDiS scored `45000` and beat EDITH at `40000`; this remains a future
+  regular-profile DA scoring issue. Umamusume and Second Prettiest Girl did not
+  show real original+English candidates; apparent English hits were subtitle
+  language tags or non-original-language rows below the Japanese x265 imports.
+  JoJo Golden Wind exposed a real anime-profile bug: `[KaiDubs] ... [Dual
+  Audio] [JPBD]` was being caught by `Dubs Only (Block)` because the positive
+  dub-title matcher included `kaidubs`. `arr_dual_audio_title_policy.py
+  --apply` now makes `Dubs Only (Block)` require its positive dub-title matcher
+  and also require absence of explicit DA markers, so KaiDubs dual-audio is
+  accepted at `140000` while KaiDubs English-dub-only remains hard rejected.
+  The same rollout added an `Anime Dual Audio` negative guard for explicit
+  non-English dub/audio lists without English, so titles such as Fuchs
+  Japanese+German `Multi-Audio ... German/Deutsch Dubs` no longer receive the
+  DA score. The retained rollback backup for this live change is
+  `/opt/media-stack/arr-policy-backups/20260531T041508Z-dual-audio-title-policy`;
+  redundant dry-run/intermediate backups from the rollout were removed after
+  validation. `sonarr_release_expectation_check.py` and
+  `radarr_release_expectation_check.py` now test these exact title cases.
 - Historical Recyclarr ownership note for that fix: the stock TRaSH/Recyclarr
   `Anime Dual Audio` custom formats were removed from
   `/opt/media-stack/recyclarr/recyclarr.yml` for Sonarr trash ID

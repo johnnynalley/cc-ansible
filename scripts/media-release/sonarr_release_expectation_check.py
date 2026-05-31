@@ -22,6 +22,7 @@ SONARR_URL = "http://127.0.0.1:8989"
 SONARR_CONFIG = "/opt/media-stack/sonarr/config.xml"
 ANIME_PROFILE_NAME = "shows-anime-efficient"
 DUAL_AUDIO_CF_NAME = "Anime Dual Audio"
+DUBS_ONLY_CF_NAME = "Dubs Only (Block)"
 X265_CF_NAME = "x265"
 QUALITY_RANK_PREFIX = "Local Quality Rank - "
 SOURCE_RANK_CF_NAME = "Local Anime Source Rank - Bluray"
@@ -212,6 +213,7 @@ def main() -> int:
 
     profile = find_by_name(profiles, ANIME_PROFILE_NAME)
     dual_audio_cf = find_by_name(custom_formats, DUAL_AUDIO_CF_NAME)
+    dubs_only_cf = find_by_name(custom_formats, DUBS_ONLY_CF_NAME)
     x265_cf = find_by_name(custom_formats, X265_CF_NAME)
     source_rank_cf = find_by_name(custom_formats, SOURCE_RANK_CF_NAME)
 
@@ -380,23 +382,25 @@ def main() -> int:
     print(f"series profile counts: {series_profile_counts}")
 
     samples = [
-        ("JA+EN x265", "[EMBER] Jujutsu Kaisen S3 - 11 [JA+EN] [x265].mkv", True, True),
-        ("EN+JA x265", "[EMBER] Jujutsu Kaisen S3 - 11 [EN+JA] [x265].mkv", True, True),
-        ("JA+KO+EN x265", "[EMBER] Jujutsu Kaisen S3 - 11 [JA+KO+EN] [x265].mkv", True, True),
-        ("KO+EN x265", "[EMBER] Jujutsu Kaisen S3 - 11 [KO+EN] [x265].mkv", True, True),
-        ("single JA only", "[EMBER] Jujutsu Kaisen S3 - 11 [JA] [x265].mkv", False, True),
-        ("single EN only", "[EMBER] Jujutsu Kaisen S3 - 11 [EN] [x265].mkv", False, True),
-        ("generic Dual-Audio", "[EMBER] Jujutsu Kaisen S3 - 11 [Dual-Audio] [x265].mkv", True, True),
+        ("JA+EN x265", "[EMBER] Jujutsu Kaisen S3 - 11 [JA+EN] [x265].mkv", True, True, False),
+        ("EN+JA x265", "[EMBER] Jujutsu Kaisen S3 - 11 [EN+JA] [x265].mkv", True, True, False),
+        ("JA+KO+EN x265", "[EMBER] Jujutsu Kaisen S3 - 11 [JA+KO+EN] [x265].mkv", True, True, False),
+        ("KO+EN x265", "[EMBER] Jujutsu Kaisen S3 - 11 [KO+EN] [x265].mkv", True, True, False),
+        ("single JA only", "[EMBER] Jujutsu Kaisen S3 - 11 [JA] [x265].mkv", False, True, False),
+        ("single EN only", "[EMBER] Jujutsu Kaisen S3 - 11 [EN] [x265].mkv", False, True, False),
+        ("generic Dual-Audio", "[EMBER] Jujutsu Kaisen S3 - 11 [Dual-Audio] [x265].mkv", True, True, False),
         (
             "standalone Dual marker",
             "JoJos.Bizarre.Adventure.2012.S03E04.1080p.BluRay.x265.SDR.Opus.2.0.Dual.Yogi-HONE",
             True,
             True,
+            False,
         ),
         (
             "standalone DUAL before quality",
             "JoJos Bizarre Adventure - S05E38 - DUAL 1080p WEB H.264 -NanDesuKa (NF)",
             True,
+            False,
             False,
         ),
         (
@@ -404,37 +408,74 @@ def main() -> int:
             "[EMBER] Jujutsu Kaisen S3 - 11 [Dual-Subs] [x265].mkv",
             False,
             True,
+            False,
         ),
         (
             "Dual-Audio with Eng-Sub",
             "[Judas] Bleach 056-111 [BD 1080p][HEVC x265 10bit][Dual-Audio][Eng-Sub]",
             True,
             True,
+            False,
         ),
         (
             "Eng-Sub without DA marker",
             "[Judas] Bleach 056-111 [BD 1080p][HEVC x265 10bit][Eng-Sub]",
             False,
             True,
+            False,
         ),
-        ("x264 DA", "[EMBER] Jujutsu Kaisen S3 - 11 [JA+EN] [x264].mkv", True, False),
+        ("x264 DA", "[EMBER] Jujutsu Kaisen S3 - 11 [JA+EN] [x264].mkv", True, False, False),
+        (
+            "KaiDubs dual audio",
+            "[KaiDubs] JoJo's Bizarre Adventure - Golden Wind - 28 [1080p] [8-bit] [Dual Audio] [JPBD]",
+            True,
+            False,
+            False,
+        ),
+        (
+            "KaiDubs English dub only",
+            "[KaiDubs] JoJo's Bizarre Adventure - Golden Wind - 28 [1080p] [English Dub] [CC] [AS-DL]",
+            False,
+            False,
+            True,
+        ),
+        (
+            "non-English multi-audio dubs",
+            "[Fuchs] Love, Chunibyo & Other Delusions! - S00E02 (BD 1080p AVC Opus 2.0) [Multi-Audio] (Japanese, German/Deutsch Dubs)",
+            False,
+            False,
+            False,
+        ),
     ]
 
     print_header("Custom Format Title Checks")
     all_passed = all(passed for _, passed, _ in checks)
-    for label, title, expect_da, expect_x265 in samples:
+    for label, title, expect_da, expect_x265, expect_dubs in samples:
         da_matches, da_results = custom_format_matches(dual_audio_cf, title)
         x265_matches, x265_results = custom_format_matches(x265_cf, title)
+        dubs_matches, dubs_results = custom_format_matches(dubs_only_cf, title)
         da_ok = da_matches == expect_da
         x265_ok = x265_matches == expect_x265
-        all_passed = all_passed and da_ok and x265_ok
-        print(f"{'PASS' if da_ok and x265_ok else 'FAIL'}: {label}")
+        dubs_ok = dubs_matches == expect_dubs
+        all_passed = all_passed and da_ok and x265_ok and dubs_ok
+        print(f"{'PASS' if da_ok and x265_ok and dubs_ok else 'FAIL'}: {label}")
         print(f"  title: {title}")
         print(f"  DA expected={expect_da} actual={da_matches}")
         for result in da_results:
             if result.required:
                 print(
                     "    DA spec {name}: required negate={negate} matched={matched} passed={passed}".format(
+                        name=result.name,
+                        negate=result.negate,
+                        matched=result.matched,
+                        passed=result.passed,
+                    )
+                )
+        print(f"  Dubs Only expected={expect_dubs} actual={dubs_matches}")
+        for result in dubs_results:
+            if result.required:
+                print(
+                    "    Dubs spec {name}: required negate={negate} matched={matched} passed={passed}".format(
                         name=result.name,
                         negate=result.negate,
                         matched=result.matched,
@@ -454,7 +495,7 @@ def main() -> int:
                 )
 
     print_header("Sonarr Parse Smoke Checks")
-    for _, title, _, _ in samples[:4]:
+    for _, title, _, _, _ in samples[:4]:
         parsed = parse_title(api_key, title)
         quality = ((parsed.get("quality") or {}).get("quality") or {}).get("name")
         languages = parsed.get("languages") or parsed.get("language") or []
