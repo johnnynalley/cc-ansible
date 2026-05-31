@@ -651,8 +651,8 @@ release-title evidence before Sonarr/Radarr import multi-file packs.
   with torrent hash/name/category, then renames payload files through
   qBittorrent's Web API so seeding state stays intact. The script retries
   transient Web API failures before giving up and logging a non-fatal stamper
-  error, and can fall back to single-file torrent metadata when qBit can return
-  the torrent but its file-list endpoint hangs.
+  error, and skips the qBit file-list endpoint for obvious single-file video
+  torrents because that endpoint can hang while torrent metadata still works.
 - **SABnzbd**: `shows` and `movies` categories run
   `sab-release-stamper.py` from the configured `scripts` folder.
 - **DA rule**: language-combo tags such as `[JA+EN]`, `[KO+EN]`, or

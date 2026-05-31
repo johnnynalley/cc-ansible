@@ -1170,10 +1170,11 @@ this with direct filesystem renames, because direct renames can break seeding or
 hash-check state. The deployed env also sets bounded qBittorrent API
 retry/backoff (`QBIT_API_RETRIES`, `QBIT_API_RETRY_DELAY`, `QBIT_API_TIMEOUT`)
 so transient Web API stalls do not immediately leave completed torrents
-unstamped. If qBittorrent can return the torrent record but the
-`torrents/files` endpoint hangs, the stamper can fall back to qBittorrent's
-single-file torrent metadata for obvious video-file torrents and still use
-`renameFile` for the actual rename.
+unstamped. For obvious single-file video torrents, the stamper uses
+qBittorrent's torrent metadata instead of calling the `torrents/files`
+endpoint, because that endpoint has been observed to hang and wedge qBit's Web
+API on some completed torrents; the actual rename still goes through
+`renameFile`.
 
 The SABnzbd script runs as a normal post-processing script for media
 categories. Usenet payloads are not seeded, so it renames completed files
