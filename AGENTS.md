@@ -92,7 +92,16 @@ When migrating a managed script, service, scheduled task, config path, binary, o
 
 Do not assume a symptom is an upstream software bug or regression unless there is an exact documented issue, release note, or vendor advisory matching the observed failure. Default to diagnosing local configuration, runtime state, logs, resource pressure, integration drift, and recent local changes first. Avoid update-fragile local patches unless the user explicitly approves a temporary workaround.
 
+For recurring `jn-t14s-lin` Wi-Fi throughput collapse with no media-stack change, prioritize root-cause evidence before remediation: repeated `wlp2s0` association churn, `ath11k_pci` TX completion warnings (`msdu_done bit in attention is not set`), and roaming between nearby BSSIDs are the active signal that the radio path is unstable and likely dominating behavior.
+
 Root cause comes before self-healing. Do not present an auto-restart, retry loop, watchdog, periodic reassertion, or other symptom-recovery automation as the fix for an unexplained incident until the trigger is understood. If immediate service recovery is needed, label it as temporary mitigation, then continue the investigation with logs, timelines, live state, and recent-change evidence until the cause and prevention path are clear. The goal is to explain why it happened and prevent recurrence, not to hide recurrence after the fact.
+
+For incident capture on this host, include at least:
+- `journalctl -b -1 -k | rg -i "ath11k|wlp2s0|msdu_done|deauthenticated|rejected association"`
+- `journalctl -b -1 -u NetworkManager --since "<event_time>" | rg -i "wlp2s0|dhcp4: restarting|supplicant|reassociate"`
+- `cat /proc/net/wireless`
+
+Use this evidence before deciding whether the prevention should be AP/BSSID stabilization, driver/module recovery hooks, or platform firmware updates.
 
 For live Windows gaming PC diagnostics, especially on `lj-gaming-pc` while the user is gaming or streaming, use narrow, bounded probes only. Do not run broad PowerShell/Ansible inspections that enumerate large process/log/state data and serialize deep JSON, and do not leave diagnostic probes running. If a probe hangs or looks expensive, stop it and verify no stale remote PowerShell workers remain before continuing. Ask first before any broad inspection that could consume noticeable CPU, memory, disk, or foreground responsiveness.
 
