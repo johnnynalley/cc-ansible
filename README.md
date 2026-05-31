@@ -554,7 +554,10 @@ The detailed release-selection policy and score-band rules are documented in
 - **Queue check**: run
   `ansible docker-vm -m script -a scripts/media-release/sonarr_grab_forensics.py` first to
   classify queued grabs as valid upgrades, payload score loss, pack
-  collateral/mapping issues, or client warnings. Then run
+  collateral/mapping issues, or client warnings. For Radarr, run
+  `ansible docker-vm -m script -a scripts/media-release/radarr_grab_forensics.py`
+  to classify movie downloads against current file scores and import-rejection
+  score messages. Then run
   `ansible docker-vm -m script -a scripts/media-release/sonarr_grab_diagnostics.py` before
   clearing suspected bad grabs; cleanup requires explicit flags and does not
   blocklist by default

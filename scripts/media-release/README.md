@@ -64,6 +64,8 @@
   groups are present upstream.
 - `radarr_release_expectation_check.py`: Read-only check of live Radarr anime
   release-selection expectations.
+- `radarr_grab_forensics.py`: Classifies Radarr queue items against current
+  movie files and Radarr's own import-rejection score messages.
 - `seerr_arr_endpoint_update.py`: Audits or updates Seerr's Sonarr/Radarr
   endpoints, validates candidates through Seerr's own Arr test API, and writes
   a snapshot before live changes.
