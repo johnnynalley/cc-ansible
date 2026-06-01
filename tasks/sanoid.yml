@@ -22,6 +22,17 @@
     group: root
     mode: "0755"
 
+- name: Deploy sanoid helper scripts
+  ansible.builtin.copy:
+    src: "{{ ansible_config_file | dirname }}/{{ item.src }}"
+    dest: "{{ item.dest }}"
+    owner: root
+    group: root
+    mode: "{{ item.mode | default('0755') }}"
+  loop: "{{ sanoid_helper_scripts | default([]) }}"
+  loop_control:
+    label: "{{ item.dest }}"
+
 - name: Configure sanoid
   ansible.builtin.template:
     src: "{{ ansible_config_file | dirname }}/templates/storage/sanoid.conf.j2"

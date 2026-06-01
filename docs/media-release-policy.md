@@ -874,6 +874,31 @@ the final profile migration is accepted or abandoned, clean up the temporary
 snapshots/backups or move the one final known-good export into the normal
 retention location. Do not let staging snapshots pile up indefinitely.
 
+### Live Rollback Backup Location
+
+`/opt/media-stack/arr-policy-backups` is a compatibility path for older
+media-release helpers. It should resolve to the Sanoid-managed rollback cache
+at `/srv/live-rollbacks/docker-vm/arr-policy` on docker-vm, not to docker-vm's
+root filesystem.
+
+For new one-off live backups, use the repo-managed helper:
+
+```bash
+sudo live-rollback-backup --domain arr-policy --name <change-name> --path <absolute-path>
+```
+
+Those backups land on ts440's `nas_zfs/backups/live-rollbacks` dataset. Sanoid
+snapshots that dataset and runs `live-rollback-cache-prune` to remove marked
+live cache directories after a newer snapshot exists. Restic and PBS remain the
+durable system backups; this Sanoid-backed cache is for quick operator
+rollback artifacts and should not consume docker-vm root space.
+
+On 2026-06-01, stale duplicate 2026-05-24 JoJo/blocklist rollback directories
+under `/opt/media-stack/arr-policy-backups` were removed to recover docker-vm
+root space. The documented retained examples from that day and the recent
+2026-05-31 rollback directories were kept for migration into the Sanoid-backed
+location.
+
 ## Current Notes
 
 - Recyclarr is disabled. If it reappears in `docker compose ps`, media-stack

@@ -11,3 +11,10 @@ restic_backup_paths_extra:
 local_restic_enabled: true
 local_restic_backup_paths:
   - /opt
+
+# Live SQLite sidecar files appear and disappear while Arr apps are running.
+# Restic still backs up the durable database files; these transient sidecars
+# caused otherwise-successful docker-vm backups to exit non-zero.
+restic_excludes_extra:
+  - "*.db-shm"
+  - "*.db-wal"

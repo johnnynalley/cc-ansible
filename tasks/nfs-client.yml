@@ -35,3 +35,13 @@
     opts: "{{ item.opts | default('defaults,_netdev,nofail,soft,timeo=50,retrans=3') }}"
     state: mounted
   loop: "{{ nfs_mounts | default([]) }}"
+
+- name: Deploy live rollback backup helper
+  ansible.builtin.copy:
+    src: "{{ ansible_config_file | dirname }}/scripts/storage/live-rollback-backup"
+    dest: /usr/local/sbin/live-rollback-backup
+    owner: root
+    group: root
+    mode: "0755"
+  when: >-
+    (nfs_mounts | default([]) | selectattr('path', 'equalto', '/srv/live-rollbacks') | list | length) > 0

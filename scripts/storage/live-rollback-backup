@@ -1,0 +1,138 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+root="/srv/live-rollbacks"
+host="$(hostname -s)"
+domain="general"
+name=""
+dry_run=0
+paths=()
+
+usage() {
+  cat <<'USAGE'
+Usage: live-rollback-backup --name NAME [--domain DOMAIN] [--root ROOT] [--host HOST] --path PATH [--path PATH ...] [--dry-run]
+
+Create a timestamped rollback copy under the Sanoid-managed live rollback
+dataset. The destination is marked so live-rollback-cache-prune can remove the
+live copy after it is covered by a ZFS snapshot.
+USAGE
+}
+
+sanitize() {
+  printf '%s' "$1" |
+    tr '[:upper:]' '[:lower:]' |
+    sed -E 's/[^a-z0-9._-]+/-/g; s/^-+//; s/-+$//'
+}
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --name)
+      name="${2:-}"
+      shift
+      ;;
+    --domain)
+      domain="${2:-}"
+      shift
+      ;;
+    --root)
+      root="${2:-}"
+      shift
+      ;;
+    --host)
+      host="${2:-}"
+      shift
+      ;;
+    --path)
+      paths+=("${2:-}")
+      shift
+      ;;
+    --dry-run)
+      dry_run=1
+      ;;
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    *)
+      printf 'Unknown argument: %s\n' "$1" >&2
+      usage >&2
+      exit 2
+      ;;
+  esac
+  shift
+done
+
+if [[ -z "$name" || ${#paths[@]} -eq 0 ]]; then
+  usage >&2
+  exit 2
+fi
+
+safe_host="$(sanitize "$host")"
+safe_domain="$(sanitize "$domain")"
+safe_name="$(sanitize "$name")"
+
+if [[ -z "$safe_host" || -z "$safe_domain" || -z "$safe_name" ]]; then
+  printf 'Host, domain, and name must contain at least one safe character.\n' >&2
+  exit 2
+fi
+
+if [[ ! -d "$root" || ! -w "$root" ]]; then
+  printf 'Rollback root is missing or not writable: %s\n' "$root" >&2
+  exit 1
+fi
+
+tar_paths=()
+for path in "${paths[@]}"; do
+  if [[ -z "$path" || ! -e "$path" ]]; then
+    printf 'Backup path is missing: %s\n' "$path" >&2
+    exit 1
+  fi
+  if [[ "$path" != /* ]]; then
+    printf 'Backup paths must be absolute: %s\n' "$path" >&2
+    exit 2
+  fi
+  tar_paths+=("${path#/}")
+done
+
+timestamp="$(date -u +%Y%m%dT%H%M%SZ)"
+dest="$root/$safe_host/$safe_domain/$timestamp-$safe_name"
+
+if (( dry_run == 1 )); then
+  printf 'Would create rollback backup: %s\n' "$dest"
+  printf 'Would copy paths:\n'
+  printf '  %s\n' "${paths[@]}"
+  exit 0
+fi
+
+created=0
+cleanup_on_error() {
+  local rc=$?
+  if (( rc != 0 && created == 1 )); then
+    rm -rf --one-file-system -- "$dest"
+  fi
+  exit "$rc"
+}
+trap cleanup_on_error EXIT
+
+install -d -m 0750 "$dest/files"
+created=1
+
+tar -C / -cpf - "${tar_paths[@]}" | tar -C "$dest/files" -xpf -
+
+{
+  printf 'created_utc=%s\n' "$timestamp"
+  printf 'host=%s\n' "$host"
+  printf 'domain=%s\n' "$domain"
+  printf 'name=%s\n' "$name"
+  printf 'paths=\n'
+  printf '  %s\n' "${paths[@]}"
+} > "$dest/manifest.txt"
+
+{
+  printf 'created_utc=%s\n' "$timestamp"
+  printf 'host=%s\n' "$host"
+  printf 'domain=%s\n' "$domain"
+} > "$dest/.live-rollback-cache"
+
+trap - EXIT
+printf '%s\n' "$dest"

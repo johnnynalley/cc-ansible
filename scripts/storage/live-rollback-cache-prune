@@ -1,0 +1,101 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+cache_root="${LIVE_ROLLBACK_CACHE_ROOT:-/srv/nas-zfs/backups/live-rollbacks}"
+dataset="${LIVE_ROLLBACK_DATASET:-${SANOID_TARGET:-nas_zfs/backups/live-rollbacks}}"
+min_age_seconds="${LIVE_ROLLBACK_CACHE_MIN_AGE_SECONDS:-86400}"
+dry_run=0
+
+usage() {
+  cat <<'USAGE'
+Usage: live-rollback-cache-prune [--dry-run]
+
+Prune marked live rollback cache directories after a newer ZFS snapshot exists.
+Only directories containing a .live-rollback-cache marker are eligible.
+USAGE
+}
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --dry-run)
+      dry_run=1
+      ;;
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    *)
+      printf 'Unknown argument: %s\n' "$1" >&2
+      usage >&2
+      exit 2
+      ;;
+  esac
+  shift
+done
+
+log() {
+  logger -t live-rollback-cache-prune -- "$*"
+  printf '%s\n' "$*"
+}
+
+if [[ ! -d "$cache_root" ]]; then
+  log "Cache root does not exist, nothing to prune: $cache_root"
+  exit 0
+fi
+
+if ! command -v zfs >/dev/null 2>&1; then
+  log "zfs command is unavailable"
+  exit 1
+fi
+
+if ! [[ "$min_age_seconds" =~ ^[0-9]+$ ]]; then
+  log "LIVE_ROLLBACK_CACHE_MIN_AGE_SECONDS must be numeric"
+  exit 2
+fi
+
+latest_snapshot_creation=0
+while IFS=$'\t' read -r creation _snapshot_name; do
+  [[ "$creation" =~ ^[0-9]+$ ]] || continue
+  if (( creation > latest_snapshot_creation )); then
+    latest_snapshot_creation="$creation"
+  fi
+done < <(zfs list -H -p -t snapshot -o creation,name -s creation -d 1 "$dataset" 2>/dev/null || true)
+
+if (( latest_snapshot_creation == 0 )); then
+  log "No snapshots found for $dataset; keeping live rollback cache"
+  exit 0
+fi
+
+now="$(date +%s)"
+find "$cache_root" -mindepth 3 -maxdepth 5 -type f -name .live-rollback-cache -print0 |
+  while IFS= read -r -d '' marker; do
+    candidate_dir="$(dirname "$marker")"
+    case "$candidate_dir" in
+      "$cache_root"/*) ;;
+      *)
+        log "Skipping path outside cache root: $candidate_dir"
+        continue
+        ;;
+    esac
+
+    dir_mtime="$(stat -c %Y "$candidate_dir" 2>/dev/null || printf '0')"
+    [[ "$dir_mtime" =~ ^[0-9]+$ ]] || continue
+
+    age_seconds=$(( now - dir_mtime ))
+    if (( age_seconds < min_age_seconds )); then
+      continue
+    fi
+
+    if (( latest_snapshot_creation < dir_mtime )); then
+      log "Keeping $candidate_dir; no newer snapshot is visible yet"
+      continue
+    fi
+
+    if (( dry_run == 1 )); then
+      log "Would remove snapshotted live rollback cache: $candidate_dir"
+      continue
+    fi
+
+    log "Removing snapshotted live rollback cache: $candidate_dir"
+    rm -rf --one-file-system -- "$candidate_dir"
+  done

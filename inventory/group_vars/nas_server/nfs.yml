@@ -73,3 +73,16 @@ nfs_exports:
         options: "rw,sync,no_subtree_check,no_root_squash,fsid=12"
       - host: 192.168.1.153
         options: "rw,sync,no_subtree_check,no_root_squash,fsid=12"
+
+  # Sanoid-backed live rollback cache for one-off config/data backups.
+  - name: live-rollbacks
+    bind_source: /srv/nas-zfs/backups/live-rollbacks
+    requires_mount: srv-nas\x2dzfs-backups-live\x2drollbacks.mount
+    owner: johnny
+    group: johnny
+    mode: "2775"
+    clients:
+      - host: 100.108.254.100
+        options: "rw,sync,no_subtree_check,no_root_squash,fsid=13"
+      - host: 192.168.1.153
+        options: "rw,sync,no_subtree_check,no_root_squash,fsid=13"

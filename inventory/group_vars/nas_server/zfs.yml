@@ -27,6 +27,20 @@ sanoid_templates:
     autosnap: "yes"
     autoprune: "yes"
 
+  # Live rollback cache - ad hoc rollback files live here briefly, then Sanoid
+  # snapshots keep the recoverable copies while the live cache is pruned.
+  live_rollbacks:
+    frequently: 0
+    hourly: 24
+    daily: 7
+    weekly: 4
+    monthly: 6
+    yearly: 0
+    autosnap: "yes"
+    autoprune: "yes"
+    post_snapshot_script: /usr/local/sbin/live-rollback-cache-prune
+    pruning_script: /usr/local/sbin/live-rollback-cache-prune
+
   # Ignore template - no snapshots for replaceable content
   ignore:
     autosnap: "no"
@@ -68,6 +82,13 @@ sanoid_datasets:
     use_template: media
     recursive: "yes"
     process_children_only: "no"
+
+  # Temporary live rollback artifacts created before live config/data edits.
+  # Sanoid snapshots this dataset and the hook prunes marked live cache dirs
+  # after they are covered by snapshots.
+  nas_zfs/backups/live-rollbacks:
+    use_template: live_rollbacks
+    recursive: "no"
 
   # Media parent - production policy for future photos dataset
   nas_zfs/media:
@@ -153,6 +174,11 @@ zfs_dataset_properties:
     recordsize: 1M
     compression: zstd
     acltype: posixacl
+  nas_zfs/backups/live-rollbacks:
+    recordsize: 128K
+    compression: zstd
+    acltype: posixacl
+    atime: "off"
   nas_zfs/backups/timemachine:
     quota: 1T
     recordsize: 1M
@@ -192,6 +218,17 @@ zfs_datasets_present:
       mountpoint: none
       compression: lz4
       atime: "off"
+  - name: nas_zfs/backups/live-rollbacks
+    properties:
+      mountpoint: /srv/nas-zfs/backups/live-rollbacks
+      compression: zstd
+      recordsize: 128K
+      acltype: posixacl
+      atime: "off"
+
+sanoid_helper_scripts:
+  - src: scripts/storage/live-rollback-cache-prune
+    dest: /usr/local/sbin/live-rollback-cache-prune
 
 # =============================================================================
 # ZFS ACLs (POSIX ACLs for shared access)
