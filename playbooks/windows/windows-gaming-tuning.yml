@@ -501,12 +501,33 @@
               $path = [string]$profile.path
 
               if (-not (Test-Path -LiteralPath $path)) {
-                  throw "RTSS profile not found: $path"
+                  $parent = Split-Path -Parent $path
+                  if (-not (Test-Path -LiteralPath $parent)) {
+                      throw "RTSS profile directory not found: $parent"
+                  }
+
+                  $createFrom = ""
+                  if ($profile.PSObject.Properties["create_from"]) {
+                      $createFrom = [string]$profile.create_from
+                  }
+
+                  if ($createFrom -and (Test-Path -LiteralPath $createFrom)) {
+                      if (-not $Ansible.CheckMode) {
+                          Copy-Item -LiteralPath $createFrom -Destination $path
+                      }
+                  } else {
+                      if (-not $Ansible.CheckMode) {
+                          Set-Content -LiteralPath $path -Value @() -Encoding ASCII
+                      }
+                  }
+                  $Ansible.Changed = $true
               }
 
               $lines = [System.Collections.Generic.List[string]]::new()
-              foreach ($line in (Get-Content -LiteralPath $path)) {
-                  $lines.Add([string]$line)
+              if (Test-Path -LiteralPath $path) {
+                  foreach ($line in (Get-Content -LiteralPath $path)) {
+                      $lines.Add([string]$line)
+                  }
               }
 
               $profileChanged = $false

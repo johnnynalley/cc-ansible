@@ -5,7 +5,8 @@ $DesiredEnabled = {{ '$true' if item.lighting_enabled else '$false' }}
 $CloseAfterAction = {{ '$true' if item.close_after_action | default(signalrgb_close_after_action) | bool else '$false' }}
 $LaunchTimeoutSeconds = {{ signalrgb_launch_timeout_seconds | int }}
 $PostApplySettleSeconds = {{ signalrgb_post_apply_settle_seconds | int }}
-$ApiBase = "http://127.0.0.1:16038/api/v1"
+$ApiPort = {{ signalrgb_api_port | default(16038) | int }}
+$ApiBase = "http://127.0.0.1:${ApiPort}/api/v1"
 $LogPath = Join-Path $env:TEMP "signalrgb-lock-unlock.log"
 $LauncherPath = Join-Path $env:LOCALAPPDATA "VortxEngine\SignalRgbLauncher.exe"
 $ProcessPriority = "{{ signalrgb_process_priority }}"
@@ -35,6 +36,31 @@ function Set-SignalRgbPriority {
     }
 }
 
+function Stop-SignalRgbProcesses {
+    Get-Process SignalRgb,SignalRgbLauncher -ErrorAction SilentlyContinue |
+        Stop-Process -Force -ErrorAction SilentlyContinue
+}
+
+function Wait-SignalRgbApi {
+    $deadline = (Get-Date).AddSeconds($LaunchTimeoutSeconds)
+    while ((Get-Date) -lt $deadline) {
+        Start-Sleep -Milliseconds 500
+        if (Test-SignalRgbApi) {
+            return $true
+        }
+    }
+
+    return $false
+}
+
+function Start-SignalRgb {
+    if (-not (Test-Path -LiteralPath $LauncherPath)) {
+        throw "SignalRGB launcher was not found at $LauncherPath"
+    }
+
+    Start-Process -FilePath $LauncherPath -ArgumentList "--silent" -WindowStyle Hidden
+}
+
 function Disable-SignalRgbStartup {
     Remove-ItemProperty -Path $StartupRunPath -Name "SignalRgb" -ErrorAction SilentlyContinue
 }
@@ -54,22 +80,16 @@ try {
     Set-SignalRgbPriority
 
     if (-not (Test-SignalRgbApi)) {
-        if (-not (Test-Path -LiteralPath $LauncherPath)) {
-            throw "SignalRGB launcher was not found at $LauncherPath"
+        if (Get-Process SignalRgb,SignalRgbLauncher -ErrorAction SilentlyContinue) {
+            Write-SignalRgbLog "SignalRGB API unavailable on port ${ApiPort} while process is running; restarting SignalRGB"
+            Stop-SignalRgbProcesses
+            Start-Sleep -Seconds 2
         }
 
-        Start-Process -FilePath $LauncherPath -ArgumentList "--silent" -WindowStyle Hidden
+        Start-SignalRgb
 
-        $deadline = (Get-Date).AddSeconds($LaunchTimeoutSeconds)
-        while ((Get-Date) -lt $deadline) {
-            Start-Sleep -Milliseconds 500
-            if (Test-SignalRgbApi) {
-                break
-            }
-        }
-
-        if (-not (Test-SignalRgbApi)) {
-            throw "SignalRGB API did not become available within $LaunchTimeoutSeconds seconds"
+        if (-not (Wait-SignalRgbApi)) {
+            throw "SignalRGB API did not become available on port ${ApiPort} within $LaunchTimeoutSeconds seconds"
         }
 
         Set-SignalRgbPriority

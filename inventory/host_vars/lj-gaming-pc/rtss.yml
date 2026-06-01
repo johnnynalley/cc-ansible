@@ -13,3 +13,23 @@ windows_gaming_rtss_profiles:
       - section: Hooking
         key: UseDetours
         value: 1
+  # SignalRGB warns that RTSSHooks64.dll is likely to cause issues. Keep RTSS
+  # away from SignalRGB so the local lighting API can initialize reliably.
+  - path: 'C:\Program Files (x86)\RivaTuner Statistics Server\Profiles\SignalRgb.exe.cfg'
+    create_from: 'C:\Program Files (x86)\RivaTuner Statistics Server\Profiles\Global'
+    settings:
+      - section: OSD
+        key: EnableOSD
+        value: 0
+      - section: Hooking
+        key: EnableHooking
+        value: 0
+  - path: 'C:\Program Files (x86)\RivaTuner Statistics Server\Profiles\SignalRgbLauncher.exe.cfg'
+    create_from: 'C:\Program Files (x86)\RivaTuner Statistics Server\Profiles\Global'
+    settings:
+      - section: OSD
+        key: EnableOSD
+        value: 0
+      - section: Hooking
+        key: EnableHooking
+        value: 0

@@ -11,6 +11,7 @@ signalrgb_legacy_script_dirs:
 # already locked, so the lock/unlock tasks depend on a resident session process.
 signalrgb_close_after_action: false
 signalrgb_disable_persistent_startup: true
+signalrgb_api_port: 16038
 signalrgb_launch_timeout_seconds: 30
 signalrgb_post_apply_settle_seconds: 2
 signalrgb_process_priority: BelowNormal
