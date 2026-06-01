@@ -162,6 +162,12 @@ services:
       - default
       - caddy-proxy
     logging: *media_stack_logging
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8191/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
     restart: unless-stopped
 
 networks:
