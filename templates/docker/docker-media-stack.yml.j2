@@ -1,3 +1,11 @@
+{% set media_stack_log_max_size = media_stack_docker_log_max_size | default('10m') %}
+{% set media_stack_log_max_file = media_stack_docker_log_max_file | default('5') %}
+x-media-stack-logging: &media_stack_logging
+  driver: json-file
+  options:
+    max-size: "{{ media_stack_log_max_size }}"
+    max-file: "{{ media_stack_log_max_file }}"
+
 services:
   sonarr:
     image: lscr.io/linuxserver/sonarr:latest
@@ -15,6 +23,7 @@ services:
     networks:
       - default
       - caddy-proxy
+    logging: *media_stack_logging
     restart: unless-stopped
 
   radarr:
@@ -33,6 +42,7 @@ services:
     networks:
       - default
       - caddy-proxy
+    logging: *media_stack_logging
     restart: unless-stopped
 
   prowlarr:
@@ -49,6 +59,7 @@ services:
     networks:
       - default
       - caddy-proxy
+    logging: *media_stack_logging
     restart: unless-stopped
 
   bazarr:
@@ -67,6 +78,7 @@ services:
     networks:
       - default
       - caddy-proxy
+    logging: *media_stack_logging
     restart: unless-stopped
 
   sabnzbd:
@@ -86,6 +98,11 @@ services:
     networks:
       - default
       - caddy-proxy
+    ulimits:
+      nofile:
+        soft: {{ media_stack_sabnzbd_nofile_soft | default(65536) }}
+        hard: {{ media_stack_sabnzbd_nofile_hard | default(65536) }}
+    logging: *media_stack_logging
     restart: unless-stopped
 
   gluetun:
@@ -111,6 +128,7 @@ services:
     networks:
       - default
       - caddy-proxy
+    logging: *media_stack_logging
     restart: unless-stopped
 
   qbittorrent:
@@ -129,6 +147,7 @@ services:
       - /srv/archive:/archive
     depends_on:
       - gluetun
+    logging: *media_stack_logging
     restart: unless-stopped
 
   byparr:
@@ -142,6 +161,7 @@ services:
     networks:
       - default
       - caddy-proxy
+    logging: *media_stack_logging
     restart: unless-stopped
 
 networks:

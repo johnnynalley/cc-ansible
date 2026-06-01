@@ -8,6 +8,9 @@
 - `diun.yml.j2`: Diun update-monitor configuration.
 - `docker-auto-update.sh.j2`: Docker auto-update runner.
 - `docker-media-stack.yml.j2`: docker-vm media automation compose template.
+  It applies bounded `json-file` logging to media-stack containers and raises
+  SABnzbd's `nofile` limit to avoid file-descriptor exhaustion during heavy
+  download/unpack bursts.
 - `docker-socket-proxy.yml`: Docker socket proxy compose file.
 - `docker-stacks.service.j2`: Systemd service for Docker Compose stacks.
 - `media-stack-health.sh.j2`: Media stack health sentinel.

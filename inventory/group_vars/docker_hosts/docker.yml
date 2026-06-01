@@ -1,0 +1,11 @@
+# =============================================================================
+# Docker Hosts - Docker Engine Defaults
+# =============================================================================
+
+# Keep Docker's json-file logs bounded. Application-level log rotation does not
+# cap container stdout/stderr logs unless Docker is configured to rotate them.
+docker_daemon_config:
+  log-driver: json-file
+  log-opts:
+    max-size: "10m"
+    max-file: "5"

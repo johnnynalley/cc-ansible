@@ -67,6 +67,25 @@
       - docker-compose-plugin
     state: present
 
+- name: Create Docker config directory
+  ansible.builtin.file:
+    path: /etc/docker
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  when: docker_daemon_config is defined
+
+- name: Configure Docker daemon
+  ansible.builtin.copy:
+    dest: /etc/docker/daemon.json
+    owner: root
+    group: root
+    mode: "0644"
+    content: "{{ docker_daemon_config | to_nice_json }}\n"
+  register: docker_daemon_config_result
+  when: docker_daemon_config is defined
+
 - name: Add user to docker group
   ansible.builtin.user:
     name: "{{ admin_user }}"
@@ -78,3 +97,11 @@
     name: docker
     enabled: true
     state: started
+
+- name: Reload Docker daemon config
+  ansible.builtin.systemd:
+    name: docker
+    state: reloaded
+  when:
+    - docker_daemon_config_result is defined
+    - docker_daemon_config_result.changed

@@ -4,7 +4,8 @@ Owner area: Docker Compose stacks and container maintenance.
 
 ## Operating Notes
 
-- Key vars: docker_stacks, docker_auto_update_*, gluetun_*, qbit_*.
+- Key vars: docker_stacks, docker_daemon_config, docker_auto_update_*,
+  gluetun_*, qbit_*.
 - Template owners: templates/docker, templates/gluetun.
 - Script owners: scripts/docker.
 - Keep playbook metadata headers and `playbooks/README.md` in sync when behavior changes.
