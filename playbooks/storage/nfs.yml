@@ -41,6 +41,7 @@
     - name: Gather facts for hosts with NFS client mounts
       ansible.builtin.setup:
       when: nfs_mounts is defined
+      tags: [nfs, client]
 
     - name: Setup NFS client mounts
       ansible.builtin.import_tasks: ../../tasks/nfs-client.yml
