@@ -64,6 +64,7 @@ nfs_exports:
   # /srv/media/plex via the single media export above.
   - name: archive
     bind_source: /srv/nas-zfs/archive
+    requires_mount: srv-nas\x2dzfs-archive.mount
     owner: johnny
     group: johnny
     mode: "0775"
