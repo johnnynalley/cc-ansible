@@ -1,0 +1,11 @@
+# =============================================================================
+# media-vm - Filesystem Mounts
+# =============================================================================
+
+filesystem_mounts:
+  - path: /opt/media-stack/plex
+    src: LABEL=plex-data
+    fstype: ext4
+    opts: defaults,noatime,nofail,x-systemd.device-timeout=30s
+    owner: root
+    group: root

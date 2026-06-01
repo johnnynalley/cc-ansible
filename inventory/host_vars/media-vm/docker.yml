@@ -2,7 +2,9 @@
 # media-vm - Docker Compose Stacks
 # =============================================================================
 
-# Configs stored locally at /opt (migrated from VirtioFS)
+# Compose projects live under /opt. Plex data at /opt/media-stack/plex is a
+# dedicated ZFS-backed VM disk mounted by filesystem_mounts, while Plex
+# transcode scratch stays on local root at /var/lib/plex-transcode.
 # Plex-side media services stay on media-vm. Sonarr/Radarr/Prowlarr/Bazarr,
 # SABnzbd, qBittorrent, Gluetun, and Byparr are managed on docker-vm
 # in that host's /opt/media-stack compose project.

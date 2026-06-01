@@ -26,6 +26,7 @@ services:
       - NVIDIA_DRIVER_CAPABILITIES=compute,video,utility
     volumes:
       - ./plex:/config
+      - /var/lib/plex-transcode:/transcode
       - /srv/plex:/data:ro
       - /srv/archive:/archive
     ports:

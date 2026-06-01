@@ -24,3 +24,4 @@ nightly_media_maintenance_plex_preferences:
   LoudnessAnalysisBehavior: scheduled
   MusicAnalysisBehavior: scheduled
   ScannerLowPriority: "1"
+  TranscoderTempDirectory: /transcode

@@ -1,6 +1,6 @@
 # Plex Appliance Operations
 
-Last updated: 2026-05-27
+Last updated: 2026-06-01
 
 Use this doc for quick operator actions on the managed Plex TV appliances.
 
@@ -8,6 +8,18 @@ Use this doc for quick operator actions on the managed Plex TV appliances.
 
 - Bedroom Plex: `jn-t14s-lin` / T14s HDMI appliance.
 - Living room Plex: `mercury` / Raspberry Pi 5 appliance.
+
+## Plex Server Storage
+
+Plex runs on `media-vm` in the `/opt/media-stack` Docker Compose project. The
+Plex config, metadata, thumbnails, intro/credits analysis, and cache live under
+`/opt/media-stack/plex`, which is mounted from the dedicated `plex-data` ext4
+disk (`LABEL=plex-data`) backed by TS440 ZFS storage `nas-zfs-vm`.
+
+The media libraries are not stored there. Plex reads library media through
+`/srv/plex` and `/srv/archive`, which are TS440 VirtioFS paths. Temporary
+transcode scratch stays on the VM root disk at `/var/lib/plex-transcode` and is
+mounted into the Plex container as `/transcode`.
 
 ## Bedroom HDMI Display Ownership
 

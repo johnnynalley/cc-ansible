@@ -124,6 +124,50 @@
         - item is not skipped
         - item.changed | default(false)
 
+    - name: Configure VM disk overrides
+      ansible.builtin.shell: |
+        set -eu
+        slot="{{ item.slot }}"
+        existing="$(qm config {{ item.vmid }} | awk -F': ' -v slot="$slot" '$1 == slot { print $2; exit }')"
+        if [ -z "$existing" ]; then
+          echo "ERROR: vmid={{ item.vmid }} slot=$slot does not exist" >&2
+          exit 2
+        fi
+
+        desired="{{ item.volume }}{% for key, value in (item.options | default({})).items() %},{{ key }}={{ value }}{% endfor %}"
+        if [ "$existing" = "$desired" ]; then
+          echo "unchanged vmid={{ item.vmid }} slot=$slot existing=$existing"
+          exit 0
+        fi
+
+        if [ "{{ ansible_check_mode | bool | lower }}" = "true" ]; then
+          echo "updated=1 check_mode=1 vmid={{ item.vmid }} slot=$slot existing=$existing desired=$desired"
+          exit 0
+        fi
+
+        qm set {{ item.vmid }} --{{ item.slot }} "$desired"
+        echo "updated=1 vmid={{ item.vmid }} slot=$slot existing=$existing desired=$desired"
+      args:
+        executable: /bin/bash
+      loop: "{{ proxmox_vm_disk_overrides | default([]) }}"
+      loop_control:
+        label: "vmid={{ item.vmid }} {{ item.slot }} {{ item.name | default('') }}"
+      register: proxmox_vm_disk_override_result
+      check_mode: false
+      changed_when: "'updated=1' in proxmox_vm_disk_override_result.stdout"
+
+    - name: Report VM disk override changes
+      ansible.builtin.debug:
+        msg:
+          - "{{ item.stdout_lines }}"
+          - "VM may need a restart before changed disk options are active."
+      loop: "{{ proxmox_vm_disk_override_result.results | default([]) }}"
+      loop_control:
+        label: "{{ item.item.name | default(item.item.vmid) }}"
+      when:
+        - item is not skipped
+        - item.changed | default(false)
+
     - name: Resize VM disks
       ansible.builtin.shell:
         cmd: |
