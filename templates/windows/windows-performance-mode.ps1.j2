@@ -220,7 +220,12 @@ function Test-RuleCloseDeferred {
     )
 
     $deferSeconds = Get-RuleIntValue -Rule $Rule -Property "defer_close_seconds" -Default 0
-    if ($deferSeconds -le 0) {
+    $targetNames = @()
+    if ($Rule.PSObject.Properties["defer_close_until_process_names"]) {
+        $targetNames = @($Rule.defer_close_until_process_names | ForEach-Object { [string]$_ } | Where-Object { $_ })
+    }
+
+    if ($deferSeconds -le 0 -and $targetNames.Count -eq 0) {
         return $false
     }
 
@@ -246,10 +251,14 @@ function Test-RuleCloseDeferred {
         }
     }
 
-    if ($Rule.PSObject.Properties["defer_close_until_process_names"]) {
-        $targetNames = @($Rule.defer_close_until_process_names | ForEach-Object { [string]$_ } | Where-Object { $_ })
-        if ($targetNames.Count -gt 0 -and (Test-AnyProcessRunning -ProcessNames $targetNames)) {
+    if ($targetNames.Count -gt 0) {
+        if (Test-AnyProcessRunning -ProcessNames $targetNames) {
             return $false
+        }
+
+        if ($deferSeconds -le 0) {
+            Write-PerformanceLog "deferred closing $($Rule.display_name); waiting for $($targetNames -join ', ')"
+            return $true
         }
     }
 

@@ -101,6 +101,17 @@ The capture script writes:
 - `obs-profile.csv`
 - `preflight.csv`
 
+
+## CPU Upgrade Baseline
+
+As of 2026-05-31, Johnny bought a Ryzen 7 5700X3D for the gaming PC. After install, use the same wrapper flow to capture at least one clean Fortnite baseline with labels that make the CPU state obvious, for example:
+
+```bash
+bin/windows-gaming-benchmark start --label fortnite-5700x3d-baseline
+```
+
+Before comparing results, record the verified CPU model, BIOS version, chipset driver version, temperatures, OBS state, render mode, map/match type, and whether Performance Mode was active. Compare against the saved 2026-05-23 Ryzen 9 3900X captures in `docs/fortnite-performance-investigation.md` before re-ranking remaining tweaks.
+
 ## Notes
 
 - Use markers aggressively. Marker names are cheap and make later analysis much cleaner.

@@ -80,14 +80,82 @@ function Confirm-PerformanceModeExit {
         return $true
     }
 
+    if (Test-ProcessesRunning -Names @($Profile.process_names)) {
+        Write-WatcherLog "$($Profile.display_name) restarted before exit prompt; keeping performance mode active"
+        return $false
+    }
+
     try {
-        $shell = New-Object -ComObject WScript.Shell
+        Add-Type -AssemblyName System.Windows.Forms
+        Add-Type -AssemblyName System.Drawing
+
         $message = $ExitPromptMessage
         if (-not $message) {
             $message = "$($Profile.display_name) exited. Disable Performance Mode and restore closed apps/services now?"
         }
-        $result = $shell.Popup($message, 0, $ExitPromptTitle, 4 + 32 + 4096)
-        return ($result -eq 6)
+
+        $form = New-Object System.Windows.Forms.Form
+        $form.Text = $ExitPromptTitle
+        $form.StartPosition = "CenterScreen"
+        $form.TopMost = $true
+        $form.ShowInTaskbar = $true
+        $form.FormBorderStyle = "FixedDialog"
+        $form.MaximizeBox = $false
+        $form.MinimizeBox = $false
+        $form.ControlBox = $false
+        $form.ClientSize = New-Object System.Drawing.Size(420, 135)
+        $form.Tag = $false
+
+        $label = New-Object System.Windows.Forms.Label
+        $label.Text = $message
+        $label.Location = New-Object System.Drawing.Point(16, 16)
+        $label.Size = New-Object System.Drawing.Size(388, 56)
+        $label.TextAlign = "MiddleLeft"
+        $form.Controls.Add($label)
+
+        $yesButton = New-Object System.Windows.Forms.Button
+        $yesButton.Text = "Yes"
+        $yesButton.Size = New-Object System.Drawing.Size(90, 28)
+        $yesButton.Location = New-Object System.Drawing.Point(214, 91)
+        $yesButton.Add_Click({
+            $form.Tag = $true
+            $form.Close()
+        })
+        $form.Controls.Add($yesButton)
+
+        $noButton = New-Object System.Windows.Forms.Button
+        $noButton.Text = "No"
+        $noButton.Size = New-Object System.Drawing.Size(90, 28)
+        $noButton.Location = New-Object System.Drawing.Point(314, 91)
+        $noButton.Add_Click({
+            $form.Tag = $false
+            $form.Close()
+        })
+        $form.Controls.Add($noButton)
+
+        $timer = New-Object System.Windows.Forms.Timer
+        $timer.Interval = 1000
+        $timer.Add_Tick({
+            if (Test-ProcessesRunning -Names @($Profile.process_names)) {
+                Write-WatcherLog "$($Profile.display_name) restarted while exit prompt was open; keeping performance mode active"
+                $form.Tag = $false
+                $form.Close()
+            }
+        })
+
+        $form.AcceptButton = $yesButton
+        $form.CancelButton = $noButton
+        $form.Add_Shown({
+            $timer.Start()
+            $form.Activate()
+        })
+        $form.Add_FormClosed({
+            $timer.Stop()
+            $timer.Dispose()
+        })
+
+        [void]$form.ShowDialog()
+        return ([bool]$form.Tag)
     } catch {
         Write-WatcherLog "exit prompt failed for $($Profile.display_name): $($_.Exception.Message); exiting performance mode"
         return $true
@@ -162,7 +230,7 @@ while ($true) {
                         Clear-ExitHold -Reason $state.reason
                         Invoke-PerformanceMode -Mode exit -Reason $state.reason
                     } else {
-                        Write-WatcherLog "$($profile.display_name) absent for $([int]$elapsed)s; user chose to keep performance mode active"
+                        Write-WatcherLog "$($profile.display_name) absent for $([int]$elapsed)s; exit prompt kept performance mode active"
                         Set-ExitHold -Reason $state.reason
                     }
                     $state.running = $false

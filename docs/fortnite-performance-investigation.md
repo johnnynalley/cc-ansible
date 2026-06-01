@@ -17,7 +17,8 @@
 ## Current Hardware Snapshot
 
 - Gaming PC: `lj-gaming-pc`
-- CPU: AMD Ryzen 9 3900X, 12 cores / 24 threads
+- CPU currently verified installed: AMD Ryzen 9 3900X, 12 cores / 24 threads
+- CPU upgrade purchased 2026-05-31: AMD Ryzen 7 5700X3D. Do not treat as installed until BIOS/Windows verification and a fresh capture confirm it.
 - Motherboard: MSI MPG B550 Gaming Plus
 - BIOS: `1.L1`
 - RAM: 32 GB, 4x8 GB Corsair `CMW16GX4M2C3200C16`
@@ -83,7 +84,7 @@ Do not manually delete paks. Use Epic Games Launcher options for this setting.
 
 ## Current Best Candidates
 
-> Updated 2026-05-24 after Astra/Vega/Antares review. Treat this as a benchmark queue, not applied wins. The goal is to preserve modern-Fortnite-valid paths for holding as close to 200 FPS as possible on the current Ryzen 9 3900X system while waiting on a possible AM4 X3D upgrade.
+> Updated 2026-05-31 after Johnny bought a Ryzen 7 5700X3D. Treat this as a benchmark queue, not applied wins. The short-term goal is to capture clean before/after data around the AM4 X3D upgrade, then re-rank remaining Fortnite tweaks based on the new CPU frame-time baseline.
 
 1. OBS capture-pipeline A/B, before more BIOS work:
    - the biggest measured delta is non-OBS gameplay around 151 FPS vs OBS recording around 99-102 FPS
@@ -120,11 +121,13 @@ Do not manually delete paks. Use Epic Games Launcher options for this setting.
 
 ## Upgrade Watch
 
-Johnny's current plan is to hold the Ryzen 9 3900X until a possible AM4 X3D upgrade is available and affordable. Rumors as of 2026-05-24 say AMD may re-release the Ryzen 7 5800X3D as an AM4 10th Anniversary Edition around Q2 2026, with early retailer sightings around the low-$300 range. Treat this as a rumor until AMD or retail availability is confirmed.
+As of 2026-05-31, Johnny bought a Ryzen 7 5700X3D for the gaming PC. The AM4 X3D path is now the chosen upgrade path rather than a fallback. Do not mark the upgrade as applied until the CPU is installed, BIOS/Windows reports verify it, thermals are checked, and at least one post-install Fortnite capture is archived.
 
-As of 2026-05-25, Astra created OpenClaw cron job `aeebfe19-a1b8-4f12-8f74-9406c29c5aab` (`AMD 5800X3D Re-release Watch`) to check every 6 hours and alert Johnny in `#astra` only for material updates: official AMD confirmation, US retailer stock/preorder, credible launch/MSRP/regional-limit news, meaningful price movement, or debunk/cancellation. Baseline state is stored in `/home/johnny/.openclaw/workspace/memory/5800x3d-watch.json`. Baseline evidence remains the same rumor cluster: Indian 99deals.in listing around ~$310 / ₹30,000 and press coverage from Tom's Hardware, TechPowerUp, VideoCardz, etc.; no official AMD or US retailer availability was confirmed at setup time.
+Later on 2026-05-31, after checking that the re-released 5800X3D is not expected until June 25 at $349 MSRP, Johnny decided to hold the 5700X3D plan for now instead of preemptively returning it. Rationale: the 5700X3D arrives around the same window, the 5800X3D may have launch availability/scalping risk, and future working-part upgrades can be partly offset by selling the replaced CPU.
 
-If the anniversary 5800X3D is unavailable, scalped, or overpriced, the practical fallback is a Ryzen 7 5700X3D or used 5800X3D. For Fortnite and other cache-sensitive games, 5700X3D/5800X3D are much better upgrade targets from a 3900X than a 5900X. A 5900X adds cores but does not solve the cache/game-thread limitation that the captures are pointing at.
+The previous 5800X3D re-release watch exists only because of the earlier plan to wait for a possible Ryzen 7 5800X3D AM4 10th Anniversary Edition. Rumors as of 2026-05-24 said AMD may re-release the 5800X3D around Q2 2026, with early retailer sightings around the low-$300 range. On 2026-06-01, AMD announced that the Ryzen 7 5800X3D 10th Anniversary Edition will be available beginning June 25 with a suggested e-tail price of $349. If Johnny no longer wants informational watch alerts after buying the 5700X3D, disable OpenClaw cron job `aeebfe19-a1b8-4f12-8f74-9406c29c5aab` (`AMD 5800X3D Re-release Watch`) after explicit approval.
+
+For Fortnite and other cache-sensitive games, 5700X3D/5800X3D are much better upgrade targets from a 3900X than a 5900X. The 5800X3D is typically only about 6-10% faster than the 5700X3D in gaming, so swapping again is most sensible only if a real 5800X3D order is secured at a reasonable net cost. A 5900X adds cores but does not solve the cache/game-thread limitation that the captures are pointing at. After the 5700X3D install, re-run the same benchmark harness before chasing lower-confidence tweaks.
 
 
 ## 2026-05-24 Creative 32-Player Cup Zone Wars FPS Observation
@@ -460,3 +463,4 @@ Microsoft documents `GPU Priority` and `SFIO Priority` as not used, and `High` s
 - Microsoft MMCSS docs: https://learn.microsoft.com/en-us/windows/win32/procthread/multimedia-class-scheduler-service
 - TechPowerUp reports the rumored Ryzen 7 5800X3D AM4 10th Anniversary Edition; treat as rumor until AMD/retail confirmation: https://www.techpowerup.com/348272/amd-to-re-launch-ryzen-7-5800x3d-as-am4-10th-anniversary-edition
 - Tom's Hardware reports early retailer sightings of the rumored Ryzen 7 5800X3D AM4 10th Anniversary Edition around $310: https://www.tomshardware.com/pc-components/cpus/ryzen-7-5800x3d-am4-10th-anniversary-edition-surfaces-online-for-usd310-return-of-iconic-gaming-cpu-for-budget-builders-seems-imminent
+- AMD announced the Ryzen 7 5800X3D 10th Anniversary Edition for June 25 with a suggested e-tail price of $349: https://www.amd.com/en/blogs/2026/amd-computex-2026-10-years-of-am4-am5-support-through.html

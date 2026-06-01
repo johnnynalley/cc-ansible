@@ -30,7 +30,7 @@ windows_performance_game_profiles:
     process_names:
       - FortniteClient-Win64-Shipping
     auto_performance_mode: true
-    exit_grace_seconds: 45
+    exit_grace_seconds: 10
 
 # Cloud sync clients are normally left alone, but Nextcloud is paused during Performance Mode
 # so OBS can write local files without live sync CPU/network contention.
@@ -99,7 +99,9 @@ windows_performance_process_rules:
       - EpicWebHelper
     launch_path: 'C:\Program Files\Epic Games\Launcher\Portal\Binaries\Win64\EpicGamesLauncher.exe'
     launch_args: ''
-    defer_close_seconds: 120
+    # Keep Epic available during a held Performance Mode relaunch, then close it
+    # again once Fortnite's game process is back.
+    defer_close_seconds: 0
     defer_close_until_process_names:
       - FortniteClient-Win64-Shipping
     defer_close_reason_prefixes:
