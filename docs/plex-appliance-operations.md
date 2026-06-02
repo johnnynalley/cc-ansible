@@ -62,6 +62,15 @@ rather than moving to `unplayable` or advancing the queue. Treat file-level
 corruption as verified only when the evidence is not just Plex
 transport/session failure.
 
+Full collection refreshes are expensive because the Adult Swim collection
+expands show directories through Plex metadata paging. The 2026-06-02 retry
+incident showed both appliances refreshing the same collection at the same time,
+with Plex metadata requests taking 80-100 seconds and exceeding the player read
+timeout. Do not set both appliances back to synchronized hourly refreshes. Keep
+saved queue state authoritative across restarts, delay the first full refresh
+when a queue already exists, and keep refresh jitter enabled so bedroom and
+Mercury do not stampede Plex together.
+
 ## Bedroom HDMI Display Ownership
 
 The T14s HDMI appliance uses mpv with direct DRM on VT8. When no real local

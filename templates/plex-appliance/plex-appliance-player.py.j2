@@ -47,6 +47,7 @@ PAGE_SIZE = int(os.environ.get("PLEX_APPLIANCE_PAGE_SIZE", "100"))
 SERVER_RETRY_SECONDS = int(os.environ.get("PLEX_APPLIANCE_SERVER_RETRY_SECONDS", "30"))
 ITEM_FAILURE_DELAY_SECONDS = int(os.environ.get("PLEX_APPLIANCE_ITEM_FAILURE_DELAY_SECONDS", "10"))
 COLLECTION_REFRESH_SECONDS = int(os.environ.get("PLEX_APPLIANCE_COLLECTION_REFRESH_SECONDS", "3600"))
+COLLECTION_REFRESH_JITTER_SECONDS = max(0, int(os.environ.get("PLEX_APPLIANCE_COLLECTION_REFRESH_JITTER_SECONDS", "300")))
 SHUFFLE_STATE_PATH = os.environ.get("PLEX_APPLIANCE_SHUFFLE_STATE_PATH", "/var/lib/plex-appliance/shuffle-state.json")
 PLAYBACK_PROGRESS_SECONDS = max(1, int(os.environ.get("PLEX_APPLIANCE_PLAYBACK_PROGRESS_SECONDS", "5")))
 RESUME_REWIND_SECONDS = max(0, int(os.environ.get("PLEX_APPLIANCE_RESUME_REWIND_SECONDS", "10")))
@@ -173,6 +174,11 @@ def playback_loading_status(title: str, detail: str) -> None:
         title or "Untitled media",
         detail,
     ])
+
+
+def collection_refresh_delay() -> float:
+    jitter = RNG.randrange(COLLECTION_REFRESH_JITTER_SECONDS + 1) if COLLECTION_REFRESH_JITTER_SECONDS else 0
+    return max(0, COLLECTION_REFRESH_SECONDS) + jitter
 
 
 def plex_url(path: str, params: Optional[Dict[str, object]] = None) -> str:
@@ -567,9 +573,13 @@ def active_checkpoint(
         "updated_at": int(time.time()),
     }
     if previous_active and str(previous_active.get("key", "")) == item_key_to_play:
-        for key in RETRY_STATE_KEYS:
-            if key in previous_active:
-                checkpoint[key] = previous_active[key]
+        previous_failure_position = optional_numeric(previous_active.get("failure_position"))
+        if previous_failure_position is None:
+            previous_failure_position = optional_numeric(previous_active.get("position"))
+        if previous_failure_position is not None and abs(checkpoint["position"] - previous_failure_position) <= PLAYBACK_FAILURE_POSITION_WINDOW_SECONDS:
+            for key in RETRY_STATE_KEYS:
+                if key in previous_active:
+                    checkpoint[key] = previous_active[key]
     return checkpoint
 
 
@@ -780,6 +790,18 @@ def run_corruption_check(item: ET.Element, position: float, duration: float) -> 
         result["status"] = "inconclusive"
         result["reason"] = "ffmpeg_failed_without_corruption_marker" if completed.returncode != 0 else "short_decode_without_corruption_marker"
     return result
+
+
+def safe_corruption_check(item: ET.Element, position: float, duration: float) -> Dict[str, Any]:
+    try:
+        return run_corruption_check(item, position, duration)
+    except Exception as exc:
+        log(f"Corruption check could not complete: {redact_token(exc)}")
+        return {
+            "status": "inconclusive",
+            "reason": "corruption_check_error",
+            "error": redact_token(exc),
+        }
 
 
 def append_corrupt_media_log(
@@ -1128,7 +1150,8 @@ def play(
 def main() -> int:
     queue_keys, played_keys, unplayable_keys, active = load_shuffle_state()
     item_map: Dict[str, ET.Element] = {}
-    next_refresh = 0.0
+    has_saved_playback_state = bool(queue_keys or active_item_key(active))
+    next_refresh = time.monotonic() + collection_refresh_delay() if has_saved_playback_state else 0.0
     refresh_attempt = 1
 
     while True:
@@ -1158,7 +1181,7 @@ def main() -> int:
                     active_item_key(active),
                 )
                 save_shuffle_state(queue_keys, played_keys, unplayable_keys, active)
-                next_refresh = now + COLLECTION_REFRESH_SECONDS
+                next_refresh = now + collection_refresh_delay()
                 refresh_attempt = 1
             except Exception as exc:
                 retry_wait("Failed to refresh collection", exc, refresh_attempt, SERVER_RETRY_SECONDS)
@@ -1247,7 +1270,8 @@ def main() -> int:
                 active = failed_active_checkpoint(item_key_to_play, item, active_position, duration, previous_active)
                 failure_count = int(numeric(active.get("failure_count"), 0.0))
                 if failure_count >= PLAYBACK_FAILURE_SKIP_THRESHOLD:
-                    check = run_corruption_check(item, active_position, duration)
+                    save_shuffle_state(queue_keys, played_keys, unplayable_keys, active)
+                    check = safe_corruption_check(item, active_position, duration)
                     if check.get("status") == "corrupt":
                         append_corrupt_media_log(item_key_to_play, item, active, check)
                         log(
@@ -1284,7 +1308,8 @@ def main() -> int:
                 active = early_exit_active_checkpoint(item_key_to_play, item, active_position, duration, previous_active)
                 failure_count = int(numeric(active.get("failure_count"), 0.0))
                 if failure_count >= PLAYBACK_FAILURE_SKIP_THRESHOLD:
-                    check = run_corruption_check(item, active_position, duration)
+                    save_shuffle_state(queue_keys, played_keys, unplayable_keys, active)
+                    check = safe_corruption_check(item, active_position, duration)
                     if check.get("status") == "corrupt":
                         append_corrupt_media_log(item_key_to_play, item, active, check)
                         log(
