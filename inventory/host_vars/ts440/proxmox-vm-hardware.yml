@@ -48,6 +48,16 @@ proxmox_vm_disks:
       ssd: 1
 
 proxmox_vm_disk_overrides:
+  - name: media-vm EFI disk 2023 certificates
+    vmid: 100
+    slot: efidisk0
+    volume: local-lvm:vm-100-disk-0
+    options:
+      efitype: 4m
+      ms-cert: 2023k
+      pre-enrolled-keys: 1
+      size: 4M
+
   - name: media-vm root disk discard
     vmid: 100
     slot: scsi0
