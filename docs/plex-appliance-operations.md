@@ -71,6 +71,15 @@ saved queue state authoritative across restarts, delay the first full refresh
 when a queue already exists, and keep refresh jitter enabled so bedroom and
 Mercury do not stampede Plex together.
 
+Some Plex items report a longer duration than the direct playable stream
+actually provides. The 2026-06-02 bedroom loop on `The Boondocks - The Itis`
+reached the real credits/end around 1188 seconds while Plex reported 1298
+seconds, so the player kept resuming near the credits and never crossed the
+Plex-reported completion threshold. Repeated failures at a clean observed EOF
+near the end of the Plex duration should count as watched, because the item
+reached the actual playable end. Do not count earlier short decodes or Plex
+transport failures as watched.
+
 ## Bedroom HDMI Display Ownership
 
 The T14s HDMI appliance uses mpv with direct DRM on VT8. When no real local

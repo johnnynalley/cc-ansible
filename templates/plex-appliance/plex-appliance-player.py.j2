@@ -58,6 +58,8 @@ MPV_STALL_TIMEOUT_SECONDS = max(MPV_START_TIMEOUT_SECONDS, int(os.environ.get("P
 PLAYBACK_POSITION_WALLCLOCK_GRACE_SECONDS = max(0, int(os.environ.get("PLEX_APPLIANCE_POSITION_WALLCLOCK_GRACE_SECONDS", "10")))
 PLAYBACK_FAILURE_SKIP_THRESHOLD = max(1, int(os.environ.get("PLEX_APPLIANCE_PLAYBACK_FAILURE_SKIP_THRESHOLD", "3")))
 PLAYBACK_FAILURE_POSITION_WINDOW_SECONDS = max(1, int(os.environ.get("PLEX_APPLIANCE_PLAYBACK_FAILURE_POSITION_WINDOW_SECONDS", "5")))
+OBSERVED_EOF_GRACE_SECONDS = max(0, int(os.environ.get("PLEX_APPLIANCE_OBSERVED_EOF_GRACE_SECONDS", "30")))
+OBSERVED_EOF_MIN_DURATION_RATIO = min(1.0, max(0.0, float(os.environ.get("PLEX_APPLIANCE_OBSERVED_EOF_MIN_DURATION_RATIO", "0.85"))))
 CORRUPT_MEDIA_LOG_PATH = os.environ.get("PLEX_APPLIANCE_CORRUPT_MEDIA_LOG_PATH", "/var/log/plex-appliance/corrupt-media.jsonl")
 CORRUPTION_CHECK_ENABLED = os.environ.get("PLEX_APPLIANCE_CORRUPTION_CHECK_ENABLED", "true").lower() == "true"
 CORRUPTION_CHECK_REWIND_SECONDS = max(0, int(os.environ.get("PLEX_APPLIANCE_CORRUPTION_CHECK_REWIND_SECONDS", "60")))
@@ -914,6 +916,25 @@ def playback_completed(
     return True
 
 
+def observed_clean_eof_completion(check: Dict[str, Any], position: float, duration: float) -> bool:
+    if check.get("reason") != "short_decode_without_corruption_marker":
+        return False
+    if int(numeric(check.get("return_code"), 1.0)) != 0:
+        return False
+    if str(check.get("stderr_tail") or "").strip():
+        return False
+
+    start = optional_numeric(check.get("start"))
+    decoded_seconds = optional_numeric(check.get("decoded_seconds"))
+    if start is None or decoded_seconds is None or decoded_seconds <= 0:
+        return False
+    if duration > 0 and position < duration * OBSERVED_EOF_MIN_DURATION_RATIO:
+        return False
+
+    observed_end = start + decoded_seconds
+    return position + OBSERVED_EOF_GRACE_SECONDS >= observed_end
+
+
 def playback_args() -> List[str]:
     args = list(MPV_ARGS)
     if MPV_SCREEN_NAME:
@@ -1054,6 +1075,7 @@ def play(
     position_offset = start_position if use_universal_stream else 0.0
     playback_elapsed = 0.0
     position_jump_logged = False
+    forced_stop_reason = ""
     try:
         with tempfile.TemporaryDirectory(prefix="plex-appliance-mpv-") as runtime_dir:
             socket_path = os.path.join(runtime_dir, "mpv.sock")
@@ -1104,10 +1126,8 @@ def play(
                 progress_callback(last_position, duration)
 
                 if not playback_ready and now - started_at >= MPV_START_TIMEOUT_SECONDS:
-                    stop_mpv_process(
-                        process,
-                        f"mpv did not configure video within {MPV_START_TIMEOUT_SECONDS}s; retrying",
-                    )
+                    forced_stop_reason = f"mpv did not configure video within {MPV_START_TIMEOUT_SECONDS}s; retrying"
+                    stop_mpv_process(process, forced_stop_reason)
                     break
 
                 paused = mpv_bool_property(socket_path, "pause")
@@ -1116,13 +1136,13 @@ def play(
                     and paused is not True
                     and now - last_progress_at >= MPV_STALL_TIMEOUT_SECONDS
                 ):
-                    stop_mpv_process(
-                        process,
-                        f"mpv made no playback progress for {MPV_STALL_TIMEOUT_SECONDS}s; retrying",
-                    )
+                    forced_stop_reason = f"mpv made no playback progress for {MPV_STALL_TIMEOUT_SECONDS}s; retrying"
+                    stop_mpv_process(process, forced_stop_reason)
                     break
 
             return_code = process.wait()
+            if forced_stop_reason and return_code == 0:
+                return_code = 1
             playback_elapsed = max(0.0, time.monotonic() - started_at)
             position_value = mpv_number_property(socket_path, "time-pos")
             duration_value = mpv_number_property(socket_path, "duration")
@@ -1279,6 +1299,16 @@ def main() -> int:
                             f"{failure_count} failed playback attempts: {item_key_to_play}"
                         )
                         mark_unplayable(queue_keys, played_keys, unplayable_keys, item_key_to_play)
+                    elif observed_clean_eof_completion(check, active_position, duration):
+                        if item_key_to_play not in played_keys:
+                            played_keys.append(item_key_to_play)
+                        active = None
+                        save_shuffle_state(queue_keys, played_keys, unplayable_keys)
+                        log(
+                            "Marking media complete at observed clean EOF after repeated playback failures: "
+                            f"{item_key_to_play}; position={active_position:.3f}s "
+                            f"observed_start={check.get('start')} decoded={check.get('decoded_seconds')}"
+                        )
                     else:
                         append_playback_issue_log(
                             item_key_to_play,
@@ -1317,6 +1347,16 @@ def main() -> int:
                             f"{failure_count} early player exits: {item_key_to_play}"
                         )
                         mark_unplayable(queue_keys, played_keys, unplayable_keys, item_key_to_play)
+                    elif observed_clean_eof_completion(check, active_position, duration):
+                        if item_key_to_play not in played_keys:
+                            played_keys.append(item_key_to_play)
+                        active = None
+                        save_shuffle_state(queue_keys, played_keys, unplayable_keys)
+                        log(
+                            "Marking media complete at observed clean EOF after repeated early player exits: "
+                            f"{item_key_to_play}; position={active_position:.3f}s "
+                            f"observed_start={check.get('start')} decoded={check.get('decoded_seconds')}"
+                        )
                     else:
                         append_playback_issue_log(
                             item_key_to_play,
