@@ -20,6 +20,24 @@ import requests
 
 PLEX_URL = os.environ["PLEX_APPLIANCE_SERVER_URL"].rstrip("/")
 TOKEN = os.environ["PLEX_APPLIANCE_TOKEN"]
+PRODUCT = os.environ.get("PLEX_APPLIANCE_PRODUCT", "Plex Appliance")
+VERSION = os.environ.get("PLEX_APPLIANCE_VERSION", "1.0")
+CLIENT_IDENTIFIER = os.environ.get("PLEX_APPLIANCE_CLIENT_IDENTIFIER", "cc-ansible-plex-appliance")
+SESSION_IDENTIFIER = os.environ.get("PLEX_APPLIANCE_SESSION_IDENTIFIER", CLIENT_IDENTIFIER)
+DEVICE_NAME = os.environ.get("PLEX_APPLIANCE_DEVICE_NAME", "Plex Appliance")
+STREAM_MODE = os.environ.get("PLEX_APPLIANCE_STREAM_MODE", "direct").strip().lower()
+TRANSCODE_PROFILE = os.environ.get("PLEX_APPLIANCE_TRANSCODE_PROFILE", "Roku-7.x").strip() or "Roku-7.x"
+TRANSCODE_PLATFORM = os.environ.get("PLEX_APPLIANCE_TRANSCODE_PLATFORM", "Roku").strip() or "Roku"
+TRANSCODE_PLATFORM_VERSION = os.environ.get("PLEX_APPLIANCE_TRANSCODE_PLATFORM_VERSION", "7.0").strip() or "7.0"
+TRANSCODE_DEVICE = os.environ.get("PLEX_APPLIANCE_TRANSCODE_DEVICE", "Roku").strip() or "Roku"
+TRANSCODE_MODEL = os.environ.get("PLEX_APPLIANCE_TRANSCODE_MODEL", "mpv").strip() or "mpv"
+TRANSCODE_CAPABILITIES = os.environ.get(
+    "PLEX_APPLIANCE_TRANSCODE_CAPABILITIES",
+    "videoDecoders=h264{profile:high&resolution:1080&level=41};audioDecoders=aac{channels:2}",
+).strip()
+TRANSCODE_VIDEO_RESOLUTION = os.environ.get("PLEX_APPLIANCE_TRANSCODE_VIDEO_RESOLUTION", "1920x1080").strip()
+TRANSCODE_MAX_VIDEO_BITRATE = max(1, int(os.environ.get("PLEX_APPLIANCE_TRANSCODE_MAX_VIDEO_BITRATE", "20000")))
+TRANSCODE_VIDEO_QUALITY = max(1, int(os.environ.get("PLEX_APPLIANCE_TRANSCODE_VIDEO_QUALITY", "100")))
 LIBRARY = os.environ["PLEX_APPLIANCE_LIBRARY"]
 COLLECTION = os.environ["PLEX_APPLIANCE_COLLECTION"]
 AUDIO_LANGUAGES = [lang.strip() for lang in os.environ.get("PLEX_APPLIANCE_AUDIO_LANGUAGES", "").split(",") if lang.strip()]
@@ -36,6 +54,7 @@ RESUME_END_THRESHOLD_SECONDS = max(0, int(os.environ.get("PLEX_APPLIANCE_RESUME_
 STREAM_PRESTART_TIMEOUT_SECONDS = max(3, int(os.environ.get("PLEX_APPLIANCE_STREAM_PRESTART_TIMEOUT_SECONDS", "12")))
 MPV_START_TIMEOUT_SECONDS = max(5, int(os.environ.get("PLEX_APPLIANCE_MPV_START_TIMEOUT_SECONDS", "45")))
 MPV_STALL_TIMEOUT_SECONDS = max(MPV_START_TIMEOUT_SECONDS, int(os.environ.get("PLEX_APPLIANCE_MPV_STALL_TIMEOUT_SECONDS", "120")))
+PLAYBACK_POSITION_WALLCLOCK_GRACE_SECONDS = max(0, int(os.environ.get("PLEX_APPLIANCE_POSITION_WALLCLOCK_GRACE_SECONDS", "10")))
 PLAYBACK_FAILURE_SKIP_THRESHOLD = max(1, int(os.environ.get("PLEX_APPLIANCE_PLAYBACK_FAILURE_SKIP_THRESHOLD", "3")))
 PLAYBACK_FAILURE_POSITION_WINDOW_SECONDS = max(1, int(os.environ.get("PLEX_APPLIANCE_PLAYBACK_FAILURE_POSITION_WINDOW_SECONDS", "5")))
 CORRUPT_MEDIA_LOG_PATH = os.environ.get("PLEX_APPLIANCE_CORRUPT_MEDIA_LOG_PATH", "/var/log/plex-appliance/corrupt-media.jsonl")
@@ -53,11 +72,33 @@ MPV_AUDIO_DEVICE = os.environ.get("PLEX_APPLIANCE_AUDIO_DEVICE", "").strip()
 SESSION = requests.Session()
 SESSION.headers.update({
     "Accept": "application/xml",
-    "X-Plex-Product": "Plex Appliance",
-    "X-Plex-Version": "1.0",
-    "X-Plex-Client-Identifier": "cc-ansible-plex-appliance",
-    "X-Plex-Device-Name": "Living Room Plex Appliance",
+    "X-Plex-Product": PRODUCT,
+    "X-Plex-Version": VERSION,
+    "X-Plex-Client-Identifier": CLIENT_IDENTIFIER,
+    "X-Plex-Session-Identifier": SESSION_IDENTIFIER,
+    "X-Plex-Device-Name": DEVICE_NAME,
 })
+PLEX_CLIENT_PARAMS = {
+    "X-Plex-Product": PRODUCT,
+    "X-Plex-Version": VERSION,
+    "X-Plex-Client-Identifier": CLIENT_IDENTIFIER,
+    "X-Plex-Session-Identifier": SESSION_IDENTIFIER,
+    "X-Plex-Device-Name": DEVICE_NAME,
+}
+PLEX_TRANSCODE_PARAMS = {
+    "X-Plex-Product": PRODUCT,
+    "X-Plex-Version": VERSION,
+    "X-Plex-Client-Identifier": CLIENT_IDENTIFIER,
+    "X-Plex-Platform": TRANSCODE_PLATFORM,
+    "X-Plex-Platform-Version": TRANSCODE_PLATFORM_VERSION,
+    "X-Plex-Device": TRANSCODE_DEVICE,
+    "X-Plex-Device-Name": DEVICE_NAME,
+    "X-Plex-Model": TRANSCODE_MODEL,
+    "X-Plex-Provides": "player",
+    "X-Plex-Client-Profile-Name": TRANSCODE_PROFILE,
+}
+if TRANSCODE_CAPABILITIES:
+    PLEX_TRANSCODE_PARAMS["X-Plex-Client-Capabilities"] = TRANSCODE_CAPABILITIES
 RNG = random.SystemRandom()
 STATUS_SCREEN_AVAILABLE = True
 RETRY_STATE_KEYS = ("failure_count", "failure_position", "failure_reason")
@@ -135,9 +176,103 @@ def playback_loading_status(title: str, detail: str) -> None:
 
 
 def plex_url(path: str, params: Optional[Dict[str, object]] = None) -> str:
+    query = dict(PLEX_CLIENT_PARAMS)
+    query.update(params or {})
+    query["X-Plex-Token"] = TOKEN
+    return f"{PLEX_URL}{path}?{urlencode(query)}"
+
+
+def plex_direct_stream_url(path: str, params: Optional[Dict[str, object]] = None) -> str:
     query = dict(params or {})
     query["X-Plex-Token"] = TOKEN
     return f"{PLEX_URL}{path}?{urlencode(query)}"
+
+
+def playback_session_id(item_key_to_play: str) -> str:
+    safe_key = re.sub(r"[^A-Za-z0-9_.-]+", "-", item_key_to_play).strip("-") or "item"
+    return f"{SESSION_IDENTIFIER}-{safe_key}-{int(time.time())}-{os.getpid()}"
+
+
+def stream_language_values(stream: ET.Element) -> Set[str]:
+    values = set()
+    for attr in ("languageCode", "language", "title", "displayTitle"):
+        value = stream.attrib.get(attr, "").strip().lower()
+        if value:
+            values.add(value)
+    return values
+
+
+def subtitle_stream_id_for_part(part: ET.Element) -> Optional[str]:
+    if SUBTITLE_MODE == "off":
+        return None
+
+    subtitle_streams = [
+        stream for stream in part.findall("Stream")
+        if stream.attrib.get("streamType") == "3" and stream.attrib.get("id")
+    ]
+    if not subtitle_streams:
+        return None
+
+    preferred_languages = {language.lower() for language in SUBTITLE_LANGUAGES}
+    if preferred_languages:
+        matching_streams = [
+            stream for stream in subtitle_streams
+            if stream_language_values(stream) & preferred_languages
+        ]
+        if matching_streams:
+            subtitle_streams = matching_streams
+
+    for marker in ("selected", "default", "forced"):
+        marked = next((stream for stream in subtitle_streams if stream.attrib.get(marker) == "1"), None)
+        if marked is not None:
+            return marked.attrib["id"]
+
+    return subtitle_streams[0].attrib["id"]
+
+
+def plex_universal_stream_url(
+    item_key_to_play: str,
+    start_position: float,
+    session_id: str,
+    subtitle_stream_id: Optional[str],
+) -> str:
+    query = dict(PLEX_TRANSCODE_PARAMS)
+    query.update({
+        "X-Plex-Session-Identifier": session_id,
+        "X-Plex-Token": TOKEN,
+        "protocol": "http",
+        "mediaIndex": 0,
+        "partIndex": 0,
+        "path": f"/library/metadata/{item_key_to_play}",
+        "directPlay": 0,
+        "directStream": 1,
+        "copyts": 1,
+        "videoQuality": TRANSCODE_VIDEO_QUALITY,
+        "maxVideoBitrate": TRANSCODE_MAX_VIDEO_BITRATE,
+        "videoResolution": TRANSCODE_VIDEO_RESOLUTION,
+        "mediaBufferSize": 50000,
+        "waitForSegments": 1,
+        "offset": max(0, int(start_position)),
+        "session": session_id,
+    })
+    if SUBTITLE_MODE == "off":
+        query["skipSubtitles"] = 1
+    elif subtitle_stream_id:
+        query["subtitleStreamID"] = subtitle_stream_id
+        query["skipSubtitles"] = 0
+    return f"{PLEX_URL}/video/:/transcode/universal/start.mkv?{urlencode(query)}"
+
+
+def stop_universal_stream(session_id: str) -> None:
+    if not session_id:
+        return
+    try:
+        SESSION.get(
+            plex_direct_stream_url("/video/:/transcode/universal/stop", {"session": session_id}),
+            timeout=5,
+        )
+    except Exception as exc:
+        log(f"Could not stop Plex universal session {session_id}: {redact_token(exc)}")
 
 
 def plex_get(path: str, params: Optional[Dict[str, object]] = None, timeout: int = 20) -> ET.Element:
@@ -238,7 +373,18 @@ def stream_url_for_item(item: ET.Element, refresh_metadata: bool = False) -> Opt
     return stream_info[0] if stream_info else None
 
 
-def stream_info_for_item(item: ET.Element, refresh_metadata: bool = False) -> Optional[Tuple[str, str, str]]:
+def plex_duration_seconds(*values: object) -> float:
+    for value in values:
+        milliseconds = numeric(value, -1.0)
+        if milliseconds > 0:
+            return milliseconds / 1000.0
+    return 0.0
+
+
+def stream_info_for_item(
+    item: ET.Element,
+    refresh_metadata: bool = False,
+) -> Optional[Tuple[str, str, str, ET.Element, float]]:
     media_parent = item
     if item.attrib.get("ratingKey") and (refresh_metadata or not item.findall("Media")):
         fetched = fetch_metadata(item.attrib["ratingKey"])
@@ -249,7 +395,13 @@ def stream_info_for_item(item: ET.Element, refresh_metadata: bool = False) -> Op
         for part in media.findall("Part"):
             key = part.attrib.get("key")
             if key:
-                return plex_url(key), key, part.attrib.get("file", "")
+                duration = plex_duration_seconds(
+                    part.attrib.get("duration"),
+                    media.attrib.get("duration"),
+                    media_parent.attrib.get("duration"),
+                    item.attrib.get("duration"),
+                )
+                return plex_direct_stream_url(key), key, part.attrib.get("file", ""), part, duration
     return None
 
 
@@ -281,29 +433,33 @@ def shuffled_keys(keys: Iterable[str]) -> List[str]:
     return queue
 
 
-def load_shuffle_state() -> Tuple[List[str], List[str], Optional[Dict[str, Any]]]:
+def load_shuffle_state() -> Tuple[List[str], List[str], List[str], Optional[Dict[str, Any]]]:
     try:
         with open(SHUFFLE_STATE_PATH, "r", encoding="utf-8") as state_file:
             payload = json.load(state_file)
     except FileNotFoundError:
-        return [], [], None
+        return [], [], [], None
     except Exception as exc:
         log(f"Could not load shuffle state {SHUFFLE_STATE_PATH}: {redact_token(exc)}")
-        return [], [], None
+        return [], [], [], None
 
     queue = payload.get("queue", [])
     played = payload.get("played", [])
+    unplayable = payload.get("unplayable", [])
     active = payload.get("active")
     if not isinstance(queue, list) or not isinstance(played, list):
-        return [], [], None
+        return [], [], [], None
+    if not isinstance(unplayable, list):
+        unplayable = []
     if not isinstance(active, dict) or not active.get("key"):
         active = None
-    return [str(key) for key in queue], [str(key) for key in played], active
+    return [str(key) for key in queue], [str(key) for key in played], [str(key) for key in unplayable], active
 
 
 def save_shuffle_state(
     queue_keys: List[str],
     played_keys: List[str],
+    unplayable_keys: List[str],
     active: Optional[Dict[str, Any]] = None,
 ) -> None:
     state_dir = os.path.dirname(SHUFFLE_STATE_PATH)
@@ -314,6 +470,7 @@ def save_shuffle_state(
         "collection": COLLECTION,
         "queue": queue_keys,
         "played": played_keys,
+        "unplayable": unplayable_keys,
         "updated_at": int(time.time()),
     }
     if active:
@@ -331,18 +488,26 @@ def insert_randomly(queue_keys: List[str], new_keys: List[str]) -> None:
 def reconcile_shuffle_state(
     queue_keys: List[str],
     played_keys: List[str],
+    unplayable_keys: List[str],
     item_keys: Set[str],
     active_key: str = "",
-) -> Tuple[List[str], List[str]]:
-    queue_keys = [key for key in queue_keys if key in item_keys]
+) -> Tuple[List[str], List[str], List[str]]:
+    unplayable_keys = [key for key in unplayable_keys if key in item_keys]
+    unplayable_set = set(unplayable_keys)
+    playable_item_keys = item_keys - unplayable_set
+
+    queue_keys = [key for key in queue_keys if key in playable_item_keys]
     if active_key:
         queue_keys = [key for key in queue_keys if key != active_key]
     queue_set = set(queue_keys)
-    played_keys = [key for key in played_keys if key in item_keys and key not in queue_set]
-    known_keys = queue_set | set(played_keys)
-    if active_key in item_keys:
+    played_keys = [
+        key for key in played_keys
+        if key in item_keys and key not in queue_set and key not in unplayable_set
+    ]
+    known_keys = queue_set | set(played_keys) | unplayable_set
+    if active_key in playable_item_keys:
         known_keys.add(active_key)
-    new_keys = sorted(item_keys - known_keys)
+    new_keys = sorted(playable_item_keys - known_keys)
 
     if new_keys and queue_keys:
         insert_randomly(queue_keys, new_keys)
@@ -352,15 +517,19 @@ def reconcile_shuffle_state(
 
     if not queue_keys and not active_key:
         last_played = played_keys[-1] if played_keys else ""
-        queue_keys = shuffled_keys(item_keys)
+        queue_keys = shuffled_keys(playable_item_keys)
         if last_played and len(queue_keys) > 1 and queue_keys[0] == last_played:
             swap_index = RNG.randrange(1, len(queue_keys))
             queue_keys[0], queue_keys[swap_index] = queue_keys[swap_index], queue_keys[0]
         played_keys = []
         log(f"Started a new shuffle cycle with {len(queue_keys)} items")
 
-    log(f"Shuffle state: {len(queue_keys)} queued, {len(played_keys)} already played this cycle")
-    return queue_keys, played_keys
+    log(
+        "Shuffle state: "
+        f"{len(queue_keys)} queued, {len(played_keys)} completed this cycle, "
+        f"{len(unplayable_keys)} marked unplayable"
+    )
+    return queue_keys, played_keys, unplayable_keys
 
 
 def active_item_key(active: Optional[Dict[str, Any]]) -> str:
@@ -401,6 +570,12 @@ def active_checkpoint(
         for key in RETRY_STATE_KEYS:
             if key in previous_active:
                 checkpoint[key] = previous_active[key]
+    return checkpoint
+
+
+def clear_retry_state(checkpoint: Dict[str, Any]) -> Dict[str, Any]:
+    for key in RETRY_STATE_KEYS:
+        checkpoint.pop(key, None)
     return checkpoint
 
 
@@ -469,19 +644,20 @@ def parse_progress_time(value: object) -> Optional[float]:
     return (hours * 3600) + (minutes * 60) + seconds
 
 
-def plex_stream_unavailable_zero_bytes(stderr_lower: str, decoded_seconds: float) -> bool:
-    if decoded_seconds > 0:
+def plex_stream_transport_failure(stderr_lower: str) -> bool:
+    if "[http @" not in stderr_lower and "http://" not in stderr_lower and "https://" not in stderr_lower:
         return False
-    source_unavailable_markers = [
+    transport_markers = [
         "stream ends prematurely at 0",
-        "error opening input",
+        "stream ends prematurely",
+        "connection reset by peer",
         "server returned 5",
         "service unavailable",
         "connection refused",
         "connection timed out",
         "read timed out",
     ]
-    return any(text in stderr_lower for text in source_unavailable_markers)
+    return any(text in stderr_lower for text in transport_markers)
 
 
 def run_corruption_check(item: ET.Element, position: float, duration: float) -> Dict[str, Any]:
@@ -507,7 +683,7 @@ def run_corruption_check(item: ET.Element, position: float, duration: float) -> 
         result["status"] = "inconclusive"
         result["reason"] = "missing_stream_url"
         return result
-    url, part_key, file_path = stream_info
+    url, part_key, file_path, _part, _duration = stream_info
     result["part_key"] = part_key
     result["file"] = file_path
 
@@ -574,7 +750,6 @@ def run_corruption_check(item: ET.Element, position: float, duration: float) -> 
         "header damaged",
         "partial file",
         "invalid nal",
-        "input/output error",
     ]
     marker = next((text for text in corruption_markers if text in stderr_lower), "")
     short_decode = expected_seconds - decoded_seconds >= 15 and decoded_seconds < expected_seconds * 0.8
@@ -590,9 +765,9 @@ def run_corruption_check(item: ET.Element, position: float, duration: float) -> 
         result["reason"] = "ffmpeg_decoded_expected_window"
         if marker:
             result["warning_marker"] = marker
-    elif plex_stream_unavailable_zero_bytes(stderr_lower, decoded_seconds):
+    elif plex_stream_transport_failure(stderr_lower):
         result["status"] = "inconclusive"
-        result["reason"] = "plex_stream_unavailable_zero_bytes"
+        result["reason"] = "plex_stream_transport_failure"
         if marker:
             result["warning_marker"] = marker
     elif marker:
@@ -634,18 +809,18 @@ def append_corrupt_media_log(
     log(f"PLEX_APPLIANCE_CORRUPT_MEDIA {line}")
 
 
-def append_playback_skip_log(
+def append_playback_issue_log(
     item_key_to_play: str,
     item: ET.Element,
     checkpoint: Dict[str, Any],
     check: Dict[str, Any],
-    skip_reason: str,
+    issue_reason: str,
 ) -> None:
     log_dir = os.path.dirname(CORRUPT_MEDIA_LOG_PATH)
     if log_dir:
         os.makedirs(log_dir, exist_ok=True)
     record = {
-        "event": "playback_item_skipped",
+        "event": "playback_item_retained",
         "timestamp": int(time.time()),
         "collection": COLLECTION,
         "rating_key": item_key_to_play,
@@ -654,13 +829,25 @@ def append_playback_skip_log(
         "duration": round(numeric(checkpoint.get("duration")), 3),
         "failure_count": int(numeric(checkpoint.get("failure_count"), 0.0)),
         "failure_reason": str(checkpoint.get("failure_reason") or ""),
-        "skip_reason": skip_reason,
+        "issue_reason": issue_reason,
         "check": check,
     }
     line = json.dumps(record, sort_keys=True, separators=(",", ":"))
-    with open(CORRUPT_MEDIA_LOG_PATH, "a", encoding="utf-8") as skip_log:
-        skip_log.write(line + "\n")
-    log(f"PLEX_APPLIANCE_PLAYBACK_SKIP {line}")
+    with open(CORRUPT_MEDIA_LOG_PATH, "a", encoding="utf-8") as issue_log:
+        issue_log.write(line + "\n")
+    log(f"PLEX_APPLIANCE_PLAYBACK_ISSUE {line}")
+
+
+def mark_unplayable(
+    queue_keys: List[str],
+    played_keys: List[str],
+    unplayable_keys: List[str],
+    item_key_to_play: str,
+) -> None:
+    queue_keys[:] = [key for key in queue_keys if key != item_key_to_play]
+    played_keys[:] = [key for key in played_keys if key != item_key_to_play]
+    if item_key_to_play not in unplayable_keys:
+        unplayable_keys.append(item_key_to_play)
 
 
 def resume_position(active: Optional[Dict[str, Any]]) -> float:
@@ -670,12 +857,39 @@ def resume_position(active: Optional[Dict[str, Any]]) -> float:
     return max(0.0, position - RESUME_REWIND_SECONDS)
 
 
-def playback_completed(return_code: int, position: float, duration: float) -> bool:
-    if return_code != 0:
+def wallclock_limited_position(start_position: float, observed_position: float, elapsed_seconds: float) -> float:
+    max_plausible_position = (
+        max(0.0, start_position)
+        + max(0.0, elapsed_seconds)
+        + PLAYBACK_POSITION_WALLCLOCK_GRACE_SECONDS
+    )
+    return max(0.0, min(observed_position, max_plausible_position))
+
+
+def playback_completed(
+    return_code: int,
+    position: float,
+    duration: float,
+    start_position: float,
+    playback_elapsed: float,
+) -> bool:
+    if return_code != 0 or duration <= 0:
         return False
-    if duration <= 0:
-        return True
-    return position >= max(0.0, duration - RESUME_END_THRESHOLD_SECONDS)
+
+    completion_position = max(0.0, duration - RESUME_END_THRESHOLD_SECONDS)
+    if position < completion_position:
+        return False
+
+    required_elapsed = max(0.0, completion_position - max(0.0, start_position))
+    if playback_elapsed + PLAYBACK_POSITION_WALLCLOCK_GRACE_SECONDS < required_elapsed:
+        log(
+            "Ignoring implausible completion report: "
+            f"position={position:.3f}s duration={duration:.3f}s "
+            f"start={start_position:.3f}s elapsed={playback_elapsed:.3f}s"
+        )
+        return False
+
+    return True
 
 
 def playback_args() -> List[str]:
@@ -780,11 +994,26 @@ def play(
     item: ET.Element,
     start_position: float,
     progress_callback,
-) -> Tuple[int, float, float]:
-    url = stream_url_for_item(item, refresh_metadata=True)
-    if not url:
+) -> Tuple[int, float, float, float]:
+    stream_info = stream_info_for_item(item, refresh_metadata=True)
+    if not stream_info:
         log(f"Skipping item without stream URL: {item_title(item)}")
-        return 0, 0.0, 0.0
+        return 1, start_position, 0.0, 0.0
+    direct_url = stream_info[0]
+    part = stream_info[3]
+    metadata_duration = stream_info[4]
+    universal_session_id = ""
+    use_universal_stream = STREAM_MODE == "universal"
+    if use_universal_stream:
+        universal_session_id = playback_session_id(item_key_to_play)
+        subtitle_stream_id = subtitle_stream_id_for_part(part)
+        if subtitle_stream_id:
+            log(f"Using Plex subtitle stream {subtitle_stream_id} for {item_key_to_play}")
+        elif SUBTITLE_MODE != "off":
+            log(f"No Plex subtitle stream selected for {item_key_to_play}")
+        url = plex_universal_stream_url(item_key_to_play, start_position, universal_session_id, subtitle_stream_id)
+    else:
+        url = direct_url
 
     title = item_title(item)
     if start_position > 0:
@@ -792,78 +1021,112 @@ def play(
     else:
         log(f"Playing: {title}")
 
-    if not stream_ready(url, title):
-        return 1, start_position, 0.0
+    if use_universal_stream:
+        playback_loading_status(title, "Opening Plex sessionized stream...")
+        log(f"Using Plex universal stream session {universal_session_id} for {item_key_to_play}")
+    elif not stream_ready(url, title):
+        return 1, start_position, 0.0, 0.0
 
     last_position = max(0.0, start_position)
-    duration = 0.0
-    with tempfile.TemporaryDirectory(prefix="plex-appliance-mpv-") as runtime_dir:
-        socket_path = os.path.join(runtime_dir, "mpv.sock")
-        command = ["mpv", *playback_args(), f"--input-ipc-server={socket_path}"]
-        if start_position > 0:
-            command.append(f"--start={start_position}")
-        command.append(url)
+    duration = max(0.0, metadata_duration)
+    position_offset = start_position if use_universal_stream else 0.0
+    playback_elapsed = 0.0
+    position_jump_logged = False
+    try:
+        with tempfile.TemporaryDirectory(prefix="plex-appliance-mpv-") as runtime_dir:
+            socket_path = os.path.join(runtime_dir, "mpv.sock")
+            command = ["mpv", *playback_args(), f"--input-ipc-server={socket_path}"]
+            if start_position > 0 and not use_universal_stream:
+                command.append(f"--start={start_position}")
+            command.append(url)
 
-        playback_loading_status(title, "Opening video player...")
-        process = subprocess.Popen(command)
-        wait_for_ipc_socket(socket_path)
-        progress_callback(last_position, duration)
-        started_at = time.monotonic()
-        last_progress_at: Optional[float] = started_at if start_position > 0 else None
-        last_seen_position = last_position
+            playback_loading_status(title, "Opening video player...")
+            process = subprocess.Popen(command)
+            wait_for_ipc_socket(socket_path)
+            progress_callback(last_position, duration)
+            started_at = time.monotonic()
+            last_progress_at: Optional[float] = started_at if start_position > 0 else None
+            last_seen_position = last_position
 
-        while process.poll() is None:
-            time.sleep(PLAYBACK_PROGRESS_SECONDS)
-            now = time.monotonic()
+            while process.poll() is None:
+                time.sleep(PLAYBACK_PROGRESS_SECONDS)
+                now = time.monotonic()
+                position_value = mpv_number_property(socket_path, "time-pos")
+                duration_value = mpv_number_property(socket_path, "duration")
+                vo_configured = mpv_bool_property(socket_path, "vo-configured")
+                playback_ready = bool(vo_configured) or position_value is not None or duration_value is not None
+                if playback_ready and last_progress_at is None:
+                    last_progress_at = now
+                    clear_status_screen()
+                if position_value is not None:
+                    observed_position = position_offset + max(0.0, position_value)
+                    absolute_position = wallclock_limited_position(
+                        start_position,
+                        observed_position,
+                        now - started_at,
+                    )
+                    if not position_jump_logged and absolute_position + 0.5 < observed_position:
+                        position_jump_logged = True
+                        log(
+                            "Ignoring implausible mpv position jump: "
+                            f"observed={observed_position:.3f}s limited={absolute_position:.3f}s"
+                        )
+                    if absolute_position > last_seen_position + 0.5:
+                        last_progress_at = now
+                    last_seen_position = max(last_seen_position, absolute_position)
+                    last_position = max(0.0, absolute_position)
+                if duration_value is not None:
+                    duration = max(duration, duration_value)
+                    if use_universal_stream and position_offset > 0 and duration_value < position_offset:
+                        duration = max(duration, position_offset + duration_value)
+                progress_callback(last_position, duration)
+
+                if not playback_ready and now - started_at >= MPV_START_TIMEOUT_SECONDS:
+                    stop_mpv_process(
+                        process,
+                        f"mpv did not configure video within {MPV_START_TIMEOUT_SECONDS}s; retrying",
+                    )
+                    break
+
+                paused = mpv_bool_property(socket_path, "pause")
+                if (
+                    last_progress_at is not None
+                    and paused is not True
+                    and now - last_progress_at >= MPV_STALL_TIMEOUT_SECONDS
+                ):
+                    stop_mpv_process(
+                        process,
+                        f"mpv made no playback progress for {MPV_STALL_TIMEOUT_SECONDS}s; retrying",
+                    )
+                    break
+
+            return_code = process.wait()
+            playback_elapsed = max(0.0, time.monotonic() - started_at)
             position_value = mpv_number_property(socket_path, "time-pos")
             duration_value = mpv_number_property(socket_path, "duration")
-            vo_configured = mpv_bool_property(socket_path, "vo-configured")
-            playback_ready = bool(vo_configured) or position_value is not None or duration_value is not None
-            if playback_ready and last_progress_at is None:
-                last_progress_at = now
-                clear_status_screen()
             if position_value is not None:
-                if position_value > last_seen_position + 0.5:
-                    last_progress_at = now
-                last_seen_position = max(last_seen_position, position_value)
-                last_position = max(0.0, position_value)
+                observed_position = position_offset + max(0.0, position_value)
+                final_position = wallclock_limited_position(start_position, observed_position, playback_elapsed)
+                if not position_jump_logged and final_position + 0.5 < observed_position:
+                    log(
+                        "Ignoring implausible final mpv position jump: "
+                        f"observed={observed_position:.3f}s limited={final_position:.3f}s"
+                    )
+                last_position = max(last_position, final_position)
             if duration_value is not None:
-                duration = max(0.0, duration_value)
-            progress_callback(last_position, duration)
-
-            if not playback_ready and now - started_at >= MPV_START_TIMEOUT_SECONDS:
-                stop_mpv_process(
-                    process,
-                    f"mpv did not configure video within {MPV_START_TIMEOUT_SECONDS}s; retrying",
-                )
-                break
-
-            paused = mpv_bool_property(socket_path, "pause")
-            if (
-                last_progress_at is not None
-                and paused is not True
-                and now - last_progress_at >= MPV_STALL_TIMEOUT_SECONDS
-            ):
-                stop_mpv_process(
-                    process,
-                    f"mpv made no playback progress for {MPV_STALL_TIMEOUT_SECONDS}s; retrying",
-                )
-                break
-
-        return_code = process.wait()
-        position_value = mpv_number_property(socket_path, "time-pos")
-        duration_value = mpv_number_property(socket_path, "duration")
-        if position_value is not None:
-            last_position = max(last_position, position_value)
-        if duration_value is not None:
-            duration = max(duration, duration_value)
+                duration = max(duration, duration_value)
+                if use_universal_stream and position_offset > 0 and duration_value < position_offset:
+                    duration = max(duration, position_offset + duration_value)
+    finally:
+        if universal_session_id:
+            stop_universal_stream(universal_session_id)
 
     log(f"Player exited with code {return_code}")
-    return return_code, last_position, duration
+    return return_code, last_position, duration, playback_elapsed
 
 
 def main() -> int:
-    queue_keys, played_keys, active = load_shuffle_state()
+    queue_keys, played_keys, unplayable_keys, active = load_shuffle_state()
     item_map: Dict[str, ET.Element] = {}
     next_refresh = 0.0
     refresh_attempt = 1
@@ -882,21 +1145,30 @@ def main() -> int:
                 item_map = items_by_key(load_collection_items())
                 if not item_map:
                     raise RuntimeError(f"No playable items found in collection: {COLLECTION}")
-                if active_item_key(active) and active_item_key(active) not in item_map:
+                if active_item_key(active) and (
+                    active_item_key(active) not in item_map
+                    or active_item_key(active) in set(unplayable_keys)
+                ):
                     active = None
-                queue_keys, played_keys = reconcile_shuffle_state(
+                queue_keys, played_keys, unplayable_keys = reconcile_shuffle_state(
                     queue_keys,
                     played_keys,
+                    unplayable_keys,
                     set(item_map),
                     active_item_key(active),
                 )
-                save_shuffle_state(queue_keys, played_keys, active)
+                save_shuffle_state(queue_keys, played_keys, unplayable_keys, active)
                 next_refresh = now + COLLECTION_REFRESH_SECONDS
                 refresh_attempt = 1
             except Exception as exc:
                 retry_wait("Failed to refresh collection", exc, refresh_attempt, SERVER_RETRY_SECONDS)
                 refresh_attempt += 1
                 continue
+
+        if not queue_keys and not active_item_key(active):
+            playback_retry_wait("all items are currently unplayable", ITEM_FAILURE_DELAY_SECONDS)
+            next_refresh = 0.0
+            continue
 
         item_key_to_play = active_item_key(active)
         existing_checkpoint_position = numeric(active.get("position")) if active else 0.0
@@ -916,13 +1188,13 @@ def main() -> int:
                 if popped_from_queue and queue_keys:
                     active = None
                     insert_randomly(queue_keys, [item_key_to_play])
-                    save_shuffle_state(queue_keys, played_keys)
+                    save_shuffle_state(queue_keys, played_keys, unplayable_keys)
                     next_refresh = 0.0
                     log(f"Deferring item with unavailable metadata: {item_key_to_play}: {redact_token(exc)}")
                     playback_retry_wait(f"item {item_key_to_play}", ITEM_FAILURE_DELAY_SECONDS)
                     continue
                 if not popped_from_queue:
-                    save_shuffle_state(queue_keys, played_keys, active)
+                    save_shuffle_state(queue_keys, played_keys, unplayable_keys, active)
                     log(f"Active item metadata unavailable; retrying same item: {item_key_to_play}: {redact_token(exc)}")
                     playback_retry_wait(f"item {item_key_to_play}", ITEM_FAILURE_DELAY_SECONDS)
                     continue
@@ -932,7 +1204,7 @@ def main() -> int:
                 continue
             if item is None:
                 active = None
-                save_shuffle_state(queue_keys, played_keys)
+                save_shuffle_state(queue_keys, played_keys, unplayable_keys)
                 continue
             item_map[item_key_to_play] = item
             refresh_attempt = 1
@@ -944,23 +1216,31 @@ def main() -> int:
             save_shuffle_state(
                 queue_keys,
                 played_keys,
+                unplayable_keys,
                 active_checkpoint(item_key_to_play, item, checkpoint_position, duration, previous_active),
             )
 
         save_progress(start_position, numeric(active.get("duration")) if active else 0.0)
         try:
-            return_code, last_position, duration = play(item_key_to_play, item, start_position, save_progress)
+            return_code, last_position, duration, playback_elapsed = play(
+                item_key_to_play,
+                item,
+                start_position,
+                save_progress,
+            )
         except Exception as exc:
             log(f"Playback launch failed: {redact_token(exc)}")
             return_code = 1
             last_position = start_position
             duration = numeric(active.get("duration")) if active else 0.0
+            playback_elapsed = 0.0
 
         retry_after_playback = False
-        if playback_completed(return_code, last_position, duration):
-            played_keys.append(item_key_to_play)
+        if playback_completed(return_code, last_position, duration, start_position, playback_elapsed):
+            if item_key_to_play not in played_keys:
+                played_keys.append(item_key_to_play)
             active = None
-            save_shuffle_state(queue_keys, played_keys)
+            save_shuffle_state(queue_keys, played_keys, unplayable_keys)
         else:
             active_position = max(last_position, existing_checkpoint_position)
             if return_code != 0:
@@ -971,11 +1251,12 @@ def main() -> int:
                     if check.get("status") == "corrupt":
                         append_corrupt_media_log(item_key_to_play, item, active, check)
                         log(
-                            "Skipping verified corrupt media after "
+                            "Marking verified corrupt media unplayable after "
                             f"{failure_count} failed playback attempts: {item_key_to_play}"
                         )
+                        mark_unplayable(queue_keys, played_keys, unplayable_keys, item_key_to_play)
                     else:
-                        append_playback_skip_log(
+                        append_playback_issue_log(
                             item_key_to_play,
                             item,
                             active,
@@ -983,15 +1264,17 @@ def main() -> int:
                             "repeated_playback_failures_without_verified_corruption",
                         )
                         log(
-                            "Skipping item after repeated playback failures without verified corruption: "
+                            "Keeping active item after repeated playback failures without verified corruption: "
                             f"{item_key_to_play}; check_status={check.get('status')} reason={check.get('reason')}"
                         )
-                    if item_key_to_play not in played_keys:
-                        played_keys.append(item_key_to_play)
-                    active = None
-                    save_shuffle_state(queue_keys, played_keys)
+                        active = clear_retry_state(active)
+                        save_shuffle_state(queue_keys, played_keys, unplayable_keys, active)
+                        retry_after_playback = True
+                    if check.get("status") == "corrupt":
+                        active = None
+                        save_shuffle_state(queue_keys, played_keys, unplayable_keys)
                 else:
-                    save_shuffle_state(queue_keys, played_keys, active)
+                    save_shuffle_state(queue_keys, played_keys, unplayable_keys, active)
                     log(
                         "Retrying active item after failed playback attempt "
                         f"{failure_count}/{PLAYBACK_FAILURE_SKIP_THRESHOLD}: {item_key_to_play}"
@@ -1005,11 +1288,12 @@ def main() -> int:
                     if check.get("status") == "corrupt":
                         append_corrupt_media_log(item_key_to_play, item, active, check)
                         log(
-                            "Skipping verified corrupt media after "
+                            "Marking verified corrupt media unplayable after "
                             f"{failure_count} early player exits: {item_key_to_play}"
                         )
+                        mark_unplayable(queue_keys, played_keys, unplayable_keys, item_key_to_play)
                     else:
-                        append_playback_skip_log(
+                        append_playback_issue_log(
                             item_key_to_play,
                             item,
                             active,
@@ -1017,15 +1301,17 @@ def main() -> int:
                             "repeated_early_clean_exits_without_verified_corruption",
                         )
                         log(
-                            "Skipping item after repeated early player exits without verified corruption: "
+                            "Keeping active item after repeated early player exits without verified corruption: "
                             f"{item_key_to_play}; check_status={check.get('status')} reason={check.get('reason')}"
                         )
-                    if item_key_to_play not in played_keys:
-                        played_keys.append(item_key_to_play)
-                    active = None
-                    save_shuffle_state(queue_keys, played_keys)
+                        active = clear_retry_state(active)
+                        save_shuffle_state(queue_keys, played_keys, unplayable_keys, active)
+                        retry_after_playback = True
+                    if check.get("status") == "corrupt":
+                        active = None
+                        save_shuffle_state(queue_keys, played_keys, unplayable_keys)
                 else:
-                    save_shuffle_state(queue_keys, played_keys, active)
+                    save_shuffle_state(queue_keys, played_keys, unplayable_keys, active)
                     log(
                         "Retrying active item after early player exit "
                         f"{failure_count}/{PLAYBACK_FAILURE_SKIP_THRESHOLD}: {item_key_to_play}"

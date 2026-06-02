@@ -4,7 +4,7 @@
 # Portable: applies to whichever host is in the [nas_server] group
 
 nfs_pseudo_root: /srv
-nfs_pseudo_root_clients: "100.108.254.100(ro,fsid=0,no_subtree_check) 192.168.1.153(ro,fsid=0,no_subtree_check)"
+nfs_pseudo_root_clients: "100.108.254.100(ro,fsid=0,no_subtree_check) 192.168.1.153(ro,fsid=0,no_subtree_check) 100.73.46.86(ro,fsid=0,no_subtree_check) 100.81.29.94(ro,fsid=0,no_subtree_check)"
 
 nfs_exports:
   # docker-vm gets access to media via mergerfs (includes podcasts from all pools)
@@ -85,4 +85,8 @@ nfs_exports:
       - host: 100.108.254.100
         options: "rw,sync,no_subtree_check,no_root_squash,fsid=13"
       - host: 192.168.1.153
+        options: "rw,sync,no_subtree_check,no_root_squash,fsid=13"
+      - host: 100.73.46.86
+        options: "rw,sync,no_subtree_check,no_root_squash,fsid=13"
+      - host: 100.81.29.94
         options: "rw,sync,no_subtree_check,no_root_squash,fsid=13"

@@ -1,0 +1,13 @@
+# =============================================================================
+# mercury - NFS Client Configuration
+# =============================================================================
+
+nfs_mounts:
+  # One-off rollback artifacts live on ts440 ZFS so Sanoid owns snapshot
+  # retention and cleanup instead of the appliance root disk.
+  - path: /srv/live-rollbacks
+    src: 100.71.188.16:/live-rollbacks
+    opts: "rw,_netdev,nofail,hard,timeo=600,retrans=2,noatime,x-systemd.automount,x-systemd.requires=network-online.target"
+    owner: johnny
+    group: johnny
+    mode: "2775"

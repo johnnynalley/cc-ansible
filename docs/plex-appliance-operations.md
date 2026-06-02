@@ -1,6 +1,6 @@
 # Plex Appliance Operations
 
-Last updated: 2026-06-01
+Last updated: 2026-06-02
 
 Use this doc for quick operator actions on the managed Plex TV appliances.
 
@@ -20,6 +20,47 @@ The media libraries are not stored there. Plex reads library media through
 `/srv/plex` and `/srv/archive`, which are TS440 VirtioFS paths. Temporary
 transcode scratch stays on the VM root disk at `/var/lib/plex-transcode` and is
 mounted into the Plex container as `/transcode`.
+
+## Playback Identity And Queue Safety
+
+The appliances intentionally depend on Plex for metadata, access control, stream
+decisioning, and media delivery. They are passive Plex health monitors: if Plex
+cannot serve media, the appliances should fail visibly instead of bypassing Plex
+with direct filesystem playback.
+
+Default playback uses Plex raw part URLs,
+`/library/parts/.../file.mkv`, so Plex remains in the media path without forcing
+every x265 file through the transcoder. Raw part URLs must stay token-only. Do
+not add static per-host `X-Plex-Session-Identifier` or client identity query
+parameters to raw part URLs; the 2026-06-02 incident showed same-token ad-hoc
+part requests fighting, and using the same fixed client identity for both
+appliances made that collision easier to trigger.
+
+`PLEX_APPLIANCE_STREAM_MODE=universal` is an explicit fallback, not the default.
+The same 2026-06-02 incident showed Plex universal playback creating ad-hoc
+hardware transcode sessions that can evict another appliance session with
+`Streaming Resource: Terminating session ... which is using transcoder slot`,
+even when the appliances have distinct client identifiers and session IDs.
+Universal also forces HEVC-to-H.264 transcode and subtitle burn for common x265
+episodes, which caused freezing/buffering that was not present with direct Plex
+part streaming. Do not restart both appliances and call that fixed. Keep the
+second appliance stopped until the Plex session/account/client-model root cause
+is proven and corrected. Do not "fix" this by mounting the library locally or by
+adding retry loops that hide recurrence.
+
+The shuffle cycle must not count any failure path as watched. `played` means
+the item reached normal playback completion. A verified corrupt file is moved
+to `unplayable`, not `played`, so it does not loop forever and does not
+masquerade as watched. Repeated playback failures without verified corruption
+keep the same active item and retry later. This preserves the rule that
+playable items are played at least once before the cycle repeats.
+
+Plex HTTP stream interruptions are not file-corruption proof. If ffmpeg is
+checking a Plex URL and Plex returns `503`, resets the stream, or ends the HTTP
+response prematurely, the check is inconclusive and the item must remain active
+rather than moving to `unplayable` or advancing the queue. Treat file-level
+corruption as verified only when the evidence is not just Plex
+transport/session failure.
 
 ## Bedroom HDMI Display Ownership
 
@@ -43,8 +84,13 @@ before changing recovery behavior.
 ## Skip Current Bedroom Plex Episode
 
 Run this on `jn-t14s-lin` from any shell. It stops the HDMI watcher and player,
-backs up the shuffle state, marks the active item as played, and lets the
-watcher start the next item.
+creates a Sanoid-backed rollback copy of the shuffle state, marks the active
+item as played, and lets the watcher start the next item.
+
+Do not use `/tmp` or a host-local state copy as the durable rollback for this
+operation. If `/usr/local/sbin/live-rollback-backup` or `/srv/live-rollbacks`
+is missing, deploy the NFS client path first with
+`ansible-playbook playbooks/storage/nfs.yml`.
 
 ```bash
 set -euo pipefail
@@ -52,12 +98,13 @@ set -euo pipefail
 sudo -n systemctl stop plex-appliance-hdmi-vt-watcher.service plex-appliance-tv.service
 trap 'sudo -n systemctl start plex-appliance-hdmi-vt-watcher.service' EXIT
 
-ts="$(date +%Y%m%d-%H%M%S)"
 state="/var/lib/plex-appliance/shuffle-state.json"
-backup="/tmp/plex-appliance-shuffle-state.${ts}.json"
-cp "$state" "$backup"
+backup="$(sudo -n live-rollback-backup \
+  --domain plex-appliance \
+  --name skip-current-bedroom \
+  --path "$state")"
 
-python3 - <<'PY'
+sudo -n python3 - <<'PY'
 import json
 import pathlib
 import time
@@ -93,7 +140,8 @@ Rollback if the wrong item was skipped:
 
 ```bash
 sudo -n systemctl stop plex-appliance-hdmi-vt-watcher.service plex-appliance-tv.service
-cp /tmp/plex-appliance-shuffle-state.YYYYMMDD-HHMMSS.json /var/lib/plex-appliance/shuffle-state.json
+backup="/srv/live-rollbacks/jn-t14s-lin/plex-appliance/YYYYMMDDTHHMMSSZ-skip-current-bedroom"
+sudo -n cp "$backup/files/var/lib/plex-appliance/shuffle-state.json" /var/lib/plex-appliance/shuffle-state.json
 sudo -n systemctl start plex-appliance-hdmi-vt-watcher.service
 ```
 
