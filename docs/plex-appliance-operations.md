@@ -112,6 +112,16 @@ boot the newer installed kernel or continue graphics-stack RCA, not to mark the
 episode bad. Bedroom uses a 45 second mpv startup window so transient DRM setup
 slowness does not cause false playback retries.
 
+If `mpv did not configure video within ...; retrying` appears at the end of
+otherwise healthy playback, treat it as a player monitor bug until proven
+otherwise. On 2026-06-02, living room reached episode credits, briefly stopped
+returning mpv IPC video properties during EOF teardown, and the appliance still
+applied the startup timer because readiness was not latched after first video
+configuration. The fix is to apply the startup timeout only before the first
+successful mpv readiness signal; after playback has been observed, late missing
+IPC properties must fall through to normal EOF/stall handling instead of
+restarting and replaying the tail.
+
 ## Skip Current Bedroom Plex Episode
 
 Run this on `jn-t14s-lin` from any shell. It stops the HDMI watcher and player,

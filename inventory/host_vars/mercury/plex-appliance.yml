@@ -41,7 +41,7 @@ plex_appliance_collection_refresh_seconds: 21600
 plex_appliance_collection_refresh_jitter_seconds: 1800
 plex_appliance_resume_rewind_seconds: 15
 plex_appliance_stream_prestart_timeout_seconds: 12
-plex_appliance_mpv_start_timeout_seconds: 20
+plex_appliance_mpv_start_timeout_seconds: 45
 plex_appliance_mpv_args:
   - --fs
   - --no-terminal

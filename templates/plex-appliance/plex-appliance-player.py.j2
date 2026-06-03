@@ -1106,6 +1106,7 @@ def play(
             started_at = time.monotonic()
             last_progress_at: Optional[float] = started_at if start_position > 0 else None
             last_seen_position = last_position
+            playback_ready_seen = False
 
             while process.poll() is None:
                 time.sleep(PLAYBACK_PROGRESS_SECONDS)
@@ -1114,9 +1115,12 @@ def play(
                 duration_value = mpv_number_property(socket_path, "duration")
                 vo_configured = mpv_bool_property(socket_path, "vo-configured")
                 playback_ready = bool(vo_configured) or position_value is not None or duration_value is not None
-                if playback_ready and last_progress_at is None:
-                    last_progress_at = now
-                    clear_status_screen()
+                if playback_ready:
+                    if not playback_ready_seen:
+                        playback_ready_seen = True
+                    if last_progress_at is None:
+                        last_progress_at = now
+                        clear_status_screen()
                 if position_value is not None:
                     observed_position = position_offset + max(0.0, position_value)
                     absolute_position = wallclock_limited_position(
@@ -1140,7 +1144,11 @@ def play(
                         duration = max(duration, position_offset + duration_value)
                 progress_callback(last_position, duration)
 
-                if not playback_ready and now - started_at >= MPV_START_TIMEOUT_SECONDS:
+                if (
+                    not playback_ready_seen
+                    and not playback_ready
+                    and now - started_at >= MPV_START_TIMEOUT_SECONDS
+                ):
                     forced_stop_reason = f"mpv did not configure video within {MPV_START_TIMEOUT_SECONDS}s; retrying"
                     stop_mpv_process(process, forced_stop_reason)
                     break
