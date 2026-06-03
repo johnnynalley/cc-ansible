@@ -935,6 +935,21 @@ def observed_clean_eof_completion(check: Dict[str, Any], position: float, durati
     return position + OBSERVED_EOF_GRACE_SECONDS >= observed_end
 
 
+def verified_end_window_completion(check: Dict[str, Any], position: float, duration: float) -> bool:
+    if duration <= 0:
+        return False
+    if position < max(0.0, duration - RESUME_END_THRESHOLD_SECONDS):
+        return False
+    return check.get("status") == "passed" and check.get("reason") == "ffmpeg_decoded_expected_window"
+
+
+def repeated_failure_completion_verified(check: Dict[str, Any], position: float, duration: float) -> bool:
+    return (
+        observed_clean_eof_completion(check, position, duration)
+        or verified_end_window_completion(check, position, duration)
+    )
+
+
 def playback_args() -> List[str]:
     args = list(MPV_ARGS)
     if MPV_SCREEN_NAME:
@@ -1299,15 +1314,16 @@ def main() -> int:
                             f"{failure_count} failed playback attempts: {item_key_to_play}"
                         )
                         mark_unplayable(queue_keys, played_keys, unplayable_keys, item_key_to_play)
-                    elif observed_clean_eof_completion(check, active_position, duration):
+                    elif repeated_failure_completion_verified(check, active_position, duration):
                         if item_key_to_play not in played_keys:
                             played_keys.append(item_key_to_play)
                         active = None
                         save_shuffle_state(queue_keys, played_keys, unplayable_keys)
                         log(
-                            "Marking media complete at observed clean EOF after repeated playback failures: "
+                            "Marking media complete at verified end after repeated playback failures: "
                             f"{item_key_to_play}; position={active_position:.3f}s "
-                            f"observed_start={check.get('start')} decoded={check.get('decoded_seconds')}"
+                            f"check_status={check.get('status')} reason={check.get('reason')} "
+                            f"check_start={check.get('start')} decoded={check.get('decoded_seconds')}"
                         )
                     else:
                         append_playback_issue_log(
@@ -1347,15 +1363,16 @@ def main() -> int:
                             f"{failure_count} early player exits: {item_key_to_play}"
                         )
                         mark_unplayable(queue_keys, played_keys, unplayable_keys, item_key_to_play)
-                    elif observed_clean_eof_completion(check, active_position, duration):
+                    elif repeated_failure_completion_verified(check, active_position, duration):
                         if item_key_to_play not in played_keys:
                             played_keys.append(item_key_to_play)
                         active = None
                         save_shuffle_state(queue_keys, played_keys, unplayable_keys)
                         log(
-                            "Marking media complete at observed clean EOF after repeated early player exits: "
+                            "Marking media complete at verified end after repeated early player exits: "
                             f"{item_key_to_play}; position={active_position:.3f}s "
-                            f"observed_start={check.get('start')} decoded={check.get('decoded_seconds')}"
+                            f"check_status={check.get('status')} reason={check.get('reason')} "
+                            f"check_start={check.get('start')} decoded={check.get('decoded_seconds')}"
                         )
                     else:
                         append_playback_issue_log(

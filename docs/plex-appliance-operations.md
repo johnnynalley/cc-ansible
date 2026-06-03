@@ -77,8 +77,10 @@ reached the real credits/end around 1188 seconds while Plex reported 1298
 seconds, so the player kept resuming near the credits and never crossed the
 Plex-reported completion threshold. Repeated failures at a clean observed EOF
 near the end of the Plex duration should count as watched, because the item
-reached the actual playable end. Do not count earlier short decodes or Plex
-transport failures as watched.
+reached the actual playable end. Repeated failures after the saved position is
+already inside the normal completion threshold should also count as watched
+when ffmpeg verifies the remaining end window. Do not count earlier short
+decodes or Plex transport failures as watched.
 
 ## Bedroom HDMI Display Ownership
 
@@ -98,6 +100,17 @@ the same AMD DRM device. The failure signature that led to this rule was:
 Do not treat a player restart or VT switch as the fix for this class of
 incident. Preserve the logs and prove which process owned the display stack
 before changing recovery behavior.
+
+For `mpv did not configure video` loops on bedroom, check kernel DRM/amdgpu
+logs before blaming Plex or the media file. On 2026-06-02, the loop occurred
+while the kernel logged `drm_mode_rmfb_work_fn` CPU hog warnings and an amdgpu
+DMCUB diagnostic error, and the host was still booted on `7.0.0-15-generic`
+even though `7.0.0-22-generic` was installed. The Plex stream and file were
+healthy: the same direct URL later played with mpv reporting `vo-configured`,
+VAAPI HEVC decode, and advancing `time-pos`. Prevention for that class is to
+boot the newer installed kernel or continue graphics-stack RCA, not to mark the
+episode bad. Bedroom uses a 45 second mpv startup window so transient DRM setup
+slowness does not cause false playback retries.
 
 ## Skip Current Bedroom Plex Episode
 
