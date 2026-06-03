@@ -1,0 +1,94 @@
+#!/usr/bin/env python3
+"""Refresh Plex library sections during the controlled maintenance window."""
+
+from __future__ import annotations
+
+import argparse
+import fcntl
+import re
+import sys
+import urllib.error
+import urllib.request
+import xml.etree.ElementTree as ET
+from pathlib import Path
+
+
+DEFAULT_PREFERENCES = Path("/opt/media-stack/plex/Library/Application Support/Plex Media Server/Preferences.xml")
+DEFAULT_PLEX_URL = "http://127.0.0.1:32400"
+DEFAULT_LOCK_PATH = Path("/run/plex-library-nightly-scan.lock")
+
+
+def load_token(preferences_path: Path) -> str:
+    text = preferences_path.read_text(encoding="utf-8")
+    match = re.search(r'PlexOnlineToken="([^"]+)"', text)
+    if not match:
+        raise RuntimeError(f"PlexOnlineToken was not found in {preferences_path}")
+    return match.group(1)
+
+
+def plex_request(base_url: str, path: str, token: str, timeout: float) -> bytes:
+    request = urllib.request.Request(
+        base_url.rstrip("/") + path,
+        headers={
+            "X-Plex-Token": token,
+            "Accept": "application/xml",
+        },
+    )
+    with urllib.request.urlopen(request, timeout=timeout) as response:
+        return response.read()
+
+
+def section_keys(base_url: str, token: str, timeout: float) -> list[str]:
+    payload = plex_request(base_url, "/library/sections", token, timeout)
+    root = ET.fromstring(payload)
+    keys: list[str] = []
+    for node in root.findall("Directory"):
+        key = node.get("key")
+        title = node.get("title", key or "unknown")
+        if key:
+            keys.append(key)
+            print(f"Queued Plex library refresh for section {key}: {title}")
+    return keys
+
+
+def refresh_section(base_url: str, key: str, token: str, timeout: float) -> None:
+    plex_request(base_url, f"/library/sections/{key}/refresh", token, timeout)
+    print(f"Requested Plex library refresh for section {key}")
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--plex-url", default=DEFAULT_PLEX_URL)
+    parser.add_argument("--preferences", type=Path, default=DEFAULT_PREFERENCES)
+    parser.add_argument("--lock-path", type=Path, default=DEFAULT_LOCK_PATH)
+    parser.add_argument("--timeout", type=float, default=30.0)
+    parser.add_argument("--section", action="append", default=[])
+    return parser.parse_args()
+
+
+def main() -> int:
+    args = parse_args()
+    args.lock_path.parent.mkdir(parents=True, exist_ok=True)
+    with args.lock_path.open("w", encoding="utf-8") as lock_file:
+        try:
+            fcntl.flock(lock_file, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            print("Plex library scan is already running; exiting.")
+            return 0
+
+        try:
+            token = load_token(args.preferences)
+            sections = args.section or section_keys(args.plex_url, token, args.timeout)
+            if not sections:
+                print("No Plex library sections found.")
+                return 1
+            for key in sections:
+                refresh_section(args.plex_url, key, token, args.timeout)
+            return 0
+        except (OSError, RuntimeError, ET.ParseError, urllib.error.URLError) as exc:
+            print(f"Plex library refresh failed: {exc}", file=sys.stderr)
+            return 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

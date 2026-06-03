@@ -1,0 +1,11 @@
+[Unit]
+Description=Refresh Plex libraries during nightly maintenance
+
+[Timer]
+OnCalendar={{ nightly_media_maintenance_plex_library_scan_calendar | default('*-*-* 00..06:15:00') }}
+RandomizedDelaySec={{ nightly_media_maintenance_plex_library_scan_randomized_delay | default('10min') }}
+Persistent=false
+Unit=plex-library-nightly-scan.service
+
+[Install]
+WantedBy=timers.target

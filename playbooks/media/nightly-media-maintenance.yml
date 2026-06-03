@@ -128,7 +128,74 @@
   become: true
   gather_facts: false
 
+  handlers:
+    - name: Reload systemd
+      ansible.builtin.systemd:
+        daemon_reload: true
+
   tasks:
+    - name: Deploy Plex library nightly scan helper
+      ansible.builtin.copy:
+        src: "{{ ansible_config_file | dirname }}/scripts/media-maintenance/plex-library-nightly-scan"
+        dest: /usr/local/sbin/plex-library-nightly-scan
+        owner: root
+        group: root
+        mode: "0755"
+      when:
+        - nightly_media_maintenance_plex_preferences_enabled | default(false)
+        - nightly_media_maintenance_plex_library_scan_enabled | default(false)
+
+    - name: Deploy Plex library nightly scan units
+      ansible.builtin.template:
+        src: "{{ ansible_config_file | dirname }}/templates/media-maintenance/{{ item }}.j2"
+        dest: "/etc/systemd/system/{{ item }}"
+        owner: root
+        group: root
+        mode: "0644"
+      loop:
+        - plex-library-nightly-scan.service
+        - plex-library-nightly-scan.timer
+      notify: Reload systemd
+      when:
+        - nightly_media_maintenance_plex_preferences_enabled | default(false)
+        - nightly_media_maintenance_plex_library_scan_enabled | default(false)
+
+    - name: Remove Plex library nightly scan units when disabled
+      ansible.builtin.file:
+        path: "/etc/systemd/system/{{ item }}"
+        state: absent
+      loop:
+        - plex-library-nightly-scan.service
+        - plex-library-nightly-scan.timer
+      notify: Reload systemd
+      when:
+        - nightly_media_maintenance_plex_preferences_enabled | default(false)
+        - not (nightly_media_maintenance_plex_library_scan_enabled | default(false))
+
+    - name: Flush handlers after Plex library scan unit changes
+      ansible.builtin.meta: flush_handlers
+
+    - name: Enable Plex library nightly scan timer
+      ansible.builtin.systemd:
+        name: plex-library-nightly-scan.timer
+        enabled: true
+        state: started
+      when:
+        - nightly_media_maintenance_plex_preferences_enabled | default(false)
+        - nightly_media_maintenance_plex_library_scan_enabled | default(false)
+        - not ansible_check_mode
+
+    - name: Disable Plex library nightly scan timer when disabled
+      ansible.builtin.systemd:
+        name: plex-library-nightly-scan.timer
+        enabled: false
+        state: stopped
+      failed_when: false
+      when:
+        - nightly_media_maintenance_plex_preferences_enabled | default(false)
+        - not (nightly_media_maintenance_plex_library_scan_enabled | default(false))
+        - not ansible_check_mode
+
     - name: Read Plex preferences
       ansible.builtin.slurp:
         src: "{{ nightly_media_maintenance_plex_preferences_path }}"
@@ -152,6 +219,11 @@
       no_log: true
       when: nightly_media_maintenance_plex_preferences_enabled | default(false)
 
+    - name: Initialize Plex preference changes
+      ansible.builtin.set_fact:
+        nightly_media_maintenance_plex_preference_changes: []
+      when: nightly_media_maintenance_plex_preferences_enabled | default(false)
+
     - name: Calculate Plex preference changes
       ansible.builtin.set_fact:
         nightly_media_maintenance_plex_preference_changes: >-
@@ -164,7 +236,7 @@
           {{
             (
               nightly_media_maintenance_plex_preferences_text
-              | regex_search('id="' ~ item.key ~ '"[^>]*value="([^"]*)"', '\1')
+              | regex_search((item.key | regex_escape) ~ '="([^"]*)"', '\1')
               | default([], true)
             )[0] | default('')
           }}

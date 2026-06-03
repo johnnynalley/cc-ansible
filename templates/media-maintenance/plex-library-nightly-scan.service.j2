@@ -1,0 +1,8 @@
+[Unit]
+Description=Refresh Plex libraries during nightly maintenance
+After=network-online.target docker.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/plex-library-nightly-scan --plex-url {{ nightly_media_maintenance_plex_url }} --preferences "{{ nightly_media_maintenance_plex_preferences_path }}"

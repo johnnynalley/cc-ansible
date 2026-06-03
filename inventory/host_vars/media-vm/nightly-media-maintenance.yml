@@ -10,11 +10,19 @@ nightly_media_maintenance_plex_url: http://127.0.0.1:32400
 nightly_media_maintenance_plex_preferences_path: "/opt/media-stack/plex/Library/Application Support/Plex Media Server/Preferences.xml"
 nightly_media_maintenance_plex_backup_root: /opt/media-stack/plex-preference-backups
 
-# Keep Plex analysis features enabled, but only let expensive background work
-# run inside the same 00:00-07:00 window as the media maintenance coordinator.
+# Keep Plex library updates and analysis out of normal viewing hours. Live
+# filesystem-triggered scans caused Plex metadata endpoints to time out during
+# appliance playback on 2026-06-02. The managed timer below refreshes libraries
+# during the late overnight maintenance window instead.
+nightly_media_maintenance_plex_library_scan_enabled: true
+nightly_media_maintenance_plex_library_scan_calendar: "*-*-* 05:15:00"
+nightly_media_maintenance_plex_library_scan_randomized_delay: 15min
 nightly_media_maintenance_plex_preferences:
-  ButlerStartHour: "0"
+  ButlerStartHour: "5"
   ButlerEndHour: "7"
+  FSEventLibraryUpdatesEnabled: "0"
+  FSEventLibraryPartialScanEnabled: "0"
+  ScheduledLibraryUpdatesEnabled: "0"
   GenerateBIFBehavior: scheduled
   GenerateIntroMarkerBehavior: scheduled
   GenerateCreditsMarkerBehavior: scheduled

@@ -21,6 +21,16 @@ The media libraries are not stored there. Plex reads library media through
 transcode scratch stays on the VM root disk at `/var/lib/plex-transcode` and is
 mounted into the Plex container as `/transcode`.
 
+Plex library scanning must stay out of normal viewing hours. On 2026-06-02,
+Bedroom finished an episode, then sat on a black screen while authenticated
+Plex metadata endpoints timed out for several minutes. The root cause was a
+live Plex scanner/analyzer process started by filesystem change detection
+outside the maintenance window; the scanner was observed stuck in uninterruptible
+I/O while Plex metadata requests hung. Live file-event and periodic all-day
+library scans are disabled, the Plex Butler window is limited to 05:00-07:00,
+and `plex-library-nightly-scan.timer` refreshes Plex sections during that late
+overnight window.
+
 ## Playback Identity And Queue Safety
 
 The appliances intentionally depend on Plex for metadata, access control, stream

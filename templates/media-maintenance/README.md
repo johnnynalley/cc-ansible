@@ -9,6 +9,10 @@
 - `nightly-media-maintenance-restore.timer.j2`: Restore timer.
 - `nightly-media-profilarr-client.sh.j2`: Profilarr SSH client used by the
   coordinator.
+- `plex-library-nightly-scan.service.j2`: Runs the managed Plex library refresh
+  helper on media-vm.
+- `plex-library-nightly-scan.timer.j2`: Schedules Plex library refreshes during
+  the overnight maintenance window.
 
 ## Consumers
 
