@@ -31,6 +31,15 @@ library scans are disabled, the Plex Butler window is limited to 05:00-07:00,
 and `plex-library-nightly-scan.timer` refreshes Plex sections during that late
 overnight window.
 
+Do not include `media-vm` / VM 100 in the cluster-wide PBS backup job while it
+serves live Plex playback. On 2026-06-03, the all-VM PBS job started at
+00:00 while `pbs-main` was unreachable from ts440, left VM 100 under
+`lock: backup`, and made media-vm unreachable over LAN, Tailscale, SSH, and
+Plex HTTP until the stuck vzdump task was canceled and the stale lock was
+cleared. VM 100 is excluded from the all-VM PBS job; use storage-native
+snapshots and explicitly scheduled maintenance for Plex data instead of
+letting a failed PBS target lock the live Plex server.
+
 ## Playback Identity And Queue Safety
 
 The appliances intentionally depend on Plex for metadata, access control, stream
