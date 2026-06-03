@@ -42,6 +42,17 @@
         - "{{ codex_npm_prefix }}/lib/node_modules"
       tags: [codex, npm]
 
+    - name: Ensure npm uses the managed Codex prefix
+      ansible.builtin.lineinfile:
+        path: "/home/{{ codex_cli_user }}/.npmrc"
+        create: true
+        owner: "{{ codex_cli_user }}"
+        group: "{{ codex_cli_user }}"
+        mode: "0644"
+        regexp: "^prefix="
+        line: "prefix={{ codex_npm_prefix }}"
+      tags: [codex, npm]
+
     - name: Check for legacy system Codex install
       ansible.builtin.stat:
         path: /usr/local/lib/node_modules/@openai/codex
@@ -55,6 +66,21 @@
         - codex_legacy_system_install.stat.exists
         - not ansible_check_mode
       changed_when: true
+      tags: [codex, npm, cleanup]
+
+    - name: Remove Codex from non-managed user npm prefixes
+      ansible.builtin.command:
+        cmd: "sudo -iu {{ codex_cli_user }} npm --prefix {{ item }} uninstall -g {{ codex_npm_package }}"
+      loop: "{{ codex_cleanup_npm_prefixes | default([]) }}"
+      loop_control:
+        label: "{{ item }}"
+      register: codex_cleanup_npm
+      changed_when: >-
+        'removed' in (codex_cleanup_npm.stdout | default(''))
+        or 'changed' in (codex_cleanup_npm.stdout | default(''))
+      when:
+        - item != codex_npm_prefix
+        - not ansible_check_mode
       tags: [codex, npm, cleanup]
 
     - name: Add npm user bin to shell PATH

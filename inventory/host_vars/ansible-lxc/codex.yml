@@ -3,5 +3,7 @@
 # =============================================================================
 
 codex_cli_user: johnny
-codex_npm_prefix: /home/johnny/.local
+codex_npm_prefix: /home/johnny/.npm-global
 codex_npm_package: "@openai/codex"
+codex_cleanup_npm_prefixes:
+  - /home/johnny/.local

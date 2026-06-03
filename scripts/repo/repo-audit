@@ -30,6 +30,33 @@ TEXT_SUFFIXES = {
 }
 
 
+def host_agent_npm_prefix_errors() -> list[str]:
+    errors: list[str] = []
+    prefix_pattern = re.compile(r"^(codex|openclaw)_npm_prefix:\s*(\S+)\s*$")
+
+    for host_dir in sorted((ROOT / "inventory" / "host_vars").iterdir()):
+        if not host_dir.is_dir():
+            continue
+
+        prefixes: dict[str, str] = {}
+        for path in sorted(host_dir.glob("*.yml")):
+            text = read_text(path)
+            if text is None:
+                continue
+            for line in text.splitlines():
+                match = prefix_pattern.match(line.strip())
+                if match:
+                    prefixes[match.group(1)] = clean_ref(match.group(2))
+
+        if {"codex", "openclaw"} <= prefixes.keys() and prefixes["codex"] != prefixes["openclaw"]:
+            errors.append(
+                f"{host_dir.relative_to(ROOT)} has divergent agent npm prefixes: "
+                f"codex={prefixes['codex']} openclaw={prefixes['openclaw']}"
+            )
+
+    return errors
+
+
 def tracked_files() -> list[Path]:
     result = subprocess.run(
         ["git", "ls-files"],
@@ -128,6 +155,8 @@ def main() -> int:
     for path in (ROOT / "playbooks").iterdir():
         if path.is_file() and path.name != "README.md":
             errors.append(f"flat playbook file is not allowed: {path.relative_to(ROOT)}")
+
+    errors.extend(host_agent_npm_prefix_errors())
 
     errors.extend(
         reference_errors(
