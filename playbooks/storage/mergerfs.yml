@@ -275,6 +275,18 @@
         etype: user
         entity: "{{ mergerfs_balance_media_stack_ssh_user | default('johnny') }}"
         permissions: r
+        recalculate_mask: mask
+        state: present
+      loop: "{{ mergerfs_balance_media_stack_compose_targets | default([]) }}"
+      loop_control:
+        label: "{{ item.path }}/docker-compose.yml"
+      when: mergerfs_balance_media_stack_control_enabled | default(false)
+
+    - name: Ensure media stack control ACL mask permits compose read access
+      ansible.posix.acl:
+        path: "{{ item.path }}/docker-compose.yml"
+        etype: mask
+        permissions: r
         state: present
       loop: "{{ mergerfs_balance_media_stack_compose_targets | default([]) }}"
       loop_control:

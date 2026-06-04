@@ -11,11 +11,16 @@ case "$ACTION" in
 esac
 
 running_services() {
-  docker compose ps --services --status running "$@" 2>/dev/null || true
+  docker compose ps --services --status running "$@"
 }
 
 all_stopped() {
-  [[ -z "$(running_services "$@")" ]]
+  local services
+  if ! services="$(running_services "$@")"; then
+    echo "docker compose ps failed in $path" >&2
+    return 1
+  fi
+  [[ -z "$services" ]]
 }
 
 compose_action() (
@@ -52,6 +57,16 @@ compose_action() (
   return 1
 )
 
+if [[ "$ACTION" == "stop" ]]; then
 {% for target in mergerfs_balance_media_stack_compose_targets | default([]) %}
 compose_action {{ target.path | quote }}{% for service in target.services | default([]) %} {{ service | quote }}{% endfor %}{{ '\n' }}
 {% endfor %}
+else
+  failures=0
+{% for start_target in mergerfs_balance_media_stack_compose_targets | default([]) %}
+  if ! compose_action {{ start_target.path | quote }}{% for service in start_target.services | default([]) %} {{ service | quote }}{% endfor %}; then
+    failures=$((failures + 1))
+  fi
+{% endfor %}
+  exit "$failures"
+fi
