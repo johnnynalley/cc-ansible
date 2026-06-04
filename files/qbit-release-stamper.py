@@ -11,6 +11,7 @@ state stay aligned with the filesystem rename.
 from __future__ import annotations
 
 import argparse
+import collections
 import datetime as dt
 import json
 import os
@@ -203,45 +204,58 @@ class QbitClient:
         endpoint: str,
         data: dict[str, str] | None = None,
         expected: tuple[int, ...] = (200, 204),
+        retries: int | None = None,
+        retry_delay: int | None = None,
+        timeout: int | None = None,
     ) -> bytes:
         url = f"{self.api_url}/{endpoint.lstrip('/')}"
         encoded = None
         if data is not None:
             encoded = urllib.parse.urlencode(data).encode("utf-8")
         last_error: Exception | None = None
-        for attempt in range(1, self.retries + 1):
+        retries = retries or self.retries
+        retry_delay = retry_delay or self.retry_delay
+        timeout = timeout or self.timeout
+        for attempt in range(1, retries + 1):
             request = urllib.request.Request(url, data=encoded)
             try:
-                with self.opener.open(request, timeout=self.timeout) as response:
+                with self.opener.open(request, timeout=timeout) as response:
                     status = response.getcode()
                     body = response.read()
             except urllib.error.HTTPError as exc:
                 body = exc.read().decode("utf-8", errors="replace")
                 last_error = RuntimeError(f"{endpoint} failed with HTTP {exc.code}: {body}")
-                if exc.code < 500 or attempt >= self.retries:
+                if exc.code < 500 or attempt >= retries:
                     raise last_error from exc
             except (TimeoutError, urllib.error.URLError, OSError) as exc:
                 last_error = RuntimeError(
-                    f"{endpoint} failed on attempt {attempt}/{self.retries}: {exc}"
+                    f"{endpoint} failed on attempt {attempt}/{retries}: {exc}"
                 )
-                if attempt >= self.retries:
+                if attempt >= retries:
                     raise last_error from exc
             else:
                 if status not in expected:
                     raise RuntimeError(f"{endpoint} returned unexpected HTTP {status}")
                 return body
             log(
-                f"{endpoint} failed on attempt {attempt}/{self.retries}; "
-                f"retrying in {self.retry_delay}s"
+                f"{endpoint} failed on attempt {attempt}/{retries}; "
+                f"retrying in {retry_delay}s"
             )
-            time.sleep(self.retry_delay)
+            time.sleep(retry_delay)
 
-        raise RuntimeError(f"{endpoint} failed after {self.retries} attempts: {last_error}")
+        raise RuntimeError(f"{endpoint} failed after {retries} attempts: {last_error}")
 
-    def get_json(self, endpoint: str, params: dict[str, str] | None = None):
+    def get_json(
+        self,
+        endpoint: str,
+        params: dict[str, str] | None = None,
+        retries: int | None = None,
+        retry_delay: int | None = None,
+        timeout: int | None = None,
+    ):
         if params:
             endpoint = f"{endpoint}?{urllib.parse.urlencode(params)}"
-        body = self.request(endpoint)
+        body = self.request(endpoint, retries=retries, retry_delay=retry_delay, timeout=timeout)
         return json.loads(body.decode("utf-8"))
 
     def login(self) -> None:
@@ -265,8 +279,20 @@ class QbitClient:
 
         return None
 
-    def files(self, torrent_hash: str):
-        return self.get_json("torrents/files", {"hash": torrent_hash})
+    def files(
+        self,
+        torrent_hash: str,
+        retries: int | None = None,
+        retry_delay: int | None = None,
+        timeout: int | None = None,
+    ):
+        return self.get_json(
+            "torrents/files",
+            {"hash": torrent_hash},
+            retries=retries,
+            retry_delay=retry_delay,
+            timeout=timeout,
+        )
 
     def rename_file(self, torrent_hash: str, old_path: str, new_path: str) -> None:
         self.request(
@@ -775,8 +801,10 @@ def parent_title_from_values(*values: str | None) -> str:
     return " || ".join(titles)
 
 
-def language_combo_tag(path: Path | None, original_languages: set[str]) -> str | None:
-    languages = file_audio_languages(path)
+def language_combo_tag_from_languages(
+    languages: set[str],
+    original_languages: set[str],
+) -> str | None:
     original_languages = {language for language in original_languages if language != "eng"}
     if "eng" not in languages or not languages & original_languages:
         return None
@@ -794,6 +822,10 @@ def language_combo_tag(path: Path | None, original_languages: set[str]) -> str |
     return "[" + "+".join(LANGUAGE_TAGS[language] for language in ordered_languages) + "]"
 
 
+def language_combo_tag(path: Path | None, original_languages: set[str]) -> str | None:
+    return language_combo_tag_from_languages(file_audio_languages(path), original_languages)
+
+
 def absolute_file_path(torrent: dict, file_name: str) -> Path | None:
     save_path = torrent.get("save_path") or torrent.get("download_path") or ""
     if save_path:
@@ -808,6 +840,77 @@ def absolute_file_path(torrent: dict, file_name: str) -> Path | None:
             return candidate
 
     return None
+
+
+def filesystem_torrent_files(torrent: dict) -> list[dict[str, object]]:
+    """Infer qBittorrent file names from the completed filesystem layout.
+
+    qBittorrent's `torrents/files` endpoint is authoritative, but it can hang on
+    busy completed torrents. `renameFile` still needs qBit-style relative paths,
+    so prefer paths relative to `save_path`, then keep basename alternatives for
+    single-root layouts where qBit reports only the payload basename.
+    """
+
+    roots: list[Path] = []
+    for key in ("content_path",):
+        value = str(torrent.get(key) or "").strip()
+        if not value:
+            continue
+        path = Path(value)
+        if path.is_file():
+            roots.append(path.parent)
+        elif path.is_dir():
+            roots.append(path)
+
+    torrent_name = str(torrent.get("name") or "").strip()
+    save_path = Path(str(torrent.get("save_path") or "")) if torrent.get("save_path") else None
+    if save_path and torrent_name:
+        named_root = save_path / torrent_name
+        if named_root.is_dir():
+            roots.append(named_root)
+
+    unique_roots: list[Path] = []
+    seen_roots: set[str] = set()
+    for root in roots:
+        key = str(root)
+        if key in seen_roots:
+            continue
+        seen_roots.add(key)
+        unique_roots.append(root)
+
+    files: list[dict[str, object]] = []
+    seen_names: set[str] = set()
+    save_base = Path(str(torrent.get("save_path") or "")) if torrent.get("save_path") else None
+    for root in unique_roots:
+        for path in sorted(root.rglob("*")):
+            if not path.is_file() or path.suffix.lower() not in VIDEO_EXTENSIONS:
+                continue
+            names: list[str] = []
+            if save_base:
+                try:
+                    names.append(path.relative_to(save_base).as_posix())
+                except ValueError:
+                    pass
+            try:
+                names.append(path.relative_to(root).as_posix())
+            except ValueError:
+                pass
+            names.append(path.name)
+
+            primary = next((name for name in names if name), "")
+            if not primary or primary in seen_names:
+                continue
+            seen_names.add(primary)
+            files.append(
+                {
+                    "name": primary,
+                    "absolute_path": str(path),
+                    "alternative_names": [
+                        name for name in dict.fromkeys(names) if name and name != primary
+                    ],
+                }
+            )
+    return files
 
 
 def fallback_single_torrent_files(torrent: dict) -> list[dict[str, str]]:
@@ -828,19 +931,47 @@ def wanted_tags(
     media_path: Path | None,
     original_languages: set[str],
     parent_title: str,
-) -> tuple[list[str], str | None]:
+) -> tuple[list[str], str | None, list[str]]:
     basename = PurePosixPath(file_name).name
     tags: list[str] = []
-    language_tag = language_combo_tag(media_path, original_languages)
+    reasons: list[str] = []
+    languages = file_audio_languages(media_path)
+    language_tag = language_combo_tag_from_languages(languages, original_languages)
     if language_tag and not LANGUAGE_COMBO_RE.search(basename):
         tags.append(language_tag)
-    if file_has_hevc_marker(media_path) and not X265_RE.search(basename):
+    elif language_tag:
+        reasons.append("language_combo_already_present")
+    elif media_path is None:
+        reasons.append("media_path_unresolved")
+    elif not languages:
+        reasons.append("audio_languages_unknown")
+    elif "eng" not in languages:
+        reasons.append("missing_english_audio")
+    else:
+        reasons.append("missing_original_audio")
+
+    has_hevc = file_has_hevc_marker(media_path)
+    if has_hevc and not X265_RE.search(basename):
         tags.append("[x265]")
-    tags.extend(context_tags_from_title(parent_title, basename))
+    elif has_hevc:
+        reasons.append("x265_already_present")
+    elif media_path is not None:
+        reasons.append("no_hevc_marker")
+
+    context_tags = context_tags_from_title(parent_title, basename)
+    if context_tags:
+        tags.extend(context_tags)
+    elif any(pattern.search(parent_title) for _, pattern in PLATFORM_TAG_PATTERNS):
+        reasons.append("platform_already_present_or_unneeded")
+
     release_group = release_group_from_title(parent_title)
     if release_group and file_has_release_group(basename, release_group):
         release_group = None
-    return tags, release_group
+        reasons.append("release_group_already_present")
+    elif not release_group:
+        reasons.append("release_group_not_in_parent_title")
+
+    return tags, release_group, reasons
 
 
 def rename_with_tags(
@@ -856,6 +987,27 @@ def rename_with_tags(
     if release_group:
         stem = f"{stem} -{release_group}"
     return str(posix_path.with_name(f"{stem}{posix_path.suffix}"))
+
+
+def rename_file_with_alternatives(
+    client: QbitClient,
+    torrent_hash: str,
+    old_path: str,
+    tags: list[str],
+    release_group: str | None,
+    series_title: str | None,
+    alternatives: list[str],
+) -> tuple[str, str, str | None]:
+    attempts = [old_path, *alternatives]
+    errors: list[str] = []
+    for candidate in attempts:
+        candidate_new_path = rename_with_tags(candidate, tags, release_group, series_title)
+        try:
+            client.rename_file(torrent_hash, candidate, candidate_new_path)
+            return candidate, candidate_new_path, None
+        except Exception as exc:  # noqa: BLE001 - try alternate qBit path forms.
+            errors.append(f"{candidate}: {exc}")
+    return old_path, rename_with_tags(old_path, tags, release_group, series_title), "; ".join(errors[:3])
 
 
 def parse_categories(value: str) -> set[str]:
@@ -965,21 +1117,45 @@ def main() -> int:
         changes = 0
         videos_scanned = 0
         skipped_no_stamp = 0
+        skip_reasons: collections.Counter[str] = collections.Counter()
+        skipped_samples: list[dict[str, object]] = []
+        rename_failures: list[dict[str, str]] = []
+        file_list_source = "qbittorrent_api"
+        file_list_error = ""
         torrent_files = fallback_single_torrent_files(torrent)
         if torrent_files:
+            file_list_source = "single_torrent_metadata"
             log("using single-file torrent metadata instead of qBittorrent file-list API")
         else:
-            torrent_files = client.files(torrent_hash)
+            try:
+                torrent_files = client.files(
+                    torrent_hash,
+                    retries=env_int("QBIT_FILES_API_RETRIES", 1),
+                    retry_delay=env_int("QBIT_FILES_API_RETRY_DELAY", 1),
+                    timeout=env_int("QBIT_FILES_API_TIMEOUT", 8),
+                )
+            except Exception as exc:  # noqa: BLE001 - fall back to the completed filesystem.
+                file_list_error = str(exc)
+                log(f"qBittorrent file-list API failed; trying filesystem fallback: {exc}")
+                torrent_files = filesystem_torrent_files(torrent)
+                file_list_source = "filesystem_fallback" if torrent_files else "none"
+                if not torrent_files:
+                    raise RuntimeError(
+                        "qBittorrent file-list API failed and filesystem fallback found no video files: "
+                        f"{exc}"
+                    )
 
         for torrent_file in torrent_files:
-            old_path = torrent_file.get("name", "")
+            old_path = str(torrent_file.get("name") or "")
             if PurePosixPath(old_path).suffix.lower() not in VIDEO_EXTENSIONS:
                 continue
             videos_scanned += 1
 
-            tags, release_group = wanted_tags(
+            absolute_path = str(torrent_file.get("absolute_path") or "")
+            media_path = Path(absolute_path) if absolute_path else absolute_file_path(torrent, old_path)
+            tags, release_group, reasons = wanted_tags(
                 old_path,
-                absolute_file_path(torrent, old_path),
+                media_path,
                 original_languages,
                 parent_title,
             )
@@ -987,7 +1163,18 @@ def main() -> int:
                 prefixed_path = path_with_episode_title_prefix(old_path, series_title)
                 if prefixed_path == old_path:
                     skipped_no_stamp += 1
-                    log(f"no stamp needed for {old_path!r}")
+                    if not reasons:
+                        reasons = ["no_matching_stamp_needed"]
+                    skip_reasons.update(reasons)
+                    if len(skipped_samples) < 10:
+                        skipped_samples.append(
+                            {
+                                "path": old_path,
+                                "reasons": reasons,
+                                "media_path_found": media_path is not None,
+                            }
+                        )
+                    log(f"no stamp needed for {old_path!r}; reasons={','.join(reasons)}")
                     continue
 
             new_path = rename_with_tags(old_path, tags, release_group, series_title)
@@ -1000,9 +1187,31 @@ def main() -> int:
                     f"tags={tags} release_group={release_group!r}"
                 )
             else:
-                client.rename_file(torrent_hash, old_path, new_path)
+                actual_old_path, actual_new_path, error = rename_file_with_alternatives(
+                    client,
+                    torrent_hash,
+                    old_path,
+                    tags,
+                    release_group,
+                    series_title,
+                    [
+                        str(name)
+                        for name in torrent_file.get("alternative_names", [])
+                        if isinstance(name, str)
+                    ],
+                )
+                if error:
+                    rename_failures.append(
+                        {
+                            "path": old_path,
+                            "target": new_path,
+                            "error": error,
+                        }
+                    )
+                    log(f"rename failed for {old_path!r}: {error}")
+                    continue
                 log(
-                    f"renamed {old_path!r} -> {new_path!r} "
+                    f"renamed {actual_old_path!r} -> {actual_new_path!r} "
                     f"tags={tags} release_group={release_group!r}"
                 )
             changes += 1
@@ -1021,6 +1230,11 @@ def main() -> int:
                 "changes": changes,
                 "videos_scanned": videos_scanned,
                 "skipped_no_stamp": skipped_no_stamp,
+                "skip_reasons": dict(sorted(skip_reasons.items())),
+                "skipped_samples": skipped_samples,
+                "file_list_source": file_list_source,
+                "file_list_error": file_list_error,
+                "rename_failures": rename_failures[:10],
             }
         )
     except Exception as exc:  # noqa: BLE001 - post-processing must not fail imports

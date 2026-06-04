@@ -1221,9 +1221,12 @@ for SABnzbd and qBittorrent on `docker-vm`.
 - SABnzbd event log:
   `/opt/media-stack/sabnzbd/scripts/release-stamper-events.jsonl`
 - SABnzbd categories using the stamper: `shows`, `movies`
-- Stamper env files are owned by UID/GID `1000` with mode `0600`, matching the
-  media containers' `PUID=1000` / `PGID=1000`. Root-only env files cause
-  qBittorrent completion hooks to fail with `Permission denied`.
+- Stamper script directories and executable scripts under the linuxserver
+  `/config` bind mounts are owned by UID/GID `1000`, matching the media
+  containers' `PUID=1000` / `PGID=1000`. The env files are also UID/GID `1000`
+  with mode `0600`, and event logs are UID/GID `1000` with mode `0640`. Do not
+  force these `/config` paths back to `root:root`; container startup and normal
+  app writes expect the configured media user.
 
 The qBittorrent script runs when a torrent finishes. It looks up the finished
 torrent through the qBittorrent Web API, iterates each video file, and renames
@@ -1239,6 +1242,12 @@ API on some completed torrents; the actual rename still goes through
 `renameFile`. For one-off repair commands where Sonarr context is known but the
 qBit-side lookup cannot recover it, the script supports `--series-title` to
 provide the canonical Sonarr title explicitly.
+- qBittorrent file-list lookup has separate bounded controls
+  (`QBIT_FILES_API_RETRIES`, `QBIT_FILES_API_RETRY_DELAY`,
+  `QBIT_FILES_API_TIMEOUT`). If `torrents/files` times out, the script falls
+  back to scanning the completed torrent path from qBittorrent metadata and
+  still uses `renameFile` for any rename. Event logs include `file_list_source`
+  and `file_list_error` so timeout-driven filesystem fallback is visible.
 
 The SABnzbd script runs as a normal post-processing script for media
 categories. Usenet payloads are not seeded, so it renames completed files
@@ -1279,7 +1288,11 @@ Stamping rules:
   `scripts/media-release/sonarr_transaction_audit.py` summarizes these logs
   alongside Sonarr history. A completed event with `changes=0` is not
   automatically bad: it is expected when payload files already include all
-  needed evidence such as `H.265`, service tags, and release group.
+  needed evidence such as `H.265`, service tags, and release group. qBittorrent
+  events also include `skip_reasons` and sampled skipped files, so a zero-rename
+  event can distinguish already-tagged files from unresolved paths, unknown audio
+  languages, missing English/original audio, missing HEVC markers, or absent
+  release-group evidence.
 
 Verification on 2026-05-22:
 

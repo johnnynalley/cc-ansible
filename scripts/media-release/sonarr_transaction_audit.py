@@ -322,6 +322,8 @@ def summarize_stamper_events(events: list[dict[str, Any]], limit: int) -> dict[s
                 "changes": event.get("changes"),
                 "videos_scanned": event.get("videos_scanned"),
                 "skipped_no_stamp": event.get("skipped_no_stamp"),
+                "skip_reasons": event.get("skip_reasons"),
+                "file_list_source": event.get("file_list_source"),
                 "download_name": event.get("download_name"),
             }
             for event in recent
@@ -738,7 +740,8 @@ def print_text(report: dict[str, Any]) -> None:
     for event in stamper["recent"]:
         print(
             "  - {observedAt} {client} {result} changes={changes} videos={videos_scanned} "
-            "skipped={skipped_no_stamp} reason={reason} {download_name}".format(**event)
+            "skipped={skipped_no_stamp} source={file_list_source} reason={reason} "
+            "skip_reasons={skip_reasons} {download_name}".format(**event)
         )
 
     print()
