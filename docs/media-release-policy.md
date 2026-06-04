@@ -1,6 +1,6 @@
 # Media Release Policy
 
-Last updated: 2026-05-31
+Last updated: 2026-06-03
 
 This documents the current Sonarr/Radarr release selection policy on `docker-vm`.
 The goal is better grabbed releases, not just smaller files. Anime is handled as
@@ -21,6 +21,11 @@ a separate policy because dual audio is the highest priority there.
   - Sonarr: `shows-anime-balanced` id `12`
   - Radarr: `movies-regular-balanced` id `10`
   - Radarr: `movies-anime-balanced` id `11`
+- The retired Radarr `[Don't Use]` profile id `1` was deleted on 2026-06-03
+  after all movie and collection references were moved to
+  `movies-regular-efficient`. Do not recreate parked request-visible profiles;
+  use efficient profiles for active defaults and balanced profiles only as
+  inactive policy comparison targets.
 - Media stack: `/opt/media-stack` on `docker-vm`
 - Recyclarr: disabled and removed from the active media-stack compose service
   list on 2026-05-27; its old config directory may remain on disk as a
@@ -196,6 +201,15 @@ movies from `movies-regular-efficient` to `movies-anime-efficient` and queued
 movie searches for each. The retained live rollback backup is
 `/opt/media-stack/arr-policy-backups/20260531T052016Z-profile-classification`.
 The dry-run backup from that repair was removed after validation.
+
+The 2026-06-03 Radarr cleanup moved `Captain America: The First Avenger` and
+`Captain America: The Winter Soldier` from `[Don't Use]` to
+`movies-regular-efficient`, then retargeted 10 Radarr collections from profile
+id `1` to `movies-regular-efficient` before deleting the retired profile. The
+retained live rollback backups are
+`/opt/media-stack/arr-policy-backups/20260604T021703Z-profile-classification`
+and
+`/opt/media-stack/arr-policy-backups/20260604T021951Z-radarr-profile-id-1-retire`.
 
 ## Quality Rank
 
