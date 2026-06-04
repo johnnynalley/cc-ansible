@@ -1000,6 +1000,15 @@ location.
   pack collateral/mapping issues, stalled/warning downloads, and active valid
   upgrades, and prints the release signals Sonarr probably used at grab time.
   Use it before considering any queue removal or download-client cleanup.
+- 2026-06-04 import-recovery queue check: current-better rows were not a
+  single Sonarr scoring failure. The live queue had stalled qBittorrent rows
+  such as `[NH] Sonny Boy` at `45000` queued score while the imported files
+  were already `145040` DA/BD/x265, plus mixed packs such as `[Judas] One
+  Piece 001-206` with 133 still-valid queued-better rows, 41 current-better
+  rows, and 32 unknown rows. Treat this as stale/incomplete download state
+  and pack collateral unless a filtered forensic check proves the whole
+  download group is current-better. Do not delete a mixed pack just because
+  some rows are worse than the current files.
 - `scripts/media-release/radarr_grab_forensics.py` is the matching Radarr
   classifier. It compares queued movie downloads against current movie file
   scores when Radarr exposes them and also parses Radarr import-rejection
