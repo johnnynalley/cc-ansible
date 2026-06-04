@@ -96,6 +96,8 @@ For recurring `jn-t14s-lin` Wi-Fi throughput collapse with no media-stack change
 
 Root cause comes before self-healing. Do not present an auto-restart, retry loop, watchdog, periodic reassertion, or other symptom-recovery automation as the fix for an unexplained incident until the trigger is understood. If immediate service recovery is needed, label it as temporary mitigation, then continue the investigation with logs, timelines, live state, and recent-change evidence until the cause and prevention path are clear. The goal is to explain why it happened and prevent recurrence, not to hide recurrence after the fact.
 
+If a service, VM, mount, or scheduled workload must be manually started or restarted to restore expected operation, do not treat the manual action as completion. State that service was restored, then immediately determine why it was not already running or why it failed to recover automatically. Check prior boot/shutdown logs, unit/container restart policy, scheduler history, dependency ordering, health checks, and recent local changes before moving on. If the user narrows scope to immediate recovery, capture the RCA follow-up explicitly and return to it after the requested recovery is verified.
+
 For incident capture on this host, include at least:
 - `journalctl -b -1 -k | rg -i "ath11k|wlp2s0|msdu_done|deauthenticated|rejected association"`
 - `journalctl -b -1 -u NetworkManager --since "<event_time>" | rg -i "wlp2s0|dhcp4: restarting|supplicant|reassociate"`
