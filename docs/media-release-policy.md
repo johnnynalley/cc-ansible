@@ -323,6 +323,29 @@ group confidence. Use it for periodic Profilarr review:
 ansible docker-vm --become -m script -a "scripts/media-release/sonarr_transaction_audit.py --hours 24 --limit 25"
 ```
 
+`media-stack-health.timer` on `docker-vm` is the alert-only storage/import
+sentinel for the Arr/download stack. It must not pause Profilarr, stop
+searches, delete queue rows, or mutate Arr/qBittorrent state. In addition to
+container, endpoint, hardlink, port-sync, and import-copy checks, it now alerts
+on repeated docker-vm NFS `fileid changed` kernel errors, media probe processes
+such as Arr `ffprobe` stuck in `D` state beyond the configured age threshold,
+and Sonarr/Radarr commands that remain active or queued beyond the configured
+stale thresholds. These checks are intentionally thresholded so short normal
+NFS reads and active search bursts do not become automatic mitigation events.
+
+Long-term docker-vm NFS reliability is still a storage configuration issue, not
+a queue-cleanup issue. On 2026-06-03, docker-vm repeatedly logged
+`NFS: server 192.168.1.146 error: fileid changed` while Radarr import scans
+touched the TS440 `/srv/media` mergerfs export. The live TS440 mergerfs runtime
+dump showed `inodecalc=path-hash`, `export-support=true`, and
+`func.getattr=newest`, but did not show `noforget` or `use_ino`. The official
+mergerfs NFS guidance calls for `noforget`, `use_ino`, and
+`inodecalc=path-hash` together for NFS exports. Adding the missing options is
+the preferred first maintenance-window test because it keeps the existing
+architecture: TS440 owns the single mergerfs pool, docker-vm keeps the Arr
+stack, and media-vm keeps Plex. Applying that change requires a planned TS440
+mergerfs remount, so treat it as Plex-impacting until proven otherwise.
+
 `scripts/media-release/arr_stage_profilarr_test_profiles.py` snapshots live Arr policy state
 and creates or refreshes future Profilarr test profiles by cloning the current
 efficient anime profiles. It does not assign any series or movies to the test

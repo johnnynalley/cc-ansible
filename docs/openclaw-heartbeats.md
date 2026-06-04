@@ -62,6 +62,13 @@ mergerfs placed the download and library file on different backing branches.
 
 This reads the cached result from the local `media-stack-health.timer` on `docker-vm`, which runs the full checks and alerts through Apprise/DBC. The cached heartbeat read avoids starting fresh NFS/mergerfs-touching probes from Astra. The timer covers the migrated Sonarr/Radarr/download automation on docker-vm while Plex stays on media-vm.
 
+The media-stack check is alert-only. It must not pause Profilarr, stop searches,
+or mutate queue/download state. Current storage/import guardrails include
+thresholded alerts for repeated docker-vm NFS `fileid changed` kernel errors,
+Arr media probe processes such as `ffprobe` stuck in `D` state, and
+Sonarr/Radarr commands that remain active or queued past their stale-command
+thresholds.
+
 ## Plex Appliance Verified Corruption Check
 
 The Plex appliances do not scan media on a schedule. They only write playback

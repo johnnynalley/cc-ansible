@@ -36,6 +36,15 @@ QBIT_IMPORT_AUDIT_ENABLED="{{ media_stack_health_qbit_import_audit_enabled | def
 QBIT_IMPORT_AUDIT_HOURS="{{ media_stack_health_qbit_import_audit_hours | default(24) }}"
 QBIT_IMPORT_AUDIT_MAX_RECORDS="{{ media_stack_health_qbit_import_audit_max_records | default(200) }}"
 QBIT_IMPORT_AUDIT_FAIL_ON_COPY="{{ media_stack_health_qbit_import_audit_fail_on_copy | default(false) }}"
+NFS_FILEID_CHECK_ENABLED="{{ media_stack_health_nfs_fileid_check_enabled | default(true) }}"
+NFS_FILEID_WINDOW_SECONDS="{{ media_stack_health_nfs_fileid_window_seconds | default(1800) }}"
+NFS_FILEID_THRESHOLD="{{ media_stack_health_nfs_fileid_threshold | default(10) }}"
+DSTATE_CHECK_ENABLED="{{ media_stack_health_dstate_check_enabled | default(true) }}"
+DSTATE_MIN_AGE_SECONDS="{{ media_stack_health_dstate_min_age_seconds | default(600) }}"
+DSTATE_COMMAND_REGEX="{{ media_stack_health_dstate_command_regex | default('(/app/(radarr|sonarr)/bin/ffprobe|ffprobe .* /data/|mediainfo .* /data/)') }}"
+ARR_COMMAND_CHECK_ENABLED="{{ media_stack_health_arr_command_check_enabled | default(true) }}"
+ARR_COMMAND_STARTED_STALE_SECONDS="{{ media_stack_health_arr_command_started_stale_seconds | default(3600) }}"
+ARR_COMMAND_QUEUED_STALE_SECONDS="{{ media_stack_health_arr_command_queued_stale_seconds | default(7200) }}"
 STATUS_FILE="$STATE_DIR/status.env"
 PROBLEMS_FILE="$STATE_DIR/problems.txt"
 WARNINGS_FILE="$STATE_DIR/warnings.txt"
@@ -609,6 +618,161 @@ check_qbit_import_audit() {
   check_qbit_import_audit_app radarr 7878
 }
 
+check_nfs_fileid_changed() {
+  local now
+  local since
+  local count
+
+  if ! is_truthy "$NFS_FILEID_CHECK_ENABLED"; then
+    return
+  fi
+
+  if [[ ! "$NFS_FILEID_WINDOW_SECONDS" =~ ^[0-9]+$ || "$NFS_FILEID_WINDOW_SECONDS" -lt 60 ]]; then
+    add_warning "NFS fileid check has invalid window seconds: $NFS_FILEID_WINDOW_SECONDS"
+    return
+  fi
+  if [[ ! "$NFS_FILEID_THRESHOLD" =~ ^[0-9]+$ || "$NFS_FILEID_THRESHOLD" -lt 1 ]]; then
+    add_warning "NFS fileid check has invalid threshold: $NFS_FILEID_THRESHOLD"
+    return
+  fi
+
+  now="$(date +%s)"
+  since=$((now - NFS_FILEID_WINDOW_SECONDS))
+  count="$(journalctl -k --since "@$since" --no-pager 2>/dev/null \
+    | grep -F "NFS: server" \
+    | grep -F "fileid changed" \
+    | wc -l \
+    | tr -d '[:space:]' || true)"
+  count="${count:-0}"
+
+  if (( count >= NFS_FILEID_THRESHOLD )); then
+    add_problem "NFS fileid changed errors are recurring on $HOSTNAME: count=$count window=${NFS_FILEID_WINDOW_SECONDS}s threshold=$NFS_FILEID_THRESHOLD"
+  elif (( count > 0 )); then
+    add_warning "NFS fileid changed errors observed below alert threshold: count=$count window=${NFS_FILEID_WINDOW_SECONDS}s threshold=$NFS_FILEID_THRESHOLD"
+  fi
+}
+
+check_dstate_media_probes() {
+  local pid
+  local etimes
+  local stat
+  local wchan
+  local cmd
+  local count=0
+
+  if ! is_truthy "$DSTATE_CHECK_ENABLED"; then
+    return
+  fi
+
+  if [[ ! "$DSTATE_MIN_AGE_SECONDS" =~ ^[0-9]+$ || "$DSTATE_MIN_AGE_SECONDS" -lt 60 ]]; then
+    add_warning "D-state media probe check has invalid minimum age seconds: $DSTATE_MIN_AGE_SECONDS"
+    return
+  fi
+
+  while read -r pid etimes stat wchan cmd; do
+    [[ -n "${pid:-}" ]] || continue
+    [[ "$stat" == D* ]] || continue
+    [[ "$etimes" =~ ^[0-9]+$ ]] || continue
+    (( etimes >= DSTATE_MIN_AGE_SECONDS )) || continue
+    [[ "$cmd" =~ $DSTATE_COMMAND_REGEX ]] || continue
+
+    add_problem "media probe stuck in D-state: pid=$pid age=${etimes}s wchan=${wchan:-unknown} cmd=$(printf '%s' "$cmd" | cut -c1-180)"
+    count=$((count + 1))
+    if (( count >= 5 )); then
+      break
+    fi
+  done < <(ps -eo pid=,etimes=,stat=,wchan=,args= 2>/dev/null || true)
+}
+
+check_arr_stalled_commands_app() {
+  local app="$1"
+  local port="$2"
+  local key
+  local response
+  local rows
+  local now
+  local id
+  local name
+  local status
+  local stamp
+  local message
+  local stamp_epoch
+  local age
+  local threshold
+  local count=0
+
+  key="$(read_arr_api_key "$app" || true)"
+  if [[ -z "$key" ]]; then
+    add_warning "Arr stalled-command check could not read $app API key"
+    return
+  fi
+
+  response="$(curl -fsS -H "X-Api-Key: $key" \
+    --connect-timeout 3 --max-time "$HTTP_MAX_TIME" \
+    "http://127.0.0.1:${port}/api/v3/command" 2>/dev/null || true)"
+  if [[ -z "$response" ]]; then
+    add_warning "Arr stalled-command check could not read $app command queue"
+    return
+  fi
+
+  rows="$(printf '%s' "$response" | jq -r '
+    .[]
+    | select(.status == "started" or .status == "queued")
+    | [
+        (.id // ""),
+        (.name // ""),
+        (.status // ""),
+        (if .status == "started" then (.startedOn // .started // .queuedOn // .queued // "") else (.queuedOn // .queued // "") end),
+        ((.message // "") | gsub("[\r\n\t]+"; " ") | .[0:160])
+      ]
+    | @tsv
+  ' 2>/dev/null || true)"
+
+  now="$(date -u +%s)"
+  while IFS=$'\t' read -r id name status stamp message; do
+    [[ -n "${id:-}" ]] || continue
+    [[ -n "${stamp:-}" ]] || continue
+
+    stamp_epoch="$(date -u -d "$stamp" +%s 2>/dev/null || true)"
+    if [[ -z "$stamp_epoch" || ! "$stamp_epoch" =~ ^[0-9]+$ ]]; then
+      continue
+    fi
+
+    age=$((now - stamp_epoch))
+    if [[ "$status" == "queued" ]]; then
+      threshold="$ARR_COMMAND_QUEUED_STALE_SECONDS"
+    else
+      threshold="$ARR_COMMAND_STARTED_STALE_SECONDS"
+    fi
+    if [[ ! "$threshold" =~ ^[0-9]+$ || "$threshold" -lt 60 ]]; then
+      add_warning "Arr stalled-command check has invalid threshold for $status: $threshold"
+      return
+    fi
+
+    if (( age >= threshold )); then
+      add_problem "$app command appears stalled: id=$id name=$name status=$status age=${age}s threshold=${threshold}s message=${message:-none}"
+      count=$((count + 1))
+      if (( count >= 5 )); then
+        break
+      fi
+    fi
+  done <<< "$rows"
+}
+
+check_arr_stalled_commands() {
+  if ! is_truthy "$ARR_COMMAND_CHECK_ENABLED"; then
+    return
+  fi
+
+  if ! command -v jq >/dev/null 2>&1; then
+    add_warning "Arr stalled-command check skipped because jq is not installed"
+    return
+  fi
+
+  check_arr_stalled_commands_app sonarr 8989
+  check_arr_stalled_commands_app radarr 7878
+}
+
 {% for mount in media_stack_health_mounts | default(media_stack_health_default_mounts) %}
 check_mount {{ mount.path | quote }} {{ mount.fstype | default('') | quote }} {{ mount.require_path | default('') | quote }}
 {% endfor %}
@@ -626,6 +790,9 @@ check_http {{ endpoint.name | quote }} {{ endpoint.url | quote }}
 check_qbit_port_sync
 check_hardlinks "$HARDLINK_CONTAINER" "$HARDLINK_SOURCE_DIR" "$HARDLINK_TARGET_DIR"
 check_qbit_import_audit
+check_nfs_fileid_changed
+check_dstate_media_probes
+check_arr_stalled_commands
 
 if ! array_has_items "${problems[@]}"; then
   rm -f "$STATE_DIR/last-alert"
