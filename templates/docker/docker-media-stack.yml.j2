@@ -17,6 +17,7 @@ services:
     volumes:
       - ./sonarr:/config
       - /srv/media/plex:/data
+      - /srv/incomplete_downloads/complete/usenet:/usenet-complete
       - /srv/archive:/archive
     ports:
       - 8989:8989
@@ -36,6 +37,7 @@ services:
     volumes:
       - ./radarr:/config
       - /srv/media/plex:/data
+      - /srv/incomplete_downloads/complete/usenet:/usenet-complete
       - /srv/archive:/archive
     ports:
       - 7878:7878
@@ -91,6 +93,7 @@ services:
     volumes:
       - ./sabnzbd:/config
       - /srv/media/plex:/data
+      - /srv/incomplete_downloads/complete/usenet:/usenet-complete
       - /srv/archive:/archive
       - /srv/incomplete_downloads/incomplete/usenet:/incomplete
     ports:

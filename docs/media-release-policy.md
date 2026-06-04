@@ -1234,6 +1234,39 @@ for SABnzbd and qBittorrent on `docker-vm`.
   force these `/config` paths back to `root:root`; container startup and normal
   app writes expect the configured media user.
 
+## Download Client Storage Layout
+
+The media stack intentionally keeps qBittorrent completed downloads under
+`/data/downloads/torrents` so Sonarr/Radarr can hardlink seeded torrents into
+the library. SABnzbd does not need torrent hardlinks, so its completed Usenet
+downloads should use `/usenet-complete`, backed by the TS440
+`/srv/media-downloads` SSD export and mounted into SABnzbd, Sonarr, and Radarr.
+This keeps SAB unpack/completion writes off the mergerfs media pool while still
+letting Arr import completed Usenet releases into `/data`.
+
+Do not move qBittorrent completed paths to `/usenet-complete`; that would break
+the desired torrent hardlink behavior and create duplicate library copies.
+
+2026-06-04 Radarr import-stall mitigation:
+
+- Evidence pointed to TS440 NFS workers blocking in mergerfs/FUSE writes while
+  `/srv/media-06` (`/dev/sdh`) was saturated. `media-06` was deliberately left
+  writable because it still needs to remain part of the pool until it can be
+  phased out.
+- A runtime increase of TS440 NFS worker threads from `16` to `64` did not fix
+  the stall and was reverted to `16`.
+- Docker-vm rollback backup before the SAB path change:
+  `/srv/live-rollbacks/docker-vm/media-stack/20260604T222322Z-sab-complete-dir-ssd`.
+- SABnzbd `complete_dir` was changed live from `/data/downloads/complete` to
+  `/usenet-complete` after mounting that path into SABnzbd, Sonarr, and Radarr.
+  Already-running SAB unpack jobs may continue writing to their original
+  `/data/downloads/complete/...` destination until they finish.
+- Full `playbooks/storage/nfs.yml --check --diff` and
+  `playbooks/docker/docker-stacks.yml --check --diff` runs showed unrelated
+  drift (`/srv/media` group ownership and `docker-stacks.service`
+  `/srv/live-rollbacks` dependencies). Those broader playbook changes were not
+  applied as part of the scoped SAB storage-path mitigation.
+
 The qBittorrent script runs when a torrent finishes. It looks up the finished
 torrent through the qBittorrent Web API, iterates each video file, and renames
 individual payload files through qBittorrent's `renameFile` API. Do not replace
