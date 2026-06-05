@@ -1,0 +1,95 @@
+# Purpose: Configure Proxmox boot ordering guardrails.
+# Hosts: proxmox_nodes.
+# Key vars: proxmox_*, pve_*.
+# Templates: none.
+# Scripts: none.
+# Validation: ansible-playbook playbooks/proxmox/proxmox-boot-order.yml --syntax-check.
+
+# =============================================================================
+# Proxmox Boot Ordering Guardrails
+# =============================================================================
+# Keeps Proxmox cluster services from starting before root and local filesystems
+# are remounted/available, and keeps guest autostart behind pve-cluster.
+# =============================================================================
+
+- name: Configure Proxmox boot ordering guardrails
+  hosts: proxmox_nodes
+  become: true
+  gather_facts: false
+
+  tasks:
+    - name: Create pve-cluster drop-in directory
+      ansible.builtin.file:
+        path: /etc/systemd/system/pve-cluster.service.d
+        state: directory
+        owner: root
+        group: root
+        mode: "0755"
+
+    - name: Require local filesystems before pve-cluster
+      ansible.builtin.copy:
+        dest: /etc/systemd/system/pve-cluster.service.d/wait-for-local-fs.conf
+        owner: root
+        group: root
+        mode: "0644"
+        content: |
+          [Unit]
+          Requires=systemd-remount-fs.service local-fs.target
+          After=systemd-remount-fs.service local-fs.target
+      notify: Reload systemd
+
+    - name: Create pve-guests drop-in directory
+      ansible.builtin.file:
+        path: /etc/systemd/system/pve-guests.service.d
+        state: directory
+        owner: root
+        group: root
+        mode: "0755"
+
+    - name: Require pve-cluster before guest autostart
+      ansible.builtin.copy:
+        dest: /etc/systemd/system/pve-guests.service.d/wait-for-pve-cluster.conf
+        owner: root
+        group: root
+        mode: "0644"
+        content: |
+          [Unit]
+          Requires=pve-cluster.service
+          After=pve-cluster.service
+      notify: Reload systemd
+
+    - name: Check for legacy media VM autostart service
+      ansible.builtin.stat:
+        path: /etc/systemd/system/vm-media-autostart.service
+      register: vm_media_autostart_unit
+
+    - name: Create legacy media VM autostart drop-in directory
+      ansible.builtin.file:
+        path: /etc/systemd/system/vm-media-autostart.service.d
+        state: directory
+        owner: root
+        group: root
+        mode: "0755"
+      when: vm_media_autostart_unit.stat.exists
+
+    - name: Make legacy media VM autostart idempotent
+      ansible.builtin.copy:
+        dest: /etc/systemd/system/vm-media-autostart.service.d/idempotent.conf
+        owner: root
+        group: root
+        mode: "0644"
+        content: |
+          [Unit]
+          Requires=pve-guests.service
+          After=pve-guests.service
+
+          [Service]
+          ExecStart=
+          ExecStart=/bin/sh -c '/usr/sbin/qm status 100 | /bin/grep -q "status: running" || /usr/sbin/qm start 100'
+      notify: Reload systemd
+      when: vm_media_autostart_unit.stat.exists
+
+  handlers:
+    - name: Reload systemd
+      ansible.builtin.systemd:
+        daemon_reload: true

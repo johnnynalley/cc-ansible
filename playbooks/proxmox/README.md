@@ -15,6 +15,7 @@ Owner area: Proxmox cluster, firewall, PBS, PDM, and VM hardware.
 | --- | --- | --- | --- |
 | `pdm.yml` | `pdm_servers` | Configure Proxmox Datacenter Manager services. | `ansible-playbook playbooks/proxmox/pdm.yml --syntax-check` |
 | `proxmox-backup-server.yml` | `pbs-lxc, proxmox_nodes` | Configure Proxmox Backup Server. | `ansible-playbook playbooks/proxmox/proxmox-backup-server.yml --syntax-check` |
+| `proxmox-boot-order.yml` | `proxmox_nodes` | Configure Proxmox boot ordering guardrails. | `ansible-playbook playbooks/proxmox/proxmox-boot-order.yml --syntax-check` |
 | `proxmox-firewall.yml` | `proxmox_nodes` | Configure Proxmox firewall. | `ansible-playbook playbooks/proxmox/proxmox-firewall.yml --syntax-check` |
 | `proxmox-ha.yml` | `proxmox_nodes` | Manage Proxmox HA service state. | `ansible-playbook playbooks/proxmox/proxmox-ha.yml --syntax-check` |
 | `proxmox-notifications.yml` | `proxmox_nodes` | Configure Proxmox notification webhooks. | `ansible-playbook playbooks/proxmox/proxmox-notifications.yml --syntax-check` |

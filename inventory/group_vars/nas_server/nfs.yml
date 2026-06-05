@@ -11,7 +11,6 @@ nfs_exports:
   # Both Tailscale and LAN IPs for docker-vm (LAN is more stable for Docker NFS volumes)
   - name: media
     bind_source: /srv/media
-    requires_mount: srv-media.mount
     owner: johnny
     group: smbusers
     mode: "2775"
@@ -80,7 +79,6 @@ nfs_exports:
   # /srv/media/plex via the single media export above.
   - name: archive
     bind_source: /srv/nas-zfs/archive
-    requires_mount: srv-nas\x2dzfs-archive.mount
     owner: johnny
     group: johnny
     mode: "0775"
@@ -93,7 +91,6 @@ nfs_exports:
   # Sanoid-backed live rollback cache for one-off config/data backups.
   - name: live-rollbacks
     bind_source: /srv/nas-zfs/backups/live-rollbacks
-    requires_mount: srv-nas\x2dzfs-backups-live\x2drollbacks.mount
     owner: johnny
     group: johnny
     mode: "2775"

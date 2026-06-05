@@ -128,6 +128,7 @@ Owner area: Proxmox cluster, firewall, PBS, PDM, and VM hardware.
 | Playbook | Hosts | Purpose | Main vars/sources | Safe validation |
 | --- | --- | --- | --- | --- |
 | `playbooks/proxmox/proxmox-vm-hardware.yml` | `proxmox_nodes, linux_hosts` | Configure Proxmox guest hardware settings. | proxmox_*, pve_*, pbs_*, pdm_*; templates/proxmox; none by default. | `ansible-playbook playbooks/proxmox/proxmox-vm-hardware.yml --syntax-check` |
+| `playbooks/proxmox/proxmox-boot-order.yml` | `proxmox_nodes` | Configure Proxmox boot ordering guardrails. | proxmox_*, pve_*; none by default. | `ansible-playbook playbooks/proxmox/proxmox-boot-order.yml --syntax-check` |
 | `playbooks/proxmox/proxmox-backup-server.yml` | `pbs-lxc, proxmox_nodes` | Configure Proxmox Backup Server. | proxmox_*, pve_*, pbs_*, pdm_*; templates/proxmox; none by default. | `ansible-playbook playbooks/proxmox/proxmox-backup-server.yml --syntax-check` |
 | `playbooks/proxmox/proxmox-notifications.yml` | `proxmox_nodes` | Configure Proxmox notification webhooks. | proxmox_*, pve_*, pbs_*, pdm_*; templates/proxmox; none by default. | `ansible-playbook playbooks/proxmox/proxmox-notifications.yml --syntax-check` |
 | `playbooks/proxmox/proxmox-firewall.yml` | `proxmox_nodes` | Configure Proxmox firewall. | proxmox_*, pve_*, pbs_*, pdm_*; templates/proxmox; none by default. | `ansible-playbook playbooks/proxmox/proxmox-firewall.yml --syntax-check` |

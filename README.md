@@ -83,7 +83,7 @@ cc-ansible/
 │   ├── media/                  # Plex, streaming, media health, release stamping, maintenance
 │   ├── backup-sync/            # Restic, local restic, rclone, git sync, Nextcloud scans
 │   ├── agents/                 # Codex, Claude archive sync, OpenClaw
-│   ├── proxmox/                # Proxmox firewall, PBS, PDM, HA, guest hardware
+│   ├── proxmox/                # Proxmox firewall, PBS, PDM, HA, guest hardware, boot ordering
 │   ├── windows/                # Windows gaming workstation automation
 │   └── apps/                   # Standalone app appliances such as FreePBX
 ├── tasks/                      # Shared task files imported by playbooks
@@ -270,6 +270,7 @@ Packages are merged from multiple sources (all applicable variables combined):
 | `docker-auto-update.yml` | `docker_hosts` | Auto-update selected containers every 6h with major version guard |
 | `virtiofs.yml` | `proxmox_nodes`, `vms` | Configure VirtioFS shares between Proxmox hosts and VMs |
 | `proxmox-vm-hardware.yml` | `proxmox_nodes` | Apply durable Proxmox VM hardware settings such as CPU model overrides |
+| `proxmox-boot-order.yml` | `proxmox_nodes` | Configure Proxmox boot ordering guardrails so `pve-cluster` waits for local filesystems and guest autostart waits for `pve-cluster` |
 | `rclone-sync.yml` | `managed_hosts` | rclone sync jobs for opted-in managed hosts |
 | `git-sync.yml` | `nas_server` | Auto-pull from GitHub every 5 minutes (Nextcloud External Storage) |
 | `nextcloud-scan.yml` | nextcloud-vm | Periodic `occ files:scan` for external storage (every 10 min) |

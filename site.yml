@@ -133,6 +133,10 @@
   ansible.builtin.import_playbook: playbooks/proxmox/proxmox-vm-hardware.yml
   tags: [proxmox, vm-hardware, guest-hardware]
 
+- name: Configure Proxmox boot ordering guardrails
+  ansible.builtin.import_playbook: playbooks/proxmox/proxmox-boot-order.yml
+  tags: [proxmox, boot-order]
+
 - name: Deploy Docker Compose stacks
   ansible.builtin.import_playbook: playbooks/docker/docker-stacks.yml
   tags: [docker, stacks]

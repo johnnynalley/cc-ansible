@@ -30,17 +30,30 @@
     group: "{{ item.group | default('root') }}"
     mode: "{{ item.mode | default('0755') }}"
   loop: "{{ nfs_exports | default([]) }}"
-  when: item.bind_source is defined
+  when:
+    - item.bind_source is defined
+    - (nfs_pseudo_root | default('/srv') ~ '/' ~ item.name) != item.bind_source
 
 - name: Create bind mounts for exports
   ansible.posix.mount:
     path: "{{ nfs_pseudo_root | default('/srv') }}/{{ item.name }}"
     src: "{{ item.bind_source }}"
     fstype: none
-    opts: "{{ 'bind,x-systemd.requires=' + item.requires_mount + ',x-systemd.after=' + item.requires_mount if item.requires_mount is defined else 'bind' }}"
+    opts: "bind,nofail,x-systemd.requires-mounts-for={{ item.bind_source }}"
     state: mounted
   loop: "{{ nfs_exports | default([]) }}"
-  when: item.bind_source is defined
+  when:
+    - item.bind_source is defined
+    - (nfs_pseudo_root | default('/srv') ~ '/' ~ item.name) != item.bind_source
+
+- name: Remove obsolete same-path export bind mounts from fstab
+  ansible.posix.mount:
+    path: "{{ nfs_pseudo_root | default('/srv') }}/{{ item.name }}"
+    state: absent_from_fstab
+  loop: "{{ nfs_exports | default([]) }}"
+  when:
+    - item.bind_source is defined
+    - (nfs_pseudo_root | default('/srv') ~ '/' ~ item.name) == item.bind_source
 
 - name: Create managed subdirectories inside bind-source exports
   ansible.builtin.file:
@@ -67,20 +80,19 @@
     path: /etc/systemd/system/nfs-kernel-server.service.d
     state: directory
     mode: "0755"
-  when: nfs_exports | selectattr('requires_mount', 'defined') | list | length > 0
+  when: nfs_exports | selectattr('bind_source', 'defined') | list | length > 0
 
-- name: Configure NFS server to wait for required mounts
+- name: Configure NFS server to wait for export source paths
   ansible.builtin.copy:
     dest: /etc/systemd/system/nfs-kernel-server.service.d/wait-for-mounts.conf
     content: |
       [Unit]
-      {% for export in nfs_exports | selectattr('requires_mount', 'defined') | list %}
-      After={{ export.requires_mount }}
-      Requires={{ export.requires_mount }}
+      {% for export in nfs_exports | selectattr('bind_source', 'defined') | list %}
+      RequiresMountsFor={{ export.bind_source }}
       {% endfor %}
     mode: "0644"
   notify: Reload systemd
-  when: nfs_exports | selectattr('requires_mount', 'defined') | list | length > 0
+  when: nfs_exports | selectattr('bind_source', 'defined') | list | length > 0
 
 - name: Ensure NFS server is enabled and running
   ansible.builtin.systemd:
