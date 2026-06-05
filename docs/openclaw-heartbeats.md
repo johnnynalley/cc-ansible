@@ -55,10 +55,12 @@ OK: cached media-stack health passed <age>s ago
 ```
 
 Any nonzero exit or `CRITICAL:` output should alert Discord `#astra`.
-If the command exits zero but includes a `WARNINGS:` section, Astra should report
-the warning without treating the stack as down. Current expected warning class:
-recent qBittorrent imports that were copied instead of hardlinked because
-mergerfs placed the download and library file on different backing branches.
+If the command exits zero but includes a `WARNINGS:` section, Astra should not
+send recurring heartbeat notifications. Those warnings are operator context for
+manual review or digest-style summaries, not evidence that the media stack is
+down. Current expected warning class: recent qBittorrent imports that were
+copied instead of hardlinked because mergerfs placed the download and library
+file on different backing branches.
 
 This reads the cached result from the local `media-stack-health.timer` on `docker-vm`, which runs the full checks and alerts through Apprise/DBC. The cached heartbeat read avoids starting fresh NFS/mergerfs-touching probes from Astra. The timer covers the migrated Sonarr/Radarr/download automation on docker-vm while Plex stays on media-vm.
 
@@ -66,8 +68,8 @@ The media-stack check is alert-only. It must not pause Profilarr, stop searches,
 or mutate queue/download state. Current storage/import guardrails include
 thresholded alerts for repeated docker-vm NFS `fileid changed` kernel errors,
 Arr media probe processes such as `ffprobe` stuck in `D` state, and
-Sonarr/Radarr commands that remain active or queued past their stale-command
-thresholds.
+Sonarr/Radarr commands that are old and have stopped making command-message
+progress past the no-progress threshold.
 
 ## Plex Appliance Verified Corruption Check
 

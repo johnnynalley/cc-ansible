@@ -1,6 +1,6 @@
 # Media Release Policy
 
-Last updated: 2026-06-03
+Last updated: 2026-06-05
 
 This documents the current Sonarr/Radarr release selection policy on `docker-vm`.
 The goal is better grabbed releases, not just smaller files. Anime is handled as
@@ -1238,14 +1238,21 @@ for SABnzbd and qBittorrent on `docker-vm`.
 
 The media stack intentionally keeps qBittorrent completed downloads under
 `/data/downloads/torrents` so Sonarr/Radarr can hardlink seeded torrents into
-the library. SABnzbd does not need torrent hardlinks, so its completed Usenet
-downloads should use `/usenet-complete`, backed by the TS440
-`/srv/media-downloads` SSD export and mounted into SABnzbd, Sonarr, and Radarr.
-This keeps SAB unpack/completion writes off the mergerfs media pool while still
-letting Arr import completed Usenet releases into `/data`.
+the library. SABnzbd completed downloads also stay under
+`/data/downloads/complete` before Arr import. Even though Usenet does not need
+seeding semantics, moving SAB completed downloads to a separate mount forces
+Arr imports into copy/delete behavior and removes the chance for same-tree
+hardlinks.
 
-Do not move qBittorrent completed paths to `/usenet-complete`; that would break
-the desired torrent hardlink behavior and create duplicate library copies.
+Do not move qBittorrent or SABnzbd completed paths to a separate completed
+download mount unless Johnny explicitly approves that copy/delete tradeoff for
+the affected client. Keep only incomplete/temp downloads on the dedicated
+`/srv/media-downloads` SSD export by default.
+
+`/usenet-complete` may remain mounted into SABnzbd/Sonarr/Radarr only as a
+temporary legacy drain path for jobs completed while that path was active. Do
+not configure SABnzbd to write new completed jobs there. Remove the compatibility
+mount after the path is empty and no Arr queue/history rows still reference it.
 
 2026-06-04 Radarr import-stall mitigation:
 
@@ -1255,17 +1262,37 @@ the desired torrent hardlink behavior and create duplicate library copies.
   phased out.
 - A runtime increase of TS440 NFS worker threads from `16` to `64` did not fix
   the stall and was reverted to `16`.
-- Docker-vm rollback backup before the SAB path change:
+- Docker-vm rollback backup before the reverted SAB path change:
   `/srv/live-rollbacks/docker-vm/media-stack/20260604T222322Z-sab-complete-dir-ssd`.
 - SABnzbd `complete_dir` was changed live from `/data/downloads/complete` to
-  `/usenet-complete` after mounting that path into SABnzbd, Sonarr, and Radarr.
-  Already-running SAB unpack jobs may continue writing to their original
-  `/data/downloads/complete/...` destination until they finish.
+  `/usenet-complete`, then reverted on 2026-06-05 after review because it
+  removed SAB's same-tree hardlink opportunity and was too broad without
+  explicit approval. The reverted desired state is
+  `/data/downloads/complete`.
+- Existing payloads already completed under `/usenet-complete` were left visible
+  through the compatibility bind mount so Arr can drain them instead of losing
+  sight of the completed downloads during the rollback.
 - Full `playbooks/storage/nfs.yml --check --diff` and
   `playbooks/docker/docker-stacks.yml --check --diff` runs showed unrelated
   drift (`/srv/media` group ownership and `docker-stacks.service`
   `/srv/live-rollbacks` dependencies). Those broader playbook changes were not
   applied as part of the scoped SAB storage-path mitigation.
+
+## Media Stack Health Alert Semantics
+
+`media-stack-health` should page only on actual brokenness, not on slow but
+advancing workload. Long-running Sonarr/Radarr commands become critical only
+after they are older than the stale threshold and their command message has not
+advanced for the no-progress window. Transient container health or HTTP
+endpoint failures require consecutive failing checks before they become
+critical. Below-threshold NFS `fileid changed` events are suppressed from
+heartbeat output.
+
+qBittorrent copied-import findings remain warnings because they are real
+storage-efficiency evidence, but they do not mean the media stack is down.
+Astra should not send recurring heartbeat alerts for zero-exit warning output;
+warnings belong in manual review or a digest unless they become a nonzero
+`CRITICAL:` result.
 
 The qBittorrent script runs when a torrent finishes. It looks up the finished
 torrent through the qBittorrent Web API, iterates each video file, and renames

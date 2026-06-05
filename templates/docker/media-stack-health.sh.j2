@@ -27,6 +27,7 @@ APPRISE_TOKEN="{{ apprise_token }}"
 APPRISE_TAGS="{{ media_stack_health_alert_tags | default(apprise_alert_tags) }}"
 QBIT_ENV_FILE="{{ media_stack_health_qbit_env_file | default('/etc/qbit-port-sync.env') }}"
 HTTP_MAX_TIME="{{ media_stack_health_http_max_time | default(20) }}"
+CONSECUTIVE_FAILURE_THRESHOLD="{{ media_stack_health_consecutive_failure_threshold | default(2) }}"
 HARDLINK_CONTAINER="{{ media_stack_health_hardlink_container | default('sonarr') }}"
 HARDLINK_SOURCE_DIR="{{ media_stack_health_hardlink_source_dir | default('/data/downloads/complete') }}"
 HARDLINK_TARGET_DIR="{{ media_stack_health_hardlink_target_dir | default('/data/Anime') }}"
@@ -45,6 +46,7 @@ DSTATE_COMMAND_REGEX="{{ media_stack_health_dstate_command_regex | default('(/ap
 ARR_COMMAND_CHECK_ENABLED="{{ media_stack_health_arr_command_check_enabled | default(true) }}"
 ARR_COMMAND_STARTED_STALE_SECONDS="{{ media_stack_health_arr_command_started_stale_seconds | default(3600) }}"
 ARR_COMMAND_QUEUED_STALE_SECONDS="{{ media_stack_health_arr_command_queued_stale_seconds | default(7200) }}"
+ARR_COMMAND_NO_PROGRESS_SECONDS="{{ media_stack_health_arr_command_no_progress_seconds | default(1800) }}"
 STATUS_FILE="$STATE_DIR/status.env"
 PROBLEMS_FILE="$STATE_DIR/problems.txt"
 WARNINGS_FILE="$STATE_DIR/warnings.txt"
@@ -192,6 +194,51 @@ is_truthy() {
   esac
 }
 
+state_key_path() {
+  local key="$1"
+  local safe_key
+
+  safe_key="$(printf '%s' "$key" | tr -c 'A-Za-z0-9_.-' '_')"
+  printf '%s/%s\n' "$STATE_DIR" "$safe_key"
+}
+
+clear_failure_state() {
+  local key="$1"
+  local state_file
+
+  state_file="$(state_key_path "failure-$key")"
+  rm -f "$state_file"
+}
+
+record_failure_state() {
+  local key="$1"
+  local threshold="$2"
+  local problem_message="$3"
+  local warning_message="${4:-}"
+  local state_file
+  local count=0
+
+  if [[ ! "$threshold" =~ ^[0-9]+$ || "$threshold" -lt 1 ]]; then
+    threshold=1
+  fi
+
+  state_file="$(state_key_path "failure-$key")"
+  if [[ -r "$state_file" ]]; then
+    count="$(cat "$state_file" 2>/dev/null || echo 0)"
+  fi
+  if [[ ! "$count" =~ ^[0-9]+$ ]]; then
+    count=0
+  fi
+  count=$((count + 1))
+  printf '%s\n' "$count" > "$state_file"
+
+  if (( count >= threshold )); then
+    add_problem "$problem_message"
+  elif [[ -n "$warning_message" ]]; then
+    add_warning "$warning_message"
+  fi
+}
+
 expected_fstype_matches() {
   local actual="$1"
   local expected="$2"
@@ -280,6 +327,7 @@ check_container() {
 
   state="$(docker inspect --format {% raw %}'{{.State.Status}}'{% endraw %} "$resolved" 2>/dev/null || true)"
   if [[ "$state" != "running" ]]; then
+    clear_failure_state "container-health-$container"
     add_problem "$container container state is ${state:-unknown}"
     return
   fi
@@ -287,12 +335,21 @@ check_container() {
   health="$(docker inspect --format {% raw %}'{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}'{% endraw %} "$resolved" 2>/dev/null || true)"
   case "$health" in
     healthy|none)
+      clear_failure_state "container-health-$container"
       ;;
     starting)
-      add_problem "$container healthcheck is still starting"
+      record_failure_state \
+        "container-health-$container" \
+        "$CONSECUTIVE_FAILURE_THRESHOLD" \
+        "$container healthcheck is still starting" \
+        "$container healthcheck is still starting; waiting for consecutive failure threshold"
       ;;
     *)
-      add_problem "$container healthcheck is ${health:-unknown}"
+      record_failure_state \
+        "container-health-$container" \
+        "$CONSECUTIVE_FAILURE_THRESHOLD" \
+        "$container healthcheck is ${health:-unknown}" \
+        "$container healthcheck is ${health:-unknown}; waiting for consecutive failure threshold"
       ;;
   esac
 }
@@ -305,9 +362,14 @@ check_http() {
   code="$(curl -sS -o /dev/null -w '%{http_code}' --connect-timeout 3 --max-time "$HTTP_MAX_TIME" "$url" 2>/dev/null || true)"
   case "$code" in
     2*|3*|401|403)
+      clear_failure_state "http-$name"
       ;;
     *)
-      add_problem "$name endpoint returned HTTP ${code:-000}: $url"
+      record_failure_state \
+        "http-$name" \
+        "$CONSECUTIVE_FAILURE_THRESHOLD" \
+        "$name endpoint returned HTTP ${code:-000}: $url" \
+        "$name endpoint returned HTTP ${code:-000}: $url; waiting for consecutive failure threshold"
       ;;
   esac
 }
@@ -647,8 +709,6 @@ check_nfs_fileid_changed() {
 
   if (( count >= NFS_FILEID_THRESHOLD )); then
     add_problem "NFS fileid changed errors are recurring on $HOSTNAME: count=$count window=${NFS_FILEID_WINDOW_SECONDS}s threshold=$NFS_FILEID_THRESHOLD"
-  elif (( count > 0 )); then
-    add_warning "NFS fileid changed errors observed below alert threshold: count=$count window=${NFS_FILEID_WINDOW_SECONDS}s threshold=$NFS_FILEID_THRESHOLD"
   fi
 }
 
@@ -699,6 +759,12 @@ check_arr_stalled_commands_app() {
   local stamp_epoch
   local age
   local threshold
+  local progress_dir
+  local state_file
+  local message_hash
+  local last_hash
+  local last_change_epoch
+  local no_progress_age
   local count=0
 
   key="$(read_arr_api_key "$app" || true)"
@@ -729,6 +795,10 @@ check_arr_stalled_commands_app() {
   ' 2>/dev/null || true)"
 
   now="$(date -u +%s)"
+  progress_dir="$STATE_DIR/arr-command-progress"
+  mkdir -p "$progress_dir"
+  find "$progress_dir" -type f -mtime +3 -delete 2>/dev/null || true
+
   while IFS=$'\t' read -r id name status stamp message; do
     [[ -n "${id:-}" ]] || continue
     [[ -n "${stamp:-}" ]] || continue
@@ -749,8 +819,47 @@ check_arr_stalled_commands_app() {
       return
     fi
 
-    if (( age >= threshold )); then
+    if (( age < threshold )); then
+      continue
+    fi
+
+    if [[ "$status" == "queued" ]]; then
       add_problem "$app command appears stalled: id=$id name=$name status=$status age=${age}s threshold=${threshold}s message=${message:-none}"
+      count=$((count + 1))
+      if (( count >= 5 )); then
+        break
+      fi
+      continue
+    fi
+
+    if [[ ! "$ARR_COMMAND_NO_PROGRESS_SECONDS" =~ ^[0-9]+$ || "$ARR_COMMAND_NO_PROGRESS_SECONDS" -lt 60 ]]; then
+      add_warning "Arr stalled-command check has invalid no-progress threshold: $ARR_COMMAND_NO_PROGRESS_SECONDS"
+      return
+    fi
+
+    message_hash="$(printf '%s' "$message" | sha256sum | awk '{print $1}')"
+    state_file="$progress_dir/${app}-${id}.env"
+    last_hash=""
+    last_change_epoch=""
+    if [[ -r "$state_file" ]]; then
+      # shellcheck disable=SC1090
+      . "$state_file"
+      last_hash="${LAST_HASH:-}"
+      last_change_epoch="${LAST_CHANGE_EPOCH:-}"
+    fi
+
+    if [[ "$message_hash" != "$last_hash" || ! "$last_change_epoch" =~ ^[0-9]+$ ]]; then
+      {
+        printf 'LAST_HASH=%q\n' "$message_hash"
+        printf 'LAST_CHANGE_EPOCH=%q\n' "$now"
+      } > "${state_file}.tmp"
+      mv "${state_file}.tmp" "$state_file"
+      continue
+    fi
+
+    no_progress_age=$((now - last_change_epoch))
+    if (( no_progress_age >= ARR_COMMAND_NO_PROGRESS_SECONDS )); then
+      add_problem "$app command appears stalled: id=$id name=$name status=$status age=${age}s threshold=${threshold}s no_progress=${no_progress_age}s no_progress_threshold=${ARR_COMMAND_NO_PROGRESS_SECONDS}s message=${message:-none}"
       count=$((count + 1))
       if (( count >= 5 )); then
         break

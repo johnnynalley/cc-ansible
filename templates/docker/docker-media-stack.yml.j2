@@ -17,6 +17,8 @@ services:
     volumes:
       - ./sonarr:/config
       - /srv/media/plex:/data
+      # Legacy drain path for SAB jobs completed while /usenet-complete was active.
+      # SAB's desired complete_dir is /data/downloads/complete.
       - /srv/incomplete_downloads/complete/usenet:/usenet-complete
       - /srv/archive:/archive
     ports:
@@ -37,6 +39,8 @@ services:
     volumes:
       - ./radarr:/config
       - /srv/media/plex:/data
+      # Legacy drain path for SAB jobs completed while /usenet-complete was active.
+      # SAB's desired complete_dir is /data/downloads/complete.
       - /srv/incomplete_downloads/complete/usenet:/usenet-complete
       - /srv/archive:/archive
     ports:
@@ -93,6 +97,8 @@ services:
     volumes:
       - ./sabnzbd:/config
       - /srv/media/plex:/data
+      # Legacy drain path for SAB jobs completed while /usenet-complete was active.
+      # SAB's desired complete_dir is /data/downloads/complete.
       - /srv/incomplete_downloads/complete/usenet:/usenet-complete
       - /srv/archive:/archive
       - /srv/incomplete_downloads/incomplete/usenet:/incomplete
