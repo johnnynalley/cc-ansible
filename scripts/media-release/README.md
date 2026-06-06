@@ -35,6 +35,11 @@
 - `arr_import_status_snapshot.py`: Read-only Sonarr/Radarr import-recovery
   snapshot that fully paginates queues, summarizes blocked import reasons,
   active commands, and recent grab/import/delete history.
+- `arr_language_policy_audit.py`: Read-only Sonarr/Radarr current-library
+  language policy audit. It compares Arr language metadata with optional
+  ffprobe audio-track tags to find wrong original-language/English combinations,
+  DA-title/DA-CF imports without English, non-English regular-profile drift,
+  and original-only anime samples for follow-up candidate searches.
 - `arr_regular_dual_audio_profiles.py`: Creates or updates non-English regular
   dual-audio efficient profiles and the parsed-language `Regular Dual Audio`
   custom format, with live backups before apply.
