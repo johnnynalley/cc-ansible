@@ -438,7 +438,8 @@ Balances files across mergerfs branches by moving from fullest to emptiest. ZFS-
 - **CLI excludes**: `-E` flags merge with config excludes (additive)
 - **Evacuation mode**: `--evacuate <branch>` drains one branch to the least-used eligible branches before planned removal or reformat. Dry-run first.
 - **Nightly coordinator**: `playbooks/media/nightly-media-maintenance.yml` owns the midnight-7 AM window. Balance jobs are queued with `nightly-media-maintenance balance add ...`; if a balance job is pending, Profilarr upgrades are skipped for that night.
-- **Media stack pause/resume**: balance jobs run `/usr/local/sbin/mergerfs-balance-media-stack stop|start` through a forced SSH key to docker-vm. Current balance jobs pause Sonarr, Radarr, Prowlarr, Bazarr, Byparr, qBittorrent, SABnzbd, and Profilarr while Plex stays up.
+- **Media stack pause/resume**: balance jobs run `/usr/local/sbin/mergerfs-balance-media-stack stop|start` through a forced SSH key to docker-vm. Current balance jobs pause Sonarr, Radarr, Prowlarr, Bazarr, Byparr, qBittorrent, SABnzbd, and Profilarr while Plex stays up. The timer fires hourly inside the window, and the balancer currently scans/selects the first eligible file before the pause hook runs.
+- **Storage-layout runbook**: use `docs/media-stack-storage-layout.md` before changing or diagnosing completed-vs-incomplete download paths, hardlinks, docker-vm NFS mounts, TS440 backing storage, `/usenet-complete` cleanup, or balance/import RCA.
 - **VirtioFS caveat**: After balancing, media-vm needs a full stop/start (`qm stop`/`qm start`) to clear virtiofsd's stale directory cache
 
 ```bash
@@ -683,7 +684,7 @@ Torrents via Nyaa as fallback when Usenet doesn't have a release.
 - **Priority**: SABnzbd (1) > qBittorrent (2) - Usenet preferred, torrents fallback
 - **Disk I/O**: POSIX-compliant (required for VirtioFS compatibility)
 - **Incomplete downloads**: Both SABnzbd and qBittorrent use the Lacie SSD for temp storage, isolated in separate subdirs (`usenet/` and `torrents/`)
-- **VirtioFS note**: Media containers use `/srv/plex:/data`, the dedicated Plex-library VirtioFS mount, while keeping the in-container path as `/data`. Do not switch back to `/srv/media/plex:/data` without revalidating mount responsiveness; on 2026-05-24 `/srv/media` was hanging while `/srv/plex` was healthy. Hardlinks were verified with a real `ln` test across `/data/downloads/complete` and `/data/Anime`.
+- **Storage layout**: Media-stack containers on docker-vm use `/srv/media/plex:/data` from the single media NFS mount. Incomplete/temp downloads use the SSD-backed `/incomplete` mount; completed Arr downloads intentionally stay under `/data` (`/data/downloads/complete` for SABnzbd, `/data/downloads/torrents` for qBittorrent) so imports can hardlink when branch placement allows it. See `docs/media-stack-storage-layout.md`.
 - **Automatic port sync**: managed by `playbooks/docker/gluetun-watchdog.yml`. The systemd path unit watches Gluetun's port file and updates qBittorrent via API when VPN reconnects. Repaired on media-vm on 2026-05-22 to accept qBittorrent 5.2.0's HTTP 204 login success response and to clean up stale lockfiles before recreating qBittorrent.
 - **Known bad server**: ProtonVPN node-nl-215 (103.69.224.3) has broken port forwarding — gluetun-watchdog should detect and force-recreate
 - **Tuning**: `max_active_downloads: 5` to reduce I/O contention with uploads; `max_active_uploads: 200`

@@ -1186,7 +1186,9 @@ location.
   and media containers were rebound from `/srv/media/plex:/data` to
   `/srv/plex:/data`. Container-internal paths did not change, and a real
   `ln` test inside Sonarr verified hardlink behavior across
-  `/data/downloads/complete` and `/data/Anime`.
+  `/data/downloads/complete` and `/data/Anime`. This was a historical
+  media-vm-era repair; the current docker-vm media-stack layout is documented
+  in `docs/media-stack-storage-layout.md` and uses `/srv/media/plex:/data`.
 - JoJo Stardust arc-local blocklist incident, 2026-05-24 UTC: Sonarr's
   combined `JoJo's Bizarre Adventure (2012)` series maps Jonathan/Joseph/Battle
   Tendency to Season 1 with 26 episodes and maps Stardust Crusaders to Season 2
@@ -1236,6 +1238,10 @@ for SABnzbd and qBittorrent on `docker-vm`.
 
 ## Download Client Storage Layout
 
+For the full verified mount/export/container topology, use
+`docs/media-stack-storage-layout.md` first. This section only captures the
+release-policy reason for the layout.
+
 The media stack intentionally keeps qBittorrent completed downloads under
 `/data/downloads/torrents` so Sonarr/Radarr can hardlink seeded torrents into
 the library. SABnzbd completed downloads also stay under
@@ -1249,10 +1255,10 @@ download mount unless Johnny explicitly approves that copy/delete tradeoff for
 the affected client. Keep only incomplete/temp downloads on the dedicated
 `/srv/media-downloads` SSD export by default.
 
-`/usenet-complete` may remain mounted into SABnzbd/Sonarr/Radarr only as a
-temporary legacy drain path for jobs completed while that path was active. Do
-not configure SABnzbd to write new completed jobs there. Remove the compatibility
-mount after the path is empty and no Arr queue/history rows still reference it.
+`/usenet-complete` was a temporary legacy drain path from a reverted live-path
+experiment. Do not configure SABnzbd to write new completed jobs there. The
+desired state is no `/usenet-complete` mount in the media-stack containers once
+legacy payloads are verified or imported.
 
 2026-06-04 Radarr import-stall mitigation:
 
@@ -1269,9 +1275,11 @@ mount after the path is empty and no Arr queue/history rows still reference it.
   removed SAB's same-tree hardlink opportunity and was too broad without
   explicit approval. The reverted desired state is
   `/data/downloads/complete`.
-- Existing payloads already completed under `/usenet-complete` were left visible
-  through the compatibility bind mount so Arr can drain them instead of losing
-  sight of the completed downloads during the rollback.
+- Existing payloads already completed under `/usenet-complete` were temporarily
+  left visible through the compatibility bind mount so Arr could still see them
+  during the rollback. On 2026-06-06, the remaining payloads were copied back
+  toward `/data/downloads/complete`; the live compatibility mount still needed
+  final verification and removal during the same cleanup window.
 - Full `playbooks/storage/nfs.yml --check --diff` and
   `playbooks/docker/docker-stacks.yml --check --diff` runs showed unrelated
   drift (`/srv/media` group ownership and `docker-stacks.service`
