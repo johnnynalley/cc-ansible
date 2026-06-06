@@ -17,9 +17,6 @@ services:
     volumes:
       - ./sonarr:/config
       - /srv/media/plex:/data
-      # Temporary compatibility path for legacy SAB jobs still referenced by Sonarr.
-      # Remove after docs/media-stack-storage-layout.md cleanup criteria are met.
-      - /srv/incomplete_downloads/complete/usenet:/usenet-complete
       - /srv/archive:/archive
     ports:
       - 8989:8989
@@ -39,9 +36,6 @@ services:
     volumes:
       - ./radarr:/config
       - /srv/media/plex:/data
-      # Temporary compatibility path for legacy SAB jobs still referenced by Sonarr.
-      # Remove after docs/media-stack-storage-layout.md cleanup criteria are met.
-      - /srv/incomplete_downloads/complete/usenet:/usenet-complete
       - /srv/archive:/archive
     ports:
       - 7878:7878
@@ -97,9 +91,6 @@ services:
     volumes:
       - ./sabnzbd:/config
       - /srv/media/plex:/data
-      # Temporary compatibility path for legacy SAB jobs still referenced by Sonarr.
-      # SAB's desired complete_dir remains /data/downloads/complete.
-      - /srv/incomplete_downloads/complete/usenet:/usenet-complete
       - /srv/archive:/archive
       - /srv/incomplete_downloads/incomplete/usenet:/incomplete
     ports:

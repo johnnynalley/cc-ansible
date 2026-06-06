@@ -52,22 +52,6 @@ nfs_exports:
         owner: johnny
         group: johnny
         mode: "2775"
-      - path: complete
-        owner: johnny
-        group: johnny
-        mode: "2775"
-      - path: complete/usenet
-        owner: johnny
-        group: johnny
-        mode: "2775"
-      - path: complete/usenet/movies
-        owner: johnny
-        group: johnny
-        mode: "2775"
-      - path: complete/usenet/shows
-        owner: johnny
-        group: johnny
-        mode: "2775"
     clients:
       - host: 100.108.254.100
         options: "rw,sync,no_subtree_check,no_root_squash,fsid=11"

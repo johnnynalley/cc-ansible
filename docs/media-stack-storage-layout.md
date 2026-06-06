@@ -66,9 +66,8 @@ Verified live downloader paths on 2026-06-06:
 - qBittorrent: `Downloads\SavePath=/data/downloads/torrents/`
 
 `/usenet-complete` was a temporary compatibility mount from a reverted path
-experiment. It must not receive new SAB completed jobs. Remove it from live
-containers after copied legacy payloads are verified and no queue rows still
-depend on it.
+experiment. It must not receive new SAB completed jobs and is not part of the
+managed desired state.
 
 ## mergerfs Balance
 
@@ -118,15 +117,11 @@ cleanup copy was writing legacy Usenet payloads into
 from that window as normal SAB behavior without checking the live timeline.
 
 The 2026-06-06 live containers still exposed `/usenet-complete` as a
-compatibility bind even after SAB's `complete_dir` was reverted. Treat that as
-cleanup debt until the live compose file is redeployed without the mount and the
-legacy source path is empty.
-
-Follow-up verification on 2026-06-06 showed Radarr had `0` queue rows still
-referencing `/usenet-complete`, but Sonarr had `12`. The copied destination
-tree was also not fully equivalent: the S01E04 X-Men Anime payload under
-`/data/downloads/complete` was only `121,634,816` bytes while the legacy source
-under `/usenet-complete` was `1,024,854,257` bytes. Do not delete the legacy
-source or remove the compatibility mount until Sonarr has imported, cleared, or
-been deliberately retargeted away from those rows and the copied destination has
-been reverified.
+compatibility bind even after SAB's `complete_dir` was reverted. Follow-up
+verification showed Radarr had `0` queue rows still referencing
+`/usenet-complete`, and Sonarr had `12`, all for X-Men Anime payloads that
+Sonarr had already refused to auto-import. Those queue rows were removed with
+`blocklist=false` and `skipRedownload=true`, and the matching legacy/copied
+payload directories were deleted. After that cleanup, Sonarr had `0`
+`/usenet-complete` queue references, so the compatibility bind was removed from
+the managed compose template.

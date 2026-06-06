@@ -1257,8 +1257,7 @@ the affected client. Keep only incomplete/temp downloads on the dedicated
 
 `/usenet-complete` was a temporary legacy drain path from a reverted live-path
 experiment. Do not configure SABnzbd to write new completed jobs there. The
-desired state is no `/usenet-complete` mount in the media-stack containers once
-legacy payloads are verified or imported.
+desired state is no `/usenet-complete` mount in the media-stack containers.
 
 2026-06-04 Radarr import-stall mitigation:
 
@@ -1277,9 +1276,12 @@ legacy payloads are verified or imported.
   `/data/downloads/complete`.
 - Existing payloads already completed under `/usenet-complete` were temporarily
   left visible through the compatibility bind mount so Arr could still see them
-  during the rollback. On 2026-06-06, the remaining payloads were copied back
-  toward `/data/downloads/complete`; the live compatibility mount still needed
-  final verification and removal during the same cleanup window.
+  during the rollback. On 2026-06-06, the remaining Sonarr references were
+  confirmed to be X-Men Anime trouble rows that Sonarr had already refused to
+  auto-import. Those queue rows were removed with `blocklist=false` and
+  `skipRedownload=true`, the matching legacy/copied payload directories were
+  deleted, and `/usenet-complete` was removed from the managed media-stack
+  compose template.
 - Full `playbooks/storage/nfs.yml --check --diff` and
   `playbooks/docker/docker-stacks.yml --check --diff` runs showed unrelated
   drift (`/srv/media` group ownership and `docker-stacks.service`
