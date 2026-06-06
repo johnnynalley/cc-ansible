@@ -156,6 +156,42 @@
   no_log: true
   when: ansible_facts.os_family != "Darwin"
 
+- name: Normalize Tailscale advertised route preferences
+  ansible.builtin.set_fact:
+    tailscale_advertise_routes_normalized: >-
+      {{
+        (
+          tailscale_advertise_routes
+          if tailscale_advertise_routes is sequence
+          and tailscale_advertise_routes is not string
+          else (tailscale_advertise_routes | string).split(',')
+        )
+        | map('trim')
+        | reject('equalto', '')
+        | sort
+        | list
+      }}
+    tailscale_accept_routes_desired: >-
+      {{
+        (tailscale_accept_routes | default(false) | bool)
+        | ternary('true', 'false')
+      }}
+    tailscale_snat_subnet_routes_desired: >-
+      {{
+        (tailscale_snat_subnet_routes | default(true) | bool)
+        | ternary('true', 'false')
+      }}
+  when:
+    - ansible_facts.os_family != "Darwin"
+    - tailscale_advertise_routes is defined
+
+- name: Format Tailscale advertised routes
+  ansible.builtin.set_fact:
+    tailscale_advertise_routes_csv: >-
+      {{ tailscale_advertise_routes_normalized | join(',') }}
+  when:
+    - ansible_facts.os_family != "Darwin"
+    - tailscale_advertise_routes is defined
 
 - name: Use configured Tailscale auth key
   ansible.builtin.set_fact:
@@ -243,6 +279,106 @@
     - ansible_facts.os_family != "Darwin"
     - tailscale_manage_preferences | default(false) | bool
     - (tailscale_backend_state_after_auth.stdout | default(tailscale_backend_state.stdout | default(''))) == "Running"
+
+- name: Check Tailscale advertised routes
+  ansible.builtin.shell: |
+    set -o pipefail
+    tailscale debug prefs | python3 -c '
+    import json, sys
+    prefs = json.load(sys.stdin)
+    print(",".join(sorted(prefs.get("AdvertiseRoutes") or [])))
+    '
+  args:
+    executable: /bin/bash
+  register: tailscale_advertise_routes_current
+  changed_when: false
+  failed_when: false
+  check_mode: false
+  when:
+    - ansible_facts.os_family != "Darwin"
+    - tailscale_manage_preferences | default(false) | bool
+    - tailscale_advertise_routes is defined
+    - >-
+      (
+        tailscale_backend_state_after_auth.stdout
+        | default(tailscale_backend_state.stdout | default(''))
+      ) == "Running"
+
+- name: Check Tailscale accept-routes preference
+  ansible.builtin.shell: |
+    set -o pipefail
+    tailscale debug prefs | python3 -c '
+    import json, sys
+    prefs = json.load(sys.stdin)
+    print(str(prefs.get("RouteAll", False)).lower())
+    '
+  args:
+    executable: /bin/bash
+  register: tailscale_accept_routes_current
+  changed_when: false
+  failed_when: false
+  check_mode: false
+  when:
+    - ansible_facts.os_family != "Darwin"
+    - tailscale_manage_preferences | default(false) | bool
+    - tailscale_advertise_routes is defined
+    - >-
+      (
+        tailscale_backend_state_after_auth.stdout
+        | default(tailscale_backend_state.stdout | default(''))
+      ) == "Running"
+
+- name: Check Tailscale subnet-route SNAT preference
+  ansible.builtin.shell: |
+    set -o pipefail
+    tailscale debug prefs | python3 -c '
+    import json, sys
+    prefs = json.load(sys.stdin)
+    print(str(not bool(prefs.get("NoSNAT", False))).lower())
+    '
+  args:
+    executable: /bin/bash
+  register: tailscale_snat_subnet_routes_current
+  changed_when: false
+  failed_when: false
+  check_mode: false
+  when:
+    - ansible_facts.os_family != "Darwin"
+    - tailscale_manage_preferences | default(false) | bool
+    - tailscale_advertise_routes is defined
+    - >-
+      (
+        tailscale_backend_state_after_auth.stdout
+        | default(tailscale_backend_state.stdout | default(''))
+      ) == "Running"
+
+- name: Configure Tailscale advertised routes
+  ansible.builtin.command: >-
+    tailscale set
+    --advertise-routes={{ tailscale_advertise_routes_csv | quote }}
+    --accept-routes={{ tailscale_accept_routes_desired }}
+    --snat-subnet-routes={{ tailscale_snat_subnet_routes_desired }}
+  register: tailscale_advertise_routes_set
+  changed_when: true
+  when:
+    - ansible_facts.os_family != "Darwin"
+    - tailscale_manage_preferences | default(false) | bool
+    - tailscale_advertise_routes is defined
+    - >-
+      (
+        tailscale_backend_state_after_auth.stdout
+        | default(tailscale_backend_state.stdout | default(''))
+      ) == "Running"
+    - >-
+      (
+        tailscale_advertise_routes_current.stdout | default('')
+      ) != tailscale_advertise_routes_csv
+      or (
+        tailscale_accept_routes_current.stdout | default('')
+      ) != tailscale_accept_routes_desired
+      or (
+        tailscale_snat_subnet_routes_current.stdout | default('')
+      ) != tailscale_snat_subnet_routes_desired
 
 - name: Check Tailscale hostname preference
   ansible.builtin.shell: |
