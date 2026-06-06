@@ -1123,8 +1123,52 @@ location.
   `142700`. At that moment Sonarr command `559257` (`RefreshMonitoredDownloads`)
   was queued behind manual `SeriesSearch` commands for Bleach, Iruma-kun, One
   Piece, JoJo, and Cyberpunk. Treat fresh parse/new history as the policy proof;
-  do not remove valid DA downloads only because an old active queue row has not
-  recomputed yet.
+  tracked queue rows can lag. Do not remove valid DA downloads only because an
+  old active queue row has not recomputed yet.
+- Standalone-dual false-positive tightening, 2026-06-06 UTC: Radarr candidate
+  audits found `DUAL-Franceira` and `Dual-YG` releases receiving the full
+  `Anime Dual Audio` score even though Radarr parsed them as Japanese+Portuguese
+  or Japanese+Spanish with no English track. The title-side DA regex still
+  trusts known-good standalone forms like `Dual.Yogi-HONE`, but no longer
+  treats standalone `Dual` followed by `Franceira` or `YG` as DA evidence.
+  Explicit language pairs such as `JA+EN`, `JP+EN`, `ZH+EN`, `KO+EN`, or
+  literal `Dual Audio`/`Dual-Audio` remain valid. `sonarr_release_expectation_check.py`
+  and `radarr_release_expectation_check.py` include the non-English suffix
+  cases so this does not silently regress.
+  Live backups from the apply are
+  `/opt/media-stack/arr-policy-backups/20260606T085014Z-dual-audio-title-policy`;
+  dry-run backup was
+  `/opt/media-stack/arr-policy-backups/20260606T084957Z-dual-audio-title-policy`.
+  Post-fix checks passed for Sonarr, Radarr, and profile math: `DUAL-Franceira`
+  and `Dual-YG` no longer receive DA, while `Dual-Audio`, `Dual.Yogi-HONE`,
+  `JA+EN`, and `EN+JA` still do.
+- Wrong-language movie audit, 2026-06-06 UTC: `arr_language_policy_audit.py
+  --app radarr --probe` scanned 58 anime/regular-dual-audio movie files and
+  found 20 suspect files. Confirmed actual-audio mismatches include
+  Japanese+Portuguese `Evangelion: 2.0`, `Howl's Moving Castle`, and `Princess
+  Mononoke`; Japanese+Spanish `Demon Slayer: Infinity Castle`; English-only
+  `One Piece Film: Z`, `One Piece: Adventure of Nebulandia`, `One Piece Film:
+  Strong World`, `Asterix Conquers America`, `Asterix: Mansions of Gods`,
+  `Flow`, and `Sisu: Road to Revenge`; French-only or French+Greek Asterix
+  files; plus Spanish/French regular-dual-audio files missing English such as
+  `I Am Frankelda`, `Unicorn Wars`, and `The Suicide Shop`.
+- Post-fix Radarr candidate audit for the false-positive anime movies found
+  approved English+Japanese replacements for `Evangelion: 2.0`, `Princess
+  Mononoke`, and `Howl's Moving Castle` at scores around `145040`. `Demon
+  Slayer: Infinity Castle` had only English+Japanese telesync candidates, which
+  are unwanted and correctly rejected. `One Piece Film: Z` and `One Piece Film:
+  Strong World` had English+Japanese iVy candidates, but the live `LQ` custom
+  format drives them to `-955000`; do not remove or weaken `LQ` without a
+  separate review because it has broad release-quality impact.
+- Asterix candidate audit, 2026-06-06 UTC: current Radarr candidates show no
+  approved English+French replacement for most Asterix movies. `Asterix: The
+  Secret of the Magic Potion` has English+French candidates only as unwanted
+  2160p remuxes. `Asterix: Mansions of Gods` and `Asterix Conquers America`
+  have approved original-language-only replacements for English-only current
+  files. Several older Asterix Greek+French files tie original-only French
+  candidates at score `40000`, so Radarr will not replace them without a
+  deliberate policy change such as penalizing non-English extra dubs without
+  English on regular dual-audio profiles.
 - Recycle-bin disable and queue cleanup, 2026-05-23 UTC: Sonarr health
   reported `/data/.sonarr-recycle-bin` was not writable. The directories
   existed and had correct ownership, but they existed only on the `media-01`

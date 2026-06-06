@@ -397,6 +397,20 @@ def main() -> int:
             False,
         ),
         (
+            "standalone Dual non-English suffix",
+            "Evangelion.2.22.You.Can.Not.Advance.2009.1080p.BluRay.x265.DUAL-Franceira",
+            False,
+            True,
+            False,
+        ),
+        (
+            "standalone Dual-YG non-English suffix",
+            "Demon Slayer Kimetsu no Yaiba Infinity Castle 2025 1080p WEB-DL H 264 Dual-YG",
+            False,
+            False,
+            False,
+        ),
+        (
             "standalone DUAL before quality",
             "JoJos Bizarre Adventure - S05E38 - DUAL 1080p WEB H.264 -NanDesuKa (NF)",
             True,

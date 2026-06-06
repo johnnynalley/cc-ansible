@@ -33,7 +33,7 @@ DUBS_ONLY_CF_NAME = "Dubs Only (Block)"
 
 DA_TITLE_REGEX = (
     r"dual[ ._-]?audio|multi[ ._-]?audio|"
-    r"\bdual\b(?![ ._-]sub(?:s|titles?)?\b)|"
+    r"\bdual\b(?![ ._-]sub(?:s|titles?)?\b)(?![ ._-]?(?:franceira|yg)\b)|"
     r"\b(ja|jp|jpn|japanese|zh|chi|zho|chinese|ko|kor|korean)"
     r"\b[ ._+&-]*\b(en|eng|english)\b|"
     r"\b(en|eng|english)\b[ ._+&-]*\b"
@@ -323,6 +323,8 @@ def patch_arr(arr: Arr, backup_root: Path, timestamp: str, apply: bool) -> dict[
         "[Judas] Bleach 056-111 [BD 1080p][HEVC x265 10bit][Dual-Audio][Eng-Sub]",
         "JoJos.Bizarre.Adventure.2012.S03E04.1080p.BluRay.x265.SDR.Opus.2.0.Dual.Yogi-HONE",
         "JoJos Bizarre Adventure - S05E38 - DUAL 1080p WEB H.264 -NanDesuKa (NF)",
+        "Evangelion.2.22.You.Can.Not.Advance.2009.1080p.BluRay.FLAC.7ch.X265-Baws.DUAL-Franceira",
+        "Demon Slayer Kimetsu no Yaiba Infinity Castle 2025 1080p WEB-DL H 264 Dual-YG",
         "[KaiDubs] JoJo's Bizarre Adventure - Golden Wind - 28 [1080p] [8-bit] [Dual Audio] [JPBD]",
         "[KaiDubs] JoJo's Bizarre Adventure - Golden Wind - 28 [1080p] [English Dub] [CC] [AS-DL]",
         "[Fuchs] Love, Chunibyo & Other Delusions! - S00E02 (BD 1080p AVC Opus 2.0) [Multi-Audio] (Japanese, German/Deutsch Dubs)",

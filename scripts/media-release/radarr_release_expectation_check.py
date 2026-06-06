@@ -385,6 +385,18 @@ def main() -> int:
         ("single EN only", "Akira (1988) [1080p] [EN] [x265].mkv", False, True),
         ("generic Dual-Audio", "Akira (1988) [1080p] [Dual-Audio] [x265].mkv", True, True),
         ("standalone Dual marker", "Akira (1988) 1080p BluRay x265 Dual-Yogi", True, True),
+        (
+            "standalone Dual non-English suffix",
+            "Evangelion.2.22.You.Can.Not.Advance.2009.1080p.BluRay.FLAC.7ch.x265.DUAL-Franceira",
+            False,
+            True,
+        ),
+        (
+            "standalone Dual-YG non-English suffix",
+            "Demon Slayer Kimetsu no Yaiba Infinity Castle 2025 1080p WEB-DL H 264 Dual-YG",
+            False,
+            False,
+        ),
         ("Dual subtitles only", "Akira (1988) [1080p] [Dual-Subs] [x265].mkv", False, True),
         ("Dual-Audio with Eng-Sub", "One Piece Film Red (2022) [1080p] [Dual-Audio] [Eng-Sub] [x265].mkv", True, True),
         ("Eng-Sub without DA marker", "One Piece Film Red (2022) [1080p] [Eng-Sub] [x265].mkv", False, True),

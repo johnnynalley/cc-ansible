@@ -418,9 +418,13 @@ def row_sort_key(row: dict[str, Any]) -> tuple[int, str, str]:
 def compact_row(row: dict[str, Any]) -> dict[str, Any]:
     return {
         "app": row["app"],
+        "id": row["id"],
+        "file_id": row["file_id"],
         "title": row["title"],
         "season_episode": row.get("season_episode"),
         "year": row.get("year"),
+        "tmdb_id": row.get("tmdb_id"),
+        "tvdb_id": row.get("tvdb_id"),
         "profile": row["profile_name"],
         "original_language": row["original_language"],
         "arr_languages": language_names(set(row["arr_languages"])),
@@ -462,9 +466,13 @@ def audit_sonarr(instance: ArrInstance, api_key: str, args: argparse.Namespace) 
                 probe_languages, probe_errors = probe_audio_languages(instance, path, args.probe_timeout)
             row = {
                 "app": "sonarr",
+                "id": series_id,
+                "file_id": episode_file.get("id"),
                 "title": str(series.get("title") or series_id),
                 "season_episode": "",
                 "year": series.get("year"),
+                "tmdb_id": None,
+                "tvdb_id": series.get("tvdbId"),
                 "profile_name": profile_name,
                 "profile_class": current_class,
                 "anime_signal": has_anime_signal("sonarr", series, profile_name),
@@ -511,9 +519,13 @@ def audit_radarr(instance: ArrInstance, api_key: str, args: argparse.Namespace) 
             probe_languages, probe_errors = probe_audio_languages(instance, path, args.probe_timeout)
         row = {
             "app": "radarr",
+            "id": movie.get("id"),
+            "file_id": movie_file.get("id"),
             "title": str(movie.get("title") or movie.get("id")),
             "season_episode": None,
             "year": movie.get("year"),
+            "tmdb_id": movie.get("tmdbId"),
+            "tvdb_id": None,
             "profile_name": profile_name,
             "profile_class": current_class,
             "anime_signal": has_anime_signal("radarr", movie, profile_name),

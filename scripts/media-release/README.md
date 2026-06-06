@@ -86,6 +86,10 @@
   movie files and Radarr's own import-rejection score messages. Optional
   cleanup is manual and can remove only safe current-better groups after
   writing a queue snapshot.
+- `radarr_language_candidate_audit.py`: Read-only Radarr replacement-candidate
+  audit. It performs interactive release searches by exact movie ID or title
+  regex and reports whether Radarr sees parsed original-language + English
+  candidates, without grabbing anything.
 - `seerr_arr_endpoint_update.py`: Audits or updates Seerr's Sonarr/Radarr
   endpoints, validates candidates through Seerr's own Arr test API, and writes
   a snapshot before live changes.
