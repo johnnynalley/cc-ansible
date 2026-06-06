@@ -193,6 +193,52 @@
     - ansible_facts.os_family != "Darwin"
     - tailscale_advertise_routes is defined
 
+- name: Normalize Tailscale peer relay preferences
+  ansible.builtin.set_fact:
+    tailscale_peer_relay_port_desired: >-
+      {{
+        (tailscale_peer_relay_port | string)
+        if (tailscale_peer_relay_enabled | default(false) | bool)
+        else ''
+      }}
+    tailscale_peer_relay_static_endpoints_normalized: >-
+      {{
+        (
+          tailscale_peer_relay_static_endpoints | default([])
+          if (
+            tailscale_peer_relay_static_endpoints | default([])
+          ) is sequence
+          and (
+            tailscale_peer_relay_static_endpoints | default([])
+          ) is not string
+          else (
+            tailscale_peer_relay_static_endpoints | default('') | string
+          ).split(',')
+        )
+        | map('trim')
+        | reject('equalto', '')
+        | sort
+        | list
+      }}
+  when:
+    - ansible_facts.os_family != "Darwin"
+    - tailscale_manage_peer_relay | default(false) | bool
+
+- name: Format Tailscale peer relay static endpoints
+  ansible.builtin.set_fact:
+    tailscale_peer_relay_static_endpoints_desired: >-
+      {{
+        (
+          tailscale_peer_relay_static_endpoints_normalized
+          if (tailscale_peer_relay_enabled | default(false) | bool)
+          else []
+        )
+        | join(',')
+      }}
+  when:
+    - ansible_facts.os_family != "Darwin"
+    - tailscale_manage_peer_relay | default(false) | bool
+
 - name: Use configured Tailscale auth key
   ansible.builtin.set_fact:
     tailscale_effective_auth_key: "{{ tailscale_direct_auth_key }}"
@@ -379,6 +425,83 @@
       or (
         tailscale_snat_subnet_routes_current.stdout | default('')
       ) != tailscale_snat_subnet_routes_desired
+
+- name: Check Tailscale peer relay server port
+  ansible.builtin.shell: |
+    set -o pipefail
+    tailscale debug prefs | python3 -c '
+    import json, sys
+    prefs = json.load(sys.stdin)
+    print(prefs.get("RelayServerPort") or "")
+    '
+  args:
+    executable: /bin/bash
+  register: tailscale_peer_relay_port_current
+  changed_when: false
+  failed_when: false
+  check_mode: false
+  when:
+    - ansible_facts.os_family != "Darwin"
+    - tailscale_manage_preferences | default(false) | bool
+    - tailscale_manage_peer_relay | default(false) | bool
+    - >-
+      (
+        tailscale_backend_state_after_auth.stdout
+        | default(tailscale_backend_state.stdout | default(''))
+      ) == "Running"
+
+- name: Check Tailscale peer relay static endpoints
+  ansible.builtin.shell: |
+    set -o pipefail
+    tailscale debug prefs | python3 -c '
+    import json, sys
+    prefs = json.load(sys.stdin)
+    endpoints = prefs.get("RelayServerStaticEndpoints") or []
+    if isinstance(endpoints, str):
+        endpoints = [item.strip() for item in endpoints.split(",")]
+    print(",".join(sorted(item for item in endpoints if item)))
+    '
+  args:
+    executable: /bin/bash
+  register: tailscale_peer_relay_static_endpoints_current
+  changed_when: false
+  failed_when: false
+  check_mode: false
+  when:
+    - ansible_facts.os_family != "Darwin"
+    - tailscale_manage_preferences | default(false) | bool
+    - tailscale_manage_peer_relay | default(false) | bool
+    - >-
+      (
+        tailscale_backend_state_after_auth.stdout
+        | default(tailscale_backend_state.stdout | default(''))
+      ) == "Running"
+
+- name: Configure Tailscale peer relay
+  ansible.builtin.command: >-
+    tailscale set
+    --relay-server-port={{ tailscale_peer_relay_port_desired | quote }}
+    --relay-server-static-endpoints={{
+      tailscale_peer_relay_static_endpoints_desired | quote
+    }}
+  register: tailscale_peer_relay_set
+  changed_when: true
+  when:
+    - ansible_facts.os_family != "Darwin"
+    - tailscale_manage_preferences | default(false) | bool
+    - tailscale_manage_peer_relay | default(false) | bool
+    - >-
+      (
+        tailscale_backend_state_after_auth.stdout
+        | default(tailscale_backend_state.stdout | default(''))
+      ) == "Running"
+    - >-
+      (
+        tailscale_peer_relay_port_current.stdout | default('')
+      ) != tailscale_peer_relay_port_desired
+      or (
+        tailscale_peer_relay_static_endpoints_current.stdout | default('')
+      ) != tailscale_peer_relay_static_endpoints_desired
 
 - name: Check Tailscale hostname preference
   ansible.builtin.shell: |

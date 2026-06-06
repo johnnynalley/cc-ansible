@@ -8,3 +8,10 @@ tailscale_advertise_routes:
   - 192.168.1.0/24
 tailscale_accept_routes: false
 tailscale_snat_subnet_routes: true
+
+# Peer relay is prepared for temporary testing, but remains disabled by default.
+# Enabling it also requires a narrow tailnet policy grant.
+tailscale_manage_peer_relay: true
+tailscale_peer_relay_enabled: false
+tailscale_peer_relay_port: "40000"
+tailscale_peer_relay_static_endpoints: []
