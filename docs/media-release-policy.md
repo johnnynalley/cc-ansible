@@ -1143,23 +1143,39 @@ location.
   and `Dual-YG` no longer receive DA, while `Dual-Audio`, `Dual.Yogi-HONE`,
   `JA+EN`, and `EN+JA` still do.
 - Wrong-language movie audit, 2026-06-06 UTC: `arr_language_policy_audit.py
-  --app radarr --probe` scanned 58 anime/regular-dual-audio movie files and
-  found 20 suspect files. Confirmed actual-audio mismatches include
+  --app radarr --probe` scanned 59 anime/regular-dual-audio movie files and
+  found 21 suspect files. Confirmed actual-audio mismatches include
   Japanese+Portuguese `Evangelion: 2.0`, `Howl's Moving Castle`, and `Princess
   Mononoke`; Japanese+Spanish `Demon Slayer: Infinity Castle`; English-only
   `One Piece Film: Z`, `One Piece: Adventure of Nebulandia`, `One Piece Film:
   Strong World`, `Asterix Conquers America`, `Asterix: Mansions of Gods`,
-  `Flow`, and `Sisu: Road to Revenge`; French-only or French+Greek Asterix
-  files; plus Spanish/French regular-dual-audio files missing English such as
-  `I Am Frankelda`, `Unicorn Wars`, and `The Suicide Shop`.
+  `Avengers Confidential: Black Widow & Punisher`, `Flow`, and `Sisu: Road to
+  Revenge`; French-only or French+Greek Asterix files; plus Spanish/French
+  regular-dual-audio files missing English such as `I Am Frankelda`, `Unicorn
+  Wars`, and `The Suicide Shop`.
 - Post-fix Radarr candidate audit for the false-positive anime movies found
   approved English+Japanese replacements for `Evangelion: 2.0`, `Princess
   Mononoke`, and `Howl's Moving Castle` at scores around `145040`. `Demon
   Slayer: Infinity Castle` had only English+Japanese telesync candidates, which
   are unwanted and correctly rejected. `One Piece Film: Z` and `One Piece Film:
   Strong World` had English+Japanese iVy candidates, but the live `LQ` custom
-  format drives them to `-955000`; do not remove or weaken `LQ` without a
-  separate review because it has broad release-quality impact.
+  format drives them to `-955000`. Radarr history confirms this is not only a
+  search rejection: `One Piece Film: Strong World` imported an iVy
+  English+Japanese x265 file, then later deleted it and imported the English-only
+  BHDStudio file because the `LQ` penalty made the DA file lose. Do not remove
+  or weaken `LQ` without a separate review because it has broad release-quality
+  impact, but the current `-1000000` anime LQ score violates the intended
+  DA-first priority for metadata-only DA candidates.
+- Anime metadata-only DA gap, 2026-06-06 UTC: `movies-anime-efficient` scores
+  `Anime Dual Audio` at `+100000`, but helper CFs `Anime - Dual Audio
+  (Metadata)`, `Anime - Dual Audio (Title)`, and `Regular Dual Audio` are all
+  scored `0` on that profile. This means an English+Japanese candidate that
+  Radarr parses as dual-audio but whose title lacks `Dual-Audio`, `JA+EN`, or a
+  similar title marker can still lose to a non-DA current file. `Avengers
+  Confidential` showed this exact pattern: the 720p English+Japanese candidate
+  matched only `Anime - Dual Audio (Metadata)` and scored `30000`, while the
+  current English-only 1080p file scored `39000`. The same zero-scored metadata
+  DA behavior combines with the hard `LQ` penalty for iVy One Piece releases.
 - Asterix candidate audit, 2026-06-06 UTC: current Radarr candidates show no
   approved English+French replacement for most Asterix movies. `Asterix: The
   Secret of the Magic Potion` has English+French candidates only as unwanted
@@ -1169,6 +1185,17 @@ location.
   candidates at score `40000`, so Radarr will not replace them without a
   deliberate policy change such as penalizing non-English extra dubs without
   English on regular dual-audio profiles.
+- Search-versus-import language mismatch, 2026-06-06 UTC: Radarr history shows
+  `Flow` and `Sisu: Road to Revenge` were grabbed at higher scores
+  (`45440`/`45088`) because release search treated the candidates as original
+  language, but imported files probed as `eng` audio and lost the
+  `Language - Not Original` penalty at import (`35440`/`35088`). Targeted
+  ffprobe confirmed the current files have only `eng` audio tags: `Flow` has one
+  E-AC-3 5.1 `eng` stream; `Sisu: Road to Revenge` has one E-AC-3 Atmos `eng`
+  stream. This mismatch is why repeated searches can download a release that
+  Radarr later refuses as not an upgrade. Preventing the download requires
+  search-time policy changes such as stricter title-language evidence, because
+  actual audio tags are not known until after download.
 - Recycle-bin disable and queue cleanup, 2026-05-23 UTC: Sonarr health
   reported `/data/.sonarr-recycle-bin` was not writable. The directories
   existed and had correct ownership, but they existed only on the `media-01`
