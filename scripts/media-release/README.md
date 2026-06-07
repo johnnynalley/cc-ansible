@@ -99,6 +99,10 @@
   on `movies-anime-efficient`, and creates a duplicate guard from the current
   `Anime Dual Audio` title specs so title+metadata matches net exactly one DA
   bonus instead of stacking.
+- `radarr_anime_da_double_score_audit.py`: Read-only audit of every current
+  Radarr movie and active queue row on `movies-anime-efficient`, checking that
+  title DA plus metadata DA either includes the duplicate guard and nets exactly
+  one DA bonus or is flagged for review.
 - `seerr_arr_endpoint_update.py`: Audits or updates Seerr's Sonarr/Radarr
   endpoints, validates candidates through Seerr's own Arr test API, and writes
   a snapshot before live changes.

@@ -1215,6 +1215,13 @@ location.
   staying around `145000` instead of double-stacking to `245000`. `One Piece
   Film: Strong World` iVy also scores `125000`, but currently loses only
   because a queued title-side DA release has score `140000`.
+  `scripts/media-release/radarr_anime_da_double_score_audit.py` is the
+  profile-wide read-only verifier. On 2026-06-07 UTC it checked all 58 movies
+  assigned to `movies-anime-efficient` plus 7 active queue rows for those
+  movies. Result: `title_only=100000`, `metadata_only=100000`,
+  `title_and_metadata=100000`; 26 title+metadata matches were guarded, 3 were
+  metadata-only, 4 were title-only, 14 had no DA match, 18 movies had no current
+  file, and failures were `none`.
 - Anime metadata-only DA gap, 2026-06-06 UTC: `movies-anime-efficient` scores
   `Anime Dual Audio` at `+100000`, but helper CFs `Anime - Dual Audio
   (Metadata)`, `Anime - Dual Audio (Title)`, and `Regular Dual Audio` are all
