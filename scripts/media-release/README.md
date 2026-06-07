@@ -94,6 +94,11 @@
   release-policy state before apply and softens only the `movies-anime-efficient`
   anime LQ penalty scores so DA/x265 releases can still beat non-DA files while
   LQ remains a meaningful negative signal.
+- `radarr_anime_metadata_da_policy.py`: Dry-run by default helper that backs up
+  Radarr release-policy state before apply, scores metadata-detected anime DA
+  on `movies-anime-efficient`, and creates a duplicate guard from the current
+  `Anime Dual Audio` title specs so title+metadata matches net exactly one DA
+  bonus instead of stacking.
 - `seerr_arr_endpoint_update.py`: Audits or updates Seerr's Sonarr/Radarr
   endpoints, validates candidates through Seerr's own Arr test API, and writes
   a snapshot before live changes.

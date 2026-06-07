@@ -23,6 +23,9 @@ LEGACY_TIER_PATTERN = re.compile(r"^(?!Dictionarry ).*\bTier \d{2}$", re.IGNOREC
 LEGACY_TIER_NAMES = {"WEB Scene"}
 
 ANIME_DUAL_AUDIO_SCORE = 100000
+ANIME_METADATA_DUAL_AUDIO_CF_NAME = "Anime - Dual Audio (Metadata)"
+ANIME_DUAL_AUDIO_TITLE_HELPER_CF_NAME = "Anime - Dual Audio (Title)"
+ANIME_DUAL_AUDIO_DUPLICATE_GUARD_CF_NAME = "Anime Dual Audio - Metadata/Title Duplicate Guard"
 REGULAR_DUAL_AUDIO_SCORE = 100000
 REGULAR_DUAL_AUDIO_CF_NAME = "Regular Dual Audio"
 RADARR_REGULAR_ENGLISH_GUARD_CF_NAME = "Regular English - Foreign/Multi Audio Guard"
@@ -608,6 +611,37 @@ def audit_profile(
         da_score = scores.get("Anime Dual Audio", 0)
         if da_score < ANIME_DUAL_AUDIO_SCORE:
             failures.append(f"{profile_check.name}: Anime Dual Audio score {da_score} is below {ANIME_DUAL_AUDIO_SCORE}")
+        if instance.name == "radarr" and profile_check.name == "movies-anime-efficient":
+            metadata_da_score = scores.get(ANIME_METADATA_DUAL_AUDIO_CF_NAME, 0)
+            duplicate_guard_score = scores.get(ANIME_DUAL_AUDIO_DUPLICATE_GUARD_CF_NAME, 0)
+            title_helper_score = scores.get(ANIME_DUAL_AUDIO_TITLE_HELPER_CF_NAME, 0)
+            regular_da_score = scores.get(REGULAR_DUAL_AUDIO_CF_NAME, 0)
+            if metadata_da_score != da_score:
+                failures.append(
+                    f"{profile_check.name}: {ANIME_METADATA_DUAL_AUDIO_CF_NAME} score "
+                    f"{metadata_da_score} must equal Anime Dual Audio {da_score}"
+                )
+            if duplicate_guard_score != -da_score:
+                failures.append(
+                    f"{profile_check.name}: {ANIME_DUAL_AUDIO_DUPLICATE_GUARD_CF_NAME} score "
+                    f"{duplicate_guard_score} must equal -Anime Dual Audio {-da_score}"
+                )
+            if title_helper_score != 0:
+                failures.append(
+                    f"{profile_check.name}: {ANIME_DUAL_AUDIO_TITLE_HELPER_CF_NAME} "
+                    f"must stay zero-scored, got {title_helper_score}"
+                )
+            if regular_da_score != 0:
+                failures.append(
+                    f"{profile_check.name}: {REGULAR_DUAL_AUDIO_CF_NAME} must stay zero-scored "
+                    f"on anime profile, got {regular_da_score}"
+                )
+            net_both_da = da_score + metadata_da_score + duplicate_guard_score
+            if net_both_da != da_score:
+                failures.append(
+                    f"{profile_check.name}: title+metadata DA nets {net_both_da}, "
+                    f"must equal one DA bonus {da_score}"
+                )
 
         release_stack = max(bluray_stack, web_stack) + max_fallback_score + max_incidental_score
         source_plus_stack = source_rank + release_stack
@@ -776,6 +810,8 @@ def audit_profile(
         "expected_cutoff_format_score": expected_cutoff_score,
         "actual_cutoff_format_score": actual_cutoff_score,
         "unexpected_legacy_tier_scores": legacy_scores,
+        "metadata_dual_audio_score": scores.get(ANIME_METADATA_DUAL_AUDIO_CF_NAME),
+        "dual_audio_duplicate_guard_score": scores.get(ANIME_DUAL_AUDIO_DUPLICATE_GUARD_CF_NAME),
         "failures": failures,
     }
 

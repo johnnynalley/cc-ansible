@@ -22,10 +22,14 @@ RADARR_URL = "http://127.0.0.1:7878"
 RADARR_CONFIG = "/opt/media-stack/radarr/config.xml"
 ANIME_PROFILE_NAME = "movies-anime-efficient"
 DUAL_AUDIO_CF_NAME = "Anime Dual Audio"
+METADATA_DUAL_AUDIO_CF_NAME = "Anime - Dual Audio (Metadata)"
+DUPLICATE_GUARD_CF_NAME = "Anime Dual Audio - Metadata/Title Duplicate Guard"
 X265_CF_NAME = "x265 (HD)"
 QUALITY_RANK_PREFIX = "Local Quality Rank - "
 SOURCE_RANK_CF_NAME = "Local Anime Source Rank - Bluray"
 EXPECTED_DA_SCORE = 100000
+EXPECTED_METADATA_DA_SCORE = 100000
+EXPECTED_DUPLICATE_GUARD_SCORE = -100000
 EXPECTED_X265_SCORE = 5000
 EXPECTED_SOURCE_RANK_SCORE = 0
 EXPECTED_CUTOFF_SCORE = 146978
@@ -221,14 +225,44 @@ def main() -> int:
 
     profile = find_by_name(profiles, ANIME_PROFILE_NAME)
     dual_audio_cf = find_by_name(custom_formats, DUAL_AUDIO_CF_NAME)
+    metadata_dual_audio_cf = find_by_name(custom_formats, METADATA_DUAL_AUDIO_CF_NAME)
+    duplicate_guard_cf = find_by_name(custom_formats, DUPLICATE_GUARD_CF_NAME)
     x265_cf = find_by_name(custom_formats, X265_CF_NAME)
     source_rank_cf = find_by_name(custom_formats, SOURCE_RANK_CF_NAME)
 
     checks: list[tuple[str, bool, str]] = []
     da_score = profile_score(profile, int(dual_audio_cf["id"]))
+    metadata_da_score = profile_score(profile, int(metadata_dual_audio_cf["id"]))
+    duplicate_guard_score = profile_score(profile, int(duplicate_guard_cf["id"]))
     x265_score = profile_score(profile, int(x265_cf["id"]))
     source_rank_score = profile_score(profile, int(source_rank_cf["id"]))
     checks.append(("DA score is +100000", da_score == EXPECTED_DA_SCORE, str(da_score)))
+    checks.append(
+        (
+            "metadata DA score is +100000",
+            metadata_da_score == EXPECTED_METADATA_DA_SCORE,
+            str(metadata_da_score),
+        )
+    )
+    checks.append(
+        (
+            "duplicate DA guard score is -100000",
+            duplicate_guard_score == EXPECTED_DUPLICATE_GUARD_SCORE,
+            str(duplicate_guard_score),
+        )
+    )
+    checks.append(
+        (
+            "title+metadata DA nets exactly one DA bonus",
+            (
+                (da_score or 0)
+                + (metadata_da_score or 0)
+                + (duplicate_guard_score or 0)
+                == EXPECTED_DA_SCORE
+            ),
+            f"{da_score}+{metadata_da_score}+{duplicate_guard_score}",
+        )
+    )
     checks.append(("x265 score is +5000", x265_score == EXPECTED_X265_SCORE, str(x265_score)))
     checks.append(
         (
@@ -276,6 +310,8 @@ def main() -> int:
 
     core_names = {
         DUAL_AUDIO_CF_NAME,
+        METADATA_DUAL_AUDIO_CF_NAME,
+        DUPLICATE_GUARD_CF_NAME,
         X265_CF_NAME,
         SOURCE_RANK_CF_NAME,
         *(f"{QUALITY_RANK_PREFIX}{quality}" for quality in EXPECTED_QUALITY_SCORES),

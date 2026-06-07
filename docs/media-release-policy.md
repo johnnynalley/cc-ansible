@@ -1194,6 +1194,27 @@ location.
   `[EN+JA]` after a file exists, and then title-side DA can match on rescore,
   but it cannot affect the initial release-search decision. Do not treat this
   as candidate unavailability; it is a remaining profile-scoring issue.
+- Radarr anime metadata DA scoring, 2026-06-07 UTC: the follow-up fix scores
+  `Anime - Dual Audio (Metadata)` at `+100000` on `movies-anime-efficient` and
+  adds `Anime Dual Audio - Metadata/Title Duplicate Guard` at `-100000`. The
+  guard custom format is generated from the current `Anime - Dual Audio
+  (Metadata)` language specs plus the current scored `Anime Dual Audio` title
+  specs. That makes the three DA paths net exactly one DA bonus:
+  title-only `+100000`, metadata-only `+100000`, title+metadata
+  `+100000 + 100000 - 100000 = +100000`. `Anime - Dual Audio (Title)` and
+  `Regular Dual Audio` must stay zero-scored on `movies-anime-efficient`.
+  `scripts/media-release/arr_profile_math_audit.py` and
+  `scripts/media-release/radarr_release_expectation_check.py` enforce those
+  invariants so metadata DA cannot silently double-stack with title DA.
+  Live apply backup:
+  `/srv/live-rollbacks/docker-vm/arr-policy/20260607T015608Z-radarr-anime-metadata-da-policy`.
+  Post-apply focused Radarr candidate audit confirmed `One Piece Film: Z` iVy
+  is approved at `125000`, `Avengers Confidential` `[M74]` is approved at
+  `130000`, and title+metadata matches such as `Evangelion: 2.0`, `Princess
+  Mononoke`, and `Howl's Moving Castle` include the duplicate guard while
+  staying around `145000` instead of double-stacking to `245000`. `One Piece
+  Film: Strong World` iVy also scores `125000`, but currently loses only
+  because a queued title-side DA release has score `140000`.
 - Anime metadata-only DA gap, 2026-06-06 UTC: `movies-anime-efficient` scores
   `Anime Dual Audio` at `+100000`, but helper CFs `Anime - Dual Audio
   (Metadata)`, `Anime - Dual Audio (Title)`, and `Regular Dual Audio` are all
