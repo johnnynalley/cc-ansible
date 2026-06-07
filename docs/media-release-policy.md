@@ -51,6 +51,10 @@ a separate policy because dual audio is the highest priority there.
   `scripts/media-release/arr_profile_classification.py`
 - Sonarr transaction monitor: `sonarr-transaction-monitor.timer` writes
   `/var/log/sonarr-transaction-monitor/events.jsonl`, rotated daily
+- Subtitle language mismatch audit:
+  `scripts/media-release/subtitle_language_mismatch_audit.py`; the Sonarr
+  transaction monitor runs it against new imports when enabled and writes
+  `subtitle_audit` events to the same JSONL log
 - Sonarr recycle bin: disabled
 - Radarr recycle bin: disabled
 - Media-stack container library bind: `/srv/media/plex:/data`, backed by the single
@@ -322,6 +326,18 @@ group confidence. Use it for periodic Profilarr review:
 ```bash
 ansible docker-vm --become -m script -a "scripts/media-release/sonarr_transaction_audit.py --hours 24 --limit 25"
 ```
+
+The monitor also runs
+`scripts/media-release/subtitle_language_mismatch_audit.py` for new Sonarr
+`downloadFolderImported` records when
+`sonarr_transaction_monitor_subtitle_audit_enabled` is true. It skips the
+initial bootstrap history batch and audits imports observed after monitor state
+exists. The first rollout target is obvious English-tagged subtitle streams
+whose sampled text is mostly CJK, such as a Family Guy episode where the first
+`eng` subtitle track contained Chinese text while a later `eng` track was
+actually English. These alerts are review prompts only: the monitor records
+`subtitle_audit` events, but it does not delete, blocklist, or replace media
+automatically.
 
 `media-stack-health.timer` on `docker-vm` is the alert-only storage/import
 sentinel for the Arr/download stack. It must not pause Profilarr, stop

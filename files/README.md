@@ -9,7 +9,7 @@ Jinja rendering. Use `templates/` when a file needs variable substitution.
 | --- | --- | --- | --- |
 | `qbit-release-stamper.py` | Media release stamping | Legacy/static source for qBittorrent post-download stamping | Prefer repo-managed script/template paths for new work. |
 | `sab-release-stamper.py` | Media release stamping | Legacy/static source for SABnzbd post-download stamping | Prefer repo-managed script/template paths for new work. |
-| `sonarr-transaction-monitor.py` | Media release monitoring | Legacy/static source for Sonarr transaction monitoring | Prefer `scripts/media-release/` for new diagnostics. |
+| `sonarr-transaction-monitor.py` | Media release monitoring | Legacy/static source for Sonarr transaction monitoring | Calls the repo-managed subtitle mismatch audit for new Sonarr imports when enabled. Prefer `scripts/media-release/` for new diagnostics. |
 | `tailscale-policy.hujson` | Tailnet policy | `tasks/tailscale-policy.yml`, `playbooks/core/packages.yml` | Static policy source applied only when explicitly enabled. |
 
 ## Root Directory Notes

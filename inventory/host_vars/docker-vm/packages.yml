@@ -3,7 +3,8 @@
 # =============================================================================
 
 # Extra packages for this host
-packages_host_extra: []
+packages_host_extra:
+  - ffmpeg
 
 # Install Docker from official repo (not Debian's docker.io)
 install_docker: true

@@ -7,6 +7,7 @@ import argparse
 import datetime as dt
 import json
 import re
+import subprocess
 import sys
 import urllib.error
 import urllib.parse
@@ -517,6 +518,78 @@ def storage_snapshot(args: argparse.Namespace, observed_at: str, sonarr_api_key:
     return snapshot
 
 
+def imported_path_from_history(record: dict[str, Any]) -> str | None:
+    if record.get("eventType") != "downloadFolderImported":
+        return None
+    data = record.get("data") if isinstance(record.get("data"), dict) else {}
+    imported_path = data.get("importedPath")
+    if isinstance(imported_path, str) and imported_path:
+        return imported_path
+    return None
+
+
+def subtitle_audit_event(args: argparse.Namespace, observed_at: str, record: dict[str, Any]) -> dict[str, Any] | None:
+    imported_path = imported_path_from_history(record)
+    if not imported_path or args.no_subtitle_audit or not args.subtitle_audit_script:
+        return None
+
+    source_title = record.get("sourceTitle") or record.get("downloadId") or ""
+    series = record.get("series") or {}
+    episode = record.get("episode") or {}
+    command = [
+        str(args.subtitle_audit_script),
+        "--json",
+        "--sample-chars",
+        str(args.subtitle_audit_sample_chars),
+        "--stream-timeout",
+        str(args.subtitle_audit_stream_timeout_sec),
+        "--probe-timeout",
+        str(args.subtitle_audit_probe_timeout_sec),
+    ]
+    for path_map in args.subtitle_audit_path_map:
+        command.extend(["--path-map", path_map])
+    command.append(imported_path)
+
+    audit: Any
+    try:
+        completed = subprocess.run(
+            command,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            errors="replace",
+            timeout=args.subtitle_audit_timeout_sec,
+            check=False,
+        )
+        try:
+            audit = json.loads(completed.stdout) if completed.stdout else []
+        except json.JSONDecodeError:
+            audit = {"parseError": completed.stdout[-1000:]}
+        ok = completed.returncode == 0
+        error = (completed.stderr or "").strip()[-1000:] or None
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        audit = []
+        ok = False
+        error = str(exc)
+
+    event: dict[str, Any] = {
+        "observedAt": observed_at,
+        "kind": "subtitle_audit",
+        "ok": ok,
+        "sourceTitle": source_title,
+        "seriesId": record.get("seriesId") or series.get("id"),
+        "seriesTitle": series.get("title"),
+        "episodeId": record.get("episodeId") or episode.get("id"),
+        "seasonNumber": episode.get("seasonNumber"),
+        "episodeNumber": episode.get("episodeNumber"),
+        "importedPath": imported_path,
+        "audit": audit,
+    }
+    if error:
+        event["error"] = error
+    return event
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--base-url", default="http://127.0.0.1:8989")
@@ -529,6 +602,13 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--max-history-pages", type=int, default=10)
     parser.add_argument("--no-storage-snapshot", action="store_true")
     parser.add_argument("--storage-snapshot-interval-sec", type=int, default=900)
+    parser.add_argument("--no-subtitle-audit", action="store_true")
+    parser.add_argument("--subtitle-audit-script", type=Path)
+    parser.add_argument("--subtitle-audit-path-map", action="append", default=[])
+    parser.add_argument("--subtitle-audit-timeout-sec", type=int, default=120)
+    parser.add_argument("--subtitle-audit-probe-timeout-sec", type=int, default=30)
+    parser.add_argument("--subtitle-audit-stream-timeout-sec", type=int, default=20)
+    parser.add_argument("--subtitle-audit-sample-chars", type=int, default=20000)
     return parser.parse_args()
 
 
@@ -566,6 +646,8 @@ def main() -> int:
                 "record": summarize_history(record),
             },
         )
+        if previous_last_id != 0 and (subtitle_event := subtitle_audit_event(args, observed_at, record)):
+            append_event(args.output, subtitle_event)
 
     queue = api_get(
         args.base_url,

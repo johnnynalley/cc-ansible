@@ -10,3 +10,11 @@ sonarr_transaction_monitor_on_boot_sec: 2min
 sonarr_transaction_monitor_interval_sec: 2min
 sonarr_transaction_monitor_storage_snapshot_interval_sec: 900
 sonarr_transaction_monitor_log_rotate_count: 90
+sonarr_transaction_monitor_subtitle_audit_enabled: true
+sonarr_transaction_monitor_subtitle_audit_script: /usr/local/bin/subtitle-language-mismatch-audit
+sonarr_transaction_monitor_subtitle_audit_path_maps:
+  - /data=/srv/media/plex
+sonarr_transaction_monitor_subtitle_audit_timeout_sec: 120
+sonarr_transaction_monitor_subtitle_audit_probe_timeout_sec: 30
+sonarr_transaction_monitor_subtitle_audit_stream_timeout_sec: 20
+sonarr_transaction_monitor_subtitle_audit_sample_chars: 20000

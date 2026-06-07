@@ -44,6 +44,17 @@
         mode: "0755"
       when: sonarr_transaction_monitor_enabled | default(false)
 
+    - name: Deploy subtitle language mismatch audit
+      ansible.builtin.copy:
+        src: ../../scripts/media-release/subtitle_language_mismatch_audit.py
+        dest: "{{ sonarr_transaction_monitor_subtitle_audit_script | default('/usr/local/bin/subtitle-language-mismatch-audit') }}"
+        owner: root
+        group: root
+        mode: "0755"
+      when:
+        - sonarr_transaction_monitor_enabled | default(false)
+        - sonarr_transaction_monitor_subtitle_audit_enabled | default(false)
+
     - name: Deploy Sonarr transaction monitor logrotate config
       ansible.builtin.copy:
         dest: /etc/logrotate.d/sonarr-transaction-monitor
@@ -76,7 +87,7 @@
 
           [Service]
           Type=oneshot
-          ExecStart=/usr/local/bin/sonarr-transaction-monitor --base-url {{ sonarr_transaction_monitor_base_url | default('http://127.0.0.1:8989') }} --config {{ sonarr_transaction_monitor_config_path | default('/opt/media-stack/sonarr/config.xml') }} --radarr-base-url {{ sonarr_transaction_monitor_radarr_base_url | default('http://127.0.0.1:7878') }} --radarr-config {{ sonarr_transaction_monitor_radarr_config_path | default('/opt/media-stack/radarr/config.xml') }} --bootstrap-records {{ sonarr_transaction_monitor_bootstrap_records }} --max-history-pages {{ sonarr_transaction_monitor_max_history_pages }} --storage-snapshot-interval-sec {{ sonarr_transaction_monitor_storage_snapshot_interval_sec | default(900) }}
+          ExecStart=/usr/local/bin/sonarr-transaction-monitor --base-url {{ sonarr_transaction_monitor_base_url | default('http://127.0.0.1:8989') }} --config {{ sonarr_transaction_monitor_config_path | default('/opt/media-stack/sonarr/config.xml') }} --radarr-base-url {{ sonarr_transaction_monitor_radarr_base_url | default('http://127.0.0.1:7878') }} --radarr-config {{ sonarr_transaction_monitor_radarr_config_path | default('/opt/media-stack/radarr/config.xml') }} --bootstrap-records {{ sonarr_transaction_monitor_bootstrap_records }} --max-history-pages {{ sonarr_transaction_monitor_max_history_pages }} --storage-snapshot-interval-sec {{ sonarr_transaction_monitor_storage_snapshot_interval_sec | default(900) }}{% if sonarr_transaction_monitor_subtitle_audit_enabled | default(false) %} --subtitle-audit-script {{ sonarr_transaction_monitor_subtitle_audit_script | default('/usr/local/bin/subtitle-language-mismatch-audit') }}{% for path_map in sonarr_transaction_monitor_subtitle_audit_path_maps | default([]) %} --subtitle-audit-path-map {{ path_map }}{% endfor %} --subtitle-audit-timeout-sec {{ sonarr_transaction_monitor_subtitle_audit_timeout_sec | default(120) }} --subtitle-audit-probe-timeout-sec {{ sonarr_transaction_monitor_subtitle_audit_probe_timeout_sec | default(30) }} --subtitle-audit-stream-timeout-sec {{ sonarr_transaction_monitor_subtitle_audit_stream_timeout_sec | default(20) }} --subtitle-audit-sample-chars {{ sonarr_transaction_monitor_subtitle_audit_sample_chars | default(20000) }}{% else %} --no-subtitle-audit{% endif %}
       when: sonarr_transaction_monitor_enabled | default(false)
       notify: Reload systemd
 

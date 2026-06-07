@@ -141,6 +141,10 @@
   history, storage snapshots, release-stamper events, and current queue state.
 - `sonarr_transaction_log_sanitize.py`: Redacts secret-looking fields and URL
   query parameters from Sonarr transaction-monitor JSONL logs.
+- `subtitle_language_mismatch_audit.py`: Read-only media-file subtitle audit
+  that samples target-language subtitle tracks and flags obvious tag/content
+  mismatches such as an English-tagged subtitle stream containing mostly
+  Chinese text. Used manually and by the Sonarr transaction monitor.
 
 ## Safety Notes
 
