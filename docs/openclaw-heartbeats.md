@@ -60,14 +60,18 @@ send recurring heartbeat notifications. Those warnings are operator context for
 manual review or digest-style summaries, not evidence that the media stack is
 down. Current expected warning class: recent qBittorrent imports that were
 copied instead of hardlinked because mergerfs placed the download and library
-file on different backing branches.
+file on different backing branches. Repeated docker-vm NFS `fileid changed`
+kernel errors are also warning-only by default because they can occur while Arr
+imports are still progressing over the TS440 mergerfs export. They should page
+only when paired with a nonzero `CRITICAL:` condition such as missing mounts,
+empty library probes, stuck media probes, stopped containers, or failed imports.
 
 This reads the cached result from the local `media-stack-health.timer` on `docker-vm`, which runs the full checks and alerts through Apprise/DBC. The cached heartbeat read avoids starting fresh NFS/mergerfs-touching probes from Astra. The timer covers the migrated Sonarr/Radarr/download automation on docker-vm while Plex stays on media-vm.
 
 The media-stack check is alert-only. It must not pause Profilarr, stop searches,
 or mutate queue/download state. Current storage/import guardrails include
-thresholded alerts for repeated docker-vm NFS `fileid changed` kernel errors,
-Arr media probe processes such as `ffprobe` stuck in `D` state, and
+warning-only repeated docker-vm NFS `fileid changed` kernel errors, Arr media
+probe processes such as `ffprobe` stuck in `D` state, and
 Sonarr/Radarr commands that are old and have stopped making command-message
 progress past the no-progress threshold.
 

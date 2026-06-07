@@ -126,6 +126,15 @@ whether new fileid errors stop. This should not interrupt Plex on `media-vm`,
 but it does pause Sonarr/Radarr/SABnzbd/qBittorrent, so get explicit operator
 approval before running it during active queue work.
 
+Alert policy: repeated `fileid changed` messages are warning-only by default in
+`media-stack-health`. They should remain visible for manual review, but they
+should not page by themselves while imports continue to progress. Page when they
+are paired with real breakage such as a missing mount, empty library probe,
+stuck D-state media probe, stopped container, failed endpoint, or import
+failure. Set `media_stack_health_nfs_fileid_fail_on_threshold: true` only for a
+temporary investigation where the kernel message alone should fail the health
+check.
+
 ## 2026-06-06 Incident Notes
 
 The nightly timer is hourly during the local `00:00-07:00` window, not a

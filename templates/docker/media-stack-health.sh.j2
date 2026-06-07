@@ -40,6 +40,7 @@ QBIT_IMPORT_AUDIT_FAIL_ON_COPY="{{ media_stack_health_qbit_import_audit_fail_on_
 NFS_FILEID_CHECK_ENABLED="{{ media_stack_health_nfs_fileid_check_enabled | default(true) }}"
 NFS_FILEID_WINDOW_SECONDS="{{ media_stack_health_nfs_fileid_window_seconds | default(1800) }}"
 NFS_FILEID_THRESHOLD="{{ media_stack_health_nfs_fileid_threshold | default(10) }}"
+NFS_FILEID_FAIL_ON_THRESHOLD="{{ media_stack_health_nfs_fileid_fail_on_threshold | default(false) }}"
 DSTATE_CHECK_ENABLED="{{ media_stack_health_dstate_check_enabled | default(true) }}"
 DSTATE_MIN_AGE_SECONDS="{{ media_stack_health_dstate_min_age_seconds | default(600) }}"
 DSTATE_COMMAND_REGEX="{{ media_stack_health_dstate_command_regex | default('(/app/(radarr|sonarr)/bin/ffprobe|ffprobe .* /data/|mediainfo .* /data/)') }}"
@@ -708,7 +709,12 @@ check_nfs_fileid_changed() {
   count="${count:-0}"
 
   if (( count >= NFS_FILEID_THRESHOLD )); then
-    add_problem "NFS fileid changed errors are recurring on $HOSTNAME: count=$count window=${NFS_FILEID_WINDOW_SECONDS}s threshold=$NFS_FILEID_THRESHOLD"
+    message="NFS fileid changed errors are recurring on $HOSTNAME: count=$count window=${NFS_FILEID_WINDOW_SECONDS}s threshold=$NFS_FILEID_THRESHOLD"
+    if is_truthy "$NFS_FILEID_FAIL_ON_THRESHOLD"; then
+      add_problem "$message"
+    else
+      add_warning "$message"
+    fi
   fi
 }
 

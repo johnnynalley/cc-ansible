@@ -25,6 +25,7 @@ media_stack_health_qbit_import_audit_fail_on_copy: false
 media_stack_health_nfs_fileid_check_enabled: true
 media_stack_health_nfs_fileid_window_seconds: 1800
 media_stack_health_nfs_fileid_threshold: 10
+media_stack_health_nfs_fileid_fail_on_threshold: false
 media_stack_health_dstate_check_enabled: true
 media_stack_health_dstate_min_age_seconds: 600
 media_stack_health_arr_command_check_enabled: true

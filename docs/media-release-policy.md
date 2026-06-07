@@ -326,12 +326,13 @@ ansible docker-vm --become -m script -a "scripts/media-release/sonarr_transactio
 `media-stack-health.timer` on `docker-vm` is the alert-only storage/import
 sentinel for the Arr/download stack. It must not pause Profilarr, stop
 searches, delete queue rows, or mutate Arr/qBittorrent state. In addition to
-container, endpoint, hardlink, port-sync, and import-copy checks, it now alerts
-on repeated docker-vm NFS `fileid changed` kernel errors, media probe processes
-such as Arr `ffprobe` stuck in `D` state beyond the configured age threshold,
-and Sonarr/Radarr commands that remain active or queued beyond the configured
-stale thresholds. These checks are intentionally thresholded so short normal
-NFS reads and active search bursts do not become automatic mitigation events.
+container, endpoint, hardlink, port-sync, and import-copy checks, it records
+repeated docker-vm NFS `fileid changed` kernel errors as warning-only by
+default, and alerts on media probe processes such as Arr `ffprobe` stuck in `D`
+state beyond the configured age threshold and Sonarr/Radarr commands that
+remain active or queued beyond the configured stale thresholds. These checks
+are intentionally thresholded so short normal NFS reads and active search bursts
+do not become automatic mitigation events.
 
 Long-term docker-vm NFS reliability is still a storage configuration issue, not
 a queue-cleanup issue. On 2026-06-03 and 2026-06-04, docker-vm repeatedly
@@ -1423,7 +1424,11 @@ after they are older than the stale threshold and their command message has not
 advanced for the no-progress window. Transient container health or HTTP
 endpoint failures require consecutive failing checks before they become
 critical. Below-threshold NFS `fileid changed` events are suppressed from
-heartbeat output.
+heartbeat output. Above-threshold NFS `fileid changed` events are warnings by
+default; they become critical only if `media_stack_health_nfs_fileid_fail_on_threshold`
+is explicitly enabled or another check proves real breakage such as missing
+mounts, empty library probes, D-state media probes, failed endpoints, or import
+failures.
 
 qBittorrent copied-import findings remain warnings because they are real
 storage-efficiency evidence, but they do not mean the media stack is down.
