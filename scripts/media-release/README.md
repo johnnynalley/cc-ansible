@@ -90,6 +90,10 @@
   audit. It performs interactive release searches by exact movie ID or title
   regex and reports whether Radarr sees parsed original-language + English
   candidates, without grabbing anything.
+- `radarr_anime_lq_policy.py`: Dry-run by default helper that backs up Radarr
+  release-policy state before apply and softens only the `movies-anime-efficient`
+  anime LQ penalty scores so DA/x265 releases can still beat non-DA files while
+  LQ remains a meaningful negative signal.
 - `seerr_arr_endpoint_update.py`: Audits or updates Seerr's Sonarr/Radarr
   endpoints, validates candidates through Seerr's own Arr test API, and writes
   a snapshot before live changes.

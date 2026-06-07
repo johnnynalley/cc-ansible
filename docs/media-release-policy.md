@@ -407,11 +407,16 @@ Sonarr `shows-anime-efficient` hard rejects:
 
 Radarr `movies-anime-efficient` hard rejects:
 
-- `Anime LQ Groups`
 - `Anime Raws`
-- `LQ`
-- `LQ (Release Title)`
 - `No ISO`
+
+Radarr `movies-anime-efficient` keeps these as soft LQ penalties, not hard
+rejects, so known DA/x265 replacements can still win while LQ remains below
+ordinary non-LQ candidates:
+
+- `Anime LQ Groups`: `-20000`
+- `LQ`: `-20000`
+- `LQ (Release Title)`: `-20000`
 
 ## Anime Soft Avoids
 
@@ -1166,6 +1171,29 @@ location.
   or weaken `LQ` without a separate review because it has broad release-quality
   impact, but the current `-1000000` anime LQ score violates the intended
   DA-first priority for metadata-only DA candidates.
+- Radarr anime LQ softening, 2026-06-07 UTC: the separate review found that
+  hard `LQ=-1000000` made English+Japanese iVy One Piece releases impossible
+  to keep even after the post-import rename format added `[EN+JA]` and the
+  title-side DA custom formats matched. `radarr_anime_lq_policy.py --apply`
+  changes only `movies-anime-efficient` scores for `Anime LQ Groups`, `LQ`, and
+  `LQ (Release Title)` to `-20000`. The helper writes the apply snapshot under
+  `/srv/live-rollbacks/docker-vm/arr-policy` with the live-rollback cache
+  marker, not under docker-vm's root filesystem. With the current bands, a
+  1080p DA x265 LQ release scores `125000`, above any non-DA 1080p x265 path,
+  while a non-DA LQ x265 1080p release scores only `25000`, so LQ still loses
+  as a normal preference.
+- Post-LQ exact Radarr candidate audit, 2026-06-07 UTC: the LQ softening fixed
+  the hard-block but exposed a separate metadata-only DA scoring gap. `One
+  Piece Film: Z` and `One Piece Film: Strong World` iVy English+Japanese
+  candidates now score `25000` instead of `-955000`, but they still lose to
+  existing/queued files because they match `Anime - Dual Audio (Metadata)` and
+  not the scored title-side `Anime Dual Audio` CF. `Avengers Confidential` has
+  a 720p English+Japanese `[M74]` candidate that similarly scores only
+  `30000` and loses to the current English-only 1080p file at `39000`. The
+  rename/stamp workaround is post-import only: Radarr's rename format can add
+  `[EN+JA]` after a file exists, and then title-side DA can match on rescore,
+  but it cannot affect the initial release-search decision. Do not treat this
+  as candidate unavailability; it is a remaining profile-scoring issue.
 - Anime metadata-only DA gap, 2026-06-06 UTC: `movies-anime-efficient` scores
   `Anime Dual Audio` at `+100000`, but helper CFs `Anime - Dual Audio
   (Metadata)`, `Anime - Dual Audio (Title)`, and `Regular Dual Audio` are all
