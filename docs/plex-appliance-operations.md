@@ -83,6 +83,15 @@ masquerade as watched. Repeated playback failures without verified corruption
 keep the same active item and retry later. This preserves the rule that
 playable items are played at least once before the cycle repeats.
 
+The saved shuffle state is authoritative per appliance. Reboots, playbook
+runs, and player restarts must not reshuffle an appliance queue while that
+appliance still has queued, active, or newly discovered playable items that
+have not completed in the current cycle. New Plex items that enter the
+collection mid-cycle are inserted at a random position after the current
+playback position. If no item is actively playing but a queued item is about
+to start, the queued head is treated as the current position so new items do
+not jump ahead of it. Bedroom and Mercury keep separate cycles.
+
 Plex HTTP stream interruptions are not file-corruption proof. If ffmpeg is
 checking a Plex URL and Plex returns `503`, resets the stream, or ends the HTTP
 response prematurely, the check is inconclusive and the item must remain active

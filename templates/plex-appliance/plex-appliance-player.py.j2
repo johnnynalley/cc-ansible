@@ -628,6 +628,18 @@ def shuffled_keys(keys: Iterable[str]) -> List[str]:
     return queue
 
 
+def unique_ordered(keys: Iterable[str]) -> List[str]:
+    seen: Set[str] = set()
+    ordered: List[str] = []
+    for key in keys:
+        key = str(key)
+        if key in seen:
+            continue
+        seen.add(key)
+        ordered.append(key)
+    return ordered
+
+
 def load_shuffle_state() -> Tuple[List[str], List[str], List[str], Optional[Dict[str, Any]]]:
     try:
         with open(SHUFFLE_STATE_PATH, "r", encoding="utf-8") as state_file:
@@ -648,7 +660,7 @@ def load_shuffle_state() -> Tuple[List[str], List[str], List[str], Optional[Dict
         unplayable = []
     if not isinstance(active, dict) or not active.get("key"):
         active = None
-    return [str(key) for key in queue], [str(key) for key in played], [str(key) for key in unplayable], active
+    return unique_ordered(queue), unique_ordered(played), unique_ordered(unplayable), active
 
 
 def save_shuffle_state(
@@ -675,9 +687,13 @@ def save_shuffle_state(
     os.replace(tmp_path, SHUFFLE_STATE_PATH)
 
 
-def insert_randomly(queue_keys: List[str], new_keys: List[str]) -> None:
+def insert_randomly_after_current(queue_keys: List[str], new_keys: List[str], active_key: str = "") -> None:
+    if not new_keys:
+        return
+
+    first_insert_index = 0 if active_key else min(1, len(queue_keys))
     for key in shuffled_keys(new_keys):
-        queue_keys.insert(RNG.randrange(len(queue_keys) + 1), key)
+        queue_keys.insert(RNG.randrange(first_insert_index, len(queue_keys) + 1), key)
 
 
 def reconcile_shuffle_state(
@@ -687,16 +703,16 @@ def reconcile_shuffle_state(
     item_keys: Set[str],
     active_key: str = "",
 ) -> Tuple[List[str], List[str], List[str]]:
-    unplayable_keys = [key for key in unplayable_keys if key in item_keys]
+    unplayable_keys = [key for key in unique_ordered(unplayable_keys) if key in item_keys]
     unplayable_set = set(unplayable_keys)
     playable_item_keys = item_keys - unplayable_set
 
-    queue_keys = [key for key in queue_keys if key in playable_item_keys]
+    queue_keys = [key for key in unique_ordered(queue_keys) if key in playable_item_keys]
     if active_key:
         queue_keys = [key for key in queue_keys if key != active_key]
     queue_set = set(queue_keys)
     played_keys = [
-        key for key in played_keys
+        key for key in unique_ordered(played_keys)
         if key in item_keys and key not in queue_set and key not in unplayable_set
     ]
     known_keys = queue_set | set(played_keys) | unplayable_set
@@ -705,10 +721,14 @@ def reconcile_shuffle_state(
     new_keys = sorted(playable_item_keys - known_keys)
 
     if new_keys and queue_keys:
-        insert_randomly(queue_keys, new_keys)
-        log(f"Added {len(new_keys)} new items to the current shuffle cycle")
+        insert_randomly_after_current(queue_keys, new_keys, active_key)
+        log(f"Added {len(new_keys)} new items after the current shuffle position")
     elif new_keys:
         queue_keys = shuffled_keys(new_keys)
+        if active_key:
+            log(f"Queued {len(new_keys)} new items after the active item")
+        else:
+            log(f"Queued {len(new_keys)} not-yet-played items before starting a new shuffle cycle")
 
     if not queue_keys and not active_key:
         last_played = played_keys[-1] if played_keys else ""
@@ -1623,7 +1643,7 @@ def main() -> int:
             except Exception as exc:
                 if popped_from_queue and queue_keys:
                     active = None
-                    insert_randomly(queue_keys, [item_key_to_play])
+                    insert_randomly_after_current(queue_keys, [item_key_to_play], active_item_key(active))
                     save_shuffle_state(queue_keys, played_keys, unplayable_keys)
                     next_refresh = 0.0
                     log(f"Deferring item with unavailable metadata: {item_key_to_play}: {redact_token(exc)}")
