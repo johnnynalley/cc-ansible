@@ -10,6 +10,7 @@ import socket
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 from typing import Any, Dict, Iterable, List, NamedTuple, Optional, Set, Tuple
 from urllib.parse import urlencode
@@ -119,6 +120,9 @@ CJK_RANGES = (
     (0x2A700, 0x2B73F),
     (0x2B740, 0x2B81F),
     (0x2B820, 0x2CEAF),
+)
+SUBTITLE_TIME_RE = re.compile(
+    r"(\d\d):(\d\d):(\d\d),(\d{3}) --> (\d\d):(\d\d):(\d\d),(\d{3})"
 )
 
 
@@ -261,20 +265,51 @@ def ordered_subtitle_candidates(candidates: List[SubtitleSelection]) -> List[Sub
     return ordered
 
 
+def subtitle_candidates_for_part(part: ET.Element) -> List[SubtitleSelection]:
+    subtitle_streams = subtitle_streams_for_part(part)
+    if not subtitle_streams:
+        return []
+
+    preferred_languages = {language.lower() for language in SUBTITLE_LANGUAGES}
+    if preferred_languages:
+        matching_streams = [
+            candidate for candidate in subtitle_streams
+            if stream_language_values(candidate.stream) & preferred_languages
+        ]
+        if matching_streams:
+            subtitle_streams = matching_streams
+
+    return ordered_subtitle_candidates(subtitle_streams)
+
+
 def is_cjk_character(character: str) -> bool:
     codepoint = ord(character)
     return any(start <= codepoint <= end for start, end in CJK_RANGES)
 
 
-def subtitle_text_stats(text: str) -> Dict[str, int]:
+def subtitle_timestamp_seconds(values: Tuple[str, str, str, str]) -> float:
+    hours, minutes, seconds, millis = (int(value) for value in values)
+    return hours * 3600 + minutes * 60 + seconds + millis / 1000.0
+
+
+def subtitle_text_stats(text: str) -> Dict[str, Any]:
+    sample = text[:SUBTITLE_SAMPLE_CHARS]
+    cue_count = 0
+    last_end = 0.0
+    for match in SUBTITLE_TIME_RE.finditer(text):
+        cue_count += 1
+        last_end = subtitle_timestamp_seconds(match.groups()[4:])
+
     return {
-        "chars": len(text),
-        "ascii_letters": sum(1 for character in text if character.isascii() and character.isalpha()),
-        "cjk": sum(1 for character in text if is_cjk_character(character)),
+        "chars": len(sample),
+        "ascii_letters": sum(1 for character in sample if character.isascii() and character.isalpha()),
+        "cjk": sum(1 for character in sample if is_cjk_character(character)),
+        "cue_count": cue_count,
+        "last_end": last_end,
     }
 
 
-def english_subtitle_mismatch(stats: Dict[str, int]) -> bool:
+def english_subtitle_mismatch(stats: Dict[str, Any]) -> bool:
     cjk = stats["cjk"]
     ascii_letters = stats["ascii_letters"]
     comparable = max(1, cjk + ascii_letters)
@@ -282,6 +317,32 @@ def english_subtitle_mismatch(stats: Dict[str, int]) -> bool:
         cjk >= SUBTITLE_MIN_CJK_CHARS
         and cjk / comparable >= SUBTITLE_MIN_CJK_FRACTION
         and cjk > ascii_letters
+    )
+
+
+def subtitle_cue_count(stats: Optional[Dict[str, Any]]) -> int:
+    if not stats:
+        return 0
+    try:
+        return int(stats.get("cue_count") or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def cumulative_subtitle_mismatch(
+    current_stats: Dict[str, Any],
+    alternate_stats: Dict[str, Any],
+    duration: float,
+) -> bool:
+    current_cues = subtitle_cue_count(current_stats)
+    alternate_cues = subtitle_cue_count(alternate_stats)
+    duration_minutes = max(1.0, duration / 60.0) if duration > 0 else 1.0
+    return (
+        current_cues >= 750
+        and alternate_cues >= 100
+        and current_cues - alternate_cues >= 250
+        and current_cues >= alternate_cues * 1.6
+        and current_cues / duration_minutes >= 35
     )
 
 
@@ -294,7 +355,7 @@ def subtitle_map_selectors(candidate: SubtitleSelection) -> List[str]:
     return list(dict.fromkeys(selectors))
 
 
-def sample_subtitle_stats(media_url: str, candidate: SubtitleSelection) -> Optional[Dict[str, int]]:
+def sample_subtitle_stats(media_url: str, candidate: SubtitleSelection) -> Optional[Dict[str, Any]]:
     for selector in subtitle_map_selectors(candidate):
         try:
             completed = subprocess.run(
@@ -322,7 +383,7 @@ def sample_subtitle_stats(media_url: str, candidate: SubtitleSelection) -> Optio
             log(f"Subtitle content check could not sample stream {candidate.plex_id}: {redact_token(exc)}")
             return None
         if completed.stdout:
-            return subtitle_text_stats(completed.stdout[:SUBTITLE_SAMPLE_CHARS])
+            return subtitle_text_stats(completed.stdout)
     return None
 
 
@@ -339,20 +400,7 @@ def subtitle_selection_for_part(part: ET.Element, media_url: str) -> Optional[Su
     if SUBTITLE_MODE == "off":
         return None
 
-    subtitle_streams = subtitle_streams_for_part(part)
-    if not subtitle_streams:
-        return None
-
-    preferred_languages = {language.lower() for language in SUBTITLE_LANGUAGES}
-    if preferred_languages:
-        matching_streams = [
-            candidate for candidate in subtitle_streams
-            if stream_language_values(candidate.stream) & preferred_languages
-        ]
-        if matching_streams:
-            subtitle_streams = matching_streams
-
-    ordered_candidates = ordered_subtitle_candidates(subtitle_streams)
+    ordered_candidates = subtitle_candidates_for_part(part)
     skipped_mismatches = 0
     for candidate in ordered_candidates:
         if should_content_check_subtitle(candidate):
@@ -1122,12 +1170,12 @@ def wait_for_ipc_socket(socket_path: str, timeout: float = 5.0) -> bool:
     return os.path.exists(socket_path)
 
 
-def mpv_raw_property(socket_path: str, name: str) -> object:
+def mpv_ipc_command(socket_path: str, command: List[object], timeout: float = 1.0) -> Optional[Dict[str, Any]]:
     try:
         with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:
-            client.settimeout(1.0)
+            client.settimeout(timeout)
             client.connect(socket_path)
-            client.sendall(json.dumps({"command": ["get_property", name]}).encode("utf-8") + b"\n")
+            client.sendall(json.dumps({"command": command}).encode("utf-8") + b"\n")
             response = b""
             while not response.endswith(b"\n"):
                 chunk = client.recv(4096)
@@ -1138,8 +1186,14 @@ def mpv_raw_property(socket_path: str, name: str) -> object:
         return None
 
     try:
-        payload = json.loads(response.decode("utf-8"))
+        return json.loads(response.decode("utf-8"))
     except (json.JSONDecodeError, UnicodeDecodeError):
+        return None
+
+
+def mpv_raw_property(socket_path: str, name: str) -> object:
+    payload = mpv_ipc_command(socket_path, ["get_property", name])
+    if not payload:
         return None
     if payload.get("error") != "success":
         return None
@@ -1154,6 +1208,147 @@ def mpv_number_property(socket_path: str, name: str) -> Optional[float]:
 def mpv_bool_property(socket_path: str, name: str) -> Optional[bool]:
     value = mpv_raw_property(socket_path, name)
     return value if isinstance(value, bool) else None
+
+
+def mpv_set_property(socket_path: str, name: str, value: object) -> bool:
+    payload = mpv_ipc_command(socket_path, ["set_property", name, value])
+    return bool(payload and payload.get("error") == "success")
+
+
+def mpv_subtitle_sid(socket_path: str) -> Optional[int]:
+    value = mpv_raw_property(socket_path, "sid")
+    if isinstance(value, bool) or value is None:
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def active_subtitle_candidate(
+    socket_path: str,
+    candidates: List[SubtitleSelection],
+    stop_event: threading.Event,
+) -> Optional[SubtitleSelection]:
+    deadline = time.monotonic() + 5.0
+    while time.monotonic() < deadline and not stop_event.is_set():
+        sid = mpv_subtitle_sid(socket_path)
+        if sid is not None:
+            for candidate in candidates:
+                if candidate.mpv_sid == sid:
+                    return candidate
+            return None
+        time.sleep(0.25)
+    return None
+
+
+def async_subtitle_validation(
+    socket_path: str,
+    media_url: str,
+    part: ET.Element,
+    duration: float,
+    process: subprocess.Popen,
+    stop_event: threading.Event,
+) -> None:
+    if SUBTITLE_MODE == "off" or not SUBTITLE_CONTENT_CHECK_ENABLED:
+        return
+    if not SUBTITLE_LANGUAGES:
+        return
+
+    candidates = subtitle_candidates_for_part(part)
+    if len(candidates) < 2:
+        return
+
+    active_candidate = active_subtitle_candidate(socket_path, candidates, stop_event)
+    if not active_candidate:
+        return
+    if not should_content_check_subtitle(active_candidate):
+        return
+
+    sampled_stats: Dict[str, Dict[str, Any]] = {}
+
+    def stats_for(candidate: SubtitleSelection) -> Optional[Dict[str, Any]]:
+        if candidate.plex_id not in sampled_stats:
+            stats = sample_subtitle_stats(media_url, candidate)
+            if stats:
+                sampled_stats[candidate.plex_id] = stats
+        return sampled_stats.get(candidate.plex_id)
+
+    active_stats = stats_for(active_candidate)
+    if not active_stats or stop_event.is_set() or process.poll() is not None:
+        return
+
+    active_reason = ""
+    replacement: Optional[Tuple[SubtitleSelection, Dict[str, Any]]] = None
+
+    if english_subtitle_mismatch(active_stats):
+        active_reason = "CJK-heavy subtitle content"
+        for candidate in candidates:
+            if candidate.plex_id == active_candidate.plex_id or not should_content_check_subtitle(candidate):
+                continue
+            stats = stats_for(candidate)
+            if stats and not english_subtitle_mismatch(stats):
+                replacement = (candidate, stats)
+                break
+    else:
+        for candidate in candidates:
+            if candidate.plex_id == active_candidate.plex_id or not should_content_check_subtitle(candidate):
+                continue
+            stats = stats_for(candidate)
+            if (
+                stats
+                and not english_subtitle_mismatch(stats)
+                and cumulative_subtitle_mismatch(active_stats, stats, duration)
+            ):
+                active_reason = (
+                    "cumulative subtitle cue count "
+                    f"({subtitle_cue_count(active_stats)} cues vs {subtitle_cue_count(stats)} cues)"
+                )
+                replacement = (candidate, stats)
+                break
+
+    if not active_reason or stop_event.is_set() or process.poll() is not None:
+        return
+
+    if replacement:
+        candidate, stats = replacement
+        if mpv_set_property(socket_path, "sid", candidate.mpv_sid):
+            log(
+                "Switched subtitle stream "
+                f"{active_candidate.plex_id}->{candidate.plex_id} "
+                f"after detecting {active_reason}"
+            )
+        else:
+            log(
+                "Could not switch subtitle stream "
+                f"{active_candidate.plex_id}->{candidate.plex_id} "
+                f"after detecting {active_reason}"
+            )
+        return
+
+    if english_subtitle_mismatch(active_stats) and mpv_set_property(socket_path, "sid", "no"):
+        log(
+            "Disabled subtitle stream "
+            f"{active_candidate.plex_id} after detecting {active_reason}; no safe replacement was sampled"
+        )
+
+
+def start_async_subtitle_validation(
+    socket_path: str,
+    media_url: str,
+    part: ET.Element,
+    duration: float,
+    process: subprocess.Popen,
+    stop_event: threading.Event,
+) -> threading.Thread:
+    thread = threading.Thread(
+        target=async_subtitle_validation,
+        args=(socket_path, media_url, part, duration, process, stop_event),
+        name="plex-appliance-subtitle-validation",
+        daemon=True,
+    )
+    thread.start()
+    return thread
 
 
 def stop_mpv_process(process: subprocess.Popen, reason: str) -> int:
@@ -1204,10 +1399,11 @@ def play(
     direct_url = stream_info[0]
     part = stream_info[3]
     metadata_duration = stream_info[4]
-    subtitle_selection = subtitle_selection_for_part(part, direct_url)
+    subtitle_selection: Optional[SubtitleSelection] = None
     universal_session_id = ""
     use_universal_stream = STREAM_MODE == "universal"
     if use_universal_stream:
+        subtitle_selection = subtitle_selection_for_part(part, direct_url)
         universal_session_id = playback_session_id(item_key_to_play)
         if subtitle_selection:
             log(f"Using Plex subtitle stream {subtitle_selection.plex_id} for {item_key_to_play}")
@@ -1240,14 +1436,19 @@ def play(
     playback_elapsed = 0.0
     position_jump_logged = False
     forced_stop_reason = ""
+    subtitle_stop_event: Optional[threading.Event] = None
+    subtitle_validator: Optional[threading.Thread] = None
     try:
         with tempfile.TemporaryDirectory(prefix="plex-appliance-mpv-") as runtime_dir:
             socket_path = os.path.join(runtime_dir, "mpv.sock")
+            subtitle_stop_event = threading.Event()
             command = [
                 "mpv",
                 *playback_args(
                     subtitle_selection,
-                    force_subtitle_selection=SUBTITLE_CONTENT_CHECK_ENABLED and bool(SUBTITLE_LANGUAGES),
+                    force_subtitle_selection=use_universal_stream
+                    and SUBTITLE_CONTENT_CHECK_ENABLED
+                    and bool(SUBTITLE_LANGUAGES),
                 ),
                 f"--input-ipc-server={socket_path}",
             ]
@@ -1257,7 +1458,16 @@ def play(
 
             playback_loading_status(title, "Opening video player...")
             process = subprocess.Popen(command)
-            wait_for_ipc_socket(socket_path)
+            ipc_ready = wait_for_ipc_socket(socket_path)
+            if ipc_ready and not use_universal_stream:
+                subtitle_validator = start_async_subtitle_validation(
+                    socket_path,
+                    direct_url,
+                    part,
+                    metadata_duration,
+                    process,
+                    subtitle_stop_event,
+                )
             progress_callback(last_position, duration)
             started_at = time.monotonic()
             last_progress_at: Optional[float] = started_at if start_position > 0 else None
@@ -1339,6 +1549,10 @@ def play(
                 if use_universal_stream and position_offset > 0 and duration_value < position_offset:
                     duration = max(duration, position_offset + duration_value)
     finally:
+        if subtitle_stop_event is not None:
+            subtitle_stop_event.set()
+        if subtitle_validator is not None and subtitle_validator.is_alive():
+            subtitle_validator.join(timeout=0.2)
         if universal_session_id:
             stop_universal_stream(universal_session_id)
 

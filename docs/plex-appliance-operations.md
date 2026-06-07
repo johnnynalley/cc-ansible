@@ -1,6 +1,6 @@
 # Plex Appliance Operations
 
-Last updated: 2026-06-02
+Last updated: 2026-06-07
 
 Use this doc for quick operator actions on the managed Plex TV appliances.
 
@@ -66,6 +66,15 @@ part streaming. Do not restart both appliances and call that fixed. Keep the
 second appliance stopped until the Plex session/account/client-model root cause
 is proven and corrected. Do not "fix" this by mounting the library locally or by
 adding retry loops that hide recurrence.
+
+Direct mpv playback starts without blocking on subtitle-content probes. When
+subtitle content checks are enabled, the player lets mpv open the file normally,
+then samples the active English subtitle stream and alternate English streams in
+a background worker. If the active stream is CJK-heavy or has a cumulative cue
+count that is far larger than a valid alternate stream, the player switches
+`sid` over mpv IPC while playback continues. Universal stream mode cannot rely
+on this live `sid` switching because Plex sessionized streams choose subtitles
+through the Plex URL before playback starts.
 
 The shuffle cycle must not count any failure path as watched. `played` means
 the item reached normal playback completion. A verified corrupt file is moved
