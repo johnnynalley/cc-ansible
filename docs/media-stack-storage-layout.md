@@ -100,6 +100,32 @@ nightly-media-maintenance --state-dir /var/lib/nightly-media-maintenance \
   balance defer set --for-days 7 --reason arr-queue-drain
 ```
 
+## NFS Fileid Changed Triage
+
+`docker-vm` consumes the TS440 mergerfs pool through NFS. If the kernel logs
+`NFS: server 192.168.1.146 error: fileid changed`, first verify that TS440 is
+still running the NFS-safe mergerfs options and that NFS exports have stable
+`fsid` values before changing anything:
+
+```bash
+ansible ts440 -b -m shell -a 'pgrep -a mergerfs; systemctl cat srv-media.mount'
+ansible docker-vm -b -m shell -a 'findmnt -T /srv/media -o TARGET,SOURCE,FSTYPE,OPTIONS -n; journalctl -k --since "10 minutes ago" --no-pager | grep -i "fileid changed" || true'
+```
+
+The expected TS440 mergerfs options include `noforget`, `use_ino`, and
+`inodecalc=path-hash`; the expected NFS media export uses a stable `fsid`.
+These match the upstream mergerfs NFS guidance. If those are present and
+TS440 has no matching server-side NFS/FUSE errors, treat the symptom as
+NFS-client state churn against a mutable FUSE/mergerfs export, especially while
+Sonarr/Radarr are importing, renaming, or deleting completed downloads.
+
+Do not call this fixed by only raising alert thresholds. A controlled recovery
+test is to wait for active imports to settle, stop the docker-vm media-stack
+containers once, remount `docker-vm:/srv/media`, start the stack, then watch
+whether new fileid errors stop. This should not interrupt Plex on `media-vm`,
+but it does pause Sonarr/Radarr/SABnzbd/qBittorrent, so get explicit operator
+approval before running it during active queue work.
+
 ## 2026-06-06 Incident Notes
 
 The nightly timer is hourly during the local `00:00-07:00` window, not a
