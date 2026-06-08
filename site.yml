@@ -157,6 +157,10 @@
   ansible.builtin.import_playbook: playbooks/media/media-stack-health.yml
   tags: [media-stack, media-health, monitoring]
 
+- name: Configure Plex server health monitor
+  ansible.builtin.import_playbook: playbooks/media/plex-server-health.yml
+  tags: [plex, plex-health, media-health, monitoring]
+
 - name: Configure stream relay
   ansible.builtin.import_playbook: playbooks/media/stream-relay.yml
   tags: [stream-relay, streaming, twitch]

@@ -1,0 +1,138 @@
+# Purpose: Configure Plex server and VirtioFS health monitor.
+# Hosts: media-vm, nas_server.
+# Key vars: nightly_media_*, media_release_stamper_*, media_stack_health_*, plex_server_health_*, stream_relay_*, plex_appliance_*.
+# Templates: templates/media-maintenance, templates/streaming, templates/plex-appliance, templates/docker.
+# Scripts: scripts/media-maintenance, scripts/media-release, scripts/streaming.
+# Validation: ansible-playbook playbooks/media/plex-server-health.yml --syntax-check.
+
+# =============================================================================
+# Plex Server Health Playbook - Plex/VirtioFS/ZFS scrub sentinel
+# =============================================================================
+# Usage:
+#   ansible-playbook playbooks/media/plex-server-health.yml
+#   ansible-playbook playbooks/media/plex-server-health.yml --check --diff
+# =============================================================================
+
+- name: Configure Plex server health monitor
+  hosts: media-vm:nas_server
+  become: true
+  gather_facts: true
+
+  handlers:
+    - name: Reload systemd
+      ansible.builtin.systemd:
+        daemon_reload: true
+
+  tasks:
+    - name: Stop and disable plex-server-health timer when disabled
+      ansible.builtin.systemd:
+        name: plex-server-health.timer
+        enabled: false
+        state: stopped
+        daemon_reload: true
+      when: not (plex_server_health_enabled | default(false))
+      failed_when: false
+
+    - name: Stop plex-server-health service when disabled
+      ansible.builtin.systemd:
+        name: plex-server-health.service
+        state: stopped
+      when: not (plex_server_health_enabled | default(false))
+      failed_when: false
+
+    - name: Skip hosts without plex-server-health enabled
+      ansible.builtin.meta: end_host
+      when: not (plex_server_health_enabled | default(false))
+
+    - name: Ensure plex-server-health dependencies are installed
+      ansible.builtin.apt:
+        name:
+          - curl
+          - procps
+        state: present
+        update_cache: true
+        cache_valid_time: 3600
+      when: ansible_facts.os_family == "Debian"
+
+    - name: Create plex-server-health state directory
+      ansible.builtin.file:
+        path: "{{ plex_server_health_state_dir | default('/var/lib/plex-server-health') }}"
+        state: directory
+        owner: root
+        group: root
+        mode: "0755"
+
+    - name: Deploy plex-server-health script
+      ansible.builtin.template:
+        src: "{{ ansible_config_file | dirname }}/templates/media-maintenance/plex-server-health.sh.j2"
+        dest: /usr/local/sbin/plex-server-health
+        owner: root
+        group: root
+        mode: "0755"
+
+    - name: Create plex-server-health.service
+      ansible.builtin.copy:
+        dest: /etc/systemd/system/plex-server-health.service
+        owner: root
+        group: root
+        mode: "0644"
+        content: |
+          [Unit]
+          Description=Plex server and VirtioFS health check
+          After=network-online.target
+          Wants=network-online.target
+
+          [Service]
+          Type=oneshot
+          ExecStart=/usr/local/sbin/plex-server-health
+          StandardOutput=journal
+          StandardError=journal
+          TimeoutStartSec=120
+      notify: Reload systemd
+
+    - name: Create plex-server-health.timer
+      ansible.builtin.copy:
+        dest: /etc/systemd/system/plex-server-health.timer
+        owner: root
+        group: root
+        mode: "0644"
+        content: |
+          [Unit]
+          Description=Run Plex server health check periodically
+
+          [Timer]
+          OnBootSec={{ plex_server_health_interval | default('5min') }}
+          OnUnitActiveSec={{ plex_server_health_interval | default('5min') }}
+          AccuracySec={{ plex_server_health_accuracy | default('30s') }}
+
+          [Install]
+          WantedBy=timers.target
+      notify: Reload systemd
+
+    - name: Allow dbc to read plex-server-health status for Astra
+      ansible.builtin.copy:
+        dest: /etc/sudoers.d/plex-server-health-dbc
+        owner: root
+        group: root
+        mode: "0440"
+        validate: "visudo -cf %s"
+        content: |
+          dbc ALL=(root) NOPASSWD: /usr/local/sbin/plex-server-health --status
+          dbc ALL=(root) NOPASSWD: /usr/local/sbin/plex-server-health --no-alert
+
+    - name: Flush systemd reload before validation
+      ansible.builtin.meta: flush_handlers
+
+    - name: Validate plex-server-health command
+      ansible.builtin.command: /usr/local/sbin/plex-server-health --no-alert
+      register: plex_server_health_validation
+      changed_when: false
+      when: not ansible_check_mode
+
+    - name: Enable and start plex-server-health timer
+      ansible.builtin.systemd:
+        name: plex-server-health.timer
+        enabled: true
+        state: started
+        daemon_reload: true
+      when: not ansible_check_mode

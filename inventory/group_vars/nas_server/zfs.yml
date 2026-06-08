@@ -143,8 +143,15 @@ zfs_pools:
   - media-01
   - media-02
 
-# Scrub schedule (systemd OnCalendar format)
-zfs_scrub_schedule: "Sun *-*-* 02:00:00"
+# Scrub schedule and guard window. The timer runs daily, but the script only
+# starts/resumes a pool when the last completed scrub is old enough. Long scrubs
+# are paused at the window end and resumed on the next overnight run so Plex
+# transcode reads are not competing with active ZFS scrub during viewing hours.
+zfs_scrub_schedule: "*-*-* 03:00:00"
+zfs_scrub_window_start_hour: 3
+zfs_scrub_window_end_hour: 9
+zfs_scrub_min_interval_seconds: 518400
+zfs_scrub_pause_at_window_end: true
 
 # =============================================================================
 # ZFS ARC Tuning

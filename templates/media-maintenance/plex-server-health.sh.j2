@@ -1,0 +1,434 @@
+#!/usr/bin/env bash
+# {{ ansible_managed }}
+set -euo pipefail
+
+ALERT_MODE=1
+STATUS_MODE=0
+for arg in "$@"; do
+  case "$arg" in
+    --no-alert)
+      ALERT_MODE=0
+      ;;
+    --status)
+      STATUS_MODE=1
+      ;;
+    *)
+      printf 'unknown argument: %s\n' "$arg" >&2
+      exit 64
+      ;;
+  esac
+done
+
+HOSTNAME="$(hostname)"
+ROLE="{{ plex_server_health_role | default('') }}"
+STATE_DIR="{{ plex_server_health_state_dir | default('/var/lib/plex-server-health') }}"
+ALERT_COOLDOWN_SECONDS="{{ plex_server_health_alert_cooldown_seconds | default(1800) }}"
+STATUS_STALE_SECONDS="{{ plex_server_health_status_stale_seconds | default(900) }}"
+CONSECUTIVE_FAILURE_THRESHOLD="{{ plex_server_health_consecutive_failure_threshold | default(2) }}"
+APPRISE_ENDPOINT="{{ apprise_endpoint }}"
+APPRISE_TOKEN="{{ apprise_token }}"
+APPRISE_TAGS="{{ plex_server_health_alert_tags | default(apprise_alert_tags) }}"
+PLEX_CONTAINER="{{ plex_server_health_plex_container | default('plex') }}"
+PLEX_IDENTITY_URL="{{ plex_server_health_plex_identity_url | default('http://127.0.0.1:32400/identity') }}"
+PLEX_MOUNT_PATH="{{ plex_server_health_plex_mount_path | default('/srv/plex') }}"
+PLEX_MOUNT_FSTYPE="{{ plex_server_health_plex_mount_fstype | default('virtiofs') }}"
+DSTATE_MIN_AGE_SECONDS="{{ plex_server_health_dstate_min_age_seconds | default(180) }}"
+HUNG_TASK_WINDOW_SECONDS="{{ plex_server_health_hung_task_window_seconds | default(1800) }}"
+PLEX_DSTATE_REGEX="{{ plex_server_health_plex_dstate_regex | default('(dmx0:matroska|Plex Transcoder|Plex Media Server)') }}"
+VIRTIOFSD_DSTATE_REGEX="{{ plex_server_health_virtiofsd_dstate_regex | default('virtiofsd') }}"
+VM_ID="{{ plex_server_health_vm_id | default(100) }}"
+SCRUB_WINDOW_START_HOUR="{{ plex_server_health_scrub_window_start_hour | default(zfs_scrub_window_start_hour | default(3)) }}"
+SCRUB_WINDOW_END_HOUR="{{ plex_server_health_scrub_window_end_hour | default(zfs_scrub_window_end_hour | default(9)) }}"
+ZFS_POOLS=({% for pool in plex_server_health_zfs_pools | default(zfs_pools | default([])) %}{{ pool | quote }} {% endfor %})
+STATUS_FILE="$STATE_DIR/status.env"
+PROBLEMS_FILE="$STATE_DIR/problems.txt"
+WARNINGS_FILE="$STATE_DIR/warnings.txt"
+RUNNING_FILE="$STATE_DIR/running"
+
+mkdir -p "$STATE_DIR"
+
+problems=()
+warnings=()
+
+add_problem() {
+  problems+=("$1")
+}
+
+add_warning() {
+  warnings+=("$1")
+}
+
+array_has_items() {
+  [[ "$#" -gt 0 ]]
+}
+
+state_key_path() {
+  local key="$1"
+  local safe_key
+
+  safe_key="$(printf '%s' "$key" | tr -c 'A-Za-z0-9_.-' '_')"
+  printf '%s/%s\n' "$STATE_DIR" "$safe_key"
+}
+
+clear_failure_state() {
+  local key="$1"
+
+  rm -f "$(state_key_path "failure-$key")"
+}
+
+record_failure_state() {
+  local key="$1"
+  local threshold="$2"
+  local problem_message="$3"
+  local warning_message="${4:-}"
+  local state_file
+  local count=0
+
+  if [[ ! "$threshold" =~ ^[0-9]+$ || "$threshold" -lt 1 ]]; then
+    threshold=1
+  fi
+
+  state_file="$(state_key_path "failure-$key")"
+  if [[ -r "$state_file" ]]; then
+    count="$(cat "$state_file" 2>/dev/null || echo 0)"
+  fi
+  if [[ ! "$count" =~ ^[0-9]+$ ]]; then
+    count=0
+  fi
+  count=$((count + 1))
+  printf '%s\n' "$count" > "$state_file"
+
+  if (( count >= threshold )); then
+    add_problem "$problem_message"
+  elif [[ -n "$warning_message" ]]; then
+    add_warning "$warning_message"
+  fi
+}
+
+join_warnings() {
+  local item
+  local joined=""
+
+  for item in "${warnings[@]}"; do
+    if [[ -n "$joined" ]]; then
+      joined+=$'\n'
+    fi
+    joined+="$item"
+  done
+
+  printf '%s' "$joined"
+}
+
+write_status() {
+  local status="$1"
+  local body="${2:-}"
+  local warning_body="${3:-}"
+  local now
+
+  now="$(date +%s)"
+  if [[ -n "$body" ]]; then
+    printf '%s\n' "$body" > "${PROBLEMS_FILE}.tmp"
+  else
+    : > "${PROBLEMS_FILE}.tmp"
+  fi
+  mv "${PROBLEMS_FILE}.tmp" "$PROBLEMS_FILE"
+
+  if [[ -n "$warning_body" ]]; then
+    printf '%s\n' "$warning_body" > "${WARNINGS_FILE}.tmp"
+  else
+    : > "${WARNINGS_FILE}.tmp"
+  fi
+  mv "${WARNINGS_FILE}.tmp" "$WARNINGS_FILE"
+
+  {
+    printf 'STATUS=%q\n' "$status"
+    printf 'TIMESTAMP=%q\n' "$now"
+    printf 'HOSTNAME=%q\n' "$HOSTNAME"
+    printf 'ROLE=%q\n' "$ROLE"
+  } > "${STATUS_FILE}.tmp"
+  mv "${STATUS_FILE}.tmp" "$STATUS_FILE"
+}
+
+show_cached_status() {
+  local now
+  local age
+  local running_started
+  local running_age
+
+  now="$(date +%s)"
+  if [[ -f "$RUNNING_FILE" ]]; then
+    running_started="$(cat "$RUNNING_FILE" 2>/dev/null || echo 0)"
+    if [[ "$running_started" =~ ^[0-9]+$ ]]; then
+      running_age=$((now - running_started))
+      if (( running_age > STATUS_STALE_SECONDS )); then
+        printf 'CRITICAL: plex-server health probe has been running for %ss, stale threshold is %ss\n' "$running_age" "$STATUS_STALE_SECONDS" >&2
+        exit 2
+      fi
+    fi
+  fi
+
+  if [[ ! -r "$STATUS_FILE" ]]; then
+    printf 'CRITICAL: no cached plex-server health status found at %s\n' "$STATUS_FILE" >&2
+    exit 2
+  fi
+
+  # shellcheck disable=SC1090
+  . "$STATUS_FILE"
+  if [[ -z "${TIMESTAMP:-}" || ! "$TIMESTAMP" =~ ^[0-9]+$ ]]; then
+    printf 'CRITICAL: cached plex-server health status has invalid timestamp\n' >&2
+    exit 2
+  fi
+
+  age=$((now - TIMESTAMP))
+  if (( age > STATUS_STALE_SECONDS )); then
+    printf 'CRITICAL: cached plex-server health status is stale: age=%ss threshold=%ss\n' "$age" "$STATUS_STALE_SECONDS" >&2
+    [[ -s "$PROBLEMS_FILE" ]] && cat "$PROBLEMS_FILE" >&2
+    exit 2
+  fi
+
+  case "${STATUS:-}" in
+    ok)
+      printf 'OK: cached plex-server health passed %ss ago on %s (%s)\n' "$age" "${HOSTNAME:-unknown}" "${ROLE:-unknown}"
+      if [[ -s "$WARNINGS_FILE" ]]; then
+        printf 'WARNINGS:\n'
+        cat "$WARNINGS_FILE"
+      fi
+      ;;
+    failed)
+      printf 'CRITICAL: cached plex-server health failed %ss ago on %s (%s)\n' "$age" "${HOSTNAME:-unknown}" "${ROLE:-unknown}" >&2
+      [[ -s "$PROBLEMS_FILE" ]] && cat "$PROBLEMS_FILE" >&2
+      if [[ -s "$WARNINGS_FILE" ]]; then
+        printf 'WARNINGS:\n' >&2
+        cat "$WARNINGS_FILE" >&2
+      fi
+      exit 2
+      ;;
+    *)
+      printf 'CRITICAL: cached plex-server health status is unknown: %s\n' "${STATUS:-unset}" >&2
+      exit 2
+      ;;
+  esac
+}
+
+if [[ "$STATUS_MODE" -eq 1 ]]; then
+  show_cached_status
+  exit 0
+fi
+
+printf '%s\n' "$(date +%s)" > "$RUNNING_FILE"
+trap 'rm -f "$RUNNING_FILE"' EXIT
+
+current_hour() {
+  local hour
+
+  hour="$(date +%H)"
+  printf '%s\n' "$((10#$hour))"
+}
+
+inside_scrub_window() {
+  local hour
+
+  hour="$(current_hour)"
+  if (( SCRUB_WINDOW_START_HOUR == SCRUB_WINDOW_END_HOUR )); then
+    return 0
+  fi
+  if (( SCRUB_WINDOW_START_HOUR < SCRUB_WINDOW_END_HOUR )); then
+    (( hour >= SCRUB_WINDOW_START_HOUR && hour < SCRUB_WINDOW_END_HOUR ))
+    return
+  fi
+  (( hour >= SCRUB_WINDOW_START_HOUR || hour < SCRUB_WINDOW_END_HOUR ))
+}
+
+check_mount() {
+  local path="$1"
+  local expected_fstype="$2"
+  local fstype
+  local source
+
+  if ! findmnt -rn --target "$path" >/dev/null 2>&1; then
+    add_problem "$path is not mounted"
+    return
+  fi
+
+  fstype="$(findmnt -rn --target "$path" -o FSTYPE 2>/dev/null | tail -n1 || true)"
+  source="$(findmnt -rn --target "$path" -o SOURCE 2>/dev/null | tail -n1 || true)"
+
+  if [[ "$fstype" != "$expected_fstype" ]]; then
+    add_problem "$path has fstype ${fstype:-unknown} from ${source:-unknown}, expected $expected_fstype"
+  fi
+}
+
+check_plex_identity() {
+  local code
+
+  if ! docker inspect "$PLEX_CONTAINER" >/dev/null 2>&1; then
+    add_problem "$PLEX_CONTAINER container is missing"
+    return
+  fi
+  if [[ "$(docker inspect --format {% raw %}'{{.State.Status}}'{% endraw %} "$PLEX_CONTAINER" 2>/dev/null || true)" != "running" ]]; then
+    add_problem "$PLEX_CONTAINER container is not running"
+    return
+  fi
+
+  code="$(docker exec "$PLEX_CONTAINER" curl -sS -o /dev/null -w '%{http_code}' --connect-timeout 2 --max-time 5 "$PLEX_IDENTITY_URL" 2>/dev/null || true)"
+  case "$code" in
+    2*|3*)
+      clear_failure_state plex-identity
+      ;;
+    *)
+      record_failure_state \
+        plex-identity \
+        "$CONSECUTIVE_FAILURE_THRESHOLD" \
+        "Plex identity check failed in $PLEX_CONTAINER with HTTP ${code:-000}" \
+        "Plex identity check failed in $PLEX_CONTAINER with HTTP ${code:-000}; waiting for consecutive failure threshold"
+      ;;
+  esac
+}
+
+check_dstate_threads() {
+  local label="$1"
+  local command_regex="$2"
+  local pid
+  local tid
+  local etimes
+  local state
+  local wchan
+  local comm
+  local args
+  local cmd
+  local count=0
+
+  if [[ ! "$DSTATE_MIN_AGE_SECONDS" =~ ^[0-9]+$ || "$DSTATE_MIN_AGE_SECONDS" -lt 60 ]]; then
+    add_warning "D-state check has invalid minimum age seconds: $DSTATE_MIN_AGE_SECONDS"
+    return
+  fi
+
+  while read -r pid tid etimes state wchan comm args; do
+    [[ -n "${pid:-}" ]] || continue
+    [[ "$state" == D ]] || continue
+    [[ "$etimes" =~ ^[0-9]+$ ]] || continue
+    (( etimes >= DSTATE_MIN_AGE_SECONDS )) || continue
+    cmd="$comm ${args:-}"
+    [[ "$cmd" =~ $command_regex ]] || continue
+
+    add_problem "$label thread stuck in D-state: pid=$pid tid=$tid age=${etimes}s wchan=${wchan:-unknown} cmd=$(printf '%s' "$cmd" | cut -c1-180)"
+    count=$((count + 1))
+    if (( count >= 5 )); then
+      break
+    fi
+  done < <(ps -eLo pid=,tid=,etimes=,state=,wchan=,comm=,args= 2>/dev/null || true)
+}
+
+check_recent_plex_hung_task_logs() {
+  local now
+  local since
+  local lines
+
+  if [[ ! "$HUNG_TASK_WINDOW_SECONDS" =~ ^[0-9]+$ || "$HUNG_TASK_WINDOW_SECONDS" -lt 300 ]]; then
+    add_warning "hung-task log check has invalid window seconds: $HUNG_TASK_WINDOW_SECONDS"
+    return
+  fi
+
+  now="$(date +%s)"
+  since=$((now - HUNG_TASK_WINDOW_SECONDS))
+  lines="$(journalctl -k --since "@$since" --no-pager 2>/dev/null \
+    | grep -Ei 'task dmx0:matroska.*blocked|__fuse_simple_request|fuse_file_read_iter|request_wait_answer' \
+    | tail -n 8 || true)"
+  if [[ -n "$lines" ]]; then
+    add_problem "recent Plex/VirtioFS hung-task kernel evidence on $HOSTNAME: $(printf '%s' "$lines" | tr '\n' '; ' | cut -c1-700)"
+  fi
+}
+
+check_qm_status() {
+  local status
+
+  if ! command -v qm >/dev/null 2>&1; then
+    add_warning "qm is not available on $HOSTNAME; skipping VM $VM_ID status"
+    return
+  fi
+
+  status="$(qm status "$VM_ID" 2>/dev/null || true)"
+  if printf '%s\n' "$status" | grep -q 'status: running'; then
+    clear_failure_state "qm-$VM_ID"
+  else
+    record_failure_state \
+      "qm-$VM_ID" \
+      "$CONSECUTIVE_FAILURE_THRESHOLD" \
+      "VM $VM_ID is not running on $HOSTNAME: ${status:-no status}" \
+      "VM $VM_ID is not running on $HOSTNAME: ${status:-no status}; waiting for consecutive failure threshold"
+  fi
+}
+
+check_scrubs_outside_window() {
+  local pool
+  local scan_line
+
+  inside_scrub_window && return
+  for pool in "${ZFS_POOLS[@]}"; do
+    [[ -n "$pool" ]] || continue
+    scan_line="$(zpool status "$pool" 2>/dev/null | sed -n '/^[[:space:]]*scan:/p' | head -n1 || true)"
+    if printf '%s\n' "$scan_line" | grep -q 'scrub in progress'; then
+      add_problem "ZFS scrub is active outside safe window ${SCRUB_WINDOW_START_HOUR}:00-${SCRUB_WINDOW_END_HOUR}:00 on $pool: $(printf '%s' "$scan_line" | sed 's/^[[:space:]]*//')"
+    fi
+  done
+}
+
+case "$ROLE" in
+  media-vm)
+    check_mount "$PLEX_MOUNT_PATH" "$PLEX_MOUNT_FSTYPE"
+    check_plex_identity
+    check_dstate_threads "Plex media" "$PLEX_DSTATE_REGEX"
+    check_recent_plex_hung_task_logs
+    ;;
+  storage-host)
+    check_qm_status
+    check_dstate_threads "VirtioFS host" "$VIRTIOFSD_DSTATE_REGEX"
+    check_scrubs_outside_window
+    ;;
+  *)
+    add_problem "unknown plex-server health role on $HOSTNAME: ${ROLE:-unset}"
+    ;;
+esac
+
+if ! array_has_items "${problems[@]}"; then
+  rm -f "$STATE_DIR/last-alert"
+  warning_body="$(join_warnings)"
+  write_status ok "" "$warning_body"
+  printf 'OK: plex-server health checks passed on %s (%s)\n' "$HOSTNAME" "$ROLE"
+  if [[ -n "$warning_body" ]]; then
+    printf 'WARNINGS:\n%s\n' "$warning_body"
+  fi
+  exit 0
+fi
+
+body="$(printf '%s\n' "${problems[@]}")"
+warning_body="$(join_warnings)"
+write_status failed "$body" "$warning_body"
+printf 'CRITICAL: plex-server health check failed on %s (%s)\n%s\n' "$HOSTNAME" "$ROLE" "$body" >&2
+if [[ -n "$warning_body" ]]; then
+  printf 'WARNINGS:\n%s\n' "$warning_body" >&2
+fi
+
+if [[ "$ALERT_MODE" -eq 1 ]]; then
+  now="$(date +%s)"
+  last_alert=0
+  if [[ -f "$STATE_DIR/last-alert" ]]; then
+    last_alert="$(cat "$STATE_DIR/last-alert" 2>/dev/null || echo 0)"
+  fi
+
+  if (( now - last_alert >= ALERT_COOLDOWN_SECONDS )); then
+    if curl -sf -o /dev/null \
+      -X POST "${APPRISE_ENDPOINT}/notify/${APPRISE_TOKEN}" \
+      --form-string "title=[Plex Server] ${HOSTNAME}: health check failed" \
+      --form-string "body=${body}" \
+      --form-string "tag=${APPRISE_TAGS}" \
+      --form-string "type=warning" \
+      --max-time 30 \
+      --retry 3 \
+      --retry-delay 5; then
+      printf '%s\n' "$now" > "$STATE_DIR/last-alert"
+    fi
+  fi
+fi
+
+exit 2

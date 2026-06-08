@@ -1,29 +1,166 @@
 #!/bin/bash
 # {{ ansible_managed }}
-# Scrub configured ZFS pools one at a time.
+# Scrub configured ZFS pools one at a time, only during the approved window.
 set -euo pipefail
 
 poll_seconds={{ zfs_scrub_poll_seconds | default(300) }}
+min_interval_seconds={{ zfs_scrub_min_interval_seconds | default(518400) }}
+window_start_hour={{ zfs_scrub_window_start_hour | default(3) }}
+window_end_hour={{ zfs_scrub_window_end_hour | default(9) }}
+pause_at_window_end="{{ zfs_scrub_pause_at_window_end | default(true) | ternary('true', 'false') }}"
+
+log_info() {
+  logger -t zfs-scrub "$*"
+  printf '%s\n' "$*"
+}
+
+log_error() {
+  logger -t zfs-scrub -p daemon.err "$*"
+  printf '%s\n' "$*" >&2
+}
+
+current_hour() {
+  local hour
+
+  hour="$(date +%H)"
+  printf '%s\n' "$((10#$hour))"
+}
+
+inside_scrub_window() {
+  local hour
+
+  hour="$(current_hour)"
+  if (( window_start_hour == window_end_hour )); then
+    return 0
+  fi
+  if (( window_start_hour < window_end_hour )); then
+    (( hour >= window_start_hour && hour < window_end_hour ))
+    return
+  fi
+  (( hour >= window_start_hour || hour < window_end_hour ))
+}
+
+pool_scan_line() {
+  local pool="$1"
+
+  zpool status "$pool" 2>/dev/null | sed -n '/^[[:space:]]*scan:/p' | head -n1
+}
+
+pool_has_active_scrub() {
+  local pool="$1"
+
+  pool_scan_line "$pool" | grep -qE 'scrub (in progress|paused)'
+}
+
+pool_has_in_progress_scrub() {
+  local pool="$1"
+
+  pool_scan_line "$pool" | grep -q 'scrub in progress'
+}
+
+pool_has_paused_scrub() {
+  local pool="$1"
+
+  pool_scan_line "$pool" | grep -q 'scrub paused'
+}
+
+pool_has_resilver() {
+  local pool="$1"
+
+  pool_scan_line "$pool" | grep -q 'resilver in progress'
+}
+
+last_scrub_epoch() {
+  local pool="$1"
+  local line
+  local date_text
+
+  line="$(pool_scan_line "$pool")"
+  date_text="$(printf '%s\n' "$line" | sed -nE 's/^.* on (.*)$/\1/p')"
+  if [[ -z "$date_text" ]]; then
+    printf '0\n'
+    return
+  fi
+  date -d "$date_text" +%s 2>/dev/null || printf '0\n'
+}
+
+pool_due_for_scrub() {
+  local pool="$1"
+  local last_epoch
+  local now
+
+  last_epoch="$(last_scrub_epoch "$pool")"
+  if [[ ! "$last_epoch" =~ ^[0-9]+$ || "$last_epoch" -eq 0 ]]; then
+    return 0
+  fi
+  now="$(date +%s)"
+  (( now - last_epoch >= min_interval_seconds ))
+}
+
+pause_scrub_and_exit() {
+  local pool="$1"
+
+  if [[ "$pause_at_window_end" == "true" ]] && pool_has_in_progress_scrub "$pool"; then
+    log_info "Pausing scrub of $pool at safe-window end"
+    zpool scrub -p "$pool" || log_error "Failed to pause scrub of $pool"
+  fi
+  exit 0
+}
 
 wait_for_scrub() {
   local pool="$1"
 
-  while zpool status "$pool" | grep -qE 'scan: (scrub|resilver) in progress'; do
+  while pool_has_active_scrub "$pool"; do
+    if pool_has_paused_scrub "$pool"; then
+      log_info "Scrub of $pool is paused; stopping scrub sequence"
+      exit 0
+    fi
+
+    if ! inside_scrub_window; then
+      pause_scrub_and_exit "$pool"
+    fi
+
     sleep "$poll_seconds"
   done
 
-  if zpool status "$pool" | grep -q 'scan: scrub canceled'; then
-    logger -t zfs-scrub "Scrub of $pool was canceled; stopping scrub sequence"
+  if pool_scan_line "$pool" | grep -q 'scrub canceled'; then
+    log_info "Scrub of $pool was canceled; stopping scrub sequence"
     exit 0
   fi
 }
 
+if ! inside_scrub_window; then
+  log_info "Outside ZFS scrub safe window ${window_start_hour}:00-${window_end_hour}:00; not starting or resuming scrubs"
+  exit 0
+fi
+
 {% for pool in zfs_pools %}
-logger -t zfs-scrub "Starting scrub of {{ pool }}"
-if zpool scrub {{ pool }}; then
-  wait_for_scrub {{ pool }}
-  logger -t zfs-scrub "Finished scrub of {{ pool }}"
+if pool_has_resilver {{ pool | quote }}; then
+  log_info "Pool {{ pool }} is resilvering; stopping scrub sequence"
+  exit 0
+fi
+
+if pool_has_paused_scrub {{ pool | quote }}; then
+  log_info "Resuming paused scrub of {{ pool }}"
+  if zpool scrub {{ pool | quote }}; then
+    wait_for_scrub {{ pool | quote }}
+    log_info "Finished scrub of {{ pool }}"
+  else
+    log_error "Failed to resume scrub of {{ pool }}"
+  fi
+elif pool_has_in_progress_scrub {{ pool | quote }}; then
+  log_info "Scrub of {{ pool }} is already in progress"
+  wait_for_scrub {{ pool | quote }}
+  log_info "Finished scrub of {{ pool }}"
+elif pool_due_for_scrub {{ pool | quote }}; then
+  log_info "Starting scrub of {{ pool }}"
+  if zpool scrub {{ pool | quote }}; then
+    wait_for_scrub {{ pool | quote }}
+    log_info "Finished scrub of {{ pool }}"
+  else
+    log_error "Scrub failed for {{ pool }}"
+  fi
 else
-  logger -t zfs-scrub -p daemon.err "Scrub failed for {{ pool }}"
+  log_info "Skipping {{ pool }}; last scrub is newer than ${min_interval_seconds}s"
 fi
 {% endfor %}

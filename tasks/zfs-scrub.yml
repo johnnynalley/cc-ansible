@@ -29,7 +29,7 @@
     content: |
       # Managed by Ansible - playbooks/storage/zfs.yml
       [Unit]
-      Description=Weekly ZFS scrub
+      Description=Windowed ZFS scrub
 
       [Timer]
       OnCalendar={{ zfs_scrub_schedule | default('Sun *-*-* 02:00:00') }}

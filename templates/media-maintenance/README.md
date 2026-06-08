@@ -13,10 +13,13 @@
   helper on media-vm.
 - `plex-library-nightly-scan.timer.j2`: Schedules Plex library refreshes during
   the overnight maintenance window.
+- `plex-server-health.sh.j2`: Checks Plex identity, media-vm VirtioFS reads,
+  ts440 host virtiofsd D-state, VM 100 state, and ZFS scrub-window violations.
 
 ## Consumers
 
 - `playbooks/media/nightly-media-maintenance.yml`
+- `playbooks/media/plex-server-health.yml`
 
 ## Safety Notes
 

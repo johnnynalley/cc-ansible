@@ -267,6 +267,7 @@ Packages are merged from multiple sources (all applicable variables combined):
 | `docker-stacks.yml` | `docker_hosts` | Deploy Docker Compose stacks and the managed Caddyfile (per-service update reporting with version diffs) |
 | `gluetun-watchdog.yml` | media-vm | Gluetun VPN crash loop detection, port forwarding monitoring, auto-restart, and qBittorrent port sync |
 | `stream-relay.yml` | media-vm | OBS SRT ingest, Quadro NVENC encode, reliable local fanout, platform RTMP workers, and VOD delivery |
+| `plex-server-health.yml` | media-vm, `nas_server` | Plex identity, guest VirtioFS, host virtiofsd, VM 100, and scrub-window sentinel |
 | `docker-auto-update.yml` | `docker_hosts` | Auto-update selected containers every 6h with major version guard |
 | `virtiofs.yml` | `proxmox_nodes`, `vms` | Configure VirtioFS shares between Proxmox hosts and VMs |
 | `proxmox-vm-hardware.yml` | `proxmox_nodes` | Apply durable Proxmox VM hardware settings such as CPU model overrides |
@@ -383,7 +384,7 @@ Managed by `zfs.yml` — snapshots, scrub, ARC tuning, property enforcement, ACL
 
 - **Pools**: `nas_zfs` (2x8TB mirror), `media-01` (3TB), `media-02` (3TB)
 - **Snapshots**: Sanoid timer every 15 minutes
-- **Scrub**: Weekly (Sunday 2am) via systemd timer
+- **Scrub**: Daily 03:00 timer with a 03:00-09:00 safe window; the script only starts/resumes pools whose last scrub is old enough and pauses long scrubs before viewing hours
 - **ARC**: 4GB max (`/etc/modprobe.d/zfs.conf`) — bumped from 1GB after ts440 RAM upgrade to 32GB (2026-05-12), then trimmed as VM footprint grew on ts440
 - **Properties**: Automatically enforced via `zfs set` (compression, acltype, recordsize, atime)
 - **Config**: `group_vars/nas_server/zfs.yml`

@@ -1,0 +1,14 @@
+---
+plex_server_health_enabled: true
+plex_server_health_role: storage-host
+plex_server_health_state_dir: /var/lib/plex-server-health
+plex_server_health_interval: 5min
+plex_server_health_accuracy: 30s
+plex_server_health_alert_cooldown_seconds: 1800
+plex_server_health_alert_tags: "push,dbc"
+plex_server_health_consecutive_failure_threshold: 2
+plex_server_health_vm_id: 100
+plex_server_health_dstate_min_age_seconds: 180
+plex_server_health_scrub_window_start_hour: "{{ zfs_scrub_window_start_hour }}"
+plex_server_health_scrub_window_end_hour: "{{ zfs_scrub_window_end_hour }}"
+plex_server_health_zfs_pools: "{{ zfs_pools }}"

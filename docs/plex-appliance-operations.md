@@ -1,6 +1,6 @@
 # Plex Appliance Operations
 
-Last updated: 2026-06-07
+Last updated: 2026-06-08
 
 Use this doc for quick operator actions on the managed Plex TV appliances.
 
@@ -39,6 +39,41 @@ Plex HTTP until the stuck vzdump task was canceled and the stale lock was
 cleared. VM 100 is excluded from the all-VM PBS job; use storage-native
 snapshots and explicitly scheduled maintenance for Plex data instead of
 letting a failed PBS target lock the live Plex server.
+
+## Plex Server Health And Scrub Guardrails
+
+`playbooks/media/plex-server-health.yml` deploys `plex-server-health.timer` on
+`media-vm` and `ts440`. The media-vm side verifies Plex identity, `/srv/plex`
+as a VirtioFS mount, Plex/Matroska D-state threads, and recent guest kernel
+hung-task evidence. The ts440 side verifies VM 100 is running, checks host
+`virtiofsd` threads for uninterruptible I/O, and alerts if a ZFS scrub is active
+outside the configured scrub safe window.
+
+Use these read-only checks before restarting Plex, the VM, or ts440:
+
+```bash
+ansible media-vm -m command -a "/usr/local/sbin/plex-server-health --status" --become
+ansible ts440 -m command -a "/usr/local/sbin/plex-server-health --status" --become
+ansible media-vm -m shell -a "journalctl -k --since '30 min ago' | grep -Ei 'dmx0:matroska|request_wait_answer|fuse_file_read_iter|blocked for more'" --become
+ansible ts440 -m shell -a "ps -eLo pid,tid,etimes,state,wchan,comm,args | grep '[v]irtiofsd'" --become
+```
+
+On 2026-06-07, Plex became unavailable after a WAN client forced a universal
+transcode of `Gravity Falls - S01E06 - Dipper vs. Manliness` while the backing
+`media-01` ZFS pool was actively scrubbing. The Plex transcoder's Matroska
+reader blocked in the media-vm kernel FUSE/VirtioFS path
+(`request_wait_answer` -> `__fuse_simple_request` -> `fuse_file_read_iter`).
+Plex request threads then piled up waiting on database connections. Recovery
+attempts could not fully unwind the D-state guest thread, and host-side
+`virtiofsd`/VM scope state prevented VM 100 from starting cleanly until ts440
+was rebooted.
+
+That incident is a storage-path stall, not evidence that the episode file is
+bad. The file later read cleanly and ZFS reported `0` scrub errors. The managed
+ZFS scrub runner in `playbooks/storage/zfs.yml` now runs daily at 03:00 but only
+inside the 03:00-09:00 safe window. Long scrubs are paused at the window end and
+resumed on the next overnight run, so a serial scrub across `nas_zfs`,
+`media-01`, and `media-02` does not spill into evening Plex usage.
 
 ## Playback Identity And Queue Safety
 
