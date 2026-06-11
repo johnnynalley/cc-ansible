@@ -366,9 +366,16 @@ logged `NFS: server 192.168.1.146 error: fileid changed` while Radarr import
 scans touched the TS440 `/srv/media` mergerfs export. TS440 owns the single
 mergerfs pool, docker-vm keeps the Arr stack, and media-vm keeps Plex.
 `inventory/group_vars/nas_server/mergerfs.yml` manages the NFS-safe mergerfs
-options `noforget`, `use_ino`, and `inodecalc=path-hash` for that export.
-Applying changes to those mount options requires a planned TS440 mergerfs
-remount, so treat it as Plex-impacting until proven otherwise.
+options `noforget`, `use_ino`, `inodecalc=path-hash`, `func.getattr=ff`, and
+`category.create=mspmfs` for that export. Do not restore
+`func.getattr=newest` casually: on 2026-06-11 Sonarr import processing wedged
+mergerfs/NFS by statting a missing destination file under a branch-local season
+folder while `newest` was active. Do not switch create policy back to plain
+`epmfs` without testing Arr imports into a season/movie folder that exists only
+on a full branch; `mspmfs` is what lets mergerfs fall back to a parent path and
+create the target on a branch with usable space. Applying changes to those
+mount options requires a planned TS440 mergerfs remount, so treat it as
+Plex-impacting until proven otherwise.
 
 `scripts/media-release/arr_stage_profilarr_test_profiles.py` snapshots live Arr policy state
 and creates or refreshes future Profilarr test profiles by cloning the current

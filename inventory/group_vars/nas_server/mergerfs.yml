@@ -32,13 +32,18 @@ mergerfs_branch_subdirectories:
 # Mount options
 # - inodecalc=path-hash: Stable inode numbers for NFS compatibility (prevents ESTALE)
 # - noforget,use_ino: Keep stable FUSE inode identity for NFS clients of the mergerfs export
-# - func.getattr=newest: Consistent file attributes across drives for NFS
+# - func.getattr=ff: Avoid broad all-branch getattr scans on missing Arr
+#   destination files. `newest` previously wedged mergerfs/NFS lookups when
+#   Sonarr statted a missing import target under a branch-local season folder.
 # - cache.files=off: Disable file caching (VirtioFS handles caching)
-# - category.create=epmfs: Existing path most free space — keeps related files on the same branch for hardlinks
+# - category.create=mspmfs: Existing path most free space with parent fallback.
+#   This preserves colocated paths when possible, but avoids trapping new Arr
+#   imports on a full branch when only the exact season/movie folder exists
+#   there.
 # - moveonenospc=true: Move writes to another branch if one is full
 # - minfreespace=50G: Minimum free space per branch before skipping
 # - statfs=full: Report combined space from all branches
-mergerfs_options: "allow_other,noforget,use_ino,inodecalc=path-hash,func.getattr=newest,cache.files=off,dropcacheonclose=true,category.create=epmfs,moveonenospc=true,minfreespace=50G,statfs=full,fsname=mergerfs"
+mergerfs_options: "allow_other,noforget,use_ino,inodecalc=path-hash,func.getattr=ff,cache.files=off,dropcacheonclose=true,category.create=mspmfs,moveonenospc=true,minfreespace=50G,statfs=full,fsname=mergerfs"
 
 # Systemd dependencies (After= only, NOT Requires= - mixed ZFS/fstab breaks Requires=)
 mergerfs_after_units:

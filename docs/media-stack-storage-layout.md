@@ -63,6 +63,17 @@ Verified live on 2026-06-06:
   on the Lacie SSD configured in `inventory/group_vars/nas_server/mounts.yml`.
   The transient kernel device name shown by `findmnt` or `df` is not stable and
   should not be used as an identity.
+- `ts440:/srv/media` uses stable NFS-oriented inode options plus
+  `func.getattr=ff`. Do not switch `func.getattr` back to `newest` without a
+  targeted test: on 2026-06-11, Sonarr import processing repeatedly wedged
+  mergerfs/NFS by statting a missing destination file under a branch-local
+  season folder while `func.getattr=newest` was active.
+- `ts440:/srv/media` uses `category.create=mspmfs`, not plain `epmfs`.
+  `mspmfs` keeps the path-preserving "existing path most free space" behavior
+  when the exact target directory exists on an eligible branch, but falls back
+  to a parent directory search when the exact target path exists only on a full
+  branch. This prevents Arr imports from getting trapped on `/srv/nas-01` when
+  a season directory exists there but the branch has no usable free space.
 
 ## Completed Vs Incomplete
 
@@ -131,9 +142,10 @@ ansible ts440 -b -m shell -a 'pgrep -a mergerfs; systemctl cat srv-media.mount'
 ansible docker-vm -b -m shell -a 'findmnt -T /srv/media -o TARGET,SOURCE,FSTYPE,OPTIONS -n; journalctl -k --since "10 minutes ago" --no-pager | grep -i "fileid changed" || true'
 ```
 
-The expected TS440 mergerfs options include `noforget`, `use_ino`, and
-`inodecalc=path-hash`; the expected NFS media export uses a stable `fsid`.
-These match the upstream mergerfs NFS guidance. If those are present and
+The expected TS440 mergerfs options include `noforget`, `use_ino`,
+`inodecalc=path-hash`, `func.getattr=ff`, and `category.create=mspmfs`; the
+expected NFS media export uses a stable `fsid`. These match the current
+NFS/import-safety guidance for this topology. If those are present and
 TS440 has no matching server-side NFS/FUSE errors, treat the symptom as
 NFS-client state churn against a mutable FUSE/mergerfs export, especially while
 Sonarr/Radarr are importing, renaming, or deleting completed downloads.
