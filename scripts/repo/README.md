@@ -13,7 +13,8 @@ cross-reference health rather than a single infrastructure service.
 - `secrets-scan`: Built-in tracked-file secret scanner with optional Gitleaks
   integration. Local runs fall back to the built-in scanner when Gitleaks is not
   installed; CI uses `repo-audit --require-gitleaks` so the Gitleaks layer is
-  mandatory there.
+  mandatory there. Run `secrets-scan --self-test` after changing scanner
+  heuristics.
 
 ## Validation
 
@@ -26,4 +27,7 @@ scripts/repo/repo-audit --require-gitleaks
 
 # Focused staged secret scan before committing.
 scripts/repo/secrets-scan --staged
+
+# Scanner heuristic regression checks.
+scripts/repo/secrets-scan --self-test
 ```
