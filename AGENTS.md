@@ -38,6 +38,14 @@ When a change affects repository layout, operator entrypoints, common commands, 
 
 When renaming, moving, deleting, or replacing a source-of-truth doc, tracker, script, or runbook that OpenClaw references, update the matching OpenClaw workspace skills, hubs, heartbeat prompts, cron jobs, and guidance files in the same change. Do not leave OpenClaw pointing at stale paths after repo-side file moves.
 
+### Codex Self-Maintenance & Memory
+
+Treat Codex guidance and memory as moving operating state, not static background text. When a repeated correction, stale path, stale command, missing recurring workflow, broken plan handoff, or explicit user instruction shows that Codex should preserve a behavior change, update the appropriate durable source in the same turn: `AGENTS.md` for repo/workflow rules, a repo doc/runbook for operational procedure, and a Codex memory note when the user explicitly authorizes memory persistence or asks memory to be updated. Do not rely on a chat promise alone.
+
+This is an immediate trigger, not just a scheduled audit. If the need is discovered while working, persist the rule before continuing unrelated work unless doing so would be unsafe or would collide with another active edit; in that case, state the blocker and the exact hunk that still needs to land. For substantial or interruption-prone work, keep an active plan current with `update_plan` and any task-specific durable plan file before and after material phases, then resume from that saved plan after compaction or interruption.
+
+When self-updating `AGENTS.md` or another shared file, still follow the shared-file rules: inspect existing dirt, isolate unrelated hunks, validate the scoped change, check for secrets, and stage/commit only the approved hunk when committing is required. Scheduled audits can catch missed drift, but they do not replace instant self-maintenance at the moment the gap is found.
+
 ### Session Naming
 
 When the user asks Codex to name a session, consider the full context of the session before proposing a title. Use a natural-language title that describes what the session was really about; do not force lowercase slugs or replace spaces with hyphens unless the user explicitly asks for a filename-safe form.
