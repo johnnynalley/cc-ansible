@@ -108,6 +108,9 @@
           rclone sync \
               "{{ rclone_sync_source }}" \
               "{{ rclone_sync_dest }}" \
+              {% for exclude in rclone_sync_excludes | default([]) %}
+              --exclude {{ exclude | quote }} \
+              {% endfor %}
               --log-file "$LOG_FILE" \
               --log-level "{{ rclone_sync_log_level | default('INFO') }}" \
               --stats-one-line \
@@ -295,6 +298,9 @@
           "$RCLONE" sync \
               "{{ rclone_sync_source }}" \
               "{{ rclone_sync_dest }}" \
+              {% for exclude in rclone_sync_excludes | default([]) %}
+              --exclude {{ exclude | quote }} \
+              {% endfor %}
               --log-file "$LOG_FILE" \
               --log-level "{{ rclone_sync_log_level | default('INFO') }}" \
               --stats-one-line \

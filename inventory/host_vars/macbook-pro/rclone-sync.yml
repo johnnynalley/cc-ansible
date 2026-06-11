@@ -13,6 +13,11 @@ rclone_sync_source: "/Users/johnny/Library/CloudStorage/OneDrive-TheUniversityof
 # Destination: Nextcloud WebDAV (rclone remote configured manually)
 rclone_sync_dest: "nextcloud:UTD OneDrive/"
 
+# OneDrive File Provider exposes a root .Trash pseudo-directory that can return
+# "resource deadlock avoided" when traversed by non-FileProvider-aware tools.
+rclone_sync_excludes:
+  - "/.Trash/**"
+
 # Schedule: every 2 hours (in seconds, for launchd StartInterval)
 rclone_sync_interval: 7200
 

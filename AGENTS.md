@@ -630,7 +630,7 @@ PVE's notification system routes alerts via webhook to Apprise → Pushover. Dep
 
 ### rclone Sync (OneDrive to Nextcloud)
 
-One-way sync from UTD OneDrive to Nextcloud via `playbooks/backup-sync/rclone-sync.yml`. Runs on macbook-pro because UTD's Microsoft 365 tenant blocks third-party OAuth — OneDrive desktop app syncs locally, then rclone copies to Nextcloud WebDAV every 2 hours. Monitored via Uptime Kuma push monitor. rclone remote config is manual (not Ansible-managed) at `~/.config/rclone/rclone.conf`.
+One-way sync from UTD OneDrive to Nextcloud via `playbooks/backup-sync/rclone-sync.yml`. Runs on macbook-pro because UTD's Microsoft 365 tenant blocks third-party OAuth — OneDrive desktop app syncs locally, then rclone copies to Nextcloud WebDAV every 2 hours. Monitored via Uptime Kuma push monitor. rclone remote config is manual (not Ansible-managed) at `~/.config/rclone/rclone.conf`. OneDrive File Provider pseudo-directories such as root `.Trash` should be excluded through `rclone_sync_excludes` instead of letting rclone traverse provider-internal paths.
 
 ### Unattended-Upgrades (Daily Security Patches)
 

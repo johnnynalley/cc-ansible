@@ -866,6 +866,7 @@ Scheduled sync from school OneDrive to Nextcloud via `rclone-sync.yml` on macboo
 - **Mode**: `rclone sync` (deletes propagate, safe due to ZFS snapshots + restic)
 - **Config**: `host_vars/macbook-pro/rclone-sync.yml`
 - **rclone remote**: Only `nextcloud` WebDAV remote needed (configured manually via `rclone config`)
+- **Excludes**: OneDrive File Provider pseudo-directories such as root `.Trash` are excluded with `rclone_sync_excludes`
 - **Monitoring**: Uptime Kuma push monitor
 
 ```bash
