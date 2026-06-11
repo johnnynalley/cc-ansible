@@ -1,0 +1,151 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+API_BASE={{ cloudflare_ddns_api_base | default('https://api.cloudflare.com/client/v4') | to_json }}
+COMMENT={{ cloudflare_ddns_comment | default('Managed by cc-ansible Cloudflare DDNS') | to_json }}
+IP_URL={{ cloudflare_ddns_ip_url | default('https://api.ipify.org') | to_json }}
+PROXIED={{ cloudflare_ddns_proxied | default(false) | bool | ternary('true', 'false') }}
+RECORD={{ cloudflare_ddns_record | to_json }}
+STATE_DIR={{ cloudflare_ddns_state_dir | default('/var/lib/cloudflare-ddns') | to_json }}
+STATE_FILE="${STATE_DIR}/{{ cloudflare_ddns_name }}.last-ip"
+TIMEOUT={{ cloudflare_ddns_curl_timeout | default(20) | int }}
+TOKEN_VAR={{ cloudflare_ddns_token_variable_effective | default(cloudflare_ddns_token_variable | default('CLOUDFLARE_DDNS_API_TOKEN')) | to_json }}
+TTL={{ cloudflare_ddns_ttl | default(120) | int }}
+ZONE={{ cloudflare_ddns_zone | to_json }}
+
+curl_common=(
+  curl
+  -sS
+  --retry 2
+  --retry-delay 2
+  --connect-timeout 10
+  --max-time "${TIMEOUT}"
+)
+
+log() {
+  printf '%s\n' "$*"
+}
+
+die() {
+  printf 'ERROR: %s\n' "$*" >&2
+  exit 1
+}
+
+validate_public_ipv4() {
+  local ip="$1"
+  local a b c d octet
+
+  [[ "$ip" =~ ^[0-9]+(\.[0-9]+){3}$ ]] || return 1
+  IFS=. read -r a b c d <<<"$ip"
+
+  for octet in "$a" "$b" "$c" "$d"; do
+    [[ "$octet" =~ ^[0-9]+$ ]] || return 1
+    (( octet >= 0 && octet <= 255 )) || return 1
+  done
+
+  (( a == 0 || a == 10 || a == 127 || a >= 224 )) && return 1
+  (( a == 100 && b >= 64 && b <= 127 )) && return 1
+  (( a == 169 && b == 254 )) && return 1
+  (( a == 172 && b >= 16 && b <= 31 )) && return 1
+  (( a == 192 && b == 168 )) && return 1
+  (( a == 198 && (b == 18 || b == 19) )) && return 1
+
+  return 0
+}
+
+require_success() {
+  local response="$1"
+  local context="$2"
+
+  if ! jq -e '.success == true' >/dev/null <<<"$response"; then
+    local detail
+    detail=$(jq -c '{errors: .errors, messages: .messages}' <<<"$response" 2>/dev/null || printf '%s' "$response")
+    die "Cloudflare ${context} failed: ${detail}"
+  fi
+}
+
+cf_get() {
+  local path="$1"
+  shift
+
+  "${curl_common[@]}" \
+    -G \
+    -H "Authorization: Bearer ${CLOUDFLARE_TOKEN}" \
+    -H "Content-Type: application/json" \
+    "$@" \
+    "${API_BASE}${path}"
+}
+
+cf_send_json() {
+  local method="$1"
+  local path="$2"
+  local body="$3"
+
+  "${curl_common[@]}" \
+    -X "$method" \
+    -H "Authorization: Bearer ${CLOUDFLARE_TOKEN}" \
+    -H "Content-Type: application/json" \
+    --data "$body" \
+    "${API_BASE}${path}"
+}
+
+CLOUDFLARE_TOKEN="${!TOKEN_VAR:-}"
+[[ -n "$CLOUDFLARE_TOKEN" ]] || die "Missing ${TOKEN_VAR} in the service environment"
+
+current_ip=$("${curl_common[@]}" "$IP_URL" | tr -d '[:space:]')
+validate_public_ipv4 "$current_ip" || die "Refusing to publish invalid or non-public IPv4 address: ${current_ip}"
+
+mkdir -p "$STATE_DIR"
+
+zone_response=$(cf_get "/zones" --data-urlencode "name=${ZONE}" --data-urlencode "status=active")
+require_success "$zone_response" "zone lookup"
+
+zone_count=$(jq '.result | length' <<<"$zone_response")
+(( zone_count == 1 )) || die "Expected exactly one active Cloudflare zone for ${ZONE}, found ${zone_count}"
+zone_id=$(jq -r '.result[0].id' <<<"$zone_response")
+
+records_response=$(cf_get "/zones/${zone_id}/dns_records" --data-urlencode "type=A" --data-urlencode "name=${RECORD}")
+require_success "$records_response" "record lookup"
+
+record_count=$(jq '.result | length' <<<"$records_response")
+(( record_count <= 1 )) || die "Refusing to update ${RECORD}: found ${record_count} matching A records"
+
+body=$(jq -n \
+  --arg type "A" \
+  --arg name "$RECORD" \
+  --arg content "$current_ip" \
+  --arg comment "$COMMENT" \
+  --argjson ttl "$TTL" \
+  --argjson proxied "$PROXIED" \
+  '{type: $type, name: $name, content: $content, ttl: $ttl, proxied: $proxied, comment: $comment}')
+
+if (( record_count == 0 )); then
+  update_response=$(cf_send_json "POST" "/zones/${zone_id}/dns_records" "$body")
+  require_success "$update_response" "record create"
+  printf '%s\n' "$current_ip" >"$STATE_FILE"
+  chmod 0644 "$STATE_FILE"
+  log "Created ${RECORD} -> ${current_ip}"
+  exit 0
+fi
+
+record_id=$(jq -r '.result[0].id' <<<"$records_response")
+record_content=$(jq -r '.result[0].content // ""' <<<"$records_response")
+record_ttl=$(jq -r '.result[0].ttl // ""' <<<"$records_response")
+record_proxied=$(jq -r '.result[0].proxied // false' <<<"$records_response")
+record_comment=$(jq -r '.result[0].comment // ""' <<<"$records_response")
+
+if [[ "$record_content" == "$current_ip" \
+  && "$record_ttl" == "$TTL" \
+  && "$record_proxied" == "$PROXIED" \
+  && "$record_comment" == "$COMMENT" ]]; then
+  printf '%s\n' "$current_ip" >"$STATE_FILE"
+  chmod 0644 "$STATE_FILE"
+  log "${RECORD} already points to ${current_ip}"
+  exit 0
+fi
+
+update_response=$(cf_send_json "PUT" "/zones/${zone_id}/dns_records/${record_id}" "$body")
+require_success "$update_response" "record update"
+printf '%s\n' "$current_ip" >"$STATE_FILE"
+chmod 0644 "$STATE_FILE"
+log "Updated ${RECORD}: ${record_content:-unset} -> ${current_ip}"

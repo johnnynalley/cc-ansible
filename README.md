@@ -253,6 +253,8 @@ Packages are merged from multiple sources (all applicable variables combined):
 | `unattended-upgrades.yml` | `debian_hosts` | Daily security patches (incl. workstations, Proxmox blacklist) |
 | `network-recovery.yml` | `linux_hosts` | Network watchdog for auto-recovery after outages |
 | `wifi.yml` | `linux_hosts` | WiFi powersave disable, optional PCI FLR or module reload resume fix |
+| `cloudflare-ddns.yml` | `cloudflare_ddns_hosts` | DNS-only Cloudflare DDNS records for fixed external endpoints with dynamic WAN IPs |
+| `tailscale-peer-relay-endpoint.yml` | `tailscale_peer_relay_endpoint_hosts` | Sync Tailscale peer-relay static endpoints to the current WAN IP |
 | `windows-signalrgb.yml` | `windows_hosts` | SignalRGB logon/lock/unlock lighting automation on lj-gaming-pc |
 | `windows-gaming-tuning.yml` | `windows_hosts` | Low-latency Realtek NIC tuning for the Windows gaming PC |
 | `windows-windows-performance-mode.yml` | `windows_hosts` | Windows performance mode triggers for competitive games and OBS streaming/recording |
@@ -745,6 +747,7 @@ docker-vm (VM 110 on pve-m70q) runs infrastructure services:
 | Proxmox Datacenter Manager | `pdm.jnalley.me` | PDM web UI via Caddy |
 | Dispatcharr | `iptv.jnalley.me` | HDHomeRun emulator for Plex Live TV (disabled — free streams unreliable) |
 | OpenClaw | `openclaw.jnalley.me` | AI agent gateway (proxied to openclaw-vm:18789) |
+| Mercury Tailscale peer relay | `mercury-relay.jnalley.me` | DNS-only A record for Mercury UDP 40000 relay endpoint; updated by `cloudflare-ddns.yml` on docker-vm |
 | ~~Uptime Kuma~~ | ~~`status.jnalley.me`~~ | Disabled 2026-04-13 (unused); compose preserved at `/opt/uptime-kuma/` |
 | ~~Homepage~~ | ~~`home.jnalley.me`~~ | Disabled 2026-04-13 (unused); compose preserved at `/opt/homepage/` |
 | ~~Gitea~~ | ~~`git.jnalley.me`~~ | Disabled 2026-04-13 (unused); compose preserved at `/opt/gitea/` |
@@ -752,6 +755,21 @@ docker-vm (VM 110 on pve-m70q) runs infrastructure services:
 Stacks support `start: true/false` in `docker.yml` to control service state.
 
 Caddy is now Ansible-managed. Edit `templates/docker/Caddyfile.j2` for routes, `templates/docker/caddy.yml` for compose, and `templates/docker/caddy.Dockerfile` for the Cloudflare DNS build. Apply with `ansible-playbook playbooks/docker/docker-stacks.yml --tags caddy`. The live files under `/opt/caddy/` are generated except `.env`, which stays live because it contains the Cloudflare API token. Emergency live edits should be backported to the templates or they will be overwritten.
+
+## Cloudflare DDNS
+
+`playbooks/network/cloudflare-ddns.yml` deploys DNS-only Cloudflare updater
+timers on `cloudflare_ddns_hosts`. docker-vm owns
+`mercury-relay.jnalley.me`, the public endpoint name for Mercury's Tailscale
+peer relay on UDP 40000. The updater requires a dedicated token in
+`/etc/default/cloudflare-ddns-mercury-relay` or
+`vault_cloudflare_ddns_mercury_relay_api_token`; it does not reuse
+`/opt/caddy/.env`.
+
+Tailscale peer-relay static endpoints require literal `IP:port` values, not
+hostnames. `playbooks/network/tailscale-peer-relay-endpoint.yml` runs on
+Mercury to keep `RelayServerStaticEndpoints` synced to the current WAN IP on
+UDP 40000.
 
 ## Cloudflare Tunnel
 

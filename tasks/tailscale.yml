@@ -195,6 +195,18 @@
 
 - name: Normalize Tailscale peer relay preferences
   ansible.builtin.set_fact:
+    tailscale_peer_relay_static_endpoints_managed: >-
+      {{
+        tailscale_manage_peer_relay_static_endpoints
+        | default(
+            not (
+              tailscale_peer_relay_static_endpoints_dynamic
+              | default(false)
+              | bool
+            )
+          )
+        | bool
+      }}
     tailscale_peer_relay_port_desired: >-
       {{
         (tailscale_peer_relay_port | string)
@@ -481,9 +493,14 @@
   ansible.builtin.command: >-
     tailscale set
     --relay-server-port={{ tailscale_peer_relay_port_desired | quote }}
+    {% if
+      tailscale_peer_relay_static_endpoints_managed
+      or not (tailscale_peer_relay_enabled | default(false) | bool)
+    %}
     --relay-server-static-endpoints={{
       tailscale_peer_relay_static_endpoints_desired | quote
     }}
+    {% endif %}
   register: tailscale_peer_relay_set
   changed_when: true
   when:
@@ -500,8 +517,14 @@
         tailscale_peer_relay_port_current.stdout | default('')
       ) != tailscale_peer_relay_port_desired
       or (
-        tailscale_peer_relay_static_endpoints_current.stdout | default('')
-      ) != tailscale_peer_relay_static_endpoints_desired
+        (
+          tailscale_peer_relay_static_endpoints_managed
+          or not (tailscale_peer_relay_enabled | default(false) | bool)
+        )
+        and (
+          tailscale_peer_relay_static_endpoints_current.stdout | default('')
+        ) != tailscale_peer_relay_static_endpoints_desired
+      )
 
 - name: Check Tailscale hostname preference
   ansible.builtin.shell: |

@@ -26,6 +26,8 @@ settings into a broad catch-all file when a concern-specific file exists.
 - `nas_server`: portable NAS role owner for storage services.
 - `docker_hosts`: hosts that receive Docker Compose stacks.
 - `gluetun_hosts`: hosts with Gluetun/qBittorrent VPN automation.
+- `cloudflare_ddns_hosts`: hosts that run Cloudflare DNS-only DDNS timers.
+- `tailscale_peer_relay_endpoint_hosts`: hosts that sync peer-relay endpoints.
 - `backup_clients`: hosts with restic or local-restic backup policy.
 - `retired_hosts`: retained records excluded from normal convergence.
 
@@ -34,6 +36,8 @@ settings into a broad catch-all file when a concern-specific file exists.
 | Concern | Inventory owner | Related playbooks | Related sources |
 | --- | --- | --- | --- |
 | Docker stacks | `host_vars/<host>/docker.yml`, `group_vars/docker_hosts/` | `playbooks/docker/docker-stacks.yml`, `playbooks/docker/docker-auto-update.yml` | `templates/docker/`, `scripts/docker/` |
+| Cloudflare DDNS | `host_vars/<host>/cloudflare-ddns.yml`, `cloudflare_ddns_hosts` | `playbooks/network/cloudflare-ddns.yml` | `templates/network/` |
+| Tailscale peer relay endpoint sync | `host_vars/<host>/tailscale.yml`, `tailscale_peer_relay_endpoint_hosts` | `playbooks/network/tailscale-peer-relay-endpoint.yml` | `templates/network/` |
 | Backups | `group_vars/backup_clients/`, `host_vars/<host>/backup.yml` | `playbooks/backup-sync/restic.yml`, `playbooks/backup-sync/local-restic.yml` | `templates/storage/` |
 | Proxmox firewall | `group_vars/proxmox_nodes/firewall.yml`, `host_vars/<node>/firewall.yml` | `playbooks/proxmox/proxmox-firewall.yml`, `playbooks/proxmox/proxmox-router-firewall.yml` | `templates/proxmox/` |
 | VirtioFS | `host_vars/<proxmox-node>/virtiofs.yml`, `host_vars/<vm>/virtiofs.yml` | `playbooks/storage/virtiofs.yml` | `templates/proxmox/` |

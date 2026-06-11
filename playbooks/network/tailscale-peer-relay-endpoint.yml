@@ -1,0 +1,186 @@
+---
+# =============================================================================
+# Tailscale peer relay endpoint sync
+# =============================================================================
+# Purpose: Keep peer-relay static endpoints synced to the current WAN IP.
+# Hosts: tailscale_peer_relay_endpoint_hosts
+# Key vars: tailscale_peer_relay_endpoint_*, tailscale_peer_relay_*
+# Templates: templates/network/tailscale-peer-relay-endpoint-sync.sh.j2
+# Validation:
+#   ansible-playbook playbooks/network/tailscale-peer-relay-endpoint.yml \
+#     --syntax-check
+# =============================================================================
+
+- name: Configure Tailscale peer relay endpoint sync
+  hosts: tailscale_peer_relay_endpoint_hosts
+  become: true
+  gather_facts: true
+
+  tasks:
+    - name: Skip hosts without peer relay endpoint sync opt-in
+      ansible.builtin.debug:
+        msg: "Tailscale peer relay endpoint sync is not enabled for this host."
+      when: >-
+        not (
+          tailscale_peer_relay_endpoint_sync_enabled | default(false) | bool
+        )
+
+    - name: Configure opted-in peer relay endpoint sync
+      when: tailscale_peer_relay_endpoint_sync_enabled | default(false) | bool
+      block:
+        - name: Validate peer relay endpoint sync settings
+          ansible.builtin.assert:
+            that:
+              - ansible_facts.os_family == "Debian"
+              - tailscale_peer_relay_enabled | default(false) | bool
+              - tailscale_peer_relay_port is defined
+              - >-
+                (
+                  tailscale_peer_relay_port
+                  | string
+                  | regex_search('^[0-9]+$')
+                ) is not none
+              - tailscale_peer_relay_port | int > 0
+              - tailscale_peer_relay_port | int <= 65535
+            fail_msg: >-
+              Peer relay endpoint sync requires a Debian-family host with
+              tailscale_peer_relay_enabled=true and a valid
+              tailscale_peer_relay_port.
+
+        - name: Define peer relay endpoint sync paths
+          ansible.builtin.set_fact:
+            tailscale_peer_relay_endpoint_unit_name: >-
+              tailscale-peer-relay-endpoint
+            tailscale_peer_relay_endpoint_script_path: >-
+              /usr/local/sbin/tailscale-peer-relay-endpoint-sync
+            tailscale_peer_relay_endpoint_state_dir: >-
+              {{ tailscale_peer_relay_endpoint_state_dir
+                 | default('/var/lib/tailscale-peer-relay-endpoint') }}
+            tailscale_peer_relay_endpoint_service_path: >-
+              /etc/systemd/system/tailscale-peer-relay-endpoint.service
+            tailscale_peer_relay_endpoint_timer_path: >-
+              /etc/systemd/system/tailscale-peer-relay-endpoint.timer
+            tailscale_peer_relay_endpoint_boot_sec_effective: >-
+              {{ tailscale_peer_relay_endpoint_on_boot_sec
+                 | default('3min') }}
+            peer_relay_endpoint_interval: >-
+              {{ tailscale_peer_relay_endpoint_on_unit_active_sec
+                 | default('10min') }}
+            peer_relay_endpoint_jitter: >-
+              {{ tailscale_peer_relay_endpoint_randomized_delay_sec
+                 | default('60s') }}
+            peer_relay_endpoint_timer_enabled: >-
+              {{
+                tailscale_peer_relay_endpoint_timer_enabled
+                | default(true)
+                | bool
+              }}
+
+        - name: Ensure peer relay endpoint packages are installed
+          ansible.builtin.apt:
+            name:
+              - ca-certificates
+              - curl
+              - jq
+            state: present
+            update_cache: true
+
+        - name: Ensure peer relay endpoint state directory exists
+          ansible.builtin.file:
+            path: "{{ tailscale_peer_relay_endpoint_state_dir }}"
+            state: directory
+            owner: root
+            group: root
+            mode: "0755"
+
+        - name: Deploy peer relay endpoint sync script
+          ansible.builtin.template:
+            src: >-
+              {{ ansible_config_file | dirname
+              }}/templates/network/tailscale-peer-relay-endpoint-sync.sh.j2
+            dest: "{{ tailscale_peer_relay_endpoint_script_path }}"
+            owner: root
+            group: root
+            mode: "0755"
+
+        - name: Deploy peer relay endpoint sync service
+          ansible.builtin.copy:
+            dest: "{{ tailscale_peer_relay_endpoint_service_path }}"
+            owner: root
+            group: root
+            mode: "0644"
+            content: |
+              [Unit]
+              Description=Tailscale peer relay endpoint sync
+              Wants=network-online.target tailscaled.service
+              After=network-online.target tailscaled.service
+
+              [Service]
+              Type=oneshot
+              ExecStart={{ tailscale_peer_relay_endpoint_script_path }}
+              NoNewPrivileges=true
+              PrivateDevices=true
+              PrivateTmp=true
+              ProtectClock=true
+              ProtectControlGroups=true
+              ProtectHome=true
+              ProtectHostname=true
+              ProtectKernelLogs=true
+              ProtectKernelModules=true
+              ProtectKernelTunables=true
+              ProtectSystem=strict
+              ReadWritePaths={{ tailscale_peer_relay_endpoint_state_dir }}
+              RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+              StateDirectory=tailscale-peer-relay-endpoint
+              SystemCallArchitectures=native
+          register: tailscale_peer_relay_endpoint_service_unit
+
+        - name: Deploy peer relay endpoint sync timer
+          ansible.builtin.copy:
+            dest: "{{ tailscale_peer_relay_endpoint_timer_path }}"
+            owner: root
+            group: root
+            mode: "0644"
+            content: |
+              [Unit]
+              Description=Tailscale peer relay endpoint sync timer
+
+              [Timer]
+              OnBootSec={{ tailscale_peer_relay_endpoint_boot_sec_effective }}
+              OnUnitActiveSec={{ peer_relay_endpoint_interval }}
+              RandomizedDelaySec={{ peer_relay_endpoint_jitter }}
+              Persistent=true
+              Unit={{ tailscale_peer_relay_endpoint_unit_name }}.service
+
+              [Install]
+              WantedBy=timers.target
+          register: tailscale_peer_relay_endpoint_timer_unit
+
+        - name: Reload systemd for peer relay endpoint units
+          ansible.builtin.systemd:
+            daemon_reload: true
+          when:
+            - not ansible_check_mode
+            - >-
+              tailscale_peer_relay_endpoint_service_unit.changed
+              or tailscale_peer_relay_endpoint_timer_unit.changed
+
+        - name: Configure peer relay endpoint timer state
+          ansible.builtin.systemd:
+            name: "{{ tailscale_peer_relay_endpoint_unit_name }}.timer"
+            enabled: "{{ peer_relay_endpoint_timer_enabled }}"
+            state: >-
+              {{
+                peer_relay_endpoint_timer_enabled
+                | ternary('started', 'stopped')
+              }}
+          when: not ansible_check_mode
+
+        - name: Run peer relay endpoint sync once after deploy
+          ansible.builtin.systemd:
+            name: "{{ tailscale_peer_relay_endpoint_unit_name }}.service"
+            state: started
+          when:
+            - not ansible_check_mode
+            - tailscale_peer_relay_endpoint_run_on_deploy | default(true) | bool
+            - tailscale_peer_relay_endpoint_timer_enabled | default(true) | bool

@@ -1,0 +1,82 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+IP_URL={{ tailscale_peer_relay_endpoint_ip_url | default('https://api.ipify.org') | to_json }}
+PORT={{ tailscale_peer_relay_port | int }}
+STATE_DIR={{ tailscale_peer_relay_endpoint_state_dir | default('/var/lib/tailscale-peer-relay-endpoint') | to_json }}
+STATE_FILE="${STATE_DIR}/last-endpoint"
+TIMEOUT={{ tailscale_peer_relay_endpoint_curl_timeout | default(20) | int }}
+
+curl_common=(
+  curl
+  -fsS
+  --retry 2
+  --retry-delay 2
+  --connect-timeout 10
+  --max-time "${TIMEOUT}"
+)
+
+log() {
+  printf '%s\n' "$*"
+}
+
+die() {
+  printf 'ERROR: %s\n' "$*" >&2
+  exit 1
+}
+
+validate_public_ipv4() {
+  local ip="$1"
+  local a b c d octet
+
+  [[ "$ip" =~ ^[0-9]+(\.[0-9]+){3}$ ]] || return 1
+  IFS=. read -r a b c d <<<"$ip"
+
+  for octet in "$a" "$b" "$c" "$d"; do
+    [[ "$octet" =~ ^[0-9]+$ ]] || return 1
+    (( octet >= 0 && octet <= 255 )) || return 1
+  done
+
+  (( a == 0 || a == 10 || a == 127 || a >= 224 )) && return 1
+  (( a == 100 && b >= 64 && b <= 127 )) && return 1
+  (( a == 169 && b == 254 )) && return 1
+  (( a == 172 && b >= 16 && b <= 31 )) && return 1
+  (( a == 192 && b == 168 )) && return 1
+  (( a == 198 && (b == 18 || b == 19) )) && return 1
+
+  return 0
+}
+
+current_ip=$("${curl_common[@]}" "$IP_URL" | tr -d '[:space:]')
+validate_public_ipv4 "$current_ip" || die "Invalid public IPv4: ${current_ip}"
+
+desired_endpoint="${current_ip}:${PORT}"
+
+prefs=$(tailscale debug prefs)
+current_port=$(jq -r '.RelayServerPort // ""' <<<"$prefs")
+current_endpoints=$(
+  jq -r '
+    (.RelayServerStaticEndpoints // [])
+    | if type == "string" then split(",") else . end
+    | map(select(. != ""))
+    | sort
+    | join(",")
+  ' <<<"$prefs"
+)
+
+mkdir -p "$STATE_DIR"
+
+if [[ "$current_port" == "$PORT" && "$current_endpoints" == "$desired_endpoint" ]]; then
+  printf '%s\n' "$desired_endpoint" >"$STATE_FILE"
+  chmod 0644 "$STATE_FILE"
+  log "Peer relay endpoint already set to ${desired_endpoint}"
+  exit 0
+fi
+
+tailscale set \
+  --relay-server-port="${PORT}" \
+  --relay-server-static-endpoints="${desired_endpoint}"
+
+printf '%s\n' "$desired_endpoint" >"$STATE_FILE"
+chmod 0644 "$STATE_FILE"
+log "Updated peer relay endpoint to ${desired_endpoint}"

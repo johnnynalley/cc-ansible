@@ -1,0 +1,25 @@
+---
+# Cloudflare DDNS updater for Mercury's Tailscale peer-relay endpoint.
+#
+# Store the dedicated token in inventory/host_vars/docker-vm/vault.yml as
+# vault_cloudflare_ddns_mercury_relay_api_token, or create the live env file
+# manually at cloudflare_ddns_env_file. The token only needs Cloudflare zone
+# read plus DNS edit for jnalley.me.
+
+cloudflare_ddns_enabled: true
+cloudflare_ddns_name: mercury-relay
+cloudflare_ddns_zone: jnalley.me
+cloudflare_ddns_record: mercury-relay.jnalley.me
+cloudflare_ddns_comment: >-
+  Managed by cc-ansible for Mercury Tailscale peer relay
+cloudflare_ddns_env_file: /etc/default/cloudflare-ddns-mercury-relay
+cloudflare_ddns_token_variable: CLOUDFLARE_DDNS_API_TOKEN
+cloudflare_ddns_api_token: >-
+  {{ vault_cloudflare_ddns_mercury_relay_api_token | default('') }}
+cloudflare_ddns_ttl: 120
+cloudflare_ddns_proxied: false
+cloudflare_ddns_timer_enabled: true
+cloudflare_ddns_on_boot_sec: 2min
+cloudflare_ddns_on_unit_active_sec: 10min
+cloudflare_ddns_randomized_delay_sec: 60s
+cloudflare_ddns_run_on_deploy: true

@@ -14,4 +14,15 @@ tailscale_snat_subnet_routes: true
 tailscale_manage_peer_relay: true
 tailscale_peer_relay_enabled: true
 tailscale_peer_relay_port: "40000"
+tailscale_peer_relay_static_endpoints_dynamic: true
 tailscale_peer_relay_static_endpoints: []
+
+# Tailscale requires peer-relay static endpoints as literal IP:port values, not
+# hostnames. This timer keeps Mercury set to the current WAN IP on UDP 40000.
+tailscale_peer_relay_endpoint_sync_enabled: true
+tailscale_peer_relay_endpoint_timer_enabled: true
+tailscale_peer_relay_endpoint_ip_url: https://api.ipify.org
+tailscale_peer_relay_endpoint_on_boot_sec: 3min
+tailscale_peer_relay_endpoint_on_unit_active_sec: 10min
+tailscale_peer_relay_endpoint_randomized_delay_sec: 60s
+tailscale_peer_relay_endpoint_run_on_deploy: true

@@ -65,6 +65,14 @@
   ansible.builtin.import_playbook: playbooks/network/wifi.yml
   tags: [wifi]
 
+- name: Configure Cloudflare DNS-only DDNS
+  ansible.builtin.import_playbook: playbooks/network/cloudflare-ddns.yml
+  tags: [cloudflare-ddns, ddns, network]
+
+- name: Configure Tailscale peer relay endpoint sync
+  ansible.builtin.import_playbook: playbooks/network/tailscale-peer-relay-endpoint.yml
+  tags: [tailscale, peer-relay, network]
+
 - name: Configure power management
   ansible.builtin.import_playbook: playbooks/core/power-management.yml
   tags: [power]

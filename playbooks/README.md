@@ -18,7 +18,7 @@ shown here.
 ## Domains
 
 - `core/`: Base OS and controller hygiene.
-- `network/`: Network recovery and adapter tuning.
+- `network/`: Network recovery, adapter tuning, and DNS endpoint automation.
 - `storage/`: NAS, mounts, shares, ZFS, MergerFS, VirtioFS.
 - `docker/`: Docker Compose stacks and container maintenance.
 - `media/`: Plex, streaming, media maintenance, release-policy automation.
@@ -51,13 +51,15 @@ Owner area: Base OS and controller hygiene.
 
 ### network
 
-Owner area: Network recovery and adapter tuning.
+Owner area: Network recovery, adapter tuning, and DNS endpoint automation.
 
 | Playbook | Hosts | Purpose | Main vars/sources | Safe validation |
 | --- | --- | --- | --- | --- |
-| `playbooks/network/e1000e-tuning.yml` | `proxmox_nodes` | Tune e1000e NICs (disable EEE/TSO). | network_recovery_*, netplan_*, wifi_*, e1000e_*; templates/network; none by default. | `ansible-playbook playbooks/network/e1000e-tuning.yml --syntax-check` |
-| `playbooks/network/network-recovery.yml` | `linux_hosts:!workstations` | Configure network recovery. | network_recovery_*, netplan_*, wifi_*, e1000e_*; templates/network; none by default. | `ansible-playbook playbooks/network/network-recovery.yml --syntax-check` |
-| `playbooks/network/wifi.yml` | `linux_hosts` | Configure WiFi power management. | network_recovery_*, netplan_*, wifi_*, e1000e_*; templates/network; none by default. | `ansible-playbook playbooks/network/wifi.yml --syntax-check` |
+| `playbooks/network/cloudflare-ddns.yml` | `cloudflare_ddns_hosts` | Configure DNS-only Cloudflare DDNS updater timers. | cloudflare_ddns_*; templates/network/cloudflare-ddns-update.sh.j2. | `ansible-playbook playbooks/network/cloudflare-ddns.yml --syntax-check` |
+| `playbooks/network/e1000e-tuning.yml` | `proxmox_nodes` | Tune e1000e NICs (disable EEE/TSO). | e1000e_*; templates/network. | `ansible-playbook playbooks/network/e1000e-tuning.yml --syntax-check` |
+| `playbooks/network/network-recovery.yml` | `linux_hosts:!workstations` | Configure network recovery. | network_recovery_*, netplan_*; templates/network. | `ansible-playbook playbooks/network/network-recovery.yml --syntax-check` |
+| `playbooks/network/tailscale-peer-relay-endpoint.yml` | `tailscale_peer_relay_endpoint_hosts` | Keep peer-relay static endpoints synced to current WAN IPs. | tailscale_peer_relay_endpoint_*, tailscale_peer_relay_*; templates/network/tailscale-peer-relay-endpoint-sync.sh.j2. | `ansible-playbook playbooks/network/tailscale-peer-relay-endpoint.yml --syntax-check` |
+| `playbooks/network/wifi.yml` | `linux_hosts` | Configure WiFi power management. | wifi_*; templates/network. | `ansible-playbook playbooks/network/wifi.yml --syntax-check` |
 
 ### storage
 
