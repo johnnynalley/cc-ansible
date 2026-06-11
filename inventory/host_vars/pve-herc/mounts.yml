@@ -11,8 +11,12 @@ filesystem_mounts:
     opts: "defaults,nofail,prjquota"
     reserved_blocks_percentage: 0
     project_quotas:
-      # Keep PBS from consuming Time Machine's 500G Samba-advertised share.
+      # Keep PBS from consuming Time Machine's share.
       # setquota uses 1 KiB blocks: 390 GiB = 390 * 1024 * 1024.
+      # 2026-06 incident bridge: PBS has deleted VM100 chunks pending GC safety
+      # cleanup. Keep the 390 GiB soft target, but allow a temporary 520 GiB
+      # hard ceiling so backups can continue until pending-bytes returns to 0.
       - path: /srv/pbs-data/.chunks
         project_id: 2001
-        block_hard_limit: 408944640
+        block_soft_limit: 408944640
+        block_hard_limit: 545259520

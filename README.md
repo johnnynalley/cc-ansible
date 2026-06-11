@@ -960,7 +960,7 @@ PBS runs in an unprivileged LXC (CT 105) on pve-herc with a dedicated 1TB ext4 d
 - **Backup schedule**: Every 6 hours, all guests except `100,103,104,105,142` (Ansible-managed via Play 3)
 - **Prune job**: Daily — 6 hourly, 3 daily, 2 weekly, 1 monthly
 - **Garbage collection**: Daily (frees space from pruned snapshots — **required**, prune alone doesn't free disk)
-- **Capacity split**: The shared ext4 volume uses `prjquota`; PBS chunks are capped at 390 GiB and Time Machine is advertised to macOS as 500G via Samba.
+- **Capacity split**: The shared ext4 volume uses `prjquota`; PBS chunks have a 390 GiB soft target with a temporary 520 GiB hard ceiling while deleted VM100 chunks age out of PBS garbage collection, and Time Machine is temporarily advertised to macOS as 400G via Samba. Restore the normal 390 GiB PBS hard cap and 500G Time Machine cap after PBS `pending-bytes` returns to 0.
 - **API auth**: Token `backup@pbs!ansible` (secret in vault)
 - **Connectivity check**: Runs at `:59` on all nodes (Play 4), logs to `pbs-check` tag in Loki
 - **Config**: `host_vars/pbs-lxc/vars.yml`, `host_vars/pbs-lxc/vault.yml`
