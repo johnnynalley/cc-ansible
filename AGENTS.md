@@ -46,6 +46,8 @@ This is an immediate trigger, not just a scheduled audit. If the need is discove
 
 When self-updating `AGENTS.md` or another shared file, still follow the shared-file rules: inspect existing dirt, isolate unrelated hunks, validate the scoped change, check for secrets, and stage/commit only the approved hunk when committing is required. Scheduled audits can catch missed drift, but they do not replace instant self-maintenance at the moment the gap is found.
 
+When working on Astra/OpenClaw behavior, Codex's role is to teach Astra how to reason and maintain itself, not to replace Astra's judgment with brittle hardcoded wrappers. Prefer updating Astra's heartbeat, skills, operating docs, memory, and approval rules so Astra performs the diagnosis, classification, backup, safe fix, approval request, and follow-up notification itself. Create or modify scripts only when the script is a justified tool for Astra to use repeatedly and safely, not as the default answer to a missing behavior. If a user correction reveals this rule was missed, persist the correction to `AGENTS.md` and Codex memory immediately.
+
 ### Session Naming
 
 When the user asks Codex to name a session, consider the full context of the session before proposing a title. Use a natural-language title that describes what the session was really about; do not force lowercase slugs or replace spaces with hyphens unless the user explicitly asks for a filename-safe form.
@@ -761,6 +763,8 @@ OpenClaw AI agent platform (Node.js gateway daemon). Provides a web UI and Disco
 - **Gateway service**: Managed by OpenClaw itself via `openclaw gateway install` (user-level systemd unit)
 - **Config**: `~/.openclaw/openclaw.json` and `~/.openclaw/.env` — created manually, backed up by restic (NOT templated by Ansible)
 - **Astra heartbeat**: The active heartbeat prompt is `/home/johnny/.openclaw/workspace/HEARTBEAT.md` on the OpenClaw host. Treat it as live OpenClaw workspace content that Astra may edit; update it directly when changing heartbeat behavior and document the expectation in this repo. Do not create an OpenClaw cron when the right primitive is the heartbeat file. Heartbeat procedure details, including stream relay and Plex appliance verified-corruption checks, live in `docs/openclaw-heartbeats.md`.
+
+**Astra autonomy contract**: For Astra improvements, teach the agent how to think and when to use its tools. Durable changes should usually land in `HEARTBEAT.md`, OpenClaw skills, references, memory, and logs-channel reporting rules so Astra can notice problems, decide whether it can safely fix them, back up first, act on safe reversible cases, and ask Johnny for approval on risky cases. Do not default to creating separate helper scripts or cron-specific doctors unless Astra's own workflow needs that tool for repeated safe execution.
 - **Linting tools**: `ansible-lint`, `yamllint` in venv at `/opt/openclaw-venv/`
 - **PATH safety**: Do not prepend `/opt/openclaw-venv/bin` to the controller login PATH. That venv can shadow system Ansible with newer `ansible-core`; under the Codex sandbox, Ansible 2.21's local RPC manager fails before any host task runs. Keep system `/usr/bin/ansible` as the default controller Ansible and append the lint venv only as a fallback for lint tools.
 - **Timers**: repo-sync (git pull every 5 min), update-check (daily at 08:00 with Apprise notification)
