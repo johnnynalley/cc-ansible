@@ -489,9 +489,18 @@ qBittorrent uses `network_mode: "service:gluetun"`, so all traffic goes through 
    - Reads Gluetun's port from file
    - Connects to qBittorrent API (with retries)
    - If API unreachable (Gluetun restart broke qBittorrent's network), restarts qBittorrent via docker compose
+   - Before any qBittorrent recreate, verifies the required NFS bind paths from
+     `qbit_port_sync_required_paths`; stale `/srv/archive` or `/srv/media/plex`
+     must block the recreate instead of stranding qBittorrent in `created`
    - Updates listening port via API so qBittorrent saves it correctly
 
 **2026-05-22 repair note**: `qbit-port-sync.path` is enabled on docker-vm. qBittorrent 5.2.0 returns HTTP 204 on successful API login, so the local script must treat either the legacy `Ok.` body or HTTP 204 as success. If qBittorrent shows `Recv failure: Connection reset by peer` on port 8085 after a restart, check `/opt/media-stack/qbittorrent/qBittorrent/lockfile`; moving that stale lockfile aside and recreating qBittorrent recovered the service during the 2026-05-22 incident. The port-sync script's recreate path now stops qBittorrent, moves a stale lockfile aside, and starts qBittorrent again instead of using a plain restart.
+**2026-06-11 repair note**: qBittorrent was stranded in Docker `created`
+state after Gluetun auto-update because docker-vm's `/srv/archive` NFS/autofs
+mount was stale. `docker-auto-update`, `gluetun-watchdog`, and
+`qbit-port-sync` now preflight required bind paths before recreating Gluetun or
+qBittorrent. If those paths are stale, fix the docker-vm mount state first,
+then recreate affected media-stack containers so their bind namespaces refresh.
 
 #### Docker Auto-Update
 
@@ -512,7 +521,7 @@ docker_stacks:
 
 **Currently auto-updated**: Caddy, Seerr, Loki-Grafana, and Gluetun (docker-vm), LazyLibrarian (media-vm), Diun (all 3 VMs). Change by editing `docker.yml` and re-running the playbook.
 
-**How it works**: The script (`/usr/local/sbin/docker-auto-update`) is templated by Ansible with the auto-update stack list baked in. For each stack, it pulls/builds, runs `docker-stack-diff` to detect changes, and only recreates if images actually changed. Gluetun uses `--force-recreate` with dependent containers (qBittorrent) to clear the network namespace. Sends `push-quiet` Apprise notification summarizing updates. Timer runs at :30 past 00/06/12/18 with 30m random delay.
+**How it works**: The script (`/usr/local/sbin/docker-auto-update`) is templated by Ansible with the auto-update stack list baked in. For each stack, it pulls/builds, runs `docker-stack-diff` to detect changes, and only recreates if images actually changed. Gluetun uses `--force-recreate` with dependent containers (qBittorrent) to clear the network namespace. Stacks can define `auto_update_required_paths`; these are checked before compose recreates so stale NFS/autofs bind paths fail early instead of leaving containers half-created. Sends `push-quiet` Apprise notification summarizing updates. Timer runs at :30 past 00/06/12/18 with 30m random delay.
 
 **Major version guard**: `docker-stack-diff --check-major` compares the `org.opencontainers.image.version` label on running vs pulled images. If the first numeric component differs (e.g., `7.x` → `8.x`), the update is blocked and a Time Sensitive Pushover notification is sent instead. The pulled image stays local for manual update when ready. A state file (`/var/lib/docker-auto-update/`) prevents repeat notifications for the same blocked version. Per-stack opt-out via `major_guard: false` in docker.yml. Safe defaults: missing/unparseable version labels allow the update (guard only blocks when confident).
 

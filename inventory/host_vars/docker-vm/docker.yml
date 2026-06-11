@@ -17,6 +17,11 @@ docker_stacks:
     compose_template: docker/docker-media-stack.yml.j2
     compose_mode: "0600"
     remove_orphans: true
+    auto_update_required_paths:
+      - /srv/archive
+      - /srv/media/plex/downloads/complete
+      - /srv/media/plex/Anime
+      - /srv/incomplete_downloads/incomplete/torrents
     auto_update_services:
       - gluetun
   - name: profilarr

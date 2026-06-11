@@ -13,3 +13,8 @@ qbit_port_sync_service_name: qbittorrent
 qbit_port_sync_lock_file: /opt/media-stack/qbittorrent/qBittorrent/lockfile
 qbit_port_sync_max_retries: 30
 qbit_port_sync_retry_delay: 5
+qbit_port_sync_required_paths:
+  - /srv/archive
+  - /srv/media/plex/downloads/complete
+  - /srv/media/plex/Anime
+  - /srv/incomplete_downloads/incomplete/torrents

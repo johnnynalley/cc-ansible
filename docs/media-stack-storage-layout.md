@@ -34,6 +34,16 @@ can hardlink when branch placement allows it.
 binds `/srv/incomplete_downloads/incomplete/torrents` to `/incomplete`. This
 SSD-backed incomplete path is outside the mergerfs branch tree.
 
+`docker-vm` also mounts the TS440 archive export at `/srv/archive`; media-stack
+containers that expose archive storage bind it as `/archive`. If `/srv/archive`
+goes stale, Docker can fail before qBittorrent starts and leave the container in
+`created` state. The managed qBittorrent/Gluetun recreate paths therefore
+preflight `/srv/archive`, `/srv/media/plex/downloads/complete`,
+`/srv/media/plex/Anime`, and
+`/srv/incomplete_downloads/incomplete/torrents` before recreating containers.
+If one of those checks fails, repair the docker-vm NFS/autofs mount first and
+then recreate the affected containers so their bind namespaces refresh.
+
 Verified live on 2026-06-06:
 
 - `docker-vm:/srv/media` is NFS `192.168.1.146:/media`.

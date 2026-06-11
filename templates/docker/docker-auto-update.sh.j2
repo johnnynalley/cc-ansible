@@ -67,6 +67,26 @@ run_compose_logged() {
     return "$rc"
 }
 
+check_required_paths() {
+    local stack_name="$1"
+    shift
+
+    local path
+    local failed=0
+
+    for path in "$@"; do
+        if [[ -z "$path" ]]; then
+            continue
+        fi
+        if ! timeout 10 test -e "$path"; then
+            log "ERROR: ${stack_name}: required path unavailable before compose recreate: ${path}"
+            failed=1
+        fi
+    done
+
+    return "$failed"
+}
+
 send_notification() {
     local title="$1"
     local body="${2:-}"
@@ -208,7 +228,13 @@ if pull_with_retry "{{ stack.name }}" "{{ stack.path }}"; then
         fi
     else
         log "{{ stack.name }}: updates available, recreating..."
+{% if stack.auto_update_required_paths is defined and stack.auto_update_required_paths | length > 0 %}
+        if ! check_required_paths "{{ stack.name }}" {% for path in stack.auto_update_required_paths %}{{ path | quote }} {% endfor %}; then
+            ERRORS=$((ERRORS + 1))
+        elif run_compose_logged "{{ stack.name }}" "{{ stack.path }}" up -d; then
+{% else %}
         if run_compose_logged "{{ stack.name }}" "{{ stack.path }}" up -d; then
+{% endif %}
             UPDATE_COUNT=$((UPDATE_COUNT + 1))
             SUMMARY="${SUMMARY}{{ stack.name }}:\n${diff_output}\n\n"
             # Clear any stale state file (stack is now up to date)
@@ -221,7 +247,13 @@ if pull_with_retry "{{ stack.name }}" "{{ stack.path }}"; then
     diff_output=$("$STACK_DIFF" "{{ stack.path }}" 2>/dev/null || echo "(diff check failed)")
     if [[ "$diff_output" != *"(no image changes detected)"* && "$diff_output" != *"(diff check failed)"* ]]; then
         log "{{ stack.name }}: updates available, recreating..."
+{% if stack.auto_update_required_paths is defined and stack.auto_update_required_paths | length > 0 %}
+        if ! check_required_paths "{{ stack.name }}" {% for path in stack.auto_update_required_paths %}{{ path | quote }} {% endfor %}; then
+            ERRORS=$((ERRORS + 1))
+        elif run_compose_logged "{{ stack.name }}" "{{ stack.path }}" up -d; then
+{% else %}
         if run_compose_logged "{{ stack.name }}" "{{ stack.path }}" up -d; then
+{% endif %}
             UPDATE_COUNT=$((UPDATE_COUNT + 1))
             SUMMARY="${SUMMARY}{{ stack.name }}:\n${diff_output}\n\n"
         else
@@ -272,14 +304,26 @@ if pull_with_retry "{{ stack.name }}" "{{ stack.path }}" "{{ stack.auto_update_s
         # Gluetun: force-recreate to clear network namespace (stale tun0 routes)
         # Dependent containers share the namespace and must be recreated together
         log "{{ stack.name }}/{{ svc }}: force-recreating with dependents..."
+{% if stack.auto_update_required_paths is defined and stack.auto_update_required_paths | length > 0 %}
+        if ! check_required_paths "{{ stack.name }}" {% for path in stack.auto_update_required_paths %}{{ path | quote }} {% endfor %}; then
+            ERRORS=$((ERRORS + 1))
+        elif run_compose_logged "{{ stack.name }}" "{{ stack.path }}" up -d --force-recreate {{ svc }} {{ gluetun_watchdog_dependent_containers | default('qbittorrent') }}; then
+{% else %}
         if run_compose_logged "{{ stack.name }}" "{{ stack.path }}" up -d --force-recreate {{ svc }} {{ gluetun_watchdog_dependent_containers | default('qbittorrent') }}; then
+{% endif %}
             UPDATE_COUNT=$((UPDATE_COUNT + 1))
             SUMMARY="${SUMMARY}{{ stack.name }}/{{ svc }}:\n${svc_diff}\n\n"
         else
             ERRORS=$((ERRORS + 1))
         fi
 {% else %}
+{% if stack.auto_update_required_paths is defined and stack.auto_update_required_paths | length > 0 %}
+        if ! check_required_paths "{{ stack.name }}" {% for path in stack.auto_update_required_paths %}{{ path | quote }} {% endfor %}; then
+            ERRORS=$((ERRORS + 1))
+        elif run_compose_logged "{{ stack.name }}" "{{ stack.path }}" up -d {{ svc }}; then
+{% else %}
         if run_compose_logged "{{ stack.name }}" "{{ stack.path }}" up -d {{ svc }}; then
+{% endif %}
             UPDATE_COUNT=$((UPDATE_COUNT + 1))
             SUMMARY="${SUMMARY}{{ stack.name }}/{{ svc }}:\n${svc_diff}\n\n"
         else

@@ -21,6 +21,11 @@ CONTAINER_NAME="{{ gluetun_watchdog_container | default('gluetun') }}"
 DEPENDENT_CONTAINERS="{{ gluetun_watchdog_dependent_containers | default('qbittorrent') }}"
 COMPOSE_LOCK_FILE="{{ gluetun_watchdog_compose_lock_file | default('/run/media-stack-compose.lock') }}"
 COMPOSE_LOCK_WAIT="{{ gluetun_watchdog_compose_lock_wait | default(900) }}"
+REQUIRED_PATHS=(
+{% for path in gluetun_watchdog_required_paths | default([]) %}
+    {{ path | quote }}
+{% endfor %}
+)
 
 mkdir -p "$STATE_DIR"
 
@@ -41,6 +46,23 @@ run_compose() {
     fi
 
     return "$rc"
+}
+
+check_required_paths() {
+    local path
+    local failed=0
+
+    for path in "${REQUIRED_PATHS[@]}"; do
+        if [[ -z "$path" ]]; then
+            continue
+        fi
+        if ! timeout 10 test -e "$path"; then
+            log "ERROR: required path unavailable before $CONTAINER_NAME recreate: $path"
+            failed=1
+        fi
+    done
+
+    return "$failed"
 }
 
 send_notification() {
@@ -181,6 +203,15 @@ restart_gluetun() {
         send_notification \
             "Gluetun watchdog: manual intervention required" \
             "$MAX_RESTARTS restarts in $(( RESTART_WINDOW / 60 ))m on $(hostname). VPN is down." \
+            "failure"
+        return 1
+    fi
+
+    if ! check_required_paths; then
+        log "ERROR: refusing to recreate $CONTAINER_NAME + dependents while required paths are unavailable"
+        send_notification \
+            "Gluetun watchdog: required mount unavailable" \
+            "A required bind path is unavailable on $(hostname). Not recreating $CONTAINER_NAME + dependents; check stale NFS/autofs mounts." \
             "failure"
         return 1
     fi

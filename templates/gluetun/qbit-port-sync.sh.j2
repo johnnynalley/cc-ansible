@@ -44,8 +44,30 @@ run_compose() {
     return "$rc"
 }
 
+check_required_paths() {
+    local path
+    local failed=0
+
+    for path in ${REQUIRED_PATHS:-}; do
+        if [[ -z "$path" ]]; then
+            continue
+        fi
+        if ! timeout 10 test -e "$path"; then
+            log "ERROR: required path unavailable before qBittorrent recreate: $path"
+            failed=1
+        fi
+    done
+
+    return "$failed"
+}
+
 restart_qbit() {
     log "qBittorrent API not reachable, recreating container..."
+    if ! check_required_paths; then
+        log "qBittorrent recreate blocked until required paths are healthy"
+        return 1
+    fi
+
     if ! run_compose stop "$QBIT_SERVICE"; then
         return 1
     fi

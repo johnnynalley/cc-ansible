@@ -16,3 +16,6 @@
 - `gluetun-watchdog.sh.j2` and `qbit-port-sync.sh.j2` share the
   `/run/media-stack-compose.lock` Compose lock by default so Gluetun recovery,
   qBittorrent recovery, and Docker auto-update do not race the same stack.
+- Recreate paths must preflight required media bind paths before calling
+  `docker compose up`; stale NFS/autofs paths should fail early instead of
+  leaving qBittorrent in Docker `created` state.

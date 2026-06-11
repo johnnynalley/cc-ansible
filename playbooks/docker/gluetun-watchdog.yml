@@ -139,6 +139,7 @@
               RETRY_DELAY={{ qbit_port_sync_retry_delay | default(5) | quote }}
               COMPOSE_LOCK_FILE={{ qbit_port_sync_compose_lock_file | default(gluetun_watchdog_compose_lock_file | default('/run/media-stack-compose.lock')) | quote }}
               COMPOSE_LOCK_WAIT={{ qbit_port_sync_compose_lock_wait | default(gluetun_watchdog_compose_lock_wait | default(900)) | quote }}
+              REQUIRED_PATHS={{ qbit_port_sync_required_paths | default([]) | join(' ') | quote }}
           no_log: true
 
         - name: Create qBittorrent port sync script

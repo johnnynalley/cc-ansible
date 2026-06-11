@@ -35,3 +35,6 @@
 - `docker-auto-update.sh.j2` uses per-stack Compose locks. The media stack lock
   must stay aligned with the Gluetun/qBittorrent helpers so updates cannot race
   VPN recovery.
+- `docker-auto-update.sh.j2` supports stack-level
+  `auto_update_required_paths`; use it for services whose recreate depends on
+  NFS/autofs bind mounts so stale paths block the update before compose runs.
