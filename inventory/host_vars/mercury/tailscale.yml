@@ -9,9 +9,9 @@ tailscale_advertise_routes:
 tailscale_accept_routes: false
 tailscale_snat_subnet_routes: true
 
-# Peer relay is prepared for temporary testing, but remains disabled by default.
-# Enabling it also requires a narrow tailnet policy grant.
+# Peer relay listens on UDP 40000 and is only usable by tailnet devices granted
+# tailscale.com/cap/relay in files/tailscale-policy.hujson.
 tailscale_manage_peer_relay: true
-tailscale_peer_relay_enabled: false
+tailscale_peer_relay_enabled: true
 tailscale_peer_relay_port: "40000"
 tailscale_peer_relay_static_endpoints: []

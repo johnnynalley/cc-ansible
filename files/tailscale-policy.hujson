@@ -21,6 +21,32 @@
 			"ip":  ["*"],
 		},
 
+		{
+			// Let current tailnet device classes use Mercury as a peer relay
+			// when direct connections fail. Keep this explicit instead of
+			// src ["*"] so future principals do not inherit relay use
+			// accidentally.
+			"src": [
+				"autogroup:member",
+				"tag:alto",
+				"tag:backup",
+				"tag:media",
+				"tag:openclaw",
+				"tag:orchestrators",
+				"tag:pcs",
+				"tag:pi",
+				"tag:servers",
+				"tag:tagged-devices",
+				"tag:ts440",
+				"tag:vms-lxcs",
+				"tag:workstation",
+			],
+			"dst": ["100.81.29.94"],
+			"app": {
+				"tailscale.com/cap/relay": [],
+			},
+		},
+
 		// Allow users in "group:example" to access "tag:example", but only from
 		// devices that are running macOS and have enabled Tailscale client auto-updating.
 		// {"src": ["group:example"], "dst": ["tag:example"], "ip": ["*"], "srcPosture":["posture:autoUpdateMac"]},
