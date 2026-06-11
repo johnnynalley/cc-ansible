@@ -10,6 +10,4 @@ smb_shares:
   - name: Time Machine
     path: /srv/pbs-data/timemachine
     fruit_time_machine: true
-    # 2026-06 incident bridge: keep Time Machine near its current sparsebundle
-    # size while PBS garbage collection drains deleted VM100 chunks.
-    fruit_time_machine_max_size: 400G
+    fruit_time_machine_max_size: 350G
