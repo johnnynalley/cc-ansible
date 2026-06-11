@@ -5,5 +5,6 @@
 *~
 .DS_Store
 .claude/
+.codex/work-plans/
 __pycache__/
 *.py[cod]
