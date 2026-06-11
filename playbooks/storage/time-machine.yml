@@ -1,0 +1,54 @@
+# Purpose: Configure macOS Time Machine client destinations.
+# Hosts: macos_hosts.
+# Key vars: time_machine_destinations.
+# Templates: none.
+# Scripts: none.
+# Validation: ansible-playbook playbooks/storage/time-machine.yml --syntax-check.
+
+# =============================================================================
+# Time Machine Client Playbook
+# =============================================================================
+# Keeps macOS Time Machine destination quotas aligned with the server-side
+# Samba caps for shared backup disks.
+# =============================================================================
+
+---
+- name: Configure Time Machine clients
+  hosts: macos_hosts
+  become: true
+  gather_facts: false
+
+  tasks:
+    - name: Check Time Machine destination quotas
+      ansible.builtin.shell:
+        cmd: |
+          set -eu
+          tmutil destinationinfo | awk -v id="{{ item.id }}" '
+            /^=+/ && in_dest { exit }
+            $1 == "ID" && $3 == id { in_dest = 1; found = 1 }
+            in_dest && $1 == "Quota" { quota = $3 }
+            END {
+              if (!found) {
+                exit 2
+              }
+              print quota
+            }
+          '
+      register: time_machine_quota_checks
+      loop: "{{ time_machine_destinations | default([]) }}"
+      loop_control:
+        label: "{{ item.name | default(item.id) }}"
+      changed_when: false
+      check_mode: false
+      when: item.quota_gb is defined
+
+    - name: Set Time Machine destination quotas
+      ansible.builtin.command:
+        cmd: "tmutil setquota {{ item.item.id }} {{ item.item.quota_gb }}"
+      loop: "{{ time_machine_quota_checks.results | default([]) }}"
+      loop_control:
+        label: "{{ item.item.name | default(item.item.id) }}"
+      when:
+        - not ansible_check_mode
+        - item.rc == 0
+        - (item.stdout | trim | int) != (item.item.quota_gb | int)

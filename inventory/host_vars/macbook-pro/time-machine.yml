@@ -1,0 +1,8 @@
+# =============================================================================
+# macbook-pro - Time Machine Configuration
+# =============================================================================
+
+time_machine_destinations:
+  - name: Time Machine
+    id: CB432DD2-8CDB-43A0-A83B-7EBF74A60FDA
+    quota_gb: 350

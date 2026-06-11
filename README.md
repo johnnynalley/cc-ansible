@@ -328,7 +328,7 @@ Samba is managed by `playbooks/storage/samba.yml` and runs on any `linux_hosts` 
 
 | Share | Path | Purpose |
 |-------|------|---------|
-| Time Machine | `/srv/pbs-data/timemachine` | macOS Time Machine (active, 500G Samba cap on shared PBS drive) |
+| Time Machine | `/srv/pbs-data/timemachine` | macOS Time Machine (active, 350G cap on shared PBS drive) |
 
 ### Connecting from macOS
 

@@ -109,6 +109,10 @@
   ansible.builtin.import_playbook: playbooks/storage/samba.yml
   tags: [samba, smb]
 
+- name: Configure Time Machine clients
+  ansible.builtin.import_playbook: playbooks/storage/time-machine.yml
+  tags: [time-machine, backups, storage]
+
 - name: Configure MergerFS media pool
   ansible.builtin.import_playbook: playbooks/storage/mergerfs.yml
   tags: [mergerfs, storage]

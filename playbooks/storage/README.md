@@ -19,6 +19,7 @@ Owner area: NAS, mounts, shares, ZFS, MergerFS, VirtioFS.
 | `nfs.yml` | `nas_server, linux_hosts` | Configure NFS server and clients. | `ansible-playbook playbooks/storage/nfs.yml --syntax-check` |
 | `samba.yml` | `samba_hosts` | Configure Samba server. | `ansible-playbook playbooks/storage/samba.yml --syntax-check` |
 | `storage-status.yml` | `linux_hosts` | Deploy storage-status utility. | `ansible-playbook playbooks/storage/storage-status.yml --syntax-check` |
+| `time-machine.yml` | `macos_hosts` | Configure macOS Time Machine destination quotas. | `ansible-playbook playbooks/storage/time-machine.yml --syntax-check` |
 | `virtiofs.yml` | `proxmox_nodes, vms` | Configure VirtioFS shares. | `ansible-playbook playbooks/storage/virtiofs.yml --syntax-check` |
 | `vm-storage-gate.yml` | `proxmox_nodes` | Deploy per-VM storage gate hookscript. | `ansible-playbook playbooks/storage/vm-storage-gate.yml --syntax-check` |
 | `zfs.yml` | `nas_server` | Configure ZFS (snapshots, scrub, tuning, properties, ACLs). | `ansible-playbook playbooks/storage/zfs.yml --syntax-check` |
