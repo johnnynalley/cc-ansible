@@ -12,6 +12,7 @@ media_stack_health_qbit_env_file: /etc/qbit-port-sync.env
 media_stack_health_consecutive_failure_threshold: 2
 media_stack_health_library_probe_path: /srv/media/plex/Movies
 media_stack_health_data_host_root: /srv/media/plex
+media_stack_health_path_probe_timeout: 10
 media_stack_health_hardlink_container: sonarr
 media_stack_health_hardlink_source_dir: /data/downloads/complete
 media_stack_health_hardlink_target_dir: /data/Anime
@@ -32,3 +33,29 @@ media_stack_health_arr_command_check_enabled: true
 media_stack_health_arr_command_started_stale_seconds: 3600
 media_stack_health_arr_command_queued_stale_seconds: 7200
 media_stack_health_arr_command_no_progress_seconds: 1800
+
+# Root-cause recovery for classified stale docker-vm NFS client state. This is
+# intentionally separate from alert-only media-stack-health logic: fileid noise
+# alone does not trigger recovery, but stale/unreadable required NFS paths do.
+media_stack_storage_recovery_enabled: true
+media_stack_storage_recovery_state_dir: /var/lib/media-stack-storage-recover
+media_stack_storage_recovery_compose_dir: /opt/media-stack
+media_stack_storage_recovery_compose_lock_file: /run/media-stack-compose.lock
+media_stack_storage_recovery_compose_lock_wait: 900
+media_stack_storage_recovery_compose_stop_timeout: 45
+media_stack_storage_recovery_path_probe_timeout: 10
+media_stack_storage_recovery_cooldown_seconds: 1800
+media_stack_storage_recovery_mounts:
+  - path: /srv/media
+    fstype: nfs
+    require_path: /srv/media/plex/Movies
+  - path: /srv/incomplete_downloads
+    fstype: nfs
+    require_path: /srv/incomplete_downloads/incomplete/torrents/tv-sonarr
+  - path: /srv/archive
+    fstype: nfs
+media_stack_storage_recovery_required_paths:
+  - /srv/archive
+  - /srv/media/plex/downloads/complete
+  - /srv/media/plex/Anime
+  - /srv/incomplete_downloads/incomplete/torrents

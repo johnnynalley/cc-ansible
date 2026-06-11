@@ -15,6 +15,8 @@
 - `docker-socket-proxy.yml`: Docker socket proxy compose file.
 - `docker-stacks.service.j2`: Systemd service for Docker Compose stacks.
 - `media-stack-health.sh.j2`: Media stack health sentinel.
+- `media-stack-storage-recover.sh.j2`: Classified stale-NFS recovery for the
+  docker-vm media stack.
 - `media-stack.yml`: media-vm Plex-side media compose file.
 - `profilarr.yml`: Profilarr compose file.
 - `qdrant.yml`: Qdrant compose file.
@@ -38,3 +40,7 @@
 - `docker-auto-update.sh.j2` supports stack-level
   `auto_update_required_paths`; use it for services whose recreate depends on
   NFS/autofs bind mounts so stale paths block the update before compose runs.
+- `media-stack-storage-recover.sh.j2` is deliberately separate from
+  `media-stack-health.sh.j2`: health checks classify/report, while recovery may
+  stop/restart the media stack only after required NFS-backed bind paths are
+  stale or unreadable. Fileid-only churn is not a recovery trigger.

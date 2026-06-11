@@ -72,8 +72,20 @@ The media-stack check is alert-only. It must not pause Profilarr, stop searches,
 or mutate queue/download state. Current storage/import guardrails include
 warning-only repeated docker-vm NFS `fileid changed` kernel errors, Arr media
 probe processes such as `ffprobe` stuck in `D` state, and
-Sonarr/Radarr commands that are old and have stopped making command-message
-progress past the no-progress threshold.
+Sonarr/Radarr non-long-running commands that are old and have stopped making
+command-message progress past the no-progress threshold. Commands the Arr API
+explicitly marks `isLongRunning=true`, such as Sonarr's
+`ProcessMonitoredDownloads`, are skipped by the stalled-command check; actual
+storage stalls for those paths are covered by mount probes and D-state media
+probe checks.
+
+Stale docker-vm NFS recovery is owned by systemd on `docker-vm`, not by Astra.
+If `media-stack-health.service` fails because required NFS-backed bind paths are
+stale, unreadable, or missing, `media-stack-storage-recover.service` can refresh
+the affected client mounts, restart the media-stack compose project, run
+qBittorrent port sync, and validate health. Astra should report the cached
+`CRITICAL:` result and recovery/failure messages, but it should not attempt its
+own remount or container restart from the heartbeat prompt.
 
 ## Plex Appliance Verified Corruption Check
 

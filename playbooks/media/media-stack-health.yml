@@ -101,6 +101,15 @@
         group: root
         mode: "0755"
 
+    - name: Create media-stack storage recovery state directory
+      ansible.builtin.file:
+        path: "{{ media_stack_storage_recovery_state_dir | default('/var/lib/media-stack-storage-recover') }}"
+        state: directory
+        owner: root
+        group: root
+        mode: "0755"
+      when: media_stack_storage_recovery_enabled | default(false)
+
     - name: Deploy media-stack-health script
       ansible.builtin.template:
         src: "{{ ansible_config_file | dirname }}/templates/docker/media-stack-health.sh.j2"
@@ -108,6 +117,37 @@
         owner: root
         group: root
         mode: "0755"
+
+    - name: Deploy media-stack storage recovery script
+      ansible.builtin.template:
+        src: "{{ ansible_config_file | dirname }}/templates/docker/media-stack-storage-recover.sh.j2"
+        dest: /usr/local/sbin/media-stack-storage-recover
+        owner: root
+        group: root
+        mode: "0755"
+      when: media_stack_storage_recovery_enabled | default(false)
+
+    - name: Create media-stack-storage-recover.service
+      ansible.builtin.copy:
+        dest: /etc/systemd/system/media-stack-storage-recover.service
+        owner: root
+        group: root
+        mode: "0644"
+        content: |
+          [Unit]
+          Description=Recover media stack after classified stale NFS storage
+          After=network-online.target docker.service
+          Wants=network-online.target
+          Requires=docker.service
+
+          [Service]
+          Type=oneshot
+          ExecStart=/usr/local/sbin/media-stack-storage-recover
+          StandardOutput=journal
+          StandardError=journal
+          TimeoutStartSec={{ media_stack_storage_recovery_timeout | default(900) }}
+      when: media_stack_storage_recovery_enabled | default(false)
+      notify: Reload systemd
 
     - name: Create media-stack-health.service
       ansible.builtin.copy:
@@ -121,6 +161,9 @@
           After=network-online.target docker.service
           Wants=network-online.target
           Requires=docker.service
+          {% if media_stack_storage_recovery_enabled | default(false) %}
+          OnFailure=media-stack-storage-recover.service
+          {% endif %}
 
           [Service]
           Type=oneshot

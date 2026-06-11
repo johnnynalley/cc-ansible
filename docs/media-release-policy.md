@@ -346,9 +346,19 @@ container, endpoint, hardlink, port-sync, and import-copy checks, it records
 repeated docker-vm NFS `fileid changed` kernel errors as warning-only by
 default, and alerts on media probe processes such as Arr `ffprobe` stuck in `D`
 state beyond the configured age threshold and Sonarr/Radarr commands that
-remain active or queued beyond the configured stale thresholds. These checks
-are intentionally thresholded so short normal NFS reads and active search bursts
-do not become automatic mitigation events.
+remain active or queued beyond the configured stale thresholds. Commands the
+Arr API explicitly marks `isLongRunning=true`, such as Sonarr's
+`ProcessMonitoredDownloads`, are skipped by the stalled-command check because
+they are intended background watchers. Actual storage stalls for those paths are
+covered by mount probes and D-state media probe checks. These checks are
+intentionally thresholded so short normal NFS reads and active search bursts do
+not become automatic mitigation events.
+
+Stale docker-vm NFS client recovery is handled by the separate
+`media-stack-storage-recover.service` failure hook. That service is allowed to
+stop/restart the media-stack compose project only after `media-stack-health`
+has failed on required NFS-backed paths that are stale, unreadable, or missing.
+Repeated `fileid changed` messages alone do not trigger recovery.
 
 Long-term docker-vm NFS reliability is still a storage configuration issue, not
 a queue-cleanup issue. On 2026-06-03 and 2026-06-04, docker-vm repeatedly
@@ -1435,16 +1445,22 @@ desired state is no `/usenet-complete` mount in the media-stack containers.
 ## Media Stack Health Alert Semantics
 
 `media-stack-health` should page only on actual brokenness, not on slow but
-advancing workload. Long-running Sonarr/Radarr commands become critical only
-after they are older than the stale threshold and their command message has not
-advanced for the no-progress window. Transient container health or HTTP
-endpoint failures require consecutive failing checks before they become
-critical. Below-threshold NFS `fileid changed` events are suppressed from
-heartbeat output. Above-threshold NFS `fileid changed` events are warnings by
-default; they become critical only if `media_stack_health_nfs_fileid_fail_on_threshold`
-is explicitly enabled or another check proves real breakage such as missing
-mounts, empty library probes, D-state media probes, failed endpoints, or import
-failures.
+advancing workload. Sonarr/Radarr commands that are not API-declared
+long-running watchers become critical only after they are older than the stale
+threshold and their command message has not advanced for the no-progress
+window. Transient container health or HTTP endpoint failures require
+consecutive failing checks before they become critical. Below-threshold NFS
+`fileid changed` events are suppressed from heartbeat output. Above-threshold
+NFS `fileid changed` events are warnings by default; they become critical only
+if `media_stack_health_nfs_fileid_fail_on_threshold` is explicitly enabled or
+another check proves real breakage such as missing mounts, empty library probes,
+D-state media probes, failed endpoints, or import failures.
+
+When the proven real breakage is stale docker-vm NFS client state,
+`media-stack-storage-recover.service` may refresh the affected NFS mounts,
+restart the media-stack compose project, run qBittorrent port sync, and validate
+with `media-stack-health --no-alert`. Treat failures from that service as a
+storage/RCA incident, not as alert-noise to suppress.
 
 qBittorrent copied-import findings remain warnings because they are real
 storage-efficiency evidence, but they do not mean the media stack is down.

@@ -1,6 +1,6 @@
 # Media Stack Storage Layout
 
-> Last updated: 2026-06-06
+> Last updated: 2026-06-11
 
 This is the first reference for Sonarr/Radarr/SABnzbd/qBittorrent storage
 questions after the media automation moved to `docker-vm`. Check this document
@@ -43,6 +43,15 @@ preflight `/srv/archive`, `/srv/media/plex/downloads/complete`,
 `/srv/incomplete_downloads/incomplete/torrents` before recreating containers.
 If one of those checks fails, repair the docker-vm NFS/autofs mount first and
 then recreate the affected containers so their bind namespaces refresh.
+
+`media-stack-health.service` now has a separate
+`media-stack-storage-recover.service` failure hook on `docker-vm`. The health
+script remains the classifier and alert surface. The recovery script only acts
+after a failed health unit proves required NFS-backed paths are stale,
+unreadable, or missing. It does not remount for `fileid changed` messages by
+themselves. When triggered, it stops the media-stack compose project, refreshes
+the affected NFS mounts, starts the compose project again, runs qBittorrent
+port sync when available, and validates with `media-stack-health --no-alert`.
 
 Verified live on 2026-06-06:
 
@@ -144,6 +153,17 @@ stuck D-state media probe, stopped container, failed endpoint, or import
 failure. Set `media_stack_health_nfs_fileid_fail_on_threshold: true` only for a
 temporary investigation where the kernel message alone should fail the health
 check.
+
+Recovery policy: once the check fails because the NFS-backed mount or required
+bind path is stale/unreadable, `media-stack-storage-recover.service` is allowed
+to refresh the docker-vm client mount and restart the media-stack containers.
+This is root-cause-specific recovery for stale NFS client state, not generic
+alert suppression. If recovery fails, inspect:
+
+```bash
+journalctl -u media-stack-storage-recover --since "1 hour ago" --no-pager
+journalctl -u media-stack-health --since "1 hour ago" --no-pager
+```
 
 ## 2026-06-06 Incident Notes
 

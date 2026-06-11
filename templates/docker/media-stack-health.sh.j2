@@ -27,6 +27,7 @@ APPRISE_TOKEN="{{ apprise_token }}"
 APPRISE_TAGS="{{ media_stack_health_alert_tags | default(apprise_alert_tags) }}"
 QBIT_ENV_FILE="{{ media_stack_health_qbit_env_file | default('/etc/qbit-port-sync.env') }}"
 HTTP_MAX_TIME="{{ media_stack_health_http_max_time | default(20) }}"
+PATH_PROBE_TIMEOUT="{{ media_stack_health_path_probe_timeout | default(10) }}"
 CONSECUTIVE_FAILURE_THRESHOLD="{{ media_stack_health_consecutive_failure_threshold | default(2) }}"
 HARDLINK_CONTAINER="{{ media_stack_health_hardlink_container | default('sonarr') }}"
 HARDLINK_SOURCE_DIR="{{ media_stack_health_hardlink_source_dir | default('/data/downloads/complete') }}"
@@ -257,6 +258,18 @@ expected_fstype_matches() {
   esac
 }
 
+probe_path_exists() {
+  local path="$1"
+
+  timeout "$PATH_PROBE_TIMEOUT" test -e "$path" >/dev/null 2>&1
+}
+
+probe_directory_has_child_dir() {
+  local path="$1"
+
+  timeout "$PATH_PROBE_TIMEOUT" find "$path" -mindepth 1 -maxdepth 1 -type d -print -quit 2>/dev/null | grep -q .
+}
+
 check_mount() {
   local path="$1"
   local expected_fstype="$2"
@@ -269,6 +282,11 @@ check_mount() {
     return
   fi
 
+  if ! probe_path_exists "$path"; then
+    add_problem "$path is mounted but is not readable within ${PATH_PROBE_TIMEOUT}s; possible stale NFS/client mount state"
+    return
+  fi
+
   fstype="$(findmnt -rn --target "$path" -o FSTYPE 2>/dev/null | tail -n1 || true)"
   source="$(findmnt -rn --target "$path" -o SOURCE 2>/dev/null | tail -n1 || true)"
 
@@ -276,8 +294,8 @@ check_mount() {
     add_problem "$path has fstype ${fstype:-unknown} from ${source:-unknown}, expected $expected_fstype"
   fi
 
-  if [[ -n "$require_path" && ! -e "$require_path" ]]; then
-    add_problem "$path is mounted but required path is missing: $require_path"
+  if [[ -n "$require_path" ]] && ! probe_path_exists "$require_path"; then
+    add_problem "$path is mounted but required path is missing or unreadable within ${PATH_PROBE_TIMEOUT}s: $require_path"
   fi
 }
 
@@ -287,11 +305,11 @@ check_library_probe() {
   if [[ -z "$path" ]]; then
     return
   fi
-  if [[ ! -d "$path" ]]; then
-    add_problem "media library probe path is missing: $path"
+  if ! timeout "$PATH_PROBE_TIMEOUT" test -d "$path" >/dev/null 2>&1; then
+    add_problem "media library probe path is missing or unreadable within ${PATH_PROBE_TIMEOUT}s: $path"
     return
   fi
-  if ! find "$path" -mindepth 1 -maxdepth 1 -type d -print -quit 2>/dev/null | grep -q .; then
+  if ! probe_directory_has_child_dir "$path"; then
     add_problem "media library probe path has no visible library directories: $path"
   fi
 }
@@ -703,8 +721,7 @@ check_nfs_fileid_changed() {
   since=$((now - NFS_FILEID_WINDOW_SECONDS))
   count="$(journalctl -k --since "@$since" --no-pager 2>/dev/null \
     | grep -F "NFS: server" \
-    | grep -F "fileid changed" \
-    | wc -l \
+    | grep -Fc "fileid changed" \
     | tr -d '[:space:]' || true)"
   count="${count:-0}"
 
@@ -760,6 +777,7 @@ check_arr_stalled_commands_app() {
   local id
   local name
   local status
+  local is_long_running
   local stamp
   local message
   local stamp_epoch
@@ -794,6 +812,7 @@ check_arr_stalled_commands_app() {
         (.id // ""),
         (.name // ""),
         (.status // ""),
+        ((.body.isLongRunning // false) | tostring),
         (if .status == "started" then (.startedOn // .started // .queuedOn // .queued // "") else (.queuedOn // .queued // "") end),
         ((.message // "") | gsub("[\r\n\t]+"; " ") | .[0:160])
       ]
@@ -805,9 +824,13 @@ check_arr_stalled_commands_app() {
   mkdir -p "$progress_dir"
   find "$progress_dir" -type f -mtime +3 -delete 2>/dev/null || true
 
-  while IFS=$'\t' read -r id name status stamp message; do
+  while IFS=$'\t' read -r id name status is_long_running stamp message; do
     [[ -n "${id:-}" ]] || continue
     [[ -n "${stamp:-}" ]] || continue
+
+    if [[ "${is_long_running:-false}" == "true" ]]; then
+      continue
+    fi
 
     stamp_epoch="$(date -u -d "$stamp" +%s 2>/dev/null || true)"
     if [[ -z "$stamp_epoch" || ! "$stamp_epoch" =~ ^[0-9]+$ ]]; then

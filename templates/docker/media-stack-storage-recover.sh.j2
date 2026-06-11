@@ -1,0 +1,386 @@
+#!/usr/bin/env bash
+# Recover docker-vm media-stack containers from classified stale NFS client state.
+# Managed by Ansible - do not edit manually.
+
+set -euo pipefail
+
+LOG_TAG="media-stack-storage-recover"
+STATE_DIR="{{ media_stack_storage_recovery_state_dir | default('/var/lib/media-stack-storage-recover') }}"
+LOCK_FILE="$STATE_DIR/recovery.lock"
+LAST_ATTEMPT_FILE="$STATE_DIR/last-attempt"
+COMPOSE_DIR="{{ media_stack_storage_recovery_compose_dir | default('/opt/media-stack') }}"
+COMPOSE_LOCK_FILE="{{ media_stack_storage_recovery_compose_lock_file | default(gluetun_watchdog_compose_lock_file | default('/run/media-stack-compose.lock')) }}"
+COMPOSE_LOCK_WAIT="{{ media_stack_storage_recovery_compose_lock_wait | default(gluetun_watchdog_compose_lock_wait | default(900)) }}"
+COMPOSE_STOP_TIMEOUT="{{ media_stack_storage_recovery_compose_stop_timeout | default(45) }}"
+PATH_PROBE_TIMEOUT="{{ media_stack_storage_recovery_path_probe_timeout | default(media_stack_health_path_probe_timeout | default(10)) }}"
+RECOVERY_COOLDOWN_SECONDS="{{ media_stack_storage_recovery_cooldown_seconds | default(1800) }}"
+NFS_FILEID_WINDOW_SECONDS="{{ media_stack_storage_recovery_nfs_fileid_window_seconds | default(media_stack_health_nfs_fileid_window_seconds | default(1800)) }}"
+NFS_FILEID_THRESHOLD="{{ media_stack_storage_recovery_nfs_fileid_threshold | default(media_stack_health_nfs_fileid_threshold | default(10)) }}"
+APPRISE_ENDPOINT="{{ apprise_endpoint }}"
+APPRISE_TOKEN="{{ apprise_token }}"
+APPRISE_TAGS="{{ media_stack_storage_recovery_alert_tags | default(media_stack_health_alert_tags | default(apprise_alert_tags)) }}"
+
+MOUNT_SPECS=(
+{% for mount in media_stack_storage_recovery_mounts | default(media_stack_health_mounts | default(media_stack_health_default_mounts)) %}
+  {{ (mount.path ~ '|' ~ (mount.fstype | default('')) ~ '|' ~ (mount.require_path | default(''))) | quote }}
+{% endfor %}
+)
+
+REQUIRED_PATHS=(
+{% for path in media_stack_storage_recovery_required_paths | default([]) %}
+  {{ path | quote }}
+{% endfor %}
+)
+
+mkdir -p "$STATE_DIR"
+
+log() {
+  logger -t "$LOG_TAG" "$*"
+  printf '%s\n' "$*"
+}
+
+send_notification() {
+  local title="$1"
+  local body="${2:-}"
+  local type="${3:-warning}"
+
+  curl -sf -o /dev/null \
+    -X POST "${APPRISE_ENDPOINT}/notify/${APPRISE_TOKEN}" \
+    --form-string "title=${title}" \
+    --form-string "body=${body}" \
+    --form-string "tag=${APPRISE_TAGS}" \
+    --form-string "type=${type}" \
+    --max-time 10 \
+    --retry 2 \
+    --retry-delay 3 2>/dev/null || true
+}
+
+expected_fstype_matches() {
+  local actual="$1"
+  local expected="$2"
+
+  case "$expected" in
+    "")
+      return 0
+      ;;
+    nfs)
+      [[ "$actual" == "nfs" || "$actual" == "nfs4" ]]
+      ;;
+    *)
+      [[ "$actual" == "$expected" ]]
+      ;;
+  esac
+}
+
+probe_path_exists() {
+  local path="$1"
+
+  timeout "$PATH_PROBE_TIMEOUT" test -e "$path" >/dev/null 2>&1
+}
+
+path_under_mount() {
+  local path="$1"
+  local mount_path="$2"
+
+  [[ "$path" == "$mount_path" || "$path" == "$mount_path"/* ]]
+}
+
+nfs_fileid_count() {
+  local now
+  local since
+
+  now="$(date +%s)"
+  since=$((now - NFS_FILEID_WINDOW_SECONDS))
+  journalctl -k --since "@$since" --no-pager 2>/dev/null \
+    | grep -F "NFS: server" \
+    | grep -Fc "fileid changed" \
+    | tr -d '[:space:]' || true
+}
+
+unhealthy_mounts=()
+unhealthy_reasons=()
+
+add_unhealthy_mount() {
+  local mount_path="$1"
+  local reason="$2"
+  local existing
+
+  for existing in "${unhealthy_mounts[@]}"; do
+    if [[ "$existing" == "$mount_path" ]]; then
+      unhealthy_reasons+=("$mount_path: $reason")
+      return
+    fi
+  done
+
+  unhealthy_mounts+=("$mount_path")
+  unhealthy_reasons+=("$mount_path: $reason")
+}
+
+check_mount_spec() {
+  local spec="$1"
+  local mount_path
+  local expected_fstype
+  local require_path
+  local actual_fstype
+
+  IFS='|' read -r mount_path expected_fstype require_path <<< "$spec"
+
+  if [[ -z "$mount_path" ]]; then
+    return
+  fi
+
+  if ! findmnt -rn --target "$mount_path" >/dev/null 2>&1; then
+    add_unhealthy_mount "$mount_path" "not mounted"
+    return
+  fi
+
+  if ! probe_path_exists "$mount_path"; then
+    add_unhealthy_mount "$mount_path" "mounted but unreadable or stale"
+    return
+  fi
+
+  actual_fstype="$(findmnt -rn --target "$mount_path" -o FSTYPE 2>/dev/null | tail -n1 || true)"
+  if ! expected_fstype_matches "$actual_fstype" "$expected_fstype"; then
+    add_unhealthy_mount "$mount_path" "fstype ${actual_fstype:-unknown}, expected ${expected_fstype:-any}"
+    return
+  fi
+
+  if [[ -n "$require_path" ]] && ! probe_path_exists "$require_path"; then
+    add_unhealthy_mount "$mount_path" "required path missing or unreadable: $require_path"
+  fi
+}
+
+check_required_paths() {
+  local required_path
+  local spec
+  local mount_path
+  local expected_fstype
+  local require_path
+  local owner_found
+
+  for required_path in "${REQUIRED_PATHS[@]}"; do
+    [[ -n "$required_path" ]] || continue
+    if probe_path_exists "$required_path"; then
+      continue
+    fi
+
+    owner_found=0
+    for spec in "${MOUNT_SPECS[@]}"; do
+      IFS='|' read -r mount_path expected_fstype require_path <<< "$spec"
+      if path_under_mount "$required_path" "$mount_path"; then
+        add_unhealthy_mount "$mount_path" "required bind path missing or unreadable: $required_path"
+        owner_found=1
+      fi
+    done
+
+    if [[ "$owner_found" -eq 0 ]]; then
+      log "ERROR: required path is unhealthy but no managed NFS mount owns it: $required_path"
+    fi
+  done
+}
+
+collect_unhealthy_mounts() {
+  local spec
+
+  unhealthy_mounts=()
+  unhealthy_reasons=()
+
+  for spec in "${MOUNT_SPECS[@]}"; do
+    check_mount_spec "$spec"
+  done
+
+  check_required_paths
+}
+
+verify_recovered_paths() {
+  local spec
+  local mount_path
+  local expected_fstype
+  local require_path
+  local actual_fstype
+  local required_path
+  local failed=0
+
+  for spec in "${MOUNT_SPECS[@]}"; do
+    IFS='|' read -r mount_path expected_fstype require_path <<< "$spec"
+    [[ -n "$mount_path" ]] || continue
+
+    if ! probe_path_exists "$mount_path"; then
+      log "ERROR: mount still unhealthy after refresh: $mount_path"
+      failed=1
+      continue
+    fi
+
+    actual_fstype="$(findmnt -rn --target "$mount_path" -o FSTYPE 2>/dev/null | tail -n1 || true)"
+    if ! expected_fstype_matches "$actual_fstype" "$expected_fstype"; then
+      log "ERROR: mount fstype still wrong after refresh: $mount_path has ${actual_fstype:-unknown}, expected ${expected_fstype:-any}"
+      failed=1
+    fi
+
+    if [[ -n "$require_path" ]] && ! probe_path_exists "$require_path"; then
+      log "ERROR: required path still unhealthy after refresh: $require_path"
+      failed=1
+    fi
+  done
+
+  for required_path in "${REQUIRED_PATHS[@]}"; do
+    [[ -n "$required_path" ]] || continue
+    if ! probe_path_exists "$required_path"; then
+      log "ERROR: required bind path still unhealthy after refresh: $required_path"
+      failed=1
+    fi
+  done
+
+  return "$failed"
+}
+
+refresh_mount() {
+  local mount_path="$1"
+  local mount_unit
+  local automount_unit
+
+  mount_unit="$(systemd-escape --path --suffix=mount "$mount_path")"
+  automount_unit="$(systemd-escape --path --suffix=automount "$mount_path")"
+
+  log "Refreshing stale NFS mount $mount_path ($mount_unit / $automount_unit)"
+  systemctl stop "$automount_unit" >/dev/null 2>&1 || true
+  umount -l "$mount_path" >/dev/null 2>&1 || true
+  systemctl reset-failed "$mount_unit" "$automount_unit" >/dev/null 2>&1 || true
+
+  if ! systemctl start "$automount_unit" >/dev/null 2>&1; then
+    systemctl start "$mount_unit" >/dev/null 2>&1 || true
+  fi
+
+  if ! probe_path_exists "$mount_path"; then
+    systemctl start "$mount_unit" >/dev/null 2>&1 || true
+  fi
+}
+
+compose_stop_stack() {
+  log "Stopping media-stack containers before NFS remount"
+  timeout "$((COMPOSE_STOP_TIMEOUT + 30))" docker compose --project-directory "$COMPOSE_DIR" stop -t "$COMPOSE_STOP_TIMEOUT"
+}
+
+compose_start_stack() {
+  log "Starting media-stack containers after NFS remount"
+  docker compose --project-directory "$COMPOSE_DIR" up -d
+}
+
+run_qbit_port_sync() {
+  if [[ -x /usr/local/bin/qbit-port-sync ]]; then
+    log "Running qBittorrent port sync after storage recovery"
+    /usr/local/bin/qbit-port-sync || log "WARNING: qBittorrent port sync failed after storage recovery"
+  fi
+}
+
+validate_stack() {
+  if [[ -x /usr/local/sbin/media-stack-health ]]; then
+    log "Validating media stack after storage recovery"
+    /usr/local/sbin/media-stack-health --no-alert
+  fi
+}
+
+check_cooldown() {
+  local now
+  local last_attempt=0
+  local age
+
+  now="$(date +%s)"
+  if [[ -r "$LAST_ATTEMPT_FILE" ]]; then
+    last_attempt="$(cat "$LAST_ATTEMPT_FILE" 2>/dev/null || echo 0)"
+  fi
+  if [[ ! "$last_attempt" =~ ^[0-9]+$ ]]; then
+    last_attempt=0
+  fi
+
+  age=$((now - last_attempt))
+  if (( age < RECOVERY_COOLDOWN_SECONDS )); then
+    log "ERROR: storage recovery suppressed by cooldown: age=${age}s cooldown=${RECOVERY_COOLDOWN_SECONDS}s"
+    return 1
+  fi
+
+  printf '%s\n' "$now" > "$LAST_ATTEMPT_FILE"
+}
+
+main() {
+  local fileid_count
+  local reason_body
+  local mount_path
+
+  exec 9>"$LOCK_FILE"
+  if ! flock -n 9; then
+    log "Another storage recovery run is already active"
+    return 0
+  fi
+
+  collect_unhealthy_mounts
+  fileid_count="$(nfs_fileid_count)"
+
+  if [[ "{% raw %}${#unhealthy_mounts[@]}{% endraw %}" -eq 0 ]]; then
+    if [[ "$fileid_count" =~ ^[0-9]+$ && "$fileid_count" -ge "$NFS_FILEID_THRESHOLD" ]]; then
+      log "NFS fileid changed count is high (${fileid_count}/${NFS_FILEID_THRESHOLD}), but required paths are healthy; not remounting"
+    else
+      log "No stale NFS storage condition found; not remounting"
+    fi
+    return 0
+  fi
+
+  reason_body="$(printf '%s\n' "${unhealthy_reasons[@]}")"
+  log "Classified stale/unhealthy media storage on $(hostname):"
+  log "$reason_body"
+
+  check_cooldown
+
+  send_notification \
+    "Media stack storage recovery: starting" \
+    "Classified stale/unhealthy docker-vm NFS storage and will refresh mounts plus media-stack containers.\n\n${reason_body}" \
+    "warning"
+
+  exec 8>"$COMPOSE_LOCK_FILE"
+  flock -w "$COMPOSE_LOCK_WAIT" 8
+
+  if ! compose_stop_stack; then
+    send_notification \
+      "Media stack storage recovery: stop failed" \
+      "Could not stop media-stack containers cleanly before NFS remount on $(hostname). Check journalctl -u media-stack-storage-recover." \
+      "failure"
+    return 1
+  fi
+
+  for mount_path in "${unhealthy_mounts[@]}"; do
+    refresh_mount "$mount_path"
+  done
+
+  if ! verify_recovered_paths; then
+    send_notification \
+      "Media stack storage recovery: remount failed" \
+      "NFS paths are still unhealthy after refresh on $(hostname). Media-stack containers were stopped to avoid stale bind namespaces; manual storage recovery is required." \
+      "failure"
+    return 1
+  fi
+
+  if ! compose_start_stack; then
+    send_notification \
+      "Media stack storage recovery: compose start failed" \
+      "NFS paths refreshed, but docker compose up failed for media-stack on $(hostname). Check journalctl -u media-stack-storage-recover." \
+      "failure"
+    return 1
+  fi
+
+  run_qbit_port_sync
+
+  if ! validate_stack; then
+    send_notification \
+      "Media stack storage recovery: validation failed" \
+      "NFS paths refreshed and media-stack was started, but media-stack-health still fails on $(hostname)." \
+      "failure"
+    return 1
+  fi
+
+  send_notification \
+    "Media stack storage recovery: complete" \
+    "Refreshed stale docker-vm NFS mounts, restarted media-stack containers, and media-stack-health passed." \
+    "info"
+}
+
+main "$@"
