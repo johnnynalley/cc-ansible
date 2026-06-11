@@ -8,5 +8,11 @@ filesystem_mounts:
   - path: /srv/pbs-data
     src: /dev/disk/by-uuid/4b8f1479-bebe-4cc0-a9bd-778023087595
     fstype: ext4
-    opts: "defaults,nofail"
-    reserved_blocks_percentage: 1
+    opts: "defaults,nofail,prjquota"
+    reserved_blocks_percentage: 0
+    project_quotas:
+      # Keep PBS from consuming Time Machine's 500G Samba-advertised share.
+      # setquota uses 1 KiB blocks: 390 GiB = 390 * 1024 * 1024.
+      - path: /srv/pbs-data/.chunks
+        project_id: 2001
+        block_hard_limit: 408944640

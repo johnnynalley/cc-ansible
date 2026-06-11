@@ -328,7 +328,7 @@ Samba is managed by `playbooks/storage/samba.yml` and runs on any `linux_hosts` 
 
 | Share | Path | Purpose |
 |-------|------|---------|
-| Time Machine | `/srv/pbs-data/timemachine` | macOS Time Machine (active, 1TB drive) |
+| Time Machine | `/srv/pbs-data/timemachine` | macOS Time Machine (active, 500G Samba cap on shared PBS drive) |
 
 ### Connecting from macOS
 
@@ -957,9 +957,10 @@ PBS runs in an unprivileged LXC (CT 105) on pve-herc with a dedicated 1TB ext4 d
 - **Web UI**: `https://pbs.jnalley.me` or `https://100.110.176.37:8007` (login as `root@pam`)
 - **Datastore**: `main` at `/srv/pbs-data` (~900GB usable)
 - **Storage name**: `pbs-main` (registered on all 4 Proxmox nodes)
-- **Backup schedule**: Hourly, all guests except pbs-lxc (Ansible-managed via Play 3)
-- **Prune job**: Daily — 24 hourly, 7 daily, 4 weekly, 3 monthly
+- **Backup schedule**: Every 6 hours, all guests except `100,103,104,105,142` (Ansible-managed via Play 3)
+- **Prune job**: Daily — 6 hourly, 3 daily, 2 weekly, 1 monthly
 - **Garbage collection**: Daily (frees space from pruned snapshots — **required**, prune alone doesn't free disk)
+- **Capacity split**: The shared ext4 volume uses `prjquota`; PBS chunks are capped at 390 GiB and Time Machine is advertised to macOS as 500G via Samba.
 - **API auth**: Token `backup@pbs!ansible` (secret in vault)
 - **Connectivity check**: Runs at `:59` on all nodes (Play 4), logs to `pbs-check` tag in Loki
 - **Config**: `host_vars/pbs-lxc/vars.yml`, `host_vars/pbs-lxc/vault.yml`

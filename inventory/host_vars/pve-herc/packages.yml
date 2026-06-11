@@ -3,4 +3,5 @@
 # =============================================================================
 
 # Extra packages for this host
-packages_host_extra: []
+packages_host_extra:
+  - quota

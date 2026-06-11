@@ -30,6 +30,53 @@
   changed_when: false
   failed_when: false
 
+- name: Build ext filesystem project quota definitions
+  ansible.builtin.set_fact:
+    filesystem_project_quota_items: >-
+      {{
+        (filesystem_project_quota_items | default([]))
+        + [item.1 | combine({
+          'mount_path': item.0.path,
+          'mount_src': item.0.src,
+          'mount_fstype': item.0.fstype
+        })]
+      }}
+  loop: "{{ (filesystem_mounts | selectattr('project_quotas', 'defined') | list) | subelements('project_quotas') }}"
+  loop_control:
+    label: "{{ item.1.path }}"
+
+- name: Install quota support for project quota mounts (Debian)
+  ansible.builtin.apt:
+    name: quota
+    state: present
+  when:
+    - ansible_facts.os_family == "Debian"
+    - filesystem_project_quota_items | default([]) | length > 0
+
+- name: Inspect ext filesystem features for project quotas
+  ansible.builtin.command:
+    cmd: "tune2fs -l {{ item.src }}"
+  register: ext_project_quota_info
+  loop: "{{ filesystem_mounts | selectattr('project_quotas', 'defined') | list }}"
+  loop_control:
+    label: "{{ item.path }}"
+  changed_when: false
+  failed_when: false
+  check_mode: false
+  when: item.fstype is match('ext.*')
+
+- name: Enable ext project quota features
+  ansible.builtin.command:
+    cmd: "tune2fs -O project -Q prjquota {{ item.item.src }}"
+  loop: "{{ ext_project_quota_info.results | default([]) }}"
+  loop_control:
+    label: "{{ item.item.path }}"
+  when:
+    - not ansible_check_mode
+    - item.rc == 0
+    - item.item.fstype is match('ext.*')
+    - not ((item.stdout_lines | select('match', '^Filesystem features:') | first | default('')) is search('\\bproject\\b'))
+
 - name: Create mount point directories (skip already-mounted)
   ansible.builtin.file:
     path: "{{ item.item.path }}"
@@ -90,8 +137,102 @@
     - item.rc == 0
     - item.item.fstype is match('ext.*')
     - >-
-      (item.stdout | regex_search('Reserved block count:\\s+(\\d+)', '\\1') | default(['0'], true) | first | int)
+      (
+        (item.stdout | regex_search('Reserved block count:\\s+\\d+') | default('0'))
+        | regex_search('\\d+')
+        | int
+      )
       !=
-      (((item.stdout | regex_search('Block count:\\s+(\\d+)', '\\1') | default(['0'], true) | first | int)
-      * (item.item.reserved_blocks_percentage | float) / 100)
-      | round(0, 'floor') | int)
+      (
+        (
+          (item.stdout | regex_search('Block count:\\s+\\d+') | default('0'))
+          | regex_search('\\d+')
+          | int
+        )
+        * (item.item.reserved_blocks_percentage | float) / 100
+      )
+      | round(0, 'floor')
+      | int
+
+- name: Check ext project quota assignments
+  ansible.builtin.shell:
+    cmd: |
+      set -eu
+      root_attrs=$(lsattr -d -p {{ item.path | quote }})
+      root_project=$(printf '%s\n' "$root_attrs" | awk '{ print $1 }')
+      root_flags=$(printf '%s\n' "$root_attrs" | awk '{ print $2 }')
+      sample_file=$(find {{ item.path | quote }} -xdev -type f -print -quit)
+      sample_file_project="$root_project"
+      if [ -n "$sample_file" ]; then
+        sample_file_project=$(lsattr -p "$sample_file" | awk '{ print $1 }')
+      fi
+      sample_dir=$(find {{ item.path | quote }} -xdev -mindepth 1 -type d -print -quit)
+      sample_dir_project="$root_project"
+      sample_dir_flags="$root_flags"
+      if [ -n "$sample_dir" ]; then
+        sample_dir_attrs=$(lsattr -d -p "$sample_dir")
+        sample_dir_project=$(printf '%s\n' "$sample_dir_attrs" | awk '{ print $1 }')
+        sample_dir_flags=$(printf '%s\n' "$sample_dir_attrs" | awk '{ print $2 }')
+      fi
+      printf '%s %s %s %s %s\n' \
+        "$root_project" \
+        "$root_flags" \
+        "$sample_file_project" \
+        "$sample_dir_project" \
+        "$sample_dir_flags"
+  register: ext_project_quota_assignments
+  loop: "{{ filesystem_project_quota_items | default([]) }}"
+  loop_control:
+    label: "{{ item.path }}"
+  changed_when: false
+  failed_when: false
+  check_mode: false
+  when: item.mount_fstype is match('ext.*')
+
+- name: Assign ext project quota IDs
+  ansible.builtin.command:
+    cmd: "chattr -R -p {{ item.item.project_id }} {{ item.item.path }}"
+  loop: "{{ ext_project_quota_assignments.results | default([]) }}"
+  loop_control:
+    label: "{{ item.item.path }}"
+  when:
+    - not ansible_check_mode
+    - item.rc == 0
+    - item.item.mount_fstype is match('ext.*')
+    - (item.stdout.split() | first | int) != (item.item.project_id | int)
+        or (item.stdout.split()[2] | int) != (item.item.project_id | int)
+        or (item.stdout.split()[3] | int) != (item.item.project_id | int)
+
+- name: Enable ext project quota inheritance
+  ansible.builtin.command:
+    cmd: "find {{ item.item.path }} -xdev -type d -exec chattr +P {} +"
+  loop: "{{ ext_project_quota_assignments.results | default([]) }}"
+  loop_control:
+    label: "{{ item.item.path }}"
+  when:
+    - not ansible_check_mode
+    - item.rc == 0
+    - item.item.mount_fstype is match('ext.*')
+    - (item.stdout.split() | first | int) != (item.item.project_id | int)
+        or (item.stdout.split()[2] | int) != (item.item.project_id | int)
+        or (item.stdout.split()[3] | int) != (item.item.project_id | int)
+        or 'P' not in (item.stdout.split()[1] | default(''))
+        or 'P' not in (item.stdout.split()[4] | default(''))
+
+- name: Set ext project quota limits
+  ansible.builtin.command:
+    cmd: >-
+      setquota -P
+      {{ item.project_id }}
+      {{ item.block_soft_limit | default(item.block_hard_limit) }}
+      {{ item.block_hard_limit }}
+      {{ item.inode_soft_limit | default(0) }}
+      {{ item.inode_hard_limit | default(0) }}
+      {{ item.mount_path }}
+  loop: "{{ filesystem_project_quota_items | default([]) }}"
+  loop_control:
+    label: "{{ item.path }}"
+  changed_when: true
+  when:
+    - not ansible_check_mode
+    - item.mount_fstype is match('ext.*')
