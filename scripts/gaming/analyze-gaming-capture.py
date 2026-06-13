@@ -287,10 +287,59 @@ def add_diagnosis(result):
         value = (group.get(key) or {}).get(stat_name)
         return value if isinstance(value, (int, float)) else None
 
+    visible_source = visible_fps.get("source")
+    visible_stats = visible_fps.get("fps") or {}
+    visible_frame = visible_fps.get("frame_ms") or {}
+    visible_avg_fps = visible_stats.get("avg")
+    presentmon_avg_fps = fps.get("avg_from_frame_ms")
+    presentmon_top_mode = top_counter_name((result.get("presentmon") or {}).get("present_modes"))
+    presentmon_visible_mismatch = (
+        visible_source
+        and visible_source != "presentmon"
+        and visible_avg_fps is not None
+        and presentmon_avg_fps is not None
+        and abs(visible_avg_fps - presentmon_avg_fps) >= max(15.0, visible_avg_fps * 0.15)
+    )
+    presentmon_composed_mismatch = (
+        presentmon_visible_mismatch
+        and presentmon_top_mode
+        and presentmon_top_mode.startswith("Composed:")
+    )
+    if presentmon_visible_mismatch:
+        diagnosis.append({
+            "type": "presentmon_visible_fps_mismatch",
+            "severity": "medium",
+            "detail": (
+                f"Visible FPS source '{visible_source}' averaged {visible_avg_fps:.1f} FPS, "
+                f"while PresentMon-derived FPS averaged {presentmon_avg_fps:.1f}. "
+                f"Dominant PresentMon present mode was '{presentmon_top_mode or 'unknown'}'. "
+                "Use RTSS/MAHM for visible FPS."
+            ),
+        })
+        if presentmon_composed_mismatch:
+            diagnosis.append({
+                "type": "presentmon_composed_flip_visible_fps_mismatch",
+                "severity": "medium",
+                "detail": (
+                    "PresentMon disagreed while the game was in a composed presentation "
+                    "path. Treat PresentMon FPS and per-frame CPU/GPU busy timing as "
+                    "suspect for this capture; compare against an independent-flip capture."
+                ),
+            })
+
     avg_cpu_busy = cpu_busy.get("avg")
     avg_gpu_busy = gpu_busy.get("avg")
     avg_cpu_wait = cpu_wait.get("avg")
-    if avg_cpu_busy is not None and avg_gpu_busy is not None:
+    if presentmon_composed_mismatch and (avg_cpu_busy is not None or avg_gpu_busy is not None):
+        diagnosis.append({
+            "type": "presentmon_frame_pipeline_suspect",
+            "severity": "medium",
+            "detail": (
+                "Skipping PresentMon CPU/GPU busy bottleneck classification because "
+                "the composed-flip PresentMon frame cadence does not match the visible FPS source."
+            ),
+        })
+    elif avg_cpu_busy is not None and avg_gpu_busy is not None:
         if avg_cpu_busy >= max(avg_gpu_busy * 1.5, avg_gpu_busy + 2.0):
             diagnosis.append({
                 "type": "cpu_frame_time_dominant",
@@ -309,7 +358,7 @@ def add_diagnosis(result):
                     f"CPU busy {avg_cpu_busy:.2f} ms."
                 ),
             })
-    if avg_cpu_wait is not None and avg_cpu_wait >= 2.0:
+    if not presentmon_composed_mismatch and avg_cpu_wait is not None and avg_cpu_wait >= 2.0:
         diagnosis.append({
             "type": "cpu_wait_pressure",
             "severity": "medium",
@@ -393,40 +442,6 @@ def add_diagnosis(result):
             "severity": "info",
             "detail": f"p95 NVIDIA GPU util={gpu_util_p95:.1f}% and p95 GPU 3D engine={gpu_3d_p95:.1f}%.",
         })
-
-    visible_source = visible_fps.get("source")
-    visible_stats = visible_fps.get("fps") or {}
-    visible_frame = visible_fps.get("frame_ms") or {}
-    visible_avg_fps = visible_stats.get("avg")
-    presentmon_avg_fps = fps.get("avg_from_frame_ms")
-    presentmon_top_mode = top_counter_name((result.get("presentmon") or {}).get("present_modes"))
-    if (
-        visible_source
-        and visible_source != "presentmon"
-        and visible_avg_fps is not None
-        and presentmon_avg_fps is not None
-        and abs(visible_avg_fps - presentmon_avg_fps) >= max(15.0, visible_avg_fps * 0.15)
-    ):
-        diagnosis.append({
-            "type": "presentmon_visible_fps_mismatch",
-            "severity": "medium",
-            "detail": (
-                f"Visible FPS source '{visible_source}' averaged {visible_avg_fps:.1f} FPS, "
-                f"while PresentMon-derived FPS averaged {presentmon_avg_fps:.1f}. "
-                f"Dominant PresentMon present mode was '{presentmon_top_mode or 'unknown'}'. "
-                "Use RTSS/MAHM for visible FPS and PresentMon for frame-pipeline timing."
-            ),
-        })
-        if presentmon_top_mode and presentmon_top_mode.startswith("Composed:"):
-            diagnosis.append({
-                "type": "presentmon_composed_flip_visible_fps_mismatch",
-                "severity": "medium",
-                "detail": (
-                    "PresentMon visible FPS disagreed while the game was in a composed "
-                    "presentation path. Compare against an independent-flip capture before "
-                    "treating PresentMon FPS as the gameplay-visible rate."
-                ),
-            })
 
     p99 = visible_frame.get("p99")
     p999 = visible_frame.get("p999")

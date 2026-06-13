@@ -132,12 +132,14 @@ row instead of failing the benchmark.
 
 If PresentMon's FPS disagrees with the in-game FPS graph, do not treat
 PresentMon-derived FPS as authoritative. Prefer RTSS/MAHM FPS for visible FPS
-and keep PresentMon for frame-pipeline details such as `CPUBusy` and `GPUBusy`.
+and keep PresentMon for frame-pipeline details such as `CPUBusy` and `GPUBusy`
+only when its cadence is believable for the capture.
 Always check `present_modes` in the analyzer output:
 
 - `Hardware: Independent Flip` can line up with RTSS/MAHM visible FPS.
 - `Composed: Flip` can diverge from the visible FPS source. When it does,
-  keep the PresentMon CPU/GPU busy data but use RTSS/MAHM for visible FPS.
+  use RTSS/MAHM for visible FPS and treat PresentMon per-frame CPU/GPU busy
+  timing as suspect unless another capture proves the cadence matches.
 - `--no_track_display` is a diagnostic mode, not a visible-FPS replacement. It
   may show app/present submission cadence that is higher than the displayed
   frame rate.
@@ -158,6 +160,12 @@ reported one Fortnite swapchain with `PresentMode` mostly `Composed: Flip`,
 while Johnny reported roughly 150 FPS in the Fortnite graph. Treat that
 mismatch as a presentation-path validation problem, not as proof that the game
 was actually running near 60 FPS.
+
+In the 2026-06-13 real-round thermal check, PresentMon again stayed in
+`Composed: Flip` and reported roughly 27 FPS while RTSS/MAHM reported roughly
+194 FPS. For captures like that, the analyzer suppresses PresentMon CPU/GPU
+busy bottleneck classification and relies on RTSS/MAHM, Windows counters,
+thread samples, and NVIDIA SMI instead.
 
 When this mismatch appears:
 

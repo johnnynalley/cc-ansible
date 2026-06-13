@@ -318,6 +318,61 @@ Interpretation:
 - The thermal concern is still real. Seeing roughly 81-83 C at only about 120 FPS, with GPU temperature in the mid-to-high 40s, points back to CPU heat density and cooler/fan behavior rather than GPU heat soak. It is still below the 90 C cHTC limit, but it is warmer than expected for a 5800X3D on a Kraken under this kind of load.
 - The next thermal/performance capture should be a marked real match or Creative test with RTSS/MAHM enabled, so we can correlate visible FPS, CPU temp, CPU power, CPU busy, and hot-thread samples over a real workload.
 
+## 2026-06-13 Real-Round Thermal Check
+
+Capture:
+
+```text
+C:\Users\jn\AppData\Local\WindowsGamingBenchmark\Captures\20260613-164633-fortnite-5800x3d-real-round-thermal-check
+```
+
+Local archive analyzed from:
+
+```text
+/tmp/LJ-GAMING-PC-20260613-164633-fortnite-5800x3d-real-round-thermal-check
+/tmp/LJ-GAMING-PC-20260613-164633-fortnite-5800x3d-real-round-thermal-check.zip
+```
+
+Markers:
+
+- `target-started-20264`: 2026-06-13 16:46:37 -05:00
+- `round1-death-start-round2`: 2026-06-13 16:50:59 -05:00
+- `stop-requested`: 2026-06-13 17:12:45 -05:00
+
+Visible FPS:
+
+- Full capture RTSS visible-FPS source: average 193.9 FPS, p50 199.8 FPS.
+- Round 1 RTSS: average 180.5 FPS, p50 198.0 FPS, p5 110.5 FPS. Frame-time p99 was 28.0 ms, with four RTSS frame samples over 16.67 ms.
+- Round 2 RTSS: average 196.6 FPS, p50 199.8 FPS, p5 193.9 FPS, p1 119.5 FPS. Frame-time p99 was 8.75 ms, with four RTSS frame samples over 16.67 ms.
+- The largest round 2 RTSS spikes were near the end/stop window at 17:12:21-17:12:44, including one 410 ms sample and one 105 ms sample. Treat those as likely transition/stop-edge artifacts unless the user confirms they were in live combat.
+
+Thermals and clocks:
+
+- Round 1 MAHM CPU temperature: average 80.1 C, p95 82.1 C, p99 83.0 C, max 83.9 C.
+- Round 2 MAHM CPU temperature: average 79.7 C, p95 82.4 C, p99 84.0 C, max 86.0 C.
+- Round 2 hottest sample: 86.0 C at 16:54:07, CPU clock 4325 MHz, CPU power 92.45 W, RTSS/MAHM visible FPS still about 199 FPS.
+- CPU clock stayed healthy: round 2 average 4406 MHz, p50 4400 MHz, p95/p99/max 4450 MHz, minimum 4300 MHz.
+- CPU power stayed normal for load: round 2 average 82.4 W, p95 89.2 W, p99 92.5 W, max 96.4 W.
+- GPU was not thermally constrained: round 2 NVIDIA GPU temperature average 59.7 C, max 62 C.
+
+Other pressure signals:
+
+- NVIDIA GPU utilization in round 2 averaged 64.1%, p95 76.9%, max 79.0%, so this capture does not show GPU saturation.
+- Windows CPU max utility in round 2 p95 was 102.9%, and Fortnite target-thread samples repeatedly showed one hot thread around 80-89% of a logical processor. This still points to Fortnite CPU-thread pressure as the practical limiter even when total CPU usage looks moderate.
+- Round 2 RAM usage from MAHM averaged 19.96 GB and peaked around 20.37 GB. Windows available memory stayed high, roughly 12.6 GB minimum, so this was not memory pressure.
+- DPC/interrupt levels were not alarming in this run: round 2 p95 DPC 1.63%, p95 interrupt 2.24%.
+
+PresentMon validity:
+
+- PresentMon reported 42,410 rows of `Composed: Flip` and derived roughly 27 FPS while RTSS averaged roughly 194 FPS. For this capture, PresentMon visible FPS and per-frame CPU/GPU busy timing are not authoritative.
+- The analyzer now flags this as `presentmon_composed_flip_visible_fps_mismatch` and suppresses PresentMon CPU/GPU busy bottleneck classification in this state.
+
+Interpretation:
+
+- No thermal throttling was observed. The 5800X3D did get warm, peaking at 86 C, but it stayed below the 90 C limit while clocks remained around 4.3-4.45 GHz and FPS stayed near the 200 FPS cap.
+- The CPU fan-curve change appears adequate for now, but the chip is still running warm enough that cooler mount, radiator airflow, and fan behavior remain worth checking if future real-match captures approach 90 C or show clock drops.
+- Performance in round 2 looked strong: mostly capped near 200 FPS, not GPU-saturated, and no sustained thermal throttle pattern.
+
 
 ## 2026-05-24 Creative 32-Player Cup Zone Wars FPS Observation
 
