@@ -260,6 +260,76 @@
         group: root
         mode: "0755"
 
+    - name: Deploy Plex appliance Tailscale keepalive helper
+      ansible.builtin.template:
+        src: "{{ ansible_config_file | dirname }}/templates/plex-appliance/plex-appliance-tailscale-keepalive.sh.j2"
+        dest: /usr/local/bin/plex-appliance-tailscale-keepalive
+        owner: root
+        group: root
+        mode: "0755"
+      when: plex_appliance_tailscale_keepalive_enabled | default(false) | bool
+
+    - name: Deploy Plex appliance Tailscale keepalive service
+      ansible.builtin.template:
+        src: "{{ ansible_config_file | dirname }}/templates/plex-appliance/plex-appliance-tailscale-keepalive.service.j2"
+        dest: /etc/systemd/system/plex-appliance-tailscale-keepalive.service
+        owner: root
+        group: root
+        mode: "0644"
+      notify: Reload systemd
+      when: plex_appliance_tailscale_keepalive_enabled | default(false) | bool
+
+    - name: Deploy Plex appliance Tailscale keepalive timer
+      ansible.builtin.template:
+        src: "{{ ansible_config_file | dirname }}/templates/plex-appliance/plex-appliance-tailscale-keepalive.timer.j2"
+        dest: /etc/systemd/system/plex-appliance-tailscale-keepalive.timer
+        owner: root
+        group: root
+        mode: "0644"
+      notify: Reload systemd
+      when: plex_appliance_tailscale_keepalive_enabled | default(false) | bool
+
+    - name: Enable Plex appliance Tailscale keepalive timer
+      ansible.builtin.systemd:
+        name: plex-appliance-tailscale-keepalive.timer
+        enabled: true
+        state: started
+        daemon_reload: true
+      when:
+        - not ansible_check_mode
+        - plex_appliance_tailscale_keepalive_enabled | default(false) | bool
+
+    - name: Run Plex appliance Tailscale keepalive once after deploy
+      ansible.builtin.systemd:
+        name: plex-appliance-tailscale-keepalive.service
+        state: started
+      when:
+        - not ansible_check_mode
+        - plex_appliance_tailscale_keepalive_enabled | default(false) | bool
+        - plex_appliance_tailscale_keepalive_run_on_deploy | default(true) | bool
+
+    - name: Disable Plex appliance Tailscale keepalive timer (disabled hosts)
+      ansible.builtin.systemd:
+        name: plex-appliance-tailscale-keepalive.timer
+        enabled: false
+        state: stopped
+        daemon_reload: true
+      when:
+        - not ansible_check_mode
+        - not (plex_appliance_tailscale_keepalive_enabled | default(false) | bool)
+      failed_when: false
+
+    - name: Remove Plex appliance Tailscale keepalive files (disabled hosts)
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: absent
+      loop:
+        - /usr/local/bin/plex-appliance-tailscale-keepalive
+        - /etc/systemd/system/plex-appliance-tailscale-keepalive.service
+        - /etc/systemd/system/plex-appliance-tailscale-keepalive.timer
+      notify: Reload systemd
+      when: not (plex_appliance_tailscale_keepalive_enabled | default(false) | bool)
+
     - name: Deploy Plex HDMI watcher
       ansible.builtin.template:
         src: "{{ ansible_config_file | dirname }}/templates/plex-appliance/plex-appliance-hdmi-watcher.py.j2"

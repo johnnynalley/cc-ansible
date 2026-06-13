@@ -262,6 +262,25 @@ diagnostic or temporary fallback only after confirming firewall reachability and
 preserving the existing Plex token/auth model. The primary prevention path is to
 stabilize or refresh the Tailscale path between Bedroom and media-vm.
 
+Bedroom enables `plex-appliance-tailscale-keepalive.timer` through
+`playbooks/media/plex-appliance.yml`. The timer periodically runs
+`tailscale ping` to the Plex server Tailscale IP from
+`plex_appliance_server_url`, then requests Plex `/identity` over that same URL.
+This warms Tailscale endpoint discovery before an episode boundary needs a new
+Plex TCP connection, while keeping Tailscale identities and preferences
+untouched. On 2026-06-13, live probing showed the cold path from Bedroom to
+media-vm first using DERP/peer relay and then settling to the direct local
+endpoint `192.168.1.136:41641` in 2-6 ms; media-vm to Bedroom was already
+direct at `192.168.1.30:41641`.
+
+Check the deployed keepalive with:
+
+```bash
+systemctl status plex-appliance-tailscale-keepalive.timer --no-pager
+journalctl -u plex-appliance-tailscale-keepalive.service -n 50 --no-pager
+tailscale ping --timeout=5s --c 5 100.66.6.113
+```
+
 ## Skip Current Bedroom Plex Episode
 
 Run this on `jn-t14s-lin` from any shell. It stops the HDMI watcher and player,

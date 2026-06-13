@@ -1,0 +1,13 @@
+[Unit]
+Description=Plex appliance Tailscale Plex-path keepalive timer
+
+[Timer]
+OnBootSec={{ plex_appliance_tailscale_keepalive_on_boot_sec | default('90s') }}
+OnUnitActiveSec={{ plex_appliance_tailscale_keepalive_on_unit_active_sec | default('60s') }}
+RandomizedDelaySec={{ plex_appliance_tailscale_keepalive_randomized_delay_sec | default('5s') }}
+AccuracySec={{ plex_appliance_tailscale_keepalive_accuracy_sec | default('10s') }}
+Persistent=true
+Unit=plex-appliance-tailscale-keepalive.service
+
+[Install]
+WantedBy=timers.target

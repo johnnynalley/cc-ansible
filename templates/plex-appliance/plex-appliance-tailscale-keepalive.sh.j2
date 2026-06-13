@@ -1,0 +1,98 @@
+#!/usr/bin/env bash
+set -uo pipefail
+
+SERVER_URL={{ plex_appliance_server_url | to_json }}
+PING_COUNT={{ plex_appliance_tailscale_keepalive_ping_count | default(5) | int }}
+PING_TIMEOUT={{ plex_appliance_tailscale_keepalive_ping_timeout | default('5s') | to_json }}
+HTTP_TIMEOUT={{ plex_appliance_tailscale_keepalive_http_timeout_seconds | default(5) | int }}
+LOG_SUCCESS={{ plex_appliance_tailscale_keepalive_log_success | default(false) | bool | ternary('1', '0') }}
+
+if ! server_host="$(
+  python3 - "$SERVER_URL" <<'PY'
+import sys
+from urllib.parse import urlparse
+
+parsed = urlparse(sys.argv[1])
+if not parsed.hostname:
+    raise SystemExit("Plex appliance server URL has no hostname")
+print(parsed.hostname)
+PY
+)"; then
+  printf 'failed to parse Plex appliance server URL: %s\n' "$SERVER_URL" >&2
+  exit 1
+fi
+
+case "$server_host" in
+  100.*|fd7a:*)
+    ;;
+  *)
+    if [[ "$LOG_SUCCESS" == "1" ]]; then
+      printf 'Plex server host %s is not a Tailscale address; skipping keepalive\n' "$server_host"
+    fi
+    exit 0
+    ;;
+esac
+
+if ! command -v tailscale >/dev/null 2>&1; then
+  printf 'tailscale command is not available\n' >&2
+  exit 1
+fi
+
+ping_output="$(tailscale ping --timeout="$PING_TIMEOUT" --c "$PING_COUNT" "$server_host" 2>&1)"
+ping_rc=$?
+if [[ "$ping_rc" -ne 0 ]]; then
+  printf 'tailscale ping to %s failed:\n%s\n' "$server_host" "$ping_output" >&2
+  exit "$ping_rc"
+fi
+
+direct_route=""
+last_route=""
+while IFS= read -r line; do
+  [[ -n "$line" ]] || continue
+  last_route="$line"
+  case "$line" in
+    *" via DERP("*|*" via peer-relay("*)
+      ;;
+    *" via "*)
+      direct_route="$line"
+      ;;
+  esac
+done <<< "$ping_output"
+
+if [[ -z "$direct_route" ]]; then
+  printf 'tailscale ping reached %s but did not report a direct path; last route: %s\n' "$server_host" "$last_route" >&2
+elif [[ "$LOG_SUCCESS" == "1" ]]; then
+  printf 'tailscale direct path ready: %s\n' "$direct_route"
+fi
+
+http_output="$(
+  python3 - "$SERVER_URL" "$HTTP_TIMEOUT" "$LOG_SUCCESS" <<'PY'
+import sys
+import urllib.request
+
+server_url = sys.argv[1].rstrip("/")
+timeout = float(sys.argv[2])
+log_success = sys.argv[3] == "1"
+url = f"{server_url}/identity"
+
+request = urllib.request.Request(
+    url,
+    headers={"User-Agent": "plex-appliance-tailscale-keepalive/1"},
+)
+with urllib.request.urlopen(request, timeout=timeout) as response:
+    response.read(512)
+    if response.status >= 400:
+        raise SystemExit(f"Plex identity returned HTTP {response.status}")
+    if log_success:
+        print(f"Plex identity ready: HTTP {response.status}")
+PY
+)"
+http_rc=$?
+if [[ "$http_rc" -ne 0 ]]; then
+  printf 'Plex identity check failed for %s:\n%s\n' "$SERVER_URL" "$http_output" >&2
+  exit "$http_rc"
+fi
+
+if [[ -n "$http_output" ]]; then
+  printf '%s\n' "$http_output"
+fi

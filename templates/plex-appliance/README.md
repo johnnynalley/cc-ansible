@@ -5,6 +5,10 @@
 - `plex-appliance.env.j2`: Plex appliance environment file.
 - `plex-appliance-player.py.j2`: Player controller.
 - `plex-appliance-corrupt-media-report.py.j2`: Corrupt-media report helper.
+- `plex-appliance-tailscale-keepalive.sh.j2`: Warms and verifies the Plex
+  server Tailscale path used by the appliance.
+- `plex-appliance-tailscale-keepalive.service.j2`: One-shot keepalive service.
+- `plex-appliance-tailscale-keepalive.timer.j2`: Periodic keepalive timer.
 - `plex-appliance-hdmi-watcher.py.j2`: HDMI watcher.
 - `plex-appliance-hdmi-vt-watcher.py.j2`: HDMI VT watcher.
 - `plex-appliance-hdmi-autostart.sh.j2`: HDMI autostart helper.
