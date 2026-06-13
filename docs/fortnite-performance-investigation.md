@@ -157,6 +157,15 @@ Johnny saw roughly 83 C in his overlay while Fortnite was running. A read-only R
 
 Interpretation: 82-83 C is warm but below the X3D thermal-control limit. It does not prove unsafe operation by itself, and clocks were still boosting over 4.2 GHz, but this should be improved or watched if Fortnite holds low-to-mid 80s for long sessions or approaches 88-90 C. Cooling mount/paste, fan curve, case airflow, dust, and a conservative X3D undervolt/curve-optimizer path are the next likely thermal levers; do not change them without a controlled before/after test.
 
+Follow-up one-minute Ryzen telemetry sample while Fortnite was still active:
+
+- Temperature samples: 84.30, 84.05, 80.50, 79.30, 80.09, 80.26 C
+- PPT range: 65.5-88.0 W
+- EDC range: 53.5-112.2 A
+- Current clocks remained roughly 4.17-4.39 GHz on active boosted cores
+
+Interpretation update: the CPU was not continuously climbing toward 90 C during this short sample. It spiked into the mid-80s, then settled around 79-80 C as load varied. That is still warm for a Kraken-cooled gaming load, but it looks more like 5800X3D heat density plus fan/pump behavior than an immediate cooling failure.
+
 Later on 2026-05-31, after checking that the re-released 5800X3D is not expected until June 25 at $349 MSRP, Johnny decided to hold the 5700X3D plan for now instead of preemptively returning it. Rationale: the 5700X3D arrives around the same window, the 5800X3D may have launch availability/scalping risk, and future working-part upgrades can be partly offset by selling the replaced CPU.
 
 The previous 5800X3D re-release watch exists only because of the earlier plan to wait for a possible Ryzen 7 5800X3D AM4 10th Anniversary Edition. Rumors as of 2026-05-24 said AMD may re-release the 5800X3D around Q2 2026, with early retailer sightings around the low-$300 range. On 2026-06-01, AMD announced that the Ryzen 7 5800X3D 10th Anniversary Edition will be available beginning June 25 with a suggested e-tail price of $349. If Johnny no longer wants informational watch alerts after buying the 5700X3D, disable OpenClaw cron job `aeebfe19-a1b8-4f12-8f74-9406c29c5aab` (`AMD 5800X3D Re-release Watch`) after explicit approval.
