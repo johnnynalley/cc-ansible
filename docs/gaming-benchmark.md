@@ -101,13 +101,52 @@ The capture script writes:
 - `obs-profile.csv`
 - `preflight.csv`
 
+## Telemetry Sources
+
+The benchmark harness is not supposed to rely on PresentMon as the only signal.
+It can collect:
+
+- PresentMon frame timing: `FrameTime`, `CPUBusy`, `CPUWait`, `GPUTime`, `GPUBusy`, `GPUWait`, display latency, present mode, and runtime.
+- Windows system counters: CPU total/max utility, CPU DPC/interrupt time, CPU max frequency, memory pressure, disk latency/queue, network throughput, and GPU engine counters when enabled.
+- NVIDIA SMI: NVIDIA GPU utilization, memory utilization, graphics/memory clocks, power, temperature, VRAM use, and PCIe link state.
+- RTSS shared memory: RTSS FPS and frame-time windows when enabled.
+- MSI Afterburner / MAHM shared memory: OSD FPS/frame time plus hardware-monitoring values such as CPU/GPU clocks, temperatures, power, and usage when enabled.
+- Process/thread sampling: watched-process CPU/memory, top process deltas, target process hot-thread samples, process inventory, OBS profile snapshot, markers, and preflight warnings.
+
+On `lj-gaming-pc`, the current inventory intentionally enables PresentMon and NVIDIA SMI but disables RTSS and MAHM capture:
+
+```yaml
+windows_gaming_benchmark_presentmon_enabled: true
+windows_gaming_benchmark_pmdp_enabled: false
+windows_gaming_benchmark_rtss_enabled: false
+windows_gaming_benchmark_mahm_enabled: false
+windows_gaming_benchmark_nvidia_smi_enabled: true
+```
+
+That means a capture can still have GPU sensor data from NVIDIA SMI and CPU/system data from Windows counters, but it will not have RTSS/Afterburner visible-FPS or CPU-temperature rows. If PresentMon's FPS disagrees with the in-game FPS graph, do not treat PresentMon-derived FPS as authoritative until RTSS/MAHM or another visible-FPS source is enabled for the same test.
+
+## PresentMon Caveat
+
+PresentMon is still valuable for CPU/GPU frame-pipeline diagnostics, especially
+`CPUBusy` versus `GPUBusy`, but it is not the same thing as Fortnite's in-game
+FPS counter. In the 2026-06-13 Cup Zone Wars stress capture, PresentMon reported
+one Fortnite swapchain with `PresentMode` mostly `Composed: Flip`, while Johnny
+reported roughly 150 FPS in the Fortnite graph. Treat that mismatch as a harness
+validation problem, not as proof that the game was actually running near 60 FPS.
+
+When this mismatch appears:
+
+- record the user's in-game FPS observation in `docs/fortnite-performance-investigation.md`
+- prefer non-FPS PresentMon data only as supporting evidence
+- enable or capture a second FPS source for the next run, such as RTSS shared memory, Afterburner/MAHM logging, or another reliable visible-FPS counter
+- keep using markers so load, lobby, fight, and exit windows can be separated
 
 ## CPU Upgrade Baseline
 
-As of 2026-05-31, Johnny bought a Ryzen 7 5700X3D for the gaming PC. After install, use the same wrapper flow to capture at least one clean Fortnite baseline with labels that make the CPU state obvious, for example:
+As of 2026-06-13, the installed CPU is verified as a Ryzen 7 5800X3D even though Johnny ordered a 5700X3D. Use the same wrapper flow to capture clean Fortnite baselines with labels that make the CPU state obvious, for example:
 
 ```bash
-bin/windows-gaming-benchmark start --label fortnite-5700x3d-baseline
+bin/windows-gaming-benchmark start --label fortnite-5800x3d-baseline
 ```
 
 Before comparing results, record the verified CPU model, BIOS version, chipset driver version, temperatures, OBS state, render mode, map/match type, and whether Performance Mode was active. Compare against the saved 2026-05-23 Ryzen 9 3900X captures in `docs/fortnite-performance-investigation.md` before re-ranking remaining tweaks.
