@@ -217,10 +217,10 @@ Important limitation: this capture has no explicit `map-loaded`, `round-start`, 
 Analyzer summary:
 
 - PresentMon rows: 6602
-- Present mode: almost entirely `Composed: Flip`
+- Present mode: almost entirely `Composed: Flip`; this is important because the raw PresentMon FPS did not line up with the in-game FPS Johnny saw
 - Runtime: DXGI
-- All-window average FPS from PresentMon frame time: 37.8
-- Trimmed first-60/last-30 average FPS from PresentMon frame time: 35.3
+- All-window average FPS from raw PresentMon frame time: 37.8
+- Trimmed first-60/last-30 average FPS from raw PresentMon frame time: 35.3
 - All-window p99 frame time: 201.23 ms
 - All-window p99.9 frame time: 661.21 ms
 - Worst captured frame: 4047.52 ms
@@ -233,7 +233,7 @@ Analyzer summary:
 - Fortnite reached 6472.9 MB working set
 - Fortnite hot target-thread samples hit roughly 97-98% of one full logical processor
 
-The time buckets show why the aggregate is hard to interpret:
+The raw PresentMon time buckets show why this capture cannot be treated as a clean visible-FPS result:
 
 - 0-40 seconds had severe map load / transition spikes, including many frames over 33 ms.
 - 40-80 seconds was much steadier: roughly 52-55 FPS by PresentMon frame time, p50 around 15.8-16.1 ms, and p95 around 35-37 ms.
@@ -243,14 +243,15 @@ The time buckets show why the aggregate is hard to interpret:
 Interpretation:
 
 - Johnny's subjective result is important: this map was previously so laggy that mechanics did not work, and after the X3D swap/XMP restore/cooling-profile change it was playable enough to use for practice. That is a real practical win over the old state.
-- PresentMon did not show a clean 200 FPS path in this capture. It reported a mostly 60-ish FPS composed presentation path during the cleanest tail, despite the user-visible Fortnite graph feeling much better in recent matches. Do not conclude from this single Cup Zone Wars capture that the system is only capable of 60 FPS; instead, treat it as a signal that this map/session or capture path needs tighter markers and cross-checking against the in-game graph.
-- The bottleneck in the captured path is still CPU frame time, not GPU throughput. CPU busy tracks frame time closely, GPU busy is low, and one or more Fortnite threads are nearly saturating a logical processor while total CPU and GPU utilization look moderate.
+- Johnny reported averaging roughly 150 FPS in-game during this Cup Zone Wars run. Treat that user-visible in-game FPS as the gameplay observation for this run.
+- The raw PresentMon FPS numbers in this capture are suspect and should not be used as the authoritative visible FPS result. They conflict with Johnny's in-game observation and look like a composed-presentation measurement path that the current harness/analyzer is not interpreting correctly for this session.
+- The non-FPS telemetry still points away from GPU saturation: GPU utilization was modest, GPU temperature was low, and Fortnite had hot target-thread samples near a full logical processor. Keep the working theory as Fortnite hot-thread / CPU-frame pressure, but do not cite this capture's raw PresentMon FPS as the proof.
 - Background-process pollution was not the smoking gun here. DWM, Defender, SteelSeries Sonar, Discord, CAM, and PowerShell stayed low relative to Fortnite's own frame-critical work.
 
 Next action:
 
 - For another Cup Zone Wars test, mark `map-loaded`, `round-start`, `heavy-fight`, `round-end`, and `leave-map` so the analyzer can isolate real fighting from load/exit spikes.
-- Ask Johnny to note whether the in-game Fortnite FPS graph is showing 200 FPS, 120 FPS lobby cap, or something closer to the PresentMon 60-ish path during the same window. This matters because the current capture shows a PresentMon/in-game-perception mismatch.
+- Improve or cross-check the benchmark harness before relying on PresentMon-derived FPS for Creative stress maps. The next capture should include a second visible-FPS source such as RTSS/Afterburner logging, an in-game FPS note, or another reliable frame counter alongside PresentMon.
 - Keep Cup Zone Wars labeled as a stress map. Do not compare it directly against BR or Realistics captures.
 
 
