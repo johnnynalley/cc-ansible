@@ -20,7 +20,7 @@
 - CPU currently verified by Windows snapshot 2026-06-12: AMD Ryzen 7 5800X3D, 8 cores / 16 threads
   - Johnny reported buying a 5700X3D, but Windows reports `AMD Ryzen 7 5800X3D 8-Core Processor` through both WMI and the CPU registry brand string.
   - Supporting identity data: `AuthenticAMD`, Family 25 Model 33 Stepping 2, 96 MB L3, WMI max clock 3401 MHz.
-  - Treat the installed CPU as a 5800X3D unless physical markings or an external hardware tool contradict Windows.
+  - Treat the installed CPU as a 5800X3D.
 - Previous CPU: AMD Ryzen 9 3900X, 12 cores / 24 threads
 - Motherboard: MSI MPG B550 Gaming Plus
 - BIOS: `1.L1`
@@ -28,7 +28,7 @@
 - Memory clock previously verified: 1600 MHz, DDR4-3200 effective
 - Memory clock after CPU swap snapshot 2026-06-12: initially reset to DDR4-2133 effective.
 - A-XMP restored 2026-06-12; Windows now reports all four DIMMs at 3200 MT/s configured speed.
-- Fabric clock previously verified: 1600 MHz. Re-check with Ryzen telemetry if available, but DDR4-3200 is restored from Windows' view.
+- Fabric clock verified after A-XMP restore: 1600 MHz.
 - GPU: NVIDIA GeForce RTX 3070
 - Display mode observed from Windows: 1920x1080 at 200 Hz
 
@@ -54,19 +54,17 @@
 
 Ryzen Master full UI is not installed, but the Ryzen Master SDK CLI is present.
 
-Read-only SDK telemetry showed:
+Current 5800X3D read-only SDK telemetry showed:
 
-- PBO supported: yes
-- Current OC mode: PBO Mode
-- Board limits: PPT 1000 W, EDC 220 A, TDC 140 A
+- Current OC mode: Default Mode
 - Fused limits: PPT 142 W, EDC 140 A, TDC 95 A
-- PBO scalar: disabled
-- Curve Optimizer: unsupported through the SDK on this CPU
-- SMT: enabled
-- Core parking: 0 cores parked
+- cHTC thermal-control limit: 90 C
+- CPU overclocking from BIOS allowed: yes
+- Memory/FCLK: DDR4-3200, MCLK 1600 MHz, FCLK 1600 MHz
 - RAM timings observed: 3200 CL16-18-18-36, GearDown enabled
+- In Fortnite, current clocks stayed roughly 4.2-4.45 GHz on boosted cores during thermal checks
 
-Implication: the machine is not stuck in stock power-plan behavior. Ryzen Master is useful for telemetry here, but the newer Curve Optimizer style of tuning is probably not available for the 3900X. Any meaningful Ryzen tuning is likely BIOS-side PBO/scalar/AutoOC and memory/FCLK tuning.
+Implication: Ryzen Master SDK is useful for current telemetry, but the old 3900X-specific PBO/Curve Optimizer interpretation is retired. Treat any X3D tuning as a new 5800X3D-specific BIOS/telemetry investigation, not a continuation of the 3900X tuning plan.
 
 ## Fortnite Install Findings
 
@@ -89,11 +87,11 @@ Do not manually delete paks. Use Epic Games Launcher options for this setting.
 
 ## Current Best Candidates
 
-> Updated 2026-06-12 after the AM4 X3D CPU swap was detected by Windows. Treat this as a benchmark queue, not applied wins. The short-term goal is to restore the memory profile, verify thermals/clocks, capture clean post-upgrade Fortnite data, then re-rank remaining tweaks based on the new CPU frame-time baseline.
+> Updated 2026-06-13 after the AM4 X3D CPU swap, A-XMP restore, and cooling-profile checks. Treat this as a benchmark queue, not applied wins. The short-term goal is to capture clean post-upgrade Fortnite data, then re-rank remaining tweaks based on the new CPU frame-time baseline.
 
 1. Post-upgrade health baseline:
-   - verify the exact CPU model mismatch: Johnny reported 5700X3D, Windows reports 5800X3D
-   - record idle/load CPU temperature, effective clocks, power limits, and whether boost behavior is normal for the X3D CPU
+   - installed CPU is verified as a 5800X3D even though Johnny ordered a 5700X3D
+   - record idle/load CPU temperature, effective clocks, power limits, cooling profile, and whether boost behavior is normal for the X3D CPU
    - then run a clean Fortnite Performance Mode capture without OBS before judging the upgrade
 2. OBS capture-pipeline A/B, after the clean X3D baseline:
    - the biggest measured delta is non-OBS gameplay around 151 FPS vs OBS recording around 99-102 FPS
@@ -101,8 +99,8 @@ Do not manually delete paks. Use Epic Games Launcher options for this setting.
    - first tests: Game Capture vs Display Capture vs Window Capture, then preview enabled vs disabled
    - then test stripped scene vs normal scene, overlays/browser sources disabled, OBS admin vs normal, OBS priority normal vs above-normal, and NVENC options
 3. VBS/HVCI diagnostic A/B if Johnny approves the reversible security tradeoff:
-   - VBS/HVCI is still a plausible Windows 11 tax on Zen 2 CPU-bound gaming
-   - after the X3D swap, do not test this until memory speed and a clean post-upgrade baseline are recorded
+   - VBS/HVCI can still tax CPU-bound Windows 11 gaming, but re-rank this after the 5800X3D baseline
+   - after the X3D swap, do not test this until a clean post-upgrade baseline is recorded
    - document current `msinfo32` / Core Isolation state before changing anything
    - if disabled for a test, reboot, run the same capture, and re-enable if there is no meaningful win
 4. Render-mode sanity checks, not a likely FPS unlock:
@@ -126,19 +124,18 @@ Do not manually delete paks. Use Epic Games Launcher options for this setting.
    - do not bake priority into Performance Mode unless it wins clearly
 8. BIOS-side Ryzen/RAM tuning:
    - PBO/scalar/AutoOC and memory/FCLK/timing work are more likely to move the single-thread ceiling than more background-app cleanup
-   - DDR4-3200 CL16 is restored after the CPU swap; verify FCLK separately before deeper memory tuning
+   - DDR4-3200 CL16 and FCLK1600 are restored after the CPU swap
    - any BIOS/memory change needs stability testing before calling it a Fortnite win
 9. Affinity/CCD/CCX tests are not the immediate recommendation. The current saved benchmark state files all show `AffinityPreset: none`; if affinity was tried earlier, there is no durable capture artifact in the harness. Only revisit with a controlled, documented A/B if Johnny explicitly wants that path or telemetry shows cross-CCD/thread-migration cost.
 
-## Upgrade Watch
+## CPU Upgrade Status
 
-As of 2026-05-31, Johnny bought a Ryzen 7 5700X3D for the gaming PC. On 2026-06-12, Johnny reported completing the CPU upgrade. A managed Windows platform snapshot at 2026-06-12 21:57:53 -05:00 verified an AM4 X3D CPU, but Windows reported it as `AMD Ryzen 7 5800X3D 8-Core Processor`, not `5700X3D`. A follow-up read-only identity check confirmed the same model through both WMI and `HKLM:\HARDWARE\DESCRIPTION\System\CentralProcessor\0`.
+Johnny ordered a Ryzen 7 5700X3D, but the installed CPU is verified as a Ryzen 7 5800X3D. The BIOS, Windows WMI, and `HKLM:\HARDWARE\DESCRIPTION\System\CentralProcessor\0` all report `AMD Ryzen 7 5800X3D 8-Core Processor`. Treat the 5800X3D as the installed and benchmark-relevant CPU.
 
-Do not call the upgrade benchmarked yet. Before performance conclusions:
+Do not call the upgrade benchmarked yet. Before final performance conclusions:
 
-- verify whether the physical CPU is actually a 5800X3D or whether Windows/vendor strings are misleading
 - BIOS A-XMP was restored after the initial post-swap DDR4-2133 reading; Windows now reports the kit at DDR4-3200
-- re-check FCLK and CPU thermals/clocks
+- FCLK1600 and CPU thermal/clock spot checks are recorded below
 - capture at least one clean post-install Fortnite baseline and archive it
 
 ## 2026-06-13 X3D Thermal Spot Check While Fortnite Was Running
@@ -183,11 +180,7 @@ Johnny then changed CAM's radiator fan temperature source from liquid to CPU, wi
 
 Interpretation update: using CPU temperature as the fan-curve source immediately helped. The earlier liquid-based curve was likely too slow or too quiet for the 5800X3D's fast CPU hotspot swings. Liquid temperature is usually the smoother AIO control source, but for this specific gaming workload and current CAM profile, CPU-sourced radiator fans are the better practical setting if noise is acceptable. A refined liquid-source curve could still work if it ramps aggressively by roughly 40-42 C liquid and reaches 100% by the mid-40s.
 
-Later on 2026-05-31, after checking that the re-released 5800X3D is not expected until June 25 at $349 MSRP, Johnny decided to hold the 5700X3D plan for now instead of preemptively returning it. Rationale: the 5700X3D arrives around the same window, the 5800X3D may have launch availability/scalping risk, and future working-part upgrades can be partly offset by selling the replaced CPU.
-
-The previous 5800X3D re-release watch exists only because of the earlier plan to wait for a possible Ryzen 7 5800X3D AM4 10th Anniversary Edition. Rumors as of 2026-05-24 said AMD may re-release the 5800X3D around Q2 2026, with early retailer sightings around the low-$300 range. On 2026-06-01, AMD announced that the Ryzen 7 5800X3D 10th Anniversary Edition will be available beginning June 25 with a suggested e-tail price of $349. If Johnny no longer wants informational watch alerts after buying the 5700X3D, disable OpenClaw cron job `aeebfe19-a1b8-4f12-8f74-9406c29c5aab` (`AMD 5800X3D Re-release Watch`) after explicit approval.
-
-For Fortnite and other cache-sensitive games, 5700X3D/5800X3D are much better upgrade targets from a 3900X than a 5900X. The 5800X3D is typically only about 6-10% faster than the 5700X3D in gaming, so swapping again is most sensible only if a real 5800X3D order is secured at a reasonable net cost. A 5900X adds cores but does not solve the cache/game-thread limitation that the captures are pointing at. After the 5700X3D install, re-run the same benchmark harness before chasing lower-confidence tweaks.
+For Fortnite and other cache-sensitive games, the installed 5800X3D is the correct AM4 upgrade path from the previous 3900X. A 5900X adds cores but does not solve the cache/game-thread limitation that the captures pointed at. Re-run the benchmark harness on the verified 5800X3D before chasing lower-confidence tweaks.
 
 
 ## 2026-05-24 Creative 32-Player Cup Zone Wars FPS Observation
@@ -395,7 +388,7 @@ Test:
 
 ### 3. Render Mode A/B Test
 
-Reason: modern Fortnite is not guaranteed to have best frame pacing on Performance Mode, but Johnny is right that DX12 is unlikely to increase raw average FPS on a CPU-limited Ryzen 9 3900X setup. DX11 or a legacy DX11 Performance path, if still selectable, may have lower graphics-feature overhead but is not expected to beat current Performance Mode's stripped-down path for raw CPU frame time. Keep render-mode testing as a sanity check for 1% lows, stutter, and OBS/capture interaction, not as a likely path to 200 FPS. Shader compilation can make first-run DX12 results misleading.
+Reason: modern Fortnite is not guaranteed to have best frame pacing on Performance Mode, but the verified 5800X3D already appears to have solved the old raw-FPS ceiling in Performance Mode. DX11 or a legacy DX11 Performance path, if still selectable, may have lower graphics-feature overhead, but keep render-mode testing as a sanity check for 1% lows, stutter, and OBS/capture interaction rather than a likely raw-FPS unlock. Shader compilation can make first-run DX12 results misleading.
 
 Test:
 
@@ -425,11 +418,11 @@ Test:
 
 ### 5. NVIDIA Driver/Profile Sanity
 
-Reason: Fortnite can regress on specific driver branches, and the current driver version is not yet recorded in this document.
+Reason: Fortnite can regress on specific driver branches. The current recorded NVIDIA driver is `596.49`.
 
 Test:
 
-1. Record current NVIDIA driver version before further A/B testing.
+1. Keep the recorded NVIDIA driver version attached to each benchmark.
 2. If results regress after a driver update, consider a clean install or known-stable branch as a measured test.
 3. Do not treat this as a magic optimization; it is hygiene and rollback context.
 
@@ -453,7 +446,7 @@ Success criteria:
 
 ### 7. Affinity A/B Test
 
-Reason: Ryzen 9 3900X is a multi-CCD Zen 2 CPU. Fortnite may behave better when its heavy threads stay within one CCD/CCX instead of bouncing across CCDs, but this remains low-confidence without telemetry showing migration cost.
+Reason: the old 3900X was a multi-CCD Zen 2 CPU, but the installed 5800X3D is a single-CCD gaming part, so the previous CCD/CCX migration concern is mostly retired. Keep affinity testing low priority unless new telemetry shows scheduler or thread-placement problems.
 
 Existing benchmark presets:
 
@@ -480,7 +473,8 @@ Current evidence state:
 
 Potential:
 
-- PBO scalar / AutoOC tuning
+- verify stock 5800X3D boost/thermal behavior under clean benchmark load
+- fan/pump/radiator airflow tuning before any voltage work
 - memory/FCLK tuning toward 3600/1800 if the four-DIMM kit and CPU memory controller tolerate it
 - tighter DDR4 timings if stable
 
@@ -521,6 +515,3 @@ Microsoft documents `GPU Priority` and `SFIO Priority` as not used, and `High` s
 - AMD Ryzen Master docs describe PBO, PBO Advanced, and Curve Optimizer behavior and limits: https://docs.amd.com/r/en-US/68886-ryzen-master-user-guide/CPU
 - AMD Ryzen Master product page notes overclocking/PBO warranty caveats: https://www.amd.com/en/products/software/ryzen-master.html
 - Microsoft MMCSS docs: https://learn.microsoft.com/en-us/windows/win32/procthread/multimedia-class-scheduler-service
-- TechPowerUp reports the rumored Ryzen 7 5800X3D AM4 10th Anniversary Edition; treat as rumor until AMD/retail confirmation: https://www.techpowerup.com/348272/amd-to-re-launch-ryzen-7-5800x3d-as-am4-10th-anniversary-edition
-- Tom's Hardware reports early retailer sightings of the rumored Ryzen 7 5800X3D AM4 10th Anniversary Edition around $310: https://www.tomshardware.com/pc-components/cpus/ryzen-7-5800x3d-am4-10th-anniversary-edition-surfaces-online-for-usd310-return-of-iconic-gaming-cpu-for-budget-builders-seems-imminent
-- AMD announced the Ryzen 7 5800X3D 10th Anniversary Edition for June 25 with a suggested e-tail price of $349: https://www.amd.com/en/blogs/2026/amd-computex-2026-10-years-of-am4-am5-support-through.html

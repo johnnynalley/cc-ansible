@@ -36,6 +36,8 @@ When creating or materially updating operator docs, policy docs, runbooks, or tr
 
 When a change affects repository layout, operator entrypoints, common commands, source-of-truth document locations, or human-facing workflow guidance, update `README.md` in the same scoped change. Do not leave `README.md` pointing at old paths, stale command examples, or outdated directory structure after moving files, scripts, templates, playbooks, or docs. Also update the relevant catalog README (`docs/README.md`, `playbooks/README.md`, `templates/README.md`, `scripts/README.md`, `inventory/README.md`, or `files/README.md`) and run or extend `scripts/repo/repo-audit` when the change affects paths or references. Docs, README files, AGENTS guidance, and cross-references must not go stale; keeping them current is part of the implementation, not a follow-up.
 
+When updating an investigation doc, tracker, or runbook with new evidence that supersedes an older plan, watch item, hypothesis, or pending decision, retire or rewrite the obsolete text in the same change. Do not append a new "current state" note while leaving contradictory older sections, stale source links, or no-longer-actionable watch items later in the file.
+
 When renaming, moving, deleting, or replacing a source-of-truth doc, tracker, script, or runbook that OpenClaw references, update the matching OpenClaw workspace skills, hubs, heartbeat prompts, cron jobs, and guidance files in the same change. Do not leave OpenClaw pointing at stale paths after repo-side file moves.
 
 ### Codex Self-Maintenance & Memory
