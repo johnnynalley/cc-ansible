@@ -1656,10 +1656,12 @@ Decision rule:
 7. Recyclarr should stay disabled unless the policy-management direction is
    explicitly changed.
 8. Profilarr native scheduled Arr upgrades should stay disabled. Overnight
-   proactive upgrades are triggered by `playbooks/media/nightly-media-maintenance.yml`
-   only when no mergerfs balance job is pending for that night. If future live
-   runs expose bad grabs, fix the Sonarr/Radarr scoring, import metadata, or
-   parsing cause rather than relying on cleanup-only handling.
+   proactive upgrades are triggered by `playbooks/media/nightly-media-maintenance.yml`.
+   Routine mergerfs balancing is disabled by policy; an explicitly queued
+   exception balance job still owns that night's window until removed,
+   completed, or deferred. If future live runs expose bad grabs, fix the
+   Sonarr/Radarr scoring, import metadata, or parsing cause rather than relying
+   on cleanup-only handling.
 
 Current deployed state on 2026-05-22:
 
@@ -1672,8 +1674,10 @@ Current deployed state on 2026-05-22:
 - Upgrade scheduler configs are currently disabled and should stay disabled.
   Sonarr has one cutoff-unmet monitored-series filter (`count: 1`), and Radarr
   has one cutoff-unmet monitored-movies filter (`count: 5`). The nightly media
-  maintenance coordinator queues controlled hourly `arr.upgrade` jobs from
-  midnight through 6 AM only when no balance job is pending for that night.
+  maintenance coordinator opens the Profilarr upgrade window from midnight
+  through 6 AM and closes it at 7 AM. Routine mergerfs balance is disabled; an
+  explicitly queued exception balance job still blocks Profilarr for that
+  night until removed, completed, or deferred.
 - On 2026-05-22, live scheduled upgrades were briefly enabled, queued one
   Sonarr run and one Radarr run for 23:00 UTC, and were disabled again after a
   Sonarr manual dry run selected `Bleach` but timed out while fetching release
@@ -1735,9 +1739,9 @@ Current deployed state on 2026-05-22:
   `/opt/profilarr/config/data/backups/profilarr-pre-disable-upgrade-jobs-20260524T225353Z.db`.
 - Later on 2026-05-24, `playbooks/media/nightly-media-maintenance.yml` became the
   owner for overnight proactive upgrade launches. It keeps native Profilarr Arr
-  scheduling disabled, queues explicit `arr.upgrade` jobs during midnight-7 AM
-  windows when no balance job is pending, and reserves the whole night for
-  storage if any queued mergerfs balance job exists.
+  scheduling disabled and opens the upgrade window during midnight-7 AM
+  windows. As of 2026-06-13, routine mergerfs balance is disabled by policy;
+  only explicitly queued exception balance jobs reserve the night for storage.
 - First `scripts/media-release/sonarr_transaction_audit.py --hours 2 --limit 8` run after
   monitor deployment skipped `10000` bootstrap history records and showed `11`
   real post-monitor events: `grabbed=10`, `downloadFolderImported=1`. The live

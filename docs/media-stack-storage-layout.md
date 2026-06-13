@@ -113,13 +113,21 @@ managed desired state.
 `/srv/media/plex/downloads/complete`, unless that path is excluded. That is not
 automatically wrong because completed downloads are part of the media tree.
 
-The safety requirement is that no process is writing to the files being moved.
-The nightly coordinator pauses the docker-vm media stack before each actual
-rsync move and resumes it afterward. The timer may fire at midnight, but the
-current `mergerfs-balance` implementation scans branch stats and selects the
-first eligible file before running the pause hook. A manual copy, import,
-unpack, or cleanup that writes into `/srv/media/plex` during a maintenance
-window can still create changing files and break the balance run.
+Routine nightly balancing is disabled by policy. The normal
+`nightly-media-maintenance` path opens Profilarr upgrade work from midnight
+through 6 AM and closes the window at 7 AM. Balance jobs are exception/manual
+work only; if one is deliberately queued, it owns that night's window and
+Profilarr upgrades are skipped until the job is removed, completed, or
+deferred.
+
+The safety requirement for an approved balance run is that no process is
+writing to the files being moved. The coordinator pauses the docker-vm media
+stack before each actual rsync move and resumes it afterward. The timer may fire
+at midnight, but the current `mergerfs-balance` implementation scans branch
+stats and selects the first eligible file before running the pause hook. A
+manual copy, import, unpack, or cleanup that writes into `/srv/media/plex`
+during a maintenance window can still create changing files and break the
+balance run.
 
 Before diagnosing balance/import behavior, verify both sides:
 
@@ -130,8 +138,16 @@ cat /var/lib/nightly-media-maintenance/state.json
 cat /etc/mergerfs-balance.conf
 ```
 
-When the Arr queue is intentionally busy, defer balance jobs with the managed
-coordinator instead of disabling random services:
+If a queued balance job should no longer block nightly Profilarr upgrades,
+remove it with the managed coordinator instead of disabling random services:
+
+```bash
+nightly-media-maintenance --state-dir /var/lib/nightly-media-maintenance \
+  balance remove <job-name>
+```
+
+If an approved balance job needs to stay queued but not run yet, defer it with
+the managed coordinator:
 
 ```bash
 nightly-media-maintenance --state-dir /var/lib/nightly-media-maintenance \

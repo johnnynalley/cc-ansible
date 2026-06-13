@@ -440,7 +440,7 @@ Balances files across mergerfs branches by moving from fullest to emptiest. ZFS-
 - **Config variable**: `mergerfs_balance_exclude_paths` in `group_vars/nas_server/mergerfs.yml`
 - **CLI excludes**: `-E` flags merge with config excludes (additive)
 - **Evacuation mode**: `--evacuate <branch>` drains one branch to the least-used eligible branches before planned removal or reformat. Dry-run first.
-- **Nightly coordinator**: `playbooks/media/nightly-media-maintenance.yml` owns the midnight-7 AM window. Balance jobs are queued with `nightly-media-maintenance balance add ...`; if a balance job is pending, Profilarr upgrades are skipped for that night.
+- **Nightly coordinator**: `playbooks/media/nightly-media-maintenance.yml` owns the midnight-7 AM window. The normal nightly path opens Profilarr upgrade work. Mergerfs balance jobs are exception/manual work queued with `nightly-media-maintenance balance add ...`; if a balance job is pending, Profilarr upgrades are skipped until the job is removed, completed, or deferred.
 - **Media stack pause/resume**: balance jobs run `/usr/local/sbin/mergerfs-balance-media-stack stop|start` through a forced SSH key to docker-vm. Current balance jobs pause Sonarr, Radarr, Prowlarr, Bazarr, Byparr, qBittorrent, SABnzbd, and Profilarr while Plex stays up. The timer fires hourly inside the window, and the balancer currently scans/selects the first eligible file before the pause hook runs.
 - **Storage-layout runbook**: use `docs/media-stack-storage-layout.md` before changing or diagnosing completed-vs-incomplete download paths, hardlinks, docker-vm NFS mounts, TS440 backing storage, `/usenet-complete` cleanup, or balance/import RCA.
 - **VirtioFS caveat**: After balancing, media-vm needs a full stop/start (`qm stop`/`qm start`) to clear virtiofsd's stale directory cache
@@ -461,7 +461,7 @@ mergerfs-balance /srv/media --evacuate nas-02 --dry-run
 # Drain nas-02, leaving at least 100G free on destination branches
 mergerfs-balance /srv/media --evacuate nas-02 --min-free 100G
 
-# Queue a managed overnight evacuation: nas-02 -> media-01..04, midnight-7 AM
+# Exception only: queue a managed overnight evacuation, nas-02 -> media-01..04
 nightly-media-maintenance balance add --name nas02-evac --evacuate nas-02 \
   --destination media-01 --destination media-02 --destination media-03 \
   --destination media-04 --min-free 100G
@@ -596,9 +596,10 @@ Profilarr is staged on docker-vm as a managed Docker stack at `/opt/profilarr`
 and is published at `profilarr.jnalley.me`. It is being evaluated as the
 proactive library-upgrade layer: upgrade jobs with filters, selectors,
 cooldowns, dry runs, and live searches. Native Profilarr scheduled Arr upgrades
-stay disabled; the nightly media maintenance coordinator queues controlled
-upgrade cycles hourly from midnight through 6 AM only when no balance job is
-pending for that night.
+stay disabled; the nightly media maintenance coordinator opens the Profilarr
+upgrade window hourly from midnight through 6 AM. Routine mergerfs balance is
+disabled by policy; an explicitly queued exception balance job blocks Profilarr
+until removed, completed, or deferred.
 
 Operational rules:
 

@@ -23,5 +23,7 @@
 
 ## Safety Notes
 
-- Balance jobs own the overnight maintenance window. Validate timer and restore
-  changes carefully so media services are not left paused.
+- The normal overnight maintenance path opens Profilarr upgrades. Manually
+  queued balance jobs are exceptional and own the window only while they are
+  pending. Validate timer and restore changes carefully so media services are
+  not left paused.
