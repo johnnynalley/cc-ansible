@@ -194,6 +194,46 @@ successful mpv readiness signal; after playback has been observed, late missing
 IPC properties must fall through to normal EOF/stall handling instead of
 restarting and replaying the tail.
 
+## Bedroom Not Playing Quick Triage
+
+If Bedroom Plex is not playing but the appliance service appears active, first
+check the state file and the player syslog tag before restarting or skipping
+anything:
+
+```bash
+python3 - <<'PY'
+import json
+import time
+
+path = "/var/lib/plex-appliance/shuffle-state.json"
+data = json.load(open(path))
+active = data.get("active") or {}
+queue = data.get("queue") or []
+updated = active.get("updated_at") or data.get("updated_at") or 0
+print(json.dumps({
+    "active": active,
+    "queue_count": len(queue),
+    "queue_head": queue[:5],
+    "updated_age_seconds": int(time.time()) - int(updated),
+}, indent=2))
+PY
+
+journalctl -t plex-appliance-tv --since '30 min ago' --no-pager
+pgrep -a -f '[p]lex-appliance|[m]pv'
+```
+
+Use `journalctl -t plex-appliance-tv`, not only
+`journalctl -u plex-appliance-tv.service`; recent player logs may be easiest to
+find by the service's `SyslogIdentifier`.
+
+If `active` is empty, `queue_count` is still nonzero, no `mpv` process exists,
+and the log repeats `Plex unavailable` with connection timeouts to
+`100.66.6.113:32400`, classify it as a Plex server reachability/dependency
+failure. The appliance is waiting for Plex `/identity` to answer before it
+selects the next item. Do not mark an episode played or skip the queue for this
+failure mode. Investigate Plex/media-vm reachability or let the appliance retry;
+when Plex responds again, the player should advance to the next queued item.
+
 ## Skip Current Bedroom Plex Episode
 
 Run this on `jn-t14s-lin` from any shell. It stops the HDMI watcher and player,
