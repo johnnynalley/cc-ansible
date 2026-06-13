@@ -49,6 +49,17 @@ ARR_COMMAND_CHECK_ENABLED="{{ media_stack_health_arr_command_check_enabled | def
 ARR_COMMAND_STARTED_STALE_SECONDS="{{ media_stack_health_arr_command_started_stale_seconds | default(3600) }}"
 ARR_COMMAND_QUEUED_STALE_SECONDS="{{ media_stack_health_arr_command_queued_stale_seconds | default(7200) }}"
 ARR_COMMAND_NO_PROGRESS_SECONDS="{{ media_stack_health_arr_command_no_progress_seconds | default(1800) }}"
+BAZARR_FUNCTIONAL_CHECK_ENABLED="{{ media_stack_health_bazarr_functional_check_enabled | default(true) }}"
+BAZARR_DB_PATH="{{ media_stack_health_bazarr_db_path | default('/opt/media-stack/bazarr/db/bazarr.db') }}"
+BAZARR_CONFIG_PATH="{{ media_stack_health_bazarr_config_path | default('/opt/media-stack/bazarr/config/config.yaml') }}"
+BAZARR_THROTTLED_PROVIDERS_PATH="{{ media_stack_health_bazarr_throttled_providers_path | default('/opt/media-stack/bazarr/config/throttled_providers.dat') }}"
+BAZARR_CONTAINER="{{ media_stack_health_bazarr_container | default('bazarr') }}"
+BAZARR_MISSING_ENGLISH_WARNING_THRESHOLD="{{ media_stack_health_bazarr_missing_english_warning_threshold | default(1) }}"
+BAZARR_STALE_SUCCESS_WARNING_SECONDS="{{ media_stack_health_bazarr_stale_success_warning_seconds | default(604800) }}"
+BAZARR_STALE_SUCCESS_FAIL="{{ media_stack_health_bazarr_stale_success_fail | default(false) }}"
+BAZARR_WRITE_PROBE_ENABLED="{{ media_stack_health_bazarr_write_probe_enabled | default(true) }}"
+BAZARR_WRITE_PROBE_DIR="{{ media_stack_health_bazarr_write_probe_dir | default('/data/Shows') }}"
+BAZARR_FAIL_ON_PROVIDER_AUTH_THROTTLE="{{ media_stack_health_bazarr_fail_on_provider_auth_throttle | default(true) }}"
 STATUS_FILE="$STATE_DIR/status.env"
 PROBLEMS_FILE="$STATE_DIR/problems.txt"
 WARNINGS_FILE="$STATE_DIR/warnings.txt"
@@ -911,6 +922,206 @@ check_arr_stalled_commands() {
   check_arr_stalled_commands_app radarr 7878
 }
 
+check_bazarr_functional() {
+  local summary
+  local missing_en
+  local last_success_epoch
+  local last_success_timestamp
+  local sample_path
+  local auth_throttle
+  local enabled_provider_count
+  local enabled_providers
+  local age
+  local now
+  local message
+  local write_dir
+  local resolved
+  local output
+
+  if ! is_truthy "$BAZARR_FUNCTIONAL_CHECK_ENABLED"; then
+    return
+  fi
+
+  if ! command -v python3 >/dev/null 2>&1; then
+    add_warning "Bazarr functional check skipped because python3 is not installed"
+    return
+  fi
+  if ! command -v jq >/dev/null 2>&1; then
+    add_warning "Bazarr functional check skipped because jq is not installed"
+    return
+  fi
+
+  summary="$(
+    python3 - "$BAZARR_DB_PATH" "$BAZARR_CONFIG_PATH" "$BAZARR_THROTTLED_PROVIDERS_PATH" <<'PY'
+import datetime as dt
+import json
+import pathlib
+import sqlite3
+import sys
+
+db_path = pathlib.Path(sys.argv[1])
+config_path = pathlib.Path(sys.argv[2])
+throttled_path = pathlib.Path(sys.argv[3])
+
+summary = {
+    "missing_en": 0,
+    "last_success_epoch": 0,
+    "last_success_timestamp": "",
+    "sample_path": "",
+    "auth_throttle": False,
+    "enabled_provider_count": 0,
+    "enabled_providers": [],
+}
+
+if config_path.exists():
+    lines = config_path.read_text(encoding="utf-8", errors="replace").splitlines()
+    for idx, line in enumerate(lines):
+        stripped_line = line.strip()
+        if stripped_line.startswith("enabled_providers:") and stripped_line != "enabled_providers:":
+            value = stripped_line.split(":", 1)[1].strip()
+            if value.startswith("[") and value.endswith("]"):
+                summary["enabled_providers"].extend(
+                    item.strip().strip("'\"")
+                    for item in value[1:-1].split(",")
+                    if item.strip()
+                )
+            break
+        if stripped_line != "enabled_providers:":
+            continue
+        base_indent = len(line) - len(line.lstrip(" "))
+        for child in lines[idx + 1:]:
+            stripped = child.strip()
+            if not stripped:
+                continue
+            indent = len(child) - len(child.lstrip(" "))
+            if indent < base_indent:
+                break
+            if not stripped.startswith("- ") and indent <= base_indent:
+                break
+            if stripped.startswith("- "):
+                summary["enabled_providers"].append(stripped[2:].strip())
+        break
+summary["enabled_provider_count"] = len(summary["enabled_providers"])
+
+if throttled_path.exists():
+    throttled_text = throttled_path.read_text(encoding="utf-8", errors="replace")
+    if "AuthenticationError" in throttled_text or "Login failed" in throttled_text:
+        summary["auth_throttle"] = True
+
+if db_path.exists():
+    conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+    try:
+        row = conn.execute(
+            "select count(*) from table_episodes where missing_subtitles like '%en%'"
+        ).fetchone()
+        summary["missing_en"] = int(row[0] or 0)
+
+        row = conn.execute(
+            "select path from table_episodes "
+            "where missing_subtitles like '%en%' and path is not null and path != '' "
+            "order by updated_at_timestamp desc limit 1"
+        ).fetchone()
+        if row and row[0]:
+            summary["sample_path"] = str(row[0])
+
+        row = conn.execute(
+            "select max(timestamp) from table_history "
+            "where action in (1, 2) and subtitles_path is not null"
+        ).fetchone()
+        if row and row[0]:
+            timestamp = str(row[0])
+            summary["last_success_timestamp"] = timestamp
+            parsed = dt.datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
+            if parsed.tzinfo is None:
+                parsed = parsed.replace(tzinfo=dt.timezone.utc)
+            summary["last_success_epoch"] = int(parsed.timestamp())
+    finally:
+        conn.close()
+
+print(json.dumps(summary, sort_keys=True))
+PY
+  )" || {
+    add_warning "Bazarr functional check could not read config/database state"
+    return
+  }
+
+  missing_en="$(printf '%s' "$summary" | jq -r '.missing_en // 0')"
+  last_success_epoch="$(printf '%s' "$summary" | jq -r '.last_success_epoch // 0')"
+  last_success_timestamp="$(printf '%s' "$summary" | jq -r '.last_success_timestamp // ""')"
+  sample_path="$(printf '%s' "$summary" | jq -r '.sample_path // ""')"
+  auth_throttle="$(printf '%s' "$summary" | jq -r '.auth_throttle // false')"
+  enabled_provider_count="$(printf '%s' "$summary" | jq -r '.enabled_provider_count // 0')"
+  enabled_providers="$(printf '%s' "$summary" | jq -r '.enabled_providers | join(",")')"
+
+  if [[ "$enabled_provider_count" =~ ^[0-9]+$ ]] && (( enabled_provider_count < 1 )); then
+    add_problem "Bazarr has no enabled subtitle providers"
+  fi
+
+  if [[ "$auth_throttle" == "true" ]]; then
+    message="Bazarr provider throttle state includes AuthenticationError/Login failed; enabled_providers=${enabled_providers:-unknown}"
+    if is_truthy "$BAZARR_FAIL_ON_PROVIDER_AUTH_THROTTLE"; then
+      add_problem "$message"
+    else
+      add_warning "$message"
+    fi
+  fi
+
+  if [[ ! "$BAZARR_MISSING_ENGLISH_WARNING_THRESHOLD" =~ ^[0-9]+$ ]]; then
+    add_warning "Bazarr missing-English warning threshold is invalid: $BAZARR_MISSING_ENGLISH_WARNING_THRESHOLD"
+  elif [[ "$missing_en" =~ ^[0-9]+$ ]] && (( missing_en >= BAZARR_MISSING_ENGLISH_WARNING_THRESHOLD )); then
+    add_warning "Bazarr has $missing_en episode(s) missing English subtitles"
+  fi
+
+  if [[ ! "$BAZARR_STALE_SUCCESS_WARNING_SECONDS" =~ ^[0-9]+$ ]]; then
+    add_warning "Bazarr stale-success threshold is invalid: $BAZARR_STALE_SUCCESS_WARNING_SECONDS"
+  elif [[ "$missing_en" =~ ^[0-9]+$ ]] && (( missing_en > 0 )); then
+    now="$(date -u +%s)"
+    if [[ "$last_success_epoch" =~ ^[0-9]+$ ]] && (( last_success_epoch > 0 )); then
+      age=$((now - last_success_epoch))
+      if (( age >= BAZARR_STALE_SUCCESS_WARNING_SECONDS )); then
+        message="Bazarr has missing English subtitles but last successful subtitle download is stale: timestamp=${last_success_timestamp:-unknown} age=${age}s threshold=${BAZARR_STALE_SUCCESS_WARNING_SECONDS}s"
+        if is_truthy "$BAZARR_STALE_SUCCESS_FAIL"; then
+          add_problem "$message"
+        else
+          add_warning "$message"
+        fi
+      fi
+    else
+      add_warning "Bazarr has missing English subtitles but no successful subtitle download history was found"
+    fi
+  fi
+
+  if ! is_truthy "$BAZARR_WRITE_PROBE_ENABLED"; then
+    return
+  fi
+
+  resolved="$(resolve_container "$BAZARR_CONTAINER")"
+  if [[ -z "$resolved" ]]; then
+    add_problem "Bazarr write probe container is missing: $BAZARR_CONTAINER"
+    return
+  fi
+
+  write_dir="$BAZARR_WRITE_PROBE_DIR"
+  if [[ "$sample_path" == /data/* ]]; then
+    write_dir="${sample_path%/*}"
+  fi
+
+  output="$(docker exec --user 1000:1000 "$resolved" sh -c '
+    set -eu
+    dir="$1"
+    if [ ! -d "$dir" ]; then
+      echo "missing subtitle target directory: $dir" >&2
+      exit 20
+    fi
+    file="$dir/.media-stack-health-bazarr-write-$(date +%s)-$$.tmp"
+    trap "rm -f \"$file\"" EXIT
+    printf health > "$file"
+    rm -f "$file"
+  ' sh "$write_dir" 2>&1)" || {
+    add_problem "Bazarr cannot write sidecar subtitles in ${write_dir}: $(printf '%s' "$output" | head -n1)"
+  }
+}
+
 {% for mount in media_stack_health_mounts | default(media_stack_health_default_mounts) %}
 check_mount {{ mount.path | quote }} {{ mount.fstype | default('') | quote }} {{ mount.require_path | default('') | quote }}
 {% endfor %}
@@ -931,6 +1142,7 @@ check_qbit_import_audit
 check_nfs_fileid_changed
 check_dstate_media_probes
 check_arr_stalled_commands
+check_bazarr_functional
 
 if ! array_has_items "${problems[@]}"; then
   rm -f "$STATE_DIR/last-alert"

@@ -71,7 +71,7 @@ services:
       - TZ=America/Chicago
     volumes:
       - ./bazarr:/config
-      - /srv/media/plex:/data:ro
+      - /srv/media/plex:/data
       - /srv/archive:/archive
     ports:
       - 6767:6767

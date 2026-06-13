@@ -33,6 +33,17 @@ media_stack_health_arr_command_check_enabled: true
 media_stack_health_arr_command_started_stale_seconds: 3600
 media_stack_health_arr_command_queued_stale_seconds: 7200
 media_stack_health_arr_command_no_progress_seconds: 1800
+media_stack_health_bazarr_functional_check_enabled: true
+media_stack_health_bazarr_db_path: /opt/media-stack/bazarr/db/bazarr.db
+media_stack_health_bazarr_config_path: /opt/media-stack/bazarr/config/config.yaml
+media_stack_health_bazarr_throttled_providers_path: /opt/media-stack/bazarr/config/throttled_providers.dat
+media_stack_health_bazarr_container: bazarr
+media_stack_health_bazarr_missing_english_warning_threshold: 1
+media_stack_health_bazarr_stale_success_warning_seconds: 604800
+media_stack_health_bazarr_stale_success_fail: false
+media_stack_health_bazarr_write_probe_enabled: true
+media_stack_health_bazarr_write_probe_dir: /data/Shows
+media_stack_health_bazarr_fail_on_provider_auth_throttle: true
 
 # Root-cause recovery for classified stale docker-vm NFS client state. This is
 # intentionally separate from alert-only media-stack-health logic: fileid noise

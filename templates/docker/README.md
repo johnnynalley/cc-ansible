@@ -14,7 +14,8 @@
   the media-stack sentinel can settle quickly after a controlled restart.
 - `docker-socket-proxy.yml`: Docker socket proxy compose file.
 - `docker-stacks.service.j2`: Systemd service for Docker Compose stacks.
-- `media-stack-health.sh.j2`: Media stack health sentinel.
+- `media-stack-health.sh.j2`: Media stack health sentinel, including Bazarr
+  provider/write-path checks for subtitle fulfillment.
 - `media-stack-storage-recover.sh.j2`: Classified stale-NFS recovery for the
   docker-vm media stack.
 - `media-stack.yml`: media-vm Plex-side media compose file.

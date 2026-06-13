@@ -28,6 +28,14 @@ containers bind `/srv/media/plex` to `/data`. This is intentional: completed
 downloads and final libraries stay under one visible filesystem so Arr imports
 can hardlink when branch placement allows it.
 
+Bazarr also binds `/srv/media/plex` to `/data` without `:ro`. That is
+intentional because Bazarr's output is sidecar subtitle files next to existing
+media. A read-only `/data` mount can make Bazarr look healthy while every
+downloaded subtitle fails with `OSError(30, 'Read-only file system')`.
+`media-stack-health` must check the functional contract, not only the container:
+enabled providers, provider auth/throttle state, a writable subtitle target, the
+missing-English backlog, and the age of the last successful subtitle download.
+
 `docker-vm` mounts the TS440 incomplete-downloads export at
 `/srv/incomplete_downloads`. SABnzbd binds
 `/srv/incomplete_downloads/incomplete/usenet` to `/incomplete`, and qBittorrent
