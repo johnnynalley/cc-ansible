@@ -255,10 +255,12 @@ ansible ts440 -m shell -a "journalctl -u plex-server-health.service --since '<ev
 ```
 
 If local Plex and storage health pass while Bedroom Tailscale shows stale
-media-vm endpoint receive times, the prevention path is to stop depending on
-the Tailscale address for a same-LAN appliance. Prefer pointing Bedroom at
-media-vm's LAN Plex address (`http://192.168.1.136:32400`) after confirming
-firewall reachability and preserving the existing Plex token/auth model.
+media-vm endpoint receive times, keep the default preference for Tailscale
+addresses. Do not switch Bedroom to media-vm's LAN Plex address as the default
+fix without explicit approval. Treat `http://192.168.1.136:32400` as a
+diagnostic or temporary fallback only after confirming firewall reachability and
+preserving the existing Plex token/auth model. The primary prevention path is to
+stabilize or refresh the Tailscale path between Bedroom and media-vm.
 
 ## Skip Current Bedroom Plex Episode
 
