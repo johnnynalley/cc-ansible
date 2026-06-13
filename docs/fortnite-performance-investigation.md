@@ -17,13 +17,15 @@
 ## Current Hardware Snapshot
 
 - Gaming PC: `lj-gaming-pc`
-- CPU currently verified installed: AMD Ryzen 9 3900X, 12 cores / 24 threads
-- CPU upgrade purchased 2026-05-31: AMD Ryzen 7 5700X3D. Do not treat as installed until BIOS/Windows verification and a fresh capture confirm it.
+- CPU currently verified by Windows snapshot 2026-06-12: AMD Ryzen 7 5800X3D, 8 cores / 16 threads
+  - Johnny reported installing the 5700X3D; Windows currently reports `AMD Ryzen 7 5800X3D 8-Core Processor`. Verify the physical SKU/box if this mismatch matters for resale or warranty.
+- Previous CPU: AMD Ryzen 9 3900X, 12 cores / 24 threads
 - Motherboard: MSI MPG B550 Gaming Plus
 - BIOS: `1.L1`
 - RAM: 32 GB, 4x8 GB Corsair `CMW16GX4M2C3200C16`
-- Memory clock: 1600 MHz, DDR4-3200 effective
-- Fabric clock: 1600 MHz
+- Memory clock previously verified: 1600 MHz, DDR4-3200 effective
+- Memory clock after CPU swap snapshot 2026-06-12: DDR4-2133 effective. Treat this as a regression until BIOS A-XMP/DOCP is restored and verified.
+- Fabric clock previously verified: 1600 MHz. Re-check after restoring the memory profile.
 - GPU: NVIDIA GeForce RTX 3070
 - Display mode observed from Windows: 1920x1080 at 200 Hz
 
@@ -84,44 +86,62 @@ Do not manually delete paks. Use Epic Games Launcher options for this setting.
 
 ## Current Best Candidates
 
-> Updated 2026-05-31 after Johnny bought a Ryzen 7 5700X3D. Treat this as a benchmark queue, not applied wins. The short-term goal is to capture clean before/after data around the AM4 X3D upgrade, then re-rank remaining Fortnite tweaks based on the new CPU frame-time baseline.
+> Updated 2026-06-12 after the AM4 X3D CPU swap was detected by Windows. Treat this as a benchmark queue, not applied wins. The short-term goal is to restore the memory profile, verify thermals/clocks, capture clean post-upgrade Fortnite data, then re-rank remaining tweaks based on the new CPU frame-time baseline.
 
-1. OBS capture-pipeline A/B, before more BIOS work:
+1. Restore BIOS memory profile before any Fortnite benchmark:
+   - Windows currently reports the installed RAM at DDR4-2133 after the CPU swap
+   - before the swap, the same kit was verified at DDR4-3200/FCLK1600
+   - this likely means the BIOS fell back to JEDEC defaults during the CPU change
+   - enable the stable MSI A-XMP/DOCP profile for DDR4-3200 again, then verify memory speed and FCLK before comparing FPS
+2. Post-upgrade health baseline:
+   - verify the exact CPU model mismatch: Johnny reported 5700X3D, Windows reports 5800X3D
+   - record idle/load CPU temperature, effective clocks, power limits, and whether boost behavior is normal for the X3D CPU
+   - then run a clean Fortnite Performance Mode capture without OBS before judging the upgrade
+3. OBS capture-pipeline A/B, after the clean X3D baseline:
    - the biggest measured delta is non-OBS gameplay around 151 FPS vs OBS recording around 99-102 FPS
    - OBS process CPU was only about 4%, so the likely overhead is capture hook / compositor / preview / scene path rather than x264-style CPU encoding
    - first tests: Game Capture vs Display Capture vs Window Capture, then preview enabled vs disabled
    - then test stripped scene vs normal scene, overlays/browser sources disabled, OBS admin vs normal, OBS priority normal vs above-normal, and NVENC options
-2. VBS/HVCI diagnostic A/B if Johnny approves the reversible security tradeoff:
+4. VBS/HVCI diagnostic A/B if Johnny approves the reversible security tradeoff:
    - VBS/HVCI is still a plausible Windows 11 tax on Zen 2 CPU-bound gaming
+   - after the X3D swap, do not test this until memory speed and a clean post-upgrade baseline are recorded
    - document current `msinfo32` / Core Isolation state before changing anything
    - if disabled for a test, reboot, run the same capture, and re-enable if there is no meaningful win
-3. Render-mode sanity checks, not a likely FPS unlock:
+5. Render-mode sanity checks, not a likely FPS unlock:
    - do not expect DX12 to beat Performance Mode for raw average FPS on this CPU-limited setup
    - DX11 or any legacy DX11 Performance path may be worth identifying only if it is still exposed/supported, but it is not expected to beat current Performance Mode for CPU frame time
    - keep render-mode tests as frame-pacing/stutter/OBS-interaction sanity checks, not likely 200 FPS paths
    - compare current Performance Mode against DX12 all-low/competitive only after multiple shader warm-up matches; if DX11 is still selectable, benchmark it separately
    - compare average FPS, 1%/0.1% lows, CPU Busy, GPU Busy, stutter markers, and input feel
-4. HAGS A/B if the user approves another reboot-level graphics test:
+6. HAGS A/B if the user approves another reboot-level graphics test:
    - current managed state disables HAGS with `HwSchMode=1`
    - Epic's FPS guide recommends enabling HAGS when available
    - test HAGS with MPO still disabled first, and do not combine with render-mode changes in the same run
-5. NVIDIA driver/profile sanity:
+7. NVIDIA driver/profile sanity:
    - record the current NVIDIA driver version in this document before more A/B tests
+   - current snapshot reports NVIDIA driver `596.49`
    - if captures regress after a driver update, consider a clean install or known-stable driver branch as a measured test
    - this is a sanity check, not a magic tweak
-6. Fortnite priority A/B remains low-risk but is now behind OBS/VBS/render-mode/HAGS tests:
+8. Fortnite priority A/B remains low-risk but is now behind OBS/VBS/render-mode/HAGS tests:
    - run the same Fortnite + OBS recording/streaming workload with `--priority High`
    - compare against the 2026-05-23 OBS recording captures below
    - do not bake priority into Performance Mode unless it wins clearly
-7. BIOS-side Ryzen/RAM tuning:
+9. BIOS-side Ryzen/RAM tuning:
    - PBO/scalar/AutoOC and memory/FCLK/timing work are more likely to move the single-thread ceiling than more background-app cleanup
-   - current DDR4-3200/FCLK1600 CL16 is already sane, so memory work is latency refinement, not fixing a broken config
+   - DDR4-3200/FCLK1600 CL16 was sane before the CPU swap, but current DDR4-2133 is a broken post-swap config until fixed
    - any BIOS/memory change needs stability testing before calling it a Fortnite win
-8. Affinity/CCD/CCX tests are not the immediate recommendation. The current saved benchmark state files all show `AffinityPreset: none`; if affinity was tried earlier, there is no durable capture artifact in the harness. Only revisit with a controlled, documented A/B if Johnny explicitly wants that path or telemetry shows cross-CCD/thread-migration cost.
+10. Affinity/CCD/CCX tests are not the immediate recommendation. The current saved benchmark state files all show `AffinityPreset: none`; if affinity was tried earlier, there is no durable capture artifact in the harness. Only revisit with a controlled, documented A/B if Johnny explicitly wants that path or telemetry shows cross-CCD/thread-migration cost.
 
 ## Upgrade Watch
 
-As of 2026-05-31, Johnny bought a Ryzen 7 5700X3D for the gaming PC. The AM4 X3D path is now the chosen upgrade path rather than a fallback. Do not mark the upgrade as applied until the CPU is installed, BIOS/Windows reports verify it, thermals are checked, and at least one post-install Fortnite capture is archived.
+As of 2026-05-31, Johnny bought a Ryzen 7 5700X3D for the gaming PC. On 2026-06-12, Johnny reported completing the CPU upgrade. A managed Windows platform snapshot at 2026-06-12 21:57:53 -05:00 verified an AM4 X3D CPU, but Windows reported it as `AMD Ryzen 7 5800X3D 8-Core Processor`, not `5700X3D`.
+
+Do not call the upgrade benchmarked yet. Before performance conclusions:
+
+- verify whether the physical CPU is actually a 5800X3D or whether Windows/vendor strings are misleading
+- restore the BIOS memory profile, because Windows now reports the DDR4-3200 kit running at DDR4-2133
+- re-check FCLK/memory speed and CPU thermals/clocks
+- capture at least one clean post-install Fortnite baseline and archive it
 
 Later on 2026-05-31, after checking that the re-released 5800X3D is not expected until June 25 at $349 MSRP, Johnny decided to hold the 5700X3D plan for now instead of preemptively returning it. Rationale: the 5700X3D arrives around the same window, the 5800X3D may have launch availability/scalping risk, and future working-part upgrades can be partly offset by selling the replaced CPU.
 
