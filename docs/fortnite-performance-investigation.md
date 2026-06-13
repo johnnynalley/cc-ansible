@@ -182,6 +182,77 @@ Interpretation update: using CPU temperature as the fan-curve source immediately
 
 For Fortnite and other cache-sensitive games, the installed 5800X3D is the correct AM4 upgrade path from the previous 3900X. A 5900X adds cores but does not solve the cache/game-thread limitation that the captures pointed at. Re-run the benchmark harness on the verified 5800X3D before chasing lower-confidence tweaks.
 
+## 2026-06-13 5800X3D Cup Zone Wars Stress Capture
+
+Capture:
+
+```text
+C:\Users\jn\AppData\Local\WindowsGamingBenchmark\Captures\20260613-153814-fortnite-5800x3d-cup-zone-wars
+```
+
+Local archive analyzed from:
+
+```text
+/tmp/LJ-GAMING-PC-20260613-153814-fortnite-5800x3d-cup-zone-wars
+/tmp/LJ-GAMING-PC-20260613-153814-fortnite-5800x3d-cup-zone-wars.zip
+```
+
+Conditions:
+
+- CPU installed and verified as Ryzen 7 5800X3D.
+- A-XMP restored; RAM/FCLK verified at DDR4-3200 / FCLK1600 before this capture.
+- CAM radiator fan curve had been changed from liquid-source behavior to CPU-source behavior, which lowered observed Fortnite CPU temperatures earlier in the session.
+- Fortnite was running in a Cup Zone Wars map used as a worst-case Creative stress test.
+- OBS was not present in the watched process inventory during this capture; the `obs-profile.csv` file is a config snapshot, not proof that OBS was recording.
+- No affinity, priority, or power-plan override was applied by the benchmark harness.
+
+Markers:
+
+- `start`: 2026-06-13 15:38:14 -05:00
+- `target-started-20264`: 2026-06-13 15:38:19 -05:00
+- `stop-requested`: 2026-06-13 15:41:15 -05:00
+
+Important limitation: this capture has no explicit `map-loaded`, `round-start`, `fight-start`, `round-end`, or `leave-map` markers. Load and exit transitions are mixed into the aggregate stats, so treat the all-window numbers as stress-capture diagnostics rather than clean gameplay FPS.
+
+Analyzer summary:
+
+- PresentMon rows: 6602
+- Present mode: almost entirely `Composed: Flip`
+- Runtime: DXGI
+- All-window average FPS from PresentMon frame time: 37.8
+- Trimmed first-60/last-30 average FPS from PresentMon frame time: 35.3
+- All-window p99 frame time: 201.23 ms
+- All-window p99.9 frame time: 661.21 ms
+- Worst captured frame: 4047.52 ms
+- Average CPU busy: 26.32 ms
+- Average GPU busy: 2.56 ms
+- p95 max CPU utility: 95.2%
+- NVIDIA GPU utilization averaged 48.0%, p95 55.8%, max 56.0%
+- GPU temperature stayed low: average 56.6 C, max 59 C
+- Available memory averaged 14.1 GB; disk queue and disk latency were not a concern
+- Fortnite reached 6472.9 MB working set
+- Fortnite hot target-thread samples hit roughly 97-98% of one full logical processor
+
+The time buckets show why the aggregate is hard to interpret:
+
+- 0-40 seconds had severe map load / transition spikes, including many frames over 33 ms.
+- 40-80 seconds was much steadier: roughly 52-55 FPS by PresentMon frame time, p50 around 15.8-16.1 ms, and p95 around 35-37 ms.
+- 80-150 seconds had another bad region, including a 4047 ms frame and a 3193 ms frame near 15:40:39-15:40:46.
+- 160-175 seconds was the cleanest tail: roughly 65-67 FPS by PresentMon frame time, p50 around 16.1 ms, p95 around 25.4-25.5 ms, and only three frames over 33 ms.
+
+Interpretation:
+
+- Johnny's subjective result is important: this map was previously so laggy that mechanics did not work, and after the X3D swap/XMP restore/cooling-profile change it was playable enough to use for practice. That is a real practical win over the old state.
+- PresentMon did not show a clean 200 FPS path in this capture. It reported a mostly 60-ish FPS composed presentation path during the cleanest tail, despite the user-visible Fortnite graph feeling much better in recent matches. Do not conclude from this single Cup Zone Wars capture that the system is only capable of 60 FPS; instead, treat it as a signal that this map/session or capture path needs tighter markers and cross-checking against the in-game graph.
+- The bottleneck in the captured path is still CPU frame time, not GPU throughput. CPU busy tracks frame time closely, GPU busy is low, and one or more Fortnite threads are nearly saturating a logical processor while total CPU and GPU utilization look moderate.
+- Background-process pollution was not the smoking gun here. DWM, Defender, SteelSeries Sonar, Discord, CAM, and PowerShell stayed low relative to Fortnite's own frame-critical work.
+
+Next action:
+
+- For another Cup Zone Wars test, mark `map-loaded`, `round-start`, `heavy-fight`, `round-end`, and `leave-map` so the analyzer can isolate real fighting from load/exit spikes.
+- Ask Johnny to note whether the in-game Fortnite FPS graph is showing 200 FPS, 120 FPS lobby cap, or something closer to the PresentMon 60-ish path during the same window. This matters because the current capture shows a PresentMon/in-game-perception mismatch.
+- Keep Cup Zone Wars labeled as a stress map. Do not compare it directly against BR or Realistics captures.
+
 
 ## 2026-05-24 Creative 32-Player Cup Zone Wars FPS Observation
 
