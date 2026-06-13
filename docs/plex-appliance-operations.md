@@ -234,6 +234,32 @@ selects the next item. Do not mark an episode played or skip the queue for this
 failure mode. Investigate Plex/media-vm reachability or let the appliance retry;
 when Plex responds again, the player should advance to the next queued item.
 
+On 2026-06-13, Bedroom finished `Family Guy - Season 12 - The Most Interesting
+Man in the World` at 09:40:41 CDT, then could not start the next item until
+09:46:19. Plex itself was healthy: media-vm `plex-server-health.service` passed
+at 09:38:52, 09:43:57, and 09:48:59, and TS440 storage-host health passed at
+09:41:52 and 09:46:53. Bedroom `NetworkManager` and kernel logs showed no
+Wi-Fi/ath11k churn. The failing dependency was the Tailscale path from Bedroom
+`100.73.46.86` to media-vm `100.66.6.113:32400`: Bedroom `tailscaled` logged
+repeated `open-conn-track: timeout opening ... to node [c0RSf]; online=yes`,
+with `lastRecv` from media-vm aging from `3m29s` to `8m58s`. Playback resumed
+immediately when Tailscale rediscovered a usable media-vm endpoint.
+
+For this pattern, prove the path issue with:
+
+```bash
+journalctl -u tailscaled --since '<event-start>' --until '<event-end>' --no-pager \
+  | grep -E '100\.66\.6\.113|open-conn-track|lastRecv|node \[c0RSf\]|lazyEndpoint'
+ansible media-vm -m shell -a "journalctl -u plex-server-health.service --since '<event-start>' --until '<event-end>' --no-pager" --become
+ansible ts440 -m shell -a "journalctl -u plex-server-health.service --since '<event-start>' --until '<event-end>' --no-pager" --become
+```
+
+If local Plex and storage health pass while Bedroom Tailscale shows stale
+media-vm endpoint receive times, the prevention path is to stop depending on
+the Tailscale address for a same-LAN appliance. Prefer pointing Bedroom at
+media-vm's LAN Plex address (`http://192.168.1.136:32400`) after confirming
+firewall reachability and preserving the existing Plex token/auth model.
+
 ## Skip Current Bedroom Plex Episode
 
 Run this on `jn-t14s-lin` from any shell. It stops the HDMI watcher and player,
