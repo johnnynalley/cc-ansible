@@ -44,7 +44,9 @@
 - Fortnite Defender path exclusion is present: `Z:\Epic Games\Fortnite`
 - Game DVR capture and historical capture are disabled.
 - Hardware-accelerated GPU scheduling is currently disabled (`HwSchMode=1`).
-- Multiplane overlay is currently disabled (`OverlayTestMode=5`).
+- Multiplane overlay disable was removed from managed state and live registry on 2026-06-13.
+  Rollback export: `C:\ProgramData\Johnny\LiveRollbacks\dwm-before-mpo-restore-20260613-172721.reg`.
+  Effective compositor behavior still needs a Windows reboot, then a PresentMon/RTSS validation capture.
 - NIC power-saving features and interrupt moderation are disabled by the gaming tuning playbook.
 - Performance Mode closes/stops known background clients and services while Fortnite/OBS triggers are active.
 - BCDEdit does not show obvious HPET/platform-clock/dynamic-tick tweak pollution.
@@ -109,24 +111,31 @@ Do not manually delete paks. Use Epic Games Launcher options for this setting.
    - keep render-mode tests as frame-pacing/stutter/OBS-interaction sanity checks, not likely 200 FPS paths
    - compare current Performance Mode against DX12 all-low/competitive only after multiple shader warm-up matches; if DX11 is still selectable, benchmark it separately
    - compare average FPS, 1%/0.1% lows, CPU Busy, GPU Busy, stutter markers, and input feel
-5. HAGS A/B if the user approves another reboot-level graphics test:
+5. MPO re-enable A/B before the next HAGS or render-mode test:
+   - live state before this change showed `OverlayTestMode=5`, which disables MPO
+   - managed target state now removes `HKLM:\SOFTWARE\Microsoft\Windows\Dwm\OverlayTestMode`
+   - applied live on 2026-06-13; verified registry value absent while HAGS remained `HwSchMode=1`
+   - rollback export saved at `C:\ProgramData\Johnny\LiveRollbacks\dwm-before-mpo-restore-20260613-172721.reg`
+   - reason: Microsoft documents that Independent Flip can stay active when other desktop contents are present by using reverse composition or MPO; disabling MPO may force Fortnite back to `Composed: Flip` when overlays/capture are active
+   - after reboot, run a short RTSS/MAHM/PresentMon capture with the same overlay/OBS state and require PresentMon to stop disagreeing before relying on its frame-pipeline metrics
+6. HAGS A/B if the user approves another reboot-level graphics test:
    - current managed state disables HAGS with `HwSchMode=1`
    - Epic's FPS guide recommends enabling HAGS when available
-   - test HAGS with MPO still disabled first, and do not combine with render-mode changes in the same run
-6. NVIDIA driver/profile sanity:
+   - test HAGS only after the MPO result is known, and do not combine with render-mode changes in the same run
+7. NVIDIA driver/profile sanity:
    - record the current NVIDIA driver version in this document before more A/B tests
    - current snapshot reports NVIDIA driver `596.49`
    - if captures regress after a driver update, consider a clean install or known-stable driver branch as a measured test
    - this is a sanity check, not a magic tweak
-7. Fortnite priority A/B remains low-risk but is now behind OBS/VBS/render-mode/HAGS tests:
+8. Fortnite priority A/B remains low-risk but is now behind OBS/VBS/render-mode/MPO/HAGS tests:
    - run the same Fortnite + OBS recording/streaming workload with `--priority High`
    - compare against the 2026-05-23 OBS recording captures below
    - do not bake priority into Performance Mode unless it wins clearly
-8. BIOS-side Ryzen/RAM tuning:
+9. BIOS-side Ryzen/RAM tuning:
    - PBO/scalar/AutoOC and memory/FCLK/timing work are more likely to move the single-thread ceiling than more background-app cleanup
    - DDR4-3200 CL16 and FCLK1600 are restored after the CPU swap
    - any BIOS/memory change needs stability testing before calling it a Fortnite win
-9. Affinity/CCD/CCX tests are not the immediate recommendation. The current saved benchmark state files all show `AffinityPreset: none`; if affinity was tried earlier, there is no durable capture artifact in the harness. Only revisit with a controlled, documented A/B if Johnny explicitly wants that path or telemetry shows cross-CCD/thread-migration cost.
+10. Affinity/CCD/CCX tests are not the immediate recommendation. The current saved benchmark state files all show `AffinityPreset: none`; if affinity was tried earlier, there is no durable capture artifact in the harness. Only revisit with a controlled, documented A/B if Johnny explicitly wants that path or telemetry shows cross-CCD/thread-migration cost.
 
 ## CPU Upgrade Status
 
@@ -591,7 +600,7 @@ Test:
 
 ### 4. HAGS A/B Test
 
-Reason: Epic's current FPS troubleshooting page recommends enabling Hardware-accelerated GPU scheduling when available, but our current managed state disables it.
+Reason: Epic's current FPS troubleshooting page recommends enabling Hardware-accelerated GPU scheduling when available, but our current managed state disables it. Do not run this until the MPO re-enable test is complete; changing both at once would make the PresentMon/flip-mode result ambiguous.
 
 Cost:
 
@@ -602,10 +611,11 @@ Cost:
 Test:
 
 1. Baseline benchmark with current `HwSchMode=1`.
-2. Set `HwSchMode=2` while keeping MPO disabled.
-3. Reboot.
-4. Repeat the same Fortnite benchmark.
-5. Compare average FPS, 1% lows, 0.1% lows, PresentMon CPU busy/wait/GPU busy, and stutter markers.
+2. Confirm whether MPO is already restored to Windows default behavior and record the PresentMon mode result.
+3. Set `HwSchMode=2`.
+4. Reboot.
+5. Repeat the same Fortnite benchmark.
+6. Compare average FPS, 1% lows, 0.1% lows, PresentMon CPU busy/wait/GPU busy, and stutter markers.
 
 ### 5. NVIDIA Driver/Profile Sanity
 

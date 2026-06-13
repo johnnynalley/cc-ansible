@@ -8,11 +8,10 @@ windows_gaming_graphics_registry_settings:
     type: dword
     data: 1
     reboot_required: true
-  - name: Disable Multiplane Overlay
+  - name: Remove Multiplane Overlay disable
     path: HKLM:\SOFTWARE\Microsoft\Windows\Dwm
     value_name: OverlayTestMode
-    type: dword
-    data: 5
+    state: absent
     reboot_required: true
   - name: Prefer high-performance GPU for Fortnite
     path: HKCU:\Software\Microsoft\DirectX\UserGpuPreferences
