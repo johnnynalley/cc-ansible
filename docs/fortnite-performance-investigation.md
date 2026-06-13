@@ -18,7 +18,9 @@
 
 - Gaming PC: `lj-gaming-pc`
 - CPU currently verified by Windows snapshot 2026-06-12: AMD Ryzen 7 5800X3D, 8 cores / 16 threads
-  - Johnny reported installing the 5700X3D; Windows currently reports `AMD Ryzen 7 5800X3D 8-Core Processor`. Verify the physical SKU/box if this mismatch matters for resale or warranty.
+  - Johnny reported buying a 5700X3D, but Windows reports `AMD Ryzen 7 5800X3D 8-Core Processor` through both WMI and the CPU registry brand string.
+  - Supporting identity data: `AuthenticAMD`, Family 25 Model 33 Stepping 2, 96 MB L3, WMI max clock 3401 MHz.
+  - Treat the installed CPU as a 5800X3D unless physical markings or an external hardware tool contradict Windows.
 - Previous CPU: AMD Ryzen 9 3900X, 12 cores / 24 threads
 - Motherboard: MSI MPG B550 Gaming Plus
 - BIOS: `1.L1`
@@ -134,7 +136,7 @@ Do not manually delete paks. Use Epic Games Launcher options for this setting.
 
 ## Upgrade Watch
 
-As of 2026-05-31, Johnny bought a Ryzen 7 5700X3D for the gaming PC. On 2026-06-12, Johnny reported completing the CPU upgrade. A managed Windows platform snapshot at 2026-06-12 21:57:53 -05:00 verified an AM4 X3D CPU, but Windows reported it as `AMD Ryzen 7 5800X3D 8-Core Processor`, not `5700X3D`.
+As of 2026-05-31, Johnny bought a Ryzen 7 5700X3D for the gaming PC. On 2026-06-12, Johnny reported completing the CPU upgrade. A managed Windows platform snapshot at 2026-06-12 21:57:53 -05:00 verified an AM4 X3D CPU, but Windows reported it as `AMD Ryzen 7 5800X3D 8-Core Processor`, not `5700X3D`. A follow-up read-only identity check confirmed the same model through both WMI and `HKLM:\HARDWARE\DESCRIPTION\System\CentralProcessor\0`.
 
 Do not call the upgrade benchmarked yet. Before performance conclusions:
 
