@@ -254,6 +254,70 @@ Next action:
 - Improve or cross-check the benchmark harness before relying on PresentMon-derived FPS for Creative stress maps. The next capture should include a second visible-FPS source such as RTSS/Afterburner logging, an in-game FPS note, or another reliable frame counter alongside PresentMon.
 - Keep Cup Zone Wars labeled as a stress map. Do not compare it directly against BR or Realistics captures.
 
+## 2026-06-13 RTSS/MAHM Benchmark Smoke Capture
+
+Capture:
+
+```text
+C:\Users\jn\AppData\Local\WindowsGamingBenchmark\Captures\20260613-155840-fortnite-rtss-mahm-smoke
+```
+
+Local archive analyzed from:
+
+```text
+/tmp/LJ-GAMING-PC-20260613-155840-fortnite-rtss-mahm-smoke
+/tmp/LJ-GAMING-PC-20260613-155840-fortnite-rtss-mahm-smoke.zip
+```
+
+Purpose: verify that the benchmark harness can read the same RTSS/Afterburner
+data Johnny is watching in the OSD.
+
+Conditions:
+
+- Fortnite was already running.
+- RTSS OSD was active and tracking `FortniteClient-Win64-Shipping.exe`.
+- MAHM/Afterburner shared memory was available.
+- No affinity, priority, or power-plan override was applied by the harness.
+- The run was a short smoke check, not a gameplay benchmark.
+
+Results:
+
+- RTSS rows: 37
+- RTSS active rows: 37
+- RTSS tracked process: `Z:\Epic Games\Fortnite\FortniteGame\Binaries\Win64\FortniteClient-Win64-Shipping.exe`
+- RTSS FPS window average: 120.0 FPS
+- RTSS frame time average: 8.31 ms, p99 9.59 ms
+- MAHM rows: 37
+- MAHM OSD framerate average: 119.9 FPS
+- PresentMon-derived average FPS over the same smoke capture: 69.2 FPS
+- PresentMon average frame time: 14.44 ms
+- MAHM CPU temperature: average 81.6 C, min 80.75 C, p95 82.5 C, max 83.0 C
+- MAHM CPU clock: average 4399 MHz, max 4450 MHz
+- MAHM CPU power: average 76.5 W, max 85.1 W
+- MAHM GPU usage: average 38.9%
+- MAHM GPU temperature: average 45.6 C, max 48 C
+- NVIDIA SMI also reported GPU around 46 C / 41% utilization during its system sample.
+
+Follow-up PresentMon isolation check while Fortnite was still open:
+
+```text
+C:\Users\jn\AppData\Local\WindowsGamingBenchmark\Captures\presentmon-debug-20260613-160927
+```
+
+- Full PresentMon v2 tracking: 956 rows, `Hardware: Independent Flip`, 8.3484 ms average frame time, 119.78 FPS from average frame time.
+- PresentMon `--no_track_display --no_track_gpu --no_track_input`: 1915 rows, 4.2434 ms average frame time, 235.66 FPS from average frame time.
+- No stale `PresentMon-2.4.1-x64.exe` capture process remained afterward; only `PresentMonService` was running.
+
+Interpretation:
+
+- The RTSS and MAHM shared-memory capture path works. Future captures can use RTSS/MAHM as the visible-FPS and sensor source instead of trusting PresentMon-derived FPS alone.
+- PresentMon is not globally broken. In the smoke capture, PresentMon was wrong for visible FPS because the game was in `Composed: Flip`: RTSS and MAHM agreed around 120 FPS, while PresentMon-derived FPS said roughly 69 FPS. In the immediate follow-up check, full PresentMon tracking matched RTSS when the game was in `Hardware: Independent Flip`, reporting 119.78 FPS.
+- `--no_track_display` is not a visible-FPS replacement. It reported about 235.66 FPS, which is closer to an app/present submission cadence than what the player sees on screen.
+- Keep PresentMon for `CPUBusy`/`GPUBusy` frame-pipeline diagnostics, but record `PresentMode` and cross-check visible FPS against RTSS/MAHM. Treat PresentMon visible FPS as suspect when the dominant mode is `Composed: Flip` and it disagrees with RTSS/MAHM.
+- This run appears to have been in a 120 FPS capped state, likely lobby or another capped context. Treat the 120 FPS result as a harness validation signal, not a full performance benchmark.
+- The thermal concern is still real. Seeing roughly 81-83 C at only about 120 FPS, with GPU temperature in the mid-to-high 40s, points back to CPU heat density and cooler/fan behavior rather than GPU heat soak. It is still below the 90 C cHTC limit, but it is warmer than expected for a 5800X3D on a Kraken under this kind of load.
+- The next thermal/performance capture should be a marked real match or Creative test with RTSS/MAHM enabled, so we can correlate visible FPS, CPU temp, CPU power, CPU busy, and hot-thread samples over a real workload.
+
 
 ## 2026-05-24 Creative 32-Player Cup Zone Wars FPS Observation
 

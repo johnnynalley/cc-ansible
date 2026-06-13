@@ -28,8 +28,8 @@ windows_gaming_benchmark_preflight_allowed_powershell_patterns:
   - windows-performance-mode.ps1
 windows_gaming_benchmark_presentmon_enabled: true
 windows_gaming_benchmark_pmdp_enabled: false
-windows_gaming_benchmark_rtss_enabled: false
-windows_gaming_benchmark_mahm_enabled: false
+windows_gaming_benchmark_rtss_enabled: true
+windows_gaming_benchmark_mahm_enabled: true
 windows_gaming_benchmark_gpu_engine_counters_enabled: false
 windows_gaming_benchmark_presentmon_path: 'C:\Program Files\Intel\PresentMon\PresentMonConsoleApplication\PresentMon-2.4.1-x64.exe'
 windows_gaming_benchmark_presentmon_provider_path: 'C:\Program Files (x86)\RivaTuner Statistics Server\Plugins\Client\PresentMonDataProvider\PresentMonDataProvider.exe'

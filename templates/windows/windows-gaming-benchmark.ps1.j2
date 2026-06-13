@@ -776,7 +776,11 @@ function Clear-PresentMonEtwState {
         } catch {
         }
     }
-    foreach ($processName in @('PresentMon-2.3.1-x64-DLSS4', 'PresentMonDataProvider')) {
+    $presentMonProcessName = if ($PresentMonPath) { [System.IO.Path]::GetFileNameWithoutExtension($PresentMonPath) } else { $null }
+    $processNames = @('PresentMon-2.3.1-x64-DLSS4', $presentMonProcessName, 'PresentMonDataProvider') |
+        Where-Object { $_ } |
+        Select-Object -Unique
+    foreach ($processName in $processNames) {
         Get-Process -Name $processName -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
     }
 }

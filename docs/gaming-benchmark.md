@@ -113,32 +113,57 @@ It can collect:
 - MSI Afterburner / MAHM shared memory: OSD FPS/frame time plus hardware-monitoring values such as CPU/GPU clocks, temperatures, power, and usage when enabled.
 - Process/thread sampling: watched-process CPU/memory, top process deltas, target process hot-thread samples, process inventory, OBS profile snapshot, markers, and preflight warnings.
 
-On `lj-gaming-pc`, the current inventory intentionally enables PresentMon and NVIDIA SMI but disables RTSS and MAHM capture:
+On `lj-gaming-pc`, the current inventory enables PresentMon, RTSS shared
+memory, MAHM/Afterburner shared memory, and NVIDIA SMI:
 
 ```yaml
 windows_gaming_benchmark_presentmon_enabled: true
 windows_gaming_benchmark_pmdp_enabled: false
-windows_gaming_benchmark_rtss_enabled: false
-windows_gaming_benchmark_mahm_enabled: false
+windows_gaming_benchmark_rtss_enabled: true
+windows_gaming_benchmark_mahm_enabled: true
 windows_gaming_benchmark_nvidia_smi_enabled: true
 ```
 
-That means a capture can still have GPU sensor data from NVIDIA SMI and CPU/system data from Windows counters, but it will not have RTSS/Afterburner visible-FPS or CPU-temperature rows. If PresentMon's FPS disagrees with the in-game FPS graph, do not treat PresentMon-derived FPS as authoritative until RTSS/MAHM or another visible-FPS source is enabled for the same test.
+RTSS/MAHM rows depend on those shared-memory maps existing in the interactive
+Windows session. RTSS must be running and tracking the game for RTSS FPS rows.
+Afterburner/MAHM hardware monitoring must be running for CPU temperature and
+other sensor rows. If either map is unavailable, the harness records a status
+row instead of failing the benchmark.
+
+If PresentMon's FPS disagrees with the in-game FPS graph, do not treat
+PresentMon-derived FPS as authoritative. Prefer RTSS/MAHM FPS for visible FPS
+and keep PresentMon for frame-pipeline details such as `CPUBusy` and `GPUBusy`.
+Always check `present_modes` in the analyzer output:
+
+- `Hardware: Independent Flip` can line up with RTSS/MAHM visible FPS.
+- `Composed: Flip` can diverge from the visible FPS source. When it does,
+  keep the PresentMon CPU/GPU busy data but use RTSS/MAHM for visible FPS.
+- `--no_track_display` is a diagnostic mode, not a visible-FPS replacement. It
+  may show app/present submission cadence that is higher than the displayed
+  frame rate.
+
+Verified on 2026-06-13 with capture
+`20260613-155840-fortnite-rtss-mahm-smoke`: RTSS produced 37 active Fortnite
+FPS rows and MAHM produced 37 sensor rows, including CPU temperature. A
+follow-up PresentMon debug check showed full PresentMon tracking at 119.78 FPS
+in `Hardware: Independent Flip`, while the earlier composed-flip smoke capture
+reported roughly 69 FPS against RTSS/MAHM's roughly 120 FPS.
 
 ## PresentMon Caveat
 
 PresentMon is still valuable for CPU/GPU frame-pipeline diagnostics, especially
-`CPUBusy` versus `GPUBusy`, but it is not the same thing as Fortnite's in-game
-FPS counter. In the 2026-06-13 Cup Zone Wars stress capture, PresentMon reported
-one Fortnite swapchain with `PresentMode` mostly `Composed: Flip`, while Johnny
-reported roughly 150 FPS in the Fortnite graph. Treat that mismatch as a harness
-validation problem, not as proof that the game was actually running near 60 FPS.
+`CPUBusy` versus `GPUBusy`, but it is not always the same thing as Fortnite's
+in-game FPS counter. In the 2026-06-13 Cup Zone Wars stress capture, PresentMon
+reported one Fortnite swapchain with `PresentMode` mostly `Composed: Flip`,
+while Johnny reported roughly 150 FPS in the Fortnite graph. Treat that
+mismatch as a presentation-path validation problem, not as proof that the game
+was actually running near 60 FPS.
 
 When this mismatch appears:
 
 - record the user's in-game FPS observation in `docs/fortnite-performance-investigation.md`
 - prefer non-FPS PresentMon data only as supporting evidence
-- enable or capture a second FPS source for the next run, such as RTSS shared memory, Afterburner/MAHM logging, or another reliable visible-FPS counter
+- compare against RTSS/MAHM FPS when those shared-memory rows are present
 - keep using markers so load, lobby, fight, and exit windows can be separated
 
 ## CPU Upgrade Baseline

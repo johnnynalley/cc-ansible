@@ -209,6 +209,66 @@ def summarize_obs_profile(root):
     }
 
 
+def stat_count(value):
+    if isinstance(value, dict):
+        count = value.get("count")
+        if isinstance(count, (int, float)):
+            return count
+    return 0
+
+
+def top_counter_name(counter_items):
+    if not counter_items:
+        return None
+    first = counter_items[0]
+    if isinstance(first, (list, tuple)) and first:
+        return first[0]
+    return None
+
+
+def choose_visible_fps_source(result):
+    rtss = result.get("rtss") or {}
+    rtss_fps = rtss.get("fps_window")
+    if stat_count(rtss_fps) > 0:
+        return {
+            "source": "rtss",
+            "fps": rtss_fps,
+            "frame_ms": rtss.get("frame_ms"),
+            "fps_lows": rtss.get("fps_lows"),
+        }
+
+    afterburner = result.get("afterburner") or {}
+    afterburner_fps = afterburner.get("OsdFramerate")
+    if stat_count(afterburner_fps) > 0:
+        return {
+            "source": "afterburner",
+            "fps": afterburner_fps,
+            "frame_ms": afterburner.get("OsdFrametimeMs"),
+            "fps_lows": None,
+        }
+
+    presentmon_all = (result.get("presentmon") or {}).get("all") or {}
+    presentmon_fps = presentmon_all.get("fps_lows") or {}
+    if presentmon_fps.get("avg_from_frame_ms") is not None:
+        return {
+            "source": "presentmon",
+            "fps": {
+                "count": (presentmon_all.get("frame_ms") or {}).get("count"),
+                "avg": presentmon_fps.get("avg_from_frame_ms"),
+                "min": presentmon_fps.get("min_from_max_frame_ms"),
+            },
+            "frame_ms": presentmon_all.get("frame_ms"),
+            "fps_lows": presentmon_fps,
+        }
+
+    return {
+        "source": None,
+        "fps": None,
+        "frame_ms": None,
+        "fps_lows": None,
+    }
+
+
 def add_diagnosis(result):
     diagnosis = []
     presentmon_all = result.get("presentmon", {}).get("all", {})
@@ -221,6 +281,7 @@ def add_diagnosis(result):
     nvidia = result.get("nvidia_smi", {})
     obs_profile = result.get("obs_profile", {})
     obs_settings = obs_profile.get("settings") or {}
+    visible_fps = result.get("visible_fps") or {}
 
     def metric(group, key, stat_name):
         value = (group.get(key) or {}).get(stat_name)
@@ -333,14 +394,47 @@ def add_diagnosis(result):
             "detail": f"p95 NVIDIA GPU util={gpu_util_p95:.1f}% and p95 GPU 3D engine={gpu_3d_p95:.1f}%.",
         })
 
-    avg_fps = fps.get("avg_from_frame_ms")
-    p99 = frame.get("p99")
-    p999 = frame.get("p999")
-    if avg_fps is not None and p99 is not None and p999 is not None:
+    visible_source = visible_fps.get("source")
+    visible_stats = visible_fps.get("fps") or {}
+    visible_frame = visible_fps.get("frame_ms") or {}
+    visible_avg_fps = visible_stats.get("avg")
+    presentmon_avg_fps = fps.get("avg_from_frame_ms")
+    presentmon_top_mode = top_counter_name((result.get("presentmon") or {}).get("present_modes"))
+    if (
+        visible_source
+        and visible_source != "presentmon"
+        and visible_avg_fps is not None
+        and presentmon_avg_fps is not None
+        and abs(visible_avg_fps - presentmon_avg_fps) >= max(15.0, visible_avg_fps * 0.15)
+    ):
+        diagnosis.append({
+            "type": "presentmon_visible_fps_mismatch",
+            "severity": "medium",
+            "detail": (
+                f"Visible FPS source '{visible_source}' averaged {visible_avg_fps:.1f} FPS, "
+                f"while PresentMon-derived FPS averaged {presentmon_avg_fps:.1f}. "
+                f"Dominant PresentMon present mode was '{presentmon_top_mode or 'unknown'}'. "
+                "Use RTSS/MAHM for visible FPS and PresentMon for frame-pipeline timing."
+            ),
+        })
+        if presentmon_top_mode and presentmon_top_mode.startswith("Composed:"):
+            diagnosis.append({
+                "type": "presentmon_composed_flip_visible_fps_mismatch",
+                "severity": "medium",
+                "detail": (
+                    "PresentMon visible FPS disagreed while the game was in a composed "
+                    "presentation path. Compare against an independent-flip capture before "
+                    "treating PresentMon FPS as the gameplay-visible rate."
+                ),
+            })
+
+    p99 = visible_frame.get("p99")
+    p999 = visible_frame.get("p999")
+    if visible_avg_fps is not None and p99 is not None and p999 is not None:
         diagnosis.append({
             "type": "frame_summary",
             "severity": "info",
-            "detail": f"Average FPS={avg_fps:.1f}, p99 frame={p99:.2f} ms, p999 frame={p999:.2f} ms.",
+            "detail": f"Visible FPS source={visible_source} avg={visible_avg_fps:.1f}, p99 frame={p99:.2f} ms, p999 frame={p999:.2f} ms.",
         })
 
     if result.get("preflight", {}).get("warnings"):
@@ -588,6 +682,7 @@ def main(root):
         "markers": list(read_csv(root / "markers.csv")) if (root / "markers.csv").exists() else [],
     }
 
+    result["visible_fps"] = choose_visible_fps_source(result)
     add_diagnosis(result)
 
     print(json.dumps(result, indent=2))
