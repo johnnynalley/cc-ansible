@@ -7,6 +7,10 @@
   backups.
 - `arr_disable_recycle_bins.py`: Disables Sonarr/Radarr recycle bins after a
   timestamped live backup.
+- `arr_download_client_toggle.py`: Dry-run by default Sonarr/Radarr download
+  client toggle for incident response, such as temporarily disabling SABnzbd
+  when failed add attempts would repeatedly fetch NZBs. `--apply` requires a
+  pre-existing live rollback backup path.
 - `arr_duplicate_media_audit.py`: Read-only duplicate media audit. On
   `docker-vm`, compares Sonarr/Radarr tracked files with the visible library;
   on the NAS host with `--mode branch`, checks mergerfs branch roots for hidden
@@ -32,6 +36,9 @@
 - `arr_quality_profile_report.py`: Read-only Sonarr/Radarr report of native
   quality-profile groups, useful for checking whether profile quality order is
   still blocking custom-format upgrades.
+- `arr_queue_remove.py`: Dry-run by default Sonarr/Radarr queue-row removal
+  helper with status/title/message filters. `--apply` requires an existing live
+  rollback backup path and supports non-blocklisting cleanup.
 - `arr_import_status_snapshot.py`: Read-only Sonarr/Radarr import-recovery
   snapshot that fully paginates queues, summarizes blocked import reasons,
   active commands, and recent grab/import/delete history.
@@ -76,6 +83,17 @@
   release-tier custom formats against Profilarr/Dictionarry tier candidates,
   including optional token filtering for checking whether specific release
   groups are present upstream.
+- `qbit_queue_status.py`: Read-only qBittorrent torrent-state summary for
+  Arr queue incidents. Reads `/etc/qbit-port-sync.env` on `docker-vm`, logs in
+  without printing secrets, and summarizes torrent states, categories, paths,
+  and optional tracker messages. Cleanup is opt-in only: `--apply-delete`
+  requires `--delete-states` plus a manifest path, deletes through the
+  qBittorrent API with files, and skips finished/seeding torrents by default.
+- `sab_queue_status.py`: Read-only SABnzbd queue and incomplete-folder summary
+  for Arr import incidents. Reads SAB's local config on `docker-vm`, queries the
+  API without printing secrets, compares active queue items with `/incomplete`
+  directories, and can remove only old unreferenced incomplete folders when
+  `--apply-delete` and a manifest path are supplied.
 - `radarr_release_expectation_check.py`: Read-only check of live Radarr anime
   release-selection expectations.
 - `radarr_regular_english_language_guard.py`: Creates or updates a Radarr

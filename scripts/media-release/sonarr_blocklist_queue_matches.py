@@ -94,11 +94,26 @@ def request_sab_json(
 
 def find_series(series_list: list[dict[str, Any]], query: str) -> dict[str, Any]:
     lowered = query.casefold()
+    if query.isdigit():
+        series_id = int(query)
+        matches = [series for series in series_list if series.get("id") == series_id]
+        if not matches:
+            raise RuntimeError(f"no series matched id {series_id}")
+        return matches[0]
+
+    exact_matches = [
+        series for series in series_list if lowered == str(series.get("title", "")).casefold()
+    ]
+    if len(exact_matches) == 1:
+        return exact_matches[0]
+    if len(exact_matches) > 1:
+        names = ", ".join(f"{series['id']}:{series['title']}" for series in exact_matches)
+        raise RuntimeError(f"multiple exact series matched {query!r}: {names}")
+
     matches = [
         series
         for series in series_list
-        if lowered == str(series.get("title", "")).casefold()
-        or lowered in str(series.get("title", "")).casefold()
+        if lowered in str(series.get("title", "")).casefold()
         or any(
             lowered in str(title.get("title", "")).casefold()
             for title in series.get("alternateTitles") or []
