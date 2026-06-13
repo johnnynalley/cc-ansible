@@ -175,6 +175,14 @@ Later CAM check:
 
 Interpretation update: the 46 C liquid temperature is the main cooling signal. With the GPU also around 45 C and not heavily loaded, this does not look like the radiator is simply being blasted by a hot GPU. If the liquid is already 46 C in the lobby, the next non-undervolt checks are radiator fan profile/RPM, whether the radiator fans are actually tied to the Kraken/CAM fan channel, radiator airflow direction, and whether the case/radiator path is recirculating warm air. Pump Performance alone is not enough if fan behavior is quiet or disconnected from the liquid curve.
 
+Johnny then changed CAM's radiator fan temperature source from liquid to CPU, with the Performance fan curve effectively running all fans at 100%. Follow-up Ryzen telemetry while Fortnite was still active:
+
+- Temperature samples: 68.37, 71.41, 67.75, 67.58, 77.82, 67.20 C
+- PPT range: 62.3-76.7 W
+- GPU stayed around 43-45 C
+
+Interpretation update: using CPU temperature as the fan-curve source immediately helped. The earlier liquid-based curve was likely too slow or too quiet for the 5800X3D's fast CPU hotspot swings. Liquid temperature is usually the smoother AIO control source, but for this specific gaming workload and current CAM profile, CPU-sourced radiator fans are the better practical setting if noise is acceptable. A refined liquid-source curve could still work if it ramps aggressively by roughly 40-42 C liquid and reaches 100% by the mid-40s.
+
 Later on 2026-05-31, after checking that the re-released 5800X3D is not expected until June 25 at $349 MSRP, Johnny decided to hold the 5700X3D plan for now instead of preemptively returning it. Rationale: the 5700X3D arrives around the same window, the 5800X3D may have launch availability/scalping risk, and future working-part upgrades can be partly offset by selling the replaced CPU.
 
 The previous 5800X3D re-release watch exists only because of the earlier plan to wait for a possible Ryzen 7 5800X3D AM4 10th Anniversary Edition. Rumors as of 2026-05-24 said AMD may re-release the 5800X3D around Q2 2026, with early retailer sightings around the low-$300 range. On 2026-06-01, AMD announced that the Ryzen 7 5800X3D 10th Anniversary Edition will be available beginning June 25 with a suggested e-tail price of $349. If Johnny no longer wants informational watch alerts after buying the 5700X3D, disable OpenClaw cron job `aeebfe19-a1b8-4f12-8f74-9406c29c5aab` (`AMD 5800X3D Re-release Watch`) after explicit approval.
