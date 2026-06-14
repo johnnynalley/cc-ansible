@@ -70,17 +70,25 @@ Treat these as the current one-by-one decisions:
 | HAGS disabled | A/B test later | Current managed value is `HwSchMode=1`, but Epic recommends enabling HAGS. Test only after the cleanup baseline is stable and do not combine it with other graphics changes. |
 | VBS/HVCI disable path | Leave disabled in inventory | The test entries are currently `enabled: false`. Do not apply unless Johnny accepts the security tradeoff for a controlled A/B. |
 | High-resolution textures off | Keep user-managed | This is controlled through Epic Games Launcher options, not Ansible. Keep the disk-state evidence, but do not manually delete paks. |
-| Performance Mode auto watcher | Rollback candidate | It solved a diagnosis/control problem, not a proven post-XMP FPS problem. It now interferes with Fortnite relaunches and normal launcher/chat workflows. First proposed live cleanup: disable automatic watcher triggers while leaving manual scripts/shortcuts available. |
-| OBS Performance Mode trigger | Rollback candidate | OBS/streaming should be benchmarked directly. Silently entering Performance Mode from OBS is now more likely to confuse tests than prove a win. |
-| Launcher/app close rules | Rollback candidate | Epic, Steam, Rockstar, Xbox, Nextcloud, and similar clients were not proven to be the current limiter. Let normal update/chat workflows run unless a future benchmark catches a specific offender. |
-| SignalRGB close rule | Rollback candidate | SignalRGB lock/unlock automation depends on a resident user-session process. Closing it during Performance Mode can plausibly break lights on lock/unlock. |
-| SysMain / Delivery Optimization / Windows Search / BITS stop rules | Rollback candidate | These were broad "quiet the box" tactics. With launchers and updates allowed again, stopping update/index services should be reserved for a targeted benchmark or a measured stutter source. |
-| Xbox Game Bar / Game DVR disabled | Rollback candidate | Johnny wants Xbox Game Bar/chat back. Preferred shape: allow Game Bar UI/chat again while keeping background capture/replay off unless explicitly needed. |
+| Performance Mode auto watcher | Rolled back 2026-06-13 | Live watcher task is removed, no watcher process was present after verification, and manual shortcuts/scripts remain available for future experiments. |
+| OBS Performance Mode trigger | Rolled back 2026-06-13 | OBS no longer references the trigger in the active scene collection, and the old trigger file was replaced with a disabled stub so future OBS launches cannot silently enter Performance Mode. |
+| Launcher/app close rules | Rolled back 2026-06-13 | The active process close list is now empty. Epic, Steam, Rockstar, Xbox, Nextcloud, SignalRGB, and other normal clients should no longer be killed by Performance Mode. |
+| SignalRGB close rule | Rolled back 2026-06-13 | SignalRGB is no longer in a Performance Mode close list, which matches the lock/unlock automation requirement that SignalRGB stay resident in the user session. |
+| SysMain / Delivery Optimization / Windows Search / BITS stop rules | Rolled back 2026-06-13 | The active service stop list is now empty. Re-add only if a benchmark identifies a specific service as a stutter source. |
+| Xbox Game Bar / Game DVR disabled | Unmanaged by Ansible 2026-06-13 | `inventory/host_vars/lj-gaming-pc/gamebar.yml` was removed so Windows Settings/Xbox UI owns Game Bar. The old Ansible-managed disabling values were removed live as a one-time cleanup rather than replaced with new managed values. |
 | Fortnite process priority | A/B test later | Low-risk, but do not bake it in without a capture showing better RTSS/MAHM FPS or lows. |
 | Affinity presets | Deprioritized | The old multi-CCD 3900X concern does not carry cleanly to the single-CCD 5800X3D. Only revisit with a controlled benchmark. |
 | Launch arguments such as `-USEALLAVAILABLECORES` | Deprioritized / rejected | Existing evidence points to frame-critical thread pressure, not missing cores. Do not add cargo-cult launch flags without a specific measured hypothesis. |
 
-No live rollback was applied during this audit entry. Proposed first live batch, if approved: disable Performance Mode auto-entry/OBS triggering, re-enable Xbox Game Bar chat/UI while keeping background capture off, and remove SignalRGB/launcher closing from the active gaming path. Keep NIC tuning, Defender exclusion, power plan, RTSS/MAHM monitoring, and benchmark tooling intact.
+Live cleanup applied 2026-06-13:
+
+- Rollback backup: `C:\ProgramData\Johnny\LiveRollbacks\gaming-cleanup-20260613-202322`.
+- Performance Mode watcher task verified absent after final convergence.
+- Watcher process count verified `0`.
+- Performance Mode state verified inactive with zero closed apps and zero stopped services.
+- OBS scene collection verified not to contain the Performance Mode trigger script path.
+- Game Bar values `AppCaptureEnabled`, `HistoricalCaptureEnabled`, `GameDVR_Enabled`, and policy `AllowGameDVR` were removed, not replaced with new managed values.
+- Keep NIC tuning, Defender exclusion, power plan, RTSS/MAHM monitoring, benchmark tooling, and other static low-friction optimizations intact.
 
 ## Ryzen Findings
 

@@ -34,7 +34,6 @@
       ansible.windows.win_file:
         path: "{{ windows_performance_obs_scripts_dir }}"
         state: directory
-      when: windows_performance_obs_enable_script | default(false)
 
     - name: Deploy Windows performance mode scripts
       ansible.windows.win_template:
@@ -51,6 +50,19 @@
         src: "{{ ansible_config_file | dirname }}/templates/windows/obs-performance-mode.lua.j2"
         dest: "{{ windows_performance_obs_scripts_dir }}\\{{ windows_performance_obs_lua_script }}"
       when: windows_performance_obs_enable_script | default(false)
+
+    - name: Replace OBS performance mode trigger with disabled stub
+      ansible.windows.win_copy:
+        dest: "{{ windows_performance_obs_scripts_dir }}\\{{ windows_performance_obs_lua_script }}"
+        content: |
+          -- Ansible managed
+          -- Windows Performance Mode OBS trigger is disabled.
+          obs = obslua
+
+          function script_description()
+              return "Windows Performance Mode trigger disabled by Ansible."
+          end
+      when: not (windows_performance_obs_enable_script | default(false) | bool)
 
     - name: Stop legacy Fortnite comp mode watcher if present
       ansible.windows.win_powershell:
@@ -110,7 +122,7 @@
         logon_type: interactive_token
         run_level: highest
         hidden: true
-        enabled: true
+        enabled: "{{ windows_performance_watcher_enabled | default(true) | bool }}"
         start_when_available: true
         multiple_instances: 2
         disallow_start_if_on_batteries: false
@@ -118,6 +130,13 @@
         execution_time_limit: PT0S
         compatibility: 4
         state: present
+      when: windows_performance_watcher_enabled | default(true) | bool
+
+    - name: Remove Windows performance mode watcher when disabled
+      community.windows.win_scheduled_task:
+        name: "{{ windows_performance_watcher_task_name }}"
+        state: absent
+      when: not (windows_performance_watcher_enabled | default(true) | bool)
 
     - name: Create Windows performance mode desktop shortcuts
       ansible.windows.win_powershell:
@@ -188,6 +207,45 @@
               }
           }
       when: windows_performance_desktop_shortcuts_enabled | default(false)
+
+    - name: Remove OBS performance mode trigger from active scene collection
+      ansible.windows.win_powershell:
+        script: |
+          [CmdletBinding(SupportsShouldProcess)]
+          param()
+
+          $ErrorActionPreference = 'Stop'
+          $Path = '{{ windows_performance_obs_scene_collection }}'
+          $ScriptPath = '{{ windows_performance_obs_scripts_dir }}\{{ windows_performance_obs_lua_script }}'
+          $Ansible.Changed = $false
+
+          if (-not (Test-Path -LiteralPath $Path)) {
+              return
+          }
+
+          $raw = Get-Content -LiteralPath $Path -Raw
+          $json = $raw | ConvertFrom-Json
+
+          if (
+              -not $json.PSObject.Properties['modules'] -or
+              -not $json.modules.PSObject.Properties['scripts-tool']
+          ) {
+              return
+          }
+
+          $scripts = @($json.modules.'scripts-tool')
+          $remaining = @($scripts | Where-Object { [string]$_ -ne $ScriptPath })
+
+          if ($remaining.Count -ne $scripts.Count) {
+              $Ansible.Changed = $true
+              if (-not $Ansible.CheckMode) {
+                  $backupPath = "{0}.pre-windows-performance-mode-remove-{1}.bak" -f $Path, (Get-Date -Format 'yyyyMMdd-HHmmss')
+                  Copy-Item -LiteralPath $Path -Destination $backupPath -Force
+                  $json.modules.'scripts-tool' = @($remaining)
+                  $json | ConvertTo-Json -Depth 100 | Set-Content -LiteralPath $Path -Encoding UTF8
+              }
+          }
+      when: not (windows_performance_obs_enable_script | default(false) | bool)
 
     - name: Remove legacy Windows performance mode desktop shortcuts
       ansible.windows.win_powershell:
@@ -304,6 +362,7 @@
           } else {
               $Ansible.Changed = $false
           }
+      when: windows_performance_watcher_enabled | default(true) | bool
 
     - name: Remove legacy Windows performance mode script directories
       ansible.windows.win_powershell:
