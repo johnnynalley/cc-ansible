@@ -700,10 +700,12 @@ Current Profilarr tier replacement policy:
     qualities remain disabled and outside the active group.
   - The regular efficient cutoff points at `Regular Enabled Qualities`.
   - Every efficient profile's `cutoffFormatScore` is computed from that profile's
-    actual maximum applicable CF path, not just `1080p + x265`.
-    Current values are Sonarr anime `146979`, Sonarr regular `46982`, Sonarr
-    regular dual-audio `146982`, Radarr anime `146978`, Radarr regular
-    `46979`, and Radarr regular dual-audio `146979`.
+    exact positive custom-format score ceiling: sum every positive scored CF on
+    that profile, including low service/repack tiebreakers. This is deliberately
+    higher than the normal maximum applicable release path because cutoff-unmet
+    automation should not be blocked by leftover positive scores. Use
+    `scripts/media-release/arr_cutoff_ceiling_policy.py` to audit or apply this
+    rule.
   - `Local Anime Quality Rank - ...` was only a resolution matcher. It was
     renamed in place to `Local Quality Rank - ...` and reused for anime and
     regular efficient profiles instead of creating duplicate CFs.
@@ -786,10 +788,9 @@ Current Profilarr tier replacement policy:
   - `scripts/media-release/arr_profile_math_audit.py` passed with no failures
     and reported `Regular Enabled Qualities` in both regular efficient profiles.
   - `scripts/media-release/arr_quality_profile_report.py` confirmed the actual
-    Sonarr/Radarr efficient-profile quality groups and max-path cutoff scores:
-    Sonarr anime `146979`, Sonarr regular `46982`, Sonarr regular dual-audio
-    `146982`, Radarr anime `146978`, Radarr regular `46979`, and Radarr regular
-    dual-audio `146979`.
+    Sonarr/Radarr efficient-profile quality groups and then-current max-path
+    cutoff scores. The current cutoff policy has since moved to exact positive
+    CF ceilings enforced by `scripts/media-release/arr_cutoff_ceiling_policy.py`.
   - `scripts/media-release/sonarr_release_expectation_check.py` and
     `scripts/media-release/radarr_release_expectation_check.py` both passed,
     confirming the efficient anime profiles still score DA, x265, and the
@@ -1267,6 +1268,19 @@ location.
   `title_and_metadata=100000`; 26 title+metadata matches were guarded, 3 were
   metadata-only, 4 were title-only, 14 had no DA match, 18 movies had no current
   file, and failures were `none`.
+- Sonarr anime metadata DA scoring, 2026-06-14 UTC: Ghost Stories exposed the
+  same metadata-only DA gap in Sonarr. DVD 480p title-marker releases scored
+  around `115000` from `Anime Dual Audio`, `Local Quality Rank - 480p`, and
+  `x265`, while 1080p BluRay iVy candidates parsed as English+Japanese but
+  scored only around `46160` because `Regular Dual Audio` was zero-scored on
+  `shows-anime-efficient`. `LQ` was already neutralized and `No-RlsGroup` was
+  not the cause. `scripts/media-release/sonarr_anime_metadata_da_policy.py`
+  creates `Anime - Dual Audio (Metadata)` from the existing parsed-language
+  `Regular Dual Audio` specs, scores it `+100000` on
+  `shows-anime-efficient`, and adds the same `Anime Dual Audio -
+  Metadata/Title Duplicate Guard` at `-100000` so title-only, metadata-only,
+  and title+metadata DA all net exactly one DA bonus. The profile math audit
+  enforces this for both Sonarr and Radarr anime efficient profiles.
 - Anime metadata-only DA gap, 2026-06-06 UTC: `movies-anime-efficient` scores
   `Anime Dual Audio` at `+100000`, but helper CFs `Anime - Dual Audio
   (Metadata)`, `Anime - Dual Audio (Title)`, and `Regular Dual Audio` are all

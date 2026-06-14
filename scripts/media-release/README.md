@@ -11,6 +11,11 @@
   client toggle for incident response, such as temporarily disabling SABnzbd
   when failed add attempts would repeatedly fetch NZBs. `--apply` requires a
   pre-existing live rollback backup path.
+- `arr_cutoff_ceiling_policy.py`: Dry-run by default Sonarr/Radarr cutoff
+  helper that backs up live policy state before apply and sets matching
+  efficient profiles' `cutoffFormatScore` to the exact sum of every positive
+  scored custom format in that profile, including small service/repack
+  tiebreakers.
 - `arr_duplicate_media_audit.py`: Read-only duplicate media audit. On
   `docker-vm`, compares Sonarr/Radarr tracked files with the visible library;
   on the NAS host with `--mode branch`, checks mergerfs branch roots for hidden
@@ -118,6 +123,12 @@
 - `radarr_anime_metadata_da_policy.py`: Dry-run by default helper that backs up
   Radarr release-policy state before apply, scores metadata-detected anime DA
   on `movies-anime-efficient`, and creates a duplicate guard from the current
+  `Anime Dual Audio` title specs so title+metadata matches net exactly one DA
+  bonus instead of stacking.
+- `sonarr_anime_metadata_da_policy.py`: Dry-run by default helper that backs up
+  Sonarr release-policy state before apply, creates a metadata DA helper from
+  `Regular Dual Audio`, scores metadata-detected anime DA on
+  `shows-anime-efficient`, and creates a duplicate guard from the current
   `Anime Dual Audio` title specs so title+metadata matches net exactly one DA
   bonus instead of stacking.
 - `radarr_anime_da_double_score_audit.py`: Read-only audit of every current
