@@ -52,6 +52,36 @@
 - BCDEdit does not show obvious HPET/platform-clock/dynamic-tick tweak pollution.
 - High-resolution textures were turned off in Epic Games Launcher on 2026-05-22 and verified by disk state.
 
+## 2026-06-13 Optimization Rollback Audit
+
+Context: after the 5800X3D install and A-XMP restore, the best real-round capture averaged roughly 194 FPS by RTSS with a 199.8 FPS p50 in round 2. That changes the cleanup priority. The old broad background-app shutdown was useful while diagnosing the 3900X-era ceiling, but it is no longer proven necessary and now has real workflow costs: launcher relaunch friction, Xbox/Game Bar chat breakage, and possible SignalRGB lock/unlock interference.
+
+Treat these as the current one-by-one decisions:
+
+| Optimization | Current classification | Reasoning / next action |
+| --- | --- | --- |
+| A-XMP / DDR4-3200 / FCLK1600 | Keep | This is the highest-confidence win found so far. Do not compare new tweaks against the accidental DDR4-2133 state. |
+| 5800X3D cooling profile | Keep / monitor | CPU-sourced CAM fan behavior immediately lowered Fortnite temperatures. No Ansible change; keep watching real-match CPU temp, clocks, and cHTC headroom. |
+| AMD Ryzen High Performance power plan | Keep for now | Static, low-friction, and the current strong baseline used it. Ryzen Balanced can be A/B tested later, but do not change it while cleaning up app-killing behavior. |
+| NIC latency tuning | Keep | Disabling NIC power-saving and interrupt moderation is independent of the app-closing Performance Mode stack. It is a reasonable wired-gaming latency/stutter tweak with low downside on this desktop. |
+| Defender Fortnite path exclusion | Keep | Scope is limited to the Fortnite install path, not a blanket Defender disable. It can reduce scan interference during game asset reads/updates. |
+| RTSS/MAHM monitoring and SignalRGB RTSS exclusions | Keep | RTSS/MAHM is now the visible-FPS/sensor cross-check path. Excluding SignalRGB from RTSS hooking also supports the lighting API stability hypothesis. |
+| MPO restored to Windows default | Keep pending reboot/capture validation | Managed state now removes `OverlayTestMode`. Do not re-disable MPO unless a measured capture proves it helps. |
+| HAGS disabled | A/B test later | Current managed value is `HwSchMode=1`, but Epic recommends enabling HAGS. Test only after the cleanup baseline is stable and do not combine it with other graphics changes. |
+| VBS/HVCI disable path | Leave disabled in inventory | The test entries are currently `enabled: false`. Do not apply unless Johnny accepts the security tradeoff for a controlled A/B. |
+| High-resolution textures off | Keep user-managed | This is controlled through Epic Games Launcher options, not Ansible. Keep the disk-state evidence, but do not manually delete paks. |
+| Performance Mode auto watcher | Rollback candidate | It solved a diagnosis/control problem, not a proven post-XMP FPS problem. It now interferes with Fortnite relaunches and normal launcher/chat workflows. First proposed live cleanup: disable automatic watcher triggers while leaving manual scripts/shortcuts available. |
+| OBS Performance Mode trigger | Rollback candidate | OBS/streaming should be benchmarked directly. Silently entering Performance Mode from OBS is now more likely to confuse tests than prove a win. |
+| Launcher/app close rules | Rollback candidate | Epic, Steam, Rockstar, Xbox, Nextcloud, and similar clients were not proven to be the current limiter. Let normal update/chat workflows run unless a future benchmark catches a specific offender. |
+| SignalRGB close rule | Rollback candidate | SignalRGB lock/unlock automation depends on a resident user-session process. Closing it during Performance Mode can plausibly break lights on lock/unlock. |
+| SysMain / Delivery Optimization / Windows Search / BITS stop rules | Rollback candidate | These were broad "quiet the box" tactics. With launchers and updates allowed again, stopping update/index services should be reserved for a targeted benchmark or a measured stutter source. |
+| Xbox Game Bar / Game DVR disabled | Rollback candidate | Johnny wants Xbox Game Bar/chat back. Preferred shape: allow Game Bar UI/chat again while keeping background capture/replay off unless explicitly needed. |
+| Fortnite process priority | A/B test later | Low-risk, but do not bake it in without a capture showing better RTSS/MAHM FPS or lows. |
+| Affinity presets | Deprioritized | The old multi-CCD 3900X concern does not carry cleanly to the single-CCD 5800X3D. Only revisit with a controlled benchmark. |
+| Launch arguments such as `-USEALLAVAILABLECORES` | Deprioritized / rejected | Existing evidence points to frame-critical thread pressure, not missing cores. Do not add cargo-cult launch flags without a specific measured hypothesis. |
+
+No live rollback was applied during this audit entry. Proposed first live batch, if approved: disable Performance Mode auto-entry/OBS triggering, re-enable Xbox Game Bar chat/UI while keeping background capture off, and remove SignalRGB/launcher closing from the active gaming path. Keep NIC tuning, Defender exclusion, power plan, RTSS/MAHM monitoring, and benchmark tooling intact.
+
 ## Ryzen Findings
 
 Ryzen Master full UI is not installed, but the Ryzen Master SDK CLI is present.
