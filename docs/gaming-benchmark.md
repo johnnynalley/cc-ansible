@@ -24,6 +24,14 @@ Start a capture:
 bin/windows-gaming-benchmark start --label fortnite-match-baseline
 ```
 
+The managed target list can include multiple games. On `lj-gaming-pc`, the
+current target list includes Fortnite and Kovaak's. When more than one known
+target is running, the sampler prefers the foreground game window; if no known
+game is foreground, it falls back to inventory order. Target markers record
+`target-started-*`, `target-switched-*`, and `target-exited-*`, and
+`combined.csv` includes `TargetProcessName` so mixed captures can be split by
+game later.
+
 Start while recording preflight warnings without blocking the capture:
 
 ```bash

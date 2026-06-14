@@ -59,8 +59,12 @@ windows_gaming_benchmark_power_plan_presets:
   windows-high: '8c5e7fda-e8bf-4a96-9a85-a6e23a8c635c'
 windows_gaming_benchmark_target_process_names:
   - FortniteClient-Win64-Shipping
+  - FPSAimTrainer-Win64-Shipping
+  - FPSAimTrainer
 windows_gaming_benchmark_watch_process_names:
   - FortniteClient-Win64-Shipping
+  - FPSAimTrainer-Win64-Shipping
+  - FPSAimTrainer
   - MsMpEng
   - OneDrive
   - dwm

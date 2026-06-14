@@ -465,7 +465,40 @@ function Write-ObsProfileSnapshot {
     }
 }
 
+function Get-ForegroundTargetProcess {
+    try {
+        if (-not ('JohnnyGaming.ForegroundWindow' -as [type])) {
+            Add-Type -Namespace JohnnyGaming -Name ForegroundWindow -MemberDefinition @'
+[System.Runtime.InteropServices.DllImport("user32.dll")]
+public static extern System.IntPtr GetForegroundWindow();
+
+[System.Runtime.InteropServices.DllImport("user32.dll")]
+public static extern uint GetWindowThreadProcessId(System.IntPtr hWnd, out uint processId);
+'@
+        }
+        $handle = [JohnnyGaming.ForegroundWindow]::GetForegroundWindow()
+        if ($handle -eq [System.IntPtr]::Zero) {
+            return $null
+        }
+        [uint32]$processId = 0
+        [void][JohnnyGaming.ForegroundWindow]::GetWindowThreadProcessId($handle, [ref]$processId)
+        if ($processId -le 0) {
+            return $null
+        }
+        $process = Get-Process -Id ([int]$processId) -ErrorAction SilentlyContinue
+        if ($process -and $TargetProcessNames -contains $process.ProcessName) {
+            return $process
+        }
+    } catch {
+    }
+    return $null
+}
+
 function Get-TargetProcess {
+    $foreground = Get-ForegroundTargetProcess
+    if ($foreground) {
+        return $foreground
+    }
     foreach ($name in $TargetProcessNames) {
         $process = Get-Process -Name $name -ErrorAction SilentlyContinue | Sort-Object StartTime -Descending | Select-Object -First 1
         if ($process) {
@@ -553,7 +586,11 @@ function Write-ThreadSample {
 }
 
 function Read-RtssSample {
-    param([object]$State)
+    param(
+        [object]$State,
+        [int]$TargetPid = 0,
+        [string]$TargetProcessName = ''
+    )
     $rows = @()
     try {
         Add-Type -AssemblyName System.Core -ErrorAction SilentlyContinue
@@ -612,7 +649,20 @@ function Read-RtssSample {
     foreach ($row in $rows) {
         Write-CsvRow -Path ([string]$State.RtssCsv) -Row $row
     }
-    return @($rows | Where-Object { $_.Active } | Sort-Object ProcessId -Descending | Select-Object -First 1)
+    $activeRows = @($rows | Where-Object { $_.Active })
+    if ($TargetPid -gt 0) {
+        $targetPidRows = @($activeRows | Where-Object { [int]$_.ProcessId -eq $TargetPid })
+        if ($targetPidRows.Count -gt 0) {
+            return @($targetPidRows | Select-Object -First 1)
+        }
+    }
+    if ($TargetProcessName) {
+        $targetNameRows = @($activeRows | Where-Object { $_.Name -like "*$TargetProcessName*" })
+        if ($targetNameRows.Count -gt 0) {
+            return @($targetNameRows | Sort-Object ProcessId -Descending | Select-Object -First 1)
+        }
+    }
+    return @($activeRows | Sort-Object ProcessId -Descending | Select-Object -First 1)
 }
 
 function Read-MahmSample {
@@ -1329,6 +1379,7 @@ function Invoke-InteractiveSampler {
         $threadBefore = @{}
         $lastPmdpFrameCount = 0
         $lastTargetPid = 0
+        $lastTargetName = ''
         $lastSystemSample = $null
         $lastNvidiaSmiSample = $null
 
@@ -1339,8 +1390,17 @@ function Invoke-InteractiveSampler {
 
             $target = Get-TargetProcess
             $targetPid = if ($target) { [int]$target.Id } else { 0 }
+            $targetName = if ($target) { [string]$target.ProcessName } else { '' }
             if ($targetPid -ne $lastTargetPid) {
-                $marker = if ($targetPid) { "target-started-$targetPid" } else { "target-exited-$lastTargetPid" }
+                $marker = if ($targetPid -and $lastTargetPid -and $targetPid -ne $lastTargetPid) {
+                    "target-switched-$lastTargetName-$lastTargetPid-to-$targetName-$targetPid"
+                } elseif ($targetPid) {
+                    "target-started-$targetName-$targetPid"
+                } elseif ($lastTargetName) {
+                    "target-exited-$lastTargetName-$lastTargetPid"
+                } else {
+                    "target-exited-$lastTargetPid"
+                }
                 Write-CsvRow -Path ([string]$state.MarkersCsv) -Row ([pscustomobject]@{
                     Timestamp = $timestamp.ToString('o')
                     Marker = $marker
@@ -1354,6 +1414,7 @@ function Invoke-InteractiveSampler {
                     Stop-PresentMonTools -State $state
                 }
                 $lastTargetPid = $targetPid
+                $lastTargetName = $targetName
             }
 
             if (($timestamp - $lastProcessTime).TotalSeconds -ge $ProcessIntervalSeconds) {
@@ -1376,7 +1437,7 @@ function Invoke-InteractiveSampler {
                 $lastNvidiaSmiSample = Read-NvidiaSmiSample -State $state
                 $lastSystemTime = $timestamp
             }
-            $rtss = if ($RtssEnabled) { Read-RtssSample -State $state } else { $null }
+            $rtss = if ($RtssEnabled) { Read-RtssSample -State $state -TargetPid $targetPid -TargetProcessName $targetName } else { $null }
             $mahm = if ($MahmEnabled) { Read-MahmSample -State $state } else { $null }
             if ($PmdpEnabled) {
                 $lastPmdpFrameCount = Read-PmdpFrames -State $state -LastFrameCount $lastPmdpFrameCount
@@ -1386,6 +1447,7 @@ function Invoke-InteractiveSampler {
                 Timestamp = $timestamp.ToString('o')
                 TargetRunning = [bool]$targetPid
                 TargetPid = $targetPid
+                TargetProcessName = $targetName
                 AffinityPreset = $state.AffinityPreset
                 AppliedAffinityMask = $state.AppliedAffinityMask
                 PowerPlanPreset = $state.PowerPlanPreset
