@@ -186,6 +186,12 @@ When this mismatch appears:
 - compare against RTSS/MAHM FPS when those shared-memory rows are present
 - keep using markers so load, lobby, fight, and exit windows can be separated
 
+If the user forgets to mark the end of a match/session and Fortnite later sits
+in lobby/sleep mode, check the analyzer's `visible_sustained_120_cap_tail`
+section. It identifies the first sustained 115-125 FPS tail where the following
+five minutes stay below 130 FPS, then summarizes the pre-tail gameplay window
+and the 120 FPS tail separately.
+
 ## CPU Upgrade Baseline
 
 As of 2026-06-13, the installed CPU is verified as a Ryzen 7 5800X3D even though Johnny ordered a 5700X3D. Use the same wrapper flow to capture clean Fortnite baselines with labels that make the CPU state obvious, for example:

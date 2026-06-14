@@ -10,6 +10,8 @@
   composed-flip mismatch captures can be separated from independent-flip
   captures. The summary includes visible-FPS bands so lobby/menus, transition
   stalls, and near-cap gameplay can be separated without one-off analysis.
+  It also detects a sustained 120 FPS cap tail, useful when a Fortnite capture
+  continues into lobby/sleep mode after gameplay has ended.
   Run locally on fetched capture output, for example
   `python3 scripts/gaming/analyze-gaming-capture.py <path>`.
 

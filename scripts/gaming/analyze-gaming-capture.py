@@ -200,6 +200,75 @@ def summarize_visible_runs(samples, min_fps=140, min_rows=10):
     ]
 
 
+def summarize_visible_sustained_cap_tail(
+    samples,
+    cap_low=115,
+    cap_high=125,
+    no_above=130,
+    min_duration_seconds=300,
+    min_samples=30,
+):
+    samples = sorted(
+        [
+            sample for sample in samples
+            if sample.get("time") is not None
+            and sample.get("fps") is not None
+            and math.isfinite(sample["fps"])
+        ],
+        key=lambda sample: sample["time"],
+    )
+    if not samples:
+        return None
+
+    cutoff = None
+    for index, sample in enumerate(samples):
+        fps = sample["fps"]
+        if fps < cap_low or fps > cap_high:
+            continue
+        window_end = sample["time"].timestamp() + min_duration_seconds
+        future = [
+            item for item in samples[index:]
+            if item["time"].timestamp() <= window_end
+        ]
+        if len(future) < min_samples:
+            continue
+        if max(item["fps"] for item in future) <= no_above:
+            cutoff = sample
+            break
+
+    if cutoff is None:
+        return None
+
+    last_above = None
+    for sample in samples:
+        if sample["time"] >= cutoff["time"]:
+            break
+        if sample["fps"] > no_above:
+            last_above = sample
+
+    before = [sample for sample in samples if sample["time"] < cutoff["time"]]
+    tail = [sample for sample in samples if sample["time"] >= cutoff["time"]]
+    return {
+        "cap_low": cap_low,
+        "cap_high": cap_high,
+        "no_above": no_above,
+        "min_duration_seconds": min_duration_seconds,
+        "min_samples": min_samples,
+        "cutoff_timestamp": cutoff["time"].isoformat(),
+        "cutoff_fps": cutoff["fps"],
+        "last_above_threshold_timestamp": last_above["time"].isoformat() if last_above else None,
+        "last_above_threshold_fps": last_above["fps"] if last_above else None,
+        "before_tail": summarize_visible_samples(before),
+        "tail": summarize_visible_samples(tail),
+        "before_tail_gameplayish_fps_gte_140": summarize_visible_samples([
+            sample for sample in before if sample["fps"] >= 140
+        ]),
+        "before_tail_near_cap_fps_gte_180": summarize_visible_samples([
+            sample for sample in before if sample["fps"] >= 180
+        ]),
+    }
+
+
 def truncate(text, length=240):
     text = str(text or "")
     if len(text) <= length:
@@ -797,6 +866,7 @@ def main(root):
     )
     result["visible_fps_bands"] = summarize_visible_bands(visible_samples)
     result["visible_fps_runs_fps_gte_140"] = summarize_visible_runs(visible_samples, min_fps=140)
+    result["visible_sustained_120_cap_tail"] = summarize_visible_sustained_cap_tail(visible_samples)
     add_diagnosis(result)
 
     print(json.dumps(result, indent=2))

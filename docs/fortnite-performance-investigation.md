@@ -545,6 +545,127 @@ Interpretation:
 - Do not reintroduce launcher/app/service killing without a new capture proving
   a specific process or service is causing stutter.
 
+## 2026-06-13/14 Duo Loaded Normal-Use Capture
+
+Capture:
+
+```text
+C:\Users\jn\AppData\Local\WindowsGamingBenchmark\Captures\20260613-230129-fortnite-duo-loaded-normal-20260613
+```
+
+Local archive analyzed from:
+
+```text
+/tmp/LJ-GAMING-PC-20260613-230129-fortnite-duo-loaded-normal-20260613
+/tmp/LJ-GAMING-PC-20260613-230129-fortnite-duo-loaded-normal-20260613.zip
+/tmp/LJ-GAMING-PC-20260613-230129-fortnite-duo-loaded-normal-20260613.analysis.v2.json
+```
+
+Conditions:
+
+- CPU installed and verified as Ryzen 7 5800X3D.
+- A-XMP restored; current baseline is DDR4-3200 / FCLK1600.
+- Automatic Performance Mode remained retired. No watcher, OBS trigger,
+  launcher close rules, or service stop rules were active.
+- Johnny was playing with a duo/friend and forgot to mark the end of gameplay.
+- Normal background apps/overlays were still present. Process inventory showed
+  NVIDIA Overlay, Xbox app, Epic, Steam, Rockstar/Social Club, Discord,
+  Nextcloud, SignalRGB, SteelSeries Sonar, and Defender.
+- OBS was not present in the watched process inventory; this is not a streaming
+  or OBS-recording benchmark.
+- No affinity, priority, or power-plan override was applied by the benchmark
+  harness.
+- Preflight was allowed to start with a recorded warning because Memory
+  Compression was already large while available RAM remained healthy.
+
+Markers:
+
+- `start`: 2026-06-13 23:01:29 -05:00
+- `target-started-28800`: 2026-06-13 23:01:38 -05:00
+- `target-exited-28800`: 2026-06-14 02:19:44 -05:00
+- `stop-requested`: 2026-06-14 02:21:18 -05:00
+
+Inferred session split:
+
+- The analyzer detected a sustained 120 FPS cap tail beginning at
+  2026-06-14 01:27:53 -05:00.
+- Last active RTSS sample above 130 FPS before that tail:
+  2026-06-14 01:27:44 -05:00 at 196.85 FPS.
+- From 01:27:53 until Fortnite exited at 02:19:44, RTSS stayed in a
+  115-125 FPS cap pattern. Treat that as lobby/sleep/end-state time, not
+  gameplay.
+
+Visible FPS from RTSS/MAHM:
+
+- Full active RTSS window, including the 120 FPS tail: average 170.9 FPS,
+  p50 196.9 FPS, p95 200.0 FPS, p99 201.0 FPS.
+- Pre-tail window, 23:01:39-01:27:52: average 189.5 FPS, p50 198.8 FPS,
+  p95 200.0 FPS, p99 201.0 FPS. This still includes some earlier lobby/load
+  segments and transition stalls.
+- Pre-tail gameplay-ish `fps >= 140`: average 196.5 FPS, p50 198.8 FPS,
+  p95 200.4 FPS, p99 201.0 FPS. Frame-time p95 was 7.27 ms, p99 9.13 ms,
+  max 22.17 ms, with 4 samples over 16.67 ms and none over 25 ms.
+- Pre-tail near-cap `fps >= 180`: average 197.5 FPS, p50 198.8 FPS,
+  p95 200.8 FPS, p99 201.0 FPS. Frame-time p95 was 7.16 ms, p99 8.83 ms,
+  max 22.17 ms, with 2 samples over 16.67 ms and none over 25 ms.
+- Longest contiguous `fps >= 140` run: 00:55:24-01:27:44, about 32.3 minutes,
+  average 199.3 FPS, p50 199.8 FPS, p99 201.0 FPS. Frame-time p95 was 6.17 ms,
+  p99 7.34 ms, max 15.00 ms, with zero samples over 16.67 ms.
+- Inferred 120 FPS tail: average 119.9 FPS, p50 120.1 FPS, p95 120.2 FPS.
+
+Thermals and clocks:
+
+- Pre-tail window CPU temperature: average 78.3 C, p95 84.6 C, p99 85.4 C,
+  max 89.5 C.
+- Pre-tail `fps >= 140` CPU temperature: average 78.4 C, p95 84.6 C,
+  p99 85.4 C, max 88.1 C.
+- Pre-tail `fps >= 180` CPU temperature: average 78.3 C, p95 84.6 C,
+  p99 85.3 C, max 88.0 C.
+- Tail CPU temperature fell to average 69.5 C, p95 71.3 C, max 76.4 C.
+- CPU clocks remained healthy: pre-tail `fps >= 180` averaged 4403 MHz with
+  p95/p99/max 4450 MHz.
+- No sustained thermal-throttle pattern was observed, but the chip still runs
+  warm enough that fan curve/radiator airflow remain worth watching.
+
+Other pressure signals:
+
+- Pre-tail `fps >= 180` NVIDIA GPU utilization averaged 70.2%, p95 93.0%,
+  p99 96.0%, max 97.0%. GPU temperature averaged 59.5 C and maxed at 65 C.
+- RAM usage averaged about 18.7 GB in the pre-tail gameplay-ish windows.
+  Windows available memory stayed healthy with a 13.2 GB minimum.
+- Memory Compression was the only preflight/capture pollution warning:
+  preflight working set 1566 MB, process-inventory max 1585 MB, watched-process
+  max 3065 MB. Available RAM stayed healthy, so this was a warning to record,
+  not proof of memory pressure.
+- Context switches were elevated but similar to prior loaded captures:
+  pre-tail `fps >= 180` p95 about 177,200/sec.
+- DPC/interrupt levels were not alarming: pre-tail `fps >= 180` p95 DPC 2.04%,
+  p95 interrupt 2.71%.
+- Background apps were not dominant CPU users. Max sampled totals included
+  Nextcloud 5.0%, Discord 3.7%, SignalRGB 2.5%, SteelSeries Sonar 1.8%,
+  Epic Games Launcher 1.2%, and NVIDIA Overlay about 0.6%.
+
+PresentMon validity:
+
+- PresentMon recorded 539,797 rows, but 539,424 were `Composed: Flip`; only
+  372 were `Hardware: Independent Flip`.
+- PresentMon-derived visible FPS averaged roughly 45.5 FPS while RTSS averaged
+  170.9 FPS over the full active capture. Treat PresentMon visible FPS and
+  CPU/GPU busy classification as suspect for this capture.
+- RTSS/MAHM remain the authoritative visible-FPS and sensor sources for this
+  capture.
+
+Interpretation:
+
+- This reinforces the Go Goated result: normal Fortnite performance now holds
+  near the 200 FPS cap with normal launchers, overlays, sync clients, Discord,
+  Xbox/Game Bar, SignalRGB, and Sonar present.
+- The old broad Performance Mode process/service shutdown remains unjustified
+  for non-OBS Fortnite. Do not re-add it unless a future capture identifies a
+  specific offender.
+- Remaining work should focus on the real streaming/OBS path and optional HAGS
+  testing, not more background-app cleanup.
+
 ## 2026-05-24 Creative 32-Player Cup Zone Wars FPS Observation
 
 Johnny reported unusually severe FPS lag in a 32-player cup zone wars map, specifically noting that it was FPS lag and that the map had a lot going on. Treat large Creative endgame maps as worst-case CPU-frame-time stress tests, not representative BR baselines. For practice quality, prefer smaller or better-optimized endgame/zone wars maps if the 32-player map breaks frame pacing; bad FPS produces bad fighting reps.
