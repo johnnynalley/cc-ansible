@@ -100,6 +100,15 @@ def parse_presentmon_time(text):
         return None
 
 
+def parse_iso_time(text):
+    if not text:
+        return None
+    try:
+        return datetime.fromisoformat(str(text))
+    except ValueError:
+        return None
+
+
 def summarize_presentmon_rows(rows):
     frame = [row["frame_ms"] for row in rows]
     cpu_busy = [row["cpu_busy_ms"] for row in rows]
@@ -126,6 +135,69 @@ def summarize_presentmon_rows(rows):
         "display_latency_ms": stats(display_latency),
         "frame_minus_gpu_busy_ms": stats(frame_minus_gpu_busy),
     }
+
+
+def summarize_visible_samples(samples):
+    if not samples:
+        return None
+    fps = [sample.get("fps") for sample in samples]
+    frame_ms = [sample.get("frame_ms") for sample in samples]
+    times = [sample.get("time") for sample in samples if sample.get("time") is not None]
+    first_time = min(times) if times else None
+    last_time = max(times) if times else None
+    return {
+        "rows": len(samples),
+        "first_timestamp": first_time.isoformat() if first_time else None,
+        "last_timestamp": last_time.isoformat() if last_time else None,
+        "duration_seconds": (last_time - first_time).total_seconds()
+        if first_time and last_time
+        else None,
+        "fps": stats(fps),
+        "frame_ms": stats(frame_ms),
+        "fps_lows": fps_lows_from_frame_ms(frame_ms),
+        "frame_over_ms_counts": counts_over(frame_ms, [5, 6.67, 8.33, 10, 16.67, 25, 33.33, 50]),
+    }
+
+
+def summarize_visible_bands(samples):
+    samples = [
+        sample for sample in samples
+        if sample.get("fps") is not None and math.isfinite(sample["fps"])
+    ]
+    if not samples:
+        return {}
+    bands = {
+        "all": lambda fps: True,
+        "near_cap_fps_gte_180": lambda fps: fps >= 180,
+        "gameplayish_fps_gte_140": lambda fps: fps >= 140,
+        "lobbyish_fps_100_to_130": lambda fps: 100 <= fps <= 130,
+        "stall_or_transition_fps_lt_100": lambda fps: fps < 100,
+    }
+    return {
+        name: summarize_visible_samples([
+            sample for sample in samples if predicate(sample["fps"])
+        ])
+        for name, predicate in bands.items()
+    }
+
+
+def summarize_visible_runs(samples, min_fps=140, min_rows=10):
+    runs = []
+    current = []
+    for sample in samples:
+        fps = sample.get("fps")
+        if fps is not None and math.isfinite(fps) and fps >= min_fps:
+            current.append(sample)
+            continue
+        if len(current) >= min_rows:
+            runs.append(current)
+        current = []
+    if len(current) >= min_rows:
+        runs.append(current)
+    return [
+        summarize_visible_samples(run)
+        for run in sorted(runs, key=len, reverse=True)[:10]
+    ]
 
 
 def truncate(text, length=240):
@@ -526,9 +598,18 @@ def main(root):
         "RamUsageMB", "OsdFramerate", "OsdFrametimeMs",
     ]
     ab_values = defaultdict(list)
+    afterburner_visible_samples = []
     for row in read_csv(root / "afterburner.csv"):
         for col in ab_cols:
             ab_values[col].append(fnum(row.get(col)))
+        afterburner_fps = fnum(row.get("OsdFramerate"))
+        afterburner_frame_ms = fnum(row.get("OsdFrametimeMs"))
+        if afterburner_fps is not None:
+            afterburner_visible_samples.append({
+                "time": parse_iso_time(row.get("Timestamp")),
+                "fps": afterburner_fps,
+                "frame_ms": afterburner_frame_ms,
+            })
     for col in ab_cols:
         afterburner[col] = stats(ab_values[col])
 
@@ -570,14 +651,23 @@ def main(root):
 
     rtss_frame = []
     rtss_fps = []
+    rtss_visible_samples = []
     rtss_rows = 0
     rtss_active_rows = 0
     for row in read_csv(root / "rtss.csv"):
         rtss_rows += 1
         if str(row.get("Active", "")).lower() == "true" and row.get("ProcessId") not in ("0", "", None):
             rtss_active_rows += 1
-            rtss_frame.append(fnum(row.get("FrameTimeMs")))
-            rtss_fps.append(fnum(row.get("FpsWindow")))
+            frame_ms = fnum(row.get("FrameTimeMs"))
+            fps = fnum(row.get("FpsWindow"))
+            rtss_frame.append(frame_ms)
+            rtss_fps.append(fps)
+            if fps is not None:
+                rtss_visible_samples.append({
+                    "time": parse_iso_time(row.get("Timestamp")),
+                    "fps": fps,
+                    "frame_ms": frame_ms,
+                })
 
     thread_rows = []
     for row in read_csv((root / "target-threads.csv" if (root / "target-threads.csv").exists() else root / "fortnite-threads.csv")):
@@ -698,6 +788,15 @@ def main(root):
     }
 
     result["visible_fps"] = choose_visible_fps_source(result)
+    visible_samples = (
+        rtss_visible_samples
+        if result["visible_fps"].get("source") == "rtss"
+        else afterburner_visible_samples
+        if result["visible_fps"].get("source") == "afterburner"
+        else []
+    )
+    result["visible_fps_bands"] = summarize_visible_bands(visible_samples)
+    result["visible_fps_runs_fps_gte_140"] = summarize_visible_runs(visible_samples, min_fps=140)
     add_diagnosis(result)
 
     print(json.dumps(result, indent=2))

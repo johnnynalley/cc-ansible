@@ -42,13 +42,18 @@
   - EPP: 0
   - core parking min/max: 100%
 - Fortnite Defender path exclusion is present: `Z:\Epic Games\Fortnite`
-- Game DVR capture and historical capture are disabled.
+- Xbox Game Bar / Game DVR settings are no longer managed by Ansible. Windows
+  Settings and the Xbox UI own this now; the 2026-06-13 loaded baseline had
+  Game Bar, GameBarPresenceWriter, Xbox app, NVIDIA Overlay, NVIDIA Instant
+  Replay, NVIDIA Highlights, Epic, Steam, Rockstar, Discord, Nextcloud, and
+  SignalRGB present.
 - Hardware-accelerated GPU scheduling is currently disabled (`HwSchMode=1`).
 - Multiplane overlay disable was removed from managed state and live registry on 2026-06-13.
   Rollback export: `C:\ProgramData\Johnny\LiveRollbacks\dwm-before-mpo-restore-20260613-172721.reg`.
   Effective compositor behavior still needs a Windows reboot, then a PresentMon/RTSS validation capture.
 - NIC power-saving features and interrupt moderation are disabled by the gaming tuning playbook.
-- Performance Mode closes/stops known background clients and services while Fortnite/OBS triggers are active.
+- Automatic Performance Mode is retired. It no longer auto-watches Fortnite/OBS
+  or closes/stops background clients and services.
 - BCDEdit does not show obvious HPET/platform-clock/dynamic-tick tweak pollution.
 - High-resolution textures were turned off in Epic Games Launcher on 2026-05-22 and verified by disk state.
 
@@ -75,7 +80,7 @@ Treat these as the current one-by-one decisions:
 | Launcher/app close rules | Rolled back 2026-06-13 | The active process close list is now empty. Epic, Steam, Rockstar, Xbox, Nextcloud, SignalRGB, and other normal clients should no longer be killed by Performance Mode. |
 | SignalRGB close rule | Rolled back 2026-06-13 | SignalRGB is no longer in a Performance Mode close list, which matches the lock/unlock automation requirement that SignalRGB stay resident in the user session. |
 | SysMain / Delivery Optimization / Windows Search / BITS stop rules | Rolled back 2026-06-13 | The active service stop list is now empty. Re-add only if a benchmark identifies a specific service as a stutter source. |
-| Xbox Game Bar / Game DVR disabled | Unmanaged by Ansible 2026-06-13 | `inventory/host_vars/lj-gaming-pc/gamebar.yml` was removed so Windows Settings/Xbox UI owns Game Bar. The old Ansible-managed disabling values were removed live as a one-time cleanup rather than replaced with new managed values. |
+| Xbox Game Bar / Game DVR settings | Unmanaged by Ansible 2026-06-13 | `inventory/host_vars/lj-gaming-pc/gamebar.yml` was removed so Windows Settings/Xbox UI owns Game Bar. The old Ansible-managed disabling values were removed live as a one-time cleanup rather than replaced with new managed values. |
 | Fortnite process priority | A/B test later | Low-risk, but do not bake it in without a capture showing better RTSS/MAHM FPS or lows. |
 | Affinity presets | Deprioritized | The old multi-CCD 3900X concern does not carry cleanly to the single-CCD 5800X3D. Only revisit with a controlled benchmark. |
 | Launch arguments such as `-USEALLAVAILABLECORES` | Deprioritized / rejected | Existing evidence points to frame-critical thread pressure, not missing cores. Do not add cargo-cult launch flags without a specific measured hypothesis. |
@@ -127,20 +132,18 @@ Do not manually delete paks. Use Epic Games Launcher options for this setting.
 
 ## Current Best Candidates
 
-> Updated 2026-06-13 after the AM4 X3D CPU swap, A-XMP restore, and cooling-profile checks. Treat this as a benchmark queue, not applied wins. The short-term goal is to capture clean post-upgrade Fortnite data, then re-rank remaining tweaks based on the new CPU frame-time baseline.
+> Updated 2026-06-13 after the 5800X3D verification, A-XMP restore, cooling-profile checks, Performance Mode rollback, and loaded normal-use Go Goated capture. Treat this as a benchmark queue, not applied wins.
 
-1. Post-upgrade health baseline:
-   - installed CPU is verified as a 5800X3D even though Johnny ordered a 5700X3D
-   - record idle/load CPU temperature, effective clocks, power limits, cooling profile, and whether boost behavior is normal for the X3D CPU
-   - then run a clean Fortnite Performance Mode capture without OBS before judging the upgrade
-2. OBS capture-pipeline A/B, after the clean X3D baseline:
-   - the biggest measured delta is non-OBS gameplay around 151 FPS vs OBS recording around 99-102 FPS
-   - OBS process CPU was only about 4%, so the likely overhead is capture hook / compositor / preview / scene path rather than x264-style CPU encoding
-   - first tests: Game Capture vs Display Capture vs Window Capture, then preview enabled vs disabled
-   - then test stripped scene vs normal scene, overlays/browser sources disabled, OBS admin vs normal, OBS priority normal vs above-normal, and NVENC options
-3. VBS/HVCI diagnostic A/B if Johnny approves the reversible security tradeoff:
-   - VBS/HVCI can still tax CPU-bound Windows 11 gaming, but re-rank this after the 5800X3D baseline
-   - after the X3D swap, do not test this until a clean post-upgrade baseline is recorded
+1. Streaming/OBS capture-path baseline:
+   - the old OBS delta was measured on the previous 3900X baseline, where non-OBS gameplay was around 151 FPS and OBS recording was around 99-102 FPS
+   - post-5800X3D gameplay now looks strong with NVIDIA Overlay/Instant Replay/Highlights and Game Bar enabled, so the next meaningful test is the real streaming stack, not stripped-offline gameplay
+   - first tests: normal streaming scene with stream relay, OBS preview enabled vs disabled, Game Capture stability/admin state, and whether the relay/offload path adds any measurable encode/capture pressure on the gaming PC
+2. HAGS A/B if the user approves another reboot-level graphics test:
+   - current managed state disables HAGS with `HwSchMode=1`
+   - Epic's FPS guide recommends enabling HAGS when available
+   - test HAGS only after the current loaded baseline is preserved, and do not combine it with render-mode changes in the same run
+3. VBS/HVCI diagnostic A/B remains available only if Johnny accepts the reversible security tradeoff:
+   - the post-5800X3D baseline does not justify disabling it blindly
    - document current `msinfo32` / Core Isolation state before changing anything
    - if disabled for a test, reboot, run the same capture, and re-enable if there is no meaningful win
 4. Render-mode sanity checks, not a likely FPS unlock:
@@ -149,17 +152,13 @@ Do not manually delete paks. Use Epic Games Launcher options for this setting.
    - keep render-mode tests as frame-pacing/stutter/OBS-interaction sanity checks, not likely 200 FPS paths
    - compare current Performance Mode against DX12 all-low/competitive only after multiple shader warm-up matches; if DX11 is still selectable, benchmark it separately
    - compare average FPS, 1%/0.1% lows, CPU Busy, GPU Busy, stutter markers, and input feel
-5. MPO re-enable A/B before the next HAGS or render-mode test:
+5. MPO / PresentMon validity follow-up:
    - live state before this change showed `OverlayTestMode=5`, which disables MPO
    - managed target state now removes `HKLM:\SOFTWARE\Microsoft\Windows\Dwm\OverlayTestMode`
    - applied live on 2026-06-13; verified registry value absent while HAGS remained `HwSchMode=1`
    - rollback export saved at `C:\ProgramData\Johnny\LiveRollbacks\dwm-before-mpo-restore-20260613-172721.reg`
    - reason: Microsoft documents that Independent Flip can stay active when other desktop contents are present by using reverse composition or MPO; disabling MPO may force Fortnite back to `Composed: Flip` when overlays/capture are active
-   - after reboot, run a short RTSS/MAHM/PresentMon capture with the same overlay/OBS state and require PresentMon to stop disagreeing before relying on its frame-pipeline metrics
-6. HAGS A/B if the user approves another reboot-level graphics test:
-   - current managed state disables HAGS with `HwSchMode=1`
-   - Epic's FPS guide recommends enabling HAGS when available
-   - test HAGS only after the MPO result is known, and do not combine with render-mode changes in the same run
+   - the post-cleanup capture still showed `Composed: Flip` almost the whole time, so RTSS/MAHM remain authoritative for visible FPS while PresentMon frame-pipeline metrics remain suspect in that state
 7. NVIDIA driver/profile sanity:
    - record the current NVIDIA driver version in this document before more A/B tests
    - current snapshot reports NVIDIA driver `596.49`
@@ -179,11 +178,11 @@ Do not manually delete paks. Use Epic Games Launcher options for this setting.
 
 Johnny ordered a Ryzen 7 5700X3D, but the installed CPU is verified as a Ryzen 7 5800X3D. The BIOS, Windows WMI, and `HKLM:\HARDWARE\DESCRIPTION\System\CentralProcessor\0` all report `AMD Ryzen 7 5800X3D 8-Core Processor`. Treat the 5800X3D as the installed and benchmark-relevant CPU.
 
-Do not call the upgrade benchmarked yet. Before final performance conclusions:
-
-- BIOS A-XMP was restored after the initial post-swap DDR4-2133 reading; Windows now reports the kit at DDR4-3200
-- FCLK1600 and CPU thermal/clock spot checks are recorded below
-- capture at least one clean post-install Fortnite baseline and archive it
+The upgrade is now benchmarked enough for the old raw-FPS investigation: after
+BIOS A-XMP was restored and FCLK1600 was verified, Fortnite held near the 200 FPS
+cap in multiple real/Creative captures. The remaining work is not proving the
+5800X3D helped; it is validating stream/OBS interaction, thermal headroom, and
+optional graphics/security A/B tests.
 
 ## 2026-06-13 X3D Thermal Spot Check While Fortnite Was Running
 
@@ -420,6 +419,131 @@ Interpretation:
 - The CPU fan-curve change appears adequate for now, but the chip is still running warm enough that cooler mount, radiator airflow, and fan behavior remain worth checking if future real-match captures approach 90 C or show clock drops.
 - Performance in round 2 looked strong: mostly capped near 200 FPS, not GPU-saturated, and no sustained thermal throttle pattern.
 
+
+## 2026-06-13 Go Goated Loaded Normal-Use Baseline
+
+Capture:
+
+```text
+C:\Users\jn\AppData\Local\WindowsGamingBenchmark\Captures\20260613-205138-fortnite-5800x3d-go-goated-post-cleanup
+```
+
+Local archive analyzed from:
+
+```text
+/tmp/LJ-GAMING-PC-20260613-205138-fortnite-5800x3d-go-goated-post-cleanup
+/tmp/LJ-GAMING-PC-20260613-205138-fortnite-5800x3d-go-goated-post-cleanup.zip
+/tmp/LJ-GAMING-PC-20260613-205138-fortnite-5800x3d-go-goated-post-cleanup.analysis.v2.json
+```
+
+Conditions:
+
+- CPU installed and verified as Ryzen 7 5800X3D.
+- A-XMP restored; current baseline is DDR4-3200 / FCLK1600.
+- Automatic Performance Mode had been retired before this capture. No watcher,
+  OBS trigger, launcher close rules, or service stop rules were active.
+- Johnny reported that normal gaming overlays/features were turned back on:
+  NVIDIA Overlay, NVIDIA Instant Replay, NVIDIA Highlights, and Game Bar.
+- Process inventory confirmed NVIDIA Overlay, Game Bar, GameBarPresenceWriter,
+  Xbox app, Epic Games Launcher, Steam, Rockstar Launcher/Social Club, Discord,
+  Nextcloud, and SignalRGB were present.
+- OBS was not present in the watched process inventory; this is not a streaming
+  or OBS-recording benchmark.
+- No affinity, priority, or power-plan override was applied by the benchmark
+  harness.
+
+Markers:
+
+- `start`: 2026-06-13 20:51:38 -05:00
+- `target-started-28800`: 2026-06-13 20:51:47 -05:00
+- `stop-requested`: 2026-06-13 22:01:50 -05:00
+
+Important limitation: Johnny forgot to mark the end of Go Goated, and the run
+continued into lobby/end-state time. Treat the all-window average as a mixed
+session number, not a clean gameplay-only average. Use the RTSS visible-FPS
+bands below to separate likely gameplay from 120 FPS capped lobby/menu periods
+and transitions.
+
+Visible FPS from RTSS/MAHM:
+
+- Full mixed capture RTSS: average 184.3 FPS, p50 198.8 FPS, p95 200.0 FPS,
+  p99 201.0 FPS.
+- Full mixed capture RTSS frame time: p50 5.28 ms, p95 8.76 ms, p99 19.75 ms,
+  max 2476 ms.
+- The full mixed capture had 41 RTSS samples over 16.67 ms, 30 over 25 ms, 28
+  over 33.33 ms, and 25 over 50 ms. Most of those were in transition/stall
+  buckets, not the high-FPS gameplay buckets.
+- Gameplay-ish RTSS band `fps >= 140`: average 195.5 FPS, p50 198.9 FPS, p95
+  200.0 FPS, p99 201.0 FPS. Frame-time p95 was 7.09 ms, p99 9.02 ms, max
+  22.54 ms, with 8 samples over 16.67 ms and none over 25 ms.
+- Near-cap RTSS band `fps >= 180`: average 197.6 FPS, p50 199.0 FPS, p95
+  200.0 FPS, p99 201.0 FPS. Frame-time p95 was 6.90 ms, p99 8.63 ms, max
+  22.54 ms, with 8 samples over 16.67 ms and none over 25 ms.
+- Longest contiguous `fps >= 140` run: 21:10:25-21:37:59, 1434 samples over
+  about 27.6 minutes, average 199.3 FPS, p50 199.8 FPS, p99 201.0 FPS.
+  Frame-time p95 was 6.30 ms, p99 7.35 ms, max 20.40 ms, with only 2 samples
+  over 16.67 ms.
+- The 100-130 FPS band averaged 117.8 FPS and lines up with the known lobby or
+  capped context behavior.
+
+Thermals and clocks:
+
+- Full capture MAHM CPU temperature: average 78.3 C, p95 82.0 C, p99 86.2 C,
+  max 90.25 C.
+- Near-cap `fps >= 180` CPU temperature: average 78.2 C, p95 81.9 C, p99 84.1
+  C, max 89.9 C.
+- CPU clock stayed healthy: full capture average 4410 MHz, p50 4400 MHz,
+  p95/p99/max 4450 MHz, minimum 4275 MHz.
+- Near-cap `fps >= 180` CPU clock: average 4409 MHz, p95/p99/max 4450 MHz,
+  minimum 4300 MHz.
+- No sustained thermal-throttle pattern was observed, but the 5800X3D did touch
+  the cHTC limit area. Keep monitoring fan curve, radiator airflow, and clocks
+  if future sessions approach 90 C again.
+
+Other pressure signals:
+
+- NVIDIA GPU utilization averaged 59.1%, p95 82.0%, max 86.0%. GPU temperature
+  averaged 58.3 C and maxed at 62 C.
+- GPU VRAM use stayed modest: NVIDIA reported max 2767 MB used.
+- RAM usage averaged 17.7 GB and peaked around 19.8 GB. Windows available
+  memory stayed healthy with a 13.2 GB minimum.
+- The analyzer flagged Memory Compression working set around 1.4-1.5 GB, but
+  this did not coincide with system RAM pressure.
+- No stale runaway PowerShell worker was detected in this capture.
+- DPC/interrupt levels were not alarming: p95 DPC 1.85%, p95 interrupt 2.38%.
+- Context switches were elevated enough to note, with p95 around 172,600/sec,
+  but there was no single background app smoking gun.
+- Steam, Nextcloud, NVIDIA Overlay, Game Bar/Xbox, Epic, Rockstar, Discord,
+  SignalRGB, and Defender were present but not dominant CPU users. NVIDIA
+  Overlay appeared in the process data with low sampled CPU, and disk latency
+  was negligible.
+- Windows GPU engine counters reported 0% video encode, which may be a counter
+  visibility issue rather than proof that Instant Replay/Highlights were idle.
+  Practically, this capture did not show encode/disk pressure hurting Fortnite.
+
+PresentMon validity:
+
+- PresentMon recorded 140,536 rows, but 140,517 were `Composed: Flip`; only 18
+  were `Hardware: Independent Flip`.
+- PresentMon-derived visible FPS averaged roughly 33.4 FPS while RTSS averaged
+  184.3 FPS over the same mixed capture. Treat PresentMon visible FPS and
+  CPU/GPU busy classification as suspect in this capture.
+- Keep RTSS/MAHM as the authoritative visible-FPS and sensor source until
+  PresentMon is captured in a mode that agrees with RTSS.
+
+Interpretation:
+
+- This is the strongest evidence so far that broad app-closing Performance Mode
+  is no longer needed for normal Fortnite after the 5800X3D + XMP restore.
+  Fortnite held near the 200 FPS cap in the high-FPS gameplay bands even with
+  normal overlays, launchers, sync clients, Discord, Xbox/Game Bar, and
+  SignalRGB present.
+- The old 3900X-era raw-FPS problem should be considered solved for non-OBS
+  Fortnite. Remaining performance work should focus on the real streaming/OBS
+  path, thermal headroom, HAGS if the user wants a reboot-level A/B, and only
+  then lower-priority security/render-mode tests.
+- Do not reintroduce launcher/app/service killing without a new capture proving
+  a specific process or service is causing stutter.
 
 ## 2026-05-24 Creative 32-Player Cup Zone Wars FPS Observation
 

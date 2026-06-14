@@ -8,7 +8,9 @@
   frame-pipeline details such as CPU/GPU busy time when the PresentMon cadence
   is valid for the capture. It also reports PresentMon presentation modes so
   composed-flip mismatch captures can be separated from independent-flip
-  captures. Run locally on fetched capture output, for example
+  captures. The summary includes visible-FPS bands so lobby/menus, transition
+  stalls, and near-cap gameplay can be separated without one-off analysis.
+  Run locally on fetched capture output, for example
   `python3 scripts/gaming/analyze-gaming-capture.py <path>`.
 
 ## Safety Notes
