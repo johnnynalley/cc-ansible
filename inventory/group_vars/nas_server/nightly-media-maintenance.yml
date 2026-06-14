@@ -2,7 +2,8 @@
 # NAS Server - Nightly Media Maintenance Coordination
 # =============================================================================
 
-nightly_media_maintenance_enabled: true
+# Disabled while Profilarr native upgrades run continuously.
+nightly_media_maintenance_enabled: false
 nightly_media_maintenance_window: "00:00-07:00"
 nightly_media_maintenance_state_dir: /var/lib/nightly-media-maintenance
 

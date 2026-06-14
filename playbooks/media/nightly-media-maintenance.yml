@@ -23,6 +23,27 @@
         daemon_reload: true
 
   tasks:
+    - name: Disable nightly media maintenance timers when coordinator is disabled
+      ansible.builtin.systemd:
+        name: "{{ item }}"
+        enabled: false
+        state: stopped
+      loop:
+        - nightly-media-maintenance.timer
+        - nightly-media-maintenance-restore.timer
+      failed_when: false
+      when: not (nightly_media_maintenance_enabled | default(false))
+
+    - name: Stop nightly media maintenance services when coordinator is disabled
+      ansible.builtin.systemd:
+        name: "{{ item }}"
+        state: stopped
+      loop:
+        - nightly-media-maintenance.service
+        - nightly-media-maintenance-restore.service
+      failed_when: false
+      when: not (nightly_media_maintenance_enabled | default(false))
+
     - name: End play when nightly media maintenance is disabled
       ansible.builtin.meta: end_host
       when: not (nightly_media_maintenance_enabled | default(false))
