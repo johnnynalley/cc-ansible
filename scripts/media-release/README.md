@@ -108,10 +108,13 @@
   audit. It performs interactive release searches by exact movie ID or title
   regex and reports whether Radarr sees parsed original-language + English
   candidates, without grabbing anything.
-- `radarr_anime_lq_policy.py`: Dry-run by default helper that backs up Radarr
-  release-policy state before apply and softens only the `movies-anime-efficient`
-  anime LQ penalty scores so DA/x265 releases can still beat non-DA files while
-  LQ remains a meaningful negative signal.
+- `radarr_anime_lq_policy.py`: Legacy Radarr-only anime LQ softener retained for
+  rollback context. Prefer `arr_trash_lq_policy.py` for current efficient-profile
+  TRaSH LQ policy.
+- `arr_trash_lq_policy.py`: Dry-run by default helper that backs up Sonarr and
+  Radarr policy state before apply, neutralizes TRaSH LQ scoring in active
+  `*-efficient` profiles, and reports remaining TRaSH-sourced negative scores
+  for explicit review.
 - `radarr_anime_metadata_da_policy.py`: Dry-run by default helper that backs up
   Radarr release-policy state before apply, scores metadata-detected anime DA
   on `movies-anime-efficient`, and creates a duplicate guard from the current

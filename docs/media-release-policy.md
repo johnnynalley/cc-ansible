@@ -422,6 +422,25 @@ spec-count collapses, because some upstream names do not represent the same
 kind of CF as the existing Arr name. Use `--inspect-target <CF name>` before
 reviewing any tier-list replacement.
 
+## TRaSH Negative Policy
+
+Dictionarry is the primary authority for compact/efficient release-group
+ranking in the efficient profiles. TRaSH Guides release-group tiers are kept as
+low-score fallback ranking only when Dictionarry does not match. TRaSH LQ
+custom formats are not scored in active `*-efficient` profiles because they can
+contradict Dictionarry tier placement and override the intended DA/x265/quality
+ordering. Other TRaSH-sourced negative custom formats require explicit review
+before removal.
+
+`scripts/media-release/arr_trash_lq_policy.py` audits this rule and, with
+`--apply`, sets `Anime LQ Groups`, `LQ`, and `LQ (Release Title)` to score `0`
+in active efficient profiles after writing a live rollback snapshot.
+
+`No-RlsGroup` remains scored because its live TRaSH definition is a single
+negated release-group condition named `No Parsed Group`: it matches releases
+where Arr did not parse any release group, not releases whose group is absent
+from a hardcoded allow list.
+
 ## Anime Hard Rejects
 
 Hard rejects use `-1000000`. They must stay far below zero even if combined
@@ -429,10 +448,7 @@ with dual audio and the highest quality rank.
 
 Sonarr `shows-anime-efficient` hard rejects:
 
-- `Anime LQ Groups`
 - `Anime Raws`
-- `LQ`
-- `LQ (Release Title)`
 - `Local Anime Raw Group - DBD-Raws`
 - `Portuguese (No English)`
 - `Dubs Only (Block)`
@@ -444,13 +460,8 @@ Radarr `movies-anime-efficient` hard rejects:
 - `Anime Raws`
 - `No ISO`
 
-Radarr `movies-anime-efficient` keeps these as soft LQ penalties, not hard
-rejects, so known DA/x265 replacements can still win while LQ remains below
-ordinary non-LQ candidates:
-
-- `Anime LQ Groups`: `-20000`
-- `LQ`: `-20000`
-- `LQ (Release Title)`: `-20000`
+TRaSH LQ formats are intentionally absent from the efficient-profile hard
+reject list.
 
 ## Anime Soft Avoids
 

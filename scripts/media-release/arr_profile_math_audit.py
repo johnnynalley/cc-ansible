@@ -264,11 +264,8 @@ TRASH_FALLBACK_SCORES = {
 }
 
 ANIME_NEGATIVE_GUARDRAILS = (
-    "Anime LQ Groups",
     "Anime Raws",
     "Dubs Only (Block)",
-    "LQ",
-    "LQ (Release Title)",
     "Portuguese (No English)",
     "UHD 2160p - Non-Dual (Block)",
 )
@@ -276,8 +273,6 @@ REGULAR_NEGATIVE_GUARDRAILS = (
     "BR-DISK",
     "Extras",
     "Language - Not Original",
-    "LQ",
-    "LQ (Release Title)",
     "No-RlsGroup",
 )
 
