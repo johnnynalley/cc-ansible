@@ -24,6 +24,18 @@ Start a capture:
 bin/windows-gaming-benchmark start --label fortnite-match-baseline
 ```
 
+Start while recording preflight warnings without blocking the capture:
+
+```bash
+bin/windows-gaming-benchmark start --label fortnite-match-baseline --allow-preflight-warnings
+```
+
+Use that only when the warning is already understood and you want the capture
+artifact anyway. Example: Memory Compression can be large before a benchmark
+while Windows still has plenty of available RAM; in that case the warning should
+be recorded in `preflight.csv` and interpreted later, not automatically cost the
+session.
+
 Mark a moment during the run:
 
 ```bash

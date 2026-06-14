@@ -6,7 +6,7 @@ usage() {
 Usage:
   bin/windows-gaming-benchmark status
   bin/windows-gaming-benchmark preflight
-  bin/windows-gaming-benchmark start --label LABEL [--affinity PRESET] [--priority CLASS] [--power PLAN]
+  bin/windows-gaming-benchmark start --label LABEL [--affinity PRESET] [--priority CLASS] [--power PLAN] [--allow-preflight-warnings]
   bin/windows-gaming-benchmark mark --marker NAME
   bin/windows-gaming-benchmark stop [--fetch] [--dest DIR]
   bin/windows-gaming-benchmark fetch [--capture-dir WINDOWS_PATH] [--dest DIR]
@@ -27,6 +27,8 @@ Common options:
   --priority CLASS          none, Idle, BelowNormal, Normal, AboveNormal, or High.
   --power PLAN              current, ryzen-high, ryzen-balanced, ultimate, or windows-high.
   --capture-dir PATH        Windows capture directory to analyze/fetch.
+  --allow-preflight-warnings
+                             Record preflight warnings without blocking start.
   --fetch                   Fetch after the action completes.
   --dest DIR                Local fetch destination. Default: /tmp.
 EOF
@@ -49,6 +51,7 @@ priority="none"
 capture_dir=""
 fetch_capture="false"
 fetch_dest="/tmp"
+preflight_fail_on_warnings="true"
 
 case "${action_raw,,}" in
   start) action="Start" ;;
@@ -102,6 +105,10 @@ while [[ $# -gt 0 ]]; do
       capture_dir="${2:?missing value for --capture-dir}"
       shift 2
       ;;
+    --allow-preflight-warnings)
+      preflight_fail_on_warnings="false"
+      shift
+      ;;
     --fetch)
       fetch_capture="true"
       shift
@@ -150,6 +157,7 @@ ansible_args=(
   -e "windows_gaming_benchmark_fetch_capture=$fetch_capture"
   -e "windows_gaming_benchmark_fetch_run_dir=$capture_dir"
   -e "windows_gaming_benchmark_fetch_dest=$fetch_dest"
+  -e "windows_gaming_benchmark_preflight_fail_on_warnings=$preflight_fail_on_warnings"
 )
 
 ansible-playbook "${ansible_args[@]}"
