@@ -86,6 +86,13 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--download-id")
     parser.add_argument("--import-path")
     parser.add_argument(
+        "--episode-id",
+        action="append",
+        type=int,
+        default=[],
+        help="explicit episode id for an otherwise unparseable --download-id candidate",
+    )
+    parser.add_argument(
         "--import-missing",
         action="store_true",
         help="queue a ManualImport for candidates whose matched monitored episodes do not currently have files",
@@ -133,6 +140,38 @@ def candidate_file(item: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def queue_records_for_download(
+    base_url: str, api_key: str, series_id: int, download_id: str
+) -> list[dict[str, Any]]:
+    records = api_get(
+        base_url,
+        api_key,
+        "/api/v3/queue/details",
+        {"seriesId": series_id},
+    )
+    return [record for record in records if record.get("downloadId") == download_id]
+
+
+def episode_ids_for_series(base_url: str, api_key: str, series_id: int) -> set[int]:
+    episodes = api_get(base_url, api_key, "/api/v3/episode", {"seriesId": series_id})
+    return {int(episode["id"]) for episode in episodes if isinstance(episode.get("id"), int)}
+
+
+def find_single_candidate(
+    candidates: list[dict[str, Any]],
+    import_path: str | None = None,
+    season: int | None = None,
+) -> dict[str, Any]:
+    selected = candidates
+    if import_path:
+        selected = [item for item in selected if item.get("path") == import_path]
+    if season is not None:
+        selected = [item for item in selected if candidate_in_season(item, season)]
+    if len(selected) != 1:
+        raise RuntimeError(f"expected exactly one manual-import candidate, found {len(selected)}")
+    return selected[0]
+
+
 def find_import_candidate(candidates: list[dict[str, Any]], import_path: str) -> dict[str, Any]:
     matches = [item for item in candidates if item.get("path") == import_path]
     if not matches:
@@ -151,6 +190,51 @@ def find_import_candidate(candidates: list[dict[str, Any]], import_path: str) ->
     if not item.get("series", {}).get("id"):
         raise RuntimeError("candidate has no series id")
     return item
+
+
+def has_only_unparseable_rejection(item: dict[str, Any]) -> bool:
+    rejections = item.get("rejections") or []
+    return bool(rejections) and all(
+        str(rejection.get("reason") or "").casefold() == "unable to parse file"
+        for rejection in rejections
+    )
+
+
+def candidate_file_with_episode_override(
+    item: dict[str, Any],
+    queue_records: list[dict[str, Any]],
+    episode_ids: list[int],
+) -> dict[str, Any]:
+    series_id = item.get("series", {}).get("id")
+    if not isinstance(series_id, int):
+        raise RuntimeError("candidate has no series id")
+
+    matching_queue = [
+        record
+        for record in queue_records
+        if not record.get("outputPath") or record.get("outputPath") == item.get("path")
+    ]
+    if len(matching_queue) != 1:
+        raise RuntimeError(f"expected exactly one matching queue row, found {len(matching_queue)}")
+    queue = matching_queue[0]
+
+    quality = queue.get("quality") or item.get("quality")
+    if not quality:
+        raise RuntimeError("no quality was available from the candidate or queue row")
+
+    return {
+        "path": item["path"],
+        "folderName": item.get("folderName"),
+        "seriesId": series_id,
+        "episodeIds": episode_ids,
+        "episodeFileId": item.get("episodeFileId") or queue.get("episodeFileId") or 0,
+        "quality": quality,
+        "languages": queue.get("languages") or item.get("languages") or [],
+        "releaseGroup": item.get("releaseGroup") or queue.get("releaseGroup"),
+        "indexerFlags": item.get("indexerFlags", 0),
+        "releaseType": item.get("releaseType"),
+        "downloadId": item.get("downloadId") or queue.get("downloadId"),
+    }
 
 
 def candidate_episode_labels(item: dict[str, Any]) -> list[str]:
@@ -213,14 +297,34 @@ def main() -> int:
         request_params(args, series),
     )
     if args.import_path:
-        item = find_import_candidate(candidates, args.import_path)
+        item = (
+            find_single_candidate(candidates, args.import_path, args.season)
+            if args.episode_id
+            else find_import_candidate(candidates, args.import_path)
+        )
+        if args.episode_id:
+            valid_ids = episode_ids_for_series(args.base_url, api_key, int(series["id"]))
+            missing_ids = [episode_id for episode_id in args.episode_id if episode_id not in valid_ids]
+            if missing_ids:
+                raise RuntimeError(f"episode id(s) do not belong to {series['title']}: {missing_ids}")
+            if not has_only_unparseable_rejection(item):
+                raise RuntimeError("--episode-id override is only allowed for Unable to parse file candidates")
+            queue_records = queue_records_for_download(
+                args.base_url,
+                api_key,
+                int(series["id"]),
+                str(item.get("downloadId") or args.download_id or ""),
+            )
+            import_file = candidate_file_with_episode_override(item, queue_records, args.episode_id)
+        else:
+            import_file = candidate_file(item)
         command = api_post(
             args.base_url,
             api_key,
             "/api/v3/command",
             {
                 "name": "ManualImport",
-                "files": [candidate_file(item)],
+                "files": [import_file],
                 "importMode": args.import_mode,
             },
         )
@@ -229,6 +333,56 @@ def main() -> int:
                 id=command.get("id"),
                 status=command.get("status"),
                 path=args.import_path,
+            )
+        )
+        if args.wait and command.get("id"):
+            final = wait_for_command(args.base_url, api_key, int(command["id"]), args.wait)
+            print(
+                "command id={id} status={status} message={message}".format(
+                    id=final.get("id", command.get("id")),
+                    status=final.get("status"),
+                    message=final.get("message"),
+                )
+            )
+        return 0
+
+    if args.episode_id:
+        item = find_single_candidate(candidates, season=args.season)
+        valid_ids = episode_ids_for_series(args.base_url, api_key, int(series["id"]))
+        missing_ids = [episode_id for episode_id in args.episode_id if episode_id not in valid_ids]
+        if missing_ids:
+            raise RuntimeError(f"episode id(s) do not belong to {series['title']}: {missing_ids}")
+        if not has_only_unparseable_rejection(item):
+            raise RuntimeError("--episode-id override is only allowed for Unable to parse file candidates")
+        queue_records = queue_records_for_download(
+            args.base_url,
+            api_key,
+            int(series["id"]),
+            str(item.get("downloadId") or args.download_id or ""),
+        )
+        import_file = candidate_file_with_episode_override(item, queue_records, args.episode_id)
+        print(
+            "selected explicit episode import: episode_ids={ids} path={path}".format(
+                ids=",".join(str(episode_id) for episode_id in args.episode_id),
+                path=item.get("path"),
+            )
+        )
+        if args.dry_run:
+            return 0
+        command = api_post(
+            args.base_url,
+            api_key,
+            "/api/v3/command",
+            {
+                "name": "ManualImport",
+                "files": [import_file],
+                "importMode": args.import_mode,
+            },
+        )
+        print(
+            "queued ManualImport command id={id} status={status} files=1".format(
+                id=command.get("id"),
+                status=command.get("status"),
             )
         )
         if args.wait and command.get("id"):

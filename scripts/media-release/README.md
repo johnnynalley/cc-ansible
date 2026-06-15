@@ -156,7 +156,11 @@
   queue one approved `ManualImport` command and wait for completion. With
   `--import-missing`, it queues only candidates whose matched monitored
   episodes currently have no file, which is useful for partially imported
-  season packs; add `--dry-run` to preview that selection.
+  season packs; add `--dry-run` to preview that selection. For a single queued
+  file that Sonarr already mapped to an episode but the manual-import endpoint
+  reports as `Unable to parse file`, pair `--download-id` with one or more
+  explicit `--episode-id` values to queue a narrow ManualImport using the queue
+  row's quality and languages.
 - `sonarr_original_language_audit.py`: Read-only audit of recent
   original-language-only imports against live manual-search candidates, useful
   for checking whether original+English/DA releases were missed or outscored.
