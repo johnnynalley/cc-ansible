@@ -153,7 +153,10 @@
   mismatch repair and blocklist helper.
 - `sonarr_manual_import_candidates.py`: Manual-import candidate report for one
   Sonarr series folder or download ID. With an exact `--import-path`, it can
-  queue one approved `ManualImport` command and wait for completion.
+  queue one approved `ManualImport` command and wait for completion. With
+  `--import-missing`, it queues only candidates whose matched monitored
+  episodes currently have no file, which is useful for partially imported
+  season packs; add `--dry-run` to preview that selection.
 - `sonarr_original_language_audit.py`: Read-only audit of recent
   original-language-only imports against live manual-search candidates, useful
   for checking whether original+English/DA releases were missed or outscored.

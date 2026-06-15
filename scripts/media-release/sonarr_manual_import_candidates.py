@@ -85,6 +85,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--folder")
     parser.add_argument("--download-id")
     parser.add_argument("--import-path")
+    parser.add_argument(
+        "--import-missing",
+        action="store_true",
+        help="queue a ManualImport for candidates whose matched monitored episodes do not currently have files",
+    )
+    parser.add_argument("--dry-run", action="store_true", help="show selected --import-missing candidates without importing")
     parser.add_argument("--import-mode", default="Auto", choices=("Auto", "Move", "Copy"))
     parser.add_argument("--wait", type=int, default=120, help="seconds to wait for queued manual import completion")
     parser.add_argument("--season", type=int)
@@ -147,6 +153,43 @@ def find_import_candidate(candidates: list[dict[str, Any]], import_path: str) ->
     return item
 
 
+def candidate_episode_labels(item: dict[str, Any]) -> list[str]:
+    labels: list[str] = []
+    for episode in item.get("episodes") or []:
+        labels.append(
+            "S{season:02}E{episode:02}".format(
+                season=int(episode.get("seasonNumber") or 0),
+                episode=int(episode.get("episodeNumber") or 0),
+            )
+        )
+    return labels
+
+
+def candidate_in_season(item: dict[str, Any], season: int | None) -> bool:
+    if season is None:
+        return True
+    return any(int(ep.get("seasonNumber") or 0) == season for ep in item.get("episodes") or [])
+
+
+def is_missing_import_candidate(item: dict[str, Any]) -> tuple[bool, str]:
+    rejections = item.get("rejections") or []
+    if rejections:
+        reasons = "; ".join(str(rejection.get("reason") or rejection) for rejection in rejections)
+        return False, f"rejected: {reasons}"
+
+    episodes = item.get("episodes") or []
+    if not episodes:
+        return False, "no matched episodes"
+
+    if not all(bool(episode.get("monitored")) for episode in episodes):
+        return False, "matched unmonitored episode"
+
+    if not all(not bool(episode.get("hasFile")) for episode in episodes):
+        return False, "one or more matched episodes already has a file"
+
+    return True, "missing monitored episode"
+
+
 def wait_for_command(base_url: str, api_key: str, command_id: int, timeout: int) -> dict[str, Any]:
     deadline = time.monotonic() + timeout
     last = {}
@@ -186,6 +229,54 @@ def main() -> int:
                 id=command.get("id"),
                 status=command.get("status"),
                 path=args.import_path,
+            )
+        )
+        if args.wait and command.get("id"):
+            final = wait_for_command(args.base_url, api_key, int(command["id"]), args.wait)
+            print(
+                "command id={id} status={status} message={message}".format(
+                    id=final.get("id", command.get("id")),
+                    status=final.get("status"),
+                    message=final.get("message"),
+                )
+            )
+        return 0
+
+    if args.import_missing:
+        selected: list[dict[str, Any]] = []
+        skipped: list[tuple[dict[str, Any], str]] = []
+        for item in candidates:
+            if not candidate_in_season(item, args.season):
+                continue
+            keep, reason = is_missing_import_candidate(item)
+            if keep:
+                selected.append(item)
+            else:
+                skipped.append((item, reason))
+
+        print(f"selected missing candidates: {len(selected)}")
+        for item in selected:
+            print(f"  {','.join(candidate_episode_labels(item))}: {item.get('path')}")
+        print(f"skipped candidates: {len(skipped)}")
+
+        if args.dry_run or not selected:
+            return 0
+
+        command = api_post(
+            args.base_url,
+            api_key,
+            "/api/v3/command",
+            {
+                "name": "ManualImport",
+                "files": [candidate_file(item) for item in selected],
+                "importMode": args.import_mode,
+            },
+        )
+        print(
+            "queued ManualImport command id={id} status={status} files={files}".format(
+                id=command.get("id"),
+                status=command.get("status"),
+                files=len(selected),
             )
         )
         if args.wait and command.get("id"):
