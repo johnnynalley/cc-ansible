@@ -366,17 +366,19 @@ TS440 is the primary NAS server (currently the sole `nas_server` group member). 
 
 **Media ZFS Pools**: Two 3TB single-drive pools (`media-01`, `media-02`) for plex/podcast overflow. Properties enforced by `playbooks/storage/zfs.yml` (compression=lz4, atime=off, recordsize=1M, acltype=posixacl). Sanoid snapshots: daily:7, weekly:4, monthly:3.
 
-**MergerFS**: `/srv/media` aggregates 8 branches into a unified media pool: nas-01 (2TB SSD), nas-02 (2TB LUKS), nas_zfs, media-01 (3TB ZFS), media-02 (3TB ZFS), media-03 (2TB ext4 via USB-SATA), media-04 (2TB ext4 via USB-SATA, ex-PBS drive), media-05 (2TB ext4 via USB, ex-Xbox WD My Passport). Create policy: `mspmfs` (most shared path, most free space) — preserves existing-path placement when an eligible target path exists, then falls back up the parent path so imports are not trapped on a full branch whose exact season/movie directory already exists. Branches and options defined in `group_vars/nas_server/mergerfs.yml`. Boot ordering uses `After=` directives only — `Requires=` and `RequiresMountsFor=` caused dependency failures with the mixed ZFS/fstab setup.
+**MergerFS**: `/srv/media` aggregates 8 branches into a unified media pool: nas-01 (2TB SSD), nas_zfs, media-01 (3TB ZFS), media-02 (3TB ZFS), media-03 (2TB ext4 via USB-SATA), media-04 (2TB ext4 via USB-SATA, ex-PBS drive), media-05 (2TB ext4 via USB, ex-Xbox WD My Passport), and media-06 (2TB ext4 via USB, WD Elements). Create policy: `mspmfs` (most shared path, most free space) — preserves existing-path placement when an eligible target path exists, then falls back up the parent path so imports are not trapped on a full branch whose exact season/movie directory already exists. Branches and options defined in `group_vars/nas_server/mergerfs.yml`. Boot ordering uses `After=` directives only — `Requires=` and `RequiresMountsFor=` caused dependency failures with the mixed ZFS/fstab setup.
 
 When answering "how much storage is there" or whether all drives are accounted
-for, do not use `df /srv/media` as the whole answer. That is mergerfs `statfs`
-for the presented filesystem and can understate the physical/pool footprint,
-especially because the ZFS branches use nested datasets such as
-`nas_zfs/media/plex`, `media-01/media/plex`, and `media-02/media/plex`. Report
-capacity as separate views: raw/block devices from `lsblk`, ZFS pool usable
-capacity from `zpool list`, dataset placement from `zfs list -r`, branch
-readability from the managed `mergerfs_branches`, and only then the presented
-mergerfs view from `df /srv/media`.
+for, start with the repo-managed read-only utility
+`/usr/local/bin/storage-status` on TS440. Do not use `df /srv/media` as the
+whole answer. That is mergerfs `statfs` for the presented filesystem and can
+understate the physical/pool footprint, especially because the ZFS branches use
+nested datasets such as `nas_zfs/media/plex`, `media-01/media/plex`, and
+`media-02/media/plex`. Report capacity as separate views: `storage-status`,
+raw/block devices from `lsblk`, ZFS pool usable capacity and vdev member health
+from `zpool list` / `zpool status`, dataset placement from `zfs list -r`,
+branch readability from the managed `mergerfs_branches`, and only then the
+presented mergerfs view from `df /srv/media`.
 
 Do not remove, disable, exclude, remount around, or otherwise take a mergerfs branch out of the active media pool without explicit user approval for that exact action. First state the downstream impact: Plex library items on that branch may disappear, Sonarr/Radarr may report missing media, and automation may redownload or duplicate releases. Any approved branch-removal plan must include media-app pause/read-only safeguards or another explicit mitigation before changing the pool.
 
