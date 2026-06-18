@@ -1,6 +1,6 @@
 # Media Stack Storage Layout
 
-> Last updated: 2026-06-11
+> Last updated: 2026-06-18
 
 This is the first reference for Sonarr/Radarr/SABnzbd/qBittorrent storage
 questions after the media automation moved to `docker-vm`. Check this document
@@ -61,16 +61,19 @@ themselves. When triggered, it stops the media-stack compose project, refreshes
 the affected NFS mounts, starts the compose project again, runs qBittorrent
 port sync when available, and validates with `media-stack-health --no-alert`.
 
-Verified live on 2026-06-06:
+Verified live on 2026-06-18:
 
 - `docker-vm:/srv/media` is NFS `192.168.1.146:/media`.
 - `docker-vm:/srv/incomplete_downloads` is NFS
   `192.168.1.146:/incomplete-downloads`.
 - `ts440:/srv/media` is `fuse.mergerfs`.
-- `ts440:/srv/media-downloads` is a bind mount from the managed downloads path
-  on the Lacie SSD configured in `inventory/group_vars/nas_server/mounts.yml`.
-  The transient kernel device name shown by `findmnt` or `df` is not stable and
-  should not be used as an identity.
+- `ts440:/srv/media-downloads` is a dedicated ext4 filesystem on the Samsung
+  860 EVO USB-SATA SSD, configured by UUID in
+  `inventory/group_vars/nas_server/mounts.yml`. The old Lacie-backed source
+  path, `/srv/nas-01/downloads/media-downloads`, must remain intact as the
+  rollback copy until the migration is fully proven. The transient kernel
+  device name shown by `findmnt` or `df` is not stable and should not be used as
+  an identity.
 - `ts440:/srv/media` uses stable NFS-oriented inode options plus
   `func.getattr=ff`. Do not switch `func.getattr` back to `newest` without a
   targeted test: on 2026-06-11, Sonarr import processing repeatedly wedged

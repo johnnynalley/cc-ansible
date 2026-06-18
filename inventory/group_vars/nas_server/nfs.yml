@@ -20,8 +20,8 @@ nfs_exports:
       - host: 192.168.1.153
         options: "rw,sync,no_subtree_check,no_root_squash,fsid=10"
 
-  # Incomplete downloads on Lacie SSD for SABnzbd/qBittorrent temp storage
-  # Dedicated fast SSD separate from mergerfs for download performance
+  # Incomplete downloads on the dedicated Samsung SSD for SABnzbd/qBittorrent temp storage
+  # Backing storage is managed by /srv/media-downloads in mounts.yml.
   - name: incomplete-downloads
     bind_source: /srv/media-downloads
     owner: johnny

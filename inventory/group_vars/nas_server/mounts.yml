@@ -9,7 +9,7 @@
 filesystem_mounts:
   # --- Physical Drives ---
 
-  # 2TB Lacie SSD (ext4) - media storage + SABnzbd incomplete downloads
+  # 2TB Lacie SSD (ext4) - mergerfs media branch
   # Timeout matches other USB drives (60s). 5s was the original value and
   # caused emergency-mode boot when the new UPS slowed cold enumeration past 5s.
   - path: /srv/nas-01
@@ -55,6 +55,19 @@ filesystem_mounts:
     group: smbusers
     mode: "2775"
 
+  # 1TB Samsung 860 EVO via USB-SATA (ext4) - SABnzbd/qBittorrent incomplete downloads
+  # Dedicated scratch filesystem outside the mergerfs branch tree. The previous
+  # Lacie-backed source is retained temporarily at /srv/nas-01/downloads/media-downloads
+  # as a rollback copy after the 2026-06-18 cutover.
+  - path: /srv/media-downloads
+    src: "UUID=ff4505f4-604a-4d7a-aeea-5183197649ab"
+    fstype: ext4
+    opts: "noatime,nofail,x-systemd.device-timeout=60s"
+    owner: johnny
+    group: johnny
+    mode: "0775"
+    reserved_blocks_percentage: 0
+
   # --- Bind Mounts ---
 
   # Plex library (bind from mergerfs pool)
@@ -70,20 +83,6 @@ filesystem_mounts:
     opts: "rbind,nofail"
     owner: johnny
     group: johnny
-
-
-
-  # SABnzbd incomplete downloads (Lacie SSD fast storage)
-  # Source is on the Lacie SSD (/srv/nas-01) but OUTSIDE the mergerfs branch
-  # (/srv/nas-01/media/). This keeps download temp files safe from mergerfs-balance.
-  - path: /srv/media-downloads
-    src: /srv/nas-01/downloads/media-downloads
-    fstype: none
-    opts: "bind,nofail,x-systemd.requires-mounts-for=/srv/nas-01"
-    owner: johnny
-    group: johnny
-    mode: "0775"
-
 # Retired bind mounts from the old Pi NFS configs workflow.
 filesystem_mounts_absent:
   - path: /srv/nas-02

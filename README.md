@@ -295,7 +295,7 @@ TS440 serves NFS exports via Tailscale. VMs have been migrated to local config s
 | Export Path | Bind Source | Client | Purpose |
 |-------------|-------------|--------|---------|
 | `/srv/media` | `/srv/media` | docker-vm | Media pool access |
-| `/srv/media-downloads` | `/srv/media-downloads` | docker-vm | Download staging access |
+| `/incomplete-downloads` | `/srv/media-downloads` | docker-vm | Download staging access |
 
 ### Client Mounts
 
@@ -687,7 +687,7 @@ Torrents via Nyaa as fallback when Usenet doesn't have a release.
 - **qBittorrent**: `network_mode: service:gluetun`, WebUI on port 8085 at `qbit.jnalley.me`
 - **Priority**: SABnzbd (1) > qBittorrent (2) - Usenet preferred, torrents fallback
 - **Disk I/O**: POSIX-compliant (required for VirtioFS compatibility)
-- **Incomplete downloads**: Both SABnzbd and qBittorrent use the Lacie SSD for temp storage, isolated in separate subdirs (`usenet/` and `torrents/`)
+- **Incomplete downloads**: Both SABnzbd and qBittorrent use the dedicated Samsung 860 EVO SSD for temp storage, isolated in separate subdirs (`usenet/` and `torrents/`). The previous Lacie-backed path remains temporarily as rollback at `/srv/nas-01/downloads/media-downloads`.
 - **Storage layout**: Media-stack containers on docker-vm use `/srv/media/plex:/data` from the single media NFS mount. Incomplete/temp downloads use the SSD-backed `/incomplete` mount; completed Arr downloads intentionally stay under `/data` (`/data/downloads/complete` for SABnzbd, `/data/downloads/torrents` for qBittorrent) so imports can hardlink when branch placement allows it. See `docs/media-stack-storage-layout.md`.
 - **Automatic port sync**: managed by `playbooks/docker/gluetun-watchdog.yml`. The systemd path unit watches Gluetun's port file and updates qBittorrent via API when VPN reconnects. Repaired on docker-vm on 2026-05-22 to accept qBittorrent 5.2.0's HTTP 204 login success response and to clean up stale lockfiles before recreating qBittorrent. Recreates now preflight required media bind paths so stale `/srv/archive` or `/srv/media/plex` state is fixed before Docker is asked to recreate qBittorrent.
 - **Known bad server**: ProtonVPN node-nl-215 (103.69.224.3) has broken port forwarding — gluetun-watchdog should detect and force-recreate
