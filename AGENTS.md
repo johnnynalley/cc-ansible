@@ -382,6 +382,8 @@ presented mergerfs view from `df /srv/media`.
 
 Do not remove, disable, exclude, remount around, or otherwise take a mergerfs branch out of the active media pool without explicit user approval for that exact action. First state the downstream impact: Plex library items on that branch may disappear, Sonarr/Radarr may report missing media, and automation may redownload or duplicate releases. Any approved branch-removal plan must include media-app pause/read-only safeguards or another explicit mitigation before changing the pool.
 
+For physical bay identification, drive pulls, or any test that can make an active media branch disappear, stop all media consumers and writers first, not just Arr/download automation. Pause docker-vm media automation and Profilarr, stop media-vm/Plex, and disable or expect the relevant health/watchdog/recovery timers before the pull. Restart Plex and media automation only after the disk is reinserted and `zpool status`, `storage-status`, and media health checks prove the branch is back.
+
 **media-03 (USB-SATA)**: 2TB Hitachi HDD connected via USB-SATA adapter, formatted ext4 (not ZFS — USB disconnects would fault a ZFS pool). Powered by UPS via power strip. Mount managed in `group_vars/nas_server/mounts.yml` with `nofail` so ts440 boots even if the drive is disconnected.
 
 **media-04 (USB-SATA)**: 2TB ext4 drive added via USB-SATA adapter — the former PBS drive from pve-herc, repurposed for additional media storage. Same nofail pattern as media-03.
