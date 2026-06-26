@@ -33,6 +33,10 @@ mergerfs_recovery_branches:
     mount_path: /srv/media-06
     mount_unit: 'srv-media\x2d06.mount'
     device_uuid: "8b70c770-3335-4dcb-b618-f9336ca39b59"
+  - name: media-07
+    mount_path: /srv/media-07
+    mount_unit: 'srv-media\x2d07.mount'
+    device_uuid: "9bbf6f89-f244-411d-9373-081157d708ca"
   - name: nas-01
     mount_path: /srv/nas-01
     mount_unit: 'srv-nas\x2d01.mount'

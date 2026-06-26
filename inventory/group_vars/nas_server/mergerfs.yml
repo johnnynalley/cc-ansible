@@ -18,6 +18,7 @@ mergerfs_branches:
   - /srv/media-04/media
   - /srv/media-05/media
   - /srv/media-06/media
+  - /srv/media-07/media
 
 mergerfs_branch_subdirectories:
   - path: plex/.sonarr-recycle-bin
@@ -56,6 +57,7 @@ mergerfs_after_units:
   - srv-media\x2d04.mount
   - srv-media\x2d05.mount
   - srv-media\x2d06.mount
+  - srv-media\x2d07.mount
 
 # Default path excludes for mergerfs-balance
 # These paths should stay on nas_zfs (mirrored) and not be moved to single-drive pools

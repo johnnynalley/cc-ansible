@@ -55,6 +55,16 @@ filesystem_mounts:
     group: smbusers
     mode: "2775"
 
+  # 1TB Toshiba HDD via USB DAS (ext4) - mergerfs media branch
+  # TOSHIBA HDWD110, formerly pve-herc PBS/Time Machine disk
+  - path: /srv/media-07
+    src: "UUID=9bbf6f89-f244-411d-9373-081157d708ca"
+    fstype: ext4
+    opts: "noatime,nofail,x-systemd.device-timeout=60s"
+    owner: johnny
+    group: smbusers
+    mode: "2775"
+
   # 1TB Samsung 860 EVO via USB-SATA (ext4) - SABnzbd/qBittorrent incomplete downloads
   # Dedicated scratch filesystem outside the mergerfs branch tree. The previous
   # Lacie-backed source is retained temporarily at /srv/nas-01/downloads/media-downloads
