@@ -18,6 +18,7 @@ services:
       - ./sonarr:/config
       - /srv/media/plex:/data
       - /srv/archive:/archive
+      - /srv/incomplete_downloads/incomplete/torrents:/incomplete
     ports:
       - 8989:8989
     networks:
@@ -37,6 +38,7 @@ services:
       - ./radarr:/config
       - /srv/media/plex:/data
       - /srv/archive:/archive
+      - /srv/incomplete_downloads/incomplete/torrents:/incomplete
     ports:
       - 7878:7878
     networks:
