@@ -20,9 +20,9 @@ filesystem_mounts:
     group: smbusers
     mode: "2775"
 
-  # 2TB Hitachi HDD via USB-SATA (ext4) - media overflow
+  # 3TB HGST HDD via USB-SATA (ext4) - media overflow
   - path: /srv/media-03
-    src: "/dev/disk/by-id/ata-Hitachi_HDS723020BLA642_MN1270F32VGU1D-part1"
+    src: "UUID=f1f082d7-25db-4e7b-9a19-163af9a25e26"
     fstype: ext4
     opts: "noatime,nofail,x-systemd.device-timeout=60s"
 

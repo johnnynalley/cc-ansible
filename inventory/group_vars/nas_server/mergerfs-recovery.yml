@@ -20,7 +20,7 @@ mergerfs_recovery_branches:
   - name: media-03
     mount_path: /srv/media-03
     mount_unit: 'srv-media\x2d03.mount'
-    device_uuid: "4f58aca3-3732-4cbb-bad7-b023c76dad9e"
+    device_uuid: "f1f082d7-25db-4e7b-9a19-163af9a25e26"
   - name: media-04
     mount_path: /srv/media-04
     mount_unit: 'srv-media\x2d04.mount'
