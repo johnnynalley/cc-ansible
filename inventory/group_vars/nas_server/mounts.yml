@@ -4,7 +4,8 @@
 # Portable: drives and bind mounts travel with the NAS role.
 # If migrating to new hardware with the same drives, UUIDs stay the same.
 # ZFS drives (nas_zfs, media-01, media-02) are managed by ZFS, NOT listed here.
-# media-03 is ext4 on USB-SATA — managed here (ZFS over USB risks pool faults on disconnect).
+# DAS-backed ext4 branches are managed here. Keep them out of ZFS because a
+# shared USB transport interruption would fault each affected single-disk pool.
 
 filesystem_mounts:
   # --- Physical Drives ---
@@ -20,13 +21,13 @@ filesystem_mounts:
     group: smbusers
     mode: "2775"
 
-  # 3TB HGST HDD via USB-SATA (ext4) - media overflow
+  # 3TB HGST HDD in four-bay USB DAS (ext4) - media overflow
   - path: /srv/media-03
     src: "UUID=f1f082d7-25db-4e7b-9a19-163af9a25e26"
     fstype: ext4
     opts: "noatime,nofail,x-systemd.device-timeout=60s"
 
-  # 2TB ex-PBS drive via USB-SATA (ext4) - mergerfs media branch
+  # 2TB Hitachi HDD in four-bay USB DAS (ext4) - mergerfs media branch
   - path: /srv/media-04
     src: "UUID=42a062bb-af07-4cfb-8c80-3250c1c76bfb"
     fstype: ext4

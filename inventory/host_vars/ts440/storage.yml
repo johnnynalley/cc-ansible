@@ -2,11 +2,9 @@
 # ts440 - Storage Transport Configuration
 # =============================================================================
 
-# Disable UAS for USB-SATA bridges with known instability in this environment.
-# media-04 is the problem device: the disk is healthy on SATA, but its Ugreen
-# ASM1153 USB path disconnected under write load. Linux's quirk knob is scoped
-# by USB bridge vendor/product, so the matching media-03 Ugreen bridge will also
-# use usb-storage after replug/reboot.
+# Disable UAS for legacy standalone USB-SATA bridges with known instability in
+# this environment. The four-bay DAS uses separate 174c:55aa slot bridges and
+# currently remains on UAS; do not infer that this 174c:1153 quirk covers it.
 usb_storage_quirks:
   - "1058:2621:u"
   - "174c:1153:u"

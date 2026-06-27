@@ -366,7 +366,7 @@ TS440 is the primary NAS server (currently the sole `nas_server` group member). 
 
 **Media ZFS Pools**: Single-drive pools `media-01` (8TB) and `media-02` (3TB) for plex/podcast overflow. Properties enforced by `playbooks/storage/zfs.yml` (compression=lz4, atime=off, recordsize=1M, acltype=posixacl). Sanoid snapshots: daily:7, weekly:4, monthly:3.
 
-**MergerFS**: `/srv/media` aggregates 8 branches into a unified media pool: nas-01 (2TB SSD), nas_zfs, media-01 (8TB ZFS), media-02 (3TB ZFS), media-03 (3TB ext4 via USB-SATA), media-04 (2TB ext4 via USB-SATA), media-05 (2TB ext4 via USB, ex-Xbox WD My Passport), and media-06 (2TB ext4 via USB, WD Elements). Create policy: `mspmfs` (most shared path, most free space) — preserves existing-path placement when an eligible target path exists, then falls back up the parent path so imports are not trapped on a full branch whose exact season/movie directory already exists. Branches and options defined in `group_vars/nas_server/mergerfs.yml`. Boot ordering uses `After=` directives only — `Requires=` and `RequiresMountsFor=` caused dependency failures with the mixed ZFS/fstab setup.
+**MergerFS**: `/srv/media` aggregates 9 branches into a unified media pool: nas-01 (2TB SSD), nas_zfs, media-01 (8TB ZFS), media-02 (3TB ZFS), media-03 (3TB ext4 in the four-bay USB DAS), media-04 (2TB ext4 in the DAS), media-05 (2TB ext4 via USB, ex-Xbox WD My Passport), media-06 (2TB ext4 via USB, WD Elements), and media-07 (1TB ext4 in the DAS). Create policy: `mspmfs` (most shared path, most free space) — preserves existing-path placement when an eligible target path exists, then falls back up the parent path so imports are not trapped on a full branch whose exact season/movie directory already exists. Branches and options defined in `group_vars/nas_server/mergerfs.yml`. Boot ordering uses `After=` directives only — `Requires=` and `RequiresMountsFor=` caused dependency failures with the mixed ZFS/fstab setup.
 
 When answering "how much storage is there" or whether all drives are accounted
 for, start with the repo-managed read-only utility
@@ -386,9 +386,13 @@ For physical bay identification, drive pulls, or any test that can make an activ
 
 Do not use short force-stop fallbacks for `media-vm` during planned storage work. Prefer a normal graceful shutdown window, then verify `qm status 100`, guest-agent state, and the Proxmox task result before considering `qm stop`. Force stop only when the VM is actually stuck or the user explicitly accepts the interruption risk.
 
-**media-03 (USB-SATA)**: 3TB HGST HDD connected via USB-SATA adapter, formatted ext4 (not ZFS — USB disconnects would fault a ZFS pool). Powered by UPS via power strip. Mount managed in `group_vars/nas_server/mounts.yml` with `nofail` so ts440 boots even if the drive is disconnected.
+**Four-bay USB DAS**: The DAS is attached to ts440 USB path `4-3` through a Genesys Logic hub. Its ASMedia `174c:55aa` slot bridges currently use UAS. `media-03`, `media-04`, and `media-07` occupy DAS slots; verify slot/device identity with `udevadm info` and serials rather than assuming `/dev/sdX` letters. A June 26 surge/power loss disconnected the whole DAS and produced ext4 journal recovery on return. A later single UAS command reset on media-07 recovered without mount loss; treat repeated resets as a transport issue, but do not classify rolling historical disconnect counts as current degradation without checking each mount.
 
-**media-04 (USB-SATA)**: 2TB ext4 drive added via USB-SATA adapter. Same nofail pattern as media-03.
+**media-03 (DAS)**: 3TB HGST HUS724030ALA640, serial `PN2231P8HVAN2R`, ext4 UUID `f1f082d7-25db-4e7b-9a19-163af9a25e26`. Mounted with the same `nofail` pattern as the other removable media branches.
+
+**media-04 (DAS)**: 2TB Hitachi HDS723020BLA642, serial `MN1270F32UM2KD`, ext4 UUID `42a062bb-af07-4cfb-8c80-3250c1c76bfb`.
+
+**media-07 (DAS)**: 1TB Toshiba HDWD110, serial `Z7CLP8DFS`, ext4 UUID `9bbf6f89-f244-411d-9373-081157d708ca`; formerly the pve-herc PBS/Time Machine disk.
 
 **media-05 (USB My Passport)**: 2TB WD My Passport (WD20NMVW-11EDZS6, ex-Xbox One game drive) added 2026-05-12 via USB. Integrated USB-on-PCB, not shuckable. SMART clean (0 reallocated/pending/UDMA-CRC). Same `nofail`/`x-systemd.device-timeout=60s` pattern. Added to mergerfs to drain nas_zfs/media (which had filled to 96% from non-media pool consumers); first balance moved 1.4 TiB across 858 files, freed 750 GiB on nas_zfs, ended at 4.9% spread.
 
