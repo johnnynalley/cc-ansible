@@ -22,7 +22,10 @@ settings into a broad catch-all file when a concern-specific file exists.
 - `linux_hosts`: Debian/Ubuntu, Proxmox, VMs, LXCs, Raspberry Pi, and the
   controller.
 - `macos_hosts`: macOS hosts that need SSH/Homebrew handling.
-- `workstations`: user-facing laptops/desktops with conservative automation.
+- `workstations`: user-facing laptops/desktops with conservative defaults.
+  `jn-t14s-lin` remains here for desktop package policy, but its controller/server
+  role explicitly overrides the group default to enable weekly updates and
+  reboot-on-required behavior.
 - `nas_server`: portable NAS role owner for storage services.
 - `docker_hosts`: hosts that receive Docker Compose stacks.
 - `gluetun_hosts`: hosts with Gluetun/qBittorrent VPN automation.

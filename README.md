@@ -2,7 +2,7 @@
 
 > **Last updated:** 2026-05-26
 
-Ansible automation for Johnny's homelab infrastructure (4 Proxmox nodes, VMs/LXCs, flat T14s Ansible controller, Raspberry Pi Plex appliance, Windows gaming workstation, ThinkPad laptop, MacBook).
+Ansible automation for Johnny's homelab infrastructure (4 Proxmox nodes, VMs/LXCs, flat T14s Ansible controller/server, Raspberry Pi Plex appliance, Windows gaming workstation, and MacBook).
 
 **Repository**: https://github.com/johnnynalley/cc-ansible (public)
 
@@ -109,7 +109,7 @@ managed_hosts
 │   └── arch_hosts (currently empty)
 └── macos_hosts (macbook-pro)
 
-workstations (jn-t14s-lin, macbook-pro) ← no auto-recovery/reboots
+workstations (jn-t14s-lin, macbook-pro) ← conservative defaults; T14s overrides auto-updates/reboots as a server
 
 nas_server (ts440) ← portable NAS role group
 

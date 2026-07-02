@@ -12,8 +12,13 @@ ansible_python_interpreter: /usr/bin/python3
 # -S reads password from stdin instead of tty prompt.
 ansible_become_flags: "-S"
 
-# network_watchdog_enabled and auto_updates_enabled inherited from
-# group_vars/workstations/vars.yml
+# The T14s is a continuously available controller/server even though it remains
+# in the workstations group for desktop package policy. Its server role takes
+# precedence for weekly full upgrades and reboot-on-required behavior.
+auto_updates_enabled: true
+auto_updates_reboot_if_required: true
+
+# Network watchdog policy remains inherited from group_vars/workstations/vars.yml.
 
 # SMART disk monitoring
 smartd_enabled: true

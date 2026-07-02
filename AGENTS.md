@@ -189,9 +189,9 @@ The reference below was migrated from `CLAUDE.md` on 2026-05-12 and rewritten on
 Ansible automation for a homelab infrastructure consisting of:
 - 4 Proxmox hypervisors (ts440, pve-alto, pve-herc, pve-m70q)
 - VMs/LXC containers (docker-vm, media-vm, nextcloud-vm, freepbx-vm, pdm-vm, homebridge-lxc, syncthing-lxc, pbs-lxc; retired records such as openclaw-vm stay in `retired_hosts`)
-- 1 flat Ansible controller on jn-t14s-lin (Kubuntu)
+- 1 flat Ansible controller/server on jn-t14s-lin (Kubuntu)
 - 1 Raspberry Pi 5 (mercury)
-- 1 Kubuntu laptop (jn-t14s-lin) — ThinkPad T14s, dual-boot with Windows
+- 1 Kubuntu controller/server (jn-t14s-lin) — ThinkPad T14s, dual-boot with Windows
 - 1 Windows gaming workstation (lj-gaming-pc)
 - 1 macOS workstation (macbook-pro)
 - Retired inventory records for dev-vm and the old jn-desktop Linux install are kept in `retired_hosts` only and excluded from normal convergence.
@@ -224,7 +224,7 @@ A new managed device is not complete when its feature-specific playbook works. A
 
 The repository is hosted on GitHub (public): https://github.com/johnnynalley/cc-ansible
 
-**jn-t14s-lin** (ThinkPad T14s, Kubuntu) is the flat Ansible controller. The working clone lives at `~/cc-ansible` on jn-t14s-lin. All Ansible commands should be run from there. It is also a workstation, but controller availability takes priority while plugged into AC power.
+**jn-t14s-lin** (ThinkPad T14s, Kubuntu) is the flat Ansible controller/server. The working clone lives at `~/cc-ansible` on jn-t14s-lin. All Ansible commands should be run from there. It remains in the `workstations` group for desktop package policy, but its server role takes precedence: host vars must keep weekly automatic updates and reboot-on-required behavior enabled.
 
 **Workflow:**
 1. Make changes on jn-t14s-lin (`~/cc-ansible`)
@@ -317,7 +317,7 @@ Host groups form a hierarchy in `inventory/hosts.ini`:
     - `debian_hosts`: `proxmox_nodes`, `vms_lxcs` (child groups: `vms` + `lxcs`), `orchestrator` (jn-t14s-lin), `raspberry_pis` (mercury)
     - `arch_hosts`: currently empty; add active Arch Linux hosts here only when they should participate in `site.yml`
   - `macos_hosts`: macbook-pro
-- `workstations` → **cross-platform group** for desktops/laptops (jn-t14s-lin, macbook-pro)
+- `workstations` → **cross-platform group** for desktop package/default policy (jn-t14s-lin, macbook-pro); jn-t14s-lin explicitly overrides the no-auto-update default because it is a controller/server
   - Hosts in this group are ALSO in their OS-specific group (debian_hosts, arch_hosts, macos_hosts)
   - Group vars disable automated recovery: `network_watchdog_enabled: false`, `auto_updates_enabled: false`
   - Playbooks like `network-recovery.yml` explicitly exclude this group: `hosts: linux_hosts:!workstations`
@@ -440,7 +440,7 @@ Docker Compose stacks are managed via the `docker-stacks.yml` playbook. Services
 - **docker-vm (VM 110 on pve-m70q)**: Infrastructure services plus the Sonarr/Radarr download automation `media-stack`
 - **nextcloud-vm (VM 101 on ts440)**: Nextcloud AIO with VirtioFS storage
 - **media-vm (VM 100 on ts440)**: Plex-side media services; Plex stays here while Sonarr/Radarr/download automation runs on `docker-vm`
-- **jn-t14s-lin (Kubuntu workstation/controller)**: OpenClaw support services such as the local Qdrant vector store
+- **jn-t14s-lin (Kubuntu controller/server)**: OpenClaw support services such as the local Qdrant vector store
 
 **Stack Configuration**: Define stacks in `host_vars/<hostname>/docker.yml`:
 ```yaml
@@ -733,9 +733,9 @@ Deployed via `playbooks/network/network-recovery.yml` to `linux_hosts:!workstati
 
 The old `jn-desktop` CachyOS install is retained in `retired_hosts` only because it has been offline long enough to break normal `site.yml` convergence. Do not add retired hosts back to active groups unless they are reachable and intentionally managed again.
 
-**jn-t14s-lin** (Kubuntu): ThinkPad T14s laptop in `orchestrator`, `debian_hosts`, `workstations`, `docker_hosts`, `openclaw_hosts`, and `backup_clients`. Requires `ansible_become_flags: "-S"` in host vars due to sudo-rs (Ubuntu 25.10+ default). WiFi powersave disabled; optional ath11k resume hooks available in `host_vars/jn-t14s-lin/wifi.yml`. As the flat controller, it advertises `tag:orchestrators`, stays awake on AC power, and runs explicit Docker stacks from `host_vars/jn-t14s-lin/docker.yml`.
+**jn-t14s-lin** (Kubuntu): ThinkPad T14s controller/server in `orchestrator`, `debian_hosts`, `workstations`, `docker_hosts`, `openclaw_hosts`, and `backup_clients`. Requires `ansible_become_flags: "-S"` in host vars due to sudo-rs (Ubuntu 25.10+ default). WiFi powersave disabled; optional ath11k resume hooks available in `host_vars/jn-t14s-lin/wifi.yml`. As the flat controller/server, it advertises `tag:orchestrators`, stays awake on AC power, runs explicit Docker stacks from `host_vars/jn-t14s-lin/docker.yml`, and must have `auto_updates_enabled: true` plus reboot-on-required enabled in host vars.
 
-Workstations inherit `network_watchdog_enabled: false` and `auto_updates_enabled: false` from `group_vars/workstations/vars.yml`. Linux workstations still receive daily security patches via `unattended-upgrades`.
+Workstations inherit `network_watchdog_enabled: false` and `auto_updates_enabled: false` from `group_vars/workstations/vars.yml`. Linux workstations still receive daily security patches via `unattended-upgrades`. The T14s is the explicit exception: it retains workstation package policy but overrides `auto_updates_enabled: true` and `auto_updates_reboot_if_required: true` because it is a controller/server.
 
 ### Swap Configuration
 
@@ -789,11 +789,11 @@ FreePBX 17 PBX server (Asterisk 22, Debian 12 Bookworm). Provides a second phone
 
 ### OpenClaw Host (jn-t14s-lin)
 
-OpenClaw AI agent platform (Node.js gateway daemon). Provides a web UI and Discord channel for interacting with the agent fleet (DBC + Fleet of Stars: main, dubble, vega, antares, rigel) — primarily backed by GPT-5.5 via OpenAI Codex, with OpenRouter and Ollama Cloud fallbacks. It runs on the T14s controller/workstation, so treat its repo and host access as controller-adjacent rather than as the old isolated VM boundary. The former `openclaw-vm` inventory record is retained only in `retired_hosts`.
+OpenClaw AI agent platform (Node.js gateway daemon). Provides a web UI and Discord channel for interacting with the agent fleet (DBC + Fleet of Stars: main, dubble, vega, antares, rigel) — primarily backed by GPT-5.5 via OpenAI Codex, with OpenRouter and Ollama Cloud fallbacks. It runs on the T14s controller/server, so treat its repo and host access as controller-adjacent rather than as the old isolated VM boundary. The former `openclaw-vm` inventory record is retained only in `retired_hosts`.
 
 - **Web UI**: `https://openclaw.jnalley.me` (Tailscale only, via Caddy on docker-vm)
 - **Gateway port**: 18789 (token auth, trustedProxies: docker-vm only)
-- **Host**: `jn-t14s-lin` (Kubuntu workstation/controller)
+- **Host**: `jn-t14s-lin` (Kubuntu controller/server)
 - **Node.js**: 22 via NodeSource repo (OpenClaw requires >= 22)
 - **Docker**: Installed for OpenClaw sandbox containers and Qdrant. In `docker_hosts` group — Qdrant is managed by `docker-stacks.yml`.
 - **Gateway service**: Managed by OpenClaw itself via `openclaw gateway install` (user-level systemd unit)
