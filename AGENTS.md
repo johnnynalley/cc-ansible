@@ -142,6 +142,12 @@ For incident capture on this host, include at least:
 
 Use this evidence before deciding whether the prevention should be AP/BSSID stabilization, driver/module recovery hooks, or platform firmware updates.
 
+Routine homelab-wide maintenance passes target managed Linux, Proxmox, and
+Docker systems only. Exclude `lj-gaming-pc` and `macbook-pro` from bulk OS,
+application, package, or reboot maintenance because the user manages Windows
+and macOS through their GUI workflows. Touch either workstation only when the
+user explicitly requests work on that platform in the current task.
+
 For live Windows gaming PC diagnostics, especially on `lj-gaming-pc` while the user is gaming or streaming, use narrow, bounded probes only. Do not run broad PowerShell/Ansible inspections that enumerate large process/log/state data and serialize deep JSON, and do not leave diagnostic probes running. If a probe hangs or looks expensive, stop it and verify no stale remote PowerShell workers remain before continuing. Ask first before any broad inspection that could consume noticeable CPU, memory, disk, or foreground responsiveness.
 
 For Fortnite/Windows gaming performance work, treat `docs/fortnite-performance-investigation.md` as the running source of truth. Before suggesting a tweak or A/B test, check that document and the saved benchmark state so you do not repeat already-tested ideas or confuse untested candidates with proven wins. After every meaningful benchmark, setting change, driver/BIOS/chipset change, or conclusion, update that document in the same turn with the capture label/path, conditions, key metrics, interpretation, and next action.

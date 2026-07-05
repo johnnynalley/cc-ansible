@@ -24,6 +24,10 @@ ansible-playbook site.yml
 ./bin/ansible-menu
 ```
 
+Routine estate-wide maintenance covers Linux, Proxmox, and Docker systems.
+Windows and macOS OS/application updates remain user-managed GUI workflows and
+are included only when explicitly requested.
+
 ## Streaming Runbook
 
 The current Twitch, YouTube, TikTok, Mac OBS, Aitum Vertical, SleepyChat, and experimental Apple Music routing setup is documented in [docs/streaming-runbook.md](docs/streaming-runbook.md).
