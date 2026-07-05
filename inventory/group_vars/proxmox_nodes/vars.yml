@@ -42,10 +42,11 @@ unattended_upgrades_blacklist:
 # Disable random delay for auto-updates — stagger is per-host in host_vars
 auto_updates_randomized_delay_sec: "0"
 
-# Proxmox nodes should not reboot themselves after package/kernel updates. A
-# host reboot can interrupt PBS/Samba clients and temporarily reduce cluster
-# quorum; notify instead so reboots can be coordinated.
-auto_updates_reboot_if_required: false
+# Reboot after weekly updates only when the live Proxmox vote count proves that
+# removing this node cannot drop the cluster below quorum. Per-host schedules
+# provide one-hour slots so normal upgrades and reboots finish sequentially.
+auto_updates_reboot_if_required: true
+auto_updates_proxmox_quorum_guard: true
 
 # Proxmox hosts should prefer reclaiming page cache over swapping QEMU guest RAM.
 proxmox_sysctl_settings:

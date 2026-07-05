@@ -6,8 +6,8 @@
 admin_user: johnny
 
 # Stagger auto-update reboots to maintain Proxmox cluster quorum
-# Order: ts440 (05:00) → pve-alto (05:20) → pve-herc (05:40) → pve-m70q (06:00)
-auto_updates_oncalendar: "Sun *-*-* 06:00:00"
+# Order: ts440 (05:00) → pve-alto (06:00) → pve-herc (07:00) → pve-m70q (08:00)
+auto_updates_oncalendar: "Sun *-*-* 08:00:00"
 
 # Swap (8 GB zvol) — needed for LXC containers to use their swap allocation
 swap_size_gb: 8

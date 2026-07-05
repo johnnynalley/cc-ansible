@@ -253,7 +253,7 @@ Packages are merged from multiple sources (all applicable variables combined):
 | `apcupsd.yml` | `proxmox_nodes` | UPS monitoring with Apprise push alerts (ts440 USB master, others slave). Staggers slave startup to avoid NIS mutex contention |
 | `bootstrap.yml` | `linux_hosts` | Create admin user, SSH keys, sudo setup, timezone (Debian + Arch) |
 | `ssh-hardening.yml` | `linux_hosts` | SSH security (key auth, disable password) |
-| `auto-updates.yml` | `linux_hosts` | Configure automatic updates (Sun; Proxmox nodes notify on reboot-required instead of auto-rebooting) |
+| `auto-updates.yml` | `linux_hosts` | Configure automatic updates (Sun; Proxmox reboots are hourly-staggered and quorum-gated) |
 | `unattended-upgrades.yml` | `debian_hosts` | Daily security patches (incl. workstations, Proxmox blacklist) |
 | `network-recovery.yml` | `linux_hosts` | Network watchdog for auto-recovery after outages |
 | `wifi.yml` | `linux_hosts` | WiFi powersave disable, optional PCI FLR or module reload resume fix |

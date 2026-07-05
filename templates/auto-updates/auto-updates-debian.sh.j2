@@ -23,6 +23,32 @@ send_notification() {
       --retry-delay 3 2>/dev/null || true
 }
 
+proxmox_quorum_allows_reboot() {
+    local status quorate total_votes quorum projected_votes
+
+    if ! status=$(pvecm status 2>&1); then
+        log "Automatic reboot blocked: unable to read Proxmox quorum status"
+        return 1
+    fi
+
+    quorate=$(awk -F: '/^Quorate:/ { gsub(/^[[:space:]]+|[[:space:]]+$/, "", $2); print $2; exit }' <<<"$status")
+    total_votes=$(awk -F: '/^Total votes:/ { gsub(/^[[:space:]]+|[[:space:]]+$/, "", $2); print $2; exit }' <<<"$status")
+    quorum=$(awk -F: '/^Quorum:/ { gsub(/^[[:space:]]+|[[:space:]]+$/, "", $2); sub(/[[:space:]].*$/, "", $2); print $2; exit }' <<<"$status")
+
+    if [ "$quorate" != "Yes" ] || ! [[ "$total_votes" =~ ^[0-9]+$ ]] || ! [[ "$quorum" =~ ^[0-9]+$ ]]; then
+        log "Automatic reboot blocked: invalid Proxmox quorum state (quorate=${quorate:-unknown}, total_votes=${total_votes:-unknown}, quorum=${quorum:-unknown})"
+        return 1
+    fi
+
+    projected_votes=$((total_votes - 1))
+    if (( projected_votes < quorum )); then
+        log "Automatic reboot blocked: removing this node would leave ${projected_votes} votes, below quorum ${quorum}"
+        return 1
+    fi
+
+    log "Proxmox quorum guard passed: ${total_votes} votes online, ${quorum} required, ${projected_votes} projected during reboot"
+}
+
 log "Starting automatic updates..."
 
 # Update package lists
@@ -75,8 +101,17 @@ fi
 
 if [ "$REBOOT_NEEDED" = "true" ]; then
     if [ "{{ auto_updates_reboot_if_required | default(true) | lower }}" = "true" ]; then
+{% if auto_updates_proxmox_quorum_guard | default(false) | bool %}
+        if proxmox_quorum_allows_reboot; then
+            send_notification "[Updates] ${HOSTNAME}: rebooting" "Reboot required after updates; quorum guard passed, rebooting in 1 minute" "warning"
+            shutdown -r +1 "Auto-updates: rebooting in 1 minute"
+        else
+            send_notification "[Updates] ${HOSTNAME}: reboot blocked" "Reboot is required, but the Proxmox quorum guard blocked it" "warning"
+        fi
+{% else %}
         send_notification "[Updates] ${HOSTNAME}: rebooting" "Reboot required after updates, rebooting in 1 minute" "warning"
         shutdown -r +1 "Auto-updates: rebooting in 1 minute"
+{% endif %}
     else
         log "Reboot required but auto-reboot disabled"
         send_notification "[Updates] ${HOSTNAME}" "Reboot required but auto-reboot is disabled" "warning"
