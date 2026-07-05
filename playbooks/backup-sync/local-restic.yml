@@ -197,6 +197,14 @@
 
           log "Starting local backup for {{ inventory_hostname }}..."
 
+          {% if local_restic_run_retention | default(true) %}
+          # Clear locks whose owning process/host is no longer active. Restic
+          # preserves live locks, so this prevents an interrupted backup from
+          # blocking every later hourly run indefinitely.
+          log "Removing stale repository locks..."
+          restic unlock
+
+          {% endif %}
           # Run backup
           restic --cleanup-cache --retry-lock 15m backup \
             --verbose \
