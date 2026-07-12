@@ -45,8 +45,12 @@ auto_updates_randomized_delay_sec: "0"
 # Reboot after weekly updates only when the live Proxmox vote count proves that
 # removing this node cannot drop the cluster below quorum. Per-host schedules
 # provide one-hour slots so normal upgrades and reboots finish sequentially.
+# The shared /etc/pve lock prevents simultaneous reboots if timers drift or the
+# script is triggered manually on more than one node.
 auto_updates_reboot_if_required: true
 auto_updates_proxmox_quorum_guard: true
+auto_updates_proxmox_reboot_lock_dir: /etc/pve/priv/auto-updates-reboot.lock.d
+auto_updates_proxmox_reboot_lock_max_age_sec: 1800
 
 # Proxmox hosts should prefer reclaiming page cache over swapping QEMU guest RAM.
 proxmox_sysctl_settings:

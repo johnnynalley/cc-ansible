@@ -49,6 +49,50 @@ proxmox_quorum_allows_reboot() {
     log "Proxmox quorum guard passed: ${total_votes} votes online, ${quorum} required, ${projected_votes} projected during reboot"
 }
 
+proxmox_acquire_reboot_slot() {
+    local lock_dir="{{ auto_updates_proxmox_reboot_lock_dir | default('/etc/pve/priv/auto-updates-reboot.lock.d') }}"
+    local max_age="{{ auto_updates_proxmox_reboot_lock_max_age_sec | default(1800) }}"
+    local now created_at age holder
+
+    now=$(date +%s)
+
+    if mkdir "$lock_dir" 2>/dev/null; then
+        {
+            printf 'host=%s\n' "$HOSTNAME"
+            printf 'created_at=%s\n' "$now"
+            printf 'max_age=%s\n' "$max_age"
+        } > "${lock_dir}/state"
+        log "Proxmox reboot slot acquired by ${HOSTNAME}"
+        return 0
+    fi
+
+    holder=$(awk -F= '$1 == "host" { print $2; exit }' "${lock_dir}/state" 2>/dev/null || true)
+    created_at=$(awk -F= '$1 == "created_at" { print $2; exit }' "${lock_dir}/state" 2>/dev/null || true)
+
+    if [[ "$created_at" =~ ^[0-9]+$ ]] && [[ "$max_age" =~ ^[0-9]+$ ]]; then
+        age=$((now - created_at))
+    else
+        age=0
+    fi
+
+    if [[ "$created_at" =~ ^[0-9]+$ ]] && (( age > max_age )); then
+        log "Clearing stale Proxmox reboot slot held by ${holder:-unknown}; age ${age}s exceeds ${max_age}s"
+        rm -rf "$lock_dir"
+        if mkdir "$lock_dir" 2>/dev/null; then
+            {
+                printf 'host=%s\n' "$HOSTNAME"
+                printf 'created_at=%s\n' "$now"
+                printf 'max_age=%s\n' "$max_age"
+            } > "${lock_dir}/state"
+            log "Proxmox reboot slot acquired by ${HOSTNAME}"
+            return 0
+        fi
+    fi
+
+    log "Automatic reboot blocked: Proxmox reboot slot already held by ${holder:-unknown}"
+    return 1
+}
+
 log "Starting automatic updates..."
 
 # Update package lists
@@ -102,11 +146,11 @@ fi
 if [ "$REBOOT_NEEDED" = "true" ]; then
     if [ "{{ auto_updates_reboot_if_required | default(true) | lower }}" = "true" ]; then
 {% if auto_updates_proxmox_quorum_guard | default(false) | bool %}
-        if proxmox_quorum_allows_reboot; then
-            send_notification "[Updates] ${HOSTNAME}: rebooting" "Reboot required after updates; quorum guard passed, rebooting in 1 minute" "warning"
+        if proxmox_quorum_allows_reboot && proxmox_acquire_reboot_slot; then
+            send_notification "[Updates] ${HOSTNAME}: rebooting" "Reboot required after updates; quorum guard and reboot slot passed, rebooting in 1 minute" "warning"
             shutdown -r +1 "Auto-updates: rebooting in 1 minute"
         else
-            send_notification "[Updates] ${HOSTNAME}: reboot blocked" "Reboot is required, but the Proxmox quorum guard blocked it" "warning"
+            send_notification "[Updates] ${HOSTNAME}: reboot blocked" "Reboot is required, but the Proxmox quorum or reboot-slot guard blocked it" "warning"
         fi
 {% else %}
         send_notification "[Updates] ${HOSTNAME}: rebooting" "Reboot required after updates, rebooting in 1 minute" "warning"
