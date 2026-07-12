@@ -841,6 +841,8 @@ Helper scripts validate config before applying (compose config check, Caddy vali
 
 Homebridge instance bridging smart home devices to Apple HomeKit. Firewall allows HAP port range 51000-56000 (child bridges use dynamic ports). Web UI: `http://100.96.116.42:8581`.
 
+`playbooks/apps/homebridge.yml` owns Homebridge-specific guardrails. It keeps the local nftables config compatible with Tailscale boot ordering by using `iifname "tailscale0"` instead of `iif "tailscale0"` so nftables can load before the interface exists.
+
 ### haos-vm (VM 120 on pve-alto)
 
 Home Assistant OS. Some devices chain: Device → Homebridge → Home Assistant (HomeKit Controller) → HomeKit (HomeKit Bridge). **HA Companion App**: Set **both** Internal URL and External URL to `http://homeassistant.hinny-liberty.ts.net:8123` (blank Internal URL causes connection failures on local network).

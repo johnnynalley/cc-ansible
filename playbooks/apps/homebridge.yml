@@ -1,0 +1,42 @@
+# Purpose: Configure Homebridge appliance guardrails.
+# Hosts: homebridge-lxc.
+# Key vars: none by default.
+# Templates: none by default.
+# Scripts: none by default.
+# Validation: ansible-playbook playbooks/apps/homebridge.yml --syntax-check.
+
+# =============================================================================
+# Homebridge appliance guardrails
+# =============================================================================
+
+- name: Configure Homebridge appliance guardrails
+  hosts: homebridge-lxc
+  become: true
+  gather_facts: true
+
+  handlers:
+    - name: Reload nftables
+      ansible.builtin.systemd:
+        name: nftables
+        state: reloaded
+
+  tasks:
+    - name: Check whether nftables config exists
+      ansible.builtin.stat:
+        path: /etc/nftables.conf
+      register: homebridge_nftables_config
+
+    - name: Allow nftables to load before tailscale0 exists
+      ansible.builtin.replace:
+        path: /etc/nftables.conf
+        regexp: 'iif "tailscale0"'
+        replace: 'iifname "tailscale0"'
+      when: homebridge_nftables_config.stat.exists
+      notify: Reload nftables
+
+    - name: Ensure nftables is enabled and started
+      ansible.builtin.systemd:
+        name: nftables
+        enabled: true
+        state: started
+      when: homebridge_nftables_config.stat.exists

@@ -42,6 +42,23 @@
       when: not (alloy_enabled | default(true))
 
     # =========================================================================
+    # Logrotate guardrails
+    # =========================================================================
+    - name: Check for cloud-init logrotate snippet
+      ansible.builtin.stat:
+        path: /etc/logrotate.d/cloud-init
+      register: cloud_init_logrotate_snippet
+      when: ansible_facts.os_family == "Debian"
+
+    - name: Remove duplicate cloud-init-base logrotate snippet
+      ansible.builtin.file:
+        path: /etc/logrotate.d/cloud-init-base
+        state: absent
+      when:
+        - ansible_facts.os_family == "Debian"
+        - cloud_init_logrotate_snippet.stat.exists | default(false)
+
+    # =========================================================================
     # Debian: Grafana APT repository
     # =========================================================================
     - name: Ensure prereqs for Grafana repo (Debian)

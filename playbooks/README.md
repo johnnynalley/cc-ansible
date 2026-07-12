@@ -160,3 +160,4 @@ Owner area: Standalone application appliances.
 | Playbook | Hosts | Purpose | Main vars/sources | Safe validation |
 | --- | --- | --- | --- | --- |
 | `playbooks/apps/freepbx.yml` | `freepbx-vm` | Configure FreePBX/Asterisk guardrails. | freepbx_*, apt_pin_release; templates/freepbx; none by default. | `ansible-playbook playbooks/apps/freepbx.yml --syntax-check` |
+| `playbooks/apps/homebridge.yml` | `homebridge-lxc` | Configure Homebridge appliance guardrails. | none by default; none by default; none by default. | `ansible-playbook playbooks/apps/homebridge.yml --syntax-check` |

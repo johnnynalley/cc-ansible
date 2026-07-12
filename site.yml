@@ -25,6 +25,10 @@
   ansible.builtin.import_playbook: playbooks/apps/freepbx.yml
   tags: [freepbx, asterisk, logging]
 
+- name: Configure Homebridge guardrails
+  ansible.builtin.import_playbook: playbooks/apps/homebridge.yml
+  tags: [homebridge, nftables, firewall]
+
 - name: Configure Codex CLI
   ansible.builtin.import_playbook: playbooks/agents/codex-cli.yml
   tags: [codex, codex-cli, npm]

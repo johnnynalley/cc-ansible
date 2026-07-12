@@ -97,7 +97,9 @@
     - name: Check if restic repo exists
       ansible.builtin.shell: |
         set -a; source {{ restic_env_file }}; set +a
-        restic snapshots --json 2>/dev/null | head -c 1
+        restic cat config > /dev/null 2>&1
+      args:
+        executable: /bin/bash
       register: restic_repo_check
       changed_when: false
       failed_when: false
@@ -107,6 +109,8 @@
       ansible.builtin.shell: |
         set -a; source {{ restic_env_file }}; set +a
         restic init
+      args:
+        executable: /bin/bash
       when: restic_repo_check.rc != 0
       tags: [init]
 

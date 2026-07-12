@@ -436,16 +436,16 @@
       ansible.builtin.file:
         path: /var/cache/restic-rest-maintenance/openclaw-vm
         state: directory
-        owner: johnny
-        group: johnny
+        owner: root
+        group: root
         mode: "0700"
       tags: [maintenance]
 
     - name: Create restic REST maintenance environment file
       ansible.builtin.copy:
         dest: /etc/restic/openclaw-vm-rest-maintenance.env
-        owner: johnny
-        group: johnny
+        owner: root
+        group: root
         mode: "0600"
         content: |
           # Managed by Ansible - do not edit manually
@@ -502,8 +502,8 @@
           ExecStart=/usr/local/sbin/restic-rest-maintenance-openclaw-vm
           StandardOutput=journal
           StandardError=journal
-          User=johnny
-          Environment=HOME=/home/johnny
+          User=root
+          Environment=HOME=/root
           Environment=RESTIC_CACHE_DIR=/var/cache/restic-rest-maintenance/openclaw-vm
           Nice=19
           IOSchedulingClass=idle

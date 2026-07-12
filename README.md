@@ -89,7 +89,7 @@ cc-ansible/
 │   ├── agents/                 # Codex, Claude archive sync, OpenClaw
 │   ├── proxmox/                # Proxmox firewall, PBS, PDM, HA, guest hardware, boot ordering
 │   ├── windows/                # Windows gaming workstation automation
-│   └── apps/                   # Standalone app appliances such as FreePBX
+│   └── apps/                   # Standalone app appliances such as FreePBX/Homebridge
 ├── tasks/                      # Shared task files imported by playbooks
 ├── templates/                  # Domain-owned Jinja/rendered sources; start with templates/README.md
 ├── scripts/                    # Domain-owned helpers; start with scripts/README.md
@@ -877,7 +877,7 @@ FreePBX 17 / Asterisk 22 PBX server on Debian 12. VoIP.ms SIP trunk with Yealink
 
 ## HomeKit / Home Assistant
 
-- **homebridge-lxc** (CT 102): Bridges Govee devices to HomeKit. Firewall needs TCP 51000-56000 (HAP) + UDP 5353 (mDNS).
+- **homebridge-lxc** (CT 102): Bridges Govee devices to HomeKit. Firewall needs TCP 51000-56000 (HAP) + UDP 5353 (mDNS). `playbooks/apps/homebridge.yml` owns Homebridge-specific guardrails, including nftables compatibility with Tailscale interface creation during boot.
 - **haos-vm** (VM 120): Home Assistant OS. Some devices chain: Homebridge → HA → HomeKit. Firewall needs TCP 21000-21100 (HAP) + UDP 5353.
 - **HA Companion App**: Set both Internal and External URL to `http://homeassistant.hinny-liberty.ts.net:8123`
 

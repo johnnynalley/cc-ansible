@@ -72,6 +72,27 @@ expected_fstype_matches() {
   esac
 }
 
+resolved_mount_fstype() {
+  local path="$1"
+
+  # Direct systemd automounts can initially appear as only "autofs" until the
+  # path is touched. Trigger the mount, then prefer the real backing fstype
+  # over the autofs wrapper when both are present.
+  timeout "$PATH_PROBE_TIMEOUT" find "$path" -maxdepth 1 -printf '' >/dev/null 2>&1 || true
+  findmnt -rn --target "$path" -o FSTYPE 2>/dev/null \
+    | awk '
+        $1 != "autofs" { actual = $1 }
+        { last = $1 }
+        END {
+          if (actual != "") {
+            print actual
+          } else {
+            print last
+          }
+        }
+      '
+}
+
 probe_path_exists() {
   local path="$1"
 
@@ -139,7 +160,7 @@ check_mount_spec() {
     return
   fi
 
-  actual_fstype="$(findmnt -rn --target "$mount_path" -o FSTYPE 2>/dev/null | tail -n1 || true)"
+  actual_fstype="$(resolved_mount_fstype "$mount_path" || true)"
   if ! expected_fstype_matches "$actual_fstype" "$expected_fstype"; then
     add_unhealthy_mount "$mount_path" "fstype ${actual_fstype:-unknown}, expected ${expected_fstype:-any}"
     return
@@ -211,7 +232,7 @@ verify_recovered_paths() {
       continue
     fi
 
-    actual_fstype="$(findmnt -rn --target "$mount_path" -o FSTYPE 2>/dev/null | tail -n1 || true)"
+    actual_fstype="$(resolved_mount_fstype "$mount_path" || true)"
     if ! expected_fstype_matches "$actual_fstype" "$expected_fstype"; then
       log "ERROR: mount fstype still wrong after refresh: $mount_path has ${actual_fstype:-unknown}, expected ${expected_fstype:-any}"
       failed=1
