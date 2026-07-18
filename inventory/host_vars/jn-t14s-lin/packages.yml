@@ -7,7 +7,6 @@ packages_host_extra:
   - ansible
   - gh
   - nodejs
-  - npm
   - python3-passlib
   - python3-pip
   - python3-venv

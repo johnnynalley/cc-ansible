@@ -802,7 +802,9 @@ OpenClaw AI agent platform (Node.js gateway daemon). Provides a web UI and Disco
 - **Web UI**: `https://openclaw.jnalley.me` (Tailscale only, via Caddy on docker-vm)
 - **Gateway port**: 18789 (token auth, trustedProxies: docker-vm only)
 - **Host**: `jn-t14s-lin` (Kubuntu controller/server)
-- **Node.js**: 22 via NodeSource repo (OpenClaw requires >= 22)
+- **Node.js**: 24 via NodeSource repo. Do not rely on Ubuntu's `nodejs`
+  package for OpenClaw; Ubuntu can lag behind current OpenClaw npm
+  `engines.node` floors and break native Gateway UI/bot self-updates.
 - **Docker**: Installed for OpenClaw sandbox containers and Qdrant. In `docker_hosts` group — Qdrant is managed by `docker-stacks.yml`.
 - **Gateway service**: Managed by OpenClaw itself via `openclaw gateway install` (user-level systemd unit)
 - **Config**: `~/.openclaw/openclaw.json` and `~/.openclaw/.env` — created manually, backed up by restic (NOT templated by Ansible)

@@ -109,6 +109,69 @@
         - item != (openclaw_npm_prefix | default('/home/' ~ admin_user ~ '/.npm-global'))
         - not ansible_check_mode
 
+    - name: Ensure NodeSource apt prerequisites are installed
+      ansible.builtin.apt:
+        name:
+          - apt-transport-https
+          - ca-certificates
+          - curl
+          - gnupg
+        state: present
+        update_cache: true
+
+    - name: Install NodeSource signing key
+      ansible.builtin.get_url:
+        url: https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key
+        dest: /usr/share/keyrings/nodesource.asc
+        mode: "0644"
+        owner: root
+        group: root
+      register: nodesource_key
+
+    - name: Configure NodeSource repository for OpenClaw runtime
+      ansible.builtin.copy:
+        dest: /etc/apt/sources.list.d/nodesource.sources
+        mode: "0644"
+        owner: root
+        group: root
+        content: |
+          Types: deb
+          URIs: https://deb.nodesource.com/node_{{ openclaw_nodesource_major | default(24) }}.x
+          Suites: nodistro
+          Components: main
+          Architectures: {{ 'amd64' if ansible_facts.architecture == 'x86_64' else ansible_facts.architecture }}
+          Signed-By: /usr/share/keyrings/nodesource.asc
+      register: nodesource_repo
+
+    - name: Pin nodejs to NodeSource for OpenClaw runtime
+      ansible.builtin.copy:
+        dest: /etc/apt/preferences.d/nodejs
+        mode: "0644"
+        owner: root
+        group: root
+        content: |
+          Package: nodejs
+          Pin: origin deb.nodesource.com
+          Pin-Priority: 600
+      register: nodesource_pin
+
+    - name: Remove distro npm package before NodeSource nodejs install
+      ansible.builtin.apt:
+        name: npm
+        state: absent
+
+    - name: Install current NodeSource nodejs for OpenClaw
+      ansible.builtin.apt:
+        name: nodejs
+        state: latest
+        update_cache: "{{ nodesource_key.changed or nodesource_repo.changed or nodesource_pin.changed }}"
+      notify: Restart OpenClaw gateway
+
+    - name: Remove retired OpenClaw native updater hotfix script
+      ansible.builtin.file:
+        path: /usr/local/lib/openclaw/openclaw-native-update-hotfix.mjs
+        state: absent
+
     - name: Install or update OpenClaw globally via npm
       ansible.builtin.command:
         cmd: sudo -iu {{ admin_user }} npm --prefix {{ openclaw_npm_prefix | default('/home/' ~ admin_user ~ '/.npm-global') }} install -g "openclaw@{{ openclaw_package_version | default('latest') }}"
@@ -133,6 +196,7 @@
         cmd: sudo -iu {{ admin_user }} {{ openclaw_npm_prefix | default('/home/' ~ admin_user ~ '/.npm-global') }}/bin/openclaw update --dry-run --json --timeout 300
       register: openclaw_update_status
       check_mode: false
+      failed_when: false
       changed_when: false
       when:
         - ansible_check_mode
