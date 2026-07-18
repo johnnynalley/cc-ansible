@@ -8,3 +8,6 @@ admin_user: johnny
 openclaw_enabled: true
 openclaw_port: 18789
 openclaw_workspace: /opt/cc-ansible
+# Keep Ansible convergence pinned unless a package bump is intentional and
+# preflighted against the gateway Node runtime.
+openclaw_package_version: "2026.6.11"

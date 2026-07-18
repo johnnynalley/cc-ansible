@@ -2,7 +2,7 @@
 # Hosts: openclaw_hosts.
 # Key vars: codex_*, claude_memory_sync_*, openclaw_*.
 # Templates: templates/openclaw.
-# Scripts: none by default.
+# Scripts: templates/openclaw.
 # Validation: ansible-playbook playbooks/agents/openclaw.yml --syntax-check.
 
 # =============================================================================
@@ -111,7 +111,7 @@
 
     - name: Install or update OpenClaw globally via npm
       ansible.builtin.command:
-        cmd: sudo -iu {{ admin_user }} npm --prefix {{ openclaw_npm_prefix | default('/home/' ~ admin_user ~ '/.npm-global') }} install -g openclaw@latest
+        cmd: sudo -iu {{ admin_user }} npm --prefix {{ openclaw_npm_prefix | default('/home/' ~ admin_user ~ '/.npm-global') }} install -g "openclaw@{{ openclaw_package_version | default('latest') }}"
       register: openclaw_npm_install
       changed_when: >-
         'changed' in (openclaw_npm_install.stdout | default(''))
@@ -331,26 +331,53 @@
 
     # --- Install Mem0 memory plugin ---
     - name: Check whether Mem0 plugin is already installed
-      ansible.builtin.stat:
-        path: /home/{{ admin_user }}/.openclaw/npm/node_modules/@mem0/openclaw-mem0/package.json
+      ansible.builtin.shell:
+        executable: /bin/bash
+        cmd: |
+          set -o pipefail
+          sudo -iu {{ admin_user }} {{ openclaw_npm_prefix | default('/home/' ~ admin_user ~ '/.npm-global') }}/bin/openclaw plugins list --json \
+            | node -e '
+              let data = "";
+              process.stdin.on("data", chunk => data += chunk);
+              process.stdin.on("end", () => {
+                const jsonStart = data.indexOf("{");
+                if (jsonStart < 0) {
+                  process.exit(2);
+                }
+                const parsed = JSON.parse(data.slice(jsonStart));
+                const plugins = Array.isArray(parsed.plugins) ? parsed.plugins : [];
+                const installed = plugins.some((plugin) =>
+                  plugin.id === "openclaw-mem0"
+                  || plugin.name === "Memory (Mem0)"
+                  || String(plugin.source || "").includes("@mem0/openclaw-mem0")
+                  || String(plugin.rootDir || "").includes("@mem0/openclaw-mem0")
+                );
+                process.exit(installed ? 0 : 1);
+              });
+            '
       register: openclaw_mem0_plugin
+      check_mode: false
+      changed_when: false
+      failed_when: false
 
     - name: Install Mem0 plugin
       ansible.builtin.command:
         cmd: sudo -iu {{ admin_user }} {{ openclaw_npm_prefix | default('/home/' ~ admin_user ~ '/.npm-global') }}/bin/openclaw plugins install @mem0/openclaw-mem0
       register: mem0_install
       changed_when: "'installed' in (mem0_install.stdout | default('') | lower) or 'updated' in (mem0_install.stdout | default('') | lower)"
-      when: not openclaw_mem0_plugin.stat.exists
+      when:
+        - openclaw_mem0_plugin.rc != 0
+        - not ansible_check_mode
 
     - name: Update existing Mem0 plugin
       ansible.builtin.command:
-        cmd: sudo -iu {{ admin_user }} {{ openclaw_npm_prefix | default('/home/' ~ admin_user ~ '/.npm-global') }}/bin/openclaw plugins update @mem0/openclaw-mem0
+        cmd: sudo -iu {{ admin_user }} {{ openclaw_npm_prefix | default('/home/' ~ admin_user ~ '/.npm-global') }}/bin/openclaw plugins update openclaw-mem0
       register: mem0_update
       changed_when: >-
         'updated' in (mem0_update.stdout | default('') | lower)
         or 'installed' in (mem0_update.stdout | default('') | lower)
       when:
-        - openclaw_mem0_plugin.stat.exists
+        - openclaw_mem0_plugin.rc == 0
         - not ansible_check_mode
 
     - name: Sync OpenClaw managed plugins after core update
@@ -444,6 +471,14 @@
       notify: Reload systemd
 
     # --- Deploy update-check timer (daily at 08:00) ---
+    - name: Create openclaw-safe-update script
+      ansible.builtin.template:
+        src: "{{ ansible_config_file | dirname }}/templates/openclaw/openclaw-safe-update.sh.j2"
+        dest: /usr/local/sbin/openclaw-safe-update
+        mode: "0755"
+        owner: root
+        group: root
+
     - name: Create openclaw-update-check script
       ansible.builtin.template:
         src: "{{ ansible_config_file | dirname }}/templates/openclaw/openclaw-update-check.sh.j2"

@@ -6,5 +6,9 @@ openclaw_enabled: true
 openclaw_port: 18789
 openclaw_workspace: /opt/cc-ansible
 openclaw_npm_prefix: /home/johnny/.npm-global
+# Keep Ansible convergence on the known-good package. OpenClaw self-updates
+# must use /usr/local/sbin/openclaw-safe-update so target Node engine checks run
+# before the live gateway package is swapped.
+openclaw_package_version: "2026.6.11"
 openclaw_cleanup_npm_prefixes:
   - /home/johnny/.local

@@ -32,9 +32,9 @@ curl -sf -o /dev/null \
     -X POST "{{ apprise_endpoint }}/notify/{{ apprise_token }}" \
     --form-string "title=[OpenClaw] Update available on $(hostname)" \
     --form-string "body=Current: $CURRENT → Latest: $LATEST
-Back up config before updating:
-  cp ~/.openclaw/openclaw.json ~/.openclaw/openclaw.json.bak.\$(date +%Y%m%d)
-  npm --prefix $OPENCLAW_NPM_PREFIX update -g openclaw" \
+Use the guarded updater so Node/runtime compatibility is checked before the live package is swapped:
+  /usr/local/sbin/openclaw-safe-update --tag $LATEST --dry-run
+  /usr/local/sbin/openclaw-safe-update --tag $LATEST --yes" \
     --form-string "tag=push-quiet,dbc" \
     --form-string "type=info" \
     --max-time 10 \

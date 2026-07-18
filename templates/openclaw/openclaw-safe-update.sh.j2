@@ -1,0 +1,135 @@
+#!/bin/bash
+# Safe OpenClaw update wrapper
+# Managed by Ansible - do not edit manually
+#
+# Preflights the target OpenClaw package against the Node runtime used by the
+# gateway service before allowing `openclaw update` to swap the live install.
+
+set -euo pipefail
+
+LOG_TAG="openclaw-safe-update"
+ADMIN_USER="{{ admin_user | default('johnny') }}"
+OPENCLAW_NPM_PREFIX="{{ openclaw_npm_prefix | default('/home/' ~ admin_user ~ '/.npm-global') }}"
+OPENCLAW_BIN="${OPENCLAW_NPM_PREFIX}/bin/openclaw"
+SERVICE_FILE="/home/${ADMIN_USER}/.config/systemd/user/openclaw-gateway.service"
+TARGET="latest"
+TIMEOUT="1800"
+DRY_RUN=0
+ASSUME_YES=0
+
+log() { logger -t "$LOG_TAG" "$*"; echo "$*"; }
+die() { log "ERROR: $*"; exit 1; }
+
+run_as_user() {
+    if [[ "$(id -un)" == "$ADMIN_USER" ]]; then
+        "$@"
+    else
+        sudo -iu "$ADMIN_USER" "$@"
+    fi
+}
+
+usage() {
+    cat <<'EOF'
+Usage: openclaw-safe-update [--tag VERSION|--latest] [--yes] [--timeout SECONDS] [--dry-run]
+
+Runs the OpenClaw updater only after verifying the target package's Node engine
+range is satisfied by the Node binary used by openclaw-gateway.service.
+EOF
+}
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --tag)
+            [[ $# -ge 2 ]] || die "--tag requires a version"
+            TARGET="$2"
+            shift 2
+            ;;
+        --latest)
+            TARGET="latest"
+            shift
+            ;;
+        --yes)
+            ASSUME_YES=1
+            shift
+            ;;
+        --timeout)
+            [[ $# -ge 2 ]] || die "--timeout requires seconds"
+            TIMEOUT="$2"
+            shift 2
+            ;;
+        --dry-run)
+            DRY_RUN=1
+            shift
+            ;;
+        -h|--help)
+            usage
+            exit 0
+            ;;
+        *)
+            die "unknown argument: $1"
+            ;;
+    esac
+done
+
+[[ -x "$OPENCLAW_BIN" ]] || die "OpenClaw binary missing or not executable: $OPENCLAW_BIN"
+[[ -r "$SERVICE_FILE" ]] || die "Gateway service file is not readable: $SERVICE_FILE"
+
+exec_start=$(awk -F= '$1 == "ExecStart" { print $2; exit }' "$SERVICE_FILE")
+[[ -n "$exec_start" ]] || die "Could not find ExecStart in $SERVICE_FILE"
+
+service_node=$(awk '{ print $1 }' <<<"$exec_start")
+[[ -x "$service_node" ]] || die "Gateway Node executable is not runnable: $service_node"
+
+service_node_version=$("$service_node" -p 'process.versions.node')
+target_spec="openclaw@${TARGET}"
+log "Preflighting ${target_spec} against gateway Node ${service_node_version} (${service_node})"
+
+meta=$(run_as_user npm --prefix "$OPENCLAW_NPM_PREFIX" view "$target_spec" version engines.node --json)
+
+target_version=$(printf '%s' "$meta" | "$service_node" -e '
+let data = "";
+process.stdin.on("data", chunk => data += chunk);
+process.stdin.on("end", () => {
+  const parsed = JSON.parse(data);
+  console.log(parsed.version || "");
+});
+')
+
+engine_range=$(printf '%s' "$meta" | "$service_node" -e '
+let data = "";
+process.stdin.on("data", chunk => data += chunk);
+process.stdin.on("end", () => {
+  const parsed = JSON.parse(data);
+  console.log(parsed["engines.node"] || "");
+});
+')
+
+[[ -n "$target_version" ]] || die "Could not determine target OpenClaw version from npm metadata"
+
+if [[ -n "$engine_range" ]]; then
+    if ! "$service_node" - "$service_node_version" "$engine_range" <<'NODE'
+const semver = require("semver");
+const version = process.argv[2];
+const range = process.argv[3];
+process.exit(semver.satisfies(version, range, { includePrerelease: true }) ? 0 : 1);
+NODE
+    then
+        log "BLOCKED: OpenClaw ${target_version} requires Node '${engine_range}', but openclaw-gateway.service uses ${service_node_version} at ${service_node}."
+        log "No package swap was performed. Upgrade the gateway Node runtime or choose a compatible OpenClaw version."
+        exit 78
+    fi
+fi
+
+log "Preflight passed: OpenClaw ${target_version} is compatible with gateway Node ${service_node_version}."
+
+if [[ "$DRY_RUN" -eq 1 ]]; then
+    exit 0
+fi
+
+args=(update --tag "$target_version" --timeout "$TIMEOUT")
+if [[ "$ASSUME_YES" -eq 1 ]]; then
+    args+=(--yes)
+fi
+
+run_as_user "$OPENCLAW_BIN" "${args[@]}"
+run_as_user "$OPENCLAW_BIN" doctor --non-interactive

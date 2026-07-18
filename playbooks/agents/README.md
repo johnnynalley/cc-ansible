@@ -6,7 +6,7 @@ Owner area: Codex, Claude archive sync, and OpenClaw services.
 
 - Key vars: codex_*, claude_memory_sync_*, openclaw_*.
 - Template owners: templates/openclaw.
-- Script owners: none by default.
+- Script owners: templates/openclaw managed helper scripts.
 - Keep playbook metadata headers and `playbooks/README.md` in sync when behavior changes.
 
 ## Playbooks

@@ -3,6 +3,9 @@
 ## Templates
 
 - `openclaw-update-check.sh.j2`: OpenClaw npm update checker.
+- `openclaw-safe-update.sh.j2`: guarded OpenClaw updater that checks the
+  target package Node engine against the gateway service runtime before
+  allowing a live package swap.
 
 ## Consumers
 
