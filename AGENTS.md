@@ -174,6 +174,8 @@ Even if the client has a persisted approval for `ansible lj-gaming-pc -m win_she
 
 Do not make empty future-behavior assurances. Avoid phrases like "this won't happen again", "I won't do that again", or "I'll make sure" unless the behavior change is immediately backed by a durable note or an `AGENTS.md` rule. If a promise cannot be persisted or should not be persisted, say that plainly and do not frame it as a future guarantee.
 
+When building shell commands from text that may contain Markdown, code spans, quotes, dollar signs, parentheses, or backticks, treat that text as data and keep it out of shell interpretation. Use single-quoted fixed-string patterns, argument arrays, `rg -F`, or a temporary pattern file. Never place unescaped user/doc text containing backticks inside a double-quoted shell string; command substitution can execute the text before the intended diagnostic command runs.
+
 ## Historical Claude Reference
 
 This repository was migrated from Claude Code to Codex CLI on 2026-05-12. The active Codex guidance is this `AGENTS.md` file and the active project memory is `~/.codex/memories/`.
