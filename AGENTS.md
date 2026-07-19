@@ -60,6 +60,8 @@ When self-updating `AGENTS.md` or another shared file, still follow the shared-f
 
 When working on Astra/OpenClaw behavior, Codex's role is to teach Astra how to reason and maintain itself, not to replace Astra's judgment with brittle hardcoded wrappers. Prefer updating Astra's heartbeat, skills, operating docs, memory, and approval rules so Astra performs the diagnosis, classification, backup, safe fix, approval request, and follow-up notification itself. Create or modify scripts only when the script is a justified tool for Astra to use repeatedly and safely, not as the default answer to a missing behavior. If a user correction reveals this rule was missed, persist the correction to `AGENTS.md` and Codex memory immediately.
 
+Do not introduce or preserve policy-level exact-version pins for self-updating applications, external plugins, or model routes unless the user explicitly approves the pin after its compatibility and update tradeoffs are explained. Prefer the product's stable channel, release track, or unversioned package spec so native update mechanisms can advance normally. Distinguish an update-policy pin from a lockfile or install record that merely records the exact artifact currently resolved. When a migration converts `latest` or a channel into an exact requested spec, treat that as configuration drift: restore the intended tracking policy and audit sibling install records for the same damage.
+
 ### Session Naming
 
 When the user asks Codex to name a session, consider the full context of the session before proposing a title. Use a natural-language title that describes what the session was really about; do not force lowercase slugs or replace spaces with hyphens unless the user explicitly asks for a filename-safe form.
