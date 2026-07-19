@@ -6,10 +6,6 @@ openclaw_enabled: true
 openclaw_port: 18789
 openclaw_workspace: /opt/cc-ansible
 openclaw_npm_prefix: /home/johnny/.npm-global
-# Keep Ansible convergence on the known-good package while allowing native
-# Gateway UI/bot self-updates. The OpenClaw playbook manages NodeSource Node 24
-# so native `openclaw update` has a compatible runtime for current releases.
-openclaw_package_version: "2026.6.11"
 openclaw_nodesource_major: 24
 openclaw_wait_for_tailnet: true
 openclaw_cleanup_npm_prefixes:

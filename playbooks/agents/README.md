@@ -8,6 +8,7 @@ Owner area: Codex, Claude archive sync, and OpenClaw services.
 - Template owners: templates/openclaw.
 - Script owners: templates/openclaw managed helper scripts.
 - Keep playbook metadata headers and `playbooks/README.md` in sync when behavior changes.
+- OpenClaw intentionally tracks the npm `latest` channel. Do not add an exact package-version variable: native OpenClaw updates must survive later Ansible convergence instead of being downgraded.
 
 ## Playbooks
 

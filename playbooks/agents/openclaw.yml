@@ -174,7 +174,11 @@
 
     - name: Install or update OpenClaw globally via npm
       ansible.builtin.command:
-        cmd: sudo -iu {{ admin_user }} npm --prefix {{ openclaw_npm_prefix | default('/home/' ~ admin_user ~ '/.npm-global') }} install -g "openclaw@{{ openclaw_package_version | default('latest') }}"
+        cmd: >-
+          sudo -iu {{ admin_user }} npm --prefix
+          {{ openclaw_npm_prefix
+             | default('/home/' ~ admin_user ~ '/.npm-global') }}
+          install -g openclaw@latest
       register: openclaw_npm_install
       changed_when: >-
         'changed' in (openclaw_npm_install.stdout | default(''))
