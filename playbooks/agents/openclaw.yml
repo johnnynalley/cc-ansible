@@ -492,6 +492,32 @@
         - Reload OpenClaw user systemd
         - Restart OpenClaw gateway
 
+    - name: Wait for Tailscale before starting the OpenClaw gateway
+      ansible.builtin.copy:
+        dest: /home/{{ admin_user }}/.config/systemd/user/openclaw-gateway.service.d/tailnet-ready.conf
+        owner: "{{ admin_user }}"
+        group: "{{ admin_user }}"
+        mode: "0644"
+        content: |
+          [Service]
+          TimeoutStartSec=120
+          ExecStartPre=/usr/bin/timeout 90 /bin/sh -c 'until /usr/bin/tailscale status --json 2>/dev/null | /usr/bin/jq -er .BackendState 2>/dev/null | /usr/bin/grep -qx Running; do /usr/bin/sleep 1; done'
+      when: openclaw_wait_for_tailnet | default(false) | bool
+      tags: [openclaw-tailnet-startup]
+      notify:
+        - Reload OpenClaw user systemd
+        - Restart OpenClaw gateway
+
+    - name: Remove OpenClaw tailnet startup wait when disabled
+      ansible.builtin.file:
+        path: /home/{{ admin_user }}/.config/systemd/user/openclaw-gateway.service.d/tailnet-ready.conf
+        state: absent
+      when: not (openclaw_wait_for_tailnet | default(false) | bool)
+      tags: [openclaw-tailnet-startup]
+      notify:
+        - Reload OpenClaw user systemd
+        - Restart OpenClaw gateway
+
     # --- Enable linger for headless persistence ---
     - name: Enable lingering for {{ admin_user }}
       ansible.builtin.command:
