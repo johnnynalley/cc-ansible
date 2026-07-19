@@ -4,6 +4,7 @@ set -euo pipefail
 
 ALERT_MODE=1
 STATUS_MODE=0
+SELF_TEST_MODE=0
 for arg in "$@"; do
   case "$arg" in
     --no-alert)
@@ -11,6 +12,9 @@ for arg in "$@"; do
       ;;
     --status)
       STATUS_MODE=1
+      ;;
+    --self-test)
+      SELF_TEST_MODE=1
       ;;
     *)
       printf 'unknown argument: %s\n' "$arg" >&2
@@ -35,7 +39,7 @@ PLEX_MOUNT_FSTYPE="{{ plex_server_health_plex_mount_fstype | default('virtiofs')
 DSTATE_MIN_AGE_SECONDS="{{ plex_server_health_dstate_min_age_seconds | default(180) }}"
 HUNG_TASK_WINDOW_SECONDS="{{ plex_server_health_hung_task_window_seconds | default(1800) }}"
 PLEX_DSTATE_REGEX="{{ plex_server_health_plex_dstate_regex | default('(dmx0:matroska|Plex Transcoder|Plex Media Server)') }}"
-VIRTIOFSD_DSTATE_REGEX="{{ plex_server_health_virtiofsd_dstate_regex | default('virtiofsd') }}"
+VIRTIOFSD_DSTATE_REGEX="{{ plex_server_health_virtiofsd_dstate_regex | default('^virtiofsd$') }}"
 VM_ID="{{ plex_server_health_vm_id | default(100) }}"
 SCRUB_WINDOW_START_HOUR="{{ plex_server_health_scrub_window_start_hour | default(zfs_scrub_window_start_hour | default(3)) }}"
 SCRUB_WINDOW_END_HOUR="{{ plex_server_health_scrub_window_end_hour | default(zfs_scrub_window_end_hour | default(9)) }}"
@@ -285,9 +289,29 @@ check_plex_identity() {
   esac
 }
 
+dstate_thread_matches() {
+  local match_field="$1"
+  local command_regex="$2"
+  local comm="$3"
+  local args="${4:-}"
+
+  case "$match_field" in
+    comm)
+      [[ "$comm" =~ $command_regex ]]
+      ;;
+    command)
+      [[ "$comm ${args:-}" =~ $command_regex ]]
+      ;;
+    *)
+      return 2
+      ;;
+  esac
+}
+
 check_dstate_threads() {
   local label="$1"
   local command_regex="$2"
+  local match_field="${3:-command}"
   local pid
   local tid
   local etimes
@@ -308,8 +332,8 @@ check_dstate_threads() {
     [[ "$state" == D ]] || continue
     [[ "$etimes" =~ ^[0-9]+$ ]] || continue
     (( etimes >= DSTATE_MIN_AGE_SECONDS )) || continue
+    dstate_thread_matches "$match_field" "$command_regex" "$comm" "${args:-}" || continue
     cmd="$comm ${args:-}"
-    [[ "$cmd" =~ $command_regex ]] || continue
 
     add_problem "$label thread stuck in D-state: pid=$pid tid=$tid age=${etimes}s wchan=${wchan:-unknown} cmd=$(printf '%s' "$cmd" | cut -c1-180)"
     count=$((count + 1))
@@ -318,6 +342,36 @@ check_dstate_threads() {
     fi
   done < <(ps -eLo pid=,tid=,etimes=,state=,wchan=,comm=,args= 2>/dev/null || true)
 }
+
+run_self_test() {
+  local failures=0
+
+  if dstate_thread_matches comm '^virtiofsd$' 'iou-wrk-2677' \
+    '/usr/bin/kvm -id 101 -chardev socket,path=/run/virtiofsd-nextcloud.sock'; then
+    printf 'self-test failed: QEMU io_uring worker matched virtiofsd comm\n' >&2
+    failures=$((failures + 1))
+  fi
+  if ! dstate_thread_matches comm '^virtiofsd$' 'virtiofsd' \
+    '/usr/libexec/virtiofsd --shared-dir=/srv/plex-library'; then
+    printf 'self-test failed: real virtiofsd process did not match\n' >&2
+    failures=$((failures + 1))
+  fi
+  if ! dstate_thread_matches command '(dmx0:matroska|Plex Transcoder|Plex Media Server)' \
+    'Plex Transcoder' '/usr/lib/plex/Plex Transcoder'; then
+    printf 'self-test failed: Plex command-line process did not match\n' >&2
+    failures=$((failures + 1))
+  fi
+
+  if (( failures > 0 )); then
+    exit 1
+  fi
+  printf 'plex-server-health self-test passed\n'
+}
+
+if (( SELF_TEST_MODE == 1 )); then
+  run_self_test
+  exit 0
+fi
 
 check_recent_plex_hung_task_logs() {
   local now
@@ -382,7 +436,7 @@ case "$ROLE" in
     ;;
   storage-host)
     check_qm_status
-    check_dstate_threads "VirtioFS host" "$VIRTIOFSD_DSTATE_REGEX"
+    check_dstate_threads "VirtioFS host" "$VIRTIOFSD_DSTATE_REGEX" comm
     check_scrubs_outside_window
     ;;
   *)

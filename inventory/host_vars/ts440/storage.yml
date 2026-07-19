@@ -8,3 +8,10 @@
 usb_storage_quirks:
   - "1058:2621:u"
   - "174c:1153:u"
+  # The Sabrent/JMicron JMS561U bridge (serial DB9876543214E) intermittently
+  # fails to enumerate after a warm reboot, which leaves the Samsung download
+  # SSD absent below the filesystem layer. It uses UAS when it does enumerate,
+  # and this exact 152d:1561 bridge has a documented UAS reconnect/stall failure
+  # mode. Force bulk-only transport for future probes; if warm-boot enumeration
+  # still fails, replace the bridge or move the SSD to an internal SATA port.
+  - "152d:1561:u"

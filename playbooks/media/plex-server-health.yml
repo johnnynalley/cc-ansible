@@ -123,6 +123,11 @@
     - name: Flush systemd reload before validation
       ansible.builtin.meta: flush_handlers
 
+    - name: Validate plex-server-health process matching
+      ansible.builtin.command: /usr/local/sbin/plex-server-health --self-test
+      changed_when: false
+      when: not ansible_check_mode
+
     - name: Validate plex-server-health command
       ansible.builtin.command: /usr/local/sbin/plex-server-health --no-alert
       register: plex_server_health_validation
