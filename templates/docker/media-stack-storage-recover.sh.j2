@@ -4,10 +4,29 @@
 
 set -euo pipefail
 
+SELF_TEST_MODE=0
+case "${1:-}" in
+  --self-test)
+    SELF_TEST_MODE=1
+    shift
+    ;;
+  "")
+    ;;
+  *)
+    printf 'unknown argument: %s\n' "$1" >&2
+    exit 64
+    ;;
+esac
+if [[ "$#" -ne 0 ]]; then
+  printf 'unexpected extra arguments\n' >&2
+  exit 64
+fi
+
 LOG_TAG="media-stack-storage-recover"
 STATE_DIR="{{ media_stack_storage_recovery_state_dir | default('/var/lib/media-stack-storage-recover') }}"
 LOCK_FILE="$STATE_DIR/recovery.lock"
 LAST_ATTEMPT_FILE="$STATE_DIR/last-attempt"
+STACK_STOPPED_FILE="$STATE_DIR/stack-stopped-by-recovery"
 COMPOSE_DIR="{{ media_stack_storage_recovery_compose_dir | default('/opt/media-stack') }}"
 COMPOSE_LOCK_FILE="{{ media_stack_storage_recovery_compose_lock_file | default(gluetun_watchdog_compose_lock_file | default('/run/media-stack-compose.lock')) }}"
 COMPOSE_LOCK_WAIT="{{ media_stack_storage_recovery_compose_lock_wait | default(gluetun_watchdog_compose_lock_wait | default(900)) }}"
@@ -323,10 +342,44 @@ check_cooldown() {
   printf '%s\n' "$now" > "$LAST_ATTEMPT_FILE"
 }
 
+classify_recovery_action() {
+  local unhealthy_count="$1"
+  local stack_stopped="$2"
+
+  if (( unhealthy_count > 0 )); then
+    printf 'refresh\n'
+  elif (( stack_stopped == 1 )); then
+    printf 'resume\n'
+  else
+    printf 'none\n'
+  fi
+}
+
+run_self_test() {
+  local failures=0
+
+  [[ "$(classify_recovery_action 3 0)" == "refresh" ]] || failures=$((failures + 1))
+  [[ "$(classify_recovery_action 0 1)" == "resume" ]] || failures=$((failures + 1))
+  [[ "$(classify_recovery_action 0 0)" == "none" ]] || failures=$((failures + 1))
+
+  if (( failures > 0 )); then
+    printf 'media-stack-storage-recover self-test failed: %s case(s)\n' "$failures" >&2
+    exit 1
+  fi
+  printf 'media-stack-storage-recover self-test passed\n'
+}
+
+if (( SELF_TEST_MODE == 1 )); then
+  run_self_test
+  exit 0
+fi
+
 main() {
   local fileid_count
   local reason_body
   local mount_path
+  local stack_stopped=0
+  local recovery_action
 
   exec 9>"$LOCK_FILE"
   if ! flock -n 9; then
@@ -336,8 +389,39 @@ main() {
 
   collect_unhealthy_mounts
   fileid_count="$(nfs_fileid_count)"
+  [[ -e "$STACK_STOPPED_FILE" ]] && stack_stopped=1
+  recovery_action="$(classify_recovery_action "{% raw %}${#unhealthy_mounts[@]}{% endraw %}" "$stack_stopped")"
 
-  if [[ "{% raw %}${#unhealthy_mounts[@]}{% endraw %}" -eq 0 ]]; then
+  if [[ "$recovery_action" == "resume" ]]; then
+    log "NFS storage is healthy after an earlier recovery stopped the media stack; resuming containers"
+
+    exec 8>"$COMPOSE_LOCK_FILE"
+    flock -w "$COMPOSE_LOCK_WAIT" 8
+
+    if ! verify_recovered_paths; then
+      log "ERROR: pending media-stack resume found storage unhealthy during final verification"
+      return 1
+    fi
+    if ! compose_start_stack; then
+      log "ERROR: failed to resume media-stack containers after storage returned"
+      return 1
+    fi
+
+    run_qbit_port_sync
+    if ! validate_stack; then
+      log "ERROR: media-stack validation failed after pending recovery resume"
+      return 1
+    fi
+
+    rm -f "$STACK_STOPPED_FILE"
+    send_notification \
+      "Media stack storage recovery: resumed" \
+      "NFS storage returned after an earlier failed remount attempt; restarted media-stack containers and validation passed." \
+      "info"
+    return 0
+  fi
+
+  if [[ "$recovery_action" == "none" ]]; then
     if [[ "$fileid_count" =~ ^[0-9]+$ && "$fileid_count" -ge "$NFS_FILEID_THRESHOLD" ]]; then
       log "NFS fileid changed count is high (${fileid_count}/${NFS_FILEID_THRESHOLD}), but required paths are healthy; not remounting"
     else
@@ -360,6 +444,7 @@ main() {
   exec 8>"$COMPOSE_LOCK_FILE"
   flock -w "$COMPOSE_LOCK_WAIT" 8
 
+  touch "$STACK_STOPPED_FILE"
   if ! compose_stop_stack; then
     send_notification \
       "Media stack storage recovery: stop failed" \
@@ -397,6 +482,8 @@ main() {
       "failure"
     return 1
   fi
+
+  rm -f "$STACK_STOPPED_FILE"
 
   send_notification \
     "Media stack storage recovery: complete" \

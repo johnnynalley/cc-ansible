@@ -16,6 +16,13 @@
 - name: Configure filesystem mounts
   hosts: linux_hosts
   become: true
+  handlers:
+    - name: Rebuild initramfs for USB storage quirks
+      ansible.builtin.command:
+        cmd: "update-initramfs -u -k {{ ansible_facts['kernel'] }}"
+      changed_when: true
+      when: ansible_facts.os_family == "Debian"
+
   tasks:
     - name: Deploy USB storage module quirks
       ansible.builtin.copy:
@@ -26,8 +33,13 @@
         content: |
           # Managed by Ansible - playbooks/storage/filesystem-mounts.yml
           # Format: vendor:product:flags. The "u" flag disables UAS for matching USB storage bridges.
+          # Rebuild initramfs after changes so early-boot USB probes receive the managed quirks.
           options usb-storage quirks={{ usb_storage_quirks | join(',') }}
       when: usb_storage_quirks | default([]) | length > 0
+      notify: Rebuild initramfs for USB storage quirks
+
+    - name: Flush USB storage initramfs rebuild before mount tasks
+      ansible.builtin.meta: flush_handlers
 
     - name: Check live USB storage quirk parameter
       ansible.builtin.command:

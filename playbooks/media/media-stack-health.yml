@@ -206,6 +206,13 @@
     - name: Flush systemd reload before validation
       ansible.builtin.meta: flush_handlers
 
+    - name: Validate media-stack storage recovery state handling
+      ansible.builtin.command: /usr/local/sbin/media-stack-storage-recover --self-test
+      changed_when: false
+      when:
+        - not ansible_check_mode
+        - media_stack_storage_recovery_enabled | default(false)
+
     - name: Validate media-stack-health command
       ansible.builtin.command: /usr/local/sbin/media-stack-health --no-alert
       register: media_stack_health_validation
