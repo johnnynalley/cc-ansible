@@ -1,0 +1,5 @@
+# Prevent a crashing DrKonqi notification launcher from recursively creating
+# tens of thousands of failed user-systemd transient units. systemd-coredump
+# remains enabled, so crash evidence is still retained for coredumpctl.
+drkonqi_coredump_recursion_guard: true
+drkonqi_coredump_guard_review_version: "6.6.4-0ubuntu1"

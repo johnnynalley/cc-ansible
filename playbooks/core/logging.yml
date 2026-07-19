@@ -16,6 +16,97 @@
 # =============================================================================
 
 # =============================================================================
+# Optional desktop coredump recursion guard
+# =============================================================================
+- name: Guard desktop coredump notification handling
+  hosts: linux_hosts
+  become: true
+  gather_facts: false
+
+  tasks:
+    - name: Read installed DrKonqi package version
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/dpkg-query
+          - -W
+          - "-f=${Version}"
+          - drkonqi
+      register: drkonqi_installed_version
+      changed_when: false
+      failed_when: false
+      check_mode: false
+      when: drkonqi_coredump_recursion_guard | default(false) | bool
+      tags: [drkonqi-coredump-guard]
+
+    - name: Require review when the guarded DrKonqi package changes
+      ansible.builtin.assert:
+        that:
+          - drkonqi_installed_version.rc == 0
+          - drkonqi_installed_version.stdout == drkonqi_coredump_guard_review_version
+        fail_msg: >-
+          DrKonqi changed from the reviewed version
+          {{ drkonqi_coredump_guard_review_version }} to
+          {{ drkonqi_installed_version.stdout | default('unknown', true) }}.
+          Check the package changelog and the upstream notification-launcher
+          crash before continuing convergence. Remove the recursion guard if
+          fixed; otherwise retest it and advance the reviewed version explicitly.
+        success_msg: >-
+          DrKonqi remains at the reviewed guarded version
+          {{ drkonqi_coredump_guard_review_version }}.
+      when:
+        - drkonqi_coredump_recursion_guard | default(false) | bool
+        - drkonqi_coredump_guard_review_version is defined
+      tags: [drkonqi-coredump-guard]
+
+    - name: Create DrKonqi user socket override directory
+      ansible.builtin.file:
+        path: /home/{{ admin_user }}/.config/systemd/user/drkonqi-coredump-launcher.socket.d
+        state: directory
+        owner: "{{ admin_user }}"
+        group: "{{ admin_user }}"
+        mode: "0755"
+      when: drkonqi_coredump_recursion_guard | default(false) | bool
+      tags: [drkonqi-coredump-guard]
+
+    - name: Limit recursive DrKonqi coredump activations
+      ansible.builtin.copy:
+        dest: /home/{{ admin_user }}/.config/systemd/user/drkonqi-coredump-launcher.socket.d/recursion-guard.conf
+        owner: "{{ admin_user }}"
+        group: "{{ admin_user }}"
+        mode: "0644"
+        content: |
+          [Unit]
+          Upholds=
+
+          [Socket]
+          TriggerLimitIntervalSec=60s
+          TriggerLimitBurst=5
+      when: drkonqi_coredump_recursion_guard | default(false) | bool
+      tags: [drkonqi-coredump-guard]
+      notify: Reload guarded DrKonqi user socket
+
+    - name: Remove DrKonqi coredump recursion guard when disabled
+      ansible.builtin.file:
+        path: /home/{{ admin_user }}/.config/systemd/user/drkonqi-coredump-launcher.socket.d/recursion-guard.conf
+        state: absent
+      when:
+        - drkonqi_coredump_recursion_guard is defined
+        - not (drkonqi_coredump_recursion_guard | bool)
+      tags: [drkonqi-coredump-guard]
+      notify: Reload guarded DrKonqi user socket
+
+  handlers:
+    - name: Reload guarded DrKonqi user socket
+      ansible.builtin.shell:
+        cmd: |
+          uid=$(id -u {{ admin_user }})
+          export XDG_RUNTIME_DIR=/run/user/$uid
+          export DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/$uid/bus
+          /usr/bin/timeout 30 /usr/sbin/runuser -u {{ admin_user }} -- systemctl --user daemon-reload
+          /usr/bin/timeout 30 /usr/sbin/runuser -u {{ admin_user }} -- systemctl --user restart drkonqi-coredump-launcher.socket
+        executable: /bin/bash
+
+# =============================================================================
 # Linux hosts (systemd)
 # =============================================================================
 - name: Deploy Alloy agent (Linux)
