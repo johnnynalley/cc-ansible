@@ -482,7 +482,9 @@
         group: "{{ admin_user }}"
         mode: "0755"
 
-    - name: Configure OpenClaw gateway startup optimization environment
+    # Let the systemd-managed gateway exit on SIGTERM so the supervisor can
+    # restart it. OPENCLAW_NO_RESPAWN would restart in-process and time out stop.
+    - name: Configure OpenClaw gateway compile cache
       ansible.builtin.copy:
         dest: /home/{{ admin_user }}/.config/systemd/user/openclaw-gateway.service.d/performance.conf
         owner: "{{ admin_user }}"
@@ -491,7 +493,6 @@
         content: |
           [Service]
           Environment=NODE_COMPILE_CACHE=/var/tmp/openclaw-compile-cache
-          Environment=OPENCLAW_NO_RESPAWN=1
       notify:
         - Reload OpenClaw user systemd
         - Restart OpenClaw gateway
