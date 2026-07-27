@@ -46,6 +46,13 @@ PLATFORM_RE = re.compile(
 )
 LEADING_GROUP_RE = re.compile(r"^\[([A-Za-z0-9][A-Za-z0-9._-]{1,31})\]")
 TRAILING_GROUP_RE = re.compile(r"-([A-Za-z0-9][A-Za-z0-9._]{1,31})$")
+STANDARD_EPISODE_RE = re.compile(
+    r"(?i)\bS(?P<season>\d{1,2})E(?P<episode>\d{1,3})\b"
+)
+ORDINAL_SEASON_EPISODE_RE = re.compile(
+    r"(?i)\b(?P<season>\d{1,2})(?:st|nd|rd|th)[ ._-]+Season\b"
+    r".*?\bEp(?:isode)?[ ._-]?(?P<episode>\d{1,3})\b"
+)
 NON_RELEASE_GROUPS = {
     "1080p",
     "10bit",
@@ -198,7 +205,20 @@ def is_broad_or_local_cf(custom_format: str) -> bool:
     )
 
 
-def risk_flags(title: str, custom_formats: list[str]) -> list[str]:
+def explicit_title_episode_target(title: str) -> tuple[int, int] | None:
+    for pattern in (STANDARD_EPISODE_RE, ORDINAL_SEASON_EPISODE_RE):
+        match = pattern.search(title)
+        if match:
+            return int(match.group("season")), int(match.group("episode"))
+    return None
+
+
+def risk_flags(
+    title: str,
+    custom_formats: list[str],
+    target_season: int | None = None,
+    target_episode: int | None = None,
+) -> list[str]:
     flags: list[str] = []
     x265 = has_x265_signal(title, custom_formats)
     tier = has_tier_cf(custom_formats)
@@ -211,6 +231,14 @@ def risk_flags(title: str, custom_formats: list[str]) -> list[str]:
         flags.append("release_group_unranked")
     if x265 and has_quality_rank and not tier and all(is_broad_or_local_cf(item) for item in custom_formats):
         flags.append("bare_quality_x265")
+    title_target = explicit_title_episode_target(title)
+    if (
+        title_target is not None
+        and target_season is not None
+        and target_episode is not None
+        and title_target != (target_season, target_episode)
+    ):
+        flags.append("explicit_title_queue_target_mismatch")
     return flags
 
 
@@ -524,6 +552,9 @@ def summarize_queue_record(
 
     title = str(record.get("title") or record.get("downloadTitle") or "")
     queued_cfs = cf_names(record.get("customFormats"))
+    target = record.get("episode") or episode or {}
+    target_season = target.get("seasonNumber")
+    target_episode = target.get("episodeNumber")
     return {
         "queue_id": record.get("id"),
         "download_id": record.get("downloadId"),
@@ -542,7 +573,7 @@ def summarize_queue_record(
         "tracked_state": record.get("trackedDownloadState"),
         "messages": status_messages(record),
         "signals": release_signals(title, queued_cfs),
-        "risk_flags": risk_flags(title, queued_cfs),
+        "risk_flags": risk_flags(title, queued_cfs, target_season, target_episode),
         "inferred_release_group": release_group_from_title(title),
     }
 
@@ -564,6 +595,10 @@ def classify_group(rows: list[dict[str, Any]]) -> list[str]:
         labels.append("payload_score_loss")
     if (
         ("queued_better" in score_states and "current_better" in score_states)
+        or any(
+            "explicit_title_queue_target_mismatch" in row["risk_flags"]
+            for row in rows
+        )
         or "episode wasn't found" in message_lc
         or "was not found in the grabbed release" in message_lc
         or "unexpected considering" in message_lc

@@ -76,6 +76,14 @@ if [[ -z "$safe_host" || -z "$safe_domain" || -z "$safe_name" ]]; then
   exit 2
 fi
 
+if [[ -d "$root" ]]; then
+  # Access the directory before testing it so systemd on-demand mounts are active.
+  if ! ls -A -- "$root" >/dev/null; then
+    printf 'Rollback root could not be accessed: %s\n' "$root" >&2
+    exit 1
+  fi
+fi
+
 if [[ ! -d "$root" || ! -w "$root" ]]; then
   printf 'Rollback root is missing or not writable: %s\n' "$root" >&2
   exit 1

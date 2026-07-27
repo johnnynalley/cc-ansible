@@ -10,6 +10,7 @@ from __future__ import annotations
 import argparse
 import datetime as dt
 import json
+import re
 import sys
 import urllib.error
 import urllib.parse
@@ -20,6 +21,13 @@ from typing import Any
 
 
 DEFAULT_BACKUP_DIR = "/opt/media-stack/arr-policy-backups"
+STANDARD_EPISODE_RE = re.compile(
+    r"(?i)\bS(?P<season>\d{1,2})E(?P<episode>\d{1,3})\b"
+)
+ORDINAL_SEASON_EPISODE_RE = re.compile(
+    r"(?i)\b(?P<season>\d{1,2})(?:st|nd|rd|th)[ ._-]+Season\b"
+    r".*?\bEp(?:isode)?[ ._-]?(?P<episode>\d{1,3})\b"
+)
 
 
 def read_api_key(path: str) -> str:
@@ -167,6 +175,8 @@ def print_text(report: dict[str, Any]) -> None:
             "same_or_unknown={same_or_unknown} queued_scores={queued_scores}".format(**item)
         )
         print(f"  series: {', '.join(item['series'])}")
+        if item["risk_flags"]:
+            print(f"  risks: {', '.join(item['risk_flags'])}")
     print()
     if report["include_details"]:
         for item in queue:
@@ -211,6 +221,11 @@ def print_text(report: dict[str, Any]) -> None:
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--json", action="store_true", help="print machine-readable JSON")
+    parser.add_argument(
+        "--summary-only",
+        action="store_true",
+        help="omit per-episode queue rows and recent history from JSON output",
+    )
     parser.add_argument("--details", action="store_true", help="print every queued episode row")
     parser.add_argument("--base-url", default="http://127.0.0.1:8989")
     parser.add_argument("--config", default="/opt/media-stack/sonarr/config.xml")
@@ -225,8 +240,8 @@ def parse_args() -> argparse.Namespace:
         "--safe-groups-only",
         action="store_true",
         help=(
-            "with --remove-current-better, remove only download groups where every "
-            "queued row is current-better; skips mixed packs"
+            "with --remove-current-better, remove only terminal problem groups where "
+            "every queued row is current-better; skips mixed packs and active transfers"
         ),
     )
     parser.add_argument(
@@ -247,6 +262,26 @@ def download_key(item: dict[str, Any]) -> str:
     return str(item.get("download_id") or item.get("queued_title") or f"queue:{item.get('queue_id')}")
 
 
+def explicit_title_episode_target(title: str) -> tuple[int, int] | None:
+    for pattern in (STANDARD_EPISODE_RE, ORDINAL_SEASON_EPISODE_RE):
+        match = pattern.search(title)
+        if match:
+            return int(match.group("season")), int(match.group("episode"))
+    return None
+
+
+def title_queue_target_mismatch(item: dict[str, Any]) -> bool:
+    title_target = explicit_title_episode_target(str(item.get("queued_title") or ""))
+    season = item.get("season")
+    episode = item.get("episode")
+    return (
+        title_target is not None
+        and isinstance(season, int)
+        and isinstance(episode, int)
+        and title_target != (season, episode)
+    )
+
+
 def queue_groups(queue: list[dict[str, Any]]) -> list[dict[str, Any]]:
     groups: dict[str, dict[str, Any]] = {}
     for item in queue:
@@ -261,10 +296,13 @@ def queue_groups(queue: list[dict[str, Any]]) -> list[dict[str, Any]]:
                 "same_or_unknown": 0,
                 "queued_scores": set(),
                 "series": set(),
+                "risk_flags": set(),
             },
         )
         group["records"] += 1
         group["series"].add(str(item.get("series") or "unknown"))
+        if title_queue_target_mismatch(item):
+            group["risk_flags"].add("explicit_title_queue_target_mismatch")
         if item.get("queued_cf_score") is not None:
             group["queued_scores"].add(str(item["queued_cf_score"]))
         queued_score = item.get("queued_cf_score")
@@ -286,6 +324,7 @@ def queue_groups(queue: list[dict[str, Any]]) -> list[dict[str, Any]]:
                 **group,
                 "queued_scores": sorted(group["queued_scores"]),
                 "series": sorted(group["series"]),
+                "risk_flags": sorted(group["risk_flags"]),
             }
         )
     return sorted(
@@ -293,6 +332,79 @@ def queue_groups(queue: list[dict[str, Any]]) -> list[dict[str, Any]]:
         key=lambda item: (item["current_better"], item["records"]),
         reverse=True,
     )
+
+
+def download_groups(queue: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    groups: dict[str, list[dict[str, Any]]] = {}
+    for item in queue:
+        groups.setdefault(download_key(item), []).append(item)
+
+    result: list[dict[str, Any]] = []
+    for key, rows in groups.items():
+        messages = sorted(
+            {
+                str(message)
+                for row in rows
+                for message in row.get("status_messages") or []
+            }
+        )
+        risk_flags = sorted(
+            {
+                "explicit_title_queue_target_mismatch"
+                for row in rows
+                if title_queue_target_mismatch(row)
+            }
+        )
+        result.append(
+            {
+                "download_id": key,
+                "title": str(rows[0].get("queued_title") or "unknown"),
+                "records": len(rows),
+                "series": sorted({str(row.get("series") or "unknown") for row in rows}),
+                "queued_scores": sorted(
+                    {
+                        int(row["queued_cf_score"])
+                        for row in rows
+                        if isinstance(row.get("queued_cf_score"), int)
+                    }
+                ),
+                "current_scores": sorted(
+                    {
+                        int(row["current_cf_score"])
+                        for row in rows
+                        if isinstance(row.get("current_cf_score"), int)
+                    }
+                ),
+                "current_better": sum(current_better(row) for row in rows),
+                "queued_better": sum(
+                    isinstance(row.get("queued_cf_score"), int)
+                    and isinstance(row.get("current_cf_score"), int)
+                    and row["queued_cf_score"] > row["current_cf_score"]
+                    for row in rows
+                ),
+                "same_or_unknown": sum(
+                    not current_better(row)
+                    and not (
+                        isinstance(row.get("queued_cf_score"), int)
+                        and isinstance(row.get("current_cf_score"), int)
+                        and row["queued_cf_score"] > row["current_cf_score"]
+                    )
+                    for row in rows
+                ),
+                "status": sorted({str(row.get("status") or "unknown") for row in rows}),
+                "tracked_state": sorted(
+                    {str(row.get("tracked_state") or "unknown") for row in rows}
+                ),
+                "download_clients": sorted(
+                    {str(row.get("download_client") or "unknown") for row in rows}
+                ),
+                "all_terminal": all(terminal_problem(row) for row in rows),
+                "risk_flags": risk_flags,
+                "message_count": len(messages),
+                "messages": messages[:3],
+            }
+        )
+    return sorted(result, key=lambda item: (item["all_terminal"], item["records"]), reverse=True)
 
 
 def current_better(item: dict[str, Any]) -> bool:
@@ -305,6 +417,28 @@ def current_better(item: dict[str, Any]) -> bool:
     )
 
 
+def terminal_problem(item: dict[str, Any]) -> bool:
+    """Return true only after Arr has stopped trying to download/import the item."""
+    status = str(item.get("status") or "").casefold()
+    tracked_state = str(item.get("tracked_state") or "").casefold()
+    if status in {"queued", "downloading", "paused"} or tracked_state == "downloading":
+        return False
+    messages = "\n".join(str(message) for message in item.get("status_messages") or []).casefold()
+    explicit_rejection = any(
+        marker in messages
+        for marker in (
+            "not a custom format upgrade",
+            "episode file already imported",
+            "existing file is of equal or higher preference",
+            "do not improve on existing",
+        )
+    )
+    return status in {"warning", "failed"} or tracked_state in {
+        "importblocked",
+        "failedpending",
+    } or (status == "completed" and explicit_rejection)
+
+
 def cleanup_candidates(queue: list[dict[str, Any]], safe_groups_only: bool) -> tuple[list[dict[str, Any]], int]:
     candidates: list[dict[str, Any]] = []
     row_count = 0
@@ -313,10 +447,15 @@ def cleanup_candidates(queue: list[dict[str, Any]], safe_groups_only: bool) -> t
         groups.setdefault(download_key(item), []).append(item)
 
     for rows in groups.values():
-        current_better_rows = [item for item in rows if current_better(item)]
+        current_better_rows = [
+            item for item in rows if current_better(item) and terminal_problem(item)
+        ]
         if not current_better_rows:
             continue
-        if safe_groups_only and len(current_better_rows) != len(rows):
+        if safe_groups_only and (
+            len(current_better_rows) != len(rows)
+            or not all(terminal_problem(item) for item in rows)
+        ):
             continue
         row_count += len(current_better_rows)
         candidates.append(current_better_rows[0])
@@ -449,9 +588,23 @@ def main() -> int:
         ],
     }
     report["queue_groups"] = queue_groups(report["queue"])
+    report["download_groups"] = download_groups(report["queue"])
 
     if args.json:
-        json.dump(report, sys.stdout, indent=2, sort_keys=True)
+        output = report
+        if args.summary_only:
+            output = {
+                key: value
+                for key, value in report.items()
+                if key not in {"queue", "queue_groups", "recent_grabs"}
+            }
+        json.dump(
+            output,
+            sys.stdout,
+            indent=None if args.summary_only else 2,
+            separators=(",", ":") if args.summary_only else None,
+            sort_keys=True,
+        )
         print()
     else:
         print_text(report)

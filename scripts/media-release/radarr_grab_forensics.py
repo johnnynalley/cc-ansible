@@ -416,6 +416,27 @@ def current_better(row: dict[str, Any]) -> bool:
     return compare_scores(row) == "current_better"
 
 
+def terminal_problem(row: dict[str, Any]) -> bool:
+    """Return true only after Arr has stopped trying to download/import the item."""
+    status = str(row.get("status") or "").casefold()
+    tracked_state = str(row.get("tracked_state") or "").casefold()
+    if status in {"queued", "downloading", "paused"} or tracked_state == "downloading":
+        return False
+    messages = "\n".join(str(message) for message in row.get("messages") or []).casefold()
+    explicit_rejection = any(
+        marker in messages
+        for marker in (
+            "not a custom format upgrade",
+            "existing file is of equal or higher preference",
+            "do not improve on existing",
+        )
+    )
+    return status in {"warning", "failed"} or tracked_state in {
+        "importblocked",
+        "failedpending",
+    } or (status == "completed" and explicit_rejection)
+
+
 def cleanup_candidates(rows: list[dict[str, Any]], safe_groups_only: bool) -> tuple[list[dict[str, Any]], int]:
     groups: dict[str, list[dict[str, Any]]] = {}
     for row in rows:
@@ -425,10 +446,15 @@ def cleanup_candidates(rows: list[dict[str, Any]], safe_groups_only: bool) -> tu
     candidates: list[dict[str, Any]] = []
     row_count = 0
     for group_rows in groups.values():
-        current_better_rows = [row for row in group_rows if current_better(row)]
+        current_better_rows = [
+            row for row in group_rows if current_better(row) and terminal_problem(row)
+        ]
         if not current_better_rows:
             continue
-        if safe_groups_only and len(current_better_rows) != len(group_rows):
+        if safe_groups_only and (
+            len(current_better_rows) != len(group_rows)
+            or not all(terminal_problem(row) for row in group_rows)
+        ):
             continue
         row_count += len(current_better_rows)
         candidates.append(current_better_rows[0])
@@ -567,8 +593,8 @@ def parse_args() -> argparse.Namespace:
         "--safe-groups-only",
         action="store_true",
         help=(
-            "with --remove-current-better, remove only download groups where every "
-            "queued row is current-better; skips mixed packs"
+            "with --remove-current-better, remove only terminal problem groups where "
+            "every queued row is current-better; skips mixed packs and active transfers"
         ),
     )
     parser.add_argument(

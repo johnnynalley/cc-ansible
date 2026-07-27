@@ -23,7 +23,9 @@
   manifest and removes only conservative generated cleanup candidates, skipping
   title-side language ambiguities instead of guessing hidden audio tracks.
 - `arr_dual_audio_title_policy.py`: Updates Arr dual-audio custom formats so
-  explicit title markers can be trusted at grab/import time.
+  explicit title markers can be trusted at grab/import time. It also keeps
+  `Dubs Only (Block)` from treating hyphenated episode-title words such as
+  `Scrubba-dub-dub` as dub-release markers.
 - `arr_release_policy_audit.py`: Read-only Sonarr/Radarr release profile and
   custom-format audit for `docker-vm`.
 - `arr_profile_math_audit.py`: Read-only Sonarr/Radarr efficient-profile
@@ -101,18 +103,28 @@
   `--apply-delete` and a manifest path are supplied.
 - `radarr_release_expectation_check.py`: Read-only check of live Radarr anime
   release-selection expectations.
-- `radarr_regular_english_language_guard.py`: Creates or updates a Radarr
-  title-side negative custom format for English-original regular movies so
-  explicit foreign/multi-audio release markers such as `German.DL` are rejected
-  only on `movies-regular-efficient`, with live backups before apply.
+- `arr_regular_english_language_guard.py`: Creates or updates a shared
+  title-side negative custom format for English-original regular shows and
+  movies so explicit foreign/multi-audio markers such as `German.DL`, `DUAL`,
+  or bracketed foreign+English audio labels are rejected only on
+  `shows-regular-efficient` and `movies-regular-efficient`. Dry-run is the
+  default and every run snapshots both Arr instances before apply.
+- `radarr_regular_english_language_guard.py`: Compatibility wrapper that runs
+  `arr_regular_english_language_guard.py --instance radarr`.
 - `radarr_grab_forensics.py`: Classifies Radarr queue items against current
   movie files and Radarr's own import-rejection score messages. Optional
-  cleanup is manual and can remove only safe current-better groups after
-  writing a queue snapshot.
+  cleanup is manual and can remove only terminal problem groups where every
+  row is current-better after writing a queue snapshot.
 - `radarr_language_candidate_audit.py`: Read-only Radarr replacement-candidate
   audit. It performs interactive release searches by exact movie ID or title
   regex and reports whether Radarr sees parsed original-language + English
   candidates, without grabbing anything.
+- `radarr_manual_import_candidate.py`: Inspects Radarr manual-import candidates
+  for one movie/download ID and can import exactly one rejection-free file by
+  exact path, with optional command completion polling. An explicit
+  `--allow-unparseable-queue-match` override supports single-file names Radarr
+  cannot parse only when movie, download ID, and output path match one live
+  queue row exactly.
 - `radarr_anime_lq_policy.py`: Legacy Radarr-only anime LQ softener retained for
   rollback context. Prefer `arr_trash_lq_policy.py` for current efficient-profile
   TRaSH LQ policy.
@@ -144,7 +156,11 @@
   episode-file scores for one series.
 - `sonarr_grab_diagnostics.py`: Compares queued Sonarr grabs against current
   episode files; cleanup requires explicit flags and can be restricted to
-  safe current-better groups so mixed packs are skipped.
+  terminal problem groups where every row is current-better, so mixed packs
+  and active transfers are skipped. `--json --summary-only` emits one compact
+  record per download ID for large-queue triage. Explicit `SxxEyy` and
+  `Nth Season - Epyy` title targets that disagree with Sonarr's queue target
+  are flagged for review; the flag does not mutate or reject releases.
 - `sonarr_grab_forensics.py`: Classifies why Sonarr queue items were grabbed
   and why they may not import; supports focused `--filter`, recent grab
   `--history-size`, and read-only `--manual-import` rescoring checks for queue
@@ -161,6 +177,8 @@
   reports as `Unable to parse file`, pair `--download-id` with one or more
   explicit `--episode-id` values to queue a narrow ManualImport using the queue
   row's quality and languages.
+  Exact series and alternate-title matches take precedence over substring
+  matches so short queries cannot silently select a similarly named series.
 - `sonarr_original_language_audit.py`: Read-only audit of recent
   original-language-only imports against live manual-search candidates, useful
   for checking whether original+English/DA releases were missed or outscored.

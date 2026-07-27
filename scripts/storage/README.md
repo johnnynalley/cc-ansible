@@ -19,7 +19,8 @@
 - `mergerfs-balance` can move files; run dry-run style checks first and respect
   configured exclude paths before applying balance or evacuation jobs.
 - `live-rollback-backup` copies only absolute paths passed with `--path`; it
-  does not inspect application state or invent backup targets.
+  does not inspect application state or invent backup targets. It activates a
+  systemd on-demand mount before checking that the rollback root is writable.
 - `live-rollback-cache-prune` only deletes directories containing a
   `.live-rollback-cache` marker under `/srv/nas-zfs/backups/live-rollbacks`,
   and only after a newer ZFS snapshot exists.

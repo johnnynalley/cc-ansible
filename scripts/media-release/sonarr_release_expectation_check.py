@@ -491,6 +491,13 @@ def main() -> int:
             False,
             False,
         ),
+        (
+            "episode title contains scrubba-dub-dub",
+            "Drug Store - S01E02 - Dishwashing Detergent Scrubba-dub-dub [JA] [x265] -ASW.mkv",
+            False,
+            True,
+            False,
+        ),
     ]
 
     print_header("Custom Format Title Checks")

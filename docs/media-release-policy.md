@@ -122,16 +122,18 @@ English-original regular shows and movies stay on `shows-regular-efficient` or
 Audio` at `0` so a show such as Family Guy does not prefer unrelated multi-audio
 releases over normal English releases.
 
-Radarr English-original regular movies also score
+English-original regular shows and movies also score
 `Regular English - Foreign/Multi Audio Guard` at `-100000` on
-`movies-regular-efficient` only. This is a title-side block for explicit
+`shows-regular-efficient` and `movies-regular-efficient` only. This is a
+title-side block for explicit
 foreign/multi-audio release markers such as `German.DL`, `FRENCH.DL`,
 standalone `DL.1080p`-style markers, `multi-audio`, `multi-language`,
-`VOSTFR`, or technical `DUAL.COMPLETE.BLURAY` / quality-tagged `DUAL` markers.
-It exists because Radarr can parse those releases as English when the title
-still clearly says the release is foreign-first or multi-audio. The guard stays
-at `0` on anime and `movies-regular-dual-audio-efficient` so non-English
-original-language+English movies are not penalized.
+`VOSTFR`, technical `DUAL.COMPLETE.BLURAY` / quality-tagged `DUAL` markers, or
+bounded bracketed foreign+English audio labels. It exists because an Arr search
+can parse those releases as English when the title still clearly says the
+release is foreign-first or multi-audio. The guard stays at `0` on anime and
+both `*-regular-dual-audio-efficient` profiles so non-English
+original-language+English media is not penalized.
 
 Non-English regular shows/movies that should prefer original-language+English
 audio use the separate `shows-regular-dual-audio-efficient` or
@@ -159,14 +161,18 @@ rollback backup for the 2026-05-31 rollout is
 `/opt/media-stack/arr-policy-backups/20260531T051612Z-regular-dual-audio-profiles`.
 Dry-run backups from that rollout were removed after validation.
 
-The Radarr English-original foreign/multi-audio guard helper is
-`scripts/media-release/radarr_regular_english_language_guard.py`. It snapshots
-Radarr custom formats, quality profiles, media-management config, queue status,
-and command state before applying. The retained live rollback backups for the
-2026-05-31 guard rollout are
+The shared English-original foreign/multi-audio guard helper is
+`scripts/media-release/arr_regular_english_language_guard.py`; the old
+`radarr_regular_english_language_guard.py` entrypoint remains as a Radarr-only
+compatibility wrapper. It snapshots each selected Arr instance's custom
+formats, quality profiles, media-management config, queue status, and command
+state before applying. The retained live rollback backups include the original
+2026-05-31 Radarr rollout at
 `/opt/media-stack/arr-policy-backups/20260531T214817Z-radarr-regular-english-language-guard`
 and
-`/opt/media-stack/arr-policy-backups/20260531T215012Z-radarr-regular-english-language-guard`.
+`/opt/media-stack/arr-policy-backups/20260531T215012Z-radarr-regular-english-language-guard`,
+plus the shared 2026-07-27 rollout at
+`/opt/media-stack/arr-policy-backups/20260727T151520Z-arr-regular-english-language-guard`.
 
 ## Profile Classification
 
@@ -1038,8 +1044,10 @@ location.
   not the steady-state behavior.
 - `scripts/media-release/sonarr_grab_diagnostics.py` is the queue regression check. By
   default it is read-only. `--remove-current-better --safe-groups-only
-  --remove-from-client` removes only download groups where every queued row is
-  worse than the current imported file; it uses Sonarr queue deletion with
+  --remove-from-client` removes only terminal problem groups where every queued
+  row is worse than the current imported file; active downloads, mixed packs,
+  and completed rows without an explicit import rejection are skipped. It uses
+  Sonarr queue deletion with
   `blocklist=false` unless `--blocklist` is explicitly passed. Each removal
   pass writes a queue snapshot under `/opt/media-stack/arr-policy-backups/`.
   On 2026-05-22, after inspection, it removed 168 stale worse queue rows across
@@ -1065,7 +1073,8 @@ location.
   scores when Radarr exposes them and also parses Radarr import-rejection
   messages that say the existing file has a higher custom-format score. It is
   read-only by default; manual cleanup uses `--remove-current-better
-  --safe-groups-only --remove-from-client` and writes a queue snapshot first.
+  --safe-groups-only --remove-from-client`, requires every row in the group to
+  be terminal and current-better, and writes a queue snapshot first.
 - Bleach fresh-search incident, 2026-05-22 local time: after the show was
   deleted/re-added, the manual search began around `20:37` and then `media-vm`
   rebooted at `20:50` and again at `20:58`. Sonarr restarted at `20:50:35` and
@@ -1838,6 +1847,70 @@ Open prevention work:
 - Decide whether to add a negative CF for anime season-pack titles with
   separated `10 bits`/`8 bits` tokens that Sonarr parses as absolute episodes,
   or handle these as manual/blocklist exceptions per release.
+
+## Queue Cleanup and False-Grab RCA - 2026-07-27
+
+The live cleanup was backed up first under
+`/srv/live-rollbacks/docker-vm/media-release/20260727T144433Z-arr-queue-cleanup-20260727`.
+All queue removals used `removeFromClient=true` and `blocklist=false`.
+
+- Radarr started with 24 rows. Nineteen proven bad, duplicate, wrong-language,
+  or current-better rows were removed; four rejection-free payloads were
+  imported; the final row was a valid dual-audio x265 Redline torrent still
+  downloading metadata.
+- Sonarr cleanup removed 231 rows across successive evidence-reviewed passes
+  and manually imported 45 rejection-free files. The final queue had no
+  completed/manual-import, current-better, or known title/target mismatch rows;
+  the only remaining row was a valid Rick and Morty S09E03 delay at `45003`
+  over the current file's `45000`, using the intended HMAX service tiebreaker.
+- The repeated Radarr NZB mechanism was a manual-import loop. A best candidate
+  downloaded successfully but remained matched by grab-history ID instead of
+  importing, so the movie stayed missing and later searches selected the same
+  release again. `radarr_manual_import_candidate.py` now provides an exact
+  movie/download/path import flow rather than broad manual-import guesses.
+- Current-better queue pollution is often grab-time versus payload-time score
+  drift. Release-title CFs can disappear when Arr reparses an individual media
+  filename or discovers track language only after download. Cleanup therefore
+  requires an explicit terminal import rejection and never treats an active
+  warning/downloading row as safe to delete.
+- Twenty-four Seven Deadly Sins `Kamigami no Gekirin` payloads were named as
+  season 1 episodes while the queue expected season 3. Two Dragon Ball Z files
+  explicitly named `Special 01` and `Special 02` were mapped by grab-history ID
+  to regular S01E01/S01E02. These are source naming/mapping failures, not score
+  ordering failures; all 26 were removed without blocklisting. A broad negative
+  for `Special NN` or alternate anime season names would also reject legitimate
+  specials, so monitoring and exact evidence-based cleanup remain safer.
+- A final raw target check found `[AnimeDevil] ... 2nd Season - Ep01` queued as
+  Iruma-kun S01E01, plus American Dad `S21E12`/`S21E13` delay rows queued as
+  future S22E12/S22E13 episodes with different titles. All three were removed
+  without blocklisting. `sonarr_grab_diagnostics.py` and
+  `sonarr_transaction_audit.py` now flag explicit title/queue season-episode
+  disagreements for review before download or import; the flag remains
+  advisory because scene numbering can intentionally remap some series.
+- Sonarr's English-original regular profile lacked Radarr's title-side
+  foreign/multi-audio rejection. The shared guard now applies `-100000` only to
+  `shows-regular-efficient` and `movies-regular-efficient`, while remaining
+  zero on anime and non-English regular dual-audio profiles. Live profile math
+  passed after apply, including exact cutoff scores and all release-tier gaps.
+- The guard is preventive only when the release title exposes the foreign or
+  multi-audio marker. It cannot know hidden media tracks before download, so
+  import-time metadata drift must continue to be reported as a distinct
+  source-availability limitation rather than hidden by automatic deletion or
+  blocklisting.
+- The last remaining suspicious Sonarr row exposed a separate local-CF bug.
+  `Dubs Only (Block)` used a bare `\bdub\b` title regex, so the renamed Japanese
+  S01E02 file for Drug Store matched the episode title `Scrubba-dub-dub` and
+  received `-1000000` despite confirmed `jpn` audio and English subtitles. That
+  false score made a 720p original-language release look better than the
+  existing 1080p x265 file. `arr_dual_audio_title_policy.py` now limits plain
+  `dub`/`dubbed` to normal release-token separators while retaining explicit
+  markers and known dub groups; the live expectation check includes this
+  exact regression case.
+  The apply snapshot is
+  `/opt/media-stack/arr-policy-backups/20260727T154529Z-dual-audio-title-policy`;
+  after a targeted series rescan, the existing file recalculated from
+  `-955000` to `45000`, and the obsolete 720p queue row was removed without
+  blocklisting.
 
 Reference links:
 

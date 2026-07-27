@@ -51,12 +51,23 @@ def api_post(base_url: str, api_key: str, path: str, body: dict[str, Any]) -> An
 
 def find_series(series_list: list[dict[str, Any]], query: str) -> dict[str, Any]:
     lowered = query.lower()
-    matches = [
+    exact_matches = [
         series
         for series in series_list
         if lowered == str(series.get("title", "")).lower()
-        or lowered in str(series.get("title", "")).lower()
-        or any(lowered in str(title.get("title", "")).lower() for title in series.get("alternateTitles") or [])
+        or any(
+            lowered == str(title.get("title", "")).lower()
+            for title in series.get("alternateTitles") or []
+        )
+    ]
+    matches = exact_matches or [
+        series
+        for series in series_list
+        if lowered in str(series.get("title", "")).lower()
+        or any(
+            lowered in str(title.get("title", "")).lower()
+            for title in series.get("alternateTitles") or []
+        )
     ]
     if not matches:
         raise RuntimeError(f"no series matched {query!r}")

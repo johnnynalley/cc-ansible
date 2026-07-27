@@ -47,6 +47,11 @@ NON_ENGLISH_DUB_MARKER_REGEX = (
     r"(?!.*\b(?:en|eng|english)\b)"
     r".*\b(?:dub|dubs|dubbed|audio|synchro|synchro[nn]is(?:e|é|ee|ed))\b"
 )
+DUBS_ONLY_TITLE_REGEX = (
+    r"(?i)(?:^|[ ._\[(])(?:dubs?|dubbed)(?=$|[ ._\])])|"
+    r"\b(?:dub[ ._-]?audio|english[- ._]?(?:dub|dubbed)|funi[_-]?dub|"
+    r"kazedub|kaidubs|golumpa|kamiFS|yameii)\b"
+)
 
 
 @dataclass(frozen=True)
@@ -233,6 +238,7 @@ def patch_dubs_only(custom_format: dict[str, Any]) -> bool:
             spec["implementationName"] = "Release Title"
             spec["negate"] = False
             spec["required"] = True
+            set_regex(spec, DUBS_ONLY_TITLE_REGEX)
         if spec.get("name") == "Exclude Explicit Dual Audio Title Markers":
             spec["implementation"] = "ReleaseTitleSpecification"
             spec["implementationName"] = "Release Title"
@@ -330,6 +336,7 @@ def patch_arr(arr: Arr, backup_root: Path, timestamp: str, apply: bool) -> dict[
         "[Fuchs] Love, Chunibyo & Other Delusions! - S00E02 (BD 1080p AVC Opus 2.0) [Multi-Audio] (Japanese, German/Deutsch Dubs)",
         "[EMBER] Jujutsu Kaisen S3 - 11 [JA+EN] [x265].mkv",
         "[EMBER] Jujutsu Kaisen S3 - 11 [JA] [x265].mkv",
+        "Drug Store - S01E02 - Dishwashing Detergent Scrubba-dub-dub [JA] [x265] -ASW.mkv",
     ]
     if apply and arr.name == "sonarr":
         smokes = [parse_smoke(arr, api_key, title) for title in smoke_titles]
