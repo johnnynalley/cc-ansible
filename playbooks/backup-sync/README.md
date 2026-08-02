@@ -14,7 +14,7 @@ Owner area: Backups, sync jobs, and Nextcloud external-storage refresh.
 | Playbook | Hosts | Purpose | Validation |
 | --- | --- | --- | --- |
 | `git-sync.yml` | `nas_server` | Configure git-sync timer (ts440). | `ansible-playbook playbooks/backup-sync/git-sync.yml --syntax-check` |
-| `local-restic.yml` | `backup_clients:!macos_hosts, ts440` | Configure local restic backups (ts440 ZFS), including safe stale-lock cleanup on retention-capable repositories. | `ansible-playbook playbooks/backup-sync/local-restic.yml --syntax-check` |
+| `local-restic.yml` | `backup_clients:!macos_hosts, ts440` | Configure local restic backups (ts440 ZFS), including stale-lock cleanup, bounded transient-outage retries, and early skipping of disabled hosts. | `ansible-playbook playbooks/backup-sync/local-restic.yml --syntax-check` |
 | `nextcloud-scan.yml` | `nextcloud-vm` | Configure Nextcloud external storage scan. | `ansible-playbook playbooks/backup-sync/nextcloud-scan.yml --syntax-check` |
 | `rclone-sync.yml` | `managed_hosts` | Configure rclone sync jobs. | `ansible-playbook playbooks/backup-sync/rclone-sync.yml --syntax-check` |
 | `restic.yml` | `backup_clients:!macos_hosts` | Configure restic backups (B2 offsite). | `ansible-playbook playbooks/backup-sync/restic.yml --syntax-check` |

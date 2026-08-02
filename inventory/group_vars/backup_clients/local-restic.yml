@@ -7,6 +7,13 @@
 # Enable local backups per-host by setting local_restic_enabled: true in host_vars
 local_restic_enabled: false
 
+# Optional bounded retry for clients that remain online while their backup
+# target reboots. Enable only on hosts with a proven scheduling collision.
+local_restic_retry_on_failure: false
+local_restic_retry_seconds: 5min
+local_restic_retry_start_limit_interval: 30min
+local_restic_retry_start_limit_burst: 3
+
 # ts440 LAN IP for SFTP access. This intentionally uses regular OpenSSH over
 # LAN so local backups do not depend on Tailscale SSH tags/policy.
 local_restic_target_host: "192.168.1.146"

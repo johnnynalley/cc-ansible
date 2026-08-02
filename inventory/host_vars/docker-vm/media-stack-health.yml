@@ -56,6 +56,8 @@ media_stack_storage_recovery_compose_lock_wait: 900
 media_stack_storage_recovery_compose_stop_timeout: 45
 media_stack_storage_recovery_path_probe_timeout: 10
 media_stack_storage_recovery_cooldown_seconds: 1800
+media_stack_storage_recovery_validation_attempts: 6
+media_stack_storage_recovery_validation_retry_seconds: 10
 media_stack_storage_recovery_mounts:
   - path: /srv/media
     fstype: nfs
@@ -70,3 +72,10 @@ media_stack_storage_recovery_required_paths:
   - /srv/media/plex/downloads/complete
   - /srv/media/plex/Anime
   - /srv/incomplete_downloads/incomplete/torrents
+media_stack_storage_recovery_container_path_probes:
+  - container: sonarr
+    path: /data/downloads/complete
+  - container: sonarr
+    path: /data/Anime
+  - container: bazarr
+    path: /data/Shows

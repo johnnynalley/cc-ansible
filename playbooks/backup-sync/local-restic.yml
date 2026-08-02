@@ -14,7 +14,7 @@
 - name: Configure local restic backups to ts440 ZFS
   hosts: backup_clients:!macos_hosts
   become: true
-  gather_facts: true
+  gather_facts: false
   serial: 1
 
   vars:
@@ -22,6 +22,10 @@
     local_restic_script: /usr/local/sbin/restic-local-backup
     local_restic_ssh_key: /etc/restic/backup_key
     local_restic_cache_dir: /var/cache/restic-local
+    local_restic_retry_interval_effective: >-
+      {{ local_restic_retry_start_limit_interval | default('30min') }}
+    local_restic_retry_burst_effective: >-
+      {{ local_restic_retry_start_limit_burst | default(3) }}
 
   tasks:
     # =========================================================================
@@ -35,10 +39,14 @@
         daemon_reload: true
       when: not (local_restic_enabled | default(false))
       failed_when: false
+      ignore_unreachable: true
 
     - name: Check if local restic is enabled
       ansible.builtin.meta: end_host
       when: not (local_restic_enabled | default(false))
+
+    - name: Gather facts for local restic clients
+      ansible.builtin.setup:
 
     # =========================================================================
     # Install restic (if not already installed by B2 playbook)
@@ -249,6 +257,10 @@
           Description=Restic Local Backup to ts440 ZFS
           After=network-online.target
           Wants=network-online.target
+          {% if local_restic_retry_on_failure | default(false) %}
+          StartLimitIntervalSec={{ local_restic_retry_interval_effective }}
+          StartLimitBurst={{ local_restic_retry_burst_effective }}
+          {% endif %}
           {% if restic_require_ac_power | default(false) %}
           ConditionACPower=true
           {% endif %}
@@ -265,6 +277,12 @@
           # Environment for restic
           Environment=HOME=/root
           Environment=RESTIC_CACHE_DIR={{ local_restic_cache_dir }}
+          {% if local_restic_retry_on_failure | default(false) %}
+
+          # Retry bounded transient target outages instead of waiting an hour.
+          Restart=on-failure
+          RestartSec={{ local_restic_retry_seconds | default('5min') }}
+          {% endif %}
 
           # Resource limits
           Nice=19

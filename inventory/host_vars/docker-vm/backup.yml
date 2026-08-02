@@ -12,6 +12,10 @@ local_restic_enabled: true
 local_restic_backup_paths:
   - /opt
 
+# docker-vm remains online while ts440 reboots at 05:00 on Sundays. Retry a
+# target-unreachable failure instead of leaving the backup failed for an hour.
+local_restic_retry_on_failure: true
+
 # Live SQLite sidecar files appear and disappear while Arr apps are running.
 # Restic still backs up the durable database files; these transient sidecars
 # caused otherwise-successful docker-vm backups to exit non-zero.

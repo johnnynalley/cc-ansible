@@ -33,6 +33,8 @@ COMPOSE_LOCK_WAIT="{{ media_stack_storage_recovery_compose_lock_wait | default(g
 COMPOSE_STOP_TIMEOUT="{{ media_stack_storage_recovery_compose_stop_timeout | default(45) }}"
 PATH_PROBE_TIMEOUT="{{ media_stack_storage_recovery_path_probe_timeout | default(media_stack_health_path_probe_timeout | default(10)) }}"
 RECOVERY_COOLDOWN_SECONDS="{{ media_stack_storage_recovery_cooldown_seconds | default(1800) }}"
+VALIDATION_ATTEMPTS="{{ media_stack_storage_recovery_validation_attempts | default(6) }}"
+VALIDATION_RETRY_SECONDS="{{ media_stack_storage_recovery_validation_retry_seconds | default(10) }}"
 NFS_FILEID_WINDOW_SECONDS="{{ media_stack_storage_recovery_nfs_fileid_window_seconds | default(media_stack_health_nfs_fileid_window_seconds | default(1800)) }}"
 NFS_FILEID_THRESHOLD="{{ media_stack_storage_recovery_nfs_fileid_threshold | default(media_stack_health_nfs_fileid_threshold | default(10)) }}"
 APPRISE_ENDPOINT="{{ apprise_endpoint }}"
@@ -48,6 +50,12 @@ MOUNT_SPECS=(
 REQUIRED_PATHS=(
 {% for path in media_stack_storage_recovery_required_paths | default([]) %}
   {{ path | quote }}
+{% endfor %}
+)
+
+CONTAINER_PATH_SPECS=(
+{% for probe in media_stack_storage_recovery_container_path_probes | default([]) %}
+  {{ (probe.container ~ '|' ~ probe.path) | quote }}
 {% endfor %}
 )
 
@@ -139,6 +147,7 @@ nfs_fileid_count() {
 
 unhealthy_mounts=()
 unhealthy_reasons=()
+unhealthy_container_reasons=()
 
 add_unhealthy_mount() {
   local mount_path="$1"
@@ -232,6 +241,36 @@ collect_unhealthy_mounts() {
   check_required_paths
 }
 
+check_container_path_spec() {
+  local spec="$1"
+  local container
+  local path
+  local running
+  local output
+
+  IFS='|' read -r container path <<< "$spec"
+  [[ -n "$container" && -n "$path" ]] || return
+
+  # A stopped or missing application is not by itself a storage
+  # classification. The normal health check owns that condition. This probe
+  # specifically detects a running container whose private bind-mount
+  # namespace retained stale NFS handles after the host automount recovered.
+  running="$(docker inspect "$container" 2>/dev/null | jq -r '.[0].State.Running // false' 2>/dev/null || printf 'false')"
+  [[ "$running" == "true" ]] || return
+
+  output="$(timeout "$PATH_PROBE_TIMEOUT" docker exec "$container" stat -c '%F' "$path" 2>&1)" && return
+  unhealthy_container_reasons+=("$container:$path: ${output:-unreadable or stale}")
+}
+
+collect_unhealthy_container_paths() {
+  local spec
+
+  unhealthy_container_reasons=()
+  for spec in "${CONTAINER_PATH_SPECS[@]}"; do
+    check_container_path_spec "$spec"
+  done
+}
+
 verify_recovered_paths() {
   local spec
   local mount_path
@@ -297,12 +336,12 @@ refresh_mount() {
 }
 
 compose_stop_stack() {
-  log "Stopping media-stack containers before NFS remount"
+  log "Stopping media-stack containers for storage recovery"
   timeout "$((COMPOSE_STOP_TIMEOUT + 30))" docker compose --project-directory "$COMPOSE_DIR" stop -t "$COMPOSE_STOP_TIMEOUT"
 }
 
 compose_start_stack() {
-  log "Starting media-stack containers after NFS remount"
+  log "Starting media-stack containers after storage recovery"
   docker compose --project-directory "$COMPOSE_DIR" up -d
 }
 
@@ -314,9 +353,20 @@ run_qbit_port_sync() {
 }
 
 validate_stack() {
+  local attempt
+
   if [[ -x /usr/local/sbin/media-stack-health ]]; then
-    log "Validating media stack after storage recovery"
-    /usr/local/sbin/media-stack-health --no-alert
+    for ((attempt = 1; attempt <= VALIDATION_ATTEMPTS; attempt++)); do
+      log "Validating media stack after storage recovery (attempt ${attempt}/${VALIDATION_ATTEMPTS})"
+      if /usr/local/sbin/media-stack-health --no-alert; then
+        return 0
+      fi
+      if (( attempt < VALIDATION_ATTEMPTS )); then
+        log "Media stack is still initializing; retrying validation in ${VALIDATION_RETRY_SECONDS}s"
+        sleep "$VALIDATION_RETRY_SECONDS"
+      fi
+    done
+    return 1
   fi
 }
 
@@ -345,11 +395,14 @@ check_cooldown() {
 classify_recovery_action() {
   local unhealthy_count="$1"
   local stack_stopped="$2"
+  local unhealthy_container_count="$3"
 
   if (( unhealthy_count > 0 )); then
     printf 'refresh\n'
   elif (( stack_stopped == 1 )); then
     printf 'resume\n'
+  elif (( unhealthy_container_count > 0 )); then
+    printf 'restart\n'
   else
     printf 'none\n'
   fi
@@ -358,9 +411,10 @@ classify_recovery_action() {
 run_self_test() {
   local failures=0
 
-  [[ "$(classify_recovery_action 3 0)" == "refresh" ]] || failures=$((failures + 1))
-  [[ "$(classify_recovery_action 0 1)" == "resume" ]] || failures=$((failures + 1))
-  [[ "$(classify_recovery_action 0 0)" == "none" ]] || failures=$((failures + 1))
+  [[ "$(classify_recovery_action 3 0 2)" == "refresh" ]] || failures=$((failures + 1))
+  [[ "$(classify_recovery_action 0 1 2)" == "resume" ]] || failures=$((failures + 1))
+  [[ "$(classify_recovery_action 0 0 2)" == "restart" ]] || failures=$((failures + 1))
+  [[ "$(classify_recovery_action 0 0 0)" == "none" ]] || failures=$((failures + 1))
 
   if (( failures > 0 )); then
     printf 'media-stack-storage-recover self-test failed: %s case(s)\n' "$failures" >&2
@@ -388,9 +442,10 @@ main() {
   fi
 
   collect_unhealthy_mounts
+  collect_unhealthy_container_paths
   fileid_count="$(nfs_fileid_count)"
   [[ -e "$STACK_STOPPED_FILE" ]] && stack_stopped=1
-  recovery_action="$(classify_recovery_action "{% raw %}${#unhealthy_mounts[@]}{% endraw %}" "$stack_stopped")"
+  recovery_action="$(classify_recovery_action "{% raw %}${#unhealthy_mounts[@]}{% endraw %}" "$stack_stopped" "{% raw %}${#unhealthy_container_reasons[@]}{% endraw %}")"
 
   if [[ "$recovery_action" == "resume" ]]; then
     log "NFS storage is healthy after an earlier recovery stopped the media stack; resuming containers"
@@ -417,6 +472,50 @@ main() {
     send_notification \
       "Media stack storage recovery: resumed" \
       "NFS storage returned after an earlier failed remount attempt; restarted media-stack containers and validation passed." \
+      "info"
+    return 0
+  fi
+
+  if [[ "$recovery_action" == "restart" ]]; then
+    reason_body="$(printf '%s\n' "${unhealthy_container_reasons[@]}")"
+    log "Classified stale media-stack container bind mounts while host NFS paths are healthy:"
+    log "$reason_body"
+
+    check_cooldown
+
+    send_notification \
+      "Media stack storage recovery: restarting containers" \
+      "Host NFS paths are healthy, but running containers retained stale bind-mount handles. Restarting the media stack.\n\n${reason_body}" \
+      "warning"
+
+    exec 8>"$COMPOSE_LOCK_FILE"
+    flock -w "$COMPOSE_LOCK_WAIT" 8
+
+    if ! verify_recovered_paths; then
+      log "ERROR: container bind-mount recovery found host storage unhealthy during final verification"
+      return 1
+    fi
+
+    touch "$STACK_STOPPED_FILE"
+    if ! compose_stop_stack; then
+      log "ERROR: failed to stop media-stack containers for bind-mount recovery"
+      return 1
+    fi
+    if ! compose_start_stack; then
+      log "ERROR: failed to restart media-stack containers for bind-mount recovery"
+      return 1
+    fi
+
+    run_qbit_port_sync
+    if ! validate_stack; then
+      log "ERROR: media-stack validation failed after container bind-mount recovery"
+      return 1
+    fi
+
+    rm -f "$STACK_STOPPED_FILE"
+    send_notification \
+      "Media stack storage recovery: complete" \
+      "Restarted media-stack containers with fresh bind mounts and media-stack-health passed." \
       "info"
     return 0
   fi
