@@ -43,7 +43,10 @@ media_stack_health_bazarr_stale_success_warning_seconds: 604800
 media_stack_health_bazarr_stale_success_fail: false
 media_stack_health_bazarr_write_probe_enabled: true
 media_stack_health_bazarr_write_probe_dir: /data/Shows
-media_stack_health_bazarr_fail_on_provider_auth_throttle: true
+# Keep collecting Bazarr provider state for manual diagnostics, but a known
+# provider authentication/throttle condition must not fail the media stack or
+# page Johnny. Container, endpoint, storage, and write-path checks remain live.
+media_stack_health_bazarr_fail_on_provider_auth_throttle: false
 
 # Root-cause recovery for classified stale docker-vm NFS client state. This is
 # intentionally separate from alert-only media-stack-health logic: fileid noise
