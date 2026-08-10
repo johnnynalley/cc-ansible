@@ -182,6 +182,8 @@ Do not make empty future-behavior assurances. Avoid phrases like "this won't hap
 
 When building shell commands from text that may contain Markdown, code spans, quotes, dollar signs, parentheses, or backticks, treat that text as data and keep it out of shell interpretation. Use single-quoted fixed-string patterns, argument arrays, `rg -F`, or a temporary pattern file. Never place unescaped user/doc text containing backticks inside a double-quoted shell string; command substitution can execute the text before the intended diagnostic command runs.
 
+Run noninteractive Codex probes and automation with a non-login shell. Login-profile initialization is unnecessary for normal repository and infrastructure commands and can introduce unrelated desktop/session side effects that appear as tool failures. Use a login shell only when the command actually depends on login-profile state, and diagnose any startup output separately from the requested command.
+
 ## Historical Claude Reference
 
 This repository was migrated from Claude Code to Codex CLI on 2026-05-12. The active Codex guidance is this `AGENTS.md` file and the active project memory is `~/.codex/memories/`.
