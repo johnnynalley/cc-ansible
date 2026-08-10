@@ -118,11 +118,22 @@ history reads, and database rows independently.
 
 `scripts/agents/openclaw-session-relocate.py` enforces that file-backed
 boundary. Its 2026-08-10 source manifest found five agents, 154 metadata
-entries, 28,764 artifacts totaling 2.50 GB, and 1,391 absolute references in
+entries, 28,770 artifacts totaling 2.50 GB, and 1,391 absolute references in
 five approved structured fields. Every reference exists and resolves inside
 the source state/workspace roots. Relocation rewrites only those fields,
 requires target references to resolve inside the dedicated roots, and verifies
 that every non-index session artifact remains byte-identical.
+
+The attended rehearsal generation `20260810T083108Z` passed this boundary and
+was promoted only through rehearsal selectors. Its immutable verification
+record reports five agents, 154 metadata entries, 28,770 artifacts, and 1,391
+rewritten references. The promoted trees are owned by
+`root:openclaw-migrate`, are not writable by the migration reader or other
+users, and remain readable by the no-login migration identity. The production
+user Gateway and its session sources were not stopped or modified. This passes
+the active file-backed session relocation lane; it does not pass the separate
+Doctor, database, behavior, integration, credential, or production-cutover
+lanes.
 
 Migration combines an OpenClaw `backup create --verify` archive for supported
 SQLite-native snapshots with a separate stopped-state archive that preserves
