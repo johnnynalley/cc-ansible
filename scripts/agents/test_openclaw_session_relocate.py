@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import shutil
 import tempfile
 import unittest
 from pathlib import Path
@@ -48,8 +49,6 @@ class SessionRelocationTests(unittest.TestCase):
         return state, workspace
 
     def _copy_fixture(self, source: Path, target: Path) -> None:
-        import shutil
-
         shutil.copytree(source, target)
 
     def _split_target_workspace(self, root: Path, target: Path) -> Path:
@@ -179,6 +178,54 @@ class SessionRelocationTests(unittest.TestCase):
             )
             transcript = target / "agents" / "main" / "sessions" / "session-one.jsonl"
             transcript.write_text("changed\n", encoding="utf-8")
+
+            with self.assertRaises(MODULE.SessionRelocationError):
+                MODULE.verify_relocation(
+                    source,
+                    source_workspace,
+                    target,
+                    target_workspace,
+                    ["main"],
+                )
+
+    def test_immutable_verification_ignores_later_live_index_drift(self) -> None:
+        with tempfile.TemporaryDirectory() as directory_name:
+            root = Path(directory_name)
+            source, source_workspace = self._fixture(root, "source")
+            target = root / "target"
+            self._copy_fixture(source, target)
+            target_workspace = self._split_target_workspace(root, target)
+            manifest_path = root / "source-manifest.json"
+            MODULE._write_json_atomic(
+                manifest_path,
+                MODULE.inspect_session_stores(source, source_workspace, ["main"]),
+            )
+            index_snapshots = root / "index-snapshots" / "main"
+            index_snapshots.mkdir(parents=True)
+            source_index = source / "agents" / "main" / "sessions" / "sessions.json"
+            shutil.copy2(source_index, index_snapshots / "sessions.json")
+
+            MODULE.rewrite_session_stores(
+                target,
+                source,
+                source_workspace,
+                target_workspace,
+                ["main"],
+            )
+            source_payload = json.loads(source_index.read_text(encoding="utf-8"))
+            source_payload["agent:main:main"]["updatedAt"] = 12345
+            source_index.write_text(json.dumps(source_payload), encoding="utf-8")
+
+            verified = MODULE.verify_relocation(
+                source,
+                source_workspace,
+                target,
+                target_workspace,
+                ["main"],
+                manifest_path,
+                index_snapshots.parent,
+            )
+            self.assertEqual(verified["status"], "ok")
 
             with self.assertRaises(MODULE.SessionRelocationError):
                 MODULE.verify_relocation(

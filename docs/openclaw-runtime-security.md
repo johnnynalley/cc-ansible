@@ -267,10 +267,13 @@ The rehearsal is deliberately selective rather than a legacy workspace clone:
 2. Copy those stores plus only workspace files/directories referenced by the
    approved structured session fields.
 3. Manifest production again and require exact equality, proving the live
-   source did not change during capture.
+   source did not change during capture, then preserve the copied source
+   indexes as immutable pre-transform evidence.
 4. Rewrite only the approved state/workspace prefixes on the protected copy.
-5. Require byte-identical non-index artifacts, semantic index equality, valid
-   target references, and an `agents`-only target state root.
+5. Verify against the immutable capture manifest and index snapshots rather
+   than re-reading a moving live source. Require byte-identical non-index
+   artifacts, semantic index equality, valid target references, and an
+   `agents`-only target state root.
 6. Keep config, credentials, plugin code/state, channels, and the unreferenced
    legacy workspace out of this generation.
 7. Transfer the validated tree to root ownership with read-only access for the

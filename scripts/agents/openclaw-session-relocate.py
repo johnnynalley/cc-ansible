@@ -292,6 +292,22 @@ def inspect_session_stores(
     }
 
 
+def _read_manifest(path: Path) -> dict[str, Any]:
+    _regular_file(path, "source manifest")
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise SessionRelocationError("source manifest is not valid JSON") from exc
+    if (
+        not isinstance(payload, dict)
+        or payload.get("schemaVersion") != 1
+        or not isinstance(payload.get("agents"), list)
+        or not isinstance(payload.get("summary"), dict)
+    ):
+        raise SessionRelocationError("source manifest has an unsupported schema")
+    return payload
+
+
 def _mapped_path(
     value: str,
     field: str | None,
@@ -459,13 +475,40 @@ def verify_relocation(
     target_state_root: Path,
     target_workspace_root: Path,
     agents: list[str],
+    source_manifest_path: Path | None = None,
+    source_index_root: Path | None = None,
 ) -> dict[str, Any]:
-    source = inspect_session_stores(source_state_root, source_workspace_root, agents)
+    if (source_manifest_path is None) != (source_index_root is None):
+        raise SessionRelocationError(
+            "immutable verification requires both source manifest and index root"
+        )
+    if source_manifest_path is None:
+        source = inspect_session_stores(
+            source_state_root,
+            source_workspace_root,
+            agents,
+        )
+        immutable_indexes = None
+    else:
+        source = _read_manifest(source_manifest_path)
+        immutable_indexes = _resolved_directory(
+            source_index_root,
+            "source index snapshot root",
+        )
     target = inspect_session_stores(target_state_root, target_workspace_root, agents)
-    source_state = Path(source["stateRoot"])
-    source_workspace = Path(source["workspaceRoot"])
+    source_state = Path(os.path.abspath(source_state_root))
+    source_workspace = Path(os.path.abspath(source_workspace_root))
     target_state = Path(target["stateRoot"])
     target_workspace = Path(target["workspaceRoot"])
+
+    if source.get("stateRoot") != str(source_state) or source.get(
+        "workspaceRoot"
+    ) != str(source_workspace):
+        raise SessionRelocationError(
+            "source manifest roots do not match the requested mapping"
+        )
+    if len(source["agents"]) != len(target["agents"]):
+        raise SessionRelocationError("source and target agent counts differ")
 
     if source["summary"]["fileCount"] != target["summary"]["fileCount"]:
         raise SessionRelocationError("source and target session file counts differ")
@@ -498,13 +541,27 @@ def verify_relocation(
                     "a target session artifact differs from its source"
                 )
 
-        source_index = (
-            source_state
-            / "agents"
-            / source_agent["agent"]
-            / "sessions"
-            / "sessions.json"
-        )
+        if immutable_indexes is None:
+            source_index = (
+                source_state
+                / "agents"
+                / source_agent["agent"]
+                / "sessions"
+                / "sessions.json"
+            )
+        else:
+            source_index = immutable_indexes / source_agent["agent"] / "sessions.json"
+            _regular_file(source_index, "source index snapshot")
+            source_index_rows = [
+                row for row in source_agent["files"] if row["kind"] == "index"
+            ]
+            if (
+                len(source_index_rows) != 1
+                or _sha256(source_index) != source_index_rows[0]["sha256"]
+            ):
+                raise SessionRelocationError(
+                    "source index snapshot does not match its manifest"
+                )
         target_index = (
             target_state
             / "agents"
@@ -562,6 +619,8 @@ def build_parser() -> argparse.ArgumentParser:
     verify_parser.add_argument("--source-workspace-root", type=Path, required=True)
     verify_parser.add_argument("--target-state-root", type=Path, required=True)
     verify_parser.add_argument("--target-workspace-root", type=Path, required=True)
+    verify_parser.add_argument("--source-manifest", type=Path)
+    verify_parser.add_argument("--source-index-root", type=Path)
     verify_parser.add_argument("--output", type=Path, required=True)
     _add_common_arguments(verify_parser)
     return parser
@@ -596,6 +655,8 @@ def main() -> int:
                 arguments.target_state_root,
                 arguments.target_workspace_root,
                 arguments.agents,
+                arguments.source_manifest,
+                arguments.source_index_root,
             )
             summary = report
         _write_json_atomic(arguments.output, report)
