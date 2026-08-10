@@ -31,6 +31,14 @@ dedicated `openclaw-health` system service passes cutover validation.
   only status and change state.
 - `test_openclaw_isolated_secrets.py` covers atomic permissions, idempotency,
   unexpected-field removal, parent ownership, and Gateway-token preservation.
+- `openclaw-session-relocate.py` inventories the shipped file-backed session
+  stores, rewrites only approved absolute state/workspace path fields on a
+  copied target, and verifies JSONL byte parity plus semantic metadata parity.
+  It rejects missing paths, symlink escapes, unknown path-bearing fields, and
+  any target session artifact that differs from its source.
+- `test_openclaw_session_relocate.py` covers deterministic relocation,
+  idempotency, byte preservation, unknown-field rejection, path-boundary
+  enforcement, and target drift detection.
 
 ## Validation
 

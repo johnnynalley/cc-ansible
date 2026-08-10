@@ -111,6 +111,14 @@ shipped owner, rewrite only deterministic state-root path references on a
 protected copy, and reconcile file counts, hashes, metadata rows, sampled
 history reads, and database rows independently.
 
+`scripts/agents/openclaw-session-relocate.py` enforces that file-backed
+boundary. Its 2026-08-10 source manifest found five agents, 154 metadata
+entries, 28,764 artifacts totaling 2.50 GB, and 1,391 absolute references in
+five approved structured fields. Every reference exists and resolves inside
+the source state/workspace roots. Relocation rewrites only those fields,
+requires target references to resolve inside the dedicated roots, and verifies
+that every non-index session artifact remains byte-identical.
+
 Migration combines an OpenClaw `backup create --verify` archive for supported
 SQLite-native snapshots with a separate stopped-state archive that preserves
 all file-backed history and any artifacts the product backup intentionally
@@ -326,6 +334,7 @@ require separate removal or redesign.
 ```bash
 PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts/agents -p 'test_health_*.py' -v
 PYTHONDONTWRITEBYTECODE=1 python3 -m unittest scripts/agents/test_openclaw_isolated_secrets.py -v
+PYTHONDONTWRITEBYTECODE=1 python3 -m unittest scripts/agents/test_openclaw_session_relocate.py -v
 black --check scripts/agents
 ansible-playbook playbooks/agents/openclaw-health-receiver.yml --syntax-check
 ansible-playbook playbooks/agents/openclaw-health-receiver.yml --check --diff
