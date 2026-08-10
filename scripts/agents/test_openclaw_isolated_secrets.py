@@ -63,7 +63,7 @@ class SecretPayloadTests(unittest.TestCase):
                 first["providers"]["openrouter"]["apiKey"],
                 FIRST_FIXTURE,
             )
-            self.assertEqual(output.stat().st_mode & 0o777, 0o640)
+            self.assertEqual(output.stat().st_mode & 0o777, 0o400)
 
             unchanged = MODULE.write_secret_payload(
                 output,
@@ -86,6 +86,18 @@ class SecretPayloadTests(unittest.TestCase):
                 second["providers"]["openrouter"]["apiKey"],
                 SECOND_FIXTURE,
             )
+
+    def test_rejects_unexpected_output_parent_owner(self) -> None:
+        with tempfile.TemporaryDirectory() as directory_name:
+            output = Path(directory_name) / "secrets.json"
+            with self.assertRaises(MODULE.SecretBootstrapError):
+                MODULE.write_secret_payload(
+                    output,
+                    FIRST_FIXTURE,
+                    os.getuid(),
+                    os.getgid(),
+                    os.getuid() + 1,
+                )
 
     def test_rejects_group_readable_source(self) -> None:
         with tempfile.TemporaryDirectory() as directory_name:

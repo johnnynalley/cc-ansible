@@ -162,8 +162,12 @@ def write_secret_payload(
     provider_key: str,
     output_uid: int,
     output_gid: int,
+    parent_owner_uid: int | None = None,
 ) -> bool:
-    _validate_output_parent(output.parent, output_uid)
+    _validate_output_parent(
+        output.parent,
+        output_uid if parent_owner_uid is None else parent_owner_uid,
+    )
     gateway_token = _existing_gateway_token(output) or secrets.token_urlsafe(48)
     payload = {
         "providers": {"openrouter": {"apiKey": provider_key}},
@@ -177,7 +181,7 @@ def write_secret_payload(
         try:
             if output.read_bytes() == encoded:
                 os.chown(output, output_uid, output_gid, follow_symlinks=False)
-                os.chmod(output, 0o640, follow_symlinks=False)
+                os.chmod(output, 0o400, follow_symlinks=False)
                 return False
         except OSError as exc:
             raise SecretBootstrapError(
@@ -189,7 +193,7 @@ def write_secret_payload(
     )
     temporary = Path(temporary_name)
     try:
-        os.fchmod(descriptor, 0o640)
+        os.fchmod(descriptor, 0o400)
         os.fchown(descriptor, output_uid, output_gid)
         with os.fdopen(descriptor, "wb") as handle:
             handle.write(encoded)
@@ -219,7 +223,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--source-key", default="OPENROUTER_API_KEY")
     parser.add_argument("--source-owner", default="johnny")
     parser.add_argument("--output", type=Path, required=True)
-    parser.add_argument("--output-owner", default="root")
+    parser.add_argument("--output-parent-owner", default="root")
+    parser.add_argument("--output-owner", default="openclaw")
     parser.add_argument("--output-group", default="openclaw")
     return parser
 
@@ -228,12 +233,17 @@ def main() -> int:
     arguments = build_parser().parse_args()
     try:
         source_uid = _identity_id(arguments.source_owner, "user")
+        output_parent_uid = _identity_id(arguments.output_parent_owner, "user")
         output_uid = _identity_id(arguments.output_owner, "user")
         output_gid = _identity_id(arguments.output_group, "group")
         source = read_protected_source(arguments.source, source_uid)
         provider_key = parse_dotenv_key(source, arguments.source_key)
         changed = write_secret_payload(
-            arguments.output, provider_key, output_uid, output_gid
+            arguments.output,
+            provider_key,
+            output_uid,
+            output_gid,
+            output_parent_uid,
         )
     except SecretBootstrapError as exc:
         print(json.dumps({"status": "error", "message": str(exc)}))

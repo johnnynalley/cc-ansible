@@ -313,14 +313,38 @@
               - "{{ openclaw_isolated_gateway_legacy_user }}"
               - --output
               - "{{ openclaw_isolated_gateway_secret_file }}"
-              - --output-owner
+              - --output-parent-owner
               - root
+              - --output-owner
+              - "{{ openclaw_isolated_gateway_user }}"
               - --output-group
               - "{{ openclaw_isolated_gateway_group }}"
           register: openclaw_isolated_gateway_secret_bootstrap
           changed_when: >-
             (openclaw_isolated_gateway_secret_bootstrap.stdout | from_json).changed
           no_log: true
+
+        - name: Inspect isolated Gateway secret boundary
+          ansible.builtin.stat:
+            path: "{{ openclaw_isolated_gateway_secret_file }}"
+          register: openclaw_isolated_gateway_secret_stat
+          no_log: true
+          when: not ansible_check_mode
+
+        - name: Require current OpenClaw file-secret permissions
+          ansible.builtin.assert:
+            that:
+              - openclaw_isolated_gateway_secret_stat.stat.exists
+              - openclaw_isolated_gateway_secret_stat.stat.isreg
+              - not openclaw_isolated_gateway_secret_stat.stat.islnk
+              - openclaw_isolated_gateway_secret_stat.stat.mode == '0400'
+              - openclaw_isolated_gateway_secret_stat.stat.pw_name == openclaw_isolated_gateway_user
+              - openclaw_isolated_gateway_secret_stat.stat.gr_name == openclaw_isolated_gateway_group
+            fail_msg: >-
+              The canary secret must be service-owned and owner-readable only,
+              as required by the current OpenClaw file SecretRef provider.
+          no_log: true
+          when: not ansible_check_mode
 
         - name: Deploy deny-by-default isolated Gateway configuration
           ansible.builtin.template:
