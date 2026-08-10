@@ -333,8 +333,11 @@ The run is a modernization gate rather than a legacy clone:
    each through `plugins uninstall --keep-files --force`, then regenerate the
    sanitized config and refresh the registry from four root-managed immutable
    plugin paths.
-5. Run Doctor twice inside a transient `PrivateNetwork` systemd sandbox with
-   the human home, Docker socket, and controller checkout inaccessible.
+5. Run Doctor twice inside a transient `PrivateNetwork` systemd sandbox. An
+   empty read-only `ProtectHome=tmpfs` view hides the human home while making
+   retired absolute install paths resolve as absent, which the supported
+   uninstall transaction requires. The Docker socket and controller checkout
+   remain explicitly inaccessible.
 6. Compare data-free filesystem manifests and stable SQLite table digests.
    Only a reviewed list of known volatile shared control-plane tables is
    excluded from the stable comparison; an unknown exclusion fails closed.

@@ -41,6 +41,9 @@ class DoctorRehearsalTests(unittest.TestCase):
             '"OPENCLAW_STATE_DIR={{ openclaw_doctor_rehearsal_generation_state }}/state"',
             playbook,
         )
+        self.assertIn("--property=ProtectHome=tmpfs", playbook)
+        self.assertNotIn("--property=ProtectHome=yes", playbook)
+        self.assertNotIn("--property=InaccessiblePaths=/home/johnny", playbook)
 
     def test_transform_rewrites_paths_and_removes_secret_values(self) -> None:
         with tempfile.TemporaryDirectory() as directory_name:

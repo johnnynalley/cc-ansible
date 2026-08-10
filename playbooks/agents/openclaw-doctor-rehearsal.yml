@@ -781,7 +781,10 @@
           - --property=PrivateTmp=yes
           - --property=ProtectClock=yes
           - --property=ProtectControlGroups=yes
-          - --property=ProtectHome=yes
+          # An empty private home makes retired absolute install paths resolve
+          # as absent. ProtectHome=yes returns EACCES, which makes OpenClaw's
+          # supported uninstall transaction abort while checking old markers.
+          - --property=ProtectHome=tmpfs
           - --property=ProtectHostname=yes
           - --property=ProtectKernelLogs=yes
           - --property=ProtectKernelModules=yes
@@ -798,7 +801,6 @@
           - "--property=ReadWritePaths={{ openclaw_doctor_rehearsal_generation_state }}"
           - "--property=ReadWritePaths={{ openclaw_doctor_rehearsal_generation_workspace }}"
           - "--property=ReadWritePaths={{ openclaw_doctor_rehearsal_generation_config_dir }}"
-          - --property=InaccessiblePaths=/home/johnny
           - --property=InaccessiblePaths=/var/run/docker.sock
           - --property=InaccessiblePaths=/opt/cc-ansible
         openclaw_doctor_rehearsal_command_environment:
