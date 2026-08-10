@@ -6,16 +6,23 @@ movie and TV screenshots in Immich into a human-reviewed Seerr queue.
 ## Components
 
 - `immich_media_inbox/`: Python standard-library service. It incrementally
-  crawls stable Immich metadata, OCR, and Smart Search APIs; ranks OCR phrases
-  against Seerr; stores review state in SQLite; and provides a strict
-  result-only JSON CLI for Astra.
+  crawls stable Immich metadata, OCR, and Smart Search APIs; sends admitted
+  candidates to isolated semantic vision; canonicalizes only model-selected
+  titles through Seerr; stores review state in SQLite; and provides a strict
+  candidate-scoped CLI for Astra.
 - `bootstrap-immich-api-key`: one-time helper that derives a narrowly scoped
-  `asset.read` key from the existing Immich helper container.
+  `asset.read` plus `asset.view` key from the existing Immich helper container.
   It first creates and verifies a fresh app-native database backup, refuses
   duplicate names, and never prints either source or created secret.
+- `reconcile-immich-api-key`: adds the exact preview permission to the existing
+  named key in place after a verified Immich database backup; it restores the
+  prior permission set if verification fails.
 - `export-seerr-api-key`: extracts the existing Seerr global API key into a
   protected container-mount file. It refuses to replace a changed export until
   the playbook has taken a standard `live-rollback-backup` copy.
+- `run-cloud-analysis`: bounded controller-side worker that claims only
+  uncertain candidates, uses the explicit tool-less `openai/gpt-5.6-sol` image
+  route, submits strict JSON, and deletes its protected temporary image.
 - `tests/`: dependency-free unit and service-boundary tests.
 
 The service defaults to calibration mode (`REQUESTS_ENABLED=false`). It can
@@ -25,14 +32,11 @@ are rejected by configuration and are never scanned. Before returning or
 acting on cached content, the CLI checks current visibility and purges an asset
 that has since moved outside the allowed timeline/archive set.
 
-Astra cannot access image bytes, thumbnails, raw OCR, filenames, the SQLite
-database, or either service credential. The root-owned host wrapper exposes
-only canonical Seerr title results, confidence, ambiguity, request state, an
-opaque candidate ID, and an Immich link Johnny can open himself.
-
-Arbitrary scene recognition is intentionally not sent to a cloud vision
-provider. Screenshots without a confident OCR/title match remain in the review
-queue until a local or explicitly approved external provider is selected.
+Astra and the isolated workers may inspect pixels and OCR without per-image
+approval only for assets already admitted as likely movie/TV candidates. Image
+export also requires a live cloud-analysis claim. Normal queue output remains
+sanitized, and Astra still has no arbitrary Immich-library, SQLite, general
+Docker, or credential access.
 
 ## Validation
 

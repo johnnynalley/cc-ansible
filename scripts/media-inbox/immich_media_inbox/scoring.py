@@ -1,4 +1,4 @@
-"""Candidate detection and conservative OCR-to-title matching."""
+"""Candidate admission and canonical metadata ordering."""
 
 from __future__ import annotations
 
@@ -24,22 +24,6 @@ TITLE_LABEL_RE = re.compile(
     re.I,
 )
 YEAR_RE = re.compile(r"(?<!\d)(?P<year>19\d{2}|20\d{2})(?!\d)")
-COMMON_UI = {
-    "like",
-    "likes",
-    "comment",
-    "comments",
-    "share",
-    "subscribe",
-    "subscribed",
-    "following",
-    "follow",
-    "reply",
-    "replies",
-    "shorts",
-    "youtube",
-    "home",
-}
 
 
 @dataclass(frozen=True)
@@ -149,58 +133,6 @@ def normalize_title(value: str) -> str:
     return re.sub(r"\s+", " ", value).strip()
 
 
-def _clean_phrase(value: str) -> str:
-    value = value.strip(" \t\r\n:-–—|•·.\"'[]()")
-    value = re.sub(
-        r"^(?:movie|film|show|series)(?:\s+(?:name|title))?\s*[:\-]\s*",
-        "",
-        value,
-        flags=re.I,
-    )
-    value = re.sub(r"^#", "", value)
-    return re.sub(r"\s+", " ", value).strip()
-
-
-def extract_title_phrases(text: str, *, limit: int = 10) -> list[str]:
-    phrases: list[str] = []
-    seen: set[str] = set()
-
-    def add(value: str) -> None:
-        phrase = _clean_phrase(value)
-        normalized = normalize_title(phrase)
-        words = normalized.split()
-        if not normalized or normalized in seen:
-            return
-        if not (2 <= len(phrase) <= 80 and 1 <= len(words) <= 9):
-            return
-        if len(words) == 1 and len(words[0]) < 4:
-            return
-        if all(word in COMMON_UI for word in words):
-            return
-        if not any(character.isalpha() for character in phrase):
-            return
-        seen.add(normalized)
-        phrases.append(phrase)
-
-    for match in TITLE_LABEL_RE.finditer(text):
-        add(match.group("title"))
-    for hashtag in re.findall(r"#([A-Za-z][A-Za-z0-9_]{2,60})", text):
-        split = re.sub(r"(?<=[a-z0-9])(?=[A-Z])", " ", hashtag.replace("_", " "))
-        add(split)
-    for line in text.splitlines():
-        line = re.sub(r"@[\w.]+", "", line)
-        line = re.sub(r"\b(?:19\d{2}|20\d{2})\b", "", line)
-        if SOCIAL_RE.fullmatch(line.strip()):
-            continue
-        add(line)
-    return phrases[:limit]
-
-
-def extract_year(text: str) -> int | None:
-    match = YEAR_RE.search(text)
-    return int(match.group("year")) if match else None
-
-
 def _result_title(result: dict[str, Any]) -> str:
     return str(result.get("title") or result.get("name") or "").strip()
 
@@ -231,23 +163,23 @@ def rank_seerr_results(
             continue
         normalized_title = normalize_title(title)
         similarity = SequenceMatcher(None, normalized_query, normalized_title).ratio()
-        reasons: list[str] = [f"title similarity {similarity:.2f}"]
+        reasons: list[str] = ["fuzzy_title"]
         score = similarity * 0.78
         if normalized_query == normalized_title:
             score = 0.94
-            reasons.append("exact normalized title match")
+            reasons = ["exact_title"]
         elif (
             normalized_title in normalized_query or normalized_query in normalized_title
         ):
             score = max(score, 0.78)
-            reasons.append("title is contained in the OCR phrase")
+            reasons = ["contained_title"]
         year = _result_year(result)
         if hinted_year and year == hinted_year:
             score += 0.05
-            reasons.append("year matches OCR")
+            reasons.append("year_match")
         elif hinted_year and year and year != hinted_year:
             score -= 0.18
-            reasons.append("year conflicts with OCR")
+            reasons.append("year_conflict")
         if score < 0.48:
             continue
         ranked.append(
@@ -257,6 +189,76 @@ def rank_seerr_results(
                 title=title,
                 year=year,
                 score=round(max(0.0, min(score, 0.99)), 3),
+                reasons=tuple(reasons),
+                payload=result,
+                source_query=query,
+            )
+        )
+    return sorted(ranked, key=lambda item: item.score, reverse=True)
+
+
+def rank_analysis_results(
+    query: str,
+    results: Iterable[dict[str, Any]],
+    *,
+    hinted_year: int | None,
+    hinted_media_type: str,
+) -> list[RankedMatch]:
+    """Rank canonical metadata for a title selected by semantic analysis.
+
+    The numeric value is only an internal ordering key. User-facing output
+    exposes the categorical reasons instead of presenting it as a probability.
+    """
+
+    normalized_query = normalize_title(query)
+    ranked: list[RankedMatch] = []
+    for result in results:
+        media_type = str(result.get("mediaType") or "")
+        media_id = result.get("id")
+        title = _result_title(result)
+        if (
+            media_type not in {"movie", "tv"}
+            or not isinstance(media_id, int)
+            or not title
+        ):
+            continue
+        if hinted_media_type in {"movie", "tv"} and media_type != hinted_media_type:
+            continue
+
+        normalized_title = normalize_title(title)
+        similarity = SequenceMatcher(None, normalized_query, normalized_title).ratio()
+        reasons: list[str] = []
+        if normalized_query == normalized_title:
+            score = 0.80
+            reasons.append("exact_title")
+        elif (
+            normalized_title in normalized_query or normalized_query in normalized_title
+        ):
+            score = 0.58
+            reasons.append("contained_title")
+        else:
+            score = similarity * 0.55
+            reasons.append("fuzzy_title")
+
+        year = _result_year(result)
+        if hinted_year and year == hinted_year:
+            score += 0.15
+            reasons.append("year_match")
+        elif hinted_year and year and year != hinted_year:
+            score -= 0.35
+            reasons.append("year_conflict")
+        if hinted_media_type in {"movie", "tv"}:
+            score += 0.05
+            reasons.append("media_type_match")
+        if score < 0.42:
+            continue
+        ranked.append(
+            RankedMatch(
+                media_type=media_type,
+                media_id=media_id,
+                title=title,
+                year=year,
+                score=round(max(0.0, min(score, 1.0)), 3),
                 reasons=tuple(reasons),
                 payload=result,
                 source_query=query,

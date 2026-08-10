@@ -1,3 +1,4 @@
+---
 # =============================================================================
 # pve-m70q - Proxmox Guest Hardware Settings
 # =============================================================================
@@ -13,6 +14,9 @@ proxmox_lxc_hardware:
 proxmox_vm_hardware:
   - name: docker-vm
     vmid: 110
+    # CPU-only local vision inference needs the 12400T's AVX/AVX2/FMA flags;
+    # the legacy QEMU virtual CPU masks all three and is several times slower.
+    cpu: host
     memory: 12288
     balloon: 10240
     agent: true

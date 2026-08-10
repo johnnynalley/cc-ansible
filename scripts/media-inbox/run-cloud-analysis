@@ -1,0 +1,337 @@
+#!/usr/bin/env python3
+"""Drain candidate-scoped vision work through OpenClaw's tool-less model CLI."""
+
+from __future__ import annotations
+
+import argparse
+import base64
+import binascii
+import json
+import os
+import re
+import subprocess
+import sys
+import tempfile
+from pathlib import Path
+from typing import Any
+
+ASSET_ID_RE = re.compile(
+    r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-" r"[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+)
+MAX_CONTROL_BYTES = 128 * 1024
+MAX_IMAGE_BYTES = 8 * 1024 * 1024
+MAX_MODEL_BYTES = 64 * 1024
+
+
+class WorkerError(RuntimeError):
+    def __init__(self, message: str, error_code: str) -> None:
+        super().__init__(message)
+        self.error_code = error_code
+
+
+def run_control(
+    ssh: str,
+    target: str,
+    wrapper: str,
+    arguments: list[str],
+    *,
+    input_text: str | None = None,
+    timeout: int = 45,
+) -> str:
+    command = [
+        ssh,
+        "-o",
+        "BatchMode=yes",
+        "-o",
+        "ConnectTimeout=8",
+        target,
+        "sudo",
+        "-n",
+        wrapper,
+        *arguments,
+    ]
+    try:
+        result = subprocess.run(
+            command,
+            input=input_text,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise WorkerError(
+            "candidate control command failed", "transport_error"
+        ) from exc
+    if result.returncode != 0:
+        raise WorkerError("candidate control command was rejected", "transport_error")
+    if len(result.stdout.encode("utf-8")) > MAX_CONTROL_BYTES:
+        raise WorkerError("candidate control response was too large", "transport_error")
+    return result.stdout
+
+
+def parse_claim(value: str) -> tuple[str, str] | None:
+    try:
+        envelope = json.loads(value)
+    except json.JSONDecodeError as exc:
+        raise WorkerError("claim response was invalid", "transport_error") from exc
+    if not isinstance(envelope, dict) or envelope.get("ok") is not True:
+        raise WorkerError("claim response was rejected", "transport_error")
+    candidate = envelope.get("candidate")
+    if candidate is None:
+        return None
+    if not isinstance(candidate, dict):
+        raise WorkerError("claim candidate was invalid", "transport_error")
+    asset_id = str(candidate.get("candidate_id") or "")
+    encoded_prompt = str(candidate.get("prompt_base64") or "")
+    if not ASSET_ID_RE.fullmatch(asset_id):
+        raise WorkerError("claim candidate ID was invalid", "transport_error")
+    try:
+        prompt_bytes = base64.b64decode(encoded_prompt, validate=True)
+        prompt = prompt_bytes.decode("utf-8", errors="strict")
+    except (binascii.Error, UnicodeDecodeError) as exc:
+        raise WorkerError("claim prompt was invalid", "transport_error") from exc
+    if not prompt or len(prompt_bytes) > MAX_CONTROL_BYTES:
+        raise WorkerError("claim prompt exceeded its boundary", "transport_error")
+    return asset_id, prompt
+
+
+def export_image(
+    ssh: str,
+    target: str,
+    wrapper: str,
+    asset_id: str,
+    destination: Path,
+) -> None:
+    if not ASSET_ID_RE.fullmatch(asset_id):
+        raise WorkerError("candidate ID was invalid", "transport_error")
+    command = [
+        ssh,
+        "-o",
+        "BatchMode=yes",
+        "-o",
+        "ConnectTimeout=8",
+        target,
+        "sudo",
+        "-n",
+        wrapper,
+        "export-image",
+        asset_id,
+    ]
+    try:
+        with destination.open("xb") as output:
+            os.fchmod(output.fileno(), 0o600)
+            result = subprocess.run(
+                command,
+                stdout=output,
+                stderr=subprocess.DEVNULL,
+                timeout=45,
+                check=False,
+            )
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise WorkerError("candidate image export failed", "transport_error") from exc
+    if result.returncode != 0:
+        raise WorkerError("candidate image export was rejected", "transport_error")
+    size = destination.stat().st_size
+    if not 0 < size <= MAX_IMAGE_BYTES:
+        raise WorkerError(
+            "candidate image violated its size boundary", "transport_error"
+        )
+
+
+def extract_model_payload(value: str, *, expected_model: str) -> dict[str, Any]:
+    if len(value.encode("utf-8")) > MAX_CONTROL_BYTES:
+        raise WorkerError("provider envelope was too large", "invalid_output")
+    try:
+        envelope = json.loads(value)
+    except json.JSONDecodeError as exc:
+        raise WorkerError("provider envelope was invalid", "invalid_output") from exc
+    if not isinstance(envelope, dict) or envelope.get("ok") is not True:
+        raise WorkerError("provider rejected the analysis", "provider_error")
+    if envelope.get("transport") != "local" or envelope.get("provider") != "openai":
+        raise WorkerError("unexpected analysis route", "provider_error")
+    if str(envelope.get("model") or "") != expected_model.split("/", 1)[-1]:
+        raise WorkerError("unexpected analysis model", "provider_error")
+    outputs = envelope.get("outputs")
+    if not isinstance(outputs, list) or len(outputs) != 1:
+        raise WorkerError("analysis output count was invalid", "invalid_output")
+    text = outputs[0].get("text") if isinstance(outputs[0], dict) else None
+    if not isinstance(text, str) or not text.strip():
+        raise WorkerError("analysis output was empty", "invalid_output")
+    if len(text.encode("utf-8")) > MAX_MODEL_BYTES:
+        raise WorkerError("analysis output exceeded its boundary", "invalid_output")
+    try:
+        payload = json.loads(text)
+    except json.JSONDecodeError as exc:
+        raise WorkerError(
+            "analysis output was not strict JSON", "invalid_output"
+        ) from exc
+    if not isinstance(payload, dict):
+        raise WorkerError("analysis output was not an object", "invalid_output")
+    return payload
+
+
+def analyze_image(
+    openclaw: str,
+    model: str,
+    image_path: Path,
+    prompt: str,
+    *,
+    timeout: int,
+) -> dict[str, Any]:
+    command = [
+        openclaw,
+        "infer",
+        "model",
+        "run",
+        "--local",
+        "--json",
+        "--model",
+        model,
+        "--thinking",
+        "high",
+        "--file",
+        str(image_path),
+        "--prompt",
+        prompt,
+    ]
+    try:
+        result = subprocess.run(
+            command,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise WorkerError(
+            "vision provider invocation failed", "provider_error"
+        ) from exc
+    if result.returncode != 0:
+        raise WorkerError("vision provider returned an error", "provider_error")
+    return extract_model_payload(result.stdout, expected_model=model)
+
+
+def safe_fail(
+    ssh: str,
+    target: str,
+    wrapper: str,
+    asset_id: str,
+    error_code: str,
+) -> str:
+    try:
+        response = run_control(
+            ssh,
+            target,
+            wrapper,
+            ["fail-cloud", asset_id, error_code],
+        )
+        payload = json.loads(response)
+        state = str(payload.get("analysis_state") or "")
+        if payload.get("ok") is True and state in {"cloud_pending", "error"}:
+            return state
+    except WorkerError:
+        pass
+    except (AttributeError, json.JSONDecodeError):
+        pass
+    print(f"candidate={asset_id} state=claim_recovery_failed", file=sys.stderr)
+    return "recovery_failed"
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--limit", type=int, default=2)
+    parser.add_argument("--ssh", default="/usr/bin/ssh")
+    parser.add_argument("--ssh-target", default="dbc@100.108.254.100")
+    parser.add_argument("--wrapper", default="/usr/local/sbin/immich-media-inbox")
+    parser.add_argument("--openclaw", default="/home/johnny/.npm-global/bin/openclaw")
+    parser.add_argument("--model", default="openai/gpt-5.6-sol")
+    parser.add_argument("--provider-timeout", type=int, default=180)
+    args = parser.parse_args()
+    if not 1 <= args.limit <= 10:
+        parser.error("--limit must be between 1 and 10")
+    if not 30 <= args.provider_timeout <= 600:
+        parser.error("--provider-timeout must be between 30 and 600")
+    if args.model != "openai/gpt-5.6-sol":
+        parser.error("--model must be openai/gpt-5.6-sol")
+    return args
+
+
+def main() -> int:
+    args = parse_args()
+    completed = 0
+    for _index in range(args.limit):
+        claim_text = run_control(
+            args.ssh,
+            args.ssh_target,
+            args.wrapper,
+            ["claim-cloud"],
+        )
+        claim = parse_claim(claim_text)
+        if claim is None:
+            break
+        asset_id, prompt = claim
+        submitted = False
+        try:
+            with tempfile.TemporaryDirectory(prefix="immich-media-inbox-") as temporary:
+                image_path = Path(temporary) / f"{asset_id}.image"
+                export_image(
+                    args.ssh,
+                    args.ssh_target,
+                    args.wrapper,
+                    asset_id,
+                    image_path,
+                )
+                payload = analyze_image(
+                    args.openclaw,
+                    args.model,
+                    image_path,
+                    prompt,
+                    timeout=args.provider_timeout,
+                )
+                try:
+                    response = run_control(
+                        args.ssh,
+                        args.ssh_target,
+                        args.wrapper,
+                        ["submit-analysis", asset_id],
+                        input_text=json.dumps(payload, separators=(",", ":")),
+                    )
+                except WorkerError as exc:
+                    raise WorkerError(
+                        "analysis submission was rejected", "submit_error"
+                    ) from exc
+                try:
+                    submitted = bool(json.loads(response).get("ok"))
+                except (AttributeError, json.JSONDecodeError):
+                    submitted = False
+                if not submitted:
+                    raise WorkerError(
+                        "analysis submission was rejected", "submit_error"
+                    )
+            completed += 1
+            print(f"candidate={asset_id} state=completed provider=gpt-5.6-sol")
+        except WorkerError as exc:
+            final_state = "completed"
+            if not submitted:
+                final_state = safe_fail(
+                    args.ssh,
+                    args.ssh_target,
+                    args.wrapper,
+                    asset_id,
+                    exc.error_code,
+                )
+            print(
+                f"candidate={asset_id} state={final_state} error={exc.error_code}",
+                file=sys.stderr,
+            )
+    print(f"completed={completed}")
+    return 0
+
+
+if __name__ == "__main__":
+    try:
+        sys.exit(main())
+    except WorkerError as exc:
+        print(f"worker_error={exc.error_code}", file=sys.stderr)
+        sys.exit(1)

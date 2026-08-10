@@ -1,0 +1,216 @@
+#!/usr/bin/env python3
+"""Reconcile one existing Immich key to the exact candidate-analysis permissions."""
+
+from __future__ import annotations
+
+import argparse
+import json
+import subprocess
+import sys
+import time
+import urllib.error
+import urllib.request
+from typing import Any
+
+PERMISSIONS = ("asset.read", "asset.view")
+
+
+def api_request(
+    api_url: str,
+    source_key: str,
+    method: str,
+    path: str,
+    body: dict[str, Any] | None = None,
+) -> Any:
+    data = json.dumps(body).encode("utf-8") if body is not None else None
+    headers = {"x-api-key": source_key, "Accept": "application/json"}
+    if data is not None:
+        headers["Content-Type"] = "application/json"
+    request = urllib.request.Request(
+        f"{api_url.rstrip('/')}{path}",
+        data=data,
+        headers=headers,
+        method=method,
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=30) as response:
+            payload = response.read()
+            return json.loads(payload.decode("utf-8")) if payload else None
+    except urllib.error.HTTPError as exc:
+        raise RuntimeError(
+            f"Immich {method} {path} failed with HTTP {exc.code}"
+        ) from None
+    except urllib.error.URLError as exc:
+        raise RuntimeError(f"Immich {method} {path} failed: {exc.reason}") from None
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise RuntimeError(f"Immich {method} {path} returned invalid JSON") from exc
+
+
+def source_key_from_container(container: str, environment_name: str) -> str:
+    try:
+        result = subprocess.run(
+            ["docker", "exec", container, "printenv", environment_name],
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise RuntimeError(
+            "could not read the bootstrap key from the Immich helper container"
+        ) from exc
+    key = result.stdout.strip()
+    if not key:
+        raise RuntimeError(
+            "the Immich helper container returned an empty bootstrap key"
+        )
+    return key
+
+
+def backup_items(response: Any) -> list[dict[str, Any]]:
+    if isinstance(response, dict):
+        response = response.get("backups") or []
+    if not isinstance(response, list):
+        return []
+    return [item for item in response if isinstance(item, dict)]
+
+
+def create_verified_database_backup(
+    api_url: str,
+    source_key: str,
+    *,
+    timeout: int,
+) -> dict[str, Any]:
+    before = backup_items(
+        api_request(api_url, source_key, "GET", "/admin/database-backups")
+    )
+    previous_names = {str(item.get("filename") or "") for item in before}
+    api_request(api_url, source_key, "POST", "/jobs", {"name": "backup-database"})
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        time.sleep(2)
+        current = backup_items(
+            api_request(api_url, source_key, "GET", "/admin/database-backups")
+        )
+        for item in current:
+            filename = str(item.get("filename") or "")
+            try:
+                filesize = int(item.get("filesize") or 0)
+            except (TypeError, ValueError):
+                filesize = 0
+            if filename and filename not in previous_names and filesize > 0:
+                return {
+                    "filename": filename,
+                    "filesize": filesize,
+                    "timezone": item.get("timezone"),
+                }
+    raise RuntimeError("timed out waiting for a new verified Immich database backup")
+
+
+def find_key(keys: Any, key_id: str) -> dict[str, Any] | None:
+    if not isinstance(keys, list):
+        return None
+    return next(
+        (
+            item
+            for item in keys
+            if isinstance(item, dict) and str(item.get("id") or "") == key_id
+        ),
+        None,
+    )
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--api-url", default="http://127.0.0.1:2283/api")
+    parser.add_argument("--source-container", default="immich_folder_album_creator")
+    parser.add_argument("--source-env", default="API_KEY")
+    parser.add_argument("--key-id", required=True)
+    parser.add_argument("--name", default="immich-media-inbox")
+    parser.add_argument("--require-new-backup", action="store_true")
+    parser.add_argument("--backup-timeout", type=int, default=600)
+    return parser.parse_args()
+
+
+def main() -> int:
+    args = parse_args()
+    if not 30 <= args.backup_timeout <= 3600:
+        raise RuntimeError("backup timeout must be between 30 and 3600 seconds")
+    source_key = source_key_from_container(args.source_container, args.source_env)
+    current = find_key(
+        api_request(args.api_url, source_key, "GET", "/api-keys"), args.key_id
+    )
+    if current is None:
+        raise RuntimeError(f"Immich API key id={args.key_id} was not found")
+    current_name = str(current.get("name") or "")
+    if current_name != args.name:
+        raise RuntimeError("Immich API key ID does not have the expected name")
+    previous_permissions = tuple(
+        sorted(str(item) for item in current.get("permissions") or [])
+    )
+    expected_permissions = tuple(sorted(PERMISSIONS))
+    if previous_permissions == expected_permissions:
+        print(
+            json.dumps(
+                {
+                    "changed": False,
+                    "id": args.key_id,
+                    "permissions": list(PERMISSIONS),
+                },
+                sort_keys=True,
+            )
+        )
+        return 0
+    if not args.require_new_backup:
+        raise RuntimeError("permission changes require --require-new-backup")
+
+    rollback_backup = create_verified_database_backup(
+        args.api_url,
+        source_key,
+        timeout=args.backup_timeout,
+    )
+    update_path = f"/api-keys/{args.key_id}"
+    new_body = {"name": args.name, "permissions": list(PERMISSIONS)}
+    old_body = {"name": current_name, "permissions": list(previous_permissions)}
+    try:
+        api_request(args.api_url, source_key, "PUT", update_path, new_body)
+        verified = find_key(
+            api_request(args.api_url, source_key, "GET", "/api-keys"), args.key_id
+        )
+        actual_permissions = tuple(
+            sorted(str(item) for item in (verified or {}).get("permissions") or [])
+        )
+        if actual_permissions != expected_permissions:
+            raise RuntimeError("updated Immich key permissions did not verify")
+    except Exception as exc:
+        try:
+            api_request(args.api_url, source_key, "PUT", update_path, old_body)
+        except Exception as rollback_exc:
+            raise RuntimeError(
+                "Immich key update failed and its prior permissions could not be restored"
+            ) from rollback_exc
+        raise RuntimeError(
+            "Immich key update failed; its prior permissions were restored"
+        ) from exc
+
+    print(
+        json.dumps(
+            {
+                "changed": True,
+                "id": args.key_id,
+                "permissions": list(PERMISSIONS),
+                "previous_permissions": list(previous_permissions),
+                "rollback_backup": rollback_backup,
+            },
+            sort_keys=True,
+        )
+    )
+    return 0
+
+
+if __name__ == "__main__":
+    try:
+        sys.exit(main())
+    except RuntimeError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        sys.exit(1)

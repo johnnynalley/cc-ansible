@@ -8,8 +8,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from immich_media_inbox.scoring import (  # noqa: E402
     detect_candidate,
-    extract_title_phrases,
-    extract_year,
     ocr_text,
     rank_seerr_results,
 )
@@ -57,12 +55,6 @@ class ScoringTests(unittest.TestCase):
             {"smart:2"},
         )
         self.assertGreaterEqual(detection.score, 0.5)
-
-    def test_extracts_labeled_title_hashtag_and_year(self) -> None:
-        text = "Movie name: The Nice Guys\n#TheNiceGuys\n2016\nLike Share"
-        phrases = extract_title_phrases(text)
-        self.assertIn("The Nice Guys", phrases)
-        self.assertEqual(extract_year(text), 2016)
 
     def test_exact_seerr_match_beats_conflicting_year(self) -> None:
         results = [

@@ -7,10 +7,26 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from immich_media_inbox.analysis import AnalysisResult, Evidence  # noqa: E402
 from immich_media_inbox.scoring import Detection, RankedMatch  # noqa: E402
 from immich_media_inbox.store import Store  # noqa: E402
 
 ASSET_ID = "12345678-1234-1234-1234-123456789abc"
+
+
+def completed_analysis() -> AnalysisResult:
+    return AnalysisResult(
+        decision="identified",
+        media_type="movie",
+        title="The Nice Guys",
+        year=2016,
+        alternate_titles=(),
+        certainty="high",
+        evidence=(Evidence("comment", "The Nice Guys is the movie"),),
+        summary="The comment identifies the movie.",
+        needs_cloud=False,
+        uncertainty_reasons=(),
+    )
 
 
 class StoreTests(unittest.TestCase):
@@ -38,6 +54,10 @@ class StoreTests(unittest.TestCase):
             ocr_text="Movie: The Nice Guys",
         )
 
+    def complete_asset(self, asset_id: str = ASSET_ID) -> None:
+        self.store.enqueue_local_analysis(asset_id)
+        self.store.record_analysis(asset_id, completed_analysis(), provider="local")
+
     def test_asset_queue_match_and_disposition(self) -> None:
         self.insert_asset()
         self.store.replace_matches(
@@ -59,6 +79,7 @@ class StoreTests(unittest.TestCase):
                 )
             ],
         )
+        self.complete_asset()
         queued = self.store.queue(status="pending", threshold=0.4)
         self.assertEqual(queued[0]["match_count"], 1)
         self.store.set_status(ASSET_ID, "ignored")
@@ -103,7 +124,11 @@ class StoreTests(unittest.TestCase):
         )
         self.assertTrue(self.store.ensure_pipeline_version(2))
         self.assertEqual(self.store.candidate(ASSET_ID)["matches"], [])
-        self.assertTrue(self.store.asset_needs_ocr(ASSET_ID, self.asset["updatedAt"]))
+        self.assertFalse(self.store.asset_needs_ocr(ASSET_ID, self.asset["updatedAt"]))
+        self.store.prepare_analysis_queue(0.4)
+        self.assertEqual(
+            self.store.candidate(ASSET_ID)["analysis_state"], "local_pending"
+        )
         self.assertFalse(self.store.ensure_pipeline_version(2))
 
         self.store.upsert_asset(
@@ -132,6 +157,7 @@ class StoreTests(unittest.TestCase):
                 {"metadata-crawl"},
                 ocr_text=large_ocr,
             )
+            self.complete_asset(asset["id"])
 
         queued = self.store.queue(status="pending", threshold=0.0, limit=5)
 

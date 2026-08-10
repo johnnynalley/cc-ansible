@@ -8,14 +8,20 @@ import threading
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
-from .clients import ApiError, ImmichClient, SeerrClient
+from .analysis import AnalysisResult
+from .clients import (
+    AnalysisResponseError,
+    ApiError,
+    ImmichClient,
+    OllamaClient,
+    SeerrClient,
+)
 from .config import Config
 from .scoring import (
     RankedMatch,
     detect_candidate,
-    extract_title_phrases,
-    extract_year,
     ocr_text,
+    rank_analysis_results,
     rank_seerr_results,
 )
 from .store import Store, utc_now
@@ -30,7 +36,7 @@ SMART_SEARCH_PROMPTS = (
     "a cinematic scene with subtitles",
     "a vertical video clip from a movie or television show",
 )
-PIPELINE_VERSION = 3
+PIPELINE_VERSION = 4
 
 
 def _parse_time(value: str | None) -> datetime | None:
@@ -49,11 +55,13 @@ class Scanner:
         store: Store,
         immich: ImmichClient,
         seerr: SeerrClient,
+        ollama: OllamaClient | None = None,
     ) -> None:
         self.config = config
         self.store = store
         self.immich = immich
         self.seerr = seerr
+        self.ollama = ollama
         self._scan_lock = threading.Lock()
         self._wake = threading.Event()
         self._stop = threading.Event()
@@ -103,6 +111,8 @@ class Scanner:
             report["pipeline_reset"] = self.store.ensure_pipeline_version(
                 PIPELINE_VERSION
             )
+            if report["pipeline_reset"]:
+                self.store.prepare_analysis_queue(self.config.candidate_threshold)
             features = self.immich.server_features()
             if not features.get("ocr") or not features.get("search"):
                 raise RuntimeError("Immich OCR and search must both be enabled")
@@ -111,6 +121,7 @@ class Scanner:
             report["smart_seed"] = self._seed_one_smart_prompt()
             report["recent"] = self._recent_batch()
             report["crawl"] = self._crawl_batch()
+            report["analysis"] = self._analyze_batch()
             self.store.set_meta("scan_state", "idle")
             self.store.set_meta("scan_completed_at", utc_now())
             self.store.set_meta("scan_last_error", "")
@@ -325,22 +336,103 @@ class Scanner:
         text = ocr_text(rows)
         detection = detect_candidate(asset, rows, sources)
         self.store.upsert_asset(asset, rows, detection, sources, ocr_text=text)
-        if detection.score >= self.config.auto_match_threshold and text:
-            self._auto_match(asset_id, text)
+        if detection.score >= self.config.candidate_threshold:
+            self.store.enqueue_local_analysis(asset_id)
+        else:
+            self.store.mark_prefilter_rejected(asset_id)
 
-    def _auto_match(self, asset_id: str, text: str) -> None:
-        hinted_year = extract_year(text)
-        deduplicated: dict[tuple[str, int], RankedMatch] = {}
-        for phrase in extract_title_phrases(text, limit=5):
+    def _analyze_batch(self) -> dict[str, Any]:
+        if self.ollama is None:
+            return {"configured": False, "processed": 0, "errors": 0}
+        processed = 0
+        escalated = 0
+        errors = 0
+        for candidate in self.store.local_analysis_batch(
+            self.config.analysis_batch_size
+        ):
+            asset_id = str(candidate["asset_id"])
             try:
-                results = self.seerr.search(phrase)
-            except ApiError as exc:
-                LOGGER.warning(
-                    "Seerr auto-match failed for asset %s: %s", asset_id, exc
+                live_asset = self.immich.get_asset(asset_id)
+                visibility = str(live_asset.get("visibility") or "").lower()
+                if visibility not in self.config.allowed_visibilities:
+                    self.store.delete_asset(asset_id)
+                    continue
+                image_bytes, _content_type = self.immich.get_preview(asset_id)
+                result = self.ollama.analyze(
+                    image_bytes,
+                    str(candidate.get("ocr_text") or ""),
                 )
-                self.store.record_error(asset_id, str(exc))
-                return
-            for match in rank_seerr_results(phrase, results, hinted_year=hinted_year):
+            except AnalysisResponseError as exc:
+                self.store.record_local_analysis_error(
+                    asset_id,
+                    str(exc),
+                    maximum_attempts=self.config.local_analysis_max_attempts,
+                    escalate=True,
+                )
+                self.store.replace_matches(asset_id, [])
+                escalated += 1
+                continue
+            except ApiError as exc:
+                self.store.record_local_analysis_error(
+                    asset_id,
+                    str(exc),
+                    maximum_attempts=self.config.local_analysis_max_attempts,
+                    escalate=False,
+                )
+                LOGGER.warning("local analysis failed for asset %s: %s", asset_id, exc)
+                errors += 1
+                continue
+
+            matches: list[RankedMatch] = []
+            if result.local_complete and result.is_media:
+                try:
+                    matches = self.canonical_matches(result)
+                except ApiError as exc:
+                    self.store.record_local_analysis_error(
+                        asset_id,
+                        str(exc),
+                        maximum_attempts=self.config.local_analysis_max_attempts,
+                        escalate=False,
+                    )
+                    LOGGER.warning(
+                        "Seerr canonicalization failed for asset %s: %s",
+                        asset_id,
+                        exc,
+                    )
+                    errors += 1
+                    continue
+            state = self.store.record_analysis(asset_id, result, provider="local")
+            self.store.replace_matches(asset_id, matches)
+            if state == "cloud_pending":
+                escalated += 1
+            processed += 1
+        return {
+            "configured": True,
+            "processed": processed,
+            "escalated": escalated,
+            "errors": errors,
+        }
+
+    def canonicalize_analysis(
+        self, asset_id: str, analysis: AnalysisResult
+    ) -> list[RankedMatch]:
+        ranked = self.canonical_matches(analysis)
+        self.store.replace_matches(asset_id, ranked)
+        return ranked
+
+    def canonical_matches(self, analysis: AnalysisResult) -> list[RankedMatch]:
+        if not analysis.is_media or not analysis.title:
+            return []
+        deduplicated: dict[tuple[str, int], RankedMatch] = {}
+        queries = (analysis.title, *analysis.alternate_titles)
+        for query in queries[:4]:
+            results = self.seerr.search(query)
+            for match in rank_analysis_results(
+                query,
+                results,
+                hinted_year=analysis.year,
+                hinted_media_type=analysis.media_type,
+            ):
                 key = (match.media_type, match.media_id)
                 previous = deduplicated.get(key)
                 if previous is None or match.score > previous.score:
@@ -348,9 +440,7 @@ class Scanner:
         ranked = sorted(
             deduplicated.values(), key=lambda item: item.score, reverse=True
         )[:8]
-        # Replacing with an empty set is intentional: changed OCR must not
-        # leave a stale title suggestion attached to an asset.
-        self.store.replace_matches(asset_id, ranked)
+        return ranked
 
     def manual_match(self, asset_id: str, query: str) -> list[RankedMatch]:
         query = query.strip()

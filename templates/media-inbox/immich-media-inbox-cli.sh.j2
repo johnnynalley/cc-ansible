@@ -1,5 +1,5 @@
 #!/bin/bash
-# Managed by Ansible. Result-only command boundary for Astra.
+# Managed by Ansible. Candidate-scoped command boundary for Astra.
 set -euo pipefail
 
 readonly APP_COMPOSE_FILE="{{ immich_media_inbox_root }}/docker-compose.yml"
@@ -79,6 +79,18 @@ case "$1" in
         *) fail ;;
       esac
     done
+    ;;
+  claim-cloud)
+    [[ $# -eq 1 ]] || fail
+    ;;
+  export-image|submit-analysis)
+    [[ $# -eq 2 ]] || fail
+    require_asset_id "$2"
+    ;;
+  fail-cloud)
+    [[ $# -eq 3 ]] || fail
+    require_asset_id "$2"
+    [[ "$3" =~ ^(invalid_output|provider_error|submit_error|transport_error)$ ]] || fail
     ;;
   *) fail ;;
 esac

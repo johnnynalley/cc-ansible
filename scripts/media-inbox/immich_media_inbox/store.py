@@ -9,6 +9,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterator
 
+from .analysis import AnalysisResult
 from .scoring import Detection, RankedMatch
 
 
@@ -57,6 +58,14 @@ class Store:
                     detection_reasons TEXT NOT NULL DEFAULT '[]',
                     sources TEXT NOT NULL DEFAULT '[]',
                     review_status TEXT NOT NULL DEFAULT 'pending',
+                    analysis_state TEXT NOT NULL DEFAULT 'unprocessed',
+                    analysis_media INTEGER,
+                    analysis_provider TEXT,
+                    analysis_result TEXT,
+                    analysis_attempts INTEGER NOT NULL DEFAULT 0,
+                    cloud_analysis_attempts INTEGER NOT NULL DEFAULT 0,
+                    analysis_updated_at TEXT,
+                    analysis_error TEXT,
                     scanned_at TEXT NOT NULL,
                     last_error TEXT
                 );
@@ -93,6 +102,47 @@ class Store:
                     created_at TEXT NOT NULL
                 );
                 """)
+            self._ensure_column(
+                connection,
+                "assets",
+                "analysis_state",
+                "TEXT NOT NULL DEFAULT 'unprocessed'",
+            )
+            self._ensure_column(connection, "assets", "analysis_media", "INTEGER")
+            self._ensure_column(connection, "assets", "analysis_provider", "TEXT")
+            self._ensure_column(connection, "assets", "analysis_result", "TEXT")
+            self._ensure_column(
+                connection,
+                "assets",
+                "analysis_attempts",
+                "INTEGER NOT NULL DEFAULT 0",
+            )
+            self._ensure_column(
+                connection,
+                "assets",
+                "cloud_analysis_attempts",
+                "INTEGER NOT NULL DEFAULT 0",
+            )
+            self._ensure_column(connection, "assets", "analysis_updated_at", "TEXT")
+            self._ensure_column(connection, "assets", "analysis_error", "TEXT")
+            connection.execute(
+                "CREATE INDEX IF NOT EXISTS assets_analysis_queue "
+                "ON assets(analysis_state, detection_score DESC, file_created_at DESC)"
+            )
+
+    @staticmethod
+    def _ensure_column(
+        connection: sqlite3.Connection,
+        table: str,
+        name: str,
+        definition: str,
+    ) -> None:
+        columns = {
+            str(row["name"])
+            for row in connection.execute(f"PRAGMA table_info({table})").fetchall()
+        }
+        if name not in columns:
+            connection.execute(f"ALTER TABLE {table} ADD COLUMN {name} {definition}")
 
     def get_meta(
         self, key: str, *, connection: sqlite3.Connection | None = None
@@ -130,9 +180,41 @@ class Store:
             if current == expected:
                 return False
             connection.execute("DELETE FROM matches")
-            connection.execute("UPDATE assets SET updated_at = '', last_error = NULL")
+            connection.execute("""
+                UPDATE assets
+                SET analysis_state = 'unprocessed', analysis_media = NULL,
+                    analysis_provider = NULL, analysis_result = NULL,
+                    analysis_attempts = 0, cloud_analysis_attempts = 0,
+                    analysis_updated_at = NULL,
+                    analysis_error = NULL
+                """)
             self.set_meta("pipeline_version", expected, connection=connection)
         return True
+
+    def prepare_analysis_queue(self, threshold: float) -> None:
+        """Queue cached candidates without re-fetching unchanged OCR."""
+
+        with self.connect() as connection:
+            connection.execute(
+                """
+                UPDATE assets
+                SET analysis_state = CASE
+                        WHEN detection_score >= ? THEN 'local_pending'
+                        ELSE 'filtered'
+                    END,
+                    analysis_media = CASE
+                        WHEN detection_score >= ? THEN NULL
+                        ELSE 0
+                    END,
+                    analysis_provider = CASE
+                        WHEN detection_score >= ? THEN NULL
+                        ELSE 'prefilter'
+                    END,
+                    analysis_updated_at = ?
+                WHERE analysis_state = 'unprocessed'
+                """,
+                (threshold, threshold, threshold, utc_now()),
+            )
 
     def asset_needs_ocr(self, asset_id: str, updated_at: str) -> bool:
         with self.connect() as connection:
@@ -175,6 +257,21 @@ class Store:
     ) -> None:
         now = utc_now()
         with self.connect() as connection:
+            existing = connection.execute(
+                """
+                SELECT updated_at, checksum, ocr_text, detection_score
+                FROM assets WHERE asset_id = ?
+                """,
+                (str(asset["id"]),),
+            ).fetchone()
+            changed = (
+                existing is None
+                or str(existing["updated_at"] or "")
+                != str(asset.get("updatedAt") or now)
+                or str(existing["checksum"] or "") != str(asset.get("checksum") or "")
+                or str(existing["ocr_text"] or "") != ocr_text
+                or float(existing["detection_score"] or 0) != detection.score
+            )
             connection.execute(
                 """
                 INSERT INTO assets(
@@ -196,7 +293,23 @@ class Store:
                     detection_reasons = excluded.detection_reasons,
                     sources = excluded.sources,
                     scanned_at = excluded.scanned_at,
-                    last_error = NULL
+                    last_error = NULL,
+                    analysis_state = CASE WHEN ? THEN 'unprocessed'
+                        ELSE assets.analysis_state END,
+                    analysis_media = CASE WHEN ? THEN NULL
+                        ELSE assets.analysis_media END,
+                    analysis_provider = CASE WHEN ? THEN NULL
+                        ELSE assets.analysis_provider END,
+                    analysis_result = CASE WHEN ? THEN NULL
+                        ELSE assets.analysis_result END,
+                    analysis_attempts = CASE WHEN ? THEN 0
+                        ELSE assets.analysis_attempts END,
+                    cloud_analysis_attempts = CASE WHEN ? THEN 0
+                        ELSE assets.cloud_analysis_attempts END,
+                    analysis_updated_at = CASE WHEN ? THEN NULL
+                        ELSE assets.analysis_updated_at END,
+                    analysis_error = CASE WHEN ? THEN NULL
+                        ELSE assets.analysis_error END
                 """,
                 (
                     asset["id"],
@@ -213,8 +326,228 @@ class Store:
                     json.dumps(detection.reasons),
                     json.dumps(sorted(sources)),
                     now,
+                    changed,
+                    changed,
+                    changed,
+                    changed,
+                    changed,
+                    changed,
+                    changed,
+                    changed,
                 ),
             )
+
+    def enqueue_local_analysis(self, asset_id: str) -> None:
+        with self.connect() as connection:
+            connection.execute(
+                """
+                UPDATE assets
+                SET analysis_state = 'local_pending', analysis_error = NULL
+                WHERE asset_id = ? AND analysis_state = 'unprocessed'
+                """,
+                (asset_id,),
+            )
+
+    def mark_prefilter_rejected(self, asset_id: str) -> None:
+        with self.connect() as connection:
+            connection.execute(
+                """
+                UPDATE assets
+                SET analysis_state = 'filtered', analysis_media = 0,
+                    analysis_provider = 'prefilter', analysis_updated_at = ?,
+                    analysis_error = NULL
+                WHERE asset_id = ?
+                """,
+                (utc_now(), asset_id),
+            )
+
+    def local_analysis_batch(self, limit: int) -> list[dict[str, Any]]:
+        with self.connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT asset_id, ocr_text
+                FROM assets
+                WHERE analysis_state = 'local_pending'
+                ORDER BY detection_score DESC, file_created_at DESC
+                LIMIT ?
+                """,
+                (limit,),
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def record_analysis(
+        self,
+        asset_id: str,
+        result: AnalysisResult,
+        *,
+        provider: str,
+    ) -> str:
+        if provider not in {"local", "gpt-5.6-sol"}:
+            raise ValueError("invalid analysis provider")
+        expected_state = (
+            "cloud_running" if provider == "gpt-5.6-sol" else "local_pending"
+        )
+        state = "complete" if provider == "gpt-5.6-sol" else "cloud_pending"
+        if provider == "local" and result.local_complete:
+            state = "complete"
+        now = utc_now()
+        with self.connect() as connection:
+            cursor = connection.execute(
+                """
+                UPDATE assets
+                SET analysis_state = ?, analysis_media = ?, analysis_provider = ?,
+                    analysis_result = ?, analysis_attempts = analysis_attempts + 1,
+                    analysis_updated_at = ?, analysis_error = NULL
+                WHERE asset_id = ? AND analysis_state = ?
+                """,
+                (
+                    state,
+                    1 if result.is_media else 0,
+                    provider,
+                    json.dumps(result.as_dict(), separators=(",", ":")),
+                    now,
+                    asset_id,
+                    expected_state,
+                ),
+            )
+            if cursor.rowcount != 1:
+                raise KeyError(asset_id)
+            if state == "complete" and not result.is_media:
+                connection.execute(
+                    "UPDATE assets SET review_status = 'not_media' "
+                    "WHERE asset_id = ? AND review_status = 'pending'",
+                    (asset_id,),
+                )
+            connection.execute(
+                "INSERT INTO events(asset_id, event_type, detail, created_at) "
+                "VALUES(?, ?, ?, ?)",
+                (
+                    asset_id,
+                    f"analysis:{provider}:{state}",
+                    json.dumps(
+                        {
+                            "decision": result.decision,
+                            "certainty": result.certainty,
+                        }
+                    ),
+                    now,
+                ),
+            )
+        return state
+
+    def record_local_analysis_error(
+        self,
+        asset_id: str,
+        message: str,
+        *,
+        maximum_attempts: int,
+        escalate: bool,
+    ) -> str:
+        with self.connect() as connection:
+            row = connection.execute(
+                "SELECT analysis_attempts FROM assets WHERE asset_id = ?",
+                (asset_id,),
+            ).fetchone()
+            if row is None:
+                raise KeyError(asset_id)
+            attempts = int(row["analysis_attempts"] or 0) + 1
+            if escalate or attempts >= maximum_attempts:
+                state = "cloud_pending" if escalate else "error"
+            else:
+                state = "local_pending"
+            connection.execute(
+                """
+                UPDATE assets
+                SET analysis_state = ?, analysis_attempts = ?,
+                    analysis_updated_at = ?, analysis_error = ?
+                WHERE asset_id = ?
+                """,
+                (state, attempts, utc_now(), message[:500], asset_id),
+            )
+        return state
+
+    def claim_cloud_analysis(
+        self,
+        *,
+        stale_before: str,
+        maximum_attempts: int,
+    ) -> dict[str, Any] | None:
+        with self.connect() as connection:
+            connection.execute(
+                """
+                UPDATE assets
+                SET analysis_state = CASE
+                        WHEN cloud_analysis_attempts + 1 >= ? THEN 'error'
+                        ELSE 'cloud_pending'
+                    END,
+                    cloud_analysis_attempts = cloud_analysis_attempts + 1,
+                    analysis_error = 'stale_claim'
+                WHERE analysis_state = 'cloud_running'
+                  AND analysis_updated_at < ?
+                """,
+                (maximum_attempts, stale_before),
+            )
+            row = connection.execute("""
+                SELECT asset_id, ocr_text
+                FROM assets
+                WHERE analysis_state = 'cloud_pending'
+                ORDER BY detection_score DESC, file_created_at DESC
+                LIMIT 1
+                """).fetchone()
+            if row is None:
+                return None
+            asset_id = str(row["asset_id"])
+            cursor = connection.execute(
+                """
+                UPDATE assets
+                SET analysis_state = 'cloud_running', analysis_updated_at = ?
+                WHERE asset_id = ? AND analysis_state = 'cloud_pending'
+                """,
+                (utc_now(), asset_id),
+            )
+            if cursor.rowcount != 1:
+                return None
+        return dict(row)
+
+    def cloud_candidate(self, asset_id: str) -> dict[str, Any] | None:
+        with self.connect() as connection:
+            row = connection.execute(
+                """
+                SELECT asset_id, visibility, analysis_state
+                FROM assets
+                WHERE asset_id = ? AND analysis_state = 'cloud_running'
+                """,
+                (asset_id,),
+            ).fetchone()
+        return dict(row) if row else None
+
+    def fail_cloud_analysis(
+        self,
+        asset_id: str,
+        error_code: str,
+        *,
+        maximum_attempts: int,
+    ) -> str:
+        with self.connect() as connection:
+            cursor = connection.execute(
+                """
+                UPDATE assets
+                SET analysis_state = CASE
+                        WHEN cloud_analysis_attempts + 1 >= ? THEN 'error'
+                        ELSE 'cloud_pending'
+                    END,
+                    cloud_analysis_attempts = cloud_analysis_attempts + 1,
+                    analysis_updated_at = ?, analysis_error = ?
+                WHERE asset_id = ? AND analysis_state = 'cloud_running'
+                """,
+                (maximum_attempts, utc_now(), error_code[:120], asset_id),
+            )
+            if cursor.rowcount != 1:
+                raise KeyError(asset_id)
+            row = connection.execute(
+                "SELECT analysis_state FROM assets WHERE asset_id = ?", (asset_id,)
+            ).fetchone()
+        return str(row["analysis_state"])
 
     def record_error(self, asset_id: str, message: str) -> None:
         with self.connect() as connection:
@@ -272,10 +605,12 @@ class Store:
                 SELECT asset_id
                 FROM assets
                 WHERE review_status = ? AND detection_score >= ?
+                  AND (? != 'pending' OR
+                       (analysis_state = 'complete' AND analysis_media = 1))
                 ORDER BY detection_score DESC, file_created_at DESC
                 LIMIT ?
                 """,
-                (status, threshold, limit),
+                (status, threshold, status, limit),
             ).fetchall()
             asset_ids = [str(row["asset_id"]) for row in id_rows]
             if not asset_ids:
@@ -340,6 +675,14 @@ class Store:
                 SELECT COUNT(*) AS scanned,
                        SUM(CASE WHEN ocr_text != '' THEN 1 ELSE 0 END) AS with_ocr,
                        SUM(CASE WHEN detection_score >= ? THEN 1 ELSE 0 END) AS candidates,
+                       SUM(CASE WHEN analysis_state = 'local_pending' THEN 1 ELSE 0 END)
+                           AS local_pending,
+                       SUM(CASE WHEN analysis_state IN ('cloud_pending', 'cloud_running')
+                                THEN 1 ELSE 0 END) AS cloud_pending,
+                       SUM(CASE WHEN analysis_state = 'complete' AND analysis_media = 1
+                                THEN 1 ELSE 0 END) AS analyzed_media,
+                       SUM(CASE WHEN analysis_state = 'error' THEN 1 ELSE 0 END)
+                           AS analysis_errors,
                        SUM(CASE WHEN last_error IS NOT NULL THEN 1 ELSE 0 END) AS errors
                 FROM assets
                 """,

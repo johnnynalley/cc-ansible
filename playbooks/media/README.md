@@ -13,7 +13,7 @@ Owner area: Plex, streaming, media maintenance, release-policy automation.
 
 | Playbook | Hosts | Purpose | Validation |
 | --- | --- | --- | --- |
-| `immich-media-inbox.yml` | `docker_hosts` (opt-in) | Deploy Astra's headless Immich screenshot movie/TV review queue. | `ansible-playbook playbooks/media/immich-media-inbox.yml --syntax-check` |
+| `immich-media-inbox.yml` | `docker_hosts` (opt-in) | Deploy Astra's headless Immich screenshot semantic-analysis queue. | `ansible-playbook playbooks/media/immich-media-inbox.yml --syntax-check` |
 | `media-release-stamper.yml` | `gluetun_hosts` | Configure media release metadata stamping. | `ansible-playbook playbooks/media/media-release-stamper.yml --syntax-check` |
 | `media-stack-health.yml` | `docker-vm` | Configure media health monitoring and classified NFS/container-bind recovery. | `ansible-playbook playbooks/media/media-stack-health.yml --syntax-check` |
 | `plex-server-health.yml` | `media-vm, nas_server` | Configure Plex server, VirtioFS, and scrub-window health monitor. | `ansible-playbook playbooks/media/plex-server-health.yml --syntax-check` |

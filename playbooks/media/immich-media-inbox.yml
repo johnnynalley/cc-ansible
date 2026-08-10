@@ -19,6 +19,8 @@
     immich_media_inbox_repo_root: "{{ ansible_config_file | dirname }}"
     immich_media_inbox_bootstrap_helper: >-
       {{ immich_media_inbox_bootstrap_work_dir }}/bootstrap-immich-api-key
+    immich_media_inbox_reconcile_helper: >-
+      {{ immich_media_inbox_bootstrap_work_dir }}/reconcile-immich-api-key
     immich_media_inbox_bootstrap_secret_path: >-
       {{ immich_media_inbox_bootstrap_work_dir }}/immich_api_key
     immich_media_inbox_bootstrap_metadata_path: >-
@@ -31,6 +33,9 @@
                immich_media_inbox_app_source_dir + '/*.py') | sort }}
     immich_media_inbox_app_module_names: >-
       {{ immich_media_inbox_app_modules | map('basename') | list }}
+    immich_media_inbox_expected_permissions:
+      - asset.read
+      - asset.view
 
   tasks:
     - name: Skip hosts without Immich Media Inbox enabled
@@ -91,6 +96,10 @@
           group: root
           mode: "0755"
         - path: "{{ immich_media_inbox_root }}/data"
+          owner: "{{ immich_media_inbox_runtime_user }}"
+          group: "{{ immich_media_inbox_runtime_group }}"
+          mode: "0750"
+        - path: "{{ immich_media_inbox_root }}/ollama"
           owner: "{{ immich_media_inbox_runtime_user }}"
           group: "{{ immich_media_inbox_runtime_group }}"
           mode: "0750"
@@ -231,6 +240,153 @@
         fail_msg: "The scoped Immich API key was not installed."
       when: not ansible_check_mode
 
+    - name: Check for Immich API key metadata
+      ansible.builtin.stat:
+        path: "{{ immich_media_inbox_root }}/secrets/immich_api_key.json"
+      register: immich_media_inbox_key_metadata_stat
+
+    - name: Require Immich API key metadata before permission reconciliation
+      ansible.builtin.assert:
+        that:
+          - immich_media_inbox_key_metadata_stat.stat.exists
+          - immich_media_inbox_key_metadata_stat.stat.isreg
+        fail_msg: >-
+          The protected Immich key metadata is required to reconcile the
+          existing key in place without creating a duplicate.
+      when: not ansible_check_mode
+
+    - name: Reconcile candidate-preview permission on the existing Immich key
+      when: not ansible_check_mode
+      block:
+        - name: Read protected Immich API key metadata
+          ansible.builtin.slurp:
+            src: "{{ immich_media_inbox_root }}/secrets/immich_api_key.json"
+          register: immich_media_inbox_key_metadata_raw
+          no_log: true
+
+        - name: Parse protected Immich API key metadata
+          ansible.builtin.set_fact:
+            immich_media_inbox_key_metadata: >-
+              {{ immich_media_inbox_key_metadata_raw.content
+                 | b64decode | from_json }}
+          no_log: true
+
+        - name: Validate protected Immich API key identity
+          ansible.builtin.assert:
+            that:
+              - >-
+                immich_media_inbox_key_metadata.id
+                is match('^[0-9A-Fa-f-]{36}$')
+              - >-
+                immich_media_inbox_key_metadata.name
+                == immich_media_inbox_bootstrap_key_name
+            fail_msg: >-
+              Protected Immich key metadata has an unexpected identity.
+          no_log: true
+
+        - name: Create temporary Immich key reconciliation directory
+          ansible.builtin.file:
+            path: "{{ immich_media_inbox_bootstrap_work_dir }}"
+            state: directory
+            owner: root
+            group: root
+            mode: "0700"
+          delegate_to: "{{ immich_media_inbox_bootstrap_host }}"
+
+        - name: Copy temporary Immich key reconciliation helper
+          ansible.builtin.copy:
+            src: >-
+              {{ immich_media_inbox_repo_root
+                 }}/scripts/media-inbox/reconcile-immich-api-key
+            dest: "{{ immich_media_inbox_reconcile_helper }}"
+            owner: root
+            group: root
+            mode: "0700"
+          delegate_to: "{{ immich_media_inbox_bootstrap_host }}"
+
+        - name: Reconcile exact Immich candidate-analysis permissions
+          ansible.builtin.command:
+            argv:
+              - /usr/bin/python3
+              - "{{ immich_media_inbox_reconcile_helper }}"
+              - --api-url
+              - "{{ immich_media_inbox_bootstrap_api_url }}"
+              - --source-container
+              - "{{ immich_media_inbox_bootstrap_container }}"
+              - --key-id
+              - "{{ immich_media_inbox_key_metadata.id }}"
+              - --name
+              - "{{ immich_media_inbox_bootstrap_key_name }}"
+              - --require-new-backup
+              - --backup-timeout
+              - "600"
+          delegate_to: "{{ immich_media_inbox_bootstrap_host }}"
+          register: immich_media_inbox_key_reconcile
+          changed_when: >-
+            (immich_media_inbox_key_reconcile.stdout | from_json).changed
+          no_log: true
+
+        - name: Verify live rollback storage before metadata update
+          ansible.builtin.command: mountpoint -q /srv/live-rollbacks
+          changed_when: false
+          when: >-
+            immich_media_inbox_key_metadata.permissions | default([]) | sort
+            != immich_media_inbox_expected_permissions | sort
+
+        - name: Back up prior Immich API key metadata
+          ansible.builtin.command:
+            argv:
+              - /usr/local/sbin/live-rollback-backup
+              - --domain
+              - media-inbox
+              - --name
+              - immich-api-key-metadata-permissions
+              - --path
+              - "{{ immich_media_inbox_root }}/secrets/immich_api_key.json"
+          register: immich_media_inbox_key_metadata_backup
+          changed_when: true
+          when: >-
+            immich_media_inbox_key_metadata.permissions | default([]) | sort
+            != immich_media_inbox_expected_permissions | sort
+
+        - name: Record reconciled Immich key permissions and rollback backup
+          ansible.builtin.copy:
+            content: >-
+              {{ immich_media_inbox_key_metadata
+                 | combine(immich_media_inbox_metadata_updates, recursive=true)
+                 | to_nice_json }}
+            dest: "{{ immich_media_inbox_root }}/secrets/immich_api_key.json"
+            owner: root
+            group: root
+            mode: "0600"
+          vars:
+            immich_media_inbox_reconcile_result: >-
+              {{ immich_media_inbox_key_reconcile.stdout | from_json }}
+            immich_media_inbox_metadata_updates: >-
+              {{
+                {'permissions': immich_media_inbox_expected_permissions}
+                | combine(
+                    {
+                      'permissionReconciliation': {
+                        'changedAt': now(utc=true, fmt='%Y-%m-%dT%H:%M:%SZ'),
+                        'previousPermissions':
+                          immich_media_inbox_reconcile_result.previous_permissions,
+                        'rollbackBackup':
+                          immich_media_inbox_reconcile_result.rollback_backup
+                      }
+                    }
+                    if immich_media_inbox_reconcile_result.changed
+                    else {}
+                  )
+              }}
+          no_log: true
+      always:
+        - name: Remove temporary Immich key reconciliation material
+          ansible.builtin.file:
+            path: "{{ immich_media_inbox_bootstrap_work_dir }}"
+            state: absent
+          delegate_to: "{{ immich_media_inbox_bootstrap_host }}"
+
     - name: Deploy Seerr API key export helper
       ansible.builtin.copy:
         src: >-
@@ -353,7 +509,7 @@
         state: absent
       register: immich_media_inbox_bytecode_cleanup
 
-    - name: Deploy Astra result-only command wrapper
+    - name: Deploy Astra candidate-scoped command wrapper
       ansible.builtin.template:
         src: >-
           {{ immich_media_inbox_repo_root
@@ -373,8 +529,9 @@
         mode: "0440"
         validate: "visudo -cf %s"
         content: |
-          # Astra result-only media inbox access. The root-owned wrapper
-          # validates every dynamic argument before invoking Docker.
+          # Astra candidate-scoped media inbox access. The root-owned wrapper
+          # validates every dynamic argument; image export requires a live
+          # cloud-analysis claim in application state.
           dbc ALL=(root) NOPASSWD: /usr/local/sbin/immich-media-inbox status
           dbc ALL=(root) NOPASSWD: /usr/local/sbin/immich-media-inbox list
           dbc ALL=(root) NOPASSWD: /usr/local/sbin/immich-media-inbox list *
@@ -382,6 +539,10 @@
           dbc ALL=(root) NOPASSWD: /usr/local/sbin/immich-media-inbox search *
           dbc ALL=(root) NOPASSWD: /usr/local/sbin/immich-media-inbox set-status *
           dbc ALL=(root) NOPASSWD: /usr/local/sbin/immich-media-inbox request *
+          dbc ALL=(root) NOPASSWD: /usr/local/sbin/immich-media-inbox claim-cloud
+          dbc ALL=(root) NOPASSWD: /usr/local/sbin/immich-media-inbox export-image *
+          dbc ALL=(root) NOPASSWD: /usr/local/sbin/immich-media-inbox submit-analysis *
+          dbc ALL=(root) NOPASSWD: /usr/local/sbin/immich-media-inbox fail-cloud *
     # yamllint enable rule:line-length
 
     - name: Deploy Immich Media Inbox Compose file
@@ -399,6 +560,109 @@
     - name: Ensure caddy-proxy Docker network exists
       ansible.builtin.command: docker network inspect caddy-proxy
       changed_when: false
+      when: not ansible_check_mode
+
+    - name: Start isolated CPU-only Ollama runtime
+      community.docker.docker_compose_v2:
+        project_src: "{{ immich_media_inbox_root }}"
+        services:
+          - ollama
+        state: present
+      when: not ansible_check_mode
+
+    - name: Verify Ollama has no GPU or host device access
+      ansible.builtin.command:
+        argv:
+          - docker
+          - inspect
+          - --format
+          - >-
+            {{ '{{json .HostConfig.DeviceRequests}}|'
+               ~ '{{json .HostConfig.Devices}}|'
+               ~ '{{.HostConfig.Memory}}|{{.HostConfig.NanoCpus}}' }}
+          - immich-media-inbox-ollama
+      register: immich_media_inbox_ollama_isolation
+      changed_when: false
+      when: not ansible_check_mode
+
+    - name: Assert CPU-only Ollama resource boundary
+      ansible.builtin.assert:
+        that:
+          - >-
+            immich_media_inbox_ollama_isolation.stdout.split('|')[0]
+            in ['null', '[]']
+          - >-
+            immich_media_inbox_ollama_isolation.stdout.split('|')[1]
+            in ['null', '[]']
+          - >-
+            immich_media_inbox_ollama_isolation.stdout.split('|')[2] | int
+            == 3221225472
+          - >-
+            immich_media_inbox_ollama_isolation.stdout.split('|')[3] | int
+            == 4000000000
+        fail_msg: >-
+          Ollama must have zero GPU/device requests, a 3 GiB memory cap, and a
+          four-CPU quota before candidate analysis starts.
+      when: not ansible_check_mode
+
+    - name: Pull selected CPU vision model through temporary egress
+      when: not ansible_check_mode
+      block:
+        - name: Attach Ollama to an empty temporary egress network
+          community.docker.docker_network:
+            name: immich-media-inbox-model-pull
+            driver: bridge
+            internal: false
+            connected:
+              - immich-media-inbox-ollama
+            appends: true
+            state: present
+
+        - name: Pull selected CPU vision model
+          ansible.builtin.command:
+            argv:
+              - docker
+              - compose
+              - exec
+              - -T
+              - ollama
+              - ollama
+              - pull
+              - "{{ immich_media_inbox_ollama_model }}"
+          args:
+            chdir: "{{ immich_media_inbox_root }}"
+          register: immich_media_inbox_ollama_pull
+          changed_when: >-
+            'pulling manifest' in immich_media_inbox_ollama_pull.stdout
+      always:
+        - name: Remove temporary Ollama model-pull network
+          community.docker.docker_network:
+            name: immich-media-inbox-model-pull
+            state: absent
+            force: true
+          when: not ansible_check_mode
+
+    - name: Verify Ollama returned to its internal-only network
+      ansible.builtin.command:
+        argv:
+          - docker
+          - inspect
+          - --format
+          - "{{ '{{json .NetworkSettings.Networks}}' }}"
+          - immich-media-inbox-ollama
+      register: immich_media_inbox_ollama_networks
+      changed_when: false
+      when: not ansible_check_mode
+
+    - name: Assert Ollama steady-state network isolation
+      ansible.builtin.assert:
+        that:
+          - >-
+            (immich_media_inbox_ollama_networks.stdout | from_json).keys()
+            | list == ['immich-media-inbox-model-runtime']
+        fail_msg: >-
+          Ollama must return to only its private internal network before any
+          candidate image can be analyzed.
       when: not ansible_check_mode
 
     - name: Start Immich Media Inbox
@@ -491,4 +755,62 @@
           - "'filename' not in immich_media_inbox_astra_result.stdout"
           - "'thumbnail' not in immich_media_inbox_astra_result.stdout"
           - "'api_key' not in immich_media_inbox_astra_result.stdout"
+      when: not ansible_check_mode
+
+    - name: Deploy candidate-scoped GPT-5.6 worker
+      ansible.builtin.copy:
+        src: >-
+          {{ immich_media_inbox_repo_root
+             }}/scripts/media-inbox/run-cloud-analysis
+        dest: "{{ immich_media_inbox_cloud_worker_path }}"
+        owner: root
+        group: root
+        mode: "0755"
+      delegate_to: "{{ immich_media_inbox_astra_controller }}"
+      register: immich_media_inbox_cloud_worker_deploy
+
+    - name: Deploy candidate-scoped GPT-5.6 service
+      ansible.builtin.template:
+        src: >-
+          {{ immich_media_inbox_repo_root
+             }}/templates/media-inbox/immich-media-inbox-cloud.service.j2
+        dest: /etc/systemd/system/immich-media-inbox-cloud.service
+        owner: root
+        group: root
+        mode: "0644"
+      delegate_to: "{{ immich_media_inbox_astra_controller }}"
+      register: immich_media_inbox_cloud_service_deploy
+
+    - name: Deploy candidate-scoped GPT-5.6 timer
+      ansible.builtin.template:
+        src: >-
+          {{ immich_media_inbox_repo_root
+             }}/templates/media-inbox/immich-media-inbox-cloud.timer.j2
+        dest: /etc/systemd/system/immich-media-inbox-cloud.timer
+        owner: root
+        group: root
+        mode: "0644"
+      delegate_to: "{{ immich_media_inbox_astra_controller }}"
+      register: immich_media_inbox_cloud_timer_deploy
+
+    - name: Validate candidate-scoped GPT-5.6 systemd units
+      ansible.builtin.command:
+        argv:
+          - systemd-analyze
+          - verify
+          - /etc/systemd/system/immich-media-inbox-cloud.service
+          - /etc/systemd/system/immich-media-inbox-cloud.timer
+      delegate_to: "{{ immich_media_inbox_astra_controller }}"
+      changed_when: false
+      when: not ansible_check_mode
+
+    - name: Enable automatic GPT-5.6 candidate escalation timer
+      ansible.builtin.systemd_service:
+        name: immich-media-inbox-cloud.timer
+        enabled: true
+        state: started
+        daemon_reload: >-
+          {{ immich_media_inbox_cloud_service_deploy.changed
+             or immich_media_inbox_cloud_timer_deploy.changed }}
+      delegate_to: "{{ immich_media_inbox_astra_controller }}"
       when: not ansible_check_mode

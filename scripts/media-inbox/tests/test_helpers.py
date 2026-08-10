@@ -29,6 +29,19 @@ def load_bootstrap_module() -> Any:
     return module
 
 
+def load_reconcile_module() -> Any:
+    path = ROOT / "reconcile-immich-api-key"
+    loader = importlib.machinery.SourceFileLoader(
+        "media_inbox_reconcile_test", str(path)
+    )
+    spec = importlib.util.spec_from_loader(loader.name, loader)
+    if spec is None:
+        raise RuntimeError("could not load reconciliation helper")
+    module = importlib.util.module_from_spec(spec)
+    loader.exec_module(module)
+    return module
+
+
 class HelperTests(unittest.TestCase):
     def test_bootstrap_creates_exact_permissions_without_printing_secrets(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -93,7 +106,7 @@ class HelperTests(unittest.TestCase):
                     }
                 if method == "GET" and path == "/api-keys/me":
                     self.assertEqual(key, created_value)
-                    return {"permissions": ["asset.read"]}
+                    return {"permissions": ["asset.read", "asset.view"]}
                 self.fail(f"unexpected API request: {method} {path}")
 
             module.api_request = fake_api_request
@@ -110,12 +123,12 @@ class HelperTests(unittest.TestCase):
                 created_body,
                 {
                     "name": "immich-media-inbox",
-                    "permissions": ["asset.read"],
+                    "permissions": ["asset.read", "asset.view"],
                 },
             )
             self.assertEqual(
                 json.loads(metadata.read_text(encoding="utf-8"))["permissions"],
-                ["asset.read"],
+                ["asset.read", "asset.view"],
             )
             self.assertEqual(
                 json.loads(metadata.read_text(encoding="utf-8"))["rollbackBackup"][
@@ -173,6 +186,71 @@ class HelperTests(unittest.TestCase):
             self.assertEqual(revoked, ["12345678-1234-1234-9234-123456789abc"])
             self.assertFalse((temp / "immich_api_key").exists())
             self.assertFalse((temp / "immich_api_key.json").exists())
+
+    def test_reconcile_adds_preview_permission_after_backup_without_printing_keys(
+        self,
+    ) -> None:
+        module = load_reconcile_module()
+        source_value = "source-bootstrap-test-value"
+        updated_body: dict[str, Any] = {}
+        module.parse_args = lambda: argparse.Namespace(
+            api_url="http://immich/api",
+            source_container="helper",
+            source_env="API_KEY",
+            key_id="12345678-1234-1234-1234-123456789abc",
+            name="immich-media-inbox",
+            require_new_backup=True,
+            backup_timeout=60,
+        )
+        module.source_key_from_container = lambda container, name: source_value
+
+        def fake_api_request(
+            api_url: str,
+            key: str,
+            method: str,
+            path: str,
+            body: dict[str, Any] | None = None,
+        ) -> Any:
+            del api_url
+            self.assertEqual(key, source_value)
+            if method == "GET" and path == "/admin/database-backups":
+                calls = getattr(fake_api_request, "backup_calls", 0)
+                fake_api_request.backup_calls = calls + 1
+                if calls == 0:
+                    return {"backups": [{"filename": "old.sql.gz", "filesize": 50}]}
+                return {
+                    "backups": [
+                        {"filename": "old.sql.gz", "filesize": 50},
+                        {"filename": "permission.sql.gz", "filesize": 100},
+                    ]
+                }
+            if method == "POST" and path == "/jobs":
+                return None
+            if method == "GET" and path == "/api-keys":
+                permissions = updated_body.get("permissions") or ["asset.read"]
+                return [
+                    {
+                        "id": "12345678-1234-1234-1234-123456789abc",
+                        "name": "immich-media-inbox",
+                        "permissions": permissions,
+                    }
+                ]
+            if method == "PUT" and path.endswith("123456789abc"):
+                updated_body.update(body or {})
+                return None
+            self.fail(f"unexpected API request: {method} {path}")
+
+        module.api_request = fake_api_request
+        module.time.sleep = lambda seconds: None
+        stdout = io.StringIO()
+        with contextlib.redirect_stdout(stdout):
+            self.assertEqual(module.main(), 0)
+        output = stdout.getvalue()
+        self.assertNotIn(source_value, output)
+        self.assertEqual(updated_body["permissions"], ["asset.read", "asset.view"])
+        result = json.loads(output)
+        self.assertTrue(result["changed"])
+        self.assertEqual(result["rollback_backup"]["filename"], "permission.sql.gz")
 
     def test_seerr_export_refuses_unbacked_replacement_and_never_prints_key(
         self,

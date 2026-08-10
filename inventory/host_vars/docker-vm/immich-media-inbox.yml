@@ -24,9 +24,27 @@ immich_media_inbox_scan_interval_seconds: 300
 immich_media_inbox_scan_batch_size: 250
 immich_media_inbox_api_request_delay_ms: 75
 immich_media_inbox_candidate_threshold: 0.40
-immich_media_inbox_auto_match_threshold: 0.55
 immich_media_inbox_smart_search_size: 100
 immich_media_inbox_smart_search_interval_hours: 24
+
+# CPU-only local vision. No NVIDIA or /dev/dri device is passed to this
+# container, so Plex/transcoding VRAM remains completely outside this path.
+immich_media_inbox_ollama_image: ollama/ollama:latest
+immich_media_inbox_ollama_model: qwen3-vl:2b-instruct-q4_K_M
+immich_media_inbox_ollama_cpus: 4.0
+immich_media_inbox_ollama_memory: 3072m
+immich_media_inbox_analysis_batch_size: 2
+immich_media_inbox_local_analysis_max_attempts: 2
+immich_media_inbox_cloud_analysis_max_attempts: 3
+
+# Uncertain candidates are automatically analyzed through Astra's explicit
+# tool-less OpenAI route. The worker holds image bytes only in a protected
+# temporary directory and removes them after each model call.
+immich_media_inbox_cloud_user: johnny
+immich_media_inbox_cloud_group: johnny
+immich_media_inbox_cloud_batch_size: 2
+immich_media_inbox_cloud_worker_path: >-
+  /usr/local/libexec/immich-media-inbox-cloud
 
 # One-time bootstrap source on media-vm. The playbook still requires the
 # explicit immich_media_inbox_bootstrap_api_key=true extra var. The helper must

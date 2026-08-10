@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import json
 import threading
 import time
@@ -10,9 +11,21 @@ import urllib.parse
 import urllib.request
 from typing import Any
 
+from .analysis import (
+    LOCAL_SYSTEM_PROMPT,
+    AnalysisResult,
+    analysis_prompt,
+    analysis_schema,
+    parse_analysis,
+)
+
 
 class ApiError(RuntimeError):
     """An upstream API request failed without exposing credentials."""
+
+
+class AnalysisResponseError(ApiError):
+    """A reachable model returned content that violated the analysis contract."""
 
 
 class JsonClient:
@@ -79,6 +92,54 @@ class JsonClient:
                 raise ApiError(
                     f"{method} {safe_path} returned an unusable response: {exc}"
                 ) from exc
+            finally:
+                self._last_request = time.monotonic()
+
+    def request_bytes(
+        self,
+        method: str,
+        path: str,
+        *,
+        maximum_bytes: int,
+        allowed_content_types: tuple[str, ...],
+    ) -> tuple[bytes, str]:
+        request = urllib.request.Request(
+            f"{self.base_url}{path}",
+            headers=dict(self.headers),
+            method=method,
+        )
+        with self._request_lock:
+            self._pace()
+            try:
+                with urllib.request.urlopen(request, timeout=self.timeout) as response:
+                    content_type = str(
+                        response.headers.get_content_type() or ""
+                    ).lower()
+                    if content_type not in allowed_content_types:
+                        raise ApiError(
+                            f"{method} {path.split('?', 1)[0]} returned an unsupported media type"
+                        )
+                    payload = response.read(maximum_bytes + 1)
+                    if not payload:
+                        raise ApiError(
+                            f"{method} {path.split('?', 1)[0]} returned an empty body"
+                        )
+                    if len(payload) > maximum_bytes:
+                        raise ApiError(
+                            f"{method} {path.split('?', 1)[0]} exceeded the size limit"
+                        )
+                    return payload, content_type
+            except urllib.error.HTTPError as exc:
+                safe_path = path.split("?", 1)[0]
+                raise ApiError(
+                    f"{method} {safe_path} failed with HTTP {exc.code}"
+                ) from exc
+            except urllib.error.URLError as exc:
+                safe_path = path.split("?", 1)[0]
+                raise ApiError(f"{method} {safe_path} failed: {exc.reason}") from exc
+            except TimeoutError as exc:
+                safe_path = path.split("?", 1)[0]
+                raise ApiError(f"{method} {safe_path} timed out") from exc
             finally:
                 self._last_request = time.monotonic()
 
@@ -152,6 +213,61 @@ class ImmichClient:
     def get_asset(self, asset_id: str) -> dict[str, Any]:
         response = self.http.request("GET", f"/assets/{urllib.parse.quote(asset_id)}")
         return dict(response or {})
+
+    def get_preview(self, asset_id: str) -> tuple[bytes, str]:
+        quoted_id = urllib.parse.quote(asset_id)
+        return self.http.request_bytes(
+            "GET",
+            f"/assets/{quoted_id}/thumbnail?size=preview",
+            maximum_bytes=8 * 1024 * 1024,
+            allowed_content_types=("image/jpeg", "image/png", "image/webp"),
+        )
+
+
+class OllamaClient:
+    def __init__(self, base_url: str, model: str, *, timeout: int = 240) -> None:
+        self.model = model
+        self.http = JsonClient(
+            base_url.rstrip("/"),
+            {"Accept": "application/json"},
+            timeout=timeout,
+        )
+
+    def analyze(
+        self,
+        image_bytes: bytes,
+        ocr: str,
+    ) -> AnalysisResult:
+        body = {
+            "model": self.model,
+            "messages": [
+                {"role": "system", "content": LOCAL_SYSTEM_PROMPT},
+                {
+                    "role": "user",
+                    "content": analysis_prompt(ocr, provider="local"),
+                    "images": [base64.b64encode(image_bytes).decode("ascii")],
+                },
+            ],
+            "format": analysis_schema(),
+            "stream": False,
+            "think": False,
+            "keep_alive": 0,
+            "options": {
+                "temperature": 0,
+                "num_ctx": 4096,
+                "num_predict": 512,
+            },
+        }
+        response = self.http.request("POST", "/api/chat", body)
+        content = str(((response or {}).get("message") or {}).get("content") or "")
+        if not content:
+            raise ApiError("Ollama returned no analysis content")
+        try:
+            return parse_analysis(content)
+        except ValueError as exc:
+            raise AnalysisResponseError(
+                f"Ollama returned an invalid analysis: {exc}"
+            ) from exc
 
 
 class SeerrClient:

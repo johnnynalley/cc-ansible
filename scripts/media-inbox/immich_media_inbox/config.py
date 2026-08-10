@@ -65,9 +65,13 @@ class Config:
     scan_batch_size: int
     api_request_delay_ms: int
     candidate_threshold: float
-    auto_match_threshold: float
     smart_search_size: int
     smart_search_interval_hours: int
+    ollama_url: str
+    ollama_model: str
+    analysis_batch_size: int
+    local_analysis_max_attempts: int
+    cloud_analysis_max_attempts: int
     requests_enabled: bool
     allowed_visibilities: tuple[str, ...]
 
@@ -109,10 +113,20 @@ class Config:
             scan_batch_size=_env_int("SCAN_BATCH_SIZE", 250, 1, 1000),
             api_request_delay_ms=_env_int("API_REQUEST_DELAY_MS", 75, 0, 5000),
             candidate_threshold=_env_float("CANDIDATE_THRESHOLD", 0.40, 0.0, 1.0),
-            auto_match_threshold=_env_float("AUTO_MATCH_THRESHOLD", 0.55, 0.0, 1.0),
             smart_search_size=_env_int("SMART_SEARCH_SIZE", 100, 1, 1000),
             smart_search_interval_hours=_env_int(
                 "SMART_SEARCH_INTERVAL_HOURS", 24, 1, 720
+            ),
+            ollama_url=os.getenv("OLLAMA_URL", "http://ollama:11434").rstrip("/"),
+            ollama_model=os.getenv(
+                "OLLAMA_MODEL", "qwen3-vl:2b-instruct-q4_K_M"
+            ).strip(),
+            analysis_batch_size=_env_int("ANALYSIS_BATCH_SIZE", 5, 1, 50),
+            local_analysis_max_attempts=_env_int(
+                "LOCAL_ANALYSIS_MAX_ATTEMPTS", 2, 1, 10
+            ),
+            cloud_analysis_max_attempts=_env_int(
+                "CLOUD_ANALYSIS_MAX_ATTEMPTS", 3, 1, 10
             ),
             requests_enabled=_env_bool("REQUESTS_ENABLED", False),
             allowed_visibilities=visibilities,

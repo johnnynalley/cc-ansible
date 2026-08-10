@@ -1,0 +1,37 @@
+[Unit]
+Description=Candidate-scoped Immich media inbox GPT-5.6 analysis
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User={{ immich_media_inbox_cloud_user }}
+Group={{ immich_media_inbox_cloud_group }}
+WorkingDirectory=/home/{{ immich_media_inbox_cloud_user }}
+Environment=HOME=/home/{{ immich_media_inbox_cloud_user }}
+UMask=0077
+ExecStart={{ immich_media_inbox_cloud_worker_path }} --limit {{ immich_media_inbox_cloud_batch_size }} --ssh-target {{ immich_media_inbox_astra_ssh_target }} --model openai/gpt-5.6-sol
+TimeoutStartSec=420
+Nice=10
+IOSchedulingClass=idle
+CPUWeight=25
+NoNewPrivileges=true
+PrivateDevices=true
+PrivateTmp=true
+ProtectProc=invisible
+ProcSubset=pid
+ProtectClock=true
+ProtectControlGroups=true
+ProtectHome=tmpfs
+ProtectKernelLogs=true
+ProtectKernelModules=true
+ProtectKernelTunables=true
+ProtectSystem=strict
+BindPaths=/home/{{ immich_media_inbox_cloud_user }}/.openclaw
+BindReadOnlyPaths=/home/{{ immich_media_inbox_cloud_user }}/.npm-global /home/{{ immich_media_inbox_cloud_user }}/.ssh
+InaccessiblePaths=-/etc/ansible -/run/docker.sock -/var/run/docker.sock -/srv -/mnt -/media
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+RestrictSUIDSGID=true
+
+[Install]
+WantedBy=multi-user.target

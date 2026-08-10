@@ -1,0 +1,12 @@
+[Unit]
+Description=Automatically drain uncertain Immich media candidates
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=2min
+AccuracySec=20s
+Persistent=true
+Unit=immich-media-inbox-cloud.service
+
+[Install]
+WantedBy=timers.target

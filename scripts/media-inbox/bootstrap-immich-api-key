@@ -15,7 +15,7 @@ import urllib.request
 from pathlib import Path
 from typing import Any
 
-PERMISSIONS = ("asset.read",)
+PERMISSIONS = ("asset.read", "asset.view")
 
 
 def api_request(
@@ -254,7 +254,7 @@ def main() -> int:
         f" after backup {rollback_backup['filename']}" if rollback_backup else ""
     )
     print(
-        f"created Immich API key id={key_id} with scoped metadata/OCR read permission{backup_note}"
+        f"created Immich API key id={key_id} with scoped metadata/OCR/preview read permissions{backup_note}"
     )
     return 0
 

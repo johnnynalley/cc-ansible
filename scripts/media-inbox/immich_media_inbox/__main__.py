@@ -8,7 +8,7 @@ import sys
 import threading
 
 from . import __version__
-from .clients import ImmichClient, SeerrClient
+from .clients import ImmichClient, OllamaClient, SeerrClient
 from .config import Config
 from .scanner import Scanner
 from .store import Store
@@ -31,7 +31,8 @@ def main() -> int:
         config.seerr_api_key,
         request_delay_ms=config.api_request_delay_ms,
     )
-    scanner = Scanner(config, store, immich, seerr)
+    ollama = OllamaClient(config.ollama_url, config.ollama_model)
+    scanner = Scanner(config, store, immich, seerr, ollama)
     # Prevent a stale completion timestamp from making a restarted scanner look
     # validated before its new process has entered and completed a scan cycle.
     store.set_meta("scan_state", "starting")
