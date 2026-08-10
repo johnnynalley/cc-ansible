@@ -101,6 +101,14 @@ intentionally classifies as volatile. Doctor imports supported legacy sources
 into current stores and records migration runs; it does not justify copying old
 runtime files back into active discovery paths.
 
+In stable `2026.7.1-2`, `openclaw backup create --dry-run` is not a strictly
+read-only probe. CLI initialization opens the state database, applies
+best-effort permission hardening to the database paths, and may persist config
+health observations before the backup planner returns its dry-run result. Run
+it only inside the same backed-up, attended state-transition boundary as a real
+backup. A read-only filesystem copy can be used for planning, but its expected
+write failures must remain internal diagnostics rather than operator alerts.
+
 ## Gateway Canary Design
 
 The canary is intentionally not a copy of the current Gateway. Copying the
