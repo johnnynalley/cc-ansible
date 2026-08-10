@@ -23,6 +23,14 @@
       {{ immich_media_inbox_bootstrap_work_dir }}/immich_api_key
     immich_media_inbox_bootstrap_metadata_path: >-
       {{ immich_media_inbox_bootstrap_work_dir }}/immich_api_key.json
+    immich_media_inbox_app_source_dir: >-
+      {{ immich_media_inbox_repo_root
+         }}/scripts/media-inbox/immich_media_inbox
+    immich_media_inbox_app_modules: >-
+      {{ query('ansible.builtin.fileglob',
+               immich_media_inbox_app_source_dir + '/*.py') | sort }}
+    immich_media_inbox_app_module_names: >-
+      {{ immich_media_inbox_app_modules | map('basename') | list }}
 
   tasks:
     - name: Skip hosts without Immich Media Inbox enabled
@@ -75,6 +83,10 @@
           group: root
           mode: "0755"
         - path: "{{ immich_media_inbox_root }}/app"
+          owner: root
+          group: root
+          mode: "0755"
+        - path: "{{ immich_media_inbox_root }}/app/immich_media_inbox"
           owner: root
           group: root
           mode: "0755"
@@ -302,15 +314,36 @@
 
     - name: Deploy Immich Media Inbox application
       ansible.builtin.copy:
-        src: >-
-          {{ immich_media_inbox_repo_root
-             }}/scripts/media-inbox/immich_media_inbox/
-        dest: "{{ immich_media_inbox_root }}/app/immich_media_inbox/"
+        src: "{{ item }}"
+        dest: >-
+          {{ immich_media_inbox_root
+             }}/app/immich_media_inbox/{{ item | basename }}
         owner: root
         group: root
-        mode: preserve
-        directory_mode: "0755"
+        mode: "0644"
+      loop: "{{ immich_media_inbox_app_modules }}"
+      loop_control:
+        label: "{{ item | basename }}"
       register: immich_media_inbox_app_deploy
+
+    - name: Find deployed Immich Media Inbox application modules
+      ansible.builtin.find:
+        paths: "{{ immich_media_inbox_root }}/app/immich_media_inbox"
+        patterns: "*.py"
+        file_type: file
+        recurse: false
+      register: immich_media_inbox_deployed_modules
+
+    - name: Remove retired Immich Media Inbox application modules
+      ansible.builtin.file:
+        path: "{{ item.path }}"
+        state: absent
+      loop: "{{ immich_media_inbox_deployed_modules.files }}"
+      loop_control:
+        label: "{{ item.path | basename }}"
+      when: >-
+        item.path | basename not in immich_media_inbox_app_module_names
+      register: immich_media_inbox_retired_module_cleanup
 
     - name: Remove generated Python bytecode from deployed application
       ansible.builtin.file:
@@ -318,6 +351,7 @@
           {{ immich_media_inbox_root
              }}/app/immich_media_inbox/__pycache__
         state: absent
+      register: immich_media_inbox_bytecode_cleanup
 
     - name: Deploy Astra result-only command wrapper
       ansible.builtin.template:
@@ -374,6 +408,8 @@
         recreate: >-
           {{ 'always'
              if (immich_media_inbox_app_deploy.changed
+                 or immich_media_inbox_retired_module_cleanup.changed
+                 or immich_media_inbox_bytecode_cleanup.changed
                  or immich_media_inbox_compose_deploy.changed
                  or (immich_media_inbox_seerr_export.changed | default(false)))
              else 'auto' }}
