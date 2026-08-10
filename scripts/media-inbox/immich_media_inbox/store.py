@@ -263,19 +263,37 @@ class Store:
         self, *, status: str = "pending", limit: int = 100, threshold: float = 0.0
     ) -> list[dict[str, Any]]:
         with self.connect() as connection:
-            rows = connection.execute(
+            # Rank only lightweight IDs first. Sorting/grouping ``a.*`` makes
+            # SQLite copy the large OCR text/JSON columns into a temporary
+            # B-tree; the deployed container intentionally has a small tmpfs
+            # and a few thousand OCR-heavy rows can exhaust it.
+            id_rows = connection.execute(
                 """
-                SELECT a.*, COUNT(m.media_id) AS match_count, MAX(m.score) AS best_match_score
-                FROM assets a
-                LEFT JOIN matches m ON m.asset_id = a.asset_id
-                WHERE a.review_status = ? AND a.detection_score >= ?
-                GROUP BY a.asset_id
-                ORDER BY a.detection_score DESC, a.file_created_at DESC
+                SELECT asset_id
+                FROM assets
+                WHERE review_status = ? AND detection_score >= ?
+                ORDER BY detection_score DESC, file_created_at DESC
                 LIMIT ?
                 """,
                 (status, threshold, limit),
             ).fetchall()
-        return [dict(row) for row in rows]
+            asset_ids = [str(row["asset_id"]) for row in id_rows]
+            if not asset_ids:
+                return []
+            placeholders = ",".join("?" for _ in asset_ids)
+            rows = connection.execute(
+                f"""
+                SELECT a.*, COUNT(m.media_id) AS match_count,
+                       MAX(m.score) AS best_match_score
+                FROM assets a
+                LEFT JOIN matches m ON m.asset_id = a.asset_id
+                WHERE a.asset_id IN ({placeholders})
+                GROUP BY a.asset_id
+                """,
+                asset_ids,
+            ).fetchall()
+        by_id = {str(row["asset_id"]): dict(row) for row in rows}
+        return [by_id[asset_id] for asset_id in asset_ids if asset_id in by_id]
 
     def candidate(self, asset_id: str) -> dict[str, Any] | None:
         with self.connect() as connection:

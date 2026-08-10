@@ -116,6 +116,38 @@ class StoreTests(unittest.TestCase):
         self.store.record_error(ASSET_ID, "safe upstream error")
         self.assertTrue(self.store.asset_needs_ocr(ASSET_ID, self.asset["updatedAt"]))
 
+    def test_queue_orders_large_ocr_rows_without_grouping_them_for_sort(self) -> None:
+        large_ocr = "dialogue " * 131072
+        for index in range(24):
+            asset = {
+                **self.asset,
+                "id": f"12345678-1234-1234-1234-{index:012d}",
+                "fileCreatedAt": f"2026-01-02T03:{index:02d}:05Z",
+                "updatedAt": f"2026-01-02T04:{index:02d}:05Z",
+            }
+            self.store.upsert_asset(
+                asset,
+                [{"text": large_ocr, "isVisible": True}],
+                Detection(index / 24, ("large OCR fixture",)),
+                {"metadata-crawl"},
+                ocr_text=large_ocr,
+            )
+
+        queued = self.store.queue(status="pending", threshold=0.0, limit=5)
+
+        self.assertEqual(len(queued), 5)
+        self.assertEqual(
+            [row["asset_id"] for row in queued],
+            [
+                "12345678-1234-1234-1234-000000000023",
+                "12345678-1234-1234-1234-000000000022",
+                "12345678-1234-1234-1234-000000000021",
+                "12345678-1234-1234-1234-000000000020",
+                "12345678-1234-1234-1234-000000000019",
+            ],
+        )
+        self.assertTrue(all(row["match_count"] == 0 for row in queued))
+
 
 if __name__ == "__main__":
     unittest.main()
