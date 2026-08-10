@@ -9,20 +9,69 @@ and output filters do not make that a security boundary. Until the Gateway is
 moved to a dedicated OS identity, prompt injection or a Gateway compromise can
 become a controller and homelab compromise.
 
-The first deterministic boundary is implemented but deliberately disabled:
+The first deterministic boundaries are implemented but deliberately disabled:
 
 - `playbooks/agents/openclaw-health-receiver.yml` stages and migrates Apple
   Health ingestion to the no-login `openclaw-health` service account.
 - `scripts/agents/health-receiver.py` accepts bounded authenticated JSON and
   stores raw records in an isolated SQLite database.
 - `scripts/agents/health-summary.py` publishes only fixed daily aggregates.
+- `playbooks/agents/openclaw-isolated-gateway.yml` stages a parallel system
+  service under the no-login `openclaw` account without stopping production.
+- `templates/openclaw/openclaw-isolated.json.j2` starts from a blank config:
+  one OpenRouter model, file-backed SecretRefs, no channel, heartbeat, memory,
+  plugin-tool, delegation, filesystem, web, messaging, or execution surfaces.
+- `templates/openclaw/openclaw-isolated-gateway.service.j2` makes the runtime,
+  config, secret payload, and workspace root-owned/read-only while exposing
+  only `/var/lib/openclaw-isolated` as writable state.
 - The future `openclaw` Gateway identity will receive membership only in
   `openclaw-health-report`, which can read generated reports but cannot read the
   database, token, receiver configuration, or raw payloads.
 
 No live service, user, listener, credential, or database has been changed by
-this implementation. The inventory mode remains `disabled` until an attended
-canary and cutover are approved.
+these implementations. Both inventory modes remain `disabled` until attended
+canaries and cutovers are approved.
+
+## Gateway Canary Design
+
+The canary is intentionally not a copy of the current Gateway. Copying the
+legacy config or `.env` would transfer Discord, GitHub, Home Assistant, Plex,
+Sonarr, Radarr, iCloud, image, and other credentials into the new account and
+would reproduce the current authority convergence.
+
+Instead, the playbook installs `openclaw@latest` into the root-owned
+`/opt/openclaw-isolated` prefix and extracts only `OPENROUTER_API_KEY` from the
+mode-`0600` legacy dotenv file. The extractor treats the source as data, accepts
+exactly one assignment, writes only the OpenRouter key and a separately
+generated Gateway token to `/etc/openclaw-isolated/secrets.json`, and never
+prints either value. The imported provider key must be rotated after migration
+because the legacy root-equivalent runtime could already read it.
+
+The system service adds the effective boundary:
+
+- static no-login `openclaw` user with only its primary group;
+- loopback-only port `19789`, disabled Control UI and HTTP compatibility APIs,
+  disabled Tailscale/discovery/channels, and token authentication;
+- minimal `session_status` tool profile plus explicit denial of runtime,
+  filesystem, session, memory, web, UI, automation, messaging, node, agent,
+  media, and plugin tools;
+- `tools.exec.security=deny`, `ask=always`, elevated mode off, session scope
+  `self`, and agent-to-agent delivery off;
+- `ProtectHome`, `ProtectSystem=strict`, private devices/temp/IPC, no
+  capabilities, no privilege gain, namespace restrictions, and explicit
+  inaccessibility for the Docker socket, controller repo, human home, Ansible,
+  Docker state, and bulk data mounts;
+- pre-start assertions that the process can read but not write its config and
+  secret, can write only its state, cannot write the workspace, and cannot read
+  the human home, Docker socket, vault password, or controller guidance.
+
+Canary mode requires `openclaw_isolated_gateway_canary_approved: true`. It
+takes a root-only targeted backup of any prior canary state, validates the
+rendered config as the service identity, starts the listener without enabling
+it at boot, verifies systemd properties and account groups, runs authenticated
+health and fixed-response model probes, and writes `.canary-validated`. Failure
+stops the canary and restores prior canary state; the production Gateway is
+never touched. This playbook deliberately has no production-cutover mode.
 
 ## Required Trust Boundaries
 
@@ -142,9 +191,12 @@ require separate removal or redesign.
 
 ```bash
 PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts/agents -p 'test_health_*.py' -v
+PYTHONDONTWRITEBYTECODE=1 python3 -m unittest scripts/agents/test_openclaw_isolated_secrets.py -v
 black --check scripts/agents
 ansible-playbook playbooks/agents/openclaw-health-receiver.yml --syntax-check
 ansible-playbook playbooks/agents/openclaw-health-receiver.yml --check --diff
+ansible-playbook playbooks/agents/openclaw-isolated-gateway.yml --syntax-check
+ansible-playbook playbooks/agents/openclaw-isolated-gateway.yml --check --diff
 scripts/repo/repo-audit
 ```
 

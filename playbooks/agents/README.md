@@ -20,3 +20,4 @@ Owner area: Codex, Claude archive sync, and OpenClaw services.
 | `codex-memory-sync.yml` | `nas_server, orchestrator` | Configure Codex memory sync to NAS. | `ansible-playbook playbooks/agents/codex-memory-sync.yml --syntax-check` |
 | `openclaw.yml` | `openclaw_hosts` | Deploy OpenClaw AI agent. | `ansible-playbook playbooks/agents/openclaw.yml --syntax-check` |
 | `openclaw-health-receiver.yml` | `openclaw_hosts` | Stage or cut over the isolated Health receiver and aggregate-only publisher; disabled by default. | `ansible-playbook playbooks/agents/openclaw-health-receiver.yml --syntax-check` |
+| `openclaw-isolated-gateway.yml` | `openclaw_hosts` | Stage a parallel deny-by-default Gateway canary under the `openclaw` account; disabled by default. | `ansible-playbook playbooks/agents/openclaw-isolated-gateway.yml --syntax-check` |

@@ -197,6 +197,10 @@
   ansible.builtin.import_playbook: playbooks/agents/openclaw-health-receiver.yml
   tags: [openclaw, openclaw-health, health-receiver]
 
+- name: Configure isolated OpenClaw Gateway canary
+  ansible.builtin.import_playbook: playbooks/agents/openclaw-isolated-gateway.yml
+  tags: [openclaw, openclaw-isolated, openclaw-canary]
+
 - name: Deploy OpenClaw AI agent
   ansible.builtin.import_playbook: playbooks/agents/openclaw.yml
   tags: [openclaw]

@@ -6,10 +6,16 @@
 - `openclaw-safe-update.sh.j2`: guarded OpenClaw updater that checks the
   target package Node engine against the gateway service runtime before
   allowing a live package swap.
+- `openclaw-isolated.json.j2`: minimal canary config with file-backed secrets,
+  one model, no channels, no heartbeats, no delegation, and a minimal tool
+  profile.
+- `openclaw-isolated-gateway.service.j2`: system service for the parallel
+  `openclaw` identity with host-home, controller, Docker, and write boundaries.
 
 ## Consumers
 
 - `playbooks/agents/openclaw.yml`
+- `playbooks/agents/openclaw-isolated-gateway.yml`
 
 ## Safety Notes
 

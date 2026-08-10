@@ -1,0 +1,160 @@
+{
+  "secrets": {
+    "providers": {
+      "isolated": {
+        "source": "file",
+        "path": {{ openclaw_isolated_gateway_secret_file | to_json }},
+        "mode": "json"
+      }
+    },
+    "defaults": {
+      "file": "isolated"
+    }
+  },
+  "models": {
+    "providers": {
+      "openrouter": {
+        "apiKey": {
+          "source": "file",
+          "provider": "isolated",
+          "id": "/providers/openrouter/apiKey"
+        }
+      }
+    }
+  },
+  "agents": {
+    "defaults": {
+      "workspace": {{ openclaw_isolated_gateway_workspace_dir | to_json }},
+      "skipBootstrap": true,
+      "model": {
+        "primary": {{ openclaw_isolated_gateway_model | to_json }},
+        "fallbacks": []
+      },
+      "models": {
+        {{ openclaw_isolated_gateway_model | to_json }}: {
+          "alias": "isolation-canary"
+        }
+      },
+      "thinkingDefault": "low",
+      "timeoutSeconds": 180,
+      "maxConcurrent": 1
+    },
+    "list": [
+      {
+        "id": "canary",
+        "name": "OpenClaw Isolation Canary",
+        "skills": [],
+        "tools": {
+          "profile": "minimal"
+        }
+      }
+    ]
+  },
+  "tools": {
+    "profile": "minimal",
+    "deny": [
+      "group:runtime",
+      "group:fs",
+      "group:sessions",
+      "group:memory",
+      "group:web",
+      "group:ui",
+      "group:automation",
+      "group:messaging",
+      "group:nodes",
+      "group:agents",
+      "group:media",
+      "group:plugins"
+    ],
+    "exec": {
+      "host": "gateway",
+      "security": "deny",
+      "ask": "always",
+      "notifyOnExit": false
+    },
+    "elevated": {
+      "enabled": false
+    },
+    "sessions": {
+      "visibility": "self"
+    },
+    "agentToAgent": {
+      "enabled": false,
+      "allow": []
+    }
+  },
+  "session": {
+    "dmScope": "per-channel-peer"
+  },
+  "gateway": {
+    "mode": "local",
+    "port": {{ openclaw_isolated_gateway_port | int }},
+    "bind": "loopback",
+    "auth": {
+      "mode": "token",
+      "token": {
+        "source": "file",
+        "provider": "isolated",
+        "id": "/gateway/token"
+      },
+      "allowTailscale": false,
+      "rateLimit": {
+        "maxAttempts": 5,
+        "windowMs": 60000,
+        "lockoutMs": 300000,
+        "exemptLoopback": false
+      }
+    },
+    "tailscale": {
+      "mode": "off",
+      "resetOnExit": false
+    },
+    "controlUi": {
+      "enabled": false
+    },
+    "terminal": {
+      "enabled": false
+    },
+    "http": {
+      "endpoints": {
+        "chatCompletions": {
+          "enabled": false
+        },
+        "responses": {
+          "enabled": false
+        }
+      }
+    },
+    "nodes": {
+      "browser": {
+        "mode": "off"
+      },
+      "denyCommands": [
+        "system.run",
+        "system.which",
+        "browser.proxy",
+        "camera.snap",
+        "camera.clip",
+        "screen.record"
+      ]
+    },
+    "reload": {
+      "mode": "off"
+    }
+  },
+  "discovery": {
+    "mdns": {
+      "mode": "off"
+    }
+  },
+  "plugins": {
+    "allow": [
+      "openrouter"
+    ],
+    "entries": {
+      "openrouter": {
+        "enabled": true
+      }
+    }
+  }
+}
