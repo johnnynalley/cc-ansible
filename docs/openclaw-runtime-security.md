@@ -21,10 +21,11 @@ loopback and remains disabled at boot:
 - `playbooks/agents/openclaw-isolated-gateway.yml` stages a parallel system
   service under the no-login `openclaw` account without stopping production.
   A credential-less ephemeral build account resolves the current stable core
-  and Codex provider inside a transient systemd sandbox with package lifecycle
-  scripts disabled, sensitive paths inaccessible, and private/Tailscale network
-  ranges denied. Root promotes the validated pair into a versioned release and
-  selects it through `/opt/openclaw-isolated/current`.
+  plus the Codex, Discord, Lossless Claw, and Mem0 plugins inside a transient
+  systemd sandbox with package lifecycle scripts disabled, sensitive paths
+  inaccessible, and private/Tailscale network ranges denied. Root promotes the
+  validated set into one versioned release and selects it through
+  `/opt/openclaw-isolated/current`.
 - `playbooks/agents/openclaw-state-rehearsal.yml` creates no Gateway and loads
   no channel or provider credential. It copies only the five active
   file-backed session trees and their exact structured workspace dependencies
@@ -88,13 +89,18 @@ discovered component must receive one explicit disposition:
 The runtime layer already applies that rule: human-home global npm state,
 root-run package lifecycle scripts, service-writable provider code, copied
 OAuth refresh material, and the unfunded OpenRouter fallback are not migrated.
-They are replaced or retired. A persisted plugin install record is part of the
-legacy runtime mechanism, not user data: the migration removes it through the
-supported plugin CLI before rebuilding the registry from the reviewed explicit
-load path. Stable-channel policy is retained, while each resolved core/provider
-pair is recorded as an immutable deployment artifact for rollback. Other
-agents, integrations, schedules, stores, and workspace artifacts remain subject
-to the same classification before production cutover.
+They are replaced or retired. Codex, Discord, Lossless Claw, and Mem0 are
+retained capabilities but their service-writable npm installations are replaced
+by root-managed current-channel artifacts. Brave, Nextcloud Talk, Perplexity,
+and the former self-evolution gate are retired because they are disabled or no
+longer configured as live channels. A persisted plugin install record is part
+of the legacy runtime mechanism, not user data: the migration removes it through
+the supported plugin CLI before rebuilding the registry from reviewed explicit
+load paths. Plugin state, Lossless Claw history, and Mem0 history are separate
+data and remain migration inputs. Stable-channel policy is retained, while each
+resolved core/plugin set is recorded as one immutable deployment artifact for
+rollback. Other agents, integrations, schedules, stores, and workspace
+artifacts remain subject to the same classification before production cutover.
 
 Stable `2026.7.1-2` is a hybrid runtime, not a completely database-first one.
 The shared SQLite database is authoritative for cron, tasks, plugin state,
@@ -166,10 +172,11 @@ data inaccessible; it denies loopback, private, link-local, and Tailscale CGNAT
 ranges while allowing public package endpoints and the local DNS stub. Its
 service exit is cgroup-scoped, so package-manager descendants must terminate
 before staging cleanup or promotion can continue. The same sandbox must pass
-explicit read-denial probes before it resolves
-`openclaw@latest` and `@openclaw/codex@latest` with lifecycle scripts disabled.
-The playbook then verifies the official package identities and build
-compatibility, stages the complete pair under
+explicit read-denial probes before it resolves `openclaw@latest` and the
+reviewed managed plugin set from their `latest` channels with lifecycle scripts
+disabled. The playbook verifies package and manifest identities, requires
+matching core builds for official Codex and Discord releases, and stages the
+complete set under
 `/opt/openclaw-isolated/releases`, and atomically promotes it. Root ownership
 prevents the Gateway from changing executable code. The old global-prefix
 `bin` and `lib` layout and writable provider cache are removed after the
@@ -181,7 +188,9 @@ root-managed config, runs `plugins registry --refresh`, and rejects a derived,
 warning-bearing, duplicate, disabled, or dependency-incomplete provider
 inventory. Because OpenClaw may report either the `current` symlink spelling or
 its selected release target, validation compares canonical paths and separately
-requires that target to be the exact promoted versioned release.
+requires that target to be the exact promoted versioned release. The managed set
+and retired set are fixed policy inputs; overlap, duplicates, exact-version
+policy pins, or unreviewed plugin additions fail before package resolution.
 
 Only a dedicated Gateway token is generated in
 `/etc/openclaw-isolated/secrets.json`. Nothing is imported from the legacy broad
@@ -214,7 +223,7 @@ Both live modes require `openclaw_isolated_gateway_canary_approved: true` and
 take a root-only targeted backup of prior canary config, state, complete runtime
 root, support files, and unit. The stopped-state archive preserves ownership,
 ACLs, and extended attributes and must compare cleanly against its source before
-mutation begins. `canary-bootstrap` validates the release pair,
+mutation begins. `canary-bootstrap` validates the managed release set,
 explicit provider loading, config, token, listener, systemd properties,
 account groups, authenticated health endpoint, and absence of provider
 self-installation, then writes `.infrastructure-validated`. It leaves the
@@ -359,9 +368,9 @@ parallel Gateway canary proves all of the following:
 - generic host execution is denied by default;
 - active instructions, skills, plugins, hooks, and collectors are root-owned
   and read-only to the Gateway;
-- the core/provider pair was built without service credentials or lifecycle
+- the core/plugin set was built without service credentials or lifecycle
   scripts, loads only from the selected root-managed release, and does not
-  regenerate writable provider code;
+  regenerate writable plugin code;
 - writable memory/project facts cannot promote themselves into behavior;
 - session visibility and agent-to-agent delivery are scoped;
 - Discord routes have explicit sender authorization;
@@ -382,6 +391,7 @@ require separate removal or redesign.
 PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts/agents -p 'test_health_*.py' -v
 PYTHONDONTWRITEBYTECODE=1 python3 -m unittest scripts/agents/test_openclaw_isolated_secrets.py -v
 PYTHONDONTWRITEBYTECODE=1 python3 -m unittest scripts/agents/test_openclaw_session_relocate.py -v
+PYTHONDONTWRITEBYTECODE=1 python3 -m unittest scripts/agents/test_openclaw_doctor_rehearsal.py -v
 black --check scripts/agents
 ansible-playbook playbooks/agents/openclaw-health-receiver.yml --syntax-check
 ansible-playbook playbooks/agents/openclaw-health-receiver.yml --check --diff

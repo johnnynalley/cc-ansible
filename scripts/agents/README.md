@@ -39,6 +39,14 @@ dedicated `openclaw-health` system service passes cutover validation.
 - `test_openclaw_session_relocate.py` covers deterministic relocation,
   idempotency, byte preservation, unknown-field rejection, path-boundary
   enforcement, and target drift detection.
+- `openclaw-doctor-rehearsal.py` creates credential-free structured config
+  copies, replaces retained external plugin paths with reviewed immutable
+  artifacts, retires explicit legacy plugin ids, performs online SQLite backups,
+  scrubs only per-agent auth tables, and emits data-free manifests and database
+  summaries for Doctor idempotency checks.
+- `test_openclaw_doctor_rehearsal.py` covers config path and secret handling,
+  plugin modernization boundaries, auth-only database scrubbing, SQLite
+  summaries, and immutable tree manifest comparison.
 
 ## Validation
 

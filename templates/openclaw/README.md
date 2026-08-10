@@ -7,10 +7,11 @@
   target package Node engine against the gateway service runtime before
   allowing a live package swap.
 - `openclaw-isolated.json.j2`: minimal canary config with a file-backed Gateway
-  token, one OpenAI model, an explicit root-managed Codex provider, no channels,
-  no heartbeats, no delegation, and a minimal tool profile. Provider prompt
-  hooks, conversation access, computer use, and plugin delegation are disabled.
-  Model OAuth is enrolled separately under the dedicated identity.
+  token, one OpenAI model, and an explicit root-managed Codex provider selected
+  from the immutable managed-plugin release. It has no channels, heartbeats,
+  delegation, or broad tool profile. Provider prompt hooks, conversation access,
+  computer use, and plugin delegation are disabled. Model OAuth is enrolled
+  separately under the dedicated identity.
 - `openclaw-isolated-gateway.service.j2`: system service for the parallel
   `openclaw` identity with host-home, controller, Docker, and write boundaries.
   Executable releases and provider code are read-only. Only data state and the

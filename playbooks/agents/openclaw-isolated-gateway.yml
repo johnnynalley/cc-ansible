@@ -62,6 +62,28 @@
           - openclaw_isolated_gateway_releases_dir == openclaw_isolated_gateway_runtime_root + '/releases'
           - openclaw_isolated_gateway_runtime_dir == openclaw_isolated_gateway_runtime_root + '/current'
           - openclaw_isolated_gateway_codex_plugin_dir == openclaw_isolated_gateway_runtime_dir + '/plugins/codex/node_modules/@openclaw/codex'
+          - >-
+            openclaw_isolated_gateway_managed_plugins
+            | map(attribute='id')
+            | list
+            == ['codex', 'discord', 'lossless-claw', 'openclaw-mem0']
+          - >-
+            openclaw_isolated_gateway_managed_plugins
+            | map(attribute='id')
+            | unique
+            | list
+            | length
+            == openclaw_isolated_gateway_managed_plugins | length
+          - >-
+            openclaw_isolated_gateway_retired_global_plugins
+            | sort
+            == ['brave', 'nextcloud-talk', 'perplexity', 'self-evolution-gate']
+          - >-
+            openclaw_isolated_gateway_managed_plugins
+            | map(attribute='id')
+            | intersect(openclaw_isolated_gateway_retired_global_plugins)
+            | length
+            == 0
           - openclaw_isolated_gateway_build_user == 'openclaw-build'
           - openclaw_isolated_gateway_build_group == 'openclaw-build'
           - openclaw_isolated_gateway_build_dir == '/var/cache/openclaw-isolated-build'
@@ -74,6 +96,20 @@
         fail_msg: >-
           The canary paths, port, or initial group policy are outside the fixed
           isolation contract.
+
+    - name: Validate isolated managed plugin release policy
+      ansible.builtin.assert:
+        that:
+          - item.id is match('^[a-z0-9][a-z0-9-]*$')
+          - item.package is match('^(@[a-z0-9-]+/)?[a-z0-9][a-z0-9-]*$')
+          - item.install_spec == item.package + '@latest'
+          - item.require_core_match is boolean
+        fail_msg: >-
+          Managed plugin {{ item.id | default('unknown') }} must track its
+          current channel and satisfy the fixed immutable-release schema.
+      loop: "{{ openclaw_isolated_gateway_managed_plugins }}"
+      loop_control:
+        label: "{{ item.id | default('unknown') }}"
 
     - name: Inspect existing isolated Gateway paths
       ansible.builtin.stat:
@@ -473,7 +509,7 @@
           changed_when: true
           when: not ansible_check_mode
 
-        - name: Build isolated Codex provider from stable channel
+        - name: Build isolated managed plugins from current channels
           ansible.builtin.command:
             argv: >-
               {{
@@ -481,16 +517,19 @@
                 + [
                   '/usr/bin/npm',
                   '--prefix',
-                  openclaw_isolated_gateway_build_dir + '/codex',
+                  openclaw_isolated_gateway_build_dir + '/plugins/' + item.id,
                   'install',
                   '--omit=dev',
                   '--no-audit',
                   '--no-fund',
                   '--ignore-scripts',
-                  '@openclaw/codex@latest'
+                  item.install_spec
                 ]
               }}
           changed_when: true
+          loop: "{{ openclaw_isolated_gateway_managed_plugins }}"
+          loop_control:
+            label: "{{ item.id }}"
           when: not ansible_check_mode
 
         - name: Read staged OpenClaw runtime metadata
@@ -499,47 +538,125 @@
           register: openclaw_isolated_gateway_staged_runtime_metadata
           when: not ansible_check_mode
 
-        - name: Read staged Codex provider metadata
+        - name: Read staged managed plugin package metadata
           ansible.builtin.slurp:
-            path: "{{ item }}"
-          loop:
-            - "{{ openclaw_isolated_gateway_build_dir }}/codex/node_modules/@openclaw/codex/package.json"
-            - "{{ openclaw_isolated_gateway_build_dir }}/codex/node_modules/@openclaw/codex/openclaw.plugin.json"
-          register: openclaw_isolated_gateway_staged_codex_metadata
+            path: >-
+              {{ openclaw_isolated_gateway_build_dir }}/plugins/{{ item.id }}/node_modules/{{ item.package }}/package.json
+          loop: "{{ openclaw_isolated_gateway_managed_plugins }}"
+          loop_control:
+            label: "{{ item.id }}"
+          register: openclaw_isolated_gateway_staged_plugin_packages
           when: not ansible_check_mode
 
-        - name: Decode isolated release metadata
+        - name: Read staged managed plugin manifests
+          ansible.builtin.slurp:
+            path: >-
+              {{ openclaw_isolated_gateway_build_dir }}/plugins/{{ item.id }}/node_modules/{{ item.package }}/openclaw.plugin.json
+          loop: "{{ openclaw_isolated_gateway_managed_plugins }}"
+          loop_control:
+            label: "{{ item.id }}"
+          register: openclaw_isolated_gateway_staged_plugin_manifests
+          when: not ansible_check_mode
+
+        - name: Decode isolated runtime metadata
           ansible.builtin.set_fact:
             openclaw_isolated_gateway_runtime_package: >-
               {{ openclaw_isolated_gateway_staged_runtime_metadata.content | b64decode | from_json }}
-            openclaw_isolated_gateway_codex_package: >-
-              {{ openclaw_isolated_gateway_staged_codex_metadata.results[0].content | b64decode | from_json }}
-            openclaw_isolated_gateway_codex_manifest: >-
-              {{ openclaw_isolated_gateway_staged_codex_metadata.results[1].content | b64decode | from_json }}
+            openclaw_isolated_gateway_plugin_metadata: []
           when: not ansible_check_mode
 
-        - name: Validate isolated release package identities
+        - name: Decode isolated managed plugin metadata
+          ansible.builtin.set_fact:
+            openclaw_isolated_gateway_plugin_metadata: >-
+              {{
+                openclaw_isolated_gateway_plugin_metadata
+                + [
+                    {
+                      'definition': openclaw_isolated_gateway_managed_plugins[item],
+                      'package': (
+                        openclaw_isolated_gateway_staged_plugin_packages.results[item].content
+                        | b64decode
+                        | from_json
+                      ),
+                      'manifest': (
+                        openclaw_isolated_gateway_staged_plugin_manifests.results[item].content
+                        | b64decode
+                        | from_json
+                      )
+                    }
+                  ]
+              }}
+          loop: "{{ range(0, openclaw_isolated_gateway_managed_plugins | length) | list }}"
+          loop_control:
+            label: "{{ openclaw_isolated_gateway_managed_plugins[item].id }}"
+          when: not ansible_check_mode
+
+        - name: Validate isolated runtime package identity
           ansible.builtin.assert:
             that:
               - openclaw_isolated_gateway_runtime_package.name == 'openclaw'
               - openclaw_isolated_gateway_runtime_package.version is match('^[0-9A-Za-z][0-9A-Za-z.+_-]*$')
-              - openclaw_isolated_gateway_codex_package.name == '@openclaw/codex'
-              - openclaw_isolated_gateway_codex_package.version is match('^[0-9A-Za-z][0-9A-Za-z.+_-]*$')
-              - openclaw_isolated_gateway_codex_manifest.id == 'codex'
-              - openclaw_isolated_gateway_codex_package.openclaw.build.openclawVersion == (openclaw_isolated_gateway_runtime_package.version | regex_replace('-.*$', ''))
             fail_msg: >-
-              The stable-channel runtime and Codex provider do not form the
-              expected compatible official release pair.
+              The stable-channel runtime does not have the expected package
+              identity.
           when: not ansible_check_mode
 
-        - name: Select isolated versioned release pair
+        - name: Validate isolated managed plugin identities
+          ansible.builtin.assert:
+            that:
+              - item.package.name == item.definition.package
+              - item.package.version is match('^[0-9A-Za-z][0-9A-Za-z.+_-]*$')
+              - item.manifest.id == item.definition.id
+              - >-
+                not (item.definition.require_core_match | bool)
+                or
+                item.package.openclaw.build.openclawVersion
+                ==
+                (openclaw_isolated_gateway_runtime_package.version | regex_replace('-.*$', ''))
+            fail_msg: >-
+              Managed plugin {{ item.definition.id }} has the wrong package or
+              manifest identity, or is not compatible with the selected core.
+          loop: "{{ openclaw_isolated_gateway_plugin_metadata }}"
+          loop_control:
+            label: "{{ item.definition.id }}"
+          when: not ansible_check_mode
+
+        - name: Select Codex package metadata for canary proof
+          ansible.builtin.set_fact:
+            openclaw_isolated_gateway_codex_package: >-
+              {{
+                (
+                  openclaw_isolated_gateway_plugin_metadata
+                  | selectattr('definition.id', 'equalto', 'codex')
+                  | map(attribute='package')
+                  | list
+                  | first
+                )
+              }}
+            openclaw_isolated_gateway_release_components: >-
+              {{
+                [openclaw_isolated_gateway_runtime_package.version]
+                + (
+                    openclaw_isolated_gateway_plugin_metadata
+                    | map(attribute='definition.id')
+                    | zip(
+                        openclaw_isolated_gateway_plugin_metadata
+                        | map(attribute='package.version')
+                      )
+                    | map('join', '=')
+                    | list
+                  )
+              }}
+          when: not ansible_check_mode
+
+        - name: Select isolated versioned managed release
           ansible.builtin.set_fact:
             openclaw_isolated_gateway_release_id: >-
-              {{ openclaw_isolated_gateway_runtime_package.version }}-codex-{{ openclaw_isolated_gateway_codex_package.version }}
+              {{ openclaw_isolated_gateway_runtime_package.version }}-plugins-{{ (openclaw_isolated_gateway_release_components | join('|') | hash('sha256'))[:16] }}
             openclaw_isolated_gateway_release_path: >-
-              {{ openclaw_isolated_gateway_releases_dir }}/{{ openclaw_isolated_gateway_runtime_package.version }}-codex-{{ openclaw_isolated_gateway_codex_package.version }}
+              {{ openclaw_isolated_gateway_releases_dir }}/{{ openclaw_isolated_gateway_runtime_package.version }}-plugins-{{ (openclaw_isolated_gateway_release_components | join('|') | hash('sha256'))[:16] }}
             openclaw_isolated_gateway_release_stage_path: >-
-              {{ openclaw_isolated_gateway_releases_dir }}/.{{ openclaw_isolated_gateway_runtime_package.version }}-codex-{{ openclaw_isolated_gateway_codex_package.version }}.staging-{{ openclaw_isolated_gateway_backup_stamp }}
+              {{ openclaw_isolated_gateway_releases_dir }}/.{{ openclaw_isolated_gateway_runtime_package.version }}-plugins-{{ (openclaw_isolated_gateway_release_components | join('|') | hash('sha256'))[:16] }}.staging-{{ openclaw_isolated_gateway_backup_stamp }}
           when: not ansible_check_mode
 
         - name: Inspect isolated versioned runtime release
@@ -580,14 +697,17 @@
             - not ansible_check_mode
             - not openclaw_isolated_gateway_release_stat.stat.exists
 
-        - name: Stage new isolated Codex provider release
+        - name: Stage new isolated managed plugin releases
           ansible.builtin.command:
             argv:
               - /usr/bin/cp
               - --archive
               - --reflink=auto
-              - "{{ openclaw_isolated_gateway_build_dir }}/codex"
-              - "{{ openclaw_isolated_gateway_release_stage_path }}/plugins/codex"
+              - "{{ openclaw_isolated_gateway_build_dir }}/plugins/{{ item.id }}"
+              - "{{ openclaw_isolated_gateway_release_stage_path }}/plugins/{{ item.id }}"
+          loop: "{{ openclaw_isolated_gateway_managed_plugins }}"
+          loop_control:
+            label: "{{ item.id }}"
           when:
             - not ansible_check_mode
             - not openclaw_isolated_gateway_release_stat.stat.exists
@@ -615,14 +735,16 @@
               release={{ openclaw_isolated_gateway_release_id }}
               channel=stable
               openclaw={{ openclaw_isolated_gateway_runtime_package.version }}
-              codex={{ openclaw_isolated_gateway_codex_package.version }}
+              {% for plugin in openclaw_isolated_gateway_plugin_metadata %}
+              plugin.{{ plugin.definition.id }}={{ plugin.package.version }}
+              {% endfor %}
               built_without_service_credentials=true
               lifecycle_scripts=disabled
           when:
             - not ansible_check_mode
             - not openclaw_isolated_gateway_release_stat.stat.exists
 
-        - name: Promote isolated release pair atomically
+        - name: Promote isolated managed release atomically
           ansible.builtin.command:
             argv:
               - /usr/bin/mv
@@ -634,38 +756,65 @@
             - not openclaw_isolated_gateway_release_stat.stat.exists
           changed_when: true
 
-        - name: Read promoted isolated release metadata
+        - name: Read promoted isolated runtime metadata
           ansible.builtin.slurp:
-            path: "{{ item }}"
-          loop:
-            - "{{ openclaw_isolated_gateway_release_path }}/lib/node_modules/openclaw/package.json"
-            - "{{ openclaw_isolated_gateway_release_path }}/plugins/codex/node_modules/@openclaw/codex/package.json"
-            - "{{ openclaw_isolated_gateway_release_path }}/OPENCLAW_RELEASE"
-          register: openclaw_isolated_gateway_promoted_metadata
+            path: "{{ openclaw_isolated_gateway_release_path }}/lib/node_modules/openclaw/package.json"
+          register: openclaw_isolated_gateway_promoted_runtime_metadata
           when: not ansible_check_mode
 
-        - name: Decode promoted isolated release package metadata
+        - name: Read promoted isolated managed plugin metadata
+          ansible.builtin.slurp:
+            path: >-
+              {{ openclaw_isolated_gateway_release_path }}/plugins/{{ item.id }}/node_modules/{{ item.package }}/package.json
+          loop: "{{ openclaw_isolated_gateway_managed_plugins }}"
+          loop_control:
+            label: "{{ item.id }}"
+          register: openclaw_isolated_gateway_promoted_plugin_packages
+          when: not ansible_check_mode
+
+        - name: Read promoted isolated release provenance
+          ansible.builtin.slurp:
+            path: "{{ openclaw_isolated_gateway_release_path }}/OPENCLAW_RELEASE"
+          register: openclaw_isolated_gateway_promoted_provenance_raw
+          when: not ansible_check_mode
+
+        - name: Decode promoted isolated release metadata
           ansible.builtin.set_fact:
             openclaw_isolated_gateway_promoted_runtime_package: >-
-              {{ openclaw_isolated_gateway_promoted_metadata.results[0].content | b64decode | from_json }}
-            openclaw_isolated_gateway_promoted_codex_package: >-
-              {{ openclaw_isolated_gateway_promoted_metadata.results[1].content | b64decode | from_json }}
+              {{ openclaw_isolated_gateway_promoted_runtime_metadata.content | b64decode | from_json }}
             openclaw_isolated_gateway_promoted_provenance: >-
-              {{ openclaw_isolated_gateway_promoted_metadata.results[2].content | b64decode }}
+              {{ openclaw_isolated_gateway_promoted_provenance_raw.content | b64decode }}
           when: not ansible_check_mode
 
-        - name: Require exact promoted isolated release pair
+        - name: Require exact promoted isolated runtime release
           ansible.builtin.assert:
             that:
               - openclaw_isolated_gateway_promoted_runtime_package.name == 'openclaw'
               - openclaw_isolated_gateway_promoted_runtime_package.version == openclaw_isolated_gateway_runtime_package.version
-              - openclaw_isolated_gateway_promoted_codex_package.name == '@openclaw/codex'
-              - openclaw_isolated_gateway_promoted_codex_package.version == openclaw_isolated_gateway_codex_package.version
               - "'release=' + openclaw_isolated_gateway_release_id in openclaw_isolated_gateway_promoted_provenance"
               - "'lifecycle_scripts=disabled' in openclaw_isolated_gateway_promoted_provenance"
             fail_msg: >-
               The promoted release does not exactly match the staged OpenClaw
-              and Codex package pair or lacks modernized build provenance.
+              runtime or lacks modernized build provenance.
+          when: not ansible_check_mode
+
+        - name: Require exact promoted isolated managed plugins
+          ansible.builtin.assert:
+            that:
+              - (openclaw_isolated_gateway_promoted_plugin_packages.results[item].content | b64decode | from_json).name == openclaw_isolated_gateway_plugin_metadata[item].package.name
+              - (openclaw_isolated_gateway_promoted_plugin_packages.results[item].content | b64decode | from_json).version == openclaw_isolated_gateway_plugin_metadata[item].package.version
+              - >-
+                'plugin.'
+                + openclaw_isolated_gateway_plugin_metadata[item].definition.id
+                + '='
+                + openclaw_isolated_gateway_plugin_metadata[item].package.version
+                in openclaw_isolated_gateway_promoted_provenance
+            fail_msg: >-
+              Promoted plugin {{ openclaw_isolated_gateway_plugin_metadata[item].definition.id }}
+              does not match its staged immutable artifact.
+          loop: "{{ range(0, openclaw_isolated_gateway_plugin_metadata | length) | list }}"
+          loop_control:
+            label: "{{ openclaw_isolated_gateway_plugin_metadata[item].definition.id }}"
           when: not ansible_check_mode
 
         - name: Select current isolated runtime release atomically

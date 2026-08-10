@@ -28,6 +28,28 @@ openclaw_isolated_gateway_releases_dir: /opt/openclaw-isolated/releases
 openclaw_isolated_gateway_runtime_dir: /opt/openclaw-isolated/current
 openclaw_isolated_gateway_codex_plugin_dir: >-
   /opt/openclaw-isolated/current/plugins/codex/node_modules/@openclaw/codex
+openclaw_isolated_gateway_managed_plugins:
+  - id: codex
+    package: "@openclaw/codex"
+    install_spec: "@openclaw/codex@latest"
+    require_core_match: true
+  - id: discord
+    package: "@openclaw/discord"
+    install_spec: "@openclaw/discord@latest"
+    require_core_match: true
+  - id: lossless-claw
+    package: "@martian-engineering/lossless-claw"
+    install_spec: "@martian-engineering/lossless-claw@latest"
+    require_core_match: false
+  - id: openclaw-mem0
+    package: "@mem0/openclaw-mem0"
+    install_spec: "@mem0/openclaw-mem0@latest"
+    require_core_match: false
+openclaw_isolated_gateway_retired_global_plugins:
+  - brave
+  - nextcloud-talk
+  - perplexity
+  - self-evolution-gate
 openclaw_isolated_gateway_build_user: openclaw-build
 openclaw_isolated_gateway_build_group: openclaw-build
 openclaw_isolated_gateway_build_dir: /var/cache/openclaw-isolated-build
