@@ -604,21 +604,24 @@
         - name: Validate isolated managed plugin identities
           ansible.builtin.assert:
             that:
-              - item.package.name == item.definition.package
-              - item.package.version is match('^[0-9A-Za-z][0-9A-Za-z.+_-]*$')
-              - item.manifest.id == item.definition.id
+              - openclaw_isolated_gateway_plugin_metadata[item].package.name == openclaw_isolated_gateway_plugin_metadata[item].definition.package
+              - openclaw_isolated_gateway_plugin_metadata[item].package.version is match('^[0-9A-Za-z][0-9A-Za-z.+_-]*$')
+              - openclaw_isolated_gateway_plugin_metadata[item].manifest.id == openclaw_isolated_gateway_plugin_metadata[item].definition.id
               - >-
-                not (item.definition.require_core_match | bool)
+                not (
+                  openclaw_isolated_gateway_plugin_metadata[item].definition.require_core_match
+                  | bool
+                )
                 or
-                item.package.openclaw.build.openclawVersion
+                openclaw_isolated_gateway_plugin_metadata[item].package.openclaw.build.openclawVersion
                 ==
                 (openclaw_isolated_gateway_runtime_package.version | regex_replace('-.*$', ''))
             fail_msg: >-
-              Managed plugin {{ item.definition.id }} has the wrong package or
+              Managed plugin {{ openclaw_isolated_gateway_plugin_metadata[item].definition.id }} has the wrong package or
               manifest identity, or is not compatible with the selected core.
-          loop: "{{ openclaw_isolated_gateway_plugin_metadata }}"
+          loop: "{{ range(0, openclaw_isolated_gateway_plugin_metadata | length) | list }}"
           loop_control:
-            label: "{{ item.definition.id }}"
+            label: "{{ openclaw_isolated_gateway_plugin_metadata[item].definition.id }}"
           when: not ansible_check_mode
 
         - name: Select Codex package metadata for canary proof
