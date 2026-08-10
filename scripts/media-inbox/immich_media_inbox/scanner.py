@@ -30,6 +30,7 @@ SMART_SEARCH_PROMPTS = (
     "a cinematic scene with subtitles",
     "a vertical video clip from a movie or television show",
 )
+PIPELINE_VERSION = 2
 
 
 def _parse_time(value: str | None) -> datetime | None:
@@ -99,6 +100,9 @@ class Scanner:
         self.store.set_meta("scan_state", "running")
         report: dict[str, Any] = {"started": True, "started_at": started}
         try:
+            report["pipeline_reset"] = self.store.ensure_pipeline_version(
+                PIPELINE_VERSION
+            )
             features = self.immich.server_features()
             if not features.get("ocr") or not features.get("search"):
                 raise RuntimeError("Immich OCR and search must both be enabled")
@@ -161,6 +165,7 @@ class Scanner:
                         asset.get("id", "unknown"),
                         exc,
                     )
+                    self.store.record_error(str(asset.get("id") or ""), str(exc))
                     errors += 1
         next_index = index + 1
         if next_index >= len(SMART_SEARCH_PROMPTS):
@@ -333,7 +338,8 @@ class Scanner:
                 LOGGER.warning(
                     "Seerr auto-match failed for asset %s: %s", asset_id, exc
                 )
-                break
+                self.store.record_error(asset_id, str(exc))
+                return
             for match in rank_seerr_results(phrase, results, hinted_year=hinted_year):
                 key = (match.media_type, match.media_id)
                 previous = deduplicated.get(key)

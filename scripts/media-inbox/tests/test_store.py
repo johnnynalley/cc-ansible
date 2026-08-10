@@ -84,6 +84,38 @@ class StoreTests(unittest.TestCase):
         self.store.replace_matches(ASSET_ID, [])
         self.assertEqual(self.store.candidate(ASSET_ID)["matches"], [])
 
+    def test_pipeline_bump_invalidates_matches_and_retries_errors(self) -> None:
+        self.insert_asset()
+        self.store.replace_matches(
+            ASSET_ID,
+            [
+                RankedMatch(
+                    "movie",
+                    1,
+                    "Stale Example",
+                    2020,
+                    0.8,
+                    ("test",),
+                    {"id": 1, "mediaType": "movie"},
+                    "Stale Example",
+                )
+            ],
+        )
+        self.assertTrue(self.store.ensure_pipeline_version(2))
+        self.assertEqual(self.store.candidate(ASSET_ID)["matches"], [])
+        self.assertTrue(self.store.asset_needs_ocr(ASSET_ID, self.asset["updatedAt"]))
+        self.assertFalse(self.store.ensure_pipeline_version(2))
+
+        self.store.upsert_asset(
+            self.asset,
+            [],
+            Detection(0.8, ("test candidate",)),
+            {"metadata-crawl"},
+            ocr_text="Movie: The Nice Guys",
+        )
+        self.store.record_error(ASSET_ID, "safe upstream error")
+        self.assertTrue(self.store.asset_needs_ocr(ASSET_ID, self.asset["updatedAt"]))
+
 
 if __name__ == "__main__":
     unittest.main()

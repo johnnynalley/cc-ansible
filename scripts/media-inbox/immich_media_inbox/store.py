@@ -122,12 +122,29 @@ class Store:
         with self.connect() as local:
             self.set_meta(key, value, connection=local)
 
+    def ensure_pipeline_version(self, version: int) -> bool:
+        """Invalidate derived matches once when scanner logic changes."""
+        expected = str(version)
+        with self.connect() as connection:
+            current = self.get_meta("pipeline_version", connection=connection)
+            if current == expected:
+                return False
+            connection.execute("DELETE FROM matches")
+            connection.execute("UPDATE assets SET updated_at = '', last_error = NULL")
+            self.set_meta("pipeline_version", expected, connection=connection)
+        return True
+
     def asset_needs_ocr(self, asset_id: str, updated_at: str) -> bool:
         with self.connect() as connection:
             row = connection.execute(
-                "SELECT updated_at FROM assets WHERE asset_id = ?", (asset_id,)
+                "SELECT updated_at, last_error FROM assets WHERE asset_id = ?",
+                (asset_id,),
             ).fetchone()
-            return row is None or str(row["updated_at"]) != updated_at
+            return (
+                row is None
+                or str(row["updated_at"]) != updated_at
+                or row["last_error"] is not None
+            )
 
     def existing_sources(self, asset_id: str) -> set[str]:
         with self.connect() as connection:

@@ -9,6 +9,7 @@ from typing import Any
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from immich_media_inbox.config import Config  # noqa: E402
+from immich_media_inbox.clients import ApiError  # noqa: E402
 from immich_media_inbox.scanner import Scanner  # noqa: E402
 from immich_media_inbox.store import Store  # noqa: E402
 
@@ -79,6 +80,17 @@ class FakeSeerr:
         ]
 
 
+class FailingSecondSearchSeerr(FakeSeerr):
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def search(self, query: str) -> list[dict[str, Any]]:
+        self.calls += 1
+        if self.calls > 1:
+            raise ApiError("GET /search failed with HTTP 400")
+        return super().search(query)
+
+
 class ScannerTests(unittest.TestCase):
     def test_cycle_seeds_recent_and_historical_paths_without_requesting(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -115,6 +127,51 @@ class ScannerTests(unittest.TestCase):
                 {**ASSET, "visibility": "locked"}, source="unexpected-result"
             )
             self.assertIsNone(store.candidate(ASSET["id"]))
+
+    def test_failed_match_is_not_published_and_is_eligible_for_retry(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            config = Config(
+                immich_url="http://immich/api",
+                immich_api_key="test",
+                immich_web_url="https://photos.example",
+                seerr_url="http://seerr/api/v1",
+                seerr_api_key="test",
+                database_path=Path(temporary) / "state.sqlite3",
+                scan_interval_seconds=300,
+                scan_batch_size=10,
+                api_request_delay_ms=0,
+                candidate_threshold=0.4,
+                auto_match_threshold=0.55,
+                smart_search_size=10,
+                smart_search_interval_hours=24,
+                requests_enabled=False,
+                allowed_visibilities=("timeline", "archive"),
+            )
+            store = Store(config.database_path)
+            immich = FakeImmich()
+            original_get_ocr = immich.get_ocr
+            immich.get_ocr = lambda asset_id: original_get_ocr(asset_id) + [
+                {
+                    "text": "Another plausible title",
+                    "textScore": 0.99,
+                    "isVisible": True,
+                    "x1": 0,
+                    "x2": 100,
+                    "x3": 100,
+                    "x4": 0,
+                    "y1": 1600,
+                    "y2": 1600,
+                    "y3": 1630,
+                    "y4": 1630,
+                }
+            ]
+            scanner = Scanner(config, store, immich, FailingSecondSearchSeerr())
+            scanner._process_asset(dict(ASSET), source="metadata-crawl")
+
+            candidate = store.candidate(ASSET["id"])
+            self.assertEqual(candidate["matches"], [])
+            self.assertIsNotNone(candidate["last_error"])
+            self.assertTrue(store.asset_needs_ocr(ASSET["id"], ASSET["updatedAt"]))
 
 
 if __name__ == "__main__":
