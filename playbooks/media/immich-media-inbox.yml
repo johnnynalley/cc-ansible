@@ -310,6 +310,7 @@
         group: root
         mode: preserve
         directory_mode: "0755"
+      register: immich_media_inbox_app_deploy
 
     - name: Remove generated Python bytecode from deployed application
       ansible.builtin.file:
@@ -359,6 +360,7 @@
         group: root
         mode: "0600"
         validate: "/usr/bin/docker compose -f %s config --quiet"
+      register: immich_media_inbox_compose_deploy
 
     - name: Ensure caddy-proxy Docker network exists
       ansible.builtin.command: docker network inspect caddy-proxy
@@ -369,6 +371,12 @@
       community.docker.docker_compose_v2:
         project_src: "{{ immich_media_inbox_root }}"
         state: present
+        recreate: >-
+          {{ 'always'
+             if (immich_media_inbox_app_deploy.changed
+                 or immich_media_inbox_compose_deploy.changed
+                 or (immich_media_inbox_seerr_export.changed | default(false)))
+             else 'auto' }}
       when: not ansible_check_mode
 
     - name: Wait for a successful review-only scan cycle
