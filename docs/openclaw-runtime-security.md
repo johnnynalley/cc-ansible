@@ -9,7 +9,9 @@ and output filters do not make that a security boundary. Until the Gateway is
 moved to a dedicated OS identity, prompt injection or a Gateway compromise can
 become a controller and homelab compromise.
 
-The first deterministic boundaries are implemented but deliberately disabled:
+The first deterministic boundaries are implemented. Production cutover remains
+disabled, while the attended Gateway canary is currently active only on
+loopback and remains disabled at boot:
 
 - `playbooks/agents/openclaw-health-receiver.yml` stages and migrates Apple
   Health ingestion to the no-login `openclaw-health` service account.
@@ -55,10 +57,14 @@ removed, so it reported a duplicate alongside the explicit root-managed
 provider. The managed migration now retires that record through OpenClaw's
 supported keep-files uninstall, discards the temporary writable config copy,
 rebuilds the registry from the root-managed config, and requires a persisted
-registry with zero diagnostics. The service is currently stopped, so the
-`johnny` production Gateway is the only running Gateway. Production was not
-stopped or modified. Inventory remains `disabled` outside attended bootstrap,
-canary, and cutover work.
+registry with zero diagnostics. The corrected bootstrap completed on
+2026-08-10 with the stable `2026.7.1-2` core and `2026.7.1-1` Codex provider.
+The temporary canary is active only on `127.0.0.1` and `::1` port `19789`, is
+disabled at boot, and has no channels. The `johnny` production Gateway remains
+unchanged on port `18789`; no production channel token is active in the
+canary. Fresh device-code model authorization and the fixed model-response
+proof remain pending. Inventory defaults to `disabled` outside attended
+bootstrap, canary, and cutover work.
 
 ## Modernization Contract
 
@@ -84,6 +90,16 @@ load path. Stable-channel policy is retained, while each resolved core/provider
 pair is recorded as an immutable deployment artifact for rollback. Other
 agents, integrations, schedules, stores, and workspace artifacts remain subject
 to the same classification before production cutover.
+
+The current stable runtime is database-first. SQLite is canonical for active
+sessions, transcripts, cron, tasks, plugin state, pairing, and other runtime
+records; legacy JSON, JSONL, and sidecar stores are migration inputs for Doctor,
+not active target stores. Migration therefore combines an OpenClaw
+`backup create --verify` archive for SQLite-native snapshots with a separate
+stopped-state archive that preserves any history the product backup
+intentionally classifies as volatile. Doctor imports supported legacy sources
+into current stores and records migration runs; it does not justify copying old
+runtime files back into active discovery paths.
 
 ## Gateway Canary Design
 
