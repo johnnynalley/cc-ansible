@@ -31,6 +31,13 @@ loopback and remains disabled at boot:
   file-backed session trees and their exact structured workspace dependencies
   into a timestamped root-owned rehearsal generation, verifies path and hash
   parity, freezes the result read-only, and promotes only rehearsal selectors.
+- `playbooks/agents/openclaw-doctor-rehearsal.yml` consumes that verified
+  session generation, takes online SQLite backups of authoritative shared,
+  per-agent, Lossless Claw, and Mem0 history stores, and scrubs copied provider
+  auth. It disables channels and network access, retires all classified legacy
+  plugin install records through the supported CLI, restores retained plugins
+  from the immutable release, and requires two successful idempotent Doctor
+  passes before promoting rehearsal-only selectors.
 - `templates/openclaw/openclaw-isolated.json.j2` starts from a blank config:
   one OpenAI model, an explicitly loaded root-managed Codex provider, a
   file-backed Gateway token, no channel, heartbeat, memory, delegation,
@@ -306,6 +313,41 @@ reports, rollback metadata, and the modernization disposition are kept under
 it does not classify or activate the remaining behavior, database, plugin,
 integration, or credential lanes.
 
+### Doctor Modernization Rehearsal
+
+`openclaw_doctor_rehearsal_mode: disabled` is inert. An attended `doctor` run
+also requires `openclaw_doctor_rehearsal_approved: true`. It creates no Gateway,
+loads no provider or channel credential, and cannot read the production state
+as its no-login migration identity.
+
+The run is a modernization gate rather than a legacy clone:
+
+1. Consume only the promoted session/workspace rehearsal and current immutable
+   OpenClaw/plugin release.
+2. Take consistent online SQLite backups of the shared database, each active
+   per-agent database, Lossless Claw, and Mem0 history. Delete copied per-agent
+   auth rows while retaining memory and index state.
+3. Transform a copied config to dedicated roots, redact secret values, disable
+   channels and updates, and reject surviving production path references.
+4. Require the exact eight classified legacy plugin install records, retire
+   each through `plugins uninstall --keep-files --force`, then regenerate the
+   sanitized config and refresh the registry from four root-managed immutable
+   plugin paths.
+5. Run Doctor twice inside a transient `PrivateNetwork` systemd sandbox with
+   the human home, Docker socket, and controller checkout inaccessible.
+6. Compare data-free filesystem manifests and stable SQLite table digests.
+   Only a reviewed list of known volatile shared control-plane tables is
+   excluded from the stable comparison; an unknown exclusion fails closed.
+7. Promote root-owned rehearsal selectors only after both passes and
+   error-level lint succeed, then prove the production config checksum and user
+   Gateway state are unchanged.
+
+Root-only evidence and the rollback artifact live under
+`/var/backups/openclaw-doctor-rehearsal/<timestamp>`. A successful result proves
+the supported database/plugin modernization lane only. It does not authorize
+fresh OAuth, Discord/channel activation, behavior parity, or production
+cutover.
+
 ### Disabled
 
 `openclaw_health_receiver_mode: disabled` is the normal current state. A full
@@ -401,6 +443,9 @@ ansible-playbook playbooks/agents/openclaw-isolated-gateway.yml --check --diff -
 ansible-playbook playbooks/agents/openclaw-state-rehearsal.yml --syntax-check
 ansible-playbook playbooks/agents/openclaw-state-rehearsal.yml --check --diff
 ansible-playbook playbooks/agents/openclaw-state-rehearsal.yml --check --diff -e openclaw_state_rehearsal_mode=sessions -e openclaw_state_rehearsal_approved=true
+ansible-playbook playbooks/agents/openclaw-doctor-rehearsal.yml --syntax-check
+ansible-playbook playbooks/agents/openclaw-doctor-rehearsal.yml --check --diff
+ansible-playbook playbooks/agents/openclaw-doctor-rehearsal.yml --check --diff -e openclaw_doctor_rehearsal_mode=doctor -e openclaw_doctor_rehearsal_approved=true
 scripts/repo/repo-audit
 ```
 

@@ -309,11 +309,32 @@ class DoctorRehearsalTests(unittest.TestCase):
             connection.close()
 
             result = MODULE.sqlite_summary(
-                argparse.Namespace(database=str(database), output=str(output))
+                argparse.Namespace(
+                    database=str(database), output=str(output), exclude_table=[]
+                )
             )
             serialized = output.read_text(encoding="utf-8")
             self.assertEqual(result["tables"]["state"]["rowCount"], 1)
             self.assertNotIn("private", serialized)
+
+            excluded = MODULE.sqlite_summary(
+                argparse.Namespace(
+                    database=str(database),
+                    output=str(root / "excluded.json"),
+                    exclude_table=["state"],
+                )
+            )
+            self.assertEqual(excluded["excludedTables"], ["state"])
+            self.assertEqual(excluded["tables"], {})
+
+            with self.assertRaises(MODULE.RehearsalError):
+                MODULE.sqlite_summary(
+                    argparse.Namespace(
+                        database=str(database),
+                        output=str(root / "unknown.json"),
+                        exclude_table=["missing"],
+                    )
+                )
 
 
 if __name__ == "__main__":

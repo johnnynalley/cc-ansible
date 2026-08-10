@@ -209,6 +209,11 @@
   ansible.builtin.import_playbook: playbooks/agents/openclaw-state-rehearsal.yml
   tags: [openclaw, openclaw-migration, openclaw-rehearsal]
 
+- name: Rehearse OpenClaw Doctor modernization
+  ansible.builtin.import_playbook: >-
+    playbooks/agents/openclaw-doctor-rehearsal.yml
+  tags: [openclaw, openclaw-migration, openclaw-doctor]
+
 - name: Deploy OpenClaw AI agent
   ansible.builtin.import_playbook: playbooks/agents/openclaw.yml
   tags: [openclaw]

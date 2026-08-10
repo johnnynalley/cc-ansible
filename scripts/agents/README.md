@@ -43,7 +43,8 @@ dedicated `openclaw-health` system service passes cutover validation.
   copies, replaces retained external plugin paths with reviewed immutable
   artifacts, retires explicit legacy plugin ids, performs online SQLite backups,
   scrubs only per-agent auth tables, and emits data-free manifests and database
-  summaries for Doctor idempotency checks.
+  summaries for Doctor idempotency checks. Stable-table summaries may exclude
+  an explicit reviewed volatile-table set; unknown exclusions fail closed.
 - `test_openclaw_doctor_rehearsal.py` covers config path and secret handling,
   plugin modernization boundaries, auth-only database scrubbing, SQLite
   summaries, and immutable tree manifest comparison.

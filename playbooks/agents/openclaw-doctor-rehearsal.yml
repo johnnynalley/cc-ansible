@@ -1,0 +1,1364 @@
+---
+# yamllint disable rule:line-length
+# Purpose: Rehearse credential-free OpenClaw Doctor modernization on copied state.
+# Hosts: openclaw_hosts.
+# Key vars: openclaw_doctor_rehearsal_*.
+# Scripts: scripts/agents/openclaw-doctor-rehearsal.py.
+# Validation: ansible-playbook playbooks/agents/openclaw-doctor-rehearsal.yml --syntax-check.
+
+- name: Rehearse OpenClaw Doctor state modernization
+  hosts: openclaw_hosts
+  become: true
+  gather_facts: false
+
+  vars:
+    openclaw_doctor_rehearsal_tool: >-
+      /usr/local/libexec/openclaw-migration/openclaw-doctor-rehearsal.py
+    openclaw_doctor_rehearsal_free_space_margin: 5368709120
+
+  tasks:
+    - name: Validate OpenClaw Doctor rehearsal mode
+      ansible.builtin.assert:
+        that:
+          - openclaw_doctor_rehearsal_mode | default('disabled') in ['disabled', 'doctor']
+        fail_msg: >-
+          openclaw_doctor_rehearsal_mode must be disabled or doctor.
+
+    - name: Skip OpenClaw Doctor rehearsal when disabled
+      ansible.builtin.meta: end_host
+      when: openclaw_doctor_rehearsal_mode | default('disabled') == 'disabled'
+
+    - name: Require explicit approval for OpenClaw Doctor rehearsal
+      ansible.builtin.assert:
+        that:
+          - openclaw_doctor_rehearsal_approved | default(false) | bool
+        fail_msg: >-
+          Doctor rehearsal copies protected production state into an isolated
+          generation. Explicit owner approval is required.
+
+    - name: Validate fixed OpenClaw Doctor rehearsal boundary
+      ansible.builtin.assert:
+        that:
+          - openclaw_doctor_rehearsal_user == 'openclaw-migrate'
+          - openclaw_doctor_rehearsal_group == 'openclaw-migrate'
+          - openclaw_doctor_rehearsal_source_state_dir == '/home/johnny/.openclaw'
+          - openclaw_doctor_rehearsal_source_config == '/home/johnny/.openclaw/openclaw.json'
+          - openclaw_doctor_rehearsal_session_state == '/var/lib/openclaw-migration-rehearsal/current'
+          - openclaw_doctor_rehearsal_session_workspace == '/usr/local/share/openclaw-migration-rehearsal/current'
+          - openclaw_doctor_rehearsal_state_root == '/var/lib/openclaw-doctor-rehearsal'
+          - openclaw_doctor_rehearsal_workspace_root == '/usr/local/share/openclaw-doctor-rehearsal'
+          - openclaw_doctor_rehearsal_config_root == '/etc/openclaw-doctor-rehearsal'
+          - openclaw_doctor_rehearsal_backup_dir == '/var/backups/openclaw-doctor-rehearsal'
+          - openclaw_doctor_rehearsal_runtime == '/opt/openclaw-isolated/current'
+          - openclaw_doctor_rehearsal_agents | sort == ['antares', 'dubble', 'main', 'rigel', 'vega']
+          - openclaw_doctor_rehearsal_install_records | sort == ['brave', 'codex', 'discord', 'lossless-claw', 'nextcloud-talk', 'openclaw-mem0', 'perplexity', 'self-evolution-gate']
+          - openclaw_isolated_gateway_managed_plugins | map(attribute='id') | sort == ['codex', 'discord', 'lossless-claw', 'openclaw-mem0']
+          - openclaw_isolated_gateway_retired_global_plugins | sort == ['brave', 'nextcloud-talk', 'perplexity', 'self-evolution-gate']
+        fail_msg: >-
+          The Doctor rehearsal identity, roots, source, agent set, runtime, or
+          plugin disposition is outside the reviewed modernization boundary.
+
+    - name: Inspect OpenClaw Doctor rehearsal selectors
+      ansible.builtin.stat:
+        path: "{{ item }}"
+        follow: false
+      loop:
+        - "{{ openclaw_doctor_rehearsal_session_state }}"
+        - "{{ openclaw_doctor_rehearsal_session_workspace }}"
+        - "{{ openclaw_doctor_rehearsal_runtime }}"
+      register: openclaw_doctor_rehearsal_selector_stats
+      check_mode: false
+
+    - name: Require symlinked OpenClaw Doctor rehearsal inputs
+      ansible.builtin.assert:
+        that:
+          - item.stat.exists
+          - item.stat.islnk | default(false)
+        fail_msg: >-
+          A session rehearsal selector or immutable runtime selector is missing
+          or is not a symlink.
+      loop: "{{ openclaw_doctor_rehearsal_selector_stats.results }}"
+      loop_control:
+        label: "{{ item.item }}"
+
+    - name: Resolve OpenClaw Doctor rehearsal selectors
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/readlink
+          - --canonicalize-existing
+          - "{{ item }}"
+      loop:
+        - "{{ openclaw_doctor_rehearsal_session_state }}"
+        - "{{ openclaw_doctor_rehearsal_session_workspace }}"
+        - "{{ openclaw_doctor_rehearsal_runtime }}"
+      register: openclaw_doctor_rehearsal_resolved_selectors
+      changed_when: false
+      check_mode: false
+
+    - name: Require approved OpenClaw Doctor rehearsal generations
+      ansible.builtin.assert:
+        that:
+          - openclaw_doctor_rehearsal_resolved_selectors.results[0].stdout is match('^/var/lib/openclaw-migration-rehearsal/generations/[0-9]{8}T[0-9]{6}Z/state$')
+          - openclaw_doctor_rehearsal_resolved_selectors.results[1].stdout is match('^/usr/local/share/openclaw-migration-rehearsal/generations/[0-9]{8}T[0-9]{6}Z/workspace$')
+          - openclaw_doctor_rehearsal_resolved_selectors.results[2].stdout is match('^/opt/openclaw-isolated/releases/[0-9A-Za-z._+-]+-plugins-[0-9a-f]{16}$')
+        fail_msg: >-
+          A Doctor rehearsal source selector resolves outside its reviewed
+          immutable generation root.
+
+    - name: Inspect OpenClaw Doctor rehearsal source files
+      ansible.builtin.stat:
+        path: "{{ item }}"
+        follow: false
+      loop:
+        - "{{ openclaw_doctor_rehearsal_source_config }}"
+        - "{{ openclaw_doctor_rehearsal_source_state_dir }}/state/openclaw.sqlite"
+        - "{{ openclaw_doctor_rehearsal_source_state_dir }}/lcm.db"
+        - "{{ openclaw_doctor_rehearsal_source_state_dir }}/state/mem0/history.db"
+      register: openclaw_doctor_rehearsal_source_files
+      check_mode: false
+
+    - name: Require regular non-symlink OpenClaw Doctor source files
+      ansible.builtin.assert:
+        that:
+          - item.stat.exists
+          - item.stat.isreg
+          - not item.stat.islnk | default(false)
+        fail_msg: >-
+          A required production config or authoritative SQLite source is
+          missing, non-regular, or symlinked.
+      loop: "{{ openclaw_doctor_rehearsal_source_files.results }}"
+      loop_control:
+        label: "{{ item.item }}"
+
+    - name: Inspect OpenClaw Doctor per-agent databases
+      ansible.builtin.stat:
+        path: >-
+          {{ openclaw_doctor_rehearsal_source_state_dir }}/agents/{{ item }}/agent/openclaw-agent.sqlite
+        follow: false
+      loop: "{{ openclaw_doctor_rehearsal_agents }}"
+      register: openclaw_doctor_rehearsal_agent_databases
+      check_mode: false
+
+    - name: Require regular OpenClaw Doctor per-agent databases
+      ansible.builtin.assert:
+        that:
+          - item.stat.exists
+          - item.stat.isreg
+          - not item.stat.islnk | default(false)
+        fail_msg: >-
+          An authoritative per-agent database is missing, non-regular, or
+          symlinked.
+      loop: "{{ openclaw_doctor_rehearsal_agent_databases.results }}"
+      loop_control:
+        label: "{{ item.item }}"
+
+    - name: Inspect existing OpenClaw migration account
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/getent
+          - passwd
+          - "{{ openclaw_doctor_rehearsal_user }}"
+      register: openclaw_doctor_rehearsal_existing_account
+      changed_when: false
+      failed_when: false
+      check_mode: false
+
+    - name: Reject an unrelated OpenClaw migration account
+      ansible.builtin.assert:
+        that:
+          - >-
+            openclaw_doctor_rehearsal_existing_account.rc != 0
+            or (
+              openclaw_doctor_rehearsal_existing_account.stdout.split(':')[5]
+              == '/var/lib/openclaw-migration-rehearsal'
+              and
+              openclaw_doctor_rehearsal_existing_account.stdout.split(':')[6]
+              == '/usr/sbin/nologin'
+            )
+        fail_msg: >-
+          A pre-existing openclaw-migrate account has an unexpected home or
+          shell and will not be repurposed.
+
+    - name: Inspect prior OpenClaw Doctor managed paths
+      ansible.builtin.stat:
+        path: "{{ item }}"
+        follow: false
+      loop:
+        - "{{ openclaw_doctor_rehearsal_tool }}"
+        - "{{ openclaw_doctor_rehearsal_state_root }}/current"
+        - "{{ openclaw_doctor_rehearsal_workspace_root }}/current"
+        - "{{ openclaw_doctor_rehearsal_config_root }}/current"
+      register: openclaw_doctor_rehearsal_existing_paths
+      check_mode: false
+
+    - name: Reject non-symlink OpenClaw Doctor selectors
+      ansible.builtin.assert:
+        that:
+          - >-
+            not item.stat.exists
+            or item.item == openclaw_doctor_rehearsal_tool
+            or item.stat.islnk | default(false)
+        fail_msg: >-
+          A Doctor rehearsal current selector is not a symlink. Refusing to
+          replace an unclassified path.
+      loop: "{{ openclaw_doctor_rehearsal_existing_paths.results }}"
+      loop_control:
+        label: "{{ item.item }}"
+
+    - name: Capture production OpenClaw config checksum
+      ansible.builtin.stat:
+        path: "{{ openclaw_doctor_rehearsal_source_config }}"
+        checksum_algorithm: sha256
+      register: openclaw_doctor_rehearsal_source_config_before
+      check_mode: false
+
+    - name: Capture production OpenClaw Gateway state
+      ansible.builtin.command:
+        argv:
+          - /usr/sbin/runuser
+          - --user
+          - johnny
+          - --
+          - /usr/bin/env
+          - XDG_RUNTIME_DIR=/run/user/1000
+          - /usr/bin/systemctl
+          - --user
+          - is-active
+          - openclaw-gateway.service
+      register: openclaw_doctor_rehearsal_production_service_before
+      changed_when: false
+      failed_when: false
+      check_mode: false
+
+    - name: Report OpenClaw Doctor rehearsal check-mode boundary
+      ansible.builtin.debug:
+        msg: >-
+          Check mode validated the fixed source, immutable input generations,
+          service identity, database set, and plugin disposition. It does not
+          copy or transform protected state.
+      when: ansible_check_mode
+
+    - name: Stop OpenClaw Doctor rehearsal before mutation in check mode
+      ansible.builtin.meta: end_host
+      when: ansible_check_mode
+
+    - name: Set OpenClaw Doctor rehearsal timestamp
+      ansible.builtin.set_fact:
+        openclaw_doctor_rehearsal_stamp: "{{ lookup('pipe', 'date -u +%Y%m%dT%H%M%SZ') }}"
+
+    - name: Derive OpenClaw Doctor rehearsal generation paths
+      ansible.builtin.set_fact:
+        openclaw_doctor_rehearsal_generation_state: >-
+          {{ openclaw_doctor_rehearsal_state_root }}/generations/{{ openclaw_doctor_rehearsal_stamp }}/state
+        openclaw_doctor_rehearsal_generation_workspace: >-
+          {{ openclaw_doctor_rehearsal_workspace_root }}/generations/{{ openclaw_doctor_rehearsal_stamp }}/workspace
+        openclaw_doctor_rehearsal_generation_config_dir: >-
+          {{ openclaw_doctor_rehearsal_config_root }}/generations/{{ openclaw_doctor_rehearsal_stamp }}
+        openclaw_doctor_rehearsal_generation_config: >-
+          {{ openclaw_doctor_rehearsal_config_root }}/generations/{{ openclaw_doctor_rehearsal_stamp }}/openclaw.json
+        openclaw_doctor_rehearsal_evidence_dir: >-
+          {{ openclaw_doctor_rehearsal_backup_dir }}/{{ openclaw_doctor_rehearsal_stamp }}
+
+    - name: Derive OpenClaw Doctor rehearsal plugin paths
+      ansible.builtin.set_fact:
+        openclaw_doctor_rehearsal_plugin_arguments: >-
+          {{
+            (openclaw_doctor_rehearsal_plugin_arguments | default([]))
+            + [
+                '--plugin-path',
+                item.id
+                + '='
+                + openclaw_doctor_rehearsal_runtime
+                + '/plugins/'
+                + item.id
+                + '/node_modules/'
+                + item.package
+              ]
+          }}
+      loop: "{{ openclaw_isolated_gateway_managed_plugins }}"
+      loop_control:
+        label: "{{ item.id }}"
+
+    - name: Derive OpenClaw Doctor rehearsal retired plugin arguments
+      ansible.builtin.set_fact:
+        openclaw_doctor_rehearsal_retired_plugin_arguments: >-
+          {{
+            (openclaw_doctor_rehearsal_retired_plugin_arguments | default([]))
+            + ['--retire-plugin', item]
+          }}
+      loop: "{{ openclaw_isolated_gateway_retired_global_plugins }}"
+
+    - name: Derive OpenClaw Doctor rehearsal database and manifest policy
+      ansible.builtin.set_fact:
+        openclaw_doctor_rehearsal_state_manifest_exclude_arguments: >-
+          {{
+            [
+              '--exclude', 'state/openclaw.sqlite',
+              '--exclude', 'state/mem0/history.db',
+              '--exclude', 'lcm.db'
+            ]
+            + (
+                openclaw_doctor_rehearsal_agents
+                | map('regex_replace', '^(.*)$', '--exclude=agents/\\1/agent/openclaw-agent.sqlite')
+                | list
+              )
+          }}
+        openclaw_doctor_rehearsal_database_specs: >-
+          {{
+            [
+              {
+                'name': 'shared-full',
+                'path': openclaw_doctor_rehearsal_generation_state + '/state/openclaw.sqlite',
+                'exclusions': [],
+                'idempotency': false
+              },
+              {
+                'name': 'shared-stable',
+                'path': openclaw_doctor_rehearsal_generation_state + '/state/openclaw.sqlite',
+                'exclusions': openclaw_doctor_rehearsal_stable_shared_db_exclusions,
+                'idempotency': true
+              },
+              {
+                'name': 'lossless-claw',
+                'path': openclaw_doctor_rehearsal_generation_state + '/lcm.db',
+                'exclusions': [],
+                'idempotency': true
+              },
+              {
+                'name': 'mem0-history',
+                'path': openclaw_doctor_rehearsal_generation_state + '/state/mem0/history.db',
+                'exclusions': [],
+                'idempotency': true
+              }
+            ]
+          }}
+
+    - name: Add per-agent OpenClaw Doctor database policy
+      ansible.builtin.set_fact:
+        openclaw_doctor_rehearsal_database_specs: >-
+          {{
+            openclaw_doctor_rehearsal_database_specs
+            + [
+                {
+                  'name': 'agent-' + item,
+                  'path': openclaw_doctor_rehearsal_generation_state + '/agents/' + item + '/agent/openclaw-agent.sqlite',
+                  'exclusions': [],
+                  'idempotency': true
+                }
+              ]
+          }}
+      loop: "{{ openclaw_doctor_rehearsal_agents }}"
+      loop_control:
+        label: "{{ item }}"
+
+    - name: Inspect candidate OpenClaw Doctor rehearsal generation
+      ansible.builtin.stat:
+        path: "{{ item }}"
+        follow: false
+      loop:
+        - "{{ openclaw_doctor_rehearsal_generation_state }}"
+        - "{{ openclaw_doctor_rehearsal_generation_workspace }}"
+        - "{{ openclaw_doctor_rehearsal_generation_config_dir }}"
+        - "{{ openclaw_doctor_rehearsal_evidence_dir }}"
+      register: openclaw_doctor_rehearsal_candidate_paths
+
+    - name: Require fresh OpenClaw Doctor rehearsal paths
+      ansible.builtin.assert:
+        that:
+          - not item.stat.exists
+        fail_msg: >-
+          A timestamped Doctor generation or evidence directory already exists.
+          Refusing to overwrite immutable evidence.
+      loop: "{{ openclaw_doctor_rehearsal_candidate_paths.results }}"
+      loop_control:
+        label: "{{ item.item }}"
+
+    - name: Create OpenClaw Doctor rehearsal evidence directory
+      ansible.builtin.file:
+        path: "{{ openclaw_doctor_rehearsal_evidence_dir }}"
+        state: directory
+        owner: root
+        group: root
+        mode: "0700"
+
+    - name: Select prior OpenClaw Doctor managed paths for rollback
+      ansible.builtin.set_fact:
+        openclaw_doctor_rehearsal_backup_paths: >-
+          {{
+            openclaw_doctor_rehearsal_existing_paths.results
+            | selectattr('stat.exists')
+            | map(attribute='item')
+            | map('regex_replace', '^/', '')
+            | list
+          }}
+
+    - name: Back up prior OpenClaw Doctor selectors and helper
+      ansible.builtin.command:
+        argv: >-
+          {{
+            [
+              '/usr/bin/tar',
+              '--create',
+              '--gzip',
+              '--acls',
+              '--xattrs',
+              '--numeric-owner',
+              '--file', openclaw_doctor_rehearsal_evidence_dir + '/rollback.tar.gz',
+              '--directory', '/'
+            ]
+            + openclaw_doctor_rehearsal_backup_paths
+          }}
+      when: openclaw_doctor_rehearsal_backup_paths | length > 0
+      changed_when: true
+
+    - name: Record empty OpenClaw Doctor rollback baseline
+      ansible.builtin.copy:
+        dest: "{{ openclaw_doctor_rehearsal_evidence_dir }}/EMPTY_BASELINE"
+        owner: root
+        group: root
+        mode: "0600"
+        content: "No prior Doctor selector or helper existed.\n"
+      when: openclaw_doctor_rehearsal_backup_paths | length == 0
+
+    - name: Record OpenClaw Doctor modernization disposition
+      ansible.builtin.copy:
+        dest: "{{ openclaw_doctor_rehearsal_evidence_dir }}/disposition.json"
+        owner: root
+        group: root
+        mode: "0600"
+        content: >-
+          {{
+            {
+              'schemaVersion': 1,
+              'activeSessions': 'retain-from-verified-relocation',
+              'sharedState': 'retain-online-sqlite-backup',
+              'agentState': 'retain-online-sqlite-backup-auth-scrubbed',
+              'losslessClaw': 'retain-online-sqlite-backup',
+              'mem0History': 'retain-online-sqlite-backup',
+              'mem0Qdrant': 'retain-external-not-copied',
+              'codexProviderHome': 'archive-not-runnable-not-copied',
+              'credentials': 'replace-fresh-not-copied',
+              'pluginCode': 'replace-root-managed-current-channel',
+              'legacyInstallRecords': 'retire-supported-cli',
+              'disabledLegacyPlugins': 'retire',
+              'channels': 'disabled',
+              'fullLegacyWorkspace': 'not-copied',
+              'backupsCachesLogs': 'archive-or-discard-not-copied',
+              'productionGateway': 'untouched'
+            }
+            | to_nice_json
+          }}
+
+    - name: Create OpenClaw migration group
+      ansible.builtin.group:
+        name: "{{ openclaw_doctor_rehearsal_group }}"
+        system: true
+        state: present
+
+    - name: Create OpenClaw migration account
+      ansible.builtin.user:
+        name: "{{ openclaw_doctor_rehearsal_user }}"
+        group: "{{ openclaw_doctor_rehearsal_group }}"
+        groups: []
+        append: false
+        home: /var/lib/openclaw-migration-rehearsal
+        create_home: false
+        shell: /usr/sbin/nologin
+        system: true
+        state: present
+
+    - name: Verify OpenClaw migration account groups
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/id
+          - -Gn
+          - "{{ openclaw_doctor_rehearsal_user }}"
+      register: openclaw_doctor_rehearsal_account_groups
+      changed_when: false
+
+    - name: Require one OpenClaw migration group only
+      ansible.builtin.assert:
+        that:
+          - openclaw_doctor_rehearsal_account_groups.stdout.split() == [openclaw_doctor_rehearsal_group]
+        fail_msg: >-
+          The OpenClaw migration account has unexpected supplementary groups.
+
+    - name: Create OpenClaw Doctor managed roots
+      ansible.builtin.file:
+        path: "{{ item.path }}"
+        state: directory
+        owner: root
+        group: "{{ item.group }}"
+        mode: "{{ item.mode }}"
+      loop:
+        - path: "{{ openclaw_doctor_rehearsal_state_root }}"
+          group: "{{ openclaw_doctor_rehearsal_group }}"
+          mode: "0750"
+        - path: "{{ openclaw_doctor_rehearsal_state_root }}/generations"
+          group: "{{ openclaw_doctor_rehearsal_group }}"
+          mode: "0750"
+        - path: "{{ openclaw_doctor_rehearsal_workspace_root }}"
+          group: "{{ openclaw_doctor_rehearsal_group }}"
+          mode: "0750"
+        - path: "{{ openclaw_doctor_rehearsal_workspace_root }}/generations"
+          group: "{{ openclaw_doctor_rehearsal_group }}"
+          mode: "0750"
+        - path: "{{ openclaw_doctor_rehearsal_config_root }}"
+          group: "{{ openclaw_doctor_rehearsal_group }}"
+          mode: "0750"
+        - path: "{{ openclaw_doctor_rehearsal_config_root }}/generations"
+          group: "{{ openclaw_doctor_rehearsal_group }}"
+          mode: "0750"
+        - path: /usr/local/libexec/openclaw-migration
+          group: root
+          mode: "0755"
+
+    - name: Deploy OpenClaw Doctor rehearsal helper
+      ansible.builtin.copy:
+        src: "{{ ansible_config_file | dirname }}/scripts/agents/openclaw-doctor-rehearsal.py"
+        dest: "{{ openclaw_doctor_rehearsal_tool }}"
+        owner: root
+        group: root
+        mode: "0755"
+
+    - name: Create OpenClaw Doctor generation directories
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: directory
+        owner: root
+        group: root
+        mode: "0700"
+      loop:
+        - "{{ openclaw_doctor_rehearsal_generation_state }}"
+        - "{{ openclaw_doctor_rehearsal_generation_workspace }}"
+        - "{{ openclaw_doctor_rehearsal_generation_config_dir }}"
+
+    - name: Derive OpenClaw Doctor source copy set
+      ansible.builtin.set_fact:
+        openclaw_doctor_rehearsal_source_copy_paths: >-
+          {{
+            [
+              openclaw_doctor_rehearsal_session_state,
+              openclaw_doctor_rehearsal_session_workspace,
+              openclaw_doctor_rehearsal_source_state_dir + '/state/openclaw.sqlite',
+              openclaw_doctor_rehearsal_source_state_dir + '/lcm.db',
+              openclaw_doctor_rehearsal_source_state_dir + '/state/mem0/history.db'
+            ]
+            + (
+                openclaw_doctor_rehearsal_agents
+                | map('regex_replace', '^(.*)$', openclaw_doctor_rehearsal_source_state_dir + '/agents/\\1/agent/openclaw-agent.sqlite')
+                | list
+              )
+          }}
+
+    - name: Measure OpenClaw Doctor source copy set
+      ansible.builtin.command:
+        argv: >-
+          {{
+            ['/usr/bin/du', '--summarize', '--bytes', '--total']
+            + openclaw_doctor_rehearsal_source_copy_paths
+          }}
+      register: openclaw_doctor_rehearsal_source_size
+      changed_when: false
+
+    - name: Inspect OpenClaw Doctor destination filesystems
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/stat
+          - --file-system
+          - --format=%i:%a:%S
+          - "{{ item }}"
+      loop:
+        - /var/lib
+        - /usr/local/share
+        - /etc
+        - /var/backups
+      register: openclaw_doctor_rehearsal_filesystems
+      changed_when: false
+
+    - name: Require one capacious OpenClaw Doctor destination filesystem
+      ansible.builtin.assert:
+        that:
+          - openclaw_doctor_rehearsal_filesystems.results[0].stdout.split(':')[0] == openclaw_doctor_rehearsal_filesystems.results[1].stdout.split(':')[0]
+          - openclaw_doctor_rehearsal_filesystems.results[0].stdout.split(':')[0] == openclaw_doctor_rehearsal_filesystems.results[2].stdout.split(':')[0]
+          - openclaw_doctor_rehearsal_filesystems.results[0].stdout.split(':')[0] == openclaw_doctor_rehearsal_filesystems.results[3].stdout.split(':')[0]
+          - >-
+            (
+              openclaw_doctor_rehearsal_filesystems.results[0].stdout.split(':')[1]
+              | int
+            )
+            *
+            (
+              openclaw_doctor_rehearsal_filesystems.results[0].stdout.split(':')[2]
+              | int
+            )
+            >
+            (
+              openclaw_doctor_rehearsal_source_size.stdout_lines[-1].split()[0]
+              | int
+            )
+            + openclaw_doctor_rehearsal_free_space_margin
+        fail_msg: >-
+          Doctor rehearsal destinations are not on one reviewed filesystem or
+          lack conservative free space for copied state and the safety margin.
+
+    - name: Copy verified OpenClaw session generation
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/rsync
+          - --archive
+          - --hard-links
+          - --xattrs
+          - --numeric-ids
+          - "{{ openclaw_doctor_rehearsal_session_state }}/"
+          - "{{ openclaw_doctor_rehearsal_generation_state }}/"
+      changed_when: true
+
+    - name: Copy verified OpenClaw workspace generation
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/rsync
+          - --archive
+          - --hard-links
+          - --xattrs
+          - --numeric-ids
+          - "{{ openclaw_doctor_rehearsal_session_workspace }}/"
+          - "{{ openclaw_doctor_rehearsal_generation_workspace }}/"
+      changed_when: true
+
+    - name: Create OpenClaw Doctor database destinations
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: directory
+        owner: root
+        group: root
+        mode: "0700"
+      loop: >-
+        {{
+          [
+            openclaw_doctor_rehearsal_generation_state + '/state',
+            openclaw_doctor_rehearsal_generation_state + '/state/mem0'
+          ]
+          + (
+              openclaw_doctor_rehearsal_agents
+              | map('regex_replace', '^(.*)$', openclaw_doctor_rehearsal_generation_state + '/agents/\\1/agent')
+              | list
+            )
+        }}
+
+    - name: Back up shared OpenClaw state through SQLite
+      ansible.builtin.command:
+        argv:
+          - "{{ openclaw_doctor_rehearsal_tool }}"
+          - sqlite-backup
+          - --source
+          - "{{ openclaw_doctor_rehearsal_source_state_dir }}/state/openclaw.sqlite"
+          - --target
+          - "{{ openclaw_doctor_rehearsal_generation_state }}/state/openclaw.sqlite"
+          - --output
+          - "{{ openclaw_doctor_rehearsal_evidence_dir }}/backup-shared.json"
+      changed_when: true
+
+    - name: Back up Lossless Claw state through SQLite
+      ansible.builtin.command:
+        argv:
+          - "{{ openclaw_doctor_rehearsal_tool }}"
+          - sqlite-backup
+          - --source
+          - "{{ openclaw_doctor_rehearsal_source_state_dir }}/lcm.db"
+          - --target
+          - "{{ openclaw_doctor_rehearsal_generation_state }}/lcm.db"
+          - --output
+          - "{{ openclaw_doctor_rehearsal_evidence_dir }}/backup-lossless-claw.json"
+      changed_when: true
+
+    - name: Back up Mem0 history through SQLite
+      ansible.builtin.command:
+        argv:
+          - "{{ openclaw_doctor_rehearsal_tool }}"
+          - sqlite-backup
+          - --source
+          - "{{ openclaw_doctor_rehearsal_source_state_dir }}/state/mem0/history.db"
+          - --target
+          - "{{ openclaw_doctor_rehearsal_generation_state }}/state/mem0/history.db"
+          - --output
+          - "{{ openclaw_doctor_rehearsal_evidence_dir }}/backup-mem0-history.json"
+      changed_when: true
+
+    - name: Back up auth-scrubbed OpenClaw per-agent state through SQLite
+      ansible.builtin.command:
+        argv:
+          - "{{ openclaw_doctor_rehearsal_tool }}"
+          - sqlite-backup
+          - --source
+          - "{{ openclaw_doctor_rehearsal_source_state_dir }}/agents/{{ item }}/agent/openclaw-agent.sqlite"
+          - --target
+          - "{{ openclaw_doctor_rehearsal_generation_state }}/agents/{{ item }}/agent/openclaw-agent.sqlite"
+          - --output
+          - "{{ openclaw_doctor_rehearsal_evidence_dir }}/backup-agent-{{ item }}.json"
+          - --scrub-agent-auth
+      loop: "{{ openclaw_doctor_rehearsal_agents }}"
+      loop_control:
+        label: "{{ item }}"
+      changed_when: true
+
+    - name: Transform OpenClaw config for plugin-record retirement
+      ansible.builtin.command:
+        argv: >-
+          {{
+            [
+              openclaw_doctor_rehearsal_tool,
+              'transform-config',
+              '--source', openclaw_doctor_rehearsal_source_config,
+              '--output', openclaw_doctor_rehearsal_generation_config,
+              '--report', openclaw_doctor_rehearsal_evidence_dir + '/config-pre-uninstall.json',
+              '--source-state-root', openclaw_doctor_rehearsal_source_state_dir,
+              '--source-workspace-root', openclaw_doctor_rehearsal_source_state_dir + '/workspace',
+              '--target-state-root', openclaw_doctor_rehearsal_generation_state,
+              '--target-workspace-root', openclaw_doctor_rehearsal_generation_workspace,
+              '--gateway-port', '19789'
+            ]
+            + openclaw_doctor_rehearsal_plugin_arguments
+            + openclaw_doctor_rehearsal_retired_plugin_arguments
+          }}
+      changed_when: true
+
+    - name: Assign writable OpenClaw Doctor generation to migration identity
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: directory
+        owner: "{{ openclaw_doctor_rehearsal_user }}"
+        group: "{{ openclaw_doctor_rehearsal_group }}"
+        mode: u=rwX,g=rX,o=
+        recurse: true
+      loop:
+        - "{{ openclaw_doctor_rehearsal_generation_state }}"
+        - "{{ openclaw_doctor_rehearsal_generation_workspace }}"
+        - "{{ openclaw_doctor_rehearsal_generation_config_dir }}"
+
+    - name: Define networkless OpenClaw Doctor transient command
+      ansible.builtin.set_fact:
+        openclaw_doctor_rehearsal_transient_prefix:
+          - /usr/bin/systemd-run
+          - --quiet
+          - --wait
+          - --collect
+          - --pipe
+          - --service-type=exec
+          - "--property=User={{ openclaw_doctor_rehearsal_user }}"
+          - "--property=Group={{ openclaw_doctor_rehearsal_group }}"
+          - --property=NoNewPrivileges=yes
+          - --property=PrivateDevices=yes
+          - --property=PrivateNetwork=yes
+          - --property=PrivateTmp=yes
+          - --property=ProtectClock=yes
+          - --property=ProtectControlGroups=yes
+          - --property=ProtectHome=yes
+          - --property=ProtectHostname=yes
+          - --property=ProtectKernelLogs=yes
+          - --property=ProtectKernelModules=yes
+          - --property=ProtectKernelTunables=yes
+          - --property=ProtectProc=invisible
+          - --property=ProtectSystem=strict
+          - --property=RestrictAddressFamilies=AF_UNIX
+          - --property=RestrictSUIDSGID=yes
+          - --property=LockPersonality=yes
+          - --property=CapabilityBoundingSet=
+          - --property=AmbientCapabilities=
+          - --property=UMask=0077
+          - "--property=WorkingDirectory={{ openclaw_doctor_rehearsal_generation_workspace }}"
+          - "--property=ReadWritePaths={{ openclaw_doctor_rehearsal_generation_state }}"
+          - "--property=ReadWritePaths={{ openclaw_doctor_rehearsal_generation_workspace }}"
+          - "--property=ReadWritePaths={{ openclaw_doctor_rehearsal_generation_config_dir }}"
+          - --property=InaccessiblePaths=/home/johnny
+          - --property=InaccessiblePaths=/var/run/docker.sock
+          - --property=InaccessiblePaths=/opt/cc-ansible
+        openclaw_doctor_rehearsal_command_environment:
+          - /usr/bin/env
+          - -i
+          - "HOME={{ openclaw_doctor_rehearsal_generation_state }}"
+          - "PATH=/usr/bin:/bin"
+          - "TMPDIR=/tmp"
+          - "XDG_CONFIG_HOME={{ openclaw_doctor_rehearsal_generation_state }}/.config"
+          - "XDG_DATA_HOME={{ openclaw_doctor_rehearsal_generation_state }}/.local/share"
+          - "XDG_CACHE_HOME={{ openclaw_doctor_rehearsal_generation_state }}/.cache"
+          - "OPENCLAW_HOME={{ openclaw_doctor_rehearsal_generation_state }}"
+          - "OPENCLAW_STATE_DIR={{ openclaw_doctor_rehearsal_generation_state }}/state"
+          - "OPENCLAW_CONFIG_PATH={{ openclaw_doctor_rehearsal_generation_config }}"
+          - "OPENCLAW_WORKSPACE_DIR={{ openclaw_doctor_rehearsal_generation_workspace }}"
+          - OPENCLAW_SKIP_CHANNELS=1
+          - OPENCLAW_SERVICE_REPAIR_POLICY=external
+          - NO_COLOR=1
+
+    - name: Prove migration identity cannot read production OpenClaw state
+      ansible.builtin.command:
+        argv: >-
+          {{
+            openclaw_doctor_rehearsal_transient_prefix
+            + ['--unit=openclaw-doctor-source-proof-' + openclaw_doctor_rehearsal_stamp]
+            + ['/usr/bin/test', '!', '-r', openclaw_doctor_rehearsal_source_config]
+          }}
+      changed_when: false
+
+    - name: Inspect copied OpenClaw plugin install records
+      ansible.builtin.command:
+        argv: >-
+          {{
+            openclaw_doctor_rehearsal_transient_prefix
+            + ['--unit=openclaw-doctor-registry-before-' + openclaw_doctor_rehearsal_stamp]
+            + openclaw_doctor_rehearsal_command_environment
+            + [openclaw_doctor_rehearsal_runtime + '/bin/openclaw', 'plugins', 'registry', '--json']
+          }}
+      register: openclaw_doctor_rehearsal_registry_before_raw
+      changed_when: false
+      no_log: true
+
+    - name: Parse copied OpenClaw plugin install records
+      ansible.builtin.set_fact:
+        openclaw_doctor_rehearsal_registry_before: >-
+          {{ openclaw_doctor_rehearsal_registry_before_raw.stdout | from_json }}
+      no_log: true
+
+    - name: Require the classified legacy OpenClaw install-record set
+      ansible.builtin.assert:
+        that:
+          - openclaw_doctor_rehearsal_registry_before.current.installRecords | default({}, true) | dict2items | map(attribute='key') | sort == openclaw_doctor_rehearsal_install_records | sort
+          - openclaw_doctor_rehearsal_registry_before.persisted.installRecords | default({}, true) | dict2items | map(attribute='key') | sort == openclaw_doctor_rehearsal_install_records | sort
+        fail_msg: >-
+          The copied plugin registry contains an unclassified or missing install
+          record. Update the modernization disposition before continuing.
+
+    - name: Record classified legacy OpenClaw install records
+      ansible.builtin.copy:
+        dest: "{{ openclaw_doctor_rehearsal_evidence_dir }}/plugin-records-before.json"
+        owner: root
+        group: root
+        mode: "0600"
+        content: >-
+          {{
+            {
+              'schemaVersion': 1,
+              'installRecords': openclaw_doctor_rehearsal_install_records | sort
+            }
+            | to_nice_json
+          }}
+
+    - name: Retire copied legacy OpenClaw plugin install records
+      ansible.builtin.command:
+        argv: >-
+          {{
+            openclaw_doctor_rehearsal_transient_prefix
+            + ['--unit=openclaw-doctor-uninstall-' + item + '-' + openclaw_doctor_rehearsal_stamp]
+            + openclaw_doctor_rehearsal_command_environment
+            + [
+                openclaw_doctor_rehearsal_runtime + '/bin/openclaw',
+                'plugins', 'uninstall', item,
+                '--keep-files', '--force'
+              ]
+          }}
+      loop: "{{ openclaw_doctor_rehearsal_install_records }}"
+      loop_control:
+        label: "{{ item }}"
+      changed_when: true
+
+    - name: Restore sanitized retained OpenClaw plugin configuration
+      ansible.builtin.command:
+        argv: >-
+          {{
+            [
+              openclaw_doctor_rehearsal_tool,
+              'transform-config',
+              '--source', openclaw_doctor_rehearsal_source_config,
+              '--output', openclaw_doctor_rehearsal_generation_config + '.final',
+              '--report', openclaw_doctor_rehearsal_evidence_dir + '/config-final.json',
+              '--source-state-root', openclaw_doctor_rehearsal_source_state_dir,
+              '--source-workspace-root', openclaw_doctor_rehearsal_source_state_dir + '/workspace',
+              '--target-state-root', openclaw_doctor_rehearsal_generation_state,
+              '--target-workspace-root', openclaw_doctor_rehearsal_generation_workspace,
+              '--gateway-port', '19789'
+            ]
+            + openclaw_doctor_rehearsal_plugin_arguments
+            + openclaw_doctor_rehearsal_retired_plugin_arguments
+          }}
+      changed_when: true
+
+    - name: Assign final sanitized config to migration identity
+      ansible.builtin.file:
+        path: "{{ openclaw_doctor_rehearsal_generation_config }}.final"
+        state: file
+        owner: "{{ openclaw_doctor_rehearsal_user }}"
+        group: "{{ openclaw_doctor_rehearsal_group }}"
+        mode: "0600"
+
+    - name: Replace temporary uninstall config atomically
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/mv
+          - --force
+          - --no-target-directory
+          - "{{ openclaw_doctor_rehearsal_generation_config }}.final"
+          - "{{ openclaw_doctor_rehearsal_generation_config }}"
+      changed_when: true
+
+    - name: Refresh copied OpenClaw plugin registry from immutable sources
+      ansible.builtin.command:
+        argv: >-
+          {{
+            openclaw_doctor_rehearsal_transient_prefix
+            + ['--unit=openclaw-doctor-registry-refresh-' + openclaw_doctor_rehearsal_stamp]
+            + openclaw_doctor_rehearsal_command_environment
+            + [openclaw_doctor_rehearsal_runtime + '/bin/openclaw', 'plugins', 'registry', '--refresh']
+          }}
+      changed_when: true
+
+    - name: Inspect modernized copied OpenClaw plugin registry
+      ansible.builtin.command:
+        argv: >-
+          {{
+            openclaw_doctor_rehearsal_transient_prefix
+            + ['--unit=openclaw-doctor-registry-after-' + openclaw_doctor_rehearsal_stamp]
+            + openclaw_doctor_rehearsal_command_environment
+            + [openclaw_doctor_rehearsal_runtime + '/bin/openclaw', 'plugins', 'registry', '--json']
+          }}
+      register: openclaw_doctor_rehearsal_registry_after_raw
+      changed_when: false
+      no_log: true
+
+    - name: Parse modernized copied OpenClaw plugin registry
+      ansible.builtin.set_fact:
+        openclaw_doctor_rehearsal_registry_after: >-
+          {{ openclaw_doctor_rehearsal_registry_after_raw.stdout | from_json }}
+      no_log: true
+
+    - name: Resolve immutable managed plugin roots
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/readlink
+          - --canonicalize-existing
+          - >-
+            {{ openclaw_doctor_rehearsal_runtime }}/plugins/{{ item.id }}/node_modules/{{ item.package }}
+      loop: "{{ openclaw_isolated_gateway_managed_plugins }}"
+      loop_control:
+        label: "{{ item.id }}"
+      register: openclaw_doctor_rehearsal_managed_plugin_roots
+      changed_when: false
+
+    - name: Require no legacy install records after modernization
+      ansible.builtin.assert:
+        that:
+          - openclaw_doctor_rehearsal_registry_after.current.installRecords | default({}, true) | length == 0
+          - openclaw_doctor_rehearsal_registry_after.persisted.installRecords | default({}, true) | length == 0
+        fail_msg: >-
+          A legacy plugin install record survived supported CLI retirement.
+
+    - name: Require exact immutable managed plugins after modernization
+      ansible.builtin.assert:
+        that:
+          - openclaw_doctor_rehearsal_registry_after.current.plugins | selectattr('pluginId', 'equalto', openclaw_isolated_gateway_managed_plugins[item].id) | list | length == 1
+          - (openclaw_doctor_rehearsal_registry_after.current.plugins | selectattr('pluginId', 'equalto', openclaw_isolated_gateway_managed_plugins[item].id) | list | first).origin == 'config'
+          - (openclaw_doctor_rehearsal_registry_after.current.plugins | selectattr('pluginId', 'equalto', openclaw_isolated_gateway_managed_plugins[item].id) | list | first).enabled | bool
+          - (openclaw_doctor_rehearsal_registry_after.current.plugins | selectattr('pluginId', 'equalto', openclaw_isolated_gateway_managed_plugins[item].id) | list | first).rootDir == openclaw_doctor_rehearsal_managed_plugin_roots.results[item].stdout
+        fail_msg: >-
+          A retained plugin is missing, duplicated, disabled, or loaded outside
+          the immutable release.
+      loop: "{{ range(0, openclaw_isolated_gateway_managed_plugins | length) | list }}"
+      loop_control:
+        label: "{{ openclaw_isolated_gateway_managed_plugins[item].id }}"
+
+    - name: Record modernized OpenClaw plugin registry summary
+      ansible.builtin.copy:
+        dest: "{{ openclaw_doctor_rehearsal_evidence_dir }}/plugin-registry-after.json"
+        owner: root
+        group: root
+        mode: "0600"
+        content: >-
+          {{
+            {
+              'schemaVersion': 1,
+              'installRecords': [],
+              'managedPlugins': (
+                openclaw_isolated_gateway_managed_plugins
+                | map(attribute='id')
+                | sort
+              ),
+              'registryState': openclaw_doctor_rehearsal_registry_after.state
+            }
+            | to_nice_json
+          }}
+
+    - name: Capture OpenClaw Doctor pre-migration evidence
+      ansible.builtin.include_tasks: ../../tasks/openclaw-doctor-snapshot.yml
+      vars:
+        openclaw_doctor_snapshot_phase: before-doctor
+
+    - name: Run first networkless OpenClaw Doctor migration pass
+      ansible.builtin.command:
+        argv: >-
+          {{
+            openclaw_doctor_rehearsal_transient_prefix
+            + ['--unit=openclaw-doctor-pass1-' + openclaw_doctor_rehearsal_stamp]
+            + openclaw_doctor_rehearsal_command_environment
+            + [
+                openclaw_doctor_rehearsal_runtime + '/bin/openclaw',
+                'doctor', '--non-interactive', '--yes',
+                '--no-workspace-suggestions'
+              ]
+          }}
+      register: openclaw_doctor_rehearsal_pass1
+      changed_when: true
+      failed_when: false
+      no_log: true
+
+    - name: Preserve first OpenClaw Doctor output
+      ansible.builtin.copy:
+        dest: "{{ openclaw_doctor_rehearsal_evidence_dir }}/doctor-pass1.txt"
+        owner: root
+        group: root
+        mode: "0600"
+        content: >-
+          {{ openclaw_doctor_rehearsal_pass1.stdout }}
+          {{ openclaw_doctor_rehearsal_pass1.stderr }}
+      no_log: true
+
+    - name: Require successful first OpenClaw Doctor pass
+      ansible.builtin.assert:
+        that:
+          - openclaw_doctor_rehearsal_pass1.rc == 0
+        fail_msg: >-
+          The first credential-free Doctor pass failed. Root-only output remains
+          in the timestamped evidence directory.
+
+    - name: Capture OpenClaw Doctor first-pass evidence
+      ansible.builtin.include_tasks: ../../tasks/openclaw-doctor-snapshot.yml
+      vars:
+        openclaw_doctor_snapshot_phase: after-pass1
+
+    - name: Record first-pass OpenClaw Doctor filesystem effects
+      ansible.builtin.command:
+        argv:
+          - "{{ openclaw_doctor_rehearsal_tool }}"
+          - diff
+          - --before
+          - "{{ openclaw_doctor_rehearsal_evidence_dir }}/before-doctor-{{ item }}.json"
+          - --after
+          - "{{ openclaw_doctor_rehearsal_evidence_dir }}/after-pass1-{{ item }}.json"
+          - --output
+          - "{{ openclaw_doctor_rehearsal_evidence_dir }}/pass1-diff-{{ item }}.json"
+      loop:
+        - state
+        - workspace
+        - config
+      changed_when: false
+
+    - name: Run second networkless OpenClaw Doctor migration pass
+      ansible.builtin.command:
+        argv: >-
+          {{
+            openclaw_doctor_rehearsal_transient_prefix
+            + ['--unit=openclaw-doctor-pass2-' + openclaw_doctor_rehearsal_stamp]
+            + openclaw_doctor_rehearsal_command_environment
+            + [
+                openclaw_doctor_rehearsal_runtime + '/bin/openclaw',
+                'doctor', '--non-interactive', '--yes',
+                '--no-workspace-suggestions'
+              ]
+          }}
+      register: openclaw_doctor_rehearsal_pass2
+      changed_when: true
+      failed_when: false
+      no_log: true
+
+    - name: Preserve second OpenClaw Doctor output
+      ansible.builtin.copy:
+        dest: "{{ openclaw_doctor_rehearsal_evidence_dir }}/doctor-pass2.txt"
+        owner: root
+        group: root
+        mode: "0600"
+        content: >-
+          {{ openclaw_doctor_rehearsal_pass2.stdout }}
+          {{ openclaw_doctor_rehearsal_pass2.stderr }}
+      no_log: true
+
+    - name: Require successful second OpenClaw Doctor pass
+      ansible.builtin.assert:
+        that:
+          - openclaw_doctor_rehearsal_pass2.rc == 0
+        fail_msg: >-
+          The second credential-free Doctor pass failed. Root-only output
+          remains in the timestamped evidence directory.
+
+    - name: Capture OpenClaw Doctor second-pass evidence
+      ansible.builtin.include_tasks: ../../tasks/openclaw-doctor-snapshot.yml
+      vars:
+        openclaw_doctor_snapshot_phase: after-pass2
+
+    - name: Compare second-pass OpenClaw Doctor filesystem effects
+      ansible.builtin.command:
+        argv:
+          - "{{ openclaw_doctor_rehearsal_tool }}"
+          - diff
+          - --before
+          - "{{ openclaw_doctor_rehearsal_evidence_dir }}/after-pass1-{{ item }}.json"
+          - --after
+          - "{{ openclaw_doctor_rehearsal_evidence_dir }}/after-pass2-{{ item }}.json"
+          - --output
+          - "{{ openclaw_doctor_rehearsal_evidence_dir }}/pass2-diff-{{ item }}.json"
+      loop:
+        - state
+        - workspace
+        - config
+      changed_when: false
+
+    - name: Read second-pass OpenClaw Doctor filesystem diffs
+      ansible.builtin.slurp:
+        src: "{{ openclaw_doctor_rehearsal_evidence_dir }}/pass2-diff-{{ item }}.json"
+      loop:
+        - state
+        - workspace
+        - config
+      register: openclaw_doctor_rehearsal_pass2_diffs
+
+    - name: Require idempotent OpenClaw Doctor filesystem state
+      ansible.builtin.assert:
+        that:
+          - (item.content | b64decode | from_json).summary.added == 0
+          - (item.content | b64decode | from_json).summary.removed == 0
+          - (item.content | b64decode | from_json).summary.modified == 0
+        fail_msg: >-
+          The second Doctor pass changed non-database state. The data-free diff
+          remains in root-only rehearsal evidence for classification.
+      loop: "{{ openclaw_doctor_rehearsal_pass2_diffs.results }}"
+      loop_control:
+        label: "{{ item.item }}"
+
+    - name: Inspect idempotent OpenClaw Doctor database summaries after pass one
+      ansible.builtin.stat:
+        path: "{{ openclaw_doctor_rehearsal_evidence_dir }}/after-pass1-db-{{ item.name }}.json"
+        checksum_algorithm: sha256
+      loop: "{{ openclaw_doctor_rehearsal_database_specs | selectattr('idempotency') | list }}"
+      loop_control:
+        label: "{{ item.name }}"
+      register: openclaw_doctor_rehearsal_database_pass1
+
+    - name: Inspect idempotent OpenClaw Doctor database summaries after pass two
+      ansible.builtin.stat:
+        path: "{{ openclaw_doctor_rehearsal_evidence_dir }}/after-pass2-db-{{ item.name }}.json"
+        checksum_algorithm: sha256
+      loop: "{{ openclaw_doctor_rehearsal_database_specs | selectattr('idempotency') | list }}"
+      loop_control:
+        label: "{{ item.name }}"
+      register: openclaw_doctor_rehearsal_database_pass2
+
+    - name: Require idempotent OpenClaw Doctor stable database state
+      ansible.builtin.assert:
+        that:
+          - openclaw_doctor_rehearsal_database_pass1.results[item].stat.checksum == openclaw_doctor_rehearsal_database_pass2.results[item].stat.checksum
+        fail_msg: >-
+          The second Doctor pass changed a stable database table. Data-free
+          table summaries remain in root-only rehearsal evidence.
+      loop: "{{ range(0, openclaw_doctor_rehearsal_database_pass1.results | length) | list }}"
+      loop_control:
+        label: "{{ openclaw_doctor_rehearsal_database_pass1.results[item].item.name }}"
+
+    - name: Run networkless OpenClaw Doctor error-level lint
+      ansible.builtin.command:
+        argv: >-
+          {{
+            openclaw_doctor_rehearsal_transient_prefix
+            + ['--unit=openclaw-doctor-lint-' + openclaw_doctor_rehearsal_stamp]
+            + openclaw_doctor_rehearsal_command_environment
+            + [
+                openclaw_doctor_rehearsal_runtime + '/bin/openclaw',
+                'doctor', '--lint', '--all', '--json',
+                '--severity-min', 'error'
+              ]
+          }}
+      register: openclaw_doctor_rehearsal_lint
+      changed_when: false
+      failed_when: false
+      no_log: true
+
+    - name: Preserve OpenClaw Doctor lint output
+      ansible.builtin.copy:
+        dest: "{{ openclaw_doctor_rehearsal_evidence_dir }}/doctor-lint.json"
+        owner: root
+        group: root
+        mode: "0600"
+        content: >-
+          {{ openclaw_doctor_rehearsal_lint.stdout }}
+          {{ openclaw_doctor_rehearsal_lint.stderr }}
+      no_log: true
+
+    - name: Require successful OpenClaw Doctor error-level lint
+      ansible.builtin.assert:
+        that:
+          - openclaw_doctor_rehearsal_lint.rc == 0
+        fail_msg: >-
+          Doctor error-level lint failed. Root-only JSON remains in the
+          rehearsal evidence directory.
+
+    - name: Freeze validated OpenClaw Doctor generation
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: directory
+        owner: root
+        group: "{{ openclaw_doctor_rehearsal_group }}"
+        mode: u=rwX,g=rX,o=
+        recurse: true
+      loop:
+        - "{{ openclaw_doctor_rehearsal_generation_state }}"
+        - "{{ openclaw_doctor_rehearsal_generation_workspace }}"
+        - "{{ openclaw_doctor_rehearsal_generation_config_dir }}"
+
+    - name: Promote validated OpenClaw Doctor generation selectors
+      block:
+        - name: Create candidate OpenClaw Doctor selectors
+          ansible.builtin.command:
+            argv:
+              - /usr/bin/ln
+              - --symbolic
+              - --no-target-directory
+              - "{{ item.source }}"
+              - "{{ item.target }}"
+          loop:
+            - source: "{{ openclaw_doctor_rehearsal_generation_state }}"
+              target: "{{ openclaw_doctor_rehearsal_state_root }}/.current-{{ openclaw_doctor_rehearsal_stamp }}"
+            - source: "{{ openclaw_doctor_rehearsal_generation_workspace }}"
+              target: "{{ openclaw_doctor_rehearsal_workspace_root }}/.current-{{ openclaw_doctor_rehearsal_stamp }}"
+            - source: "{{ openclaw_doctor_rehearsal_generation_config_dir }}"
+              target: "{{ openclaw_doctor_rehearsal_config_root }}/.current-{{ openclaw_doctor_rehearsal_stamp }}"
+          loop_control:
+            label: "{{ item.target }}"
+          changed_when: true
+
+        - name: Atomically promote OpenClaw Doctor selectors
+          ansible.builtin.command:
+            argv:
+              - /usr/bin/mv
+              - --force
+              - --no-target-directory
+              - "{{ item.candidate }}"
+              - "{{ item.current }}"
+          loop:
+            - candidate: "{{ openclaw_doctor_rehearsal_state_root }}/.current-{{ openclaw_doctor_rehearsal_stamp }}"
+              current: "{{ openclaw_doctor_rehearsal_state_root }}/current"
+            - candidate: "{{ openclaw_doctor_rehearsal_workspace_root }}/.current-{{ openclaw_doctor_rehearsal_stamp }}"
+              current: "{{ openclaw_doctor_rehearsal_workspace_root }}/current"
+            - candidate: "{{ openclaw_doctor_rehearsal_config_root }}/.current-{{ openclaw_doctor_rehearsal_stamp }}"
+              current: "{{ openclaw_doctor_rehearsal_config_root }}/current"
+          loop_control:
+            label: "{{ item.current }}"
+          changed_when: true
+
+        - name: Resolve promoted OpenClaw Doctor selectors
+          ansible.builtin.command:
+            argv:
+              - /usr/bin/readlink
+              - --canonicalize-existing
+              - "{{ item }}"
+          loop:
+            - "{{ openclaw_doctor_rehearsal_state_root }}/current"
+            - "{{ openclaw_doctor_rehearsal_workspace_root }}/current"
+            - "{{ openclaw_doctor_rehearsal_config_root }}/current"
+          register: openclaw_doctor_rehearsal_promoted_selectors
+          changed_when: false
+
+        - name: Require exact promoted OpenClaw Doctor selectors
+          ansible.builtin.assert:
+            that:
+              - openclaw_doctor_rehearsal_promoted_selectors.results[0].stdout == openclaw_doctor_rehearsal_generation_state
+              - openclaw_doctor_rehearsal_promoted_selectors.results[1].stdout == openclaw_doctor_rehearsal_generation_workspace
+              - openclaw_doctor_rehearsal_promoted_selectors.results[2].stdout == openclaw_doctor_rehearsal_generation_config_dir
+            fail_msg: >-
+              A promoted Doctor selector does not resolve to the validated
+              immutable generation.
+      rescue:
+        - name: Remove failed OpenClaw Doctor candidate selectors
+          ansible.builtin.file:
+            path: "{{ item }}"
+            state: absent
+          loop:
+            - "{{ openclaw_doctor_rehearsal_state_root }}/.current-{{ openclaw_doctor_rehearsal_stamp }}"
+            - "{{ openclaw_doctor_rehearsal_workspace_root }}/.current-{{ openclaw_doctor_rehearsal_stamp }}"
+            - "{{ openclaw_doctor_rehearsal_config_root }}/.current-{{ openclaw_doctor_rehearsal_stamp }}"
+
+        - name: Restore prior OpenClaw Doctor selectors
+          ansible.builtin.file:
+            src: "{{ item.source }}"
+            dest: "{{ item.dest }}"
+            state: link
+            force: true
+          loop:
+            - source: "{{ openclaw_doctor_rehearsal_existing_paths.results[1].stat.lnk_source | default('') }}"
+              dest: "{{ openclaw_doctor_rehearsal_state_root }}/current"
+              existed: "{{ openclaw_doctor_rehearsal_existing_paths.results[1].stat.exists }}"
+            - source: "{{ openclaw_doctor_rehearsal_existing_paths.results[2].stat.lnk_source | default('') }}"
+              dest: "{{ openclaw_doctor_rehearsal_workspace_root }}/current"
+              existed: "{{ openclaw_doctor_rehearsal_existing_paths.results[2].stat.exists }}"
+            - source: "{{ openclaw_doctor_rehearsal_existing_paths.results[3].stat.lnk_source | default('') }}"
+              dest: "{{ openclaw_doctor_rehearsal_config_root }}/current"
+              existed: "{{ openclaw_doctor_rehearsal_existing_paths.results[3].stat.exists }}"
+          loop_control:
+            label: "{{ item.dest }}"
+          when: item.existed | bool
+
+        - name: Stop after OpenClaw Doctor selector rollback
+          ansible.builtin.fail:
+            msg: >-
+              Doctor selector promotion failed. Prior selectors were restored
+              and the failed generation remains root-only evidence.
+
+    - name: Recheck production OpenClaw config checksum
+      ansible.builtin.stat:
+        path: "{{ openclaw_doctor_rehearsal_source_config }}"
+        checksum_algorithm: sha256
+      register: openclaw_doctor_rehearsal_source_config_after
+
+    - name: Recheck production OpenClaw Gateway state
+      ansible.builtin.command:
+        argv:
+          - /usr/sbin/runuser
+          - --user
+          - johnny
+          - --
+          - /usr/bin/env
+          - XDG_RUNTIME_DIR=/run/user/1000
+          - /usr/bin/systemctl
+          - --user
+          - is-active
+          - openclaw-gateway.service
+      register: openclaw_doctor_rehearsal_production_service_after
+      changed_when: false
+      failed_when: false
+
+    - name: Require untouched production OpenClaw control state
+      ansible.builtin.assert:
+        that:
+          - openclaw_doctor_rehearsal_source_config_after.stat.checksum == openclaw_doctor_rehearsal_source_config_before.stat.checksum
+          - openclaw_doctor_rehearsal_production_service_after.rc == openclaw_doctor_rehearsal_production_service_before.rc
+          - openclaw_doctor_rehearsal_production_service_after.stdout == openclaw_doctor_rehearsal_production_service_before.stdout
+        fail_msg: >-
+          Production config or Gateway state changed during the copy-only Doctor
+          rehearsal. Stop before using the rehearsal result.
+
+    - name: Record successful OpenClaw Doctor rehearsal promotion
+      ansible.builtin.copy:
+        dest: "{{ openclaw_doctor_rehearsal_evidence_dir }}/PROMOTED.json"
+        owner: root
+        group: root
+        mode: "0600"
+        content: >-
+          {{
+            {
+              'schemaVersion': 1,
+              'stamp': openclaw_doctor_rehearsal_stamp,
+              'state': openclaw_doctor_rehearsal_generation_state,
+              'workspace': openclaw_doctor_rehearsal_generation_workspace,
+              'config': openclaw_doctor_rehearsal_generation_config,
+              'runtime': openclaw_doctor_rehearsal_resolved_selectors.results[2].stdout,
+              'doctorPasses': 2,
+              'stableStateIdempotent': true,
+              'productionGateway': 'untouched'
+            }
+            | to_nice_json
+          }}

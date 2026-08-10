@@ -1,0 +1,60 @@
+---
+# yamllint disable rule:line-length
+# Data-free evidence snapshot for one OpenClaw Doctor rehearsal phase.
+
+- name: Manifest OpenClaw Doctor rehearsal state at {{ openclaw_doctor_snapshot_phase }}
+  ansible.builtin.command:
+    argv: >-
+      {{
+        [
+          openclaw_doctor_rehearsal_tool,
+          'manifest',
+          '--root', openclaw_doctor_rehearsal_generation_state,
+          '--output', openclaw_doctor_rehearsal_evidence_dir + '/' + openclaw_doctor_snapshot_phase + '-state.json'
+        ]
+        + openclaw_doctor_rehearsal_state_manifest_exclude_arguments
+      }}
+  changed_when: false
+
+- name: Manifest OpenClaw Doctor rehearsal workspace at {{ openclaw_doctor_snapshot_phase }}
+  ansible.builtin.command:
+    argv:
+      - "{{ openclaw_doctor_rehearsal_tool }}"
+      - manifest
+      - --root
+      - "{{ openclaw_doctor_rehearsal_generation_workspace }}"
+      - --output
+      - "{{ openclaw_doctor_rehearsal_evidence_dir }}/{{ openclaw_doctor_snapshot_phase }}-workspace.json"
+  changed_when: false
+
+- name: Manifest OpenClaw Doctor rehearsal config at {{ openclaw_doctor_snapshot_phase }}
+  ansible.builtin.command:
+    argv:
+      - "{{ openclaw_doctor_rehearsal_tool }}"
+      - manifest
+      - --root
+      - "{{ openclaw_doctor_rehearsal_generation_config_dir }}"
+      - --output
+      - "{{ openclaw_doctor_rehearsal_evidence_dir }}/{{ openclaw_doctor_snapshot_phase }}-config.json"
+  changed_when: false
+
+- name: Summarize OpenClaw Doctor rehearsal databases at {{ openclaw_doctor_snapshot_phase }}
+  ansible.builtin.command:
+    argv: >-
+      {{
+        [
+          openclaw_doctor_rehearsal_tool,
+          'sqlite-summary',
+          '--database', item.path,
+          '--output', openclaw_doctor_rehearsal_evidence_dir + '/' + openclaw_doctor_snapshot_phase + '-db-' + item.name + '.json'
+        ]
+        + (
+            item.exclusions
+            | map('regex_replace', '^', '--exclude-table=')
+            | list
+          )
+      }}
+  loop: "{{ openclaw_doctor_rehearsal_database_specs }}"
+  loop_control:
+    label: "{{ item.name }}"
+  changed_when: false

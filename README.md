@@ -297,6 +297,8 @@ Packages are merged from multiple sources (all applicable variables combined):
 | `openclaw.yml` | `openclaw_hosts` | OpenClaw AI agent (npm install, gateway service, repo-sync/update-check timers) |
 | `openclaw-health-receiver.yml` | `openclaw_hosts` | Isolated Health receiver and aggregate-only report publisher (disabled by default) |
 | `openclaw-isolated-gateway.yml` | `openclaw_hosts` | Modernized two-phase Gateway canary with immutable core/provider releases, isolated OAuth enrollment, and model proof (disabled by default) |
+| `openclaw-state-rehearsal.yml` | `openclaw_hosts` | Verified relocation rehearsal for active file-backed sessions and their exact workspace dependencies (disabled by default) |
+| `openclaw-doctor-rehearsal.yml` | `openclaw_hosts` | Credential-free Doctor and plugin-modernization rehearsal on protected copied state (disabled by default) |
 
 ## NFS Configuration
 
@@ -1051,7 +1053,15 @@ OpenClaw AI agent platform — personal homelab admin assistant via web UI and D
   ephemeral account resolves the stable core/provider pair with lifecycle
   scripts disabled; root atomically promotes the immutable versioned release.
   The attended canary uses loopback port 19789 and does not stop or modify
-  production. Existing canary infrastructure is currently stopped.
+  production. The temporary loopback canary is currently active, has no
+  channels, and remains disabled at boot.
+- **State modernization rehearsals**: The promoted session relocation contains
+  only active file-backed history and exact workspace dependencies. A separate
+  disabled-by-default Doctor rehearsal takes online SQLite backups, scrubs
+  copied provider auth, retires legacy plugin install records through the
+  supported CLI, restores retained plugins from the immutable release, and
+  requires a second Doctor pass to be idempotent before promotion. Neither
+  rehearsal modifies or authenticates production.
 - **Mem0 memory**: `@mem0/openclaw-mem0` plugin with Qdrant (localhost:6333), Gemini embeddings, and the configured OpenAI-compatible LLM for fact extraction. Auto-capture + auto-recall across sessions.
 - **dbc ops access**: Narrow host-specific wrappers, including candidate-scoped Immich Media Inbox access on docker-vm. Its isolated vision workers may read pixels/OCR only for admitted candidates; there is no arbitrary Immich, credential, SQLite, or general Docker access. Existing media-stack/Caddy operational paths remain separately scoped.
 - **Docker reporting**: A strict result-only reporter is implemented but remains disabled until the dedicated runtime identity and key are deployed. See `docs/openclaw-docker-access.md`.

@@ -82,6 +82,54 @@ openclaw_state_rehearsal_agents:
   - vega
   - antares
 
+# Credential-free Doctor modernization rehearsal. This consumes the already
+# verified session relocation generation, takes online backups of only the
+# authoritative live SQLite stores, removes legacy plugin install records from
+# the copy through OpenClaw's supported CLI, and runs safe migrations twice in
+# a networkless transient unit. Disabled mode is inert.
+openclaw_doctor_rehearsal_mode: disabled
+openclaw_doctor_rehearsal_approved: false
+openclaw_doctor_rehearsal_user: openclaw-migrate
+openclaw_doctor_rehearsal_group: openclaw-migrate
+openclaw_doctor_rehearsal_source_state_dir: /home/johnny/.openclaw
+openclaw_doctor_rehearsal_source_config: /home/johnny/.openclaw/openclaw.json
+openclaw_doctor_rehearsal_session_state: >-
+  /var/lib/openclaw-migration-rehearsal/current
+openclaw_doctor_rehearsal_session_workspace: >-
+  /usr/local/share/openclaw-migration-rehearsal/current
+openclaw_doctor_rehearsal_state_root: /var/lib/openclaw-doctor-rehearsal
+openclaw_doctor_rehearsal_workspace_root: >-
+  /usr/local/share/openclaw-doctor-rehearsal
+openclaw_doctor_rehearsal_config_root: /etc/openclaw-doctor-rehearsal
+openclaw_doctor_rehearsal_backup_dir: >-
+  /var/backups/openclaw-doctor-rehearsal
+openclaw_doctor_rehearsal_runtime: /opt/openclaw-isolated/current
+openclaw_doctor_rehearsal_agents:
+  - main
+  - dubble
+  - rigel
+  - vega
+  - antares
+openclaw_doctor_rehearsal_install_records:
+  - brave
+  - codex
+  - discord
+  - lossless-claw
+  - nextcloud-talk
+  - openclaw-mem0
+  - perplexity
+  - self-evolution-gate
+openclaw_doctor_rehearsal_stable_shared_db_exclusions:
+  - audit_events
+  - config_health_entries
+  - gateway_boot_lifecycle
+  - gateway_restart_handoff
+  - gateway_restart_intent
+  - gateway_restart_sentinel
+  - installed_plugin_index
+  - state_leases
+  - update_check_state
+
 # Dedicated Health receiver migration. Disabled leaves the current user service
 # untouched. Canary and production are attended rollout modes; first production
 # activation additionally requires both request and approval booleans.

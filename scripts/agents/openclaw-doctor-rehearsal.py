@@ -433,8 +433,19 @@ def sqlite_summary(args: argparse.Namespace) -> dict[str, Any]:
         schema_hash = hashlib.sha256(
             json.dumps(schema_rows, separators=(",", ":"), ensure_ascii=True).encode()
         ).hexdigest()
+        table_rows = sqlite_table_rows(connection)
+        available_tables = {name for name, _ in table_rows}
+        excluded_tables = set(args.exclude_table)
+        unknown_exclusions = excluded_tables - available_tables
+        if unknown_exclusions:
+            raise RehearsalError(
+                "SQLite summary excludes unknown tables: "
+                + ", ".join(sorted(unknown_exclusions))
+            )
         tables: dict[str, Any] = {}
-        for name, create_sql in sqlite_table_rows(connection):
+        for name, create_sql in table_rows:
+            if name in excluded_tables:
+                continue
             if create_sql.upper().startswith("CREATE VIRTUAL TABLE"):
                 tables[name] = {"kind": "virtual"}
                 continue
@@ -481,6 +492,7 @@ def sqlite_summary(args: argparse.Namespace) -> dict[str, Any]:
         "schemaVersion": SCHEMA_VERSION,
         "status": "ok",
         "quickCheck": "ok",
+        "excludedTables": sorted(excluded_tables),
         "schemaSha256": schema_hash,
         "tables": tables,
     }
@@ -641,6 +653,7 @@ def build_parser() -> argparse.ArgumentParser:
     summary = subparsers.add_parser("sqlite-summary")
     summary.add_argument("--database", required=True)
     summary.add_argument("--output", required=True)
+    summary.add_argument("--exclude-table", action="append", default=[])
     summary.set_defaults(handler=sqlite_summary)
 
     manifest = subparsers.add_parser("manifest")
