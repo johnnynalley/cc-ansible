@@ -951,22 +951,55 @@
               }}
           when: not ansible_check_mode
 
-        - name: Require one compatible root-managed Codex provider
+        - name: Require exactly one root-managed Codex provider candidate
           ansible.builtin.assert:
             that:
               - openclaw_isolated_gateway_codex_inventory | length == 1
+            fail_msg: >-
+              The root-managed configuration did not resolve exactly one Codex
+              provider candidate.
+          when: not ansible_check_mode
+
+        - name: Canonicalize configured Codex provider path
+          ansible.builtin.command:
+            argv:
+              - /usr/bin/readlink
+              - -f
+              - "{{ openclaw_isolated_gateway_codex_plugin_dir }}"
+          register: openclaw_isolated_gateway_configured_codex_realpath
+          changed_when: false
+          when: not ansible_check_mode
+
+        - name: Canonicalize inventoried Codex provider path
+          ansible.builtin.command:
+            argv:
+              - /usr/bin/readlink
+              - -f
+              - "{{ openclaw_isolated_gateway_codex_inventory[0].rootDir }}"
+          register: openclaw_isolated_gateway_inventory_codex_realpath
+          changed_when: false
+          when: not ansible_check_mode
+
+        - name: Require one compatible root-managed Codex provider
+          ansible.builtin.assert:
+            that:
               - openclaw_isolated_gateway_codex_inventory[0].enabled | bool
               - openclaw_isolated_gateway_codex_inventory[0].status == 'loaded'
               - openclaw_isolated_gateway_codex_inventory[0].origin == 'config'
-              - openclaw_isolated_gateway_codex_inventory[0].rootDir == openclaw_isolated_gateway_codex_plugin_dir
+              - openclaw_isolated_gateway_inventory_codex_realpath.stdout == openclaw_isolated_gateway_configured_codex_realpath.stdout
+              - >-
+                openclaw_isolated_gateway_configured_codex_realpath.stdout
+                ==
+                openclaw_isolated_gateway_release_path + '/plugins/codex/node_modules/@openclaw/codex'
               - openclaw_isolated_gateway_codex_inventory[0].dependencyStatus.requiredInstalled | bool
               - openclaw_isolated_gateway_plugin_inventory.registry.source == 'persisted'
               - openclaw_isolated_gateway_plugin_inventory.registry.diagnostics | length == 0
               - openclaw_isolated_gateway_plugin_inventory.diagnostics | length == 0
             fail_msg: >-
               The root-managed Codex provider is missing, incompatible, or
-              still dependent on writable runtime installation state or a
-              stale legacy install record.
+              outside the selected immutable release, or it still depends on
+              writable runtime installation state or a stale legacy install
+              record.
           when: not ansible_check_mode
 
         - name: Prove isolated Gateway cannot mutate provider code

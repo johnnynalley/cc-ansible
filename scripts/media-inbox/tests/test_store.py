@@ -3,7 +3,9 @@ from __future__ import annotations
 import sys
 import tempfile
 import unittest
+from contextlib import contextmanager
 from pathlib import Path
+from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
@@ -140,6 +142,58 @@ class StoreTests(unittest.TestCase):
         )
         self.store.record_error(ASSET_ID, "safe upstream error")
         self.assertTrue(self.store.asset_needs_ocr(ASSET_ID, self.asset["updatedAt"]))
+
+    def test_pipeline_migration_batches_ocr_heavy_asset_updates(self) -> None:
+        large_ocr = "x" * 131072
+        with self.store.connect() as connection:
+            connection.executemany(
+                """
+                INSERT INTO assets(
+                    asset_id, updated_at, visibility, ocr_text,
+                    detection_score, scanned_at
+                ) VALUES (?, ?, 'timeline', ?, 0.8, ?)
+                """,
+                [
+                    (
+                        f"12345678-1234-1234-1234-{index:012d}",
+                        "2026-01-02T03:05:00Z",
+                        large_ocr,
+                        "2026-01-02T03:06:00Z",
+                    )
+                    for index in range(205)
+                ],
+            )
+        self.store.set_meta("pipeline_version", "3")
+
+        statements: list[str] = []
+        original_connect = self.store.connect
+
+        @contextmanager
+        def traced_connect():
+            with original_connect() as connection:
+                connection.set_trace_callback(statements.append)
+                yield connection
+
+        with mock.patch.object(self.store, "connect", traced_connect):
+            self.assertTrue(self.store.ensure_pipeline_version(4))
+
+        reset_updates = [
+            statement
+            for statement in statements
+            if statement.lstrip().upper().startswith("UPDATE ASSETS")
+        ]
+        self.assertEqual(len(reset_updates), 3)
+
+        statements.clear()
+        with mock.patch.object(self.store, "connect", traced_connect):
+            self.store.prepare_analysis_queue(0.4)
+        queue_updates = [
+            statement
+            for statement in statements
+            if statement.lstrip().upper().startswith("UPDATE ASSETS")
+        ]
+        self.assertEqual(len(queue_updates), 3)
+        self.assertEqual(self.store.stats(0.4)["local_pending"], 205)
 
     def test_queue_orders_large_ocr_rows_without_grouping_them_for_sort(self) -> None:
         large_ocr = "dialogue " * 131072

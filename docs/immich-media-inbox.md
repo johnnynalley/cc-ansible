@@ -162,6 +162,12 @@ Final decisions are:
 - `ambiguous`: the final automated tier could not safely choose an exact work;
 - `not_media`: the candidate admission filter produced a false positive.
 
+Pipeline-version resets and cached-candidate queue preparation update at most
+100 assets per SQLite statement while remaining inside one transaction. Do not
+replace those batches with one unbounded `UPDATE`: OCR-heavy rows can make
+SQLite's statement journal exceed the container's 16 MB temporary filesystem
+and return `SQLITE_FULL` even when the host filesystem has ample free space.
+
 ## Managed Paths
 
 | Path | Owner | Purpose |

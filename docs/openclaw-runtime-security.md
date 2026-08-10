@@ -113,7 +113,9 @@ config and `plugins uninstall codex --force --keep-files` to remove only its
 persisted install record. It then removes the old package tree, deploys the
 root-managed config, runs `plugins registry --refresh`, and rejects a derived,
 warning-bearing, duplicate, disabled, or dependency-incomplete provider
-inventory.
+inventory. Because OpenClaw may report either the `current` symlink spelling or
+its selected release target, validation compares canonical paths and separately
+requires that target to be the exact promoted versioned release.
 
 Only a dedicated Gateway token is generated in
 `/etc/openclaw-isolated/secrets.json`. Nothing is imported from the legacy broad

@@ -12,6 +12,8 @@ from typing import Any, Iterator
 from .analysis import AnalysisResult
 from .scoring import Detection, RankedMatch
 
+SQLITE_WRITE_BATCH_SIZE = 100
+
 
 def utc_now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
@@ -172,6 +174,21 @@ class Store:
         with self.connect() as local:
             self.set_meta(key, value, connection=local)
 
+    @staticmethod
+    def _asset_id_batches(
+        connection: sqlite3.Connection,
+        *,
+        where: str = "",
+        parameters: tuple[Any, ...] = (),
+    ) -> Iterator[list[str]]:
+        query = "SELECT asset_id FROM assets"
+        if where:
+            query += f" WHERE {where}"
+        rows = connection.execute(query, parameters).fetchall()
+        asset_ids = [str(row["asset_id"]) for row in rows]
+        for offset in range(0, len(asset_ids), SQLITE_WRITE_BATCH_SIZE):
+            yield asset_ids[offset : offset + SQLITE_WRITE_BATCH_SIZE]
+
     def ensure_pipeline_version(self, version: int) -> bool:
         """Invalidate derived matches once when scanner logic changes."""
         expected = str(version)
@@ -180,14 +197,20 @@ class Store:
             if current == expected:
                 return False
             connection.execute("DELETE FROM matches")
-            connection.execute("""
-                UPDATE assets
-                SET analysis_state = 'unprocessed', analysis_media = NULL,
-                    analysis_provider = NULL, analysis_result = NULL,
-                    analysis_attempts = 0, cloud_analysis_attempts = 0,
-                    analysis_updated_at = NULL,
-                    analysis_error = NULL
-                """)
+            for asset_ids in self._asset_id_batches(connection):
+                placeholders = ",".join("?" for _asset_id in asset_ids)
+                connection.execute(
+                    f"""
+                    UPDATE assets
+                    SET analysis_state = 'unprocessed', analysis_media = NULL,
+                        analysis_provider = NULL, analysis_result = NULL,
+                        analysis_attempts = 0, cloud_analysis_attempts = 0,
+                        analysis_updated_at = NULL,
+                        analysis_error = NULL
+                    WHERE asset_id IN ({placeholders})
+                    """,
+                    asset_ids,
+                )
             self.set_meta("pipeline_version", expected, connection=connection)
         return True
 
@@ -195,26 +218,34 @@ class Store:
         """Queue cached candidates without re-fetching unchanged OCR."""
 
         with self.connect() as connection:
-            connection.execute(
-                """
-                UPDATE assets
-                SET analysis_state = CASE
-                        WHEN detection_score >= ? THEN 'local_pending'
-                        ELSE 'filtered'
-                    END,
-                    analysis_media = CASE
-                        WHEN detection_score >= ? THEN NULL
-                        ELSE 0
-                    END,
-                    analysis_provider = CASE
-                        WHEN detection_score >= ? THEN NULL
-                        ELSE 'prefilter'
-                    END,
-                    analysis_updated_at = ?
-                WHERE analysis_state = 'unprocessed'
-                """,
-                (threshold, threshold, threshold, utc_now()),
-            )
+            now = utc_now()
+            for asset_ids in self._asset_id_batches(
+                connection,
+                where="analysis_state = ?",
+                parameters=("unprocessed",),
+            ):
+                placeholders = ",".join("?" for _asset_id in asset_ids)
+                connection.execute(
+                    f"""
+                    UPDATE assets
+                    SET analysis_state = CASE
+                            WHEN detection_score >= ? THEN 'local_pending'
+                            ELSE 'filtered'
+                        END,
+                        analysis_media = CASE
+                            WHEN detection_score >= ? THEN NULL
+                            ELSE 0
+                        END,
+                        analysis_provider = CASE
+                            WHEN detection_score >= ? THEN NULL
+                            ELSE 'prefilter'
+                        END,
+                        analysis_updated_at = ?
+                    WHERE analysis_state = 'unprocessed'
+                      AND asset_id IN ({placeholders})
+                    """,
+                    (threshold, threshold, threshold, now, *asset_ids),
+                )
 
     def asset_needs_ocr(self, asset_id: str, updated_at: str) -> bool:
         with self.connect() as connection:
