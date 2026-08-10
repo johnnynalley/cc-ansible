@@ -34,10 +34,11 @@ loopback and remains disabled at boot:
 - `playbooks/agents/openclaw-doctor-rehearsal.yml` consumes that verified
   session generation, takes online SQLite backups of authoritative shared,
   per-agent, Lossless Claw, and Mem0 history stores, and scrubs copied provider
-  auth. It disables channels and network access, retires all classified legacy
-  plugin install records through the supported CLI, restores retained plugins
-  from the immutable release, and requires two successful idempotent Doctor
-  passes before promoting rehearsal-only selectors.
+  auth. It disables channels and network access, retires all eight classified
+  legacy plugin install records through the supported CLI, registers only four
+  canonical `source:path` ownership records for retained immutable plugins, and
+  requires two successful idempotent Doctor passes before promoting
+  rehearsal-only selectors.
 - `templates/openclaw/openclaw-isolated.json.j2` starts from a blank config:
   one OpenAI model, an explicitly loaded root-managed Codex provider, a
   file-backed Gateway token, no channel, heartbeat, memory, delegation,
@@ -100,14 +101,18 @@ They are replaced or retired. Codex, Discord, Lossless Claw, and Mem0 are
 retained capabilities but their service-writable npm installations are replaced
 by root-managed current-channel artifacts. Brave, Nextcloud Talk, Perplexity,
 and the former self-evolution gate are retired because they are disabled or no
-longer configured as live channels. A persisted plugin install record is part
-of the legacy runtime mechanism, not user data: the migration removes it through
-the supported plugin CLI before rebuilding the registry from reviewed explicit
-load paths. Plugin state, Lossless Claw history, and Mem0 history are separate
-data and remain migration inputs. Stable-channel policy is retained, while each
-resolved core/plugin set is recorded as one immutable deployment artifact for
-rollback. Other agents, integrations, schedules, stores, and workspace
-artifacts remain subject to the same classification before production cutover.
+longer configured as live channels. The eight copied global/npm install records
+are part of the legacy runtime mechanism, not user data, and are removed through
+the supported plugin CLI. Current OpenClaw still requires an ownership ledger
+for configured external plugins, so the retained four receive new
+`source:path` records through `plugins install --link`. Those records point at
+canonical root-owned immutable release paths; they neither copy executable code
+into writable state nor grant package-update authority to the service. Plugin
+state, Lossless Claw history, and Mem0 history are separate data and remain
+migration inputs. Stable-channel policy is retained, while each resolved
+core/plugin set is recorded as one immutable deployment artifact for rollback.
+Other agents, integrations, schedules, stores, and workspace artifacts remain
+subject to the same classification before production cutover.
 
 Stable `2026.7.1-2` is a hybrid runtime, not a completely database-first one.
 The shared SQLite database is authoritative for cron, tasks, plugin state,
@@ -329,15 +334,18 @@ The run is a modernization gate rather than a legacy clone:
    auth rows while retaining memory and index state.
 3. Transform a copied config to dedicated roots, redact secret values, disable
    channels and updates, and reject surviving production path references.
-4. Require the exact eight classified legacy plugin install records, retire
-   each through `plugins uninstall --keep-files --force`, then regenerate the
-   sanitized config and refresh the registry from four root-managed immutable
-   plugin paths.
+4. Require the exact eight classified legacy plugin install records and retire
+   each through `plugins uninstall --keep-files --force`. Register only Codex,
+   Discord, Lossless Claw, and Mem0 through `plugins install --link` against
+   their canonical root-owned immutable paths. Require the current and
+   persisted ownership ledgers to contain exactly those four `source:path`
+   records before refreshing the registry.
 5. Run Doctor twice inside a transient `PrivateNetwork` systemd sandbox. An
    empty read-only `ProtectHome=tmpfs` view hides the human home while making
    retired absolute install paths resolve as absent, which the supported
-   uninstall transaction requires. The Docker socket and controller checkout
-   remain explicitly inaccessible.
+   uninstall transaction requires. NPM metadata lookup is forced offline and
+   every transient command is bounded to five minutes. The Docker socket and
+   controller checkout remain explicitly inaccessible.
 6. Compare data-free filesystem manifests and stable SQLite table digests.
    Only a reviewed list of known volatile shared control-plane tables is
    excluded from the stable comparison; an unknown exclusion fails closed.

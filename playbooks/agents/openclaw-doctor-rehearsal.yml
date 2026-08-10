@@ -773,6 +773,7 @@
           - --collect
           - --pipe
           - --service-type=exec
+          - --property=RuntimeMaxSec=300s
           - "--property=User={{ openclaw_doctor_rehearsal_user }}"
           - "--property=Group={{ openclaw_doctor_rehearsal_group }}"
           - --property=NoNewPrivileges=yes
@@ -818,6 +819,9 @@
           - "OPENCLAW_WORKSPACE_DIR={{ openclaw_doctor_rehearsal_generation_workspace }}"
           - OPENCLAW_SKIP_CHANNELS=1
           - OPENCLAW_SERVICE_REPAIR_POLICY=external
+          - NPM_CONFIG_OFFLINE=true
+          - NPM_CONFIG_FETCH_RETRIES=0
+          - NPM_CONFIG_FETCH_TIMEOUT=5000
           - NO_COLOR=1
 
     - name: Prove migration identity cannot read production OpenClaw state
@@ -930,6 +934,42 @@
           - "{{ openclaw_doctor_rehearsal_generation_config }}"
       changed_when: true
 
+    - name: Resolve immutable managed plugin roots
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/readlink
+          - --canonicalize-existing
+          - >-
+            {{ openclaw_doctor_rehearsal_runtime }}/plugins/{{ item.id }}/node_modules/{{ item.package }}
+      loop: "{{ openclaw_isolated_gateway_managed_plugins }}"
+      loop_control:
+        label: "{{ item.id }}"
+      register: openclaw_doctor_rehearsal_managed_plugin_roots
+      changed_when: false
+
+    - name: Register immutable OpenClaw plugin ownership through supported links
+      ansible.builtin.command:
+        argv: >-
+          {{
+            openclaw_doctor_rehearsal_transient_prefix
+            + [
+                '--unit=openclaw-doctor-link-'
+                + openclaw_isolated_gateway_managed_plugins[item].id
+                + '-'
+                + openclaw_doctor_rehearsal_stamp
+              ]
+            + openclaw_doctor_rehearsal_command_environment
+            + [
+                openclaw_doctor_rehearsal_runtime + '/bin/openclaw',
+                'plugins', 'install', '--link',
+                openclaw_doctor_rehearsal_managed_plugin_roots.results[item].stdout
+              ]
+          }}
+      loop: "{{ range(0, openclaw_isolated_gateway_managed_plugins | length) | list }}"
+      loop_control:
+        label: "{{ openclaw_isolated_gateway_managed_plugins[item].id }}"
+      changed_when: true
+
     - name: Refresh copied OpenClaw plugin registry from immutable sources
       ansible.builtin.command:
         argv: >-
@@ -960,26 +1000,30 @@
           {{ openclaw_doctor_rehearsal_registry_after_raw.stdout | from_json }}
       no_log: true
 
-    - name: Resolve immutable managed plugin roots
-      ansible.builtin.command:
-        argv:
-          - /usr/bin/readlink
-          - --canonicalize-existing
-          - >-
-            {{ openclaw_doctor_rehearsal_runtime }}/plugins/{{ item.id }}/node_modules/{{ item.package }}
-      loop: "{{ openclaw_isolated_gateway_managed_plugins }}"
-      loop_control:
-        label: "{{ item.id }}"
-      register: openclaw_doctor_rehearsal_managed_plugin_roots
-      changed_when: false
-
-    - name: Require no legacy install records after modernization
+    - name: Require only modern managed-plugin ownership records
       ansible.builtin.assert:
         that:
-          - openclaw_doctor_rehearsal_registry_after.current.installRecords | default({}, true) | length == 0
-          - openclaw_doctor_rehearsal_registry_after.persisted.installRecords | default({}, true) | length == 0
+          - (openclaw_doctor_rehearsal_registry_after.current.installRecords | default({}, true) | dict2items | map(attribute='key') | sort) == (openclaw_isolated_gateway_managed_plugins | map(attribute='id') | sort)
+          - (openclaw_doctor_rehearsal_registry_after.persisted.installRecords | default({}, true) | dict2items | map(attribute='key') | sort) == (openclaw_isolated_gateway_managed_plugins | map(attribute='id') | sort)
         fail_msg: >-
-          A legacy plugin install record survived supported CLI retirement.
+          A legacy record survived or a root-managed plugin lacks its modern
+          path ownership record.
+
+    - name: Require canonical immutable OpenClaw plugin ownership records
+      ansible.builtin.assert:
+        that:
+          - openclaw_doctor_rehearsal_registry_after.current.installRecords[openclaw_isolated_gateway_managed_plugins[item].id].source == 'path'
+          - openclaw_doctor_rehearsal_registry_after.current.installRecords[openclaw_isolated_gateway_managed_plugins[item].id].sourcePath == openclaw_doctor_rehearsal_managed_plugin_roots.results[item].stdout
+          - openclaw_doctor_rehearsal_registry_after.current.installRecords[openclaw_isolated_gateway_managed_plugins[item].id].installPath == openclaw_doctor_rehearsal_managed_plugin_roots.results[item].stdout
+          - openclaw_doctor_rehearsal_registry_after.persisted.installRecords[openclaw_isolated_gateway_managed_plugins[item].id].source == 'path'
+          - openclaw_doctor_rehearsal_registry_after.persisted.installRecords[openclaw_isolated_gateway_managed_plugins[item].id].sourcePath == openclaw_doctor_rehearsal_managed_plugin_roots.results[item].stdout
+          - openclaw_doctor_rehearsal_registry_after.persisted.installRecords[openclaw_isolated_gateway_managed_plugins[item].id].installPath == openclaw_doctor_rehearsal_managed_plugin_roots.results[item].stdout
+        fail_msg: >-
+          A retained plugin ownership record is writable-package-managed,
+          noncanonical, or outside the selected immutable release.
+      loop: "{{ range(0, openclaw_isolated_gateway_managed_plugins | length) | list }}"
+      loop_control:
+        label: "{{ openclaw_isolated_gateway_managed_plugins[item].id }}"
 
     - name: Require exact immutable managed plugins after modernization
       ansible.builtin.assert:
@@ -1004,13 +1048,19 @@
         content: >-
           {{
             {
-              'schemaVersion': 1,
-              'installRecords': [],
+              'schemaVersion': 2,
+              'legacyInstallRecords': [],
               'managedPlugins': (
                 openclaw_isolated_gateway_managed_plugins
                 | map(attribute='id')
                 | sort
               ),
+              'ownershipRecords': (
+                openclaw_isolated_gateway_managed_plugins
+                | map(attribute='id')
+                | sort
+              ),
+              'ownershipRecordSource': 'path',
               'registryState': openclaw_doctor_rehearsal_registry_after.state
             }
             | to_nice_json

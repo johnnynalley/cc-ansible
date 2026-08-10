@@ -44,6 +44,17 @@ class DoctorRehearsalTests(unittest.TestCase):
         self.assertIn("--property=ProtectHome=tmpfs", playbook)
         self.assertNotIn("--property=ProtectHome=yes", playbook)
         self.assertNotIn("--property=InaccessiblePaths=/home/johnny", playbook)
+        self.assertIn("--property=RuntimeMaxSec=300s", playbook)
+        self.assertIn("NPM_CONFIG_OFFLINE=true", playbook)
+        self.assertIn("NPM_CONFIG_FETCH_RETRIES=0", playbook)
+        self.assertIn(
+            "Register immutable OpenClaw plugin ownership through supported links",
+            playbook,
+        )
+        self.assertIn("'plugins', 'install', '--link'", playbook)
+        self.assertIn("Require only modern managed-plugin ownership records", playbook)
+        self.assertIn("'ownershipRecordSource': 'path'", playbook)
+        self.assertNotIn("'installRecords': []", playbook)
 
     def test_transform_rewrites_paths_and_removes_secret_values(self) -> None:
         with tempfile.TemporaryDirectory() as directory_name:
