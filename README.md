@@ -44,6 +44,7 @@ Source-of-truth docs currently include:
 - [docs/media-release-policy.md](docs/media-release-policy.md)
 - [docs/openclaw-docker-access.md](docs/openclaw-docker-access.md)
 - [docs/openclaw-heartbeats.md](docs/openclaw-heartbeats.md)
+- [docs/openclaw-runtime-security.md](docs/openclaw-runtime-security.md)
 - [docs/plex-appliance-operations.md](docs/plex-appliance-operations.md)
 - [docs/streaming-runbook.md](docs/streaming-runbook.md)
 
@@ -293,6 +294,7 @@ Packages are merged from multiple sources (all applicable variables combined):
 | `proxmox-ha.yml` | `proxmox_nodes` | Stop/disable/mask `pve-ha-{lrm,crm}` cluster-wide (no HA resources configured; removes fencing risk). Driven by `pve_ha_enabled` (default `false`) |
 | `vm-storage-gate.yml` | `proxmox_nodes` | Per-VM start gate: hookscript blocks `qm start`/`pct start` if VM's declared host mountpoints aren't mounted. Per-VM declarations in `host_vars/<vm>/storage.yml` |
 | `openclaw.yml` | `openclaw_hosts` | OpenClaw AI agent (npm install, gateway service, repo-sync/update-check timers) |
+| `openclaw-health-receiver.yml` | `openclaw_hosts` | Isolated Health receiver and aggregate-only report publisher (disabled by default) |
 
 ## NFS Configuration
 
@@ -1045,6 +1047,7 @@ OpenClaw AI agent platform — personal homelab admin assistant via web UI and D
 - **Mem0 memory**: `@mem0/openclaw-mem0` plugin with Qdrant (localhost:6333), Gemini embeddings, and the configured OpenAI-compatible LLM for fact extraction. Auto-capture + auto-recall across sessions.
 - **dbc ops access**: Narrow host-specific wrappers, including result-only Immich Media Inbox access on docker-vm; no image, raw OCR, credential, SQLite, or general Docker access. Existing media-stack/Caddy operational paths remain separately scoped.
 - **Docker reporting**: A strict result-only reporter is implemented but remains disabled until the dedicated runtime identity and key are deployed. See `docs/openclaw-docker-access.md`.
+- **Health isolation**: The dedicated receiver and aggregate report boundary are implemented but disabled pending an approved canary/cutover. See `docs/openclaw-runtime-security.md`.
 
 ```bash
 # Check gateway status (on the current OpenClaw host)

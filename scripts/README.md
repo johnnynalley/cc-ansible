@@ -16,6 +16,7 @@ audits, controlled repairs, and deployment support.
 
 ## Directories
 
+- `agents/`: Isolated agent-adjacent services and aggregate-only data publishers.
 - `docker/`: Docker stack update helpers and redacted inventory reporting.
 - `gaming/`: Capture and frame-time analysis helpers.
 - `media-inbox/`: Immich OCR/Smart Search screenshot review service, credential bootstrap/export helpers, and tests.

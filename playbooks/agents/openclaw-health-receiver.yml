@@ -1,0 +1,733 @@
+# Purpose: Isolate Health Auto Export ingestion from the OpenClaw Gateway.
+# Hosts: openclaw_hosts.
+# Key vars: openclaw_health_receiver_*.
+# Templates: none.
+# Scripts: scripts/agents/health-receiver.py, scripts/agents/health-receiver-check.py,
+#          scripts/agents/health-summary.py.
+# Validation: ansible-playbook playbooks/agents/openclaw-health-receiver.yml --syntax-check.
+
+- name: Configure isolated OpenClaw Health receiver
+  hosts: openclaw_hosts
+  become: true
+  gather_facts: false
+
+  vars:
+    openclaw_health_receiver_effective_bind: >-
+      {{ openclaw_health_receiver_canary_bind
+         if openclaw_health_receiver_mode == 'canary'
+         else openclaw_health_receiver_production_bind }}
+    openclaw_health_receiver_effective_port: >-
+      {{ openclaw_health_receiver_canary_port
+         if openclaw_health_receiver_mode == 'canary'
+         else openclaw_health_receiver_production_port }}
+    openclaw_health_receiver_effective_sources: >-
+      {{ openclaw_health_receiver_canary_sources
+         if openclaw_health_receiver_mode == 'canary'
+         else openclaw_health_receiver_production_sources }}
+
+  tasks:
+    - name: Validate isolated Health receiver mode
+      ansible.builtin.assert:
+        that:
+          - openclaw_health_receiver_mode | default('disabled') in ['disabled', 'canary', 'production']
+        fail_msg: >-
+          openclaw_health_receiver_mode must be disabled, canary, or production.
+
+    - name: Check for existing isolated Health receiver unit
+      ansible.builtin.stat:
+        path: /etc/systemd/system/openclaw-health-receiver.service
+      register: openclaw_health_receiver_unit
+      check_mode: false
+
+    - name: Stop isolated Health units when disabled
+      ansible.builtin.systemd_service:
+        name: "{{ item }}"
+        enabled: false
+        state: stopped
+        daemon_reload: true
+      loop:
+        - openclaw-health-summary.timer
+        - openclaw-health-receiver.service
+      when:
+        - openclaw_health_receiver_mode == 'disabled'
+        - openclaw_health_receiver_unit.stat.exists
+      failed_when: false
+
+    - name: Skip hosts without isolated Health receiver enabled
+      ansible.builtin.meta: end_host
+      when: openclaw_health_receiver_mode == 'disabled'
+
+    - name: Require explicit approval for production cutover
+      ansible.builtin.assert:
+        that:
+          - openclaw_health_receiver_cutover_approved | default(false) | bool
+        fail_msg: >-
+          Production cutover stops the legacy receiver. Set the approval flag
+          only during an owner-approved, attended migration window.
+      when:
+        - openclaw_health_receiver_mode == 'production'
+        - openclaw_health_receiver_cutover_requested | default(false) | bool
+
+    - name: Inspect production Health cutover marker
+      ansible.builtin.stat:
+        path: "{{ openclaw_health_receiver_data_dir }}/.production-cutover-complete"
+      register: openclaw_health_receiver_cutover_marker
+      check_mode: false
+
+    - name: Inspect Health canary validation marker
+      ansible.builtin.stat:
+        path: "{{ openclaw_health_receiver_data_dir }}/.canary-validated"
+      register: openclaw_health_receiver_canary_marker
+      check_mode: false
+
+    - name: Refuse unrequested first production activation
+      ansible.builtin.assert:
+        that:
+          - >-
+            openclaw_health_receiver_cutover_requested | default(false) | bool
+            or openclaw_health_receiver_cutover_marker.stat.exists
+        fail_msg: >-
+          First production activation requires an explicitly requested and
+          approved cutover. Use canary mode before that window.
+      when: openclaw_health_receiver_mode == 'production'
+
+    - name: Require a validated canary before production cutover
+      ansible.builtin.assert:
+        that:
+          - openclaw_health_receiver_canary_marker.stat.exists
+        fail_msg: >-
+          Production cutover is blocked until canary mode has passed its
+          authenticated receiver and aggregate-report checks.
+      when:
+        - openclaw_health_receiver_mode == 'production'
+        - openclaw_health_receiver_cutover_requested | default(false) | bool
+
+    - name: Set one Health cutover backup timestamp
+      ansible.builtin.set_fact:
+        openclaw_health_receiver_backup_stamp: "{{ lookup('pipe', 'date -u +%Y%m%dT%H%M%SZ') }}"
+      when:
+        - openclaw_health_receiver_mode == 'production'
+        - openclaw_health_receiver_cutover_requested | default(false) | bool
+
+    - name: Validate isolated Health receiver paths and network policy
+      ansible.builtin.assert:
+        that:
+          - openclaw_health_receiver_data_dir is match('^/var/lib/openclaw-health(/[A-Za-z0-9._-]+)*$')
+          - openclaw_health_receiver_config_dir is match('^/etc/openclaw-health(/[A-Za-z0-9._-]+)*$')
+          - openclaw_health_receiver_legacy_db is match('^/home/[A-Za-z0-9._-]+/.+\.db$')
+          - openclaw_health_receiver_token_source is match('^/home/[A-Za-z0-9._-]+/.+$')
+          - openclaw_health_receiver_effective_port | int >= 1024
+          - openclaw_health_receiver_effective_port | int <= 65535
+          - openclaw_health_receiver_effective_sources | length > 0
+          - openclaw_health_receiver_max_body_bytes | int >= 1
+          - openclaw_health_receiver_max_body_bytes | int <= 67108864
+        fail_msg: "Health receiver paths or bounded network settings are invalid."
+
+    - name: Validate literal Health receiver source addresses
+      ansible.builtin.assert:
+        that:
+          - item is match('^[0-9A-Fa-f:.]+$')
+        fail_msg: "Health receiver source allowlists accept literal IPs only."
+      loop: "{{ openclaw_health_receiver_effective_sources }}"
+
+    - name: Install isolated Health receiver runtime dependencies
+      ansible.builtin.apt:
+        name:
+          - python3
+          - sqlite3
+        state: present
+        update_cache: false
+
+    - name: Resolve legacy Health receiver account
+      ansible.builtin.getent:
+        database: passwd
+        key: "{{ openclaw_health_receiver_legacy_user }}"
+
+    - name: Create aggregate Health report reader group
+      ansible.builtin.group:
+        name: "{{ openclaw_health_report_group }}"
+        system: true
+
+    - name: Create isolated Health service group
+      ansible.builtin.group:
+        name: "{{ openclaw_health_receiver_group }}"
+        system: true
+
+    - name: Create isolated Health service account
+      ansible.builtin.user:
+        name: "{{ openclaw_health_receiver_user }}"
+        group: "{{ openclaw_health_receiver_group }}"
+        groups: "{{ openclaw_health_report_group }}"
+        append: false
+        shell: /usr/sbin/nologin
+        system: true
+        create_home: false
+        home: "{{ openclaw_health_receiver_data_dir }}"
+        comment: "Isolated Health Auto Export receiver"
+        password: "!"
+
+    - name: Create isolated Health directories
+      ansible.builtin.file:
+        path: "{{ item.path }}"
+        state: directory
+        owner: "{{ item.owner }}"
+        group: "{{ item.group }}"
+        mode: "{{ item.mode }}"
+      loop:
+        - path: /usr/local/libexec/openclaw-health
+          owner: root
+          group: root
+          mode: "0755"
+        - path: "{{ openclaw_health_receiver_config_dir }}"
+          owner: root
+          group: "{{ openclaw_health_receiver_group }}"
+          mode: "0750"
+        - path: "{{ openclaw_health_receiver_data_dir }}"
+          owner: "{{ openclaw_health_receiver_user }}"
+          group: "{{ openclaw_health_receiver_group }}"
+          mode: "0700"
+        - path: "{{ openclaw_health_receiver_report_dir }}"
+          owner: "{{ openclaw_health_receiver_user }}"
+          group: "{{ openclaw_health_report_group }}"
+          mode: "2750"
+        - path: "{{ openclaw_health_receiver_backup_dir }}"
+          owner: root
+          group: root
+          mode: "0700"
+
+    - name: Deploy isolated Health receiver
+      ansible.builtin.copy:
+        src: "{{ ansible_config_file | dirname }}/scripts/agents/health-receiver.py"
+        dest: /usr/local/libexec/openclaw-health/health-receiver.py
+        owner: root
+        group: root
+        mode: "0755"
+      notify: Restart isolated Health receiver
+
+    - name: Deploy isolated Health receiver validation probe
+      ansible.builtin.copy:
+        src: "{{ ansible_config_file | dirname }}/scripts/agents/health-receiver-check.py"
+        dest: /usr/local/libexec/openclaw-health/health-receiver-check.py
+        owner: root
+        group: root
+        mode: "0755"
+
+    - name: Deploy aggregate-only Health summary publisher
+      ansible.builtin.copy:
+        src: "{{ ansible_config_file | dirname }}/scripts/agents/health-summary.py"
+        dest: /usr/local/libexec/openclaw-health/health-summary.py
+        owner: root
+        group: root
+        mode: "0755"
+
+    - name: Inspect legacy Health token source
+      ansible.builtin.stat:
+        path: "{{ openclaw_health_receiver_token_source }}"
+      register: openclaw_health_receiver_token_stat
+      check_mode: false
+      no_log: true
+
+    - name: Inspect legacy Health database
+      ansible.builtin.stat:
+        path: "{{ openclaw_health_receiver_legacy_db }}"
+      register: openclaw_health_receiver_legacy_db_stat
+      check_mode: false
+
+    - name: Require protected migration inputs
+      ansible.builtin.assert:
+        that:
+          - openclaw_health_receiver_token_stat.stat.exists
+          - openclaw_health_receiver_token_stat.stat.isreg
+          - openclaw_health_receiver_token_stat.stat.mode == '0600'
+          - openclaw_health_receiver_token_stat.stat.pw_name == openclaw_health_receiver_legacy_user
+          - openclaw_health_receiver_legacy_db_stat.stat.exists
+          - openclaw_health_receiver_legacy_db_stat.stat.isreg
+          - openclaw_health_receiver_legacy_db_stat.stat.size | int > 0
+        fail_msg: >-
+          The protected token or SQLite migration source is absent or has
+          unexpected ownership. Refusing to guess or create a replacement.
+      no_log: true
+
+    - name: Copy Health receiver token without exposing it to Ansible output
+      ansible.builtin.copy:
+        src: "{{ openclaw_health_receiver_token_source }}"
+        dest: "{{ openclaw_health_receiver_config_dir }}/token"
+        remote_src: true
+        owner: root
+        group: "{{ openclaw_health_receiver_group }}"
+        mode: "0640"
+      no_log: true
+      notify: Restart isolated Health receiver
+
+    - name: Check isolated Health database state
+      ansible.builtin.stat:
+        path: "{{ openclaw_health_receiver_db }}"
+      register: openclaw_health_receiver_db_stat
+      check_mode: false
+
+    - name: Seed canary database with a consistent SQLite backup
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/sqlite3
+          - "{{ openclaw_health_receiver_legacy_db }}"
+          - ".backup '{{ openclaw_health_receiver_db }}.seed'"
+      when:
+        - openclaw_health_receiver_mode == 'canary'
+        - not openclaw_health_receiver_db_stat.stat.exists
+        - not ansible_check_mode
+      changed_when: true
+
+    - name: Protect seeded canary database
+      ansible.builtin.file:
+        path: "{{ openclaw_health_receiver_db }}.seed"
+        owner: "{{ openclaw_health_receiver_user }}"
+        group: "{{ openclaw_health_receiver_group }}"
+        mode: "0600"
+      when:
+        - openclaw_health_receiver_mode == 'canary'
+        - not openclaw_health_receiver_db_stat.stat.exists
+        - not ansible_check_mode
+
+    - name: Promote seeded canary database atomically
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/mv
+          - "{{ openclaw_health_receiver_db }}.seed"
+          - "{{ openclaw_health_receiver_db }}"
+      when:
+        - openclaw_health_receiver_mode == 'canary'
+        - not openclaw_health_receiver_db_stat.stat.exists
+        - not ansible_check_mode
+      changed_when: true
+
+    - name: Remove temporary canary database seed
+      ansible.builtin.file:
+        path: "{{ openclaw_health_receiver_db }}.seed"
+        state: absent
+      when: openclaw_health_receiver_mode == 'canary'
+
+    - name: Write nonsecret Health receiver configuration
+      ansible.builtin.copy:
+        dest: "{{ openclaw_health_receiver_config_dir }}/receiver.env"
+        owner: root
+        group: "{{ openclaw_health_receiver_group }}"
+        mode: "0640"
+        content: |
+          HEALTH_RECEIVER_PORT={{ openclaw_health_receiver_effective_port }}
+          HEALTH_RECEIVER_BIND={{ openclaw_health_receiver_effective_bind }}
+          HEALTH_RECEIVER_ALLOWED_SOURCES={{ openclaw_health_receiver_effective_sources | join(',') }}
+          HEALTH_RECEIVER_MAX_BODY_BYTES={{ openclaw_health_receiver_max_body_bytes }}
+          HEALTH_RECEIVER_RATE_LIMIT={{ openclaw_health_receiver_rate_limit }}
+          HEALTH_RECEIVER_RATE_WINDOW_SECONDS={{ openclaw_health_receiver_rate_window_seconds }}
+          HEALTH_RECEIVER_MAX_JSON_DEPTH={{ openclaw_health_receiver_max_json_depth }}
+          HEALTH_RECEIVER_MAX_JSON_NODES={{ openclaw_health_receiver_max_json_nodes }}
+          HEALTH_RECEIVER_MAX_COLLECTION_ITEMS={{ openclaw_health_receiver_max_collection_items }}
+          HEALTH_RECEIVER_MAX_STRING_BYTES={{ openclaw_health_receiver_max_string_bytes }}
+          HEALTH_RECEIVER_TOKEN_FILE={{ openclaw_health_receiver_config_dir }}/token
+          HEALTH_DB_PATH={{ openclaw_health_receiver_db }}
+      notify: Restart isolated Health receiver
+
+    - name: Create hardened isolated Health receiver service
+      ansible.builtin.copy:
+        dest: /etc/systemd/system/openclaw-health-receiver.service
+        owner: root
+        group: root
+        mode: "0644"
+        content: |
+          [Unit]
+          Description=Isolated Health Auto Export receiver
+          After=network-online.target
+          Wants=network-online.target
+
+          [Service]
+          Type=simple
+          User={{ openclaw_health_receiver_user }}
+          Group={{ openclaw_health_receiver_group }}
+          SupplementaryGroups={{ openclaw_health_report_group }}
+          WorkingDirectory={{ openclaw_health_receiver_data_dir }}
+          EnvironmentFile={{ openclaw_health_receiver_config_dir }}/receiver.env
+          ExecStart=/usr/bin/python3 /usr/local/libexec/openclaw-health/health-receiver.py
+          Restart=on-failure
+          RestartSec=5s
+          TimeoutStopSec=30s
+          UMask=0077
+          NoNewPrivileges=yes
+          CapabilityBoundingSet=
+          AmbientCapabilities=
+          LockPersonality=yes
+          MemoryDenyWriteExecute=yes
+          PrivateDevices=yes
+          PrivateTmp=yes
+          ProtectClock=yes
+          ProtectControlGroups=yes
+          ProtectHome=yes
+          ProtectHostname=yes
+          ProtectKernelLogs=yes
+          ProtectKernelModules=yes
+          ProtectKernelTunables=yes
+          ProtectProc=invisible
+          ProtectSystem=strict
+          ProcSubset=pid
+          ReadOnlyPaths={{ openclaw_health_receiver_config_dir }}
+          ReadWritePaths={{ openclaw_health_receiver_data_dir }}
+          RemoveIPC=yes
+          RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+          RestrictNamespaces=yes
+          RestrictRealtime=yes
+          RestrictSUIDSGID=yes
+          SocketBindAllow=tcp:{{ openclaw_health_receiver_effective_port }}
+          SocketBindDeny=any
+          SystemCallArchitectures=native
+          SystemCallErrorNumber=EPERM
+          SystemCallFilter=@system-service
+          TasksMax=64
+          MemoryMax=512M
+
+          [Install]
+          WantedBy=multi-user.target
+      notify:
+        - Reload systemd
+        - Restart isolated Health receiver
+
+    - name: Create hardened aggregate Health summary service
+      ansible.builtin.copy:
+        dest: /etc/systemd/system/openclaw-health-summary.service
+        owner: root
+        group: root
+        mode: "0644"
+        content: |
+          [Unit]
+          Description=Publish aggregate-only Health reports for OpenClaw
+          After=openclaw-health-receiver.service
+
+          [Service]
+          Type=oneshot
+          User={{ openclaw_health_receiver_user }}
+          Group={{ openclaw_health_receiver_group }}
+          SupplementaryGroups={{ openclaw_health_report_group }}
+          UMask=0027
+          ExecStart=/usr/bin/python3 /usr/local/libexec/openclaw-health/health-summary.py --db-path {{ openclaw_health_receiver_db }} --format json --output {{ openclaw_health_receiver_report_dir }}/yesterday.json
+          ExecStart=/usr/bin/python3 /usr/local/libexec/openclaw-health/health-summary.py --db-path {{ openclaw_health_receiver_db }} --format markdown --no-heading --output {{ openclaw_health_receiver_report_dir }}/yesterday.md
+          NoNewPrivileges=yes
+          CapabilityBoundingSet=
+          AmbientCapabilities=
+          LockPersonality=yes
+          MemoryDenyWriteExecute=yes
+          PrivateDevices=yes
+          PrivateNetwork=yes
+          PrivateTmp=yes
+          ProtectClock=yes
+          ProtectControlGroups=yes
+          ProtectHome=yes
+          ProtectHostname=yes
+          ProtectKernelLogs=yes
+          ProtectKernelModules=yes
+          ProtectKernelTunables=yes
+          ProtectProc=invisible
+          ProtectSystem=strict
+          ProcSubset=pid
+          ReadOnlyPaths={{ openclaw_health_receiver_db }}
+          ReadWritePaths={{ openclaw_health_receiver_report_dir }}
+          RemoveIPC=yes
+          RestrictAddressFamilies=AF_UNIX
+          RestrictNamespaces=yes
+          RestrictRealtime=yes
+          RestrictSUIDSGID=yes
+          SystemCallArchitectures=native
+          SystemCallErrorNumber=EPERM
+          SystemCallFilter=@system-service
+          TasksMax=32
+          MemoryMax=256M
+
+    - name: Create aggregate Health summary timer
+      ansible.builtin.copy:
+        dest: /etc/systemd/system/openclaw-health-summary.timer
+        owner: root
+        group: root
+        mode: "0644"
+        content: |
+          [Unit]
+          Description=Refresh aggregate-only Health reports
+
+          [Timer]
+          OnBootSec=3m
+          OnUnitActiveSec=15m
+          RandomizedDelaySec=30s
+          AccuracySec=15s
+          Persistent=true
+
+          [Install]
+          WantedBy=timers.target
+      notify: Reload systemd
+
+    - name: Run production Health receiver cutover
+      when:
+        - openclaw_health_receiver_mode == 'production'
+        - openclaw_health_receiver_cutover_requested | default(false) | bool
+        - not ansible_check_mode
+      block:
+        - name: Create timestamped Health cutover backup directory
+          ansible.builtin.file:
+            path: "{{ openclaw_health_receiver_backup_dir }}/{{ openclaw_health_receiver_backup_stamp }}"
+            state: directory
+            owner: root
+            group: root
+            mode: "0700"
+
+        - name: Back up legacy Health service metadata
+          ansible.builtin.copy:
+            src: "{{ item.src }}"
+            dest: "{{ openclaw_health_receiver_backup_dir }}/{{ openclaw_health_receiver_backup_stamp }}/{{ item.dest }}"
+            remote_src: true
+            owner: root
+            group: root
+            mode: "0600"
+          loop:
+            - src: "{{ openclaw_health_receiver_legacy_unit }}"
+              dest: health-receiver.service
+            - src: "{{ openclaw_health_receiver_legacy_env }}"
+              dest: health-receiver.env
+            - src: "{{ openclaw_health_receiver_token_source }}"
+              dest: health-receiver.token
+          no_log: true
+
+        - name: Stop isolated Health receiver before final database copy
+          ansible.builtin.systemd_service:
+            name: openclaw-health-receiver.service
+            state: stopped
+            daemon_reload: true
+          failed_when: false
+
+        - name: Stop legacy user Health receiver
+          ansible.builtin.command:
+            argv:
+              - /usr/bin/systemctl
+              - --user
+              - stop
+              - health-receiver.service
+          become_user: "{{ openclaw_health_receiver_legacy_user }}"
+          environment:
+            XDG_RUNTIME_DIR: "/run/user/{{ ansible_facts.getent_passwd[openclaw_health_receiver_legacy_user][1] }}"
+            DBUS_SESSION_BUS_ADDRESS: "unix:path=/run/user/{{ ansible_facts.getent_passwd[openclaw_health_receiver_legacy_user][1] }}/bus"
+          changed_when: true
+
+        - name: Back up final legacy Health database consistently
+          ansible.builtin.command:
+            argv:
+              - /usr/bin/sqlite3
+              - "{{ openclaw_health_receiver_legacy_db }}"
+              - ".backup '{{ openclaw_health_receiver_backup_dir }}/{{ openclaw_health_receiver_backup_stamp }}/health.db'"
+          changed_when: true
+
+        - name: Protect final legacy Health database backup
+          ansible.builtin.file:
+            path: "{{ openclaw_health_receiver_backup_dir }}/{{ openclaw_health_receiver_backup_stamp }}/health.db"
+            owner: root
+            group: root
+            mode: "0600"
+
+        - name: Create final isolated Health database copy
+          ansible.builtin.command:
+            argv:
+              - /usr/bin/sqlite3
+              - "{{ openclaw_health_receiver_legacy_db }}"
+              - ".backup '{{ openclaw_health_receiver_db }}.cutover'"
+          changed_when: true
+
+        - name: Protect final isolated Health database copy
+          ansible.builtin.file:
+            path: "{{ openclaw_health_receiver_db }}.cutover"
+            owner: "{{ openclaw_health_receiver_user }}"
+            group: "{{ openclaw_health_receiver_group }}"
+            mode: "0600"
+
+        - name: Promote final isolated Health database atomically
+          ansible.builtin.command:
+            argv:
+              - /usr/bin/mv
+              - "{{ openclaw_health_receiver_db }}.cutover"
+              - "{{ openclaw_health_receiver_db }}"
+          changed_when: true
+
+        - name: Remove temporary cutover database
+          ansible.builtin.file:
+            path: "{{ openclaw_health_receiver_db }}.cutover"
+            state: absent
+
+        - name: Start isolated production Health receiver
+          ansible.builtin.systemd_service:
+            name: openclaw-health-receiver.service
+            enabled: true
+            state: started
+            daemon_reload: true
+
+        - name: Verify authenticated production Health receiver
+          ansible.builtin.command:
+            argv:
+              - /usr/bin/python3
+              - /usr/local/libexec/openclaw-health/health-receiver-check.py
+              - --url
+              - "http://{{ openclaw_health_receiver_effective_bind }}:{{ openclaw_health_receiver_effective_port }}/health"
+              - --token-file
+              - "{{ openclaw_health_receiver_config_dir }}/token"
+              - --require-metrics
+          register: openclaw_health_receiver_cutover_check
+          changed_when: false
+          retries: 5
+          delay: 2
+          until: openclaw_health_receiver_cutover_check.rc == 0
+
+        - name: Disable legacy user Health receiver after validation
+          ansible.builtin.command:
+            argv:
+              - /usr/bin/systemctl
+              - --user
+              - disable
+              - health-receiver.service
+          become_user: "{{ openclaw_health_receiver_legacy_user }}"
+          environment:
+            XDG_RUNTIME_DIR: "/run/user/{{ ansible_facts.getent_passwd[openclaw_health_receiver_legacy_user][1] }}"
+            DBUS_SESSION_BUS_ADDRESS: "unix:path=/run/user/{{ ansible_facts.getent_passwd[openclaw_health_receiver_legacy_user][1] }}/bus"
+          changed_when: true
+
+        - name: Record completed production Health cutover
+          ansible.builtin.copy:
+            dest: "{{ openclaw_health_receiver_data_dir }}/.production-cutover-complete"
+            owner: root
+            group: root
+            mode: "0400"
+            content: |
+              completed={{ openclaw_health_receiver_backup_stamp }}
+              backup={{ openclaw_health_receiver_backup_dir }}/{{ openclaw_health_receiver_backup_stamp }}
+      rescue:
+        - name: Stop failed isolated Health receiver
+          ansible.builtin.systemd_service:
+            name: openclaw-health-receiver.service
+            enabled: false
+            state: stopped
+            daemon_reload: true
+          failed_when: false
+
+        - name: Restart legacy Health receiver after failed cutover
+          ansible.builtin.command:
+            argv:
+              - /usr/bin/systemctl
+              - --user
+              - start
+              - health-receiver.service
+          become_user: "{{ openclaw_health_receiver_legacy_user }}"
+          environment:
+            XDG_RUNTIME_DIR: "/run/user/{{ ansible_facts.getent_passwd[openclaw_health_receiver_legacy_user][1] }}"
+            DBUS_SESSION_BUS_ADDRESS: "unix:path=/run/user/{{ ansible_facts.getent_passwd[openclaw_health_receiver_legacy_user][1] }}/bus"
+          changed_when: true
+
+        - name: Fail the Health receiver cutover after rollback
+          ansible.builtin.fail:
+            msg: >-
+              Isolated Health validation failed. The legacy receiver was
+              restarted; inspect the timestamped backup and system journal.
+
+    - name: Keep isolated production Health receiver enabled
+      ansible.builtin.systemd_service:
+        name: openclaw-health-receiver.service
+        enabled: true
+        state: started
+        daemon_reload: true
+      when:
+        - openclaw_health_receiver_mode == 'production'
+        - openclaw_health_receiver_cutover_marker.stat.exists
+        - not (openclaw_health_receiver_cutover_requested | default(false) | bool)
+        - not ansible_check_mode
+
+    - name: Start isolated Health receiver canary
+      ansible.builtin.systemd_service:
+        name: openclaw-health-receiver.service
+        enabled: false
+        state: started
+        daemon_reload: true
+      when:
+        - openclaw_health_receiver_mode == 'canary'
+        - not ansible_check_mode
+
+    - name: Verify authenticated Health receiver canary
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/python3
+          - /usr/local/libexec/openclaw-health/health-receiver-check.py
+          - --url
+          - "http://{{ openclaw_health_receiver_effective_bind }}:{{ openclaw_health_receiver_effective_port }}/health"
+          - --token-file
+          - "{{ openclaw_health_receiver_config_dir }}/token"
+          - --require-metrics
+      register: openclaw_health_receiver_canary_check
+      changed_when: false
+      when:
+        - openclaw_health_receiver_mode == 'canary'
+        - not ansible_check_mode
+      retries: 5
+      delay: 2
+      until: openclaw_health_receiver_canary_check.rc == 0
+
+    - name: Enable aggregate Health report timer
+      ansible.builtin.systemd_service:
+        name: openclaw-health-summary.timer
+        enabled: "{{ openclaw_health_receiver_mode == 'production' }}"
+        state: started
+        daemon_reload: true
+      when: not ansible_check_mode
+
+    - name: Generate initial aggregate Health reports
+      ansible.builtin.systemd_service:
+        name: openclaw-health-summary.service
+        state: started
+      when: not ansible_check_mode
+
+    - name: Inspect generated aggregate Health reports
+      ansible.builtin.stat:
+        path: "{{ item }}"
+      loop:
+        - "{{ openclaw_health_receiver_report_dir }}/yesterday.json"
+        - "{{ openclaw_health_receiver_report_dir }}/yesterday.md"
+      register: openclaw_health_receiver_reports
+      when: not ansible_check_mode
+
+    - name: Require protected aggregate Health reports
+      ansible.builtin.assert:
+        that:
+          - item.stat.exists
+          - item.stat.isreg
+          - item.stat.mode == '0640'
+          - item.stat.pw_name == openclaw_health_receiver_user
+          - item.stat.gr_name == openclaw_health_report_group
+          - item.stat.size | int > 0
+      loop: "{{ openclaw_health_receiver_reports.results | default([]) }}"
+      when: not ansible_check_mode
+
+    - name: Record validated isolated Health canary
+      ansible.builtin.copy:
+        dest: "{{ openclaw_health_receiver_data_dir }}/.canary-validated"
+        owner: root
+        group: root
+        mode: "0400"
+        content: |
+          validated={{ lookup('pipe', 'date -u +%Y%m%dT%H%M%SZ') }}
+          source={{ openclaw_health_receiver_legacy_db }}
+      when:
+        - openclaw_health_receiver_mode == 'canary'
+        - not ansible_check_mode
+
+  handlers:
+    - name: Reload systemd
+      ansible.builtin.systemd_service:
+        daemon_reload: true
+
+    - name: Restart isolated Health receiver
+      ansible.builtin.systemd_service:
+        name: openclaw-health-receiver.service
+        state: restarted
+        daemon_reload: true
+      when:
+        - not ansible_check_mode
+        - >-
+          openclaw_health_receiver_mode == 'canary'
+          or openclaw_health_receiver_cutover_marker.stat.exists

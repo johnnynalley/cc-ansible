@@ -193,6 +193,10 @@
   ansible.builtin.import_playbook: playbooks/docker/openclaw-docker-report.yml
   tags: [docker, openclaw, openclaw-docker-report]
 
+- name: Configure isolated OpenClaw Health receiver
+  ansible.builtin.import_playbook: playbooks/agents/openclaw-health-receiver.yml
+  tags: [openclaw, openclaw-health, health-receiver]
+
 - name: Deploy OpenClaw AI agent
   ansible.builtin.import_playbook: playbooks/agents/openclaw.yml
   tags: [openclaw]
