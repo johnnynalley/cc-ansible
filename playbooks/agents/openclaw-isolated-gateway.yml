@@ -374,17 +374,76 @@
             - path: "{{ openclaw_isolated_gateway_build_dir }}/tmp"
           when: not ansible_check_mode
 
+        - name: Define isolated release-builder sandbox
+          ansible.builtin.set_fact:
+            openclaw_isolated_gateway_build_sandbox_argv:
+              - /usr/bin/systemd-run
+              - --quiet
+              - --wait
+              - --pipe
+              - --collect
+              - --service-type=exec
+              - "--uid={{ openclaw_isolated_gateway_build_user }}"
+              - "--gid={{ openclaw_isolated_gateway_build_group }}"
+              - "--working-directory={{ openclaw_isolated_gateway_build_dir }}"
+              - "--setenv=HOME={{ openclaw_isolated_gateway_build_dir }}"
+              - "--setenv=USER={{ openclaw_isolated_gateway_build_user }}"
+              - "--setenv=LOGNAME={{ openclaw_isolated_gateway_build_user }}"
+              - --setenv=PATH=/usr/bin:/bin
+              - "--setenv=TMPDIR={{ openclaw_isolated_gateway_build_dir }}/tmp"
+              - "--setenv=NPM_CONFIG_CACHE={{ openclaw_isolated_gateway_build_dir }}/npm-cache"
+              - --setenv=NPM_CONFIG_AUDIT=false
+              - --setenv=NPM_CONFIG_FUND=false
+              - --setenv=NPM_CONFIG_IGNORE_SCRIPTS=true
+              - --setenv=NPM_CONFIG_UPDATE_NOTIFIER=false
+              - --property=NoNewPrivileges=yes
+              - --property=ExitType=cgroup
+              - --property=PrivateTmp=yes
+              - --property=PrivateDevices=yes
+              - --property=PrivateIPC=yes
+              - --property=ProtectSystem=strict
+              - --property=ProtectHome=yes
+              - --property=ProtectClock=yes
+              - --property=ProtectControlGroups=yes
+              - --property=ProtectHostname=yes
+              - --property=ProtectKernelLogs=yes
+              - --property=ProtectKernelModules=yes
+              - --property=ProtectKernelTunables=yes
+              - --property=ProtectProc=invisible
+              - --property=ProcSubset=pid
+              - --property=RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+              - --property=RestrictNamespaces=yes
+              - --property=RestrictRealtime=yes
+              - --property=RestrictSUIDSGID=yes
+              - --property=LockPersonality=yes
+              - --property=RemoveIPC=yes
+              - --property=CapabilityBoundingSet=
+              - --property=AmbientCapabilities=
+              - --property=SystemCallArchitectures=native
+              - --property=DevicePolicy=closed
+              - --property=UMask=0077
+              - "--property=ReadWritePaths={{ openclaw_isolated_gateway_build_dir }}"
+              - >-
+                --property=InaccessiblePaths=-{{ openclaw_isolated_gateway_config_dir }}
+                -{{ openclaw_isolated_gateway_state_dir }}
+                -{{ openclaw_workspace }}
+                -/home/{{ openclaw_isolated_gateway_legacy_user }}
+                -/root -/run/docker.sock -/var/run/docker.sock -/etc/ansible
+                -/var/lib/docker -/srv -/mnt -/media
+              - >-
+                --property=IPAddressDeny=127.0.0.0/8 10.0.0.0/8
+                100.64.0.0/10 169.254.0.0/16 172.16.0.0/12
+                192.168.0.0/16 ::1/128 fc00::/7 fe80::/10
+              - --property=IPAddressAllow=127.0.0.53/32
+          when: not ansible_check_mode
+
         - name: Prove isolated release builder cannot read privileged state
           ansible.builtin.command:
-            argv:
-              - /usr/sbin/runuser
-              - -u
-              - "{{ openclaw_isolated_gateway_build_user }}"
-              - --
-              - /usr/bin/test
-              - "!"
-              - -r
-              - "{{ item }}"
+            argv: >-
+              {{
+                openclaw_isolated_gateway_build_sandbox_argv
+                + ['/usr/bin/test', '!', '-r', item]
+              }}
           loop:
             - "{{ openclaw_isolated_gateway_secret_file }}"
             - /home/{{ openclaw_isolated_gateway_legacy_user }}
@@ -396,63 +455,41 @@
 
         - name: Build isolated OpenClaw runtime from stable channel
           ansible.builtin.command:
-            argv:
-              - /usr/sbin/runuser
-              - -u
-              - "{{ openclaw_isolated_gateway_build_user }}"
-              - --
-              - /usr/bin/env
-              - -i
-              - "HOME={{ openclaw_isolated_gateway_build_dir }}"
-              - "USER={{ openclaw_isolated_gateway_build_user }}"
-              - "LOGNAME={{ openclaw_isolated_gateway_build_user }}"
-              - PATH=/usr/bin:/bin
-              - "TMPDIR={{ openclaw_isolated_gateway_build_dir }}/tmp"
-              - "NPM_CONFIG_CACHE={{ openclaw_isolated_gateway_build_dir }}/npm-cache"
-              - NPM_CONFIG_AUDIT=false
-              - NPM_CONFIG_FUND=false
-              - NPM_CONFIG_IGNORE_SCRIPTS=true
-              - NPM_CONFIG_UPDATE_NOTIFIER=false
-              - /usr/bin/npm
-              - --prefix
-              - "{{ openclaw_isolated_gateway_build_dir }}/runtime"
-              - install
-              - --global
-              - --no-audit
-              - --no-fund
-              - --ignore-scripts
-              - openclaw@latest
+            argv: >-
+              {{
+                openclaw_isolated_gateway_build_sandbox_argv
+                + [
+                  '/usr/bin/npm',
+                  '--prefix',
+                  openclaw_isolated_gateway_build_dir + '/runtime',
+                  'install',
+                  '--global',
+                  '--no-audit',
+                  '--no-fund',
+                  '--ignore-scripts',
+                  'openclaw@latest'
+                ]
+              }}
           changed_when: true
           when: not ansible_check_mode
 
         - name: Build isolated Codex provider from stable channel
           ansible.builtin.command:
-            argv:
-              - /usr/sbin/runuser
-              - -u
-              - "{{ openclaw_isolated_gateway_build_user }}"
-              - --
-              - /usr/bin/env
-              - -i
-              - "HOME={{ openclaw_isolated_gateway_build_dir }}"
-              - "USER={{ openclaw_isolated_gateway_build_user }}"
-              - "LOGNAME={{ openclaw_isolated_gateway_build_user }}"
-              - PATH=/usr/bin:/bin
-              - "TMPDIR={{ openclaw_isolated_gateway_build_dir }}/tmp"
-              - "NPM_CONFIG_CACHE={{ openclaw_isolated_gateway_build_dir }}/npm-cache"
-              - NPM_CONFIG_AUDIT=false
-              - NPM_CONFIG_FUND=false
-              - NPM_CONFIG_IGNORE_SCRIPTS=true
-              - NPM_CONFIG_UPDATE_NOTIFIER=false
-              - /usr/bin/npm
-              - --prefix
-              - "{{ openclaw_isolated_gateway_build_dir }}/codex"
-              - install
-              - --omit=dev
-              - --no-audit
-              - --no-fund
-              - --ignore-scripts
-              - "@openclaw/codex@latest"
+            argv: >-
+              {{
+                openclaw_isolated_gateway_build_sandbox_argv
+                + [
+                  '/usr/bin/npm',
+                  '--prefix',
+                  openclaw_isolated_gateway_build_dir + '/codex',
+                  'install',
+                  '--omit=dev',
+                  '--no-audit',
+                  '--no-fund',
+                  '--ignore-scripts',
+                  '@openclaw/codex@latest'
+                ]
+              }}
           changed_when: true
           when: not ansible_check_mode
 

@@ -19,9 +19,10 @@ The first deterministic boundaries are implemented but deliberately disabled:
 - `playbooks/agents/openclaw-isolated-gateway.yml` stages a parallel system
   service under the no-login `openclaw` account without stopping production.
   A credential-less ephemeral build account resolves the current stable core
-  and Codex provider with package lifecycle scripts disabled. Root promotes
-  the validated pair into a versioned release and selects it through
-  `/opt/openclaw-isolated/current`.
+  and Codex provider inside a transient systemd sandbox with package lifecycle
+  scripts disabled, sensitive paths inaccessible, and private/Tailscale network
+  ranges denied. Root promotes the validated pair into a versioned release and
+  selects it through `/opt/openclaw-isolated/current`.
 - `templates/openclaw/openclaw-isolated.json.j2` starts from a blank config:
   one OpenAI model, an explicitly loaded root-managed Codex provider, a
   file-backed Gateway token, no channel, heartbeat, memory, delegation,
@@ -80,13 +81,19 @@ Sonarr, Radarr, iCloud, image, and other credentials into the new account and
 would reproduce the current authority convergence.
 
 Instead, the playbook creates a no-login `openclaw-build` account only for the
-duration of the run. That account receives no service credentials and must
-prove it cannot read the human home, vault password, Docker socket, active
-workspace, or canary secret. It resolves `openclaw@latest` and
-`@openclaw/codex@latest` with lifecycle scripts disabled, verifies the official
-package identities and build compatibility, stages the complete pair under
+duration of the run. That account receives no service credentials and runs only
+inside a transient systemd sandbox. The sandbox makes the human home, vault,
+Docker socket, active workspace, canary config/state, controller paths, and bulk
+data inaccessible; it denies loopback, private, link-local, and Tailscale CGNAT
+ranges while allowing public package endpoints and the local DNS stub. Its
+service exit is cgroup-scoped, so package-manager descendants must terminate
+before staging cleanup or promotion can continue. The same sandbox must pass
+explicit read-denial probes before it resolves
+`openclaw@latest` and `@openclaw/codex@latest` with lifecycle scripts disabled.
+The playbook then verifies the official package identities and build
+compatibility, stages the complete pair under
 `/opt/openclaw-isolated/releases`, and atomically promotes it. Root ownership
-then prevents the Gateway from changing executable code. The old global-prefix
+prevents the Gateway from changing executable code. The old global-prefix
 `bin` and `lib` layout and writable provider cache are removed after the
 rollback artifact exists.
 
