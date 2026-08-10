@@ -13,8 +13,10 @@ cross-reference health rather than a single infrastructure service.
 - `secrets-scan`: Built-in tracked-file secret scanner with optional Gitleaks
   integration. Local runs fall back to the built-in scanner when Gitleaks is not
   installed; CI uses `repo-audit --require-gitleaks` so the Gitleaks layer is
-  mandatory there. Run `secrets-scan --self-test` after changing scanner
-  heuristics.
+  mandatory there. It detects literal credentials in HTTP authorization/API-key
+  headers in addition to assignments and known provider formats. Use `--root`
+  to scan another Git worktree with the same rules. Run `secrets-scan
+  --self-test` after changing scanner heuristics.
 
 ## Validation
 
@@ -27,6 +29,9 @@ scripts/repo/repo-audit --require-gitleaks
 
 # Focused staged secret scan before committing.
 scripts/repo/secrets-scan --staged
+
+# Scan Astra's tracked workspace without printing unredacted values.
+scripts/repo/secrets-scan --root ~/.openclaw/workspace --external off
 
 # Scanner heuristic regression checks.
 scripts/repo/secrets-scan --self-test
