@@ -811,7 +811,7 @@
           - "XDG_DATA_HOME={{ openclaw_doctor_rehearsal_generation_state }}/.local/share"
           - "XDG_CACHE_HOME={{ openclaw_doctor_rehearsal_generation_state }}/.cache"
           - "OPENCLAW_HOME={{ openclaw_doctor_rehearsal_generation_state }}"
-          - "OPENCLAW_STATE_DIR={{ openclaw_doctor_rehearsal_generation_state }}/state"
+          - "OPENCLAW_STATE_DIR={{ openclaw_doctor_rehearsal_generation_state }}"
           - "OPENCLAW_CONFIG_PATH={{ openclaw_doctor_rehearsal_generation_config }}"
           - "OPENCLAW_WORKSPACE_DIR={{ openclaw_doctor_rehearsal_generation_workspace }}"
           - OPENCLAW_SKIP_CHANNELS=1

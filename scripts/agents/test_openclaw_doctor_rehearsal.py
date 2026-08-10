@@ -33,6 +33,14 @@ class DoctorRehearsalTests(unittest.TestCase):
             "Create private OpenClaw Doctor generation content directories",
             playbook,
         )
+        self.assertIn(
+            '"OPENCLAW_STATE_DIR={{ openclaw_doctor_rehearsal_generation_state }}"',
+            playbook,
+        )
+        self.assertNotIn(
+            '"OPENCLAW_STATE_DIR={{ openclaw_doctor_rehearsal_generation_state }}/state"',
+            playbook,
+        )
 
     def test_transform_rewrites_paths_and_removes_secret_values(self) -> None:
         with tempfile.TemporaryDirectory() as directory_name:
