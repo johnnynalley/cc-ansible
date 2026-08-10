@@ -150,6 +150,10 @@
 
     - name: Derive OpenClaw state rehearsal generation paths
       ansible.builtin.set_fact:
+        openclaw_state_rehearsal_generation_state_container: >-
+          {{ openclaw_state_rehearsal_state_root }}/generations/{{ openclaw_state_rehearsal_stamp }}
+        openclaw_state_rehearsal_generation_workspace_container: >-
+          {{ openclaw_state_rehearsal_workspace_root }}/generations/{{ openclaw_state_rehearsal_stamp }}
         openclaw_state_rehearsal_generation_state: >-
           {{ openclaw_state_rehearsal_state_root }}/generations/{{ openclaw_state_rehearsal_stamp }}/state
         openclaw_state_rehearsal_generation_workspace: >-
@@ -316,6 +320,17 @@
         owner: root
         group: root
         mode: "0755"
+
+    - name: Create OpenClaw state rehearsal generation containers
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: directory
+        owner: root
+        group: "{{ openclaw_state_rehearsal_group }}"
+        mode: "0750"
+      loop:
+        - "{{ openclaw_state_rehearsal_generation_state_container }}"
+        - "{{ openclaw_state_rehearsal_generation_workspace_container }}"
 
     - name: Create root-only OpenClaw state rehearsal generation
       ansible.builtin.file:
@@ -706,6 +721,9 @@
             argv: >-
               {{
                 [
+                  '/usr/sbin/runuser',
+                  '--user', openclaw_state_rehearsal_user,
+                  '--',
                   openclaw_state_rehearsal_tool,
                   'inspect',
                   '--state-root', openclaw_state_rehearsal_generation_state,
@@ -714,7 +732,6 @@
                 ]
                 + openclaw_state_rehearsal_agent_arguments
               }}
-          become_user: "{{ openclaw_state_rehearsal_user }}"
           changed_when: false
       always:
         - name: Remove OpenClaw rehearsal read proof output

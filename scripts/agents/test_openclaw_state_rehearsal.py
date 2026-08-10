@@ -19,7 +19,18 @@ class StateRehearsalPlaybookTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
         payload = yaml.safe_load(PLAYBOOK_PATH.read_text(encoding="utf-8"))
-        cls.tasks = payload[0]["tasks"]
+        cls.tasks = cls._flatten_tasks(payload[0]["tasks"])
+
+    @staticmethod
+    def _flatten_tasks(tasks: list[dict]) -> list[dict]:
+        flattened: list[dict] = []
+        for task in tasks:
+            flattened.append(task)
+            for section in ("block", "rescue", "always"):
+                flattened.extend(
+                    StateRehearsalPlaybookTests._flatten_tasks(task.get(section, []))
+                )
+        return flattened
 
     def _task(self, name: str) -> dict:
         return next(task for task in self.tasks if task.get("name") == name)
@@ -46,6 +57,28 @@ class StateRehearsalPlaybookTests(unittest.TestCase):
         verify = names.index("Verify copied OpenClaw session relocation")
         self.assertLess(preserve_index, rewrite)
         self.assertLess(rewrite, verify)
+
+    def test_read_proof_drops_identity_inside_root_module(self) -> None:
+        read_proof = self._task(
+            "Read frozen OpenClaw rehearsal generation as migration account"
+        )
+        argv = read_proof["ansible.builtin.command"]["argv"]
+        self.assertNotIn("become_user", read_proof)
+        self.assertIn("'/usr/sbin/runuser'", argv)
+        self.assertIn("'--user', openclaw_state_rehearsal_user", argv)
+
+    def test_generation_containers_allow_only_group_traversal(self) -> None:
+        containers = self._task("Create OpenClaw state rehearsal generation containers")
+        module = containers["ansible.builtin.file"]
+        self.assertEqual(module["owner"], "root")
+        self.assertEqual(module["group"], "{{ openclaw_state_rehearsal_group }}")
+        self.assertEqual(module["mode"], "0750")
+
+        names = [task.get("name") for task in self.tasks]
+        self.assertLess(
+            names.index("Create OpenClaw state rehearsal generation containers"),
+            names.index("Create root-only OpenClaw state rehearsal generation"),
+        )
 
 
 if __name__ == "__main__":
