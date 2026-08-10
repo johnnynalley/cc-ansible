@@ -529,6 +529,19 @@
         path: "{{ item }}"
         state: directory
         owner: root
+        group: "{{ openclaw_doctor_rehearsal_group }}"
+        mode: "0750"
+      loop:
+        - >-
+          {{ openclaw_doctor_rehearsal_state_root }}/generations/{{ openclaw_doctor_rehearsal_stamp }}
+        - >-
+          {{ openclaw_doctor_rehearsal_workspace_root }}/generations/{{ openclaw_doctor_rehearsal_stamp }}
+
+    - name: Create private OpenClaw Doctor generation content directories
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: directory
+        owner: root
         group: root
         mode: "0700"
       loop:

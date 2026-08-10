@@ -28,6 +28,11 @@ class DoctorRehearsalTests(unittest.TestCase):
         self.assertIn(
             "Create per-agent OpenClaw Doctor database destinations", playbook
         )
+        self.assertIn("Create OpenClaw Doctor generation directories", playbook)
+        self.assertIn(
+            "Create private OpenClaw Doctor generation content directories",
+            playbook,
+        )
 
     def test_transform_rewrites_paths_and_removes_secret_values(self) -> None:
         with tempfile.TemporaryDirectory() as directory_name:
