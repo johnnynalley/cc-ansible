@@ -297,11 +297,6 @@
               '--exclude', 'state/mem0/history.db',
               '--exclude', 'lcm.db'
             ]
-            + (
-                openclaw_doctor_rehearsal_agents
-                | map('regex_replace', '^(.*)$', '--exclude=agents/\\1/agent/openclaw-agent.sqlite')
-                | list
-              )
           }}
         openclaw_doctor_rehearsal_database_specs: >-
           {{
@@ -345,6 +340,14 @@
                   'exclusions': [],
                   'idempotency': true
                 }
+              ]
+          }}
+        openclaw_doctor_rehearsal_state_manifest_exclude_arguments: >-
+          {{
+            openclaw_doctor_rehearsal_state_manifest_exclude_arguments
+            + [
+                '--exclude',
+                'agents/' + item + '/agent/openclaw-agent.sqlite'
               ]
           }}
       loop: "{{ openclaw_doctor_rehearsal_agents }}"
@@ -538,18 +541,27 @@
         openclaw_doctor_rehearsal_source_copy_paths: >-
           {{
             [
-              openclaw_doctor_rehearsal_session_state,
-              openclaw_doctor_rehearsal_session_workspace,
+              openclaw_doctor_rehearsal_resolved_selectors.results[0].stdout,
+              openclaw_doctor_rehearsal_resolved_selectors.results[1].stdout,
               openclaw_doctor_rehearsal_source_state_dir + '/state/openclaw.sqlite',
               openclaw_doctor_rehearsal_source_state_dir + '/lcm.db',
               openclaw_doctor_rehearsal_source_state_dir + '/state/mem0/history.db'
             ]
-            + (
-                openclaw_doctor_rehearsal_agents
-                | map('regex_replace', '^(.*)$', openclaw_doctor_rehearsal_source_state_dir + '/agents/\\1/agent/openclaw-agent.sqlite')
-                | list
-              )
           }}
+
+    - name: Add per-agent OpenClaw Doctor source paths
+      ansible.builtin.set_fact:
+        openclaw_doctor_rehearsal_source_copy_paths: >-
+          {{
+            openclaw_doctor_rehearsal_source_copy_paths
+            + [
+                openclaw_doctor_rehearsal_source_state_dir
+                + '/agents/' + item + '/agent/openclaw-agent.sqlite'
+              ]
+          }}
+      loop: "{{ openclaw_doctor_rehearsal_agents }}"
+      loop_control:
+        label: "{{ item }}"
 
     - name: Measure OpenClaw Doctor source copy set
       ansible.builtin.command:
@@ -626,25 +638,28 @@
           - "{{ openclaw_doctor_rehearsal_generation_workspace }}/"
       changed_when: true
 
-    - name: Create OpenClaw Doctor database destinations
+    - name: Create shared OpenClaw Doctor database destinations
       ansible.builtin.file:
         path: "{{ item }}"
         state: directory
         owner: root
         group: root
         mode: "0700"
-      loop: >-
-        {{
-          [
-            openclaw_doctor_rehearsal_generation_state + '/state',
-            openclaw_doctor_rehearsal_generation_state + '/state/mem0'
-          ]
-          + (
-              openclaw_doctor_rehearsal_agents
-              | map('regex_replace', '^(.*)$', openclaw_doctor_rehearsal_generation_state + '/agents/\\1/agent')
-              | list
-            )
-        }}
+      loop:
+        - "{{ openclaw_doctor_rehearsal_generation_state }}/state"
+        - "{{ openclaw_doctor_rehearsal_generation_state }}/state/mem0"
+
+    - name: Create per-agent OpenClaw Doctor database destinations
+      ansible.builtin.file:
+        path: >-
+          {{ openclaw_doctor_rehearsal_generation_state }}/agents/{{ item }}/agent
+        state: directory
+        owner: root
+        group: root
+        mode: "0700"
+      loop: "{{ openclaw_doctor_rehearsal_agents }}"
+      loop_control:
+        label: "{{ item }}"
 
     - name: Back up shared OpenClaw state through SQLite
       ansible.builtin.command:

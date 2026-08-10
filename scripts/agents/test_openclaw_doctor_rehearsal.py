@@ -11,6 +11,9 @@ import unittest
 from pathlib import Path
 
 MODULE_PATH = Path(__file__).with_name("openclaw-doctor-rehearsal.py")
+PLAYBOOK_PATH = (
+    Path(__file__).parents[2] / "playbooks/agents/openclaw-doctor-rehearsal.yml"
+)
 SPEC = importlib.util.spec_from_file_location("openclaw_doctor_rehearsal", MODULE_PATH)
 MODULE = importlib.util.module_from_spec(SPEC)
 assert SPEC and SPEC.loader
@@ -18,6 +21,14 @@ SPEC.loader.exec_module(MODULE)
 
 
 class DoctorRehearsalTests(unittest.TestCase):
+    def test_playbook_builds_agent_paths_without_capture_replacements(self) -> None:
+        playbook = PLAYBOOK_PATH.read_text(encoding="utf-8")
+        self.assertNotIn(r"\\1", playbook)
+        self.assertIn("Add per-agent OpenClaw Doctor source paths", playbook)
+        self.assertIn(
+            "Create per-agent OpenClaw Doctor database destinations", playbook
+        )
+
     def test_transform_rewrites_paths_and_removes_secret_values(self) -> None:
         with tempfile.TemporaryDirectory() as directory_name:
             root = Path(directory_name)

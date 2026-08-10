@@ -98,6 +98,14 @@ Critical shared-file rule: any scoped edit to `AGENTS.md` or `site.yml` must be 
 
 Before closing any repo-mutating session, run `git status --short --branch`. If the branch is ahead or has completed local changes, commit and push the scoped work; if anything remains dirty, explicitly identify it as generated junk, unrelated in-progress work, or a concrete blocker.
 
+This repository is frequently shared by concurrent agent sessions, so a staged
+file check can become stale before `git commit` runs. After validating the
+intended paths, use a path-limited commit such as
+`git commit --only -- <scoped-paths...>` instead of an unrestricted commit.
+Recheck the resulting commit and leave any other session's staged files in the
+index untouched. Do not rewrite or revert a mixed commit if a race is discovered
+afterward without explicit user approval; report the exact captured paths.
+
 ### Security & Configuration Tips
 
 Do not commit real secrets. Encrypted values belong in `vault.yml` files beside the relevant `vars.yml`; examples may use `vault.yml.example`. The configured vault password path is `~/.ansible/vault_pass.txt`. Run `scripts/repo/repo-audit` before committing repo layout or source changes; it calls `scripts/repo/secrets-scan` by default so secret scanning is part of the normal audit path. Use `scripts/repo/repo-audit --require-gitleaks` when Gitleaks must be present, such as CI parity checks. Do not leave `repo-audit` failing because of a known false positive; a noisy audit hides real failures. Fix the scanner/check, add a narrow documented exception with regression coverage, or explicitly report the blocker before continuing. Prefer full-playbook `--check --diff` runs for changes touching Proxmox, storage, firewall, backup, or Docker automation.
