@@ -53,8 +53,29 @@ class DoctorRehearsalTests(unittest.TestCase):
         self.assertIn("plugins', 'install'", playbook)
         self.assertEqual(playbook.count("'plugins', 'inspect'"), 3)
         self.assertNotIn("'--link'", playbook)
+        self.assertNotIn("--install-records-source", playbook)
+        self.assertIn("--suspend-managed-plugin-slots", playbook)
         self.assertIn("ownershipRecordSource': 'npm'", playbook)
         self.assertIn("openKeyedStore is only available for trusted plugins", playbook)
+        legacy_inspect = playbook.index(
+            "- name: Inspect copied OpenClaw plugin install records"
+        )
+        legacy_uninstall = playbook.index(
+            "- name: Retire copied legacy OpenClaw plugin install records"
+        )
+        supported_install = playbook.index(
+            "- name: Install exact managed plugins into copied modern state"
+        )
+        final_config = playbook.index(
+            "- name: Restore sanitized retained OpenClaw plugin configuration"
+        )
+        plugin_freeze = playbook.index(
+            "- name: Freeze npm-managed plugin code before Doctor"
+        )
+        self.assertLess(legacy_inspect, legacy_uninstall)
+        self.assertLess(legacy_uninstall, supported_install)
+        self.assertLess(supported_install, final_config)
+        self.assertLess(final_config, plugin_freeze)
         trust_assertions = [
             line for line in playbook.splitlines() if "trustedOfficialInstall" in line
         ]
@@ -136,10 +157,7 @@ class DoctorRehearsalTests(unittest.TestCase):
                     source_workspace_root=str(source_workspace),
                     target_state_root=str(target_state),
                     target_workspace_root=str(target_workspace),
-                    plugin_path=[
-                        f"codex={codex_path}",
-                        f"discord={discord_path}",
-                    ],
+                    managed_plugin=["codex", "discord"],
                     retire_plugin=["nextcloud-talk"],
                     disable_memory_search=True,
                     disable_plugin_runtime=["discord"],
@@ -187,36 +205,25 @@ class DoctorRehearsalTests(unittest.TestCase):
             )
             self.assertTrue(report.exists())
 
-    def test_transform_ships_only_validated_npm_install_records(self) -> None:
+    def test_transform_suspends_only_managed_plugin_slots(self) -> None:
         with tempfile.TemporaryDirectory() as directory_name:
             root = Path(directory_name)
             source_state = root / "source"
             source_workspace = source_state / "workspace"
             target_state = root / "target"
             target_workspace = target_state / "workspace"
-            plugin_path = (
-                target_state / "npm/projects/codex/node_modules/@openclaw/codex"
-            )
-            for path in (source_workspace, target_workspace, plugin_path):
+            for path in (source_workspace, target_workspace):
                 path.mkdir(parents=True)
-            (plugin_path / "openclaw.plugin.json").write_text("{}\n")
             source = root / "source.json"
-            source.write_text("{}\n", encoding="utf-8")
-            registry = root / "registry.json"
-            registry.write_text(
+            source.write_text(
                 json.dumps(
                     {
-                        "current": {
-                            "installRecords": {
-                                "codex": {
-                                    "source": "npm",
-                                    "spec": "@openclaw/codex@1.2.3",
-                                    "installPath": str(plugin_path),
-                                    "resolvedName": "@openclaw/codex",
-                                    "resolvedVersion": "1.2.3",
-                                    "integrity": "sha512-test",
-                                }
-                            }
+                        "plugins": {
+                            "allow": ["codex", "browser"],
+                            "slots": {
+                                "contextEngine": "codex",
+                                "browser": "browser",
+                            },
                         }
                     }
                 ),
@@ -233,42 +240,41 @@ class DoctorRehearsalTests(unittest.TestCase):
                     source_workspace_root=str(source_workspace),
                     target_state_root=str(target_state),
                     target_workspace_root=str(target_workspace),
-                    plugin_path=[f"codex={plugin_path}"],
+                    managed_plugin=["codex"],
                     retire_plugin=[],
-                    install_records_source=str(registry),
+                    suspend_managed_plugin_slots=True,
                     gateway_port=19789,
                     forbidden_literal=[],
                 )
             )
 
             transformed = json.loads(output.read_text(encoding="utf-8"))
-            self.assertEqual(result["installRecordPlugins"], ["codex"])
-            self.assertEqual(
-                transformed["plugins"]["installs"]["codex"]["source"], "npm"
-            )
+            self.assertEqual(transformed["plugins"]["slots"], {"browser": "browser"})
+            self.assertEqual(result["suspendedPluginSlots"], {"contextEngine": "codex"})
 
-            escaped = json.loads(registry.read_text(encoding="utf-8"))
-            escaped["current"]["installRecords"]["codex"]["installPath"] = str(
-                root / "outside"
-            )
-            registry.write_text(json.dumps(escaped), encoding="utf-8")
-            with self.assertRaises(MODULE.RehearsalError):
-                MODULE.transform_config(
-                    argparse.Namespace(
-                        source=str(source),
-                        output=str(root / "escaped.json"),
-                        report=None,
-                        source_state_root=str(source_state),
-                        source_workspace_root=str(source_workspace),
-                        target_state_root=str(target_state),
-                        target_workspace_root=str(target_workspace),
-                        plugin_path=[f"codex={plugin_path}"],
-                        retire_plugin=[],
-                        install_records_source=str(registry),
-                        gateway_port=19789,
-                        forbidden_literal=[],
-                    )
+            final_output = root / "final.json"
+            final_result = MODULE.transform_config(
+                argparse.Namespace(
+                    source=str(source),
+                    output=str(final_output),
+                    report=None,
+                    source_state_root=str(source_state),
+                    source_workspace_root=str(source_workspace),
+                    target_state_root=str(target_state),
+                    target_workspace_root=str(target_workspace),
+                    managed_plugin=["codex"],
+                    retire_plugin=[],
+                    suspend_managed_plugin_slots=False,
+                    gateway_port=19789,
+                    forbidden_literal=[],
                 )
+            )
+            final_transformed = json.loads(final_output.read_text(encoding="utf-8"))
+            self.assertEqual(
+                final_transformed["plugins"]["slots"],
+                {"browser": "browser", "contextEngine": "codex"},
+            )
+            self.assertEqual(final_result["suspendedPluginSlots"], {})
 
     def test_transform_rejects_embedded_source_reference(self) -> None:
         with tempfile.TemporaryDirectory() as directory_name:
@@ -297,7 +303,7 @@ class DoctorRehearsalTests(unittest.TestCase):
                         source_workspace_root=str(source_workspace),
                         target_state_root=str(target_state),
                         target_workspace_root=str(target_workspace),
-                        plugin_path=[f"codex={codex_path}"],
+                        managed_plugin=["codex"],
                         retire_plugin=[],
                         gateway_port=19789,
                         forbidden_literal=[],
@@ -338,7 +344,7 @@ class DoctorRehearsalTests(unittest.TestCase):
                         source_workspace_root=str(source_workspace),
                         target_state_root=str(target_state),
                         target_workspace_root=str(target_workspace),
-                        plugin_path=[f"codex={codex_path}"],
+                        managed_plugin=["codex"],
                         retire_plugin=["retired-memory"],
                         gateway_port=19789,
                         forbidden_literal=[],

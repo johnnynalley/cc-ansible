@@ -123,6 +123,20 @@ record and reported Codex and Discord as officially trusted while correctly
 leaving Lossless Claw and Mem0 untrusted. The gate now uses the cold registry
 only for ownership, integrity, path, and enablement evidence, and uses
 manifest-only inspection for trust without importing plugin runtime code.
+Generation `20260810T114801Z` exposed two ordering and ownership defects before
+Doctor ran. The pre-uninstall config still selected Lossless Claw and Mem0 in
+hard plugin slots while their copied ownership records pointed at hidden legacy
+paths, so config validation stopped the registry transaction. A root-only
+reproduction against that failed copy proved that temporarily removing only
+managed-plugin slot selections makes the config valid and leaves all eight
+copied legacy records visible for supported uninstall. It also proved that
+feeding records back through legacy `plugins.installs` loses npm integrity when
+OpenClaw migrates them into SQLite. The rehearsal therefore no longer imports
+or transfers ownership records through config. It suspends managed slots,
+retires the exact copied record set, installs the four retained packages through
+OpenClaw directly into the copied target state, requires integrity-bearing
+SQLite ownership, restores the sanitized source config and slots, and only then
+freezes plugin code before Doctor. Production remained active and unchanged.
 
 ## Modernization Contract
 
@@ -149,17 +163,19 @@ longer configured as live channels. The eight copied global/npm install records
 are part of the legacy runtime mechanism, not user data, and are removed through
 the supported plugin CLI. Current OpenClaw requires a trusted ownership ledger
 for configured external plugins. The retained four are therefore reinstalled
-through `plugins install npm:<package>@<resolved-version> --pin` in a clean,
-credential-free build state, and their exact source, integrity, package,
-version, install path, and official-trust classification are validated before
-the records are transferred into the rehearsal config. This exact-version
-record describes one immutable rollback artifact; it does not replace the
-repository's stable/current-channel update policy. Root then removes build
-control state and makes the npm store read-only to the migration/runtime
-identity. Plugin data, Lossless Claw history, and Mem0 history are separate
-migration inputs and remain retained. Stable-channel policy is retained, while
-each resolved core/plugin set is recorded as one immutable deployment artifact
-for rollback.
+through `plugins install npm:<package>@<resolved-version> --pin` directly into
+the credential-free copied target state after the copied legacy records are
+removed. OpenClaw itself writes the authoritative SQLite ownership rows. Their
+exact source, integrity, package, version, state-local install path, and
+official-trust classification must pass before the sanitized source config
+restores the managed slots. No `plugins.installs` compatibility payload crosses
+that boundary. This exact-version record describes one immutable rollback
+artifact; it does not replace the repository's stable/current-channel update
+policy. Root then removes install cache state and makes the npm store read-only
+to the migration/runtime identity. Plugin data, Lossless Claw history, and Mem0
+history are separate migration inputs and remain retained. Stable-channel
+policy is retained, while each resolved core/plugin set is recorded as one
+immutable deployment artifact for rollback.
 Other agents, integrations, schedules, stores, and workspace artifacts remain
 subject to the same classification before production cutover.
 
@@ -385,14 +401,17 @@ The run is a modernization gate rather than a legacy clone:
    keys and all channel configuration, disable updates, and reject surviving
    production path references. Preserve configured memory and Mem0 state but
    disable their credential/network-dependent runtime only in this rehearsal.
-4. Require the exact eight classified legacy plugin install records and retire
-   each through `plugins uninstall --keep-files --force`. In a separate empty,
-   credential-free network sandbox, install the exact resolved Codex, Discord,
-   Lossless Claw, and Mem0 packages through OpenClaw's npm installer. Require
-   exact integrity-bearing npm records and canonical state-local paths from the
+4. Temporarily suspend only slots owned by retained managed plugins, validate
+   the copied config, require the exact eight classified legacy install records,
+   and retire each through `plugins uninstall --keep-files --force`. Require an
+   empty ownership ledger, then install the exact resolved Codex, Discord,
+   Lossless Claw, and Mem0 packages into that same copied state through
+   OpenClaw's npm installer in a credential-free network sandbox. Require exact
+   integrity-bearing SQLite records and canonical state-local paths from the
    cold registry, plus the expected trust classification from manifest-only
-   `plugins inspect`. Then freeze that plugin store root-owned and read-only
-   before any copied production state is processed.
+   `plugins inspect`. Restore the sanitized source config and managed slots,
+   validate it, then freeze the plugin store root-owned and read-only before
+   Doctor.
 5. Run Doctor twice inside a transient `PrivateNetwork` systemd sandbox. An
    empty `ProtectHome=tmpfs` view hides the human home while making retired
    absolute install paths resolve as absent, which the supported uninstall

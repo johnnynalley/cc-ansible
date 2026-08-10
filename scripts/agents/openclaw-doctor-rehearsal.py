@@ -13,7 +13,7 @@ import tempfile
 from pathlib import Path
 from typing import Any, Iterable
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 MANIFEST_SCHEMA_VERSION = 2
 SECRET_KEYS = {
     "accesstoken",
@@ -164,78 +164,16 @@ def find_source_references(value: Any, prefixes: tuple[str, ...]) -> list[str]:
     return references
 
 
-def parse_plugin_paths(values: list[str]) -> dict[str, Path]:
-    plugins: dict[str, Path] = {}
+def parse_plugin_ids(values: list[str]) -> set[str]:
+    plugins: set[str] = set()
     for value in values:
-        plugin_id, separator, raw_path = value.partition("=")
-        if not separator or not plugin_id or not raw_path:
-            raise RehearsalError(
-                "managed plugin paths must use the form plugin-id=/absolute/path"
-            )
+        plugin_id = value.strip()
+        if not plugin_id:
+            raise RehearsalError("managed plugin id cannot be empty")
         if plugin_id in plugins:
             raise RehearsalError(f"duplicate managed plugin id: {plugin_id}")
-        path = Path(raw_path)
-        if not path.is_absolute():
-            raise RehearsalError(f"managed plugin path is not absolute: {raw_path}")
-        require_directory(path)
-        require_regular_file(path / "openclaw.plugin.json")
-        plugins[plugin_id] = path.resolve()
+        plugins.add(plugin_id)
     return plugins
-
-
-def load_managed_install_records(
-    source: str | None,
-    managed_plugins: dict[str, Path],
-    target_state: str,
-) -> dict[str, dict[str, Any]]:
-    if not source:
-        return {}
-    source_path = Path(source)
-    require_regular_file(source_path)
-    try:
-        payload = json.loads(source_path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as error:
-        raise RehearsalError(
-            f"failed to read plugin install records: {error}"
-        ) from error
-    records = payload.get("current", {}).get("installRecords")
-    if not isinstance(records, dict):
-        raise RehearsalError(
-            "plugin registry source does not contain current.installRecords"
-        )
-    if set(records) != set(managed_plugins):
-        raise RehearsalError(
-            "plugin install-record ids do not match managed plugins: "
-            + ", ".join(sorted(set(records) ^ set(managed_plugins)))
-        )
-    npm_root = Path(target_state, "npm").resolve()
-    validated: dict[str, dict[str, Any]] = {}
-    for plugin_id, record in records.items():
-        if not isinstance(record, dict) or record.get("source") != "npm":
-            raise RehearsalError(
-                f"managed plugin lacks npm install provenance: {plugin_id}"
-            )
-        install_path_value = record.get("installPath")
-        if not isinstance(install_path_value, str):
-            raise RehearsalError(
-                f"managed plugin install record lacks installPath: {plugin_id}"
-            )
-        install_path = Path(install_path_value)
-        if (
-            not install_path.is_absolute()
-            or install_path.resolve() != managed_plugins[plugin_id]
-            or not is_within(install_path.resolve(), npm_root)
-        ):
-            raise RehearsalError(
-                f"managed plugin install record escapes target npm state: {plugin_id}"
-            )
-        for field in ("integrity", "resolvedName", "resolvedVersion", "spec"):
-            if not isinstance(record.get(field), str) or not record[field].strip():
-                raise RehearsalError(
-                    f"managed plugin npm record lacks {field}: {plugin_id}"
-                )
-        validated[plugin_id] = record
-    return validated
 
 
 def transform_config(args: argparse.Namespace) -> dict[str, Any]:
@@ -338,12 +276,7 @@ def transform_config(args: argparse.Namespace) -> dict[str, Any]:
     if not isinstance(plugins, dict):
         raise RehearsalError("plugins config must be an object")
     plugins.pop("installs", None)
-    managed_plugins = parse_plugin_paths(args.plugin_path)
-    managed_install_records = load_managed_install_records(
-        getattr(args, "install_records_source", None),
-        managed_plugins,
-        target_state,
-    )
+    managed_plugins = parse_plugin_ids(args.managed_plugin)
     retired_plugins = set(args.retire_plugin)
     overlap = retired_plugins & set(managed_plugins)
     if overlap:
@@ -406,9 +339,24 @@ def transform_config(args: argparse.Namespace) -> dict[str, Any]:
             )
         )
 
+    suspended_plugin_slots: dict[str, str] = {}
+    if getattr(args, "suspend_managed_plugin_slots", False) and slots:
+        suspended_plugin_slots = {
+            slot: plugin_id
+            for slot, plugin_id in slots.items()
+            if plugin_id in managed_plugins
+        }
+        retained_slots = {
+            slot: plugin_id
+            for slot, plugin_id in slots.items()
+            if plugin_id not in managed_plugins
+        }
+        if retained_slots:
+            plugins["slots"] = retained_slots
+        else:
+            plugins.pop("slots", None)
+
     plugins.pop("load", None)
-    if managed_install_records:
-        plugins["installs"] = managed_install_records
 
     remaining = find_source_references(transformed, (source_state, source_workspace))
     if remaining:
@@ -429,12 +377,12 @@ def transform_config(args: argparse.Namespace) -> dict[str, Any]:
         "disabledChannels": sorted(disabled_channels),
         "disabledMemorySearchPaths": sorted(disabled_memory_search_paths),
         "disabledRuntimePlugins": sorted(disabled_runtime_plugins),
-        "installRecordPlugins": sorted(managed_install_records),
         "managedPlugins": sorted(managed_plugins),
         "removedCredentialPaths": sorted(set(removed_credential_paths)),
         "retiredPlugins": sorted(retired_plugins),
         "rewrittenPaths": sorted(set(rewritten_paths)),
         "sourceConfigSha256": hashlib.sha256(source.read_bytes()).hexdigest(),
+        "suspendedPluginSlots": suspended_plugin_slots,
         "targetConfigSha256": hashlib.sha256(output.read_bytes()).hexdigest(),
     }
     if args.report:
@@ -995,11 +943,10 @@ def build_parser() -> argparse.ArgumentParser:
     transform.add_argument("--target-state-root", required=True)
     transform.add_argument("--target-workspace-root", required=True)
     transform.add_argument(
-        "--plugin-path",
+        "--managed-plugin",
         action="append",
         default=[],
-        metavar="ID=PATH",
-        help="root-managed plugin path; repeat for every retained external plugin",
+        help="retained external plugin id; repeat for every managed plugin",
     )
     transform.add_argument(
         "--retire-plugin",
@@ -1008,10 +955,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="legacy global plugin id to remove from the transformed config",
     )
     transform.add_argument(
-        "--install-records-source",
+        "--suspend-managed-plugin-slots",
+        action="store_true",
         help=(
-            "OpenClaw plugin registry JSON whose npm install records are "
-            "shipped into the transformed config for supported migration"
+            "temporarily remove slots owned by managed plugins while copied "
+            "legacy install records are retired"
         ),
     )
     transform.add_argument(
