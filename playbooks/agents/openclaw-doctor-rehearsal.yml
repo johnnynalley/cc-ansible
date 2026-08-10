@@ -763,6 +763,42 @@
           {{ openclaw_doctor_rehearsal_plugin_build_registry_raw.stdout | from_json }}
       no_log: true
 
+    - name: Inspect managed plugin manifest trust after supported installation
+      ansible.builtin.command:
+        argv: >-
+          {{
+            openclaw_doctor_rehearsal_plugin_build_prefix
+            + [
+                '--unit=openclaw-doctor-plugin-inspect-'
+                + item.definition.id
+                + '-'
+                + openclaw_doctor_rehearsal_stamp
+              ]
+            + openclaw_doctor_rehearsal_plugin_build_environment
+            + [
+                openclaw_doctor_rehearsal_runtime + '/bin/openclaw',
+                'plugins', 'inspect', item.definition.id, '--json'
+              ]
+          }}
+      loop: "{{ openclaw_doctor_rehearsal_plugin_metadata }}"
+      loop_control:
+        label: "{{ item.definition.id }}"
+      register: openclaw_doctor_rehearsal_plugin_build_inspections_raw
+      changed_when: false
+      no_log: true
+
+    - name: Parse managed plugin manifest trust inspections
+      ansible.builtin.set_fact:
+        openclaw_doctor_rehearsal_plugin_build_inspections: >-
+          {{
+            (openclaw_doctor_rehearsal_plugin_build_inspections | default([]))
+            + [item.stdout | from_json]
+          }}
+      loop: "{{ openclaw_doctor_rehearsal_plugin_build_inspections_raw.results }}"
+      loop_control:
+        label: "{{ item.item.definition.id }}"
+      no_log: true
+
     - name: Require exact npm-provenance plugin record set
       ansible.builtin.assert:
         that:
@@ -772,7 +808,7 @@
           The clean plugin build did not produce exactly the classified managed
           npm install records.
 
-    - name: Require supported npm provenance and trust classification
+    - name: Require supported npm provenance and manifest trust classification
       ansible.builtin.assert:
         that:
           - openclaw_doctor_rehearsal_plugin_build_registry.current.installRecords[item.definition.id].source == 'npm'
@@ -781,14 +817,20 @@
           - openclaw_doctor_rehearsal_plugin_build_registry.current.installRecords[item.definition.id].integrity | length > 0
           - (openclaw_doctor_rehearsal_plugin_build_registry.current.plugins | selectattr('pluginId', 'equalto', item.definition.id) | list | length) == 1
           - (openclaw_doctor_rehearsal_plugin_build_registry.current.plugins | selectattr('pluginId', 'equalto', item.definition.id) | list | first).origin == 'global'
-          - ((openclaw_doctor_rehearsal_plugin_build_registry.current.plugins | selectattr('pluginId', 'equalto', item.definition.id) | list | first).trustedOfficialInstall | default(false) | bool) == (item.definition.trusted_official | bool)
           - (openclaw_doctor_rehearsal_plugin_build_registry.current.plugins | selectattr('pluginId', 'equalto', item.definition.id) | list | first).rootDir is match('^' + (openclaw_doctor_rehearsal_generation_state | regex_escape) + '/npm/')
+          - openclaw_doctor_rehearsal_plugin_build_inspections[plugin_index].plugin.id == item.definition.id
+          - openclaw_doctor_rehearsal_plugin_build_inspections[plugin_index].plugin.packageName == item.package.name
+          - openclaw_doctor_rehearsal_plugin_build_inspections[plugin_index].plugin.origin == 'global'
+          - openclaw_doctor_rehearsal_plugin_build_inspections[plugin_index].plugin.rootDir is match('^' + (openclaw_doctor_rehearsal_generation_state | regex_escape) + '/npm/')
+          - ((openclaw_doctor_rehearsal_plugin_build_inspections[plugin_index].plugin.trustedOfficialInstall | default(false)) | bool) == (item.definition.trusted_official | bool)
         fail_msg: >-
           Managed plugin {{ item.definition.id }} lacks exact npm provenance,
-          integrity, immutable-state placement, or the expected official trust.
+          integrity, immutable-state placement, or manifest-proven official
+          trust.
       loop: "{{ openclaw_doctor_rehearsal_plugin_metadata }}"
       loop_control:
         label: "{{ item.definition.id }}"
+        index_var: plugin_index
 
     - name: Preserve supported managed plugin build registry
       ansible.builtin.copy:
@@ -798,6 +840,16 @@
         mode: "0600"
         content: >-
           {{ openclaw_doctor_rehearsal_plugin_build_registry | to_nice_json }}
+      no_log: true
+
+    - name: Preserve managed plugin manifest trust inspections
+      ansible.builtin.copy:
+        dest: "{{ openclaw_doctor_rehearsal_evidence_dir }}/plugin-build-inspections.json"
+        owner: root
+        group: root
+        mode: "0600"
+        content: >-
+          {{ openclaw_doctor_rehearsal_plugin_build_inspections | to_nice_json }}
       no_log: true
 
     - name: Initialize managed plugin roots and transform arguments
@@ -1303,6 +1355,42 @@
           {{ openclaw_doctor_rehearsal_registry_after_raw.stdout | from_json }}
       no_log: true
 
+    - name: Inspect modernized managed plugin manifest trust
+      ansible.builtin.command:
+        argv: >-
+          {{
+            openclaw_doctor_rehearsal_transient_prefix
+            + [
+                '--unit=openclaw-doctor-inspect-after-'
+                + item.id
+                + '-'
+                + openclaw_doctor_rehearsal_stamp
+              ]
+            + openclaw_doctor_rehearsal_command_environment
+            + [
+                openclaw_doctor_rehearsal_runtime + '/bin/openclaw',
+                'plugins', 'inspect', item.id, '--json'
+              ]
+          }}
+      loop: "{{ openclaw_isolated_gateway_managed_plugins }}"
+      loop_control:
+        label: "{{ item.id }}"
+      register: openclaw_doctor_rehearsal_plugin_inspections_after_raw
+      changed_when: false
+      no_log: true
+
+    - name: Parse modernized managed plugin manifest trust inspections
+      ansible.builtin.set_fact:
+        openclaw_doctor_rehearsal_plugin_inspections_after: >-
+          {{
+            (openclaw_doctor_rehearsal_plugin_inspections_after | default([]))
+            + [item.stdout | from_json]
+          }}
+      loop: "{{ openclaw_doctor_rehearsal_plugin_inspections_after_raw.results }}"
+      loop_control:
+        label: "{{ item.item.id }}"
+      no_log: true
+
     - name: Require only modern managed-plugin ownership records
       ansible.builtin.assert:
         that:
@@ -1335,10 +1423,16 @@
           - (openclaw_doctor_rehearsal_registry_after.current.plugins | selectattr('pluginId', 'equalto', openclaw_isolated_gateway_managed_plugins[item].id) | list | first).origin == 'global'
           - ((openclaw_doctor_rehearsal_registry_after.current.plugins | selectattr('pluginId', 'equalto', openclaw_isolated_gateway_managed_plugins[item].id) | list | first).enabled | bool) == (openclaw_isolated_gateway_managed_plugins[item].id not in openclaw_doctor_rehearsal_disabled_runtime_plugins)
           - (openclaw_doctor_rehearsal_registry_after.current.plugins | selectattr('pluginId', 'equalto', openclaw_isolated_gateway_managed_plugins[item].id) | list | first).rootDir == openclaw_doctor_rehearsal_managed_plugin_root_paths[item]
-          - ((openclaw_doctor_rehearsal_registry_after.current.plugins | selectattr('pluginId', 'equalto', openclaw_isolated_gateway_managed_plugins[item].id) | list | first).trustedOfficialInstall | default(false) | bool) == (openclaw_isolated_gateway_managed_plugins[item].trusted_official | bool)
+          - openclaw_doctor_rehearsal_plugin_inspections_after[item].plugin.id == openclaw_isolated_gateway_managed_plugins[item].id
+          - openclaw_doctor_rehearsal_plugin_inspections_after[item].plugin.packageName == openclaw_isolated_gateway_managed_plugins[item].package
+          - openclaw_doctor_rehearsal_plugin_inspections_after[item].plugin.origin == 'global'
+          - openclaw_doctor_rehearsal_plugin_inspections_after[item].plugin.rootDir == openclaw_doctor_rehearsal_managed_plugin_root_paths[item]
+          - ((openclaw_doctor_rehearsal_plugin_inspections_after[item].plugin.trustedOfficialInstall | default(false)) | bool) == (openclaw_isolated_gateway_managed_plugins[item].trusted_official | bool)
+          - (openclaw_doctor_rehearsal_plugin_inspections_after[item].plugin.enabled | bool) == (openclaw_isolated_gateway_managed_plugins[item].id not in openclaw_doctor_rehearsal_disabled_runtime_plugins)
         fail_msg: >-
-          A retained plugin is missing, duplicated, disabled, or loaded outside
-          the immutable release.
+          A retained plugin is missing, duplicated, has the wrong manifest
+          trust, has the wrong credential-free enablement state, or is loaded
+          outside the immutable release.
       loop: "{{ range(0, openclaw_isolated_gateway_managed_plugins | length) | list }}"
       loop_control:
         label: "{{ openclaw_isolated_gateway_managed_plugins[item].id }}"
@@ -1538,6 +1632,42 @@
           {{ openclaw_doctor_rehearsal_registry_post_doctor_raw.stdout | from_json }}
       no_log: true
 
+    - name: Inspect managed plugin manifest trust after OpenClaw Doctor
+      ansible.builtin.command:
+        argv: >-
+          {{
+            openclaw_doctor_rehearsal_transient_prefix
+            + [
+                '--unit=openclaw-doctor-inspect-post-'
+                + item.id
+                + '-'
+                + openclaw_doctor_rehearsal_stamp
+              ]
+            + openclaw_doctor_rehearsal_command_environment
+            + [
+                openclaw_doctor_rehearsal_runtime + '/bin/openclaw',
+                'plugins', 'inspect', item.id, '--json'
+              ]
+          }}
+      loop: "{{ openclaw_isolated_gateway_managed_plugins }}"
+      loop_control:
+        label: "{{ item.id }}"
+      register: openclaw_doctor_rehearsal_plugin_inspections_post_doctor_raw
+      changed_when: false
+      no_log: true
+
+    - name: Parse managed plugin manifest trust inspections after Doctor
+      ansible.builtin.set_fact:
+        openclaw_doctor_rehearsal_plugin_inspections_post_doctor: >-
+          {{
+            (openclaw_doctor_rehearsal_plugin_inspections_post_doctor | default([]))
+            + [item.stdout | from_json]
+          }}
+      loop: "{{ openclaw_doctor_rehearsal_plugin_inspections_post_doctor_raw.results }}"
+      loop_control:
+        label: "{{ item.item.id }}"
+      no_log: true
+
     - name: Require clean managed plugin registration after OpenClaw Doctor
       ansible.builtin.assert:
         that:
@@ -1557,11 +1687,16 @@
           - openclaw_doctor_rehearsal_registry_post_doctor.current.installRecords[openclaw_isolated_gateway_managed_plugins[item].id].integrity | length > 0
           - (openclaw_doctor_rehearsal_registry_post_doctor.current.plugins | selectattr('pluginId', 'equalto', openclaw_isolated_gateway_managed_plugins[item].id) | list | length) == 1
           - (openclaw_doctor_rehearsal_registry_post_doctor.current.plugins | selectattr('pluginId', 'equalto', openclaw_isolated_gateway_managed_plugins[item].id) | list | first).rootDir == openclaw_doctor_rehearsal_managed_plugin_root_paths[item]
-          - ((openclaw_doctor_rehearsal_registry_post_doctor.current.plugins | selectattr('pluginId', 'equalto', openclaw_isolated_gateway_managed_plugins[item].id) | list | first).trustedOfficialInstall | default(false) | bool) == (openclaw_isolated_gateway_managed_plugins[item].trusted_official | bool)
           - ((openclaw_doctor_rehearsal_registry_post_doctor.current.plugins | selectattr('pluginId', 'equalto', openclaw_isolated_gateway_managed_plugins[item].id) | list | first).enabled | bool) == (openclaw_isolated_gateway_managed_plugins[item].id not in openclaw_doctor_rehearsal_disabled_runtime_plugins)
+          - openclaw_doctor_rehearsal_plugin_inspections_post_doctor[item].plugin.id == openclaw_isolated_gateway_managed_plugins[item].id
+          - openclaw_doctor_rehearsal_plugin_inspections_post_doctor[item].plugin.packageName == openclaw_isolated_gateway_managed_plugins[item].package
+          - openclaw_doctor_rehearsal_plugin_inspections_post_doctor[item].plugin.origin == 'global'
+          - openclaw_doctor_rehearsal_plugin_inspections_post_doctor[item].plugin.rootDir == openclaw_doctor_rehearsal_managed_plugin_root_paths[item]
+          - ((openclaw_doctor_rehearsal_plugin_inspections_post_doctor[item].plugin.trustedOfficialInstall | default(false)) | bool) == (openclaw_isolated_gateway_managed_plugins[item].trusted_official | bool)
+          - (openclaw_doctor_rehearsal_plugin_inspections_post_doctor[item].plugin.enabled | bool) == (openclaw_isolated_gateway_managed_plugins[item].id not in openclaw_doctor_rehearsal_disabled_runtime_plugins)
         fail_msg: >-
           A managed plugin lost its npm ownership, integrity, immutable path,
-          trust classification, or credential-free enablement state.
+          manifest trust classification, or credential-free enablement state.
       loop: "{{ range(0, openclaw_isolated_gateway_managed_plugins | length) | list }}"
       loop_control:
         label: "{{ openclaw_isolated_gateway_managed_plugins[item].id }}"

@@ -109,6 +109,21 @@ prove the plugin store is unchanged and non-writable, supported npm provenance
 and trust survive Doctor, and the prior trusted-plugin, duplicate-state,
 plaintext-secret, missing-memory-provider, and Qdrant error classes are absent.
 
+Generation `20260810T112905Z` stopped before OpenClaw executed because the
+networked plugin-builder unit combined `ProtectHome=tmpfs` with a redundant
+`InaccessiblePaths=/home/johnny`. Systemd could not construct that nested mount
+namespace and exited with `226/NAMESPACE`. Removing the redundant path mask did
+not expose the human home; `ProtectHome=tmpfs` remains the owning boundary.
+Generation `20260810T113119Z` then installed all four classified plugins with
+exact npm records and integrity hashes, but the Ansible gate incorrectly asked
+the persisted cold plugin registry to prove `trustedOfficialInstall`. That
+registry intentionally omits the runtime trust bit. OpenClaw's documented,
+manifest-only `plugins inspect <id> --json` path recomputed the same installed
+record and reported Codex and Discord as officially trusted while correctly
+leaving Lossless Claw and Mem0 untrusted. The gate now uses the cold registry
+only for ownership, integrity, path, and enablement evidence, and uses
+manifest-only inspection for trust without importing plugin runtime code.
+
 ## Modernization Contract
 
 Behavior and data parity do not require legacy mechanism parity. Every
@@ -374,9 +389,10 @@ The run is a modernization gate rather than a legacy clone:
    each through `plugins uninstall --keep-files --force`. In a separate empty,
    credential-free network sandbox, install the exact resolved Codex, Discord,
    Lossless Claw, and Mem0 packages through OpenClaw's npm installer. Require
-   exact integrity-bearing npm records, canonical state-local paths, and the
-   expected official-trust classification, then freeze that plugin store
-   root-owned and read-only before any copied production state is processed.
+   exact integrity-bearing npm records and canonical state-local paths from the
+   cold registry, plus the expected trust classification from manifest-only
+   `plugins inspect`. Then freeze that plugin store root-owned and read-only
+   before any copied production state is processed.
 5. Run Doctor twice inside a transient `PrivateNetwork` systemd sandbox. An
    empty `ProtectHome=tmpfs` view hides the human home while making retired
    absolute install paths resolve as absent, which the supported uninstall
@@ -396,8 +412,9 @@ The run is a modernization gate rather than a legacy clone:
    comparison; an unknown table or column fails closed.
 7. Reject a zero-exit Doctor run if it still emits a trusted-plugin,
    duplicate-state, plaintext-secret, missing-memory-provider, or Qdrant error.
-   Re-read the plugin registry after both passes and require npm provenance,
-   integrity, immutable paths, and trust to remain exact.
+   Re-read the plugin registry and manifest-only plugin inspections after both
+   passes and require npm provenance, integrity, immutable paths, enablement,
+   and trust to remain exact.
 8. Promote root-owned rehearsal selectors only after both passes, filesystem
    and database idempotency, plugin-store immutability, and error-level lint
    succeed, then prove the production config checksum and user Gateway state

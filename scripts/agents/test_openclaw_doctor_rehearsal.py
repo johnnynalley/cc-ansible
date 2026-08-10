@@ -51,9 +51,16 @@ class DoctorRehearsalTests(unittest.TestCase):
         self.assertIn("NPM_CONFIG_FETCH_RETRIES=0", playbook)
         self.assertIn("sqlite-checkpoint", snapshot_tasks)
         self.assertIn("plugins', 'install'", playbook)
+        self.assertEqual(playbook.count("'plugins', 'inspect'"), 3)
         self.assertNotIn("'--link'", playbook)
         self.assertIn("ownershipRecordSource': 'npm'", playbook)
         self.assertIn("openKeyedStore is only available for trusted plugins", playbook)
+        trust_assertions = [
+            line for line in playbook.splitlines() if "trustedOfficialInstall" in line
+        ]
+        self.assertEqual(len(trust_assertions), 3)
+        for assertion in trust_assertions:
+            self.assertIn("inspections", assertion)
 
     def test_transform_rewrites_paths_and_removes_secret_values(self) -> None:
         with tempfile.TemporaryDirectory() as directory_name:
