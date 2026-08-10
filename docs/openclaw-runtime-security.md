@@ -80,6 +80,16 @@ canary. Fresh device-code model authorization and the fixed model-response
 proof remain pending. Inventory defaults to `disabled` outside attended
 bootstrap, canary, and cutover work.
 
+Doctor rehearsal generation `20260810T103557Z` passed the first networkless
+Doctor run, then stopped before selector promotion because the original
+integrity manifest rejected Doctor's generated `plugin-skills/` symlinks.
+Installed OpenClaw source identifies those links as the current product-owned
+publication mechanism. A data-free proof against the stopped generation found
+29,554 entries and exactly four links; each resolved inside the selected
+immutable plugin release and contained a regular `SKILL.md`. The narrowed
+manifest policy below accepts only that bounded form. Production remained
+active and unchanged.
+
 ## Modernization Contract
 
 Behavior and data parity do not require legacy mechanism parity. Every
@@ -347,8 +357,11 @@ The run is a modernization gate rather than a legacy clone:
    every transient command is bounded to five minutes. The Docker socket and
    controller checkout remain explicitly inaccessible.
 6. Compare data-free filesystem manifests and stable SQLite table digests.
-   Only a reviewed list of known volatile shared control-plane tables is
-   excluded from the stable comparison; an unknown exclusion fails closed.
+   OpenClaw-owned generated `plugin-skills/<name>` symlinks are recorded only
+   when their real targets and regular `SKILL.md` files remain inside one of the
+   four canonical immutable plugin roots; every other symlink is rejected. Only
+   a reviewed list of known volatile shared control-plane tables is excluded
+   from the stable comparison; an unknown exclusion fails closed.
 7. Promote root-owned rehearsal selectors only after both passes and
    error-level lint succeed, then prove the production config checksum and user
    Gateway state are unchanged.

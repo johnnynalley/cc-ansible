@@ -333,6 +333,60 @@ class DoctorRehearsalTests(unittest.TestCase):
                     )
                 )
 
+    def test_manifest_allows_only_reviewed_plugin_skill_symlinks(self) -> None:
+        with tempfile.TemporaryDirectory() as directory_name:
+            root = Path(directory_name)
+            tree = root / "tree"
+            plugin_root = root / "immutable-plugin"
+            skill = plugin_root / "skills" / "discord"
+            skill.mkdir(parents=True)
+            (skill / "SKILL.md").write_text("# Discord\n", encoding="utf-8")
+            links = tree / "plugin-skills"
+            links.mkdir(parents=True)
+            (links / "discord").symlink_to(skill, target_is_directory=True)
+
+            result = MODULE.manifest_tree(
+                argparse.Namespace(
+                    root=str(tree),
+                    output=str(root / "manifest.json"),
+                    exclude=[],
+                    allow_plugin_skill_target_root=[str(plugin_root)],
+                )
+            )
+            symlink = next(
+                entry for entry in result["entries"] if entry["type"] == "symlink"
+            )
+            self.assertEqual(symlink["relativePath"], "plugin-skills/discord")
+            self.assertEqual(symlink["resolvedTarget"], str(skill))
+            self.assertEqual(result["summary"]["symlinks"], 1)
+
+            outside = root / "outside"
+            outside.mkdir()
+            (outside / "SKILL.md").write_text("# Outside\n", encoding="utf-8")
+            (links / "discord").unlink()
+            (links / "discord").symlink_to(outside, target_is_directory=True)
+            with self.assertRaises(MODULE.RehearsalError):
+                MODULE.manifest_tree(
+                    argparse.Namespace(
+                        root=str(tree),
+                        output=str(root / "escaped.json"),
+                        exclude=[],
+                        allow_plugin_skill_target_root=[str(plugin_root)],
+                    )
+                )
+
+            (links / "discord").unlink()
+            (links / "discord").mkdir()
+            with self.assertRaises(MODULE.RehearsalError):
+                MODULE.manifest_tree(
+                    argparse.Namespace(
+                        root=str(tree),
+                        output=str(root / "nongenerated.json"),
+                        exclude=[],
+                        allow_plugin_skill_target_root=[str(plugin_root)],
+                    )
+                )
+
     def test_sqlite_summary_contains_digests_not_values(self) -> None:
         with tempfile.TemporaryDirectory() as directory_name:
             root = Path(directory_name)

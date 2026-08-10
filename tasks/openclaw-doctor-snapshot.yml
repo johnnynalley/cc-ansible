@@ -13,6 +13,7 @@
           '--output', openclaw_doctor_rehearsal_evidence_dir + '/' + openclaw_doctor_snapshot_phase + '-state.json'
         ]
         + openclaw_doctor_rehearsal_state_manifest_exclude_arguments
+        + openclaw_doctor_rehearsal_plugin_skill_manifest_arguments
       }}
   changed_when: false
 

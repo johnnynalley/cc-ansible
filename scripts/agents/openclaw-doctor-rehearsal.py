@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any, Iterable
 
 SCHEMA_VERSION = 1
+MANIFEST_SCHEMA_VERSION = 2
 REDACTED = "doctor-rehearsal-redacted"
 SECRET_KEYS = {
     "accesstoken",
@@ -515,10 +516,69 @@ def is_excluded(relative_path: str, exclusions: tuple[str, ...]) -> bool:
     )
 
 
+def is_within(path: Path, root: Path) -> bool:
+    try:
+        path.relative_to(root)
+    except ValueError:
+        return False
+    return True
+
+
+def canonical_plugin_skill_roots(args: argparse.Namespace) -> tuple[Path, ...]:
+    roots: set[Path] = set()
+    for raw_root in getattr(args, "allow_plugin_skill_target_root", []):
+        supplied = Path(raw_root)
+        if not supplied.is_absolute():
+            raise RehearsalError(
+                f"plugin skill target root is not absolute: {supplied}"
+            )
+        resolved = supplied.resolve(strict=True)
+        if supplied != resolved:
+            raise RehearsalError(
+                f"plugin skill target root is not canonical: {supplied}"
+            )
+        require_directory(resolved)
+        roots.add(resolved)
+    return tuple(sorted(roots, key=str))
+
+
+def manifest_plugin_skill_symlink(
+    child: Path,
+    relative: str,
+    metadata: os.stat_result,
+    allowed_roots: tuple[Path, ...],
+) -> dict[str, Any]:
+    relative_parts = Path(relative).parts
+    if len(relative_parts) != 2 or relative_parts[0] != "plugin-skills":
+        raise RehearsalError(f"manifest refuses directory symlink: {relative}")
+    if not allowed_roots:
+        raise RehearsalError(f"manifest refuses directory symlink: {relative}")
+    try:
+        resolved = child.resolve(strict=True)
+    except (OSError, RuntimeError) as error:
+        raise RehearsalError(
+            f"plugin skill symlink does not resolve safely: {relative}"
+        ) from error
+    require_directory(resolved)
+    if not any(is_within(resolved, root) for root in allowed_roots):
+        raise RehearsalError(
+            f"plugin skill symlink escapes reviewed immutable roots: {relative}"
+        )
+    require_regular_file(resolved / "SKILL.md")
+    return {
+        "relativePath": relative,
+        "type": "symlink",
+        "mode": stat.S_IMODE(metadata.st_mode),
+        "target": os.readlink(child),
+        "resolvedTarget": str(resolved),
+    }
+
+
 def manifest_tree(args: argparse.Namespace) -> dict[str, Any]:
     root = Path(args.root)
     require_directory(root)
     exclusions = tuple(sorted(set(args.exclude)))
+    plugin_skill_roots = canonical_plugin_skill_roots(args)
     entries: list[dict[str, Any]] = []
     total_bytes = 0
     for current_root, directories, files in os.walk(root, followlinks=False):
@@ -532,7 +592,16 @@ def manifest_tree(args: argparse.Namespace) -> dict[str, Any]:
                 continue
             metadata = child.lstat()
             if stat.S_ISLNK(metadata.st_mode):
-                raise RehearsalError(f"manifest refuses directory symlink: {relative}")
+                entries.append(
+                    manifest_plugin_skill_symlink(
+                        child, relative, metadata, plugin_skill_roots
+                    )
+                )
+                continue
+            if relative_root.as_posix() == "plugin-skills" and plugin_skill_roots:
+                raise RehearsalError(
+                    f"plugin skill entry is not a generated symlink: {relative}"
+                )
             if not stat.S_ISDIR(metadata.st_mode):
                 raise RehearsalError(f"manifest found non-directory entry: {relative}")
             retained_directories.append(name)
@@ -552,6 +621,10 @@ def manifest_tree(args: argparse.Namespace) -> dict[str, Any]:
             metadata = child.lstat()
             if stat.S_ISLNK(metadata.st_mode):
                 raise RehearsalError(f"manifest refuses file symlink: {relative}")
+            if relative_root.as_posix() == "plugin-skills" and plugin_skill_roots:
+                raise RehearsalError(
+                    f"plugin skill entry is not a generated symlink: {relative}"
+                )
             if not stat.S_ISREG(metadata.st_mode):
                 raise RehearsalError(f"manifest found non-regular file: {relative}")
             total_bytes += metadata.st_size
@@ -566,15 +639,17 @@ def manifest_tree(args: argparse.Namespace) -> dict[str, Any]:
             )
     entries.sort(key=lambda entry: (entry["relativePath"], entry["type"]))
     result = {
-        "schemaVersion": SCHEMA_VERSION,
+        "schemaVersion": MANIFEST_SCHEMA_VERSION,
         "status": "ok",
         "root": str(root.resolve()),
         "exclusions": list(exclusions),
+        "allowedPluginSkillTargetRoots": [str(path) for path in plugin_skill_roots],
         "entries": entries,
         "summary": {
             "entries": len(entries),
             "files": sum(entry["type"] == "file" for entry in entries),
             "directories": sum(entry["type"] == "directory" for entry in entries),
+            "symlinks": sum(entry["type"] == "symlink" for entry in entries),
             "bytes": total_bytes,
         },
     }
@@ -599,7 +674,7 @@ def diff_manifests(args: argparse.Namespace) -> dict[str, Any]:
         if before_entries[path] != after_entries[path]
     )
     result = {
-        "schemaVersion": SCHEMA_VERSION,
+        "schemaVersion": MANIFEST_SCHEMA_VERSION,
         "status": "ok",
         "added": added,
         "removed": removed,
@@ -660,6 +735,15 @@ def build_parser() -> argparse.ArgumentParser:
     manifest.add_argument("--root", required=True)
     manifest.add_argument("--output", required=True)
     manifest.add_argument("--exclude", action="append", default=[])
+    manifest.add_argument(
+        "--allow-plugin-skill-target-root",
+        action="append",
+        default=[],
+        help=(
+            "canonical immutable plugin root allowed as a generated "
+            "plugin-skills symlink target"
+        ),
+    )
     manifest.set_defaults(handler=manifest_tree)
 
     diff = subparsers.add_parser("diff")

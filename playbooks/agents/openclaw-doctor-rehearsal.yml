@@ -947,6 +947,20 @@
       register: openclaw_doctor_rehearsal_managed_plugin_roots
       changed_when: false
 
+    - name: Allow only immutable plugin roots for generated skill links
+      ansible.builtin.set_fact:
+        openclaw_doctor_rehearsal_plugin_skill_manifest_arguments: >-
+          {{
+            (openclaw_doctor_rehearsal_plugin_skill_manifest_arguments | default([]))
+            + [
+                '--allow-plugin-skill-target-root',
+                item.stdout
+              ]
+          }}
+      loop: "{{ openclaw_doctor_rehearsal_managed_plugin_roots.results }}"
+      loop_control:
+        label: "{{ item.item.id }}"
+
     - name: Register immutable OpenClaw plugin ownership through supported links
       ansible.builtin.command:
         argv: >-

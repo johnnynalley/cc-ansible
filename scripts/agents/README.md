@@ -45,6 +45,9 @@ dedicated `openclaw-health` system service passes cutover validation.
   scrubs only per-agent auth tables, and emits data-free manifests and database
   summaries for Doctor idempotency checks. Stable-table summaries may exclude
   an explicit reviewed volatile-table set; unknown exclusions fail closed.
+  State manifests reject symlinks except for OpenClaw-owned
+  `plugin-skills/<name>` links whose real targets and regular `SKILL.md` files
+  remain inside explicitly allowlisted immutable plugin roots.
 - `test_openclaw_doctor_rehearsal.py` covers config path and secret handling,
   plugin modernization boundaries, auth-only database scrubbing, SQLite
   summaries, and immutable tree manifest comparison.
