@@ -11,17 +11,6 @@
       "file": "isolated"
     }
   },
-  "models": {
-    "providers": {
-      "openrouter": {
-        "apiKey": {
-          "source": "file",
-          "provider": "isolated",
-          "id": "/providers/openrouter/apiKey"
-        }
-      }
-    }
-  },
   "agents": {
     "defaults": {
       "workspace": {{ openclaw_isolated_gateway_workspace_dir | to_json }},
@@ -149,10 +138,10 @@
   },
   "plugins": {
     "allow": [
-      "openrouter"
+      "openai"
     ],
     "entries": {
-      "openrouter": {
+      "openai": {
         "enabled": true
       }
     }

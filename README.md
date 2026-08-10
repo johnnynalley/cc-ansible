@@ -296,7 +296,7 @@ Packages are merged from multiple sources (all applicable variables combined):
 | `vm-storage-gate.yml` | `proxmox_nodes` | Per-VM start gate: hookscript blocks `qm start`/`pct start` if VM's declared host mountpoints aren't mounted. Per-VM declarations in `host_vars/<vm>/storage.yml` |
 | `openclaw.yml` | `openclaw_hosts` | OpenClaw AI agent (npm install, gateway service, repo-sync/update-check timers) |
 | `openclaw-health-receiver.yml` | `openclaw_hosts` | Isolated Health receiver and aggregate-only report publisher (disabled by default) |
-| `openclaw-isolated-gateway.yml` | `openclaw_hosts` | Parallel deny-by-default Gateway canary under a dedicated OS account (disabled by default) |
+| `openclaw-isolated-gateway.yml` | `openclaw_hosts` | Two-phase deny-by-default Gateway canary with isolated OAuth enrollment and model proof (disabled by default) |
 
 ## NFS Configuration
 

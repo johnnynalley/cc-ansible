@@ -16,10 +16,10 @@
     - name: Validate isolated Gateway mode
       ansible.builtin.assert:
         that:
-          - openclaw_isolated_gateway_mode | default('disabled') in ['disabled', 'canary']
+          - openclaw_isolated_gateway_mode | default('disabled') in ['disabled', 'canary-bootstrap', 'canary']
         fail_msg: >-
-          openclaw_isolated_gateway_mode must be disabled or canary. This
-          playbook does not implement a production cutover.
+          openclaw_isolated_gateway_mode must be disabled, canary-bootstrap,
+          or canary. This playbook does not implement a production cutover.
 
     - name: Inspect isolated Gateway unit
       ansible.builtin.stat:
@@ -60,7 +60,7 @@
           - openclaw_isolated_gateway_state_dir is match('^/var/lib/openclaw-isolated$')
           - openclaw_isolated_gateway_runtime_dir is match('^/opt/openclaw-isolated$')
           - openclaw_isolated_gateway_workspace_dir is match('^/usr/local/share/openclaw-isolated/workspace$')
-          - openclaw_isolated_gateway_credential_source is match('^/home/[A-Za-z0-9._-]+/.+$')
+          - openclaw_isolated_gateway_model is match('^openai/')
           - openclaw_isolated_gateway_port | int >= 1024
           - openclaw_isolated_gateway_port | int <= 65535
           - openclaw_isolated_gateway_port | int != openclaw_port | int
@@ -68,28 +68,6 @@
         fail_msg: >-
           The canary paths, port, or initial group policy are outside the fixed
           isolation contract.
-
-    - name: Inspect legacy credential source
-      ansible.builtin.stat:
-        path: "{{ openclaw_isolated_gateway_credential_source }}"
-      register: openclaw_isolated_gateway_credential_stat
-      check_mode: false
-      no_log: true
-
-    - name: Require protected legacy credential source
-      ansible.builtin.assert:
-        that:
-          - openclaw_isolated_gateway_credential_stat.stat.exists
-          - openclaw_isolated_gateway_credential_stat.stat.isreg
-          - not openclaw_isolated_gateway_credential_stat.stat.islnk
-          - openclaw_isolated_gateway_credential_stat.stat.mode == '0600'
-          - openclaw_isolated_gateway_credential_stat.stat.pw_name == openclaw_isolated_gateway_legacy_user
-          - openclaw_isolated_gateway_credential_stat.stat.size | int > 0
-          - openclaw_isolated_gateway_credential_stat.stat.size | int <= 1048576
-        fail_msg: >-
-          The legacy credential source is absent or not a protected regular
-          file. Refusing to import from a looser source.
-      no_log: true
 
     - name: Inspect existing isolated Gateway paths
       ansible.builtin.stat:
@@ -305,12 +283,6 @@
           ansible.builtin.command:
             argv:
               - /usr/local/libexec/openclaw-isolated/openclaw-isolated-secrets.py
-              - --source
-              - "{{ openclaw_isolated_gateway_credential_source }}"
-              - --source-key
-              - "{{ openclaw_isolated_gateway_credential_key }}"
-              - --source-owner
-              - "{{ openclaw_isolated_gateway_legacy_user }}"
               - --output
               - "{{ openclaw_isolated_gateway_secret_file }}"
               - --output-parent-owner
@@ -353,6 +325,14 @@
             owner: root
             group: "{{ openclaw_isolated_gateway_group }}"
             mode: "0640"
+
+        - name: Deploy writable isolated Gateway last-good target
+          ansible.builtin.template:
+            src: "{{ ansible_config_file | dirname }}/templates/openclaw/openclaw-isolated.json.j2"
+            dest: "{{ openclaw_isolated_gateway_config_file }}.last-good"
+            owner: "{{ openclaw_isolated_gateway_user }}"
+            group: "{{ openclaw_isolated_gateway_group }}"
+            mode: "0600"
 
         - name: Validate isolated Gateway configuration
           ansible.builtin.command:
@@ -503,7 +483,9 @@
           register: openclaw_isolated_gateway_model_probe
           changed_when: false
           no_log: true
-          when: not ansible_check_mode
+          when:
+            - not ansible_check_mode
+            - openclaw_isolated_gateway_mode == 'canary'
 
         - name: Require exact isolated Gateway model response marker
           ansible.builtin.assert:
@@ -511,6 +493,20 @@
               - "'ISOLATED_CANARY_OK' in openclaw_isolated_gateway_model_probe.stdout"
             fail_msg: "The isolated Gateway model canary did not return its fixed marker."
           no_log: true
+          when:
+            - not ansible_check_mode
+            - openclaw_isolated_gateway_mode == 'canary'
+
+        - name: Mark isolated Gateway infrastructure validated
+          ansible.builtin.copy:
+            dest: "{{ openclaw_isolated_gateway_config_dir }}/.infrastructure-validated"
+            owner: root
+            group: root
+            mode: "0600"
+            content: |
+              validated_at={{ openclaw_isolated_gateway_backup_stamp }}
+              port={{ openclaw_isolated_gateway_port }}
+              mode={{ openclaw_isolated_gateway_mode }}
           when: not ansible_check_mode
 
         - name: Mark isolated Gateway canary validated
@@ -523,7 +519,9 @@
               validated_at={{ openclaw_isolated_gateway_backup_stamp }}
               port={{ openclaw_isolated_gateway_port }}
               mode=parallel-canary-only
-          when: not ansible_check_mode
+          when:
+            - not ansible_check_mode
+            - openclaw_isolated_gateway_mode == 'canary'
 
       rescue:
         - name: Stop failed isolated Gateway canary

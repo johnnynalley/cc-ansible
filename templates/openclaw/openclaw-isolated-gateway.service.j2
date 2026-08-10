@@ -18,6 +18,7 @@ Environment=NODE_COMPILE_CACHE={{ openclaw_isolated_gateway_state_dir }}/compile
 Environment=PATH={{ openclaw_isolated_gateway_runtime_dir }}/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin
 ExecStartPre=/usr/bin/test -r {{ openclaw_isolated_gateway_config_file }}
 ExecStartPre=/usr/bin/test ! -w {{ openclaw_isolated_gateway_config_file }}
+ExecStartPre=/usr/bin/test -w {{ openclaw_isolated_gateway_config_file }}.last-good
 ExecStartPre=/usr/bin/test -r {{ openclaw_isolated_gateway_secret_file }}
 ExecStartPre=/usr/bin/test ! -w {{ openclaw_isolated_gateway_secret_file }}
 ExecStartPre=/usr/bin/test -w {{ openclaw_isolated_gateway_state_dir }}
@@ -69,6 +70,7 @@ ReadWritePaths={{ openclaw_isolated_gateway_state_dir }}
 ReadOnlyPaths={{ openclaw_isolated_gateway_runtime_dir }}
 ReadOnlyPaths={{ openclaw_isolated_gateway_config_dir }}
 ReadOnlyPaths={{ openclaw_isolated_gateway_workspace_dir }}
+ReadWritePaths={{ openclaw_isolated_gateway_config_file }}.last-good
 InaccessiblePaths=-/run/docker.sock -/var/run/docker.sock
 InaccessiblePaths=-/home/{{ openclaw_isolated_gateway_legacy_user }} -/root
 InaccessiblePaths=-{{ openclaw_workspace }} -/etc/ansible

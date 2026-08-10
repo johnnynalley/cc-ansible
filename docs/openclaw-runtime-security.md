@@ -19,18 +19,23 @@ The first deterministic boundaries are implemented but deliberately disabled:
 - `playbooks/agents/openclaw-isolated-gateway.yml` stages a parallel system
   service under the no-login `openclaw` account without stopping production.
 - `templates/openclaw/openclaw-isolated.json.j2` starts from a blank config:
-  one OpenRouter model, file-backed SecretRefs, no channel, heartbeat, memory,
+  one OpenAI model, a file-backed Gateway token, no channel, heartbeat, memory,
   plugin-tool, delegation, filesystem, web, messaging, or execution surfaces.
 - `templates/openclaw/openclaw-isolated-gateway.service.j2` makes the runtime,
-  config, secret payload, and workspace root-owned/read-only while exposing
-  only `/var/lib/openclaw-isolated` as writable state.
+  primary config, and workspace root-owned/read-only. The SecretRef payload is
+  service-owned mode `0400` because the current file provider requires the
+  running UID to own it. Only `/var/lib/openclaw-isolated` and the exact
+  service-owned `.last-good` config backup are writable inside the sandbox.
 - The future `openclaw` Gateway identity will receive membership only in
   `openclaw-health-report`, which can read generated reports but cannot read the
   database, token, receiver configuration, or raw payloads.
 
-No live service, user, listener, credential, or database has been changed by
-these implementations. Both inventory modes remain `disabled` until attended
-canaries and cutovers are approved.
+Two attended canary attempts were rolled back automatically on 2026-08-10: the
+first exposed and fixed the current file-provider ownership contract, and the
+second passed every infrastructure check before proving that the legacy
+OpenRouter fallback was unfunded. No canary account, unit, listener, or path
+remains active. Production was not stopped or modified. Inventory remains
+`disabled` outside attended bootstrap, canary, and cutover work.
 
 ## Gateway Canary Design
 
@@ -40,12 +45,12 @@ Sonarr, Radarr, iCloud, image, and other credentials into the new account and
 would reproduce the current authority convergence.
 
 Instead, the playbook installs `openclaw@latest` into the root-owned
-`/opt/openclaw-isolated` prefix and extracts only `OPENROUTER_API_KEY` from the
-mode-`0600` legacy dotenv file. The extractor treats the source as data, accepts
-exactly one assignment, writes only the OpenRouter key and a separately
-generated Gateway token to `/etc/openclaw-isolated/secrets.json`, and never
-prints either value. The imported provider key must be rotated after migration
-because the legacy root-equivalent runtime could already read it.
+`/opt/openclaw-isolated` prefix and generates only a dedicated Gateway token in
+`/etc/openclaw-isolated/secrets.json`. It imports nothing from the legacy broad
+environment. Production uses a current OpenAI OAuth profile whose refresh
+material is intentionally nonportable, so the dedicated identity receives a
+fresh device-code login rather than a copied token. The unfunded OpenRouter
+fallback is not carried into the canary.
 
 The system service adds the effective boundary:
 
@@ -61,17 +66,21 @@ The system service adds the effective boundary:
   capabilities, no privilege gain, namespace restrictions, and explicit
   inaccessibility for the Docker socket, controller repo, human home, Ansible,
   Docker state, and bulk data mounts;
-- pre-start assertions that the process can read but not write its config and
-  secret, can write only its state, cannot write the workspace, and cannot read
-  the human home, Docker socket, vault password, or controller guidance.
+- pre-start assertions that the process can read but not write its primary
+  config or secret, can write its state and exact `.last-good` file, cannot
+  write the workspace, and cannot read the human home, Docker socket, vault
+  password, or controller guidance.
 
-Canary mode requires `openclaw_isolated_gateway_canary_approved: true`. It
-takes a root-only targeted backup of any prior canary state, validates the
-rendered config as the service identity, starts the listener without enabling
-it at boot, verifies systemd properties and account groups, runs authenticated
-health and fixed-response model probes, and writes `.canary-validated`. Failure
-stops the canary and restores prior canary state; the production Gateway is
-never touched. This playbook deliberately has no production-cutover mode.
+Both live modes require `openclaw_isolated_gateway_canary_approved: true` and
+take a root-only targeted backup of prior canary state. `canary-bootstrap`
+validates the config, token, listener, systemd properties, account groups, and
+authenticated health endpoint, then writes `.infrastructure-validated`. It
+leaves the loopback-only, boot-disabled service available for a fresh OpenAI
+device-code login. It does not claim model parity. After authentication,
+`canary` repeats every infrastructure check, requires the fixed-response model
+probe, and only then writes `.canary-validated`. Failure stops the canary and
+restores prior canary state; the production Gateway is never touched. This
+playbook deliberately has no production-cutover mode.
 
 ## Required Trust Boundaries
 
@@ -197,6 +206,7 @@ ansible-playbook playbooks/agents/openclaw-health-receiver.yml --syntax-check
 ansible-playbook playbooks/agents/openclaw-health-receiver.yml --check --diff
 ansible-playbook playbooks/agents/openclaw-isolated-gateway.yml --syntax-check
 ansible-playbook playbooks/agents/openclaw-isolated-gateway.yml --check --diff
+ansible-playbook playbooks/agents/openclaw-isolated-gateway.yml --check --diff -e openclaw_isolated_gateway_mode=canary-bootstrap -e openclaw_isolated_gateway_canary_approved=true
 scripts/repo/repo-audit
 ```
 

@@ -22,17 +22,15 @@ dedicated `openclaw-health` system service passes cutover validation.
 
 ## Isolated Gateway
 
-- `openclaw-isolated-secrets.py` reads one exact credential from the protected
-  legacy dotenv file, preserves or generates the canary Gateway token, and
-  atomically writes one service-owned, owner-read-only SecretRef payload inside
-  a root-owned directory. This satisfies the current OpenClaw file-provider
+- `openclaw-isolated-secrets.py` preserves or generates the canary Gateway
+  token and atomically writes one service-owned, owner-read-only SecretRef
+  payload inside a root-owned directory. It imports no legacy provider or
+  application credentials. This satisfies the current OpenClaw file-provider
   contract while the systemd sandbox keeps the path read-only to the service.
-  It rejects symlinks, loose source permissions, duplicate keys, unexpected
-  bytes, and unsafe output directories. Its output contains only status and
-  change state.
-- `test_openclaw_isolated_secrets.py` covers exact-key parsing, duplicate and
-  whitespace rejection, source permissions, atomic permissions, idempotency,
-  provider-key replacement, and Gateway-token preservation.
+  It rejects symlinks and unsafe output directories, and its output contains
+  only status and change state.
+- `test_openclaw_isolated_secrets.py` covers atomic permissions, idempotency,
+  unexpected-field removal, parent ownership, and Gateway-token preservation.
 
 ## Validation
 

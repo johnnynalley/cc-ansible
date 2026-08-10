@@ -12,8 +12,8 @@ openclaw_cleanup_npm_prefixes:
   - /home/johnny/.local
 
 # Parallel least-privilege Gateway canary. Disabled mode leaves the existing
-# johnny-owned production Gateway untouched. Canary mode is an attended,
-# owner-approved listener on loopback and is never enabled at boot.
+# johnny-owned production Gateway untouched. Bootstrap and full canary modes
+# are attended, owner-approved listeners on loopback and never enabled at boot.
 openclaw_isolated_gateway_mode: disabled
 openclaw_isolated_gateway_canary_approved: false
 openclaw_isolated_gateway_user: openclaw
@@ -21,7 +21,7 @@ openclaw_isolated_gateway_group: openclaw
 openclaw_isolated_gateway_report_groups: []
 openclaw_isolated_gateway_legacy_user: johnny
 openclaw_isolated_gateway_port: 19789
-openclaw_isolated_gateway_model: openrouter/auto
+openclaw_isolated_gateway_model: openai/gpt-5.6-sol
 openclaw_isolated_gateway_runtime_dir: /opt/openclaw-isolated
 openclaw_isolated_gateway_config_dir: /etc/openclaw-isolated
 openclaw_isolated_gateway_config_file: /etc/openclaw-isolated/openclaw.json
@@ -29,8 +29,6 @@ openclaw_isolated_gateway_secret_file: /etc/openclaw-isolated/secrets.json
 openclaw_isolated_gateway_state_dir: /var/lib/openclaw-isolated
 openclaw_isolated_gateway_workspace_dir: /usr/local/share/openclaw-isolated/workspace
 openclaw_isolated_gateway_backup_dir: /var/backups/openclaw-isolated
-openclaw_isolated_gateway_credential_source: /home/johnny/.openclaw/.env
-openclaw_isolated_gateway_credential_key: OPENROUTER_API_KEY
 
 # Dedicated Health receiver migration. Disabled leaves the current user service
 # untouched. Canary and production are attended rollout modes; first production
