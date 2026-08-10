@@ -3,7 +3,8 @@
 # Purpose: Rehearse credential-free OpenClaw Doctor modernization on copied state.
 # Hosts: openclaw_hosts.
 # Key vars: openclaw_doctor_rehearsal_*.
-# Scripts: scripts/agents/openclaw-doctor-rehearsal.py.
+# Scripts: scripts/agents/openclaw-doctor-rehearsal.py and
+# scripts/agents/openclaw-isolated-secrets.py.
 # Validation: ansible-playbook playbooks/agents/openclaw-doctor-rehearsal.yml --syntax-check.
 
 - name: Rehearse OpenClaw Doctor state modernization
@@ -14,6 +15,8 @@
   vars:
     openclaw_doctor_rehearsal_tool: >-
       /usr/local/libexec/openclaw-migration/openclaw-doctor-rehearsal.py
+    openclaw_doctor_rehearsal_secret_tool: >-
+      /usr/local/libexec/openclaw-migration/openclaw-isolated-secrets.py
     openclaw_doctor_rehearsal_free_space_margin: 5368709120
 
   tasks:
@@ -199,6 +202,7 @@
         follow: false
       loop:
         - "{{ openclaw_doctor_rehearsal_tool }}"
+        - "{{ openclaw_doctor_rehearsal_secret_tool }}"
         - "{{ openclaw_doctor_rehearsal_state_root }}/current"
         - "{{ openclaw_doctor_rehearsal_workspace_root }}/current"
         - "{{ openclaw_doctor_rehearsal_config_root }}/current"
@@ -211,6 +215,7 @@
           - >-
             not item.stat.exists
             or item.item == openclaw_doctor_rehearsal_tool
+            or item.item == openclaw_doctor_rehearsal_secret_tool
             or item.stat.islnk | default(false)
         fail_msg: >-
           A Doctor rehearsal current selector is not a symlink. Refusing to
@@ -270,6 +275,8 @@
           {{ openclaw_doctor_rehearsal_config_root }}/generations/{{ openclaw_doctor_rehearsal_stamp }}
         openclaw_doctor_rehearsal_generation_config: >-
           {{ openclaw_doctor_rehearsal_config_root }}/generations/{{ openclaw_doctor_rehearsal_stamp }}/openclaw.json
+        openclaw_doctor_rehearsal_generation_secret: >-
+          {{ openclaw_doctor_rehearsal_config_root }}/generations/{{ openclaw_doctor_rehearsal_stamp }}/secrets.json
         openclaw_doctor_rehearsal_plugin_build_cache: >-
           {{ openclaw_doctor_rehearsal_config_root }}/generations/{{ openclaw_doctor_rehearsal_stamp }}/npm-cache
         openclaw_doctor_rehearsal_evidence_dir: >-
@@ -454,6 +461,7 @@
               'mem0Qdrant': 'retain-external-not-copied',
               'codexProviderHome': 'archive-not-runnable-not-copied',
               'credentials': 'replace-fresh-not-copied',
+              'gatewayAuth': 'replace-fresh-file-secretref-not-copied',
               'pluginCode': 'replace-supported-npm-provenance-root-locked',
               'legacyInstallRecords': 'retire-supported-cli',
               'disabledLegacyPlugins': 'retire',
@@ -540,6 +548,14 @@
         group: root
         mode: "0755"
 
+    - name: Deploy OpenClaw Doctor rehearsal secret bootstrapper
+      ansible.builtin.copy:
+        src: "{{ ansible_config_file | dirname }}/scripts/agents/openclaw-isolated-secrets.py"
+        dest: "{{ openclaw_doctor_rehearsal_secret_tool }}"
+        owner: root
+        group: root
+        mode: "0755"
+
     - name: Create OpenClaw Doctor generation directories
       ansible.builtin.file:
         path: "{{ item }}"
@@ -574,6 +590,43 @@
         owner: root
         group: "{{ openclaw_doctor_rehearsal_group }}"
         force: false
+
+    - name: Bootstrap fresh OpenClaw Doctor rehearsal Gateway secret
+      ansible.builtin.command:
+        argv:
+          - "{{ openclaw_doctor_rehearsal_secret_tool }}"
+          - --output
+          - "{{ openclaw_doctor_rehearsal_generation_secret }}"
+          - --output-parent-owner
+          - root
+          - --output-owner
+          - "{{ openclaw_doctor_rehearsal_user }}"
+          - --output-group
+          - "{{ openclaw_doctor_rehearsal_group }}"
+      register: openclaw_doctor_rehearsal_secret_bootstrap
+      changed_when: >-
+        (openclaw_doctor_rehearsal_secret_bootstrap.stdout | from_json).changed
+      no_log: true
+
+    - name: Inspect OpenClaw Doctor rehearsal Gateway secret boundary
+      ansible.builtin.stat:
+        path: "{{ openclaw_doctor_rehearsal_generation_secret }}"
+      register: openclaw_doctor_rehearsal_secret_stat
+      no_log: true
+
+    - name: Require fresh owner-only OpenClaw Doctor Gateway secret
+      ansible.builtin.assert:
+        that:
+          - openclaw_doctor_rehearsal_secret_stat.stat.exists
+          - openclaw_doctor_rehearsal_secret_stat.stat.isreg
+          - not openclaw_doctor_rehearsal_secret_stat.stat.islnk
+          - openclaw_doctor_rehearsal_secret_stat.stat.mode == '0400'
+          - openclaw_doctor_rehearsal_secret_stat.stat.pw_name == openclaw_doctor_rehearsal_user
+          - openclaw_doctor_rehearsal_secret_stat.stat.gr_name == openclaw_doctor_rehearsal_group
+        fail_msg: >-
+          The Doctor canary Gateway secret is not a fresh service-owned,
+          owner-readable-only regular file.
+      no_log: true
 
     - name: Read immutable managed plugin package metadata
       ansible.builtin.slurp:
@@ -846,6 +899,7 @@
               '--target-state-root', openclaw_doctor_rehearsal_generation_state,
               '--target-workspace-root', openclaw_doctor_rehearsal_generation_workspace,
               '--gateway-port', '19789',
+              '--gateway-secret-file', openclaw_doctor_rehearsal_generation_secret,
               '--suspend-managed-plugin-slots'
             ]
             + openclaw_doctor_rehearsal_plugin_arguments
@@ -866,6 +920,14 @@
         - "{{ openclaw_doctor_rehearsal_generation_state }}"
         - "{{ openclaw_doctor_rehearsal_generation_workspace }}"
         - "{{ openclaw_doctor_rehearsal_generation_config_dir }}"
+
+    - name: Restore owner-only OpenClaw Doctor Gateway secret permissions
+      ansible.builtin.file:
+        path: "{{ openclaw_doctor_rehearsal_generation_secret }}"
+        state: file
+        owner: "{{ openclaw_doctor_rehearsal_user }}"
+        group: "{{ openclaw_doctor_rehearsal_group }}"
+        mode: "0400"
 
     - name: Define networkless OpenClaw Doctor transient command
       ansible.builtin.set_fact:
@@ -1270,7 +1332,8 @@
               '--source-workspace-root', openclaw_doctor_rehearsal_source_state_dir + '/workspace',
               '--target-state-root', openclaw_doctor_rehearsal_generation_state,
               '--target-workspace-root', openclaw_doctor_rehearsal_generation_workspace,
-              '--gateway-port', '19789'
+              '--gateway-port', '19789',
+              '--gateway-secret-file', openclaw_doctor_rehearsal_generation_secret
             ]
             + openclaw_doctor_rehearsal_plugin_arguments
             + openclaw_doctor_rehearsal_retired_plugin_arguments
@@ -1834,24 +1897,33 @@
       failed_when: false
       no_log: true
 
-    - name: Preserve OpenClaw Doctor lint output
+    - name: Preserve OpenClaw Doctor lint JSON
       ansible.builtin.copy:
         dest: "{{ openclaw_doctor_rehearsal_evidence_dir }}/doctor-lint.json"
         owner: root
         group: root
         mode: "0600"
-        content: >-
-          {{ openclaw_doctor_rehearsal_lint.stdout }}
-          {{ openclaw_doctor_rehearsal_lint.stderr }}
+        content: "{{ openclaw_doctor_rehearsal_lint.stdout }}\n"
+      no_log: true
+
+    - name: Preserve OpenClaw Doctor lint diagnostics
+      ansible.builtin.copy:
+        dest: "{{ openclaw_doctor_rehearsal_evidence_dir }}/doctor-lint.stderr.txt"
+        owner: root
+        group: root
+        mode: "0600"
+        content: "{{ openclaw_doctor_rehearsal_lint.stderr }}\n"
       no_log: true
 
     - name: Require successful OpenClaw Doctor error-level lint
       ansible.builtin.assert:
         that:
           - openclaw_doctor_rehearsal_lint.rc == 0
+          - (openclaw_doctor_rehearsal_lint.stdout | from_json).ok | bool
+          - (openclaw_doctor_rehearsal_lint.stdout | from_json).findings | length == 0
         fail_msg: >-
-          Doctor error-level lint failed. Root-only JSON remains in the
-          rehearsal evidence directory.
+          Doctor error-level lint failed. Root-only JSON and diagnostic text
+          remain in the rehearsal evidence directory.
 
     - name: Freeze validated OpenClaw Doctor generation
       ansible.builtin.file:

@@ -6,13 +6,14 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from contextlib import closing
 from pathlib import Path
 
 SCRIPT = Path(__file__).with_name("health-summary.py")
 
 
 def create_database(path: Path) -> None:
-    with sqlite3.connect(path) as connection:
+    with closing(sqlite3.connect(path)) as connection:
         connection.executescript("""
             CREATE TABLE health_metrics (
                 metric_name TEXT NOT NULL,
@@ -43,6 +44,7 @@ def create_database(path: Path) -> None:
                 raw_json TEXT
             );
             """)
+        connection.commit()
         row = (
             "step_count",
             100,
@@ -56,6 +58,7 @@ def create_database(path: Path) -> None:
             "INSERT INTO health_metrics VALUES (?, ?, ?, ?, ?, ?, ?)",
             [row, row],
         )
+        connection.commit()
 
 
 class HealthSummaryTests(unittest.TestCase):

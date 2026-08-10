@@ -13,7 +13,7 @@ import tempfile
 from pathlib import Path
 from typing import Any, Iterable
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 MANIFEST_SCHEMA_VERSION = 2
 SECRET_KEYS = {
     "accesstoken",
@@ -193,6 +193,17 @@ def transform_config(args: argparse.Namespace) -> dict[str, Any]:
     source_workspace = str(Path(args.source_workspace_root).resolve())
     target_state = str(Path(args.target_state_root).resolve())
     target_workspace = str(Path(args.target_workspace_root).resolve())
+    gateway_secret_file = Path(args.gateway_secret_file)
+    if not gateway_secret_file.is_absolute():
+        raise RehearsalError("Gateway secret file must be an absolute path")
+    require_regular_file(gateway_secret_file)
+    gateway_secret_metadata = gateway_secret_file.stat()
+    if stat.S_IMODE(gateway_secret_metadata.st_mode) & 0o077:
+        raise RehearsalError("Gateway secret file must be owner-readable only")
+    if gateway_secret_file.resolve().parent != output.resolve().parent:
+        raise RehearsalError(
+            "Gateway secret file must remain inside the generated config directory"
+        )
     replacements = sorted(
         [(source_workspace, target_workspace), (source_state, target_state)],
         key=lambda pair: len(pair[0]),
@@ -212,6 +223,18 @@ def transform_config(args: argparse.Namespace) -> dict[str, Any]:
         transformed["env"] = {}
         removed_credential_paths.append("/env")
 
+    replaced_secret_provider_config = "secrets" in transformed
+    transformed["secrets"] = {
+        "providers": {
+            "doctor_rehearsal": {
+                "source": "file",
+                "path": str(gateway_secret_file.resolve()),
+                "mode": "json",
+            }
+        },
+        "defaults": {"file": "doctor_rehearsal"},
+    }
+
     gateway = transformed.setdefault("gateway", {})
     if not isinstance(gateway, dict):
         raise RehearsalError("gateway config must be an object")
@@ -219,7 +242,22 @@ def transform_config(args: argparse.Namespace) -> dict[str, Any]:
     gateway["bind"] = "loopback"
     gateway["port"] = args.gateway_port
     gateway.pop("remote", None)
-    gateway["auth"] = {"mode": "none"}
+    gateway["auth"] = {
+        "mode": "token",
+        "token": {
+            "source": "file",
+            "provider": "doctor_rehearsal",
+            "id": "/gateway/token",
+        },
+        "allowTailscale": False,
+        "rateLimit": {
+            "maxAttempts": 5,
+            "windowMs": 60000,
+            "lockoutMs": 300000,
+            "exemptLoopback": False,
+        },
+    }
+    gateway["tailscale"] = {"mode": "off", "resetOnExit": False}
 
     channels = transformed.pop("channels", None)
     disabled_channels: list[str] = []
@@ -378,6 +416,8 @@ def transform_config(args: argparse.Namespace) -> dict[str, Any]:
         "disabledMemorySearchPaths": sorted(disabled_memory_search_paths),
         "disabledRuntimePlugins": sorted(disabled_runtime_plugins),
         "managedPlugins": sorted(managed_plugins),
+        "gatewayAuth": "fresh-file-secretref",
+        "replacedSecretProviderConfig": replaced_secret_provider_config,
         "removedCredentialPaths": sorted(set(removed_credential_paths)),
         "retiredPlugins": sorted(retired_plugins),
         "rewrittenPaths": sorted(set(rewritten_paths)),
@@ -977,6 +1017,7 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     transform.add_argument("--gateway-port", type=int, default=19789)
+    transform.add_argument("--gateway-secret-file", required=True)
     transform.add_argument("--forbidden-literal", action="append", default=[])
     transform.set_defaults(handler=transform_config)
 

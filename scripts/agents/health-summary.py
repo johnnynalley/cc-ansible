@@ -11,6 +11,7 @@ import argparse
 import json
 import os
 import sqlite3
+from contextlib import closing
 from dataclasses import asdict, dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -180,7 +181,7 @@ def build(date: str, db_path: Path = DEFAULT_DB_PATH) -> dict:
             "error": "health database is unavailable",
         }
 
-    with connect(db_path) as con:
+    with closing(connect(db_path)) as con:
         cur = con.cursor()
         totals = {
             name: metric_total(cur, name, date)

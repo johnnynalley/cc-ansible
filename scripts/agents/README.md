@@ -39,12 +39,16 @@ dedicated `openclaw-health` system service passes cutover validation.
 - `test_openclaw_session_relocate.py` covers deterministic relocation,
   idempotency, byte preservation, unknown-field rejection, path-boundary
   enforcement, and target drift detection.
-- `openclaw-doctor-rehearsal.py` creates credential-free structured config
-  copies, replaces retained external plugin paths with reviewed immutable
-  artifacts, retires explicit legacy plugin ids, performs online SQLite backups,
-  scrubs only per-agent auth tables, and emits data-free manifests and database
-  summaries for Doctor idempotency checks. Stable-table summaries may exclude
-  an explicit reviewed volatile-table set; unknown exclusions fail closed.
+- `openclaw-doctor-rehearsal.py` creates service-credential-free structured
+  config copies, replaces source secret providers with a fresh canary Gateway
+  file `SecretRef`, replaces retained external plugin paths with reviewed
+  immutable artifacts, retires explicit legacy plugin ids, performs online
+  SQLite backups, scrubs only per-agent auth tables, and emits data-free
+  manifests and database summaries for Doctor idempotency checks. Stable-table
+  summaries may exclude an explicit reviewed volatile-table set; unknown
+  exclusions fail closed. Final Doctor lint JSON and human diagnostics are
+  stored separately, and promotion requires parseable JSON with no error
+  findings.
   State manifests reject symlinks except for OpenClaw-owned
   `plugin-skills/<name>` links whose real targets and regular `SKILL.md` files
   remain inside explicitly allowlisted immutable plugin roots.

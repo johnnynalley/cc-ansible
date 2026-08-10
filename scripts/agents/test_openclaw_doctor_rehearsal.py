@@ -22,6 +22,16 @@ SPEC.loader.exec_module(MODULE)
 
 
 class DoctorRehearsalTests(unittest.TestCase):
+    @staticmethod
+    def gateway_secret_file(root: Path) -> str:
+        secret_file = root / "secrets.json"
+        secret_file.write_text(
+            '{"gateway":{"token":"unit-test-token-with-more-than-32-bytes"}}\n',
+            encoding="utf-8",
+        )
+        secret_file.chmod(0o400)
+        return str(secret_file)
+
     def test_playbook_builds_agent_paths_without_capture_replacements(self) -> None:
         playbook = PLAYBOOK_PATH.read_text(encoding="utf-8")
         snapshot_tasks = SNAPSHOT_TASK_PATH.read_text(encoding="utf-8")
@@ -55,6 +65,31 @@ class DoctorRehearsalTests(unittest.TestCase):
         self.assertNotIn("'--link'", playbook)
         self.assertNotIn("--install-records-source", playbook)
         self.assertIn("--suspend-managed-plugin-slots", playbook)
+        self.assertIn("--gateway-secret-file", playbook)
+        self.assertIn("fresh OpenClaw Doctor rehearsal Gateway secret", playbook)
+        self.assertIn("Preserve OpenClaw Doctor lint JSON", playbook)
+        self.assertIn("Preserve OpenClaw Doctor lint diagnostics", playbook)
+        self.assertIn("doctor-lint.stderr.txt", playbook)
+        self.assertNotIn(
+            "{{ openclaw_doctor_rehearsal_lint.stdout }}\n"
+            "          {{ openclaw_doctor_rehearsal_lint.stderr }}",
+            playbook,
+        )
+        self.assertIn(
+            "(openclaw_doctor_rehearsal_lint.stdout | from_json).ok | bool",
+            playbook,
+        )
+        self.assertIn(
+            "(openclaw_doctor_rehearsal_lint.stdout | from_json).findings | length == 0",
+            playbook,
+        )
+        secret_restore = playbook.index(
+            "- name: Restore owner-only OpenClaw Doctor Gateway secret permissions"
+        )
+        final_config = playbook.index(
+            "- name: Restore sanitized retained OpenClaw plugin configuration"
+        )
+        self.assertLess(secret_restore, final_config)
         self.assertIn("ownershipRecordSource': 'npm'", playbook)
         self.assertIn("openKeyedStore is only available for trusted plugins", playbook)
         legacy_inspect = playbook.index(
@@ -65,9 +100,6 @@ class DoctorRehearsalTests(unittest.TestCase):
         )
         supported_install = playbook.index(
             "- name: Install exact managed plugins into copied modern state"
-        )
-        final_config = playbook.index(
-            "- name: Restore sanitized retained OpenClaw plugin configuration"
         )
         plugin_freeze = playbook.index(
             "- name: Freeze npm-managed plugin code before Doctor"
@@ -105,6 +137,14 @@ class DoctorRehearsalTests(unittest.TestCase):
                 json.dumps(
                     {
                         "env": {"OPENROUTER_API_KEY": "forbidden-env-secret"},
+                        "secrets": {
+                            "providers": {
+                                "legacy": {
+                                    "source": "exec",
+                                    "command": "/home/johnny/legacy-secret-provider",
+                                }
+                            }
+                        },
                         "gateway": {
                             "mode": "local",
                             "bind": "tailnet",
@@ -162,6 +202,7 @@ class DoctorRehearsalTests(unittest.TestCase):
                     disable_memory_search=True,
                     disable_plugin_runtime=["discord"],
                     gateway_port=19789,
+                    gateway_secret_file=self.gateway_secret_file(root),
                     forbidden_literal=[
                         "forbidden-env-secret",
                         "forbidden-channel-secret",
@@ -175,7 +216,21 @@ class DoctorRehearsalTests(unittest.TestCase):
             self.assertEqual(transformed["env"], {})
             self.assertEqual(transformed["gateway"]["bind"], "loopback")
             self.assertEqual(transformed["gateway"]["port"], 19789)
-            self.assertEqual(transformed["gateway"]["auth"], {"mode": "none"})
+            self.assertEqual(transformed["gateway"]["auth"]["mode"], "token")
+            self.assertEqual(
+                transformed["gateway"]["auth"]["token"],
+                {
+                    "source": "file",
+                    "provider": "doctor_rehearsal",
+                    "id": "/gateway/token",
+                },
+            )
+            self.assertFalse(transformed["gateway"]["auth"]["allowTailscale"])
+            self.assertEqual(
+                transformed["secrets"]["providers"]["doctor_rehearsal"]["path"],
+                str(root / "secrets.json"),
+            )
+            self.assertNotIn("unit-test-token", serialized)
             self.assertNotIn("channels", transformed)
             self.assertEqual(
                 transformed["agents"]["list"][0]["workspace"],
@@ -192,6 +247,8 @@ class DoctorRehearsalTests(unittest.TestCase):
             )
             self.assertNotIn("forbidden", serialized)
             self.assertEqual(result["status"], "ok")
+            self.assertEqual(result["gatewayAuth"], "fresh-file-secretref")
+            self.assertTrue(result["replacedSecretProviderConfig"])
             self.assertEqual(result["managedPlugins"], ["codex", "discord"])
             self.assertEqual(result["retiredPlugins"], ["nextcloud-talk"])
             self.assertEqual(result["disabledRuntimePlugins"], ["discord"])
@@ -244,6 +301,7 @@ class DoctorRehearsalTests(unittest.TestCase):
                     retire_plugin=[],
                     suspend_managed_plugin_slots=True,
                     gateway_port=19789,
+                    gateway_secret_file=self.gateway_secret_file(root),
                     forbidden_literal=[],
                 )
             )
@@ -266,6 +324,7 @@ class DoctorRehearsalTests(unittest.TestCase):
                     retire_plugin=[],
                     suspend_managed_plugin_slots=False,
                     gateway_port=19789,
+                    gateway_secret_file=str(root / "secrets.json"),
                     forbidden_literal=[],
                 )
             )
@@ -306,6 +365,7 @@ class DoctorRehearsalTests(unittest.TestCase):
                         managed_plugin=["codex"],
                         retire_plugin=[],
                         gateway_port=19789,
+                        gateway_secret_file=self.gateway_secret_file(root),
                         forbidden_literal=[],
                     )
                 )
@@ -347,6 +407,7 @@ class DoctorRehearsalTests(unittest.TestCase):
                         managed_plugin=["codex"],
                         retire_plugin=["retired-memory"],
                         gateway_port=19789,
+                        gateway_secret_file=self.gateway_secret_file(root),
                         forbidden_literal=[],
                     )
                 )

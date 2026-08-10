@@ -138,6 +138,40 @@ OpenClaw directly into the copied target state, requires integrity-bearing
 SQLite ownership, restores the sanitized source config and slots, and only then
 freezes plugin code before Doctor. Production remained active and unchanged.
 
+Generation `20260810T121919Z` completed the full native-plugin transaction,
+both Doctor passes, stable-database comparisons, and zero-diff filesystem
+idempotency. It then failed closed at the independent error-level lint because
+the sanitizer had explicitly set `gateway.auth.mode=none`. Doctor correctly
+classified the copied Gateway as unauthenticated; loopback and a private network
+namespace do not replace application authentication. The rehearsal now replaces
+all source secret-provider configuration with one fresh per-generation Gateway
+token generated into an owner-only JSON file and referenced through OpenClaw's
+current file `SecretRef` contract. No production token, provider credential, or
+channel credential is copied, and the error-level lint remains mandatory.
+
+Generation `20260810T124551Z` then passed both Doctor runs, stable-database and
+filesystem idempotency, plugin provenance and trust checks, and error-level lint
+with zero findings. It exposed an evidence-format defect after promotion:
+machine-readable lint stdout and human diagnostic stderr had been concatenated
+into a file named `doctor-lint.json`. The rehearsal now stores them separately
+and requires parseable lint JSON with `ok=true` and no findings before
+promotion. The diagnostics were nonfatal warnings caused by intentionally
+disabled credential-dependent memory runtime in this credential-free stage;
+they remain visible without corrupting machine evidence.
+
+Generation `20260810T130113Z` passed the corrected gate end to end and supersedes
+the prior rehearsal selector. Its lint artifact parses independently and reports
+51 checks, zero skipped, and zero findings; diagnostics remain in the separate
+stderr artifact. Both Doctor passes, stable SQLite summaries, zero-diff
+filesystem manifests, exact four-plugin npm provenance, integrity, expected
+trust classification, root-owned read-only freeze, and selector promotion
+passed. Production retained the same service PID and activation timestamp.
+
+The live-source inspection also confirmed that legacy `lcm.db` is mode `0644`.
+That source permission is not copied into the modern generation, but the final
+cutover must protect or archive the legacy file before broader user access can
+expose retained conversation history.
+
 ## Modernization Contract
 
 Behavior and data parity do not require legacy mechanism parity. Every
@@ -399,8 +433,11 @@ The run is a modernization gate rather than a legacy clone:
    auth rows while retaining memory and index state.
 3. Transform a copied config to dedicated roots, remove credential-bearing
    keys and all channel configuration, disable updates, and reject surviving
-   production path references. Preserve configured memory and Mem0 state but
-   disable their credential/network-dependent runtime only in this rehearsal.
+   production path references. Replace source secret providers and Gateway auth
+   with one fresh owner-only per-generation token referenced through a file
+   `SecretRef`; this authenticates the canary without copying any production
+   credential. Preserve configured memory and Mem0 state but disable their
+   credential/network-dependent runtime only in this rehearsal.
 4. Temporarily suspend only slots owned by retained managed plugins, validate
    the copied config, require the exact eight classified legacy install records,
    and retire each through `plugins uninstall --keep-files --force`. Require an
