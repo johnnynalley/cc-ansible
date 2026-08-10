@@ -87,6 +87,7 @@ Owner area: Docker Compose stacks and container maintenance.
 | `playbooks/docker/docker-stacks.yml` | `docker_hosts` | Deploy Docker Compose stacks. | docker_stacks, docker_daemon_config, docker_auto_update_*, gluetun_*, qbit_*; templates/docker, templates/gluetun; scripts/docker. | `ansible-playbook playbooks/docker/docker-stacks.yml --syntax-check` |
 | `playbooks/docker/gluetun-watchdog.yml` | `gluetun_hosts:media-vm` | Configure Gluetun VPN watchdog. | docker_stacks, docker_auto_update_*, gluetun_*, qbit_*; templates/docker, templates/gluetun; scripts/docker. | `ansible-playbook playbooks/docker/gluetun-watchdog.yml --syntax-check` |
 | `playbooks/docker/docker-auto-update.yml` | `docker_hosts` | Configure Docker container auto-updates. | docker_stacks, docker_daemon_config, docker_auto_update_*, gluetun_*, qbit_*; templates/docker, templates/gluetun; scripts/docker. | `ansible-playbook playbooks/docker/docker-auto-update.yml --syntax-check` |
+| `playbooks/docker/openclaw-docker-report.yml` | `docker_hosts` | Publish a strict redacted Docker inventory through a forced-command account; disabled by default. | openclaw_docker_report_*; scripts/docker/openclaw-docker-report*. | `ansible-playbook playbooks/docker/openclaw-docker-report.yml --syntax-check` |
 
 ### media
 

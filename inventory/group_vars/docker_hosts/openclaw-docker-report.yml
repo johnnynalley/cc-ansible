@@ -1,0 +1,18 @@
+# Redacted Docker inventory for the future dedicated OpenClaw runtime.
+# Keep disabled until that identity has a dedicated key and the live rollout is
+# explicitly approved. Docker socket access remains confined to the root-owned
+# reporter; the SSH account can only read the generated report.
+
+openclaw_docker_report_enabled: false
+openclaw_docker_report_user: openclaw-report
+openclaw_docker_report_group: openclaw-report
+openclaw_docker_report_home: /var/lib/openclaw-docker-report
+openclaw_docker_report_socket: /var/run/docker.sock
+openclaw_docker_report_on_boot_sec: 2m
+openclaw_docker_report_interval: 5m
+openclaw_docker_report_randomized_delay: 30s
+
+# Populate only with a dedicated OpenClaw report-reader key and the Tailscale
+# source CIDR of the dedicated runtime. Do not reuse a human or Ansible key.
+openclaw_docker_report_authorized_keys: []
+openclaw_docker_report_source_cidrs: []

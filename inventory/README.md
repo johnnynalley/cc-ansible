@@ -38,7 +38,7 @@ settings into a broad catch-all file when a concern-specific file exists.
 
 | Concern | Inventory owner | Related playbooks | Related sources |
 | --- | --- | --- | --- |
-| Docker stacks | `host_vars/<host>/docker.yml`, `group_vars/docker_hosts/` | `playbooks/docker/docker-stacks.yml`, `playbooks/docker/docker-auto-update.yml` | `templates/docker/`, `scripts/docker/` |
+| Docker stacks and redacted agent inventory | `host_vars/<host>/docker.yml`, `group_vars/docker_hosts/` | `playbooks/docker/docker-stacks.yml`, `playbooks/docker/docker-auto-update.yml`, `playbooks/docker/openclaw-docker-report.yml` | `templates/docker/`, `scripts/docker/` |
 | Cloudflare DDNS | `host_vars/<host>/cloudflare-ddns.yml`, `cloudflare_ddns_hosts` | `playbooks/network/cloudflare-ddns.yml` | `templates/network/` |
 | Tailscale peer relay endpoint sync | `host_vars/<host>/tailscale.yml`, `tailscale_peer_relay_endpoint_hosts` | `playbooks/network/tailscale-peer-relay-endpoint.yml` | `templates/network/` |
 | Backups | `group_vars/backup_clients/`, `host_vars/<host>/backup.yml` | `playbooks/backup-sync/restic.yml`, `playbooks/backup-sync/local-restic.yml` | `templates/storage/` |

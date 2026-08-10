@@ -1,0 +1,15 @@
+#!/bin/sh
+set -eu
+
+if [ -n "${SSH_ORIGINAL_COMMAND:-}" ]; then
+    echo "interactive commands are not allowed" >&2
+    exit 64
+fi
+
+report=/var/lib/openclaw-docker-report/data/report.json
+if ! /usr/bin/find "$report" -type f -mmin -15 -print -quit | /usr/bin/grep -q .; then
+    echo "Docker inventory report is unavailable or stale" >&2
+    exit 75
+fi
+
+exec /bin/cat "$report"

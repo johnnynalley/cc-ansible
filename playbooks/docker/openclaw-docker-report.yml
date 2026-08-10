@@ -1,0 +1,239 @@
+# Purpose: Publish a redacted Docker inventory to a forced-command SSH account.
+# Hosts: docker_hosts.
+# Key vars: openclaw_docker_report_*.
+# Templates: none.
+# Scripts: scripts/docker/openclaw-docker-report.py, scripts/docker/openclaw-docker-report-cat.
+# Validation: ansible-playbook playbooks/docker/openclaw-docker-report.yml --syntax-check.
+
+- name: Configure OpenClaw Docker inventory reporter
+  hosts: docker_hosts
+  become: true
+  gather_facts: false
+
+  tasks:
+    - name: Check for an existing OpenClaw Docker report timer
+      ansible.builtin.stat:
+        path: /etc/systemd/system/openclaw-docker-report.timer
+      register: openclaw_docker_report_timer_unit
+      check_mode: false
+
+    - name: Stop and disable OpenClaw Docker report units when disabled
+      ansible.builtin.systemd:
+        name: "{{ item }}"
+        enabled: false
+        state: stopped
+        daemon_reload: true
+      loop:
+        - openclaw-docker-report.timer
+        - openclaw-docker-report.service
+      when:
+        - not (openclaw_docker_report_enabled | default(false) | bool)
+        - openclaw_docker_report_timer_unit.stat.exists
+      failed_when: false
+
+    - name: Revoke OpenClaw Docker report SSH access when disabled
+      ansible.builtin.file:
+        path: "{{ openclaw_docker_report_home | default('/var/lib/openclaw-docker-report') }}/.ssh/authorized_keys"
+        state: absent
+      when: not (openclaw_docker_report_enabled | default(false) | bool)
+
+    - name: Skip hosts without OpenClaw Docker reporting enabled
+      ansible.builtin.meta: end_host
+      when: not (openclaw_docker_report_enabled | default(false) | bool)
+
+    - name: Require a dedicated key and source restriction
+      ansible.builtin.assert:
+        that:
+          - openclaw_docker_report_authorized_keys | default([]) | length > 0
+          - openclaw_docker_report_source_cidrs | default([]) | length > 0
+        fail_msg: >-
+          Enabling OpenClaw Docker reporting requires at least one dedicated
+          Ed25519 public key and one allowed source CIDR.
+
+    - name: Validate dedicated OpenClaw Docker report keys
+      ansible.builtin.assert:
+        that:
+          - item is match('^ssh-ed25519 [A-Za-z0-9+/]+={0,3}( [^\r\n]+)?$')
+        fail_msg: "Only single-line Ed25519 public keys are accepted."
+      loop: "{{ openclaw_docker_report_authorized_keys }}"
+      loop_control:
+        label: "dedicated Ed25519 key"
+
+    - name: Validate OpenClaw Docker report source CIDRs
+      ansible.builtin.assert:
+        that:
+          - item is match('^[0-9A-Fa-f:.]+/[0-9]{1,3}$')
+        fail_msg: "Source restrictions must be literal IPv4 or IPv6 CIDRs."
+      loop: "{{ openclaw_docker_report_source_cidrs }}"
+
+    - name: Create OpenClaw Docker report group
+      ansible.builtin.group:
+        name: "{{ openclaw_docker_report_group | default('openclaw-report') }}"
+        system: true
+
+    - name: Create OpenClaw Docker report account
+      ansible.builtin.user:
+        name: "{{ openclaw_docker_report_user | default('openclaw-report') }}"
+        group: "{{ openclaw_docker_report_group | default('openclaw-report') }}"
+        groups: ""
+        append: false
+        shell: /bin/sh
+        system: true
+        create_home: false
+        home: "{{ openclaw_docker_report_home | default('/var/lib/openclaw-docker-report') }}"
+        comment: "Forced-command reader for redacted Docker inventory"
+        password: "{{ lookup('pipe', 'openssl rand -base64 48') | password_hash('sha512') }}"
+        update_password: on_create
+
+    - name: Create OpenClaw Docker report directories
+      ansible.builtin.file:
+        path: "{{ item.path }}"
+        state: directory
+        owner: "{{ item.owner }}"
+        group: "{{ item.group }}"
+        mode: "{{ item.mode }}"
+      loop:
+        - path: "{{ openclaw_docker_report_home | default('/var/lib/openclaw-docker-report') }}"
+          owner: root
+          group: root
+          mode: "0755"
+        - path: "{{ openclaw_docker_report_home | default('/var/lib/openclaw-docker-report') }}/data"
+          owner: root
+          group: "{{ openclaw_docker_report_group | default('openclaw-report') }}"
+          mode: "0750"
+        - path: "{{ openclaw_docker_report_home | default('/var/lib/openclaw-docker-report') }}/.ssh"
+          owner: root
+          group: root
+          mode: "0755"
+
+    - name: Deploy redacted OpenClaw Docker reporter
+      ansible.builtin.copy:
+        src: "{{ ansible_config_file | dirname }}/scripts/docker/openclaw-docker-report.py"
+        dest: /usr/local/sbin/openclaw-docker-report
+        owner: root
+        group: root
+        mode: "0755"
+
+    - name: Deploy fixed OpenClaw Docker report reader
+      ansible.builtin.copy:
+        src: "{{ ansible_config_file | dirname }}/scripts/docker/openclaw-docker-report-cat"
+        dest: /usr/local/bin/openclaw-docker-report-cat
+        owner: root
+        group: root
+        mode: "0755"
+
+    - name: Install root-owned forced-command authorized keys
+      ansible.builtin.copy:
+        dest: "{{ openclaw_docker_report_home | default('/var/lib/openclaw-docker-report') }}/.ssh/authorized_keys"
+        owner: root
+        group: root
+        mode: "0644"
+        content: |
+          {% for key in openclaw_docker_report_authorized_keys %}
+          restrict,command="/usr/local/bin/openclaw-docker-report-cat",from="{{ openclaw_docker_report_source_cidrs | join(',') }}" {{ key }}
+          {% endfor %}
+
+    - name: Create hardened OpenClaw Docker report service
+      ansible.builtin.copy:
+        dest: /etc/systemd/system/openclaw-docker-report.service
+        owner: root
+        group: root
+        mode: "0644"
+        content: |
+          [Unit]
+          Description=Generate redacted Docker inventory for OpenClaw
+          After=docker.service
+          Requires=docker.service
+
+          [Service]
+          Type=oneshot
+          User=root
+          Group=root
+          UMask=0027
+          ExecStart=/usr/local/sbin/openclaw-docker-report --socket {{ openclaw_docker_report_socket | default('/var/run/docker.sock') }} --output {{ openclaw_docker_report_home | default('/var/lib/openclaw-docker-report') }}/data/report.json --group {{ openclaw_docker_report_group | default('openclaw-report') }}
+          TimeoutStartSec=60
+          Nice=10
+          IOSchedulingClass=idle
+          NoNewPrivileges=yes
+          CapabilityBoundingSet=
+          AmbientCapabilities=
+          PrivateDevices=yes
+          PrivateNetwork=yes
+          PrivateTmp=yes
+          ProtectClock=yes
+          ProtectControlGroups=yes
+          ProtectHome=yes
+          ProtectHostname=yes
+          ProtectKernelLogs=yes
+          ProtectKernelModules=yes
+          ProtectKernelTunables=yes
+          ProtectProc=invisible
+          ProtectSystem=strict
+          ProcSubset=pid
+          ReadWritePaths={{ openclaw_docker_report_home | default('/var/lib/openclaw-docker-report') }}/data
+          RemoveIPC=yes
+          RestrictAddressFamilies=AF_UNIX
+          RestrictNamespaces=yes
+          RestrictRealtime=yes
+          RestrictSUIDSGID=yes
+          LockPersonality=yes
+          MemoryDenyWriteExecute=yes
+          SystemCallArchitectures=native
+      notify: Reload systemd
+
+    - name: Create OpenClaw Docker report timer
+      ansible.builtin.copy:
+        dest: /etc/systemd/system/openclaw-docker-report.timer
+        owner: root
+        group: root
+        mode: "0644"
+        content: |
+          [Unit]
+          Description=Refresh redacted Docker inventory for OpenClaw
+
+          [Timer]
+          OnBootSec={{ openclaw_docker_report_on_boot_sec | default('2m') }}
+          OnUnitActiveSec={{ openclaw_docker_report_interval | default('5m') }}
+          RandomizedDelaySec={{ openclaw_docker_report_randomized_delay | default('30s') }}
+          AccuracySec=15s
+
+          [Install]
+          WantedBy=timers.target
+      notify: Reload systemd
+
+    - name: Generate and validate the initial redacted report
+      when: not ansible_check_mode
+      block:
+        - name: Run OpenClaw Docker reporter once
+          ansible.builtin.systemd:
+            name: openclaw-docker-report.service
+            state: started
+            daemon_reload: true
+
+        - name: Inspect generated OpenClaw Docker report
+          ansible.builtin.stat:
+            path: "{{ openclaw_docker_report_home | default('/var/lib/openclaw-docker-report') }}/data/report.json"
+          register: openclaw_docker_report_file
+
+        - name: Verify generated OpenClaw Docker report ownership
+          ansible.builtin.assert:
+            that:
+              - openclaw_docker_report_file.stat.exists
+              - openclaw_docker_report_file.stat.isreg
+              - openclaw_docker_report_file.stat.mode == '0640'
+              - openclaw_docker_report_file.stat.pw_name == 'root'
+              - openclaw_docker_report_file.stat.gr_name == (openclaw_docker_report_group | default('openclaw-report'))
+            fail_msg: "The redacted Docker report was not generated with the required ownership boundary."
+
+    - name: Enable and start OpenClaw Docker report timer
+      ansible.builtin.systemd:
+        name: openclaw-docker-report.timer
+        enabled: true
+        state: started
+        daemon_reload: true
+      when: not ansible_check_mode
+
+  handlers:
+    - name: Reload systemd
+      ansible.builtin.systemd:
+        daemon_reload: true

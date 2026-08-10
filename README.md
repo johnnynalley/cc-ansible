@@ -42,6 +42,7 @@ Source-of-truth docs currently include:
 - [docs/gaming-benchmark.md](docs/gaming-benchmark.md)
 - [docs/immich-media-inbox.md](docs/immich-media-inbox.md)
 - [docs/media-release-policy.md](docs/media-release-policy.md)
+- [docs/openclaw-docker-access.md](docs/openclaw-docker-access.md)
 - [docs/openclaw-heartbeats.md](docs/openclaw-heartbeats.md)
 - [docs/plex-appliance-operations.md](docs/plex-appliance-operations.md)
 - [docs/streaming-runbook.md](docs/streaming-runbook.md)
@@ -277,6 +278,7 @@ Packages are merged from multiple sources (all applicable variables combined):
 | `stream-relay.yml` | media-vm | OBS SRT ingest, Quadro NVENC encode, reliable local fanout, platform RTMP workers, and VOD delivery |
 | `plex-server-health.yml` | media-vm, `nas_server` | Plex identity, guest VirtioFS, host virtiofsd, VM 100, and scrub-window sentinel |
 | `docker-auto-update.yml` | `docker_hosts` | Auto-update selected containers every 6h with major version guard |
+| `openclaw-docker-report.yml` | `docker_hosts` | Publish a redacted result-only Docker inventory for a future dedicated OpenClaw identity (disabled by default) |
 | `virtiofs.yml` | `proxmox_nodes`, `vms` | Configure VirtioFS shares between Proxmox hosts and VMs |
 | `proxmox-vm-hardware.yml` | `proxmox_nodes` | Apply durable Proxmox VM hardware settings such as CPU model overrides |
 | `proxmox-boot-order.yml` | `proxmox_nodes` | Configure Proxmox boot ordering guardrails so `pve-cluster` waits for local filesystems and guest autostart waits for `pve-cluster` |
@@ -385,6 +387,14 @@ Check status: `journalctl -t gluetun-watchdog -f`
 Selected containers are auto-updated every 6 hours via systemd timer (`docker-auto-update.yml`). Opt-in per stack with `auto_update: true` or per service with `auto_update_services: [name]` in `host_vars/<hostname>/docker.yml`. Currently auto-updated: Caddy, Seerr, and Loki-Grafana (docker-vm), Gluetun and LazyLibrarian (media-vm), Diun (all 3 VMs). Pulls/builds new images, uses `docker-stack-diff` to detect changes, only recreates if images changed. Gluetun uses `--force-recreate` with qBittorrent and can require healthy bind paths through `auto_update_required_paths` before compose recreates. **Major version guard**: blocks major version bumps (e.g., `7.x` → `8.x`) and sends a Time Sensitive notification instead of auto-updating. Per-stack opt-out with `major_guard: false`. Config in `group_vars/docker_hosts/auto-update.yml`.
 
 Check status: `journalctl -u docker-auto-update`, `systemctl list-timers docker-auto-update*`
+
+## OpenClaw Docker Reporting
+
+The result-only Docker reporter is implemented but disabled pending the
+dedicated OpenClaw service-account migration and an approved canary rollout. It
+does not grant Astra Docker socket, Docker group, sudo, or arbitrary SSH access.
+See [docs/openclaw-docker-access.md](docs/openclaw-docker-access.md) for the
+schema, threat model, rollout gates, and separate update-broker design.
 
 ## ZFS Configuration
 
@@ -1034,6 +1044,7 @@ OpenClaw AI agent platform — personal homelab admin assistant via web UI and D
 - **Playbook**: `ansible-playbook playbooks/agents/openclaw.yml` (opt-in via `openclaw_enabled`)
 - **Mem0 memory**: `@mem0/openclaw-mem0` plugin with Qdrant (localhost:6333), Gemini embeddings, and the configured OpenAI-compatible LLM for fact extraction. Auto-capture + auto-recall across sessions.
 - **dbc ops access**: Narrow host-specific wrappers, including result-only Immich Media Inbox access on docker-vm; no image, raw OCR, credential, SQLite, or general Docker access. Existing media-stack/Caddy operational paths remain separately scoped.
+- **Docker reporting**: A strict result-only reporter is implemented but remains disabled until the dedicated runtime identity and key are deployed. See `docs/openclaw-docker-access.md`.
 
 ```bash
 # Check gateway status (on the current OpenClaw host)

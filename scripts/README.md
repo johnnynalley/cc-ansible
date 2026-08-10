@@ -16,7 +16,7 @@ audits, controlled repairs, and deployment support.
 
 ## Directories
 
-- `docker/`: Docker stack update helpers.
+- `docker/`: Docker stack update helpers and redacted inventory reporting.
 - `gaming/`: Capture and frame-time analysis helpers.
 - `media-inbox/`: Immich OCR/Smart Search screenshot review service, credential bootstrap/export helpers, and tests.
 - `media-maintenance/`: Overnight maintenance coordinators.
