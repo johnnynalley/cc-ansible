@@ -91,15 +91,33 @@ pair is recorded as an immutable deployment artifact for rollback. Other
 agents, integrations, schedules, stores, and workspace artifacts remain subject
 to the same classification before production cutover.
 
-The current stable runtime is database-first. SQLite is canonical for active
-sessions, transcripts, cron, tasks, plugin state, pairing, and other runtime
-records; legacy JSON, JSONL, and sidecar stores are migration inputs for Doctor,
-not active target stores. Migration therefore combines an OpenClaw
-`backup create --verify` archive for SQLite-native snapshots with a separate
-stopped-state archive that preserves any history the product backup
-intentionally classifies as volatile. Doctor imports supported legacy sources
-into current stores and records migration runs; it does not justify copying old
-runtime files back into active discovery paths.
+Stable `2026.7.1-2` is a hybrid runtime, not a completely database-first one.
+The shared SQLite database is authoritative for cron, tasks, plugin state,
+pairing, audit, and other control-plane records. Per-agent SQLite databases
+currently hold auth and memory/index state, but the shipped schema has no
+`sessions`, `session_entries`, or `transcript_events` tables. Active session
+metadata still lives in per-agent `sessions.json`, and transcripts and
+trajectories still live in JSONL files. The bundled
+`refactor/database-first.md` describes an intended refactor state that is ahead
+of the installed implementation and is not a migration contract by itself.
+
+Doctor remains the supported owner for the legacy moves and repairs it actually
+implements, including old root-level session layouts and cron JSON imports. Its
+`migration_runs` and `migration_sources` ledger is not universal in this
+release: the inspected production database has zero rows in both tables even
+though all five active agents have valid, live file-backed session stores. The
+target migration must therefore preserve each current store according to its
+shipped owner, rewrite only deterministic state-root path references on a
+protected copy, and reconcile file counts, hashes, metadata rows, sampled
+history reads, and database rows independently.
+
+Migration combines an OpenClaw `backup create --verify` archive for supported
+SQLite-native snapshots with a separate stopped-state archive that preserves
+all file-backed history and any artifacts the product backup intentionally
+classifies as volatile. Run Doctor only against a protected writable rehearsal
+copy with channels disabled because successful repairs can move, rewrite,
+archive, or remove their source files. Keep production sources unchanged until
+the rehearsal and stopped-state archive both pass.
 
 In stable `2026.7.1-2`, `openclaw backup create --dry-run` is not a strictly
 read-only probe. CLI initialization opens the state database, applies
@@ -294,7 +312,10 @@ parallel Gateway canary proves all of the following:
 - Discord routes have explicit sender authorization;
 - idle Rigel heartbeats remain silent without output-token filters;
 - aggregate Health reports remain readable while the raw database and token do
-  not.
+  not;
+- a copy-only Doctor rehearsal validates each migration it actually owns, while
+  the separately manifested per-agent file-backed session stores relocate with
+  count/hash parity and readable sampled history.
 
 The current `dbc` account is not a replacement for this boundary. Its arbitrary
 Ansible dry-run arguments, writable Compose/Caddy inputs, and broad sudo rules
