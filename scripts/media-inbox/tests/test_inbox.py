@@ -195,7 +195,7 @@ class InboxTests(unittest.TestCase):
         payload = self.inbox().status()
         self.assertFalse(payload["healthy"])
         self.assertEqual(payload["pipeline_version"], 0)
-        self.assertEqual(payload["expected_pipeline_version"], 2)
+        self.assertEqual(payload["expected_pipeline_version"], 3)
 
 
 if __name__ == "__main__":

@@ -19,6 +19,8 @@ class ClientTests(unittest.TestCase):
         ) as request:
             client.search("The Nice Guys")
         path = request.call_args.args[1]
+        self.assertIn("query=The%20Nice%20Guys", path)
+        self.assertNotIn("+", path)
         query = urllib.parse.parse_qs(urllib.parse.urlsplit(path).query)
         self.assertEqual(query["language"], ["en-US"])
         self.assertEqual(query["query"], ["The Nice Guys"])

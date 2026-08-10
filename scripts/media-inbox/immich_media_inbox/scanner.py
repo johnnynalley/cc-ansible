@@ -30,7 +30,7 @@ SMART_SEARCH_PROMPTS = (
     "a cinematic scene with subtitles",
     "a vertical video clip from a movie or television show",
 )
-PIPELINE_VERSION = 2
+PIPELINE_VERSION = 3
 
 
 def _parse_time(value: str | None) -> datetime | None:

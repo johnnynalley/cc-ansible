@@ -167,8 +167,10 @@ class SeerrClient:
     def search(self, query: str, *, page: int = 1) -> list[dict[str, Any]]:
         params = urllib.parse.urlencode(
             # Seerr forwards this locale to TMDb, which requires a regioned
-            # BCP-47 value. Bare "en" returns HTTP 400 for ordinary searches.
-            {"query": query, "page": page, "language": "en-US"}
+            # BCP-47 value. Its request validator also rejects form-style "+"
+            # space encoding, so use percent encoding for the whole query.
+            {"query": query, "page": page, "language": "en-US"},
+            quote_via=urllib.parse.quote,
         )
         response = self.http.request("GET", f"/search?{params}")
         return list((response or {}).get("results") or [])
