@@ -363,6 +363,7 @@
             enabled: false
             state: started
             daemon_reload: true
+          when: not ansible_check_mode
 
         - name: Wait for isolated Gateway canary listener
           ansible.builtin.wait_for:
@@ -370,6 +371,7 @@
             port: "{{ openclaw_isolated_gateway_port }}"
             state: started
             timeout: 90
+          when: not ansible_check_mode
 
         - name: Inspect isolated Gateway service security properties
           ansible.builtin.command:
@@ -387,6 +389,7 @@
               - --property=MainPID
           register: openclaw_isolated_gateway_service_properties
           changed_when: false
+          when: not ansible_check_mode
 
         - name: Require isolated Gateway service boundary
           ansible.builtin.assert:
@@ -399,6 +402,7 @@
               - "'ProtectHome=yes' in openclaw_isolated_gateway_service_properties.stdout_lines"
               - "'PrivateDevices=yes' in openclaw_isolated_gateway_service_properties.stdout_lines"
             fail_msg: "The running canary does not match the required systemd boundary."
+          when: not ansible_check_mode
 
         - name: Inspect isolated Gateway account groups
           ansible.builtin.command:
@@ -409,6 +413,7 @@
               - "{{ openclaw_isolated_gateway_user }}"
           register: openclaw_isolated_gateway_account_groups
           changed_when: false
+          when: not ansible_check_mode
 
         - name: Reject supplementary isolated Gateway privileges
           ansible.builtin.assert:
@@ -417,6 +422,7 @@
             fail_msg: >-
               The isolated Gateway account has an unexpected supplementary
               group. It must not inherit sudo, Docker, journal, or human access.
+          when: not ansible_check_mode
 
         - name: Probe isolated Gateway health without exposing its token
           ansible.builtin.command:
@@ -441,6 +447,7 @@
           register: openclaw_isolated_gateway_health
           changed_when: false
           no_log: true
+          when: not ansible_check_mode
 
         - name: Run isolated Gateway model canary
           ansible.builtin.command:
@@ -472,6 +479,7 @@
           register: openclaw_isolated_gateway_model_probe
           changed_when: false
           no_log: true
+          when: not ansible_check_mode
 
         - name: Require exact isolated Gateway model response marker
           ansible.builtin.assert:
@@ -479,6 +487,7 @@
               - "'ISOLATED_CANARY_OK' in openclaw_isolated_gateway_model_probe.stdout"
             fail_msg: "The isolated Gateway model canary did not return its fixed marker."
           no_log: true
+          when: not ansible_check_mode
 
         - name: Mark isolated Gateway canary validated
           ansible.builtin.copy:
@@ -490,6 +499,7 @@
               validated_at={{ openclaw_isolated_gateway_backup_stamp }}
               port={{ openclaw_isolated_gateway_port }}
               mode=parallel-canary-only
+          when: not ansible_check_mode
 
       rescue:
         - name: Stop failed isolated Gateway canary
