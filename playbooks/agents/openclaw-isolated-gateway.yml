@@ -687,6 +687,98 @@
             - "{{ openclaw_isolated_gateway_runtime_root }}/lib"
           when: not ansible_check_mode
 
+        - name: Inspect legacy service-writable plugin project store
+          ansible.builtin.stat:
+            path: "{{ openclaw_isolated_gateway_state_dir }}/state/npm/projects"
+          register: openclaw_isolated_gateway_legacy_plugin_projects
+          check_mode: false
+
+        - name: Locate legacy Codex install managed by OpenClaw
+          ansible.builtin.command:
+            argv:
+              - /usr/bin/find
+              - "{{ openclaw_isolated_gateway_state_dir }}/state/npm/projects"
+              - -path
+              - "*/node_modules/@openclaw/codex/package.json"
+              - -type
+              - f
+              - -print
+              - -quit
+          register: openclaw_isolated_gateway_legacy_codex_package
+          changed_when: false
+          check_mode: false
+          when: openclaw_isolated_gateway_legacy_plugin_projects.stat.exists
+
+        - name: Classify legacy Codex install record for retirement
+          ansible.builtin.set_fact:
+            openclaw_isolated_gateway_retire_legacy_codex_install: >-
+              {{
+                openclaw_isolated_gateway_legacy_plugin_projects.stat.exists
+                and
+                (openclaw_isolated_gateway_legacy_codex_package.stdout | default('') | length > 0)
+              }}
+
+        - name: Inspect source config for legacy Codex record migration
+          ansible.builtin.stat:
+            path: "{{ openclaw_isolated_gateway_config_file }}"
+          register: openclaw_isolated_gateway_legacy_config
+          check_mode: false
+          when: openclaw_isolated_gateway_retire_legacy_codex_install | bool
+
+        - name: Require config source for legacy Codex record migration
+          ansible.builtin.assert:
+            that:
+              - openclaw_isolated_gateway_legacy_config.stat.exists
+              - openclaw_isolated_gateway_legacy_config.stat.isreg | default(false)
+              - not (openclaw_isolated_gateway_legacy_config.stat.islnk | default(true))
+            fail_msg: >-
+              The legacy Codex package exists without a regular source config.
+              Refusing to edit its persisted install registry implicitly.
+          when: openclaw_isolated_gateway_retire_legacy_codex_install | bool
+
+        - name: Stage writable config copy for supported legacy plugin retirement
+          ansible.builtin.copy:
+            src: "{{ openclaw_isolated_gateway_config_file }}"
+            dest: "{{ openclaw_isolated_gateway_state_dir }}/.legacy-plugin-migration.json"
+            remote_src: true
+            owner: "{{ openclaw_isolated_gateway_user }}"
+            group: "{{ openclaw_isolated_gateway_group }}"
+            mode: "0600"
+          when:
+            - not ansible_check_mode
+            - openclaw_isolated_gateway_retire_legacy_codex_install | bool
+
+        - name: Retire legacy Codex install record through OpenClaw
+          ansible.builtin.command:
+            argv:
+              - /usr/sbin/runuser
+              - -u
+              - "{{ openclaw_isolated_gateway_user }}"
+              - --
+              - /usr/bin/env
+              - "HOME={{ openclaw_isolated_gateway_state_dir }}"
+              - "OPENCLAW_HOME={{ openclaw_isolated_gateway_state_dir }}"
+              - "OPENCLAW_STATE_DIR={{ openclaw_isolated_gateway_state_dir }}/state"
+              - "OPENCLAW_CONFIG_PATH={{ openclaw_isolated_gateway_state_dir }}/.legacy-plugin-migration.json"
+              - "OPENCLAW_WORKSPACE_DIR={{ openclaw_isolated_gateway_workspace_dir }}"
+              - OPENCLAW_SKIP_CHANNELS=1
+              - "{{ openclaw_isolated_gateway_runtime_dir }}/bin/openclaw"
+              - plugins
+              - uninstall
+              - codex
+              - --force
+              - --keep-files
+          changed_when: true
+          when:
+            - not ansible_check_mode
+            - openclaw_isolated_gateway_retire_legacy_codex_install | bool
+
+        - name: Remove legacy plugin migration config copy
+          ansible.builtin.file:
+            path: "{{ openclaw_isolated_gateway_state_dir }}/.legacy-plugin-migration.json"
+            state: absent
+          when: not ansible_check_mode
+
         - name: Remove writable managed-plugin state
           ansible.builtin.file:
             path: "{{ openclaw_isolated_gateway_state_dir }}/state/npm"
@@ -804,6 +896,27 @@
           changed_when: false
           when: not ansible_check_mode
 
+        - name: Rebuild plugin registry from root-managed configuration
+          ansible.builtin.command:
+            argv:
+              - /usr/sbin/runuser
+              - -u
+              - "{{ openclaw_isolated_gateway_user }}"
+              - --
+              - /usr/bin/env
+              - "HOME={{ openclaw_isolated_gateway_state_dir }}"
+              - "OPENCLAW_HOME={{ openclaw_isolated_gateway_state_dir }}"
+              - "OPENCLAW_STATE_DIR={{ openclaw_isolated_gateway_state_dir }}/state"
+              - "OPENCLAW_CONFIG_PATH={{ openclaw_isolated_gateway_config_file }}"
+              - "OPENCLAW_WORKSPACE_DIR={{ openclaw_isolated_gateway_workspace_dir }}"
+              - OPENCLAW_SKIP_CHANNELS=1
+              - "{{ openclaw_isolated_gateway_runtime_dir }}/bin/openclaw"
+              - plugins
+              - registry
+              - --refresh
+          changed_when: true
+          when: not ansible_check_mode
+
         - name: Inventory root-managed isolated Gateway plugins
           ansible.builtin.command:
             argv:
@@ -847,10 +960,13 @@
               - openclaw_isolated_gateway_codex_inventory[0].origin == 'config'
               - openclaw_isolated_gateway_codex_inventory[0].rootDir == openclaw_isolated_gateway_codex_plugin_dir
               - openclaw_isolated_gateway_codex_inventory[0].dependencyStatus.requiredInstalled | bool
+              - openclaw_isolated_gateway_plugin_inventory.registry.source == 'persisted'
+              - openclaw_isolated_gateway_plugin_inventory.registry.diagnostics | length == 0
               - openclaw_isolated_gateway_plugin_inventory.diagnostics | length == 0
             fail_msg: >-
               The root-managed Codex provider is missing, incompatible, or
-              still dependent on writable runtime installation state.
+              still dependent on writable runtime installation state or a
+              stale legacy install record.
           when: not ansible_check_mode
 
         - name: Prove isolated Gateway cannot mutate provider code

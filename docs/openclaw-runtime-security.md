@@ -40,16 +40,25 @@ The first deterministic boundaries are implemented but deliberately disabled:
   `openclaw-health-report`, which can read generated reports but cannot read the
   database, token, receiver configuration, or raw payloads.
 
-Two attended canary attempts were rolled back automatically on 2026-08-10: the
-first exposed and fixed the current file-provider ownership contract, and the
-second passed every infrastructure check before proving that the legacy
-OpenRouter fallback was unfunded. A later infrastructure bootstrap passed with
-a dedicated account and loopback-only, boot-disabled service. The service is
-currently stopped, so the `johnny` production Gateway is the only running
-Gateway. The next bootstrap replaces the stopped canary's legacy global npm
-prefix and runtime-managed provider with the versioned release design above.
-Production was not stopped or modified. Inventory remains `disabled` outside
-attended bootstrap, canary, and cutover work.
+Two initial attended canary attempts were rolled back automatically on
+2026-08-10: the first exposed and fixed the current file-provider ownership
+contract, and the second proved that the legacy OpenRouter fallback was
+unfunded. A later infrastructure bootstrap passed with a dedicated account and
+loopback-only, boot-disabled service. Subsequent modernization runs also failed
+closed: one exposed excess builder read access to the controller checkout, and
+the next reached provider inventory before detecting a stale SQLite install
+record for the retired service-writable Codex tree. Both restored the exact
+prior canary state. The builder now runs inside a transient path/network
+sandbox. The registry failure was reproduced against a copied state database:
+OpenClaw retained the legacy global install record after its package tree was
+removed, so it reported a duplicate alongside the explicit root-managed
+provider. The managed migration now retires that record through OpenClaw's
+supported keep-files uninstall, discards the temporary writable config copy,
+rebuilds the registry from the root-managed config, and requires a persisted
+registry with zero diagnostics. The service is currently stopped, so the
+`johnny` production Gateway is the only running Gateway. Production was not
+stopped or modified. Inventory remains `disabled` outside attended bootstrap,
+canary, and cutover work.
 
 ## Modernization Contract
 
@@ -68,10 +77,13 @@ discovered component must receive one explicit disposition:
 The runtime layer already applies that rule: human-home global npm state,
 root-run package lifecycle scripts, service-writable provider code, copied
 OAuth refresh material, and the unfunded OpenRouter fallback are not migrated.
-They are replaced or retired. Stable-channel policy is retained, while each
-resolved core/provider pair is recorded as an immutable deployment artifact
-for rollback. Other agents, integrations, schedules, stores, and workspace
-artifacts remain subject to the same classification before production cutover.
+They are replaced or retired. A persisted plugin install record is part of the
+legacy runtime mechanism, not user data: the migration removes it through the
+supported plugin CLI before rebuilding the registry from the reviewed explicit
+load path. Stable-channel policy is retained, while each resolved core/provider
+pair is recorded as an immutable deployment artifact for rollback. Other
+agents, integrations, schedules, stores, and workspace artifacts remain subject
+to the same classification before production cutover.
 
 ## Gateway Canary Design
 
@@ -95,7 +107,13 @@ compatibility, stages the complete pair under
 `/opt/openclaw-isolated/releases`, and atomically promotes it. Root ownership
 prevents the Gateway from changing executable code. The old global-prefix
 `bin` and `lib` layout and writable provider cache are removed after the
-rollback artifact exists.
+rollback artifact exists. If the stopped canary still has an OpenClaw-managed
+Codex package, the playbook uses a service-owned temporary copy of the old
+config and `plugins uninstall codex --force --keep-files` to remove only its
+persisted install record. It then removes the old package tree, deploys the
+root-managed config, runs `plugins registry --refresh`, and rejects a derived,
+warning-bearing, duplicate, disabled, or dependency-incomplete provider
+inventory.
 
 Only a dedicated Gateway token is generated in
 `/etc/openclaw-isolated/secrets.json`. Nothing is imported from the legacy broad
