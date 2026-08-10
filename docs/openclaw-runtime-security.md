@@ -25,6 +25,11 @@ loopback and remains disabled at boot:
   scripts disabled, sensitive paths inaccessible, and private/Tailscale network
   ranges denied. Root promotes the validated pair into a versioned release and
   selects it through `/opt/openclaw-isolated/current`.
+- `playbooks/agents/openclaw-state-rehearsal.yml` creates no Gateway and loads
+  no channel or provider credential. It copies only the five active
+  file-backed session trees and their exact structured workspace dependencies
+  into a timestamped root-owned rehearsal generation, verifies path and hash
+  parity, freezes the result read-only, and promotes only rehearsal selectors.
 - `templates/openclaw/openclaw-isolated.json.j2` starts from a blank config:
   one OpenAI model, an explicitly loaded root-managed Codex provider, a
   file-backed Gateway token, no channel, heartbeat, memory, delegation,
@@ -250,6 +255,34 @@ database paths, and credentials. Reports are atomically replaced at mode
 `inventory/host_vars/jn-t14s-lin/openclaw.yml` keeps the migration mode and
 cutover gates.
 
+### Session-State Rehearsal
+
+`openclaw_state_rehearsal_mode: disabled` is inert. An attended `sessions` run
+also requires `openclaw_state_rehearsal_approved: true`. It does not stop,
+restart, reconfigure, or authenticate the production Gateway.
+
+The rehearsal is deliberately selective rather than a legacy workspace clone:
+
+1. Manifest all five active `sessions.json` and JSONL trees before copying.
+2. Copy those stores plus only workspace files/directories referenced by the
+   approved structured session fields.
+3. Manifest production again and require exact equality, proving the live
+   source did not change during capture.
+4. Rewrite only the approved state/workspace prefixes on the protected copy.
+5. Require byte-identical non-index artifacts, semantic index equality, valid
+   target references, and an `agents`-only target state root.
+6. Keep config, credentials, plugin code/state, channels, and the unreferenced
+   legacy workspace out of this generation.
+7. Transfer the validated tree to root ownership with read-only access for the
+   no-login `openclaw-migrate` group, then atomically update rehearsal-only
+   `current` symlinks.
+
+Failed generations are never promoted. Timestamped manifests, verification
+reports, rollback metadata, and the modernization disposition are kept under
+`/var/backups/openclaw-migration-rehearsal`. This proves file-store relocation;
+it does not classify or activate the remaining behavior, database, plugin,
+integration, or credential lanes.
+
 ### Disabled
 
 `openclaw_health_receiver_mode: disabled` is the normal current state. A full
@@ -341,6 +374,9 @@ ansible-playbook playbooks/agents/openclaw-health-receiver.yml --check --diff
 ansible-playbook playbooks/agents/openclaw-isolated-gateway.yml --syntax-check
 ansible-playbook playbooks/agents/openclaw-isolated-gateway.yml --check --diff
 ansible-playbook playbooks/agents/openclaw-isolated-gateway.yml --check --diff -e openclaw_isolated_gateway_mode=canary-bootstrap -e openclaw_isolated_gateway_canary_approved=true
+ansible-playbook playbooks/agents/openclaw-state-rehearsal.yml --syntax-check
+ansible-playbook playbooks/agents/openclaw-state-rehearsal.yml --check --diff
+ansible-playbook playbooks/agents/openclaw-state-rehearsal.yml --check --diff -e openclaw_state_rehearsal_mode=sessions -e openclaw_state_rehearsal_approved=true
 scripts/repo/repo-audit
 ```
 

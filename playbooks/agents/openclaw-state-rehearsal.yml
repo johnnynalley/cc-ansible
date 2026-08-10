@@ -1,0 +1,813 @@
+---
+# yamllint disable rule:line-length
+# Purpose: Rehearse OpenClaw file-backed session relocation without touching production.
+# Hosts: openclaw_hosts.
+# Key vars: openclaw_state_rehearsal_*.
+# Scripts: scripts/agents/openclaw-session-relocate.py.
+# Validation: ansible-playbook playbooks/agents/openclaw-state-rehearsal.yml --syntax-check.
+
+- name: Rehearse OpenClaw state relocation
+  hosts: openclaw_hosts
+  become: true
+  gather_facts: false
+
+  vars:
+    openclaw_state_rehearsal_tool: >-
+      /usr/local/libexec/openclaw-migration/openclaw-session-relocate.py
+    openclaw_state_rehearsal_free_space_margin: 1073741824
+    openclaw_state_rehearsal_agent_arguments:
+      - --agent=main
+      - --agent=dubble
+      - --agent=rigel
+      - --agent=vega
+      - --agent=antares
+
+  tasks:
+    - name: Validate OpenClaw state rehearsal mode
+      ansible.builtin.assert:
+        that:
+          - openclaw_state_rehearsal_mode | default('disabled') in ['disabled', 'sessions']
+        fail_msg: >-
+          openclaw_state_rehearsal_mode must be disabled or sessions.
+
+    - name: Skip OpenClaw state rehearsal when disabled
+      ansible.builtin.meta: end_host
+      when: openclaw_state_rehearsal_mode | default('disabled') == 'disabled'
+
+    - name: Require explicit approval for OpenClaw state rehearsal
+      ansible.builtin.assert:
+        that:
+          - openclaw_state_rehearsal_approved | default(false) | bool
+        fail_msg: >-
+          Session rehearsal copies protected production history into a new
+          isolated generation. Explicit owner approval is required.
+
+    - name: Validate fixed OpenClaw state rehearsal boundary
+      ansible.builtin.assert:
+        that:
+          - openclaw_state_rehearsal_user == 'openclaw-migrate'
+          - openclaw_state_rehearsal_group == 'openclaw-migrate'
+          - openclaw_state_rehearsal_source_state_dir == '/home/johnny/.openclaw'
+          - openclaw_state_rehearsal_source_workspace_dir == '/home/johnny/.openclaw/workspace'
+          - openclaw_state_rehearsal_state_root == '/var/lib/openclaw-migration-rehearsal'
+          - openclaw_state_rehearsal_workspace_root == '/usr/local/share/openclaw-migration-rehearsal'
+          - openclaw_state_rehearsal_backup_dir == '/var/backups/openclaw-migration-rehearsal'
+          - openclaw_state_rehearsal_agents | sort == ['antares', 'dubble', 'main', 'rigel', 'vega']
+        fail_msg: >-
+          The state rehearsal identity, roots, sources, or agent set are
+          outside the reviewed migration boundary.
+
+    - name: Inspect OpenClaw state rehearsal sources
+      ansible.builtin.stat:
+        path: "{{ item }}"
+        follow: false
+      loop:
+        - "{{ openclaw_state_rehearsal_source_state_dir }}"
+        - "{{ openclaw_state_rehearsal_source_workspace_dir }}"
+      register: openclaw_state_rehearsal_sources
+      check_mode: false
+
+    - name: Require non-symlink OpenClaw state rehearsal sources
+      ansible.builtin.assert:
+        that:
+          - item.stat.exists
+          - item.stat.isdir
+          - not item.stat.islnk | default(false)
+        fail_msg: >-
+          An OpenClaw state rehearsal source is missing, is not a directory,
+          or is a symlink.
+      loop: "{{ openclaw_state_rehearsal_sources.results }}"
+      loop_control:
+        label: "{{ item.item }}"
+
+    - name: Inspect existing OpenClaw state rehearsal account
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/getent
+          - passwd
+          - "{{ openclaw_state_rehearsal_user }}"
+      register: openclaw_state_rehearsal_existing_account
+      check_mode: false
+      changed_when: false
+      failed_when: false
+
+    - name: Reject unrelated OpenClaw state rehearsal account
+      ansible.builtin.assert:
+        that:
+          - >-
+            openclaw_state_rehearsal_existing_account.rc != 0
+            or (
+              openclaw_state_rehearsal_existing_account.stdout.split(':')[5]
+              == openclaw_state_rehearsal_state_root
+              and
+              openclaw_state_rehearsal_existing_account.stdout.split(':')[6]
+              == '/usr/sbin/nologin'
+            )
+        fail_msg: >-
+          A pre-existing openclaw-migrate account has an unexpected home or
+          shell and will not be repurposed.
+
+    - name: Inspect existing OpenClaw state rehearsal managed paths
+      ansible.builtin.stat:
+        path: "{{ item }}"
+        follow: false
+      loop:
+        - "{{ openclaw_state_rehearsal_tool }}"
+        - "{{ openclaw_state_rehearsal_state_root }}/current"
+        - "{{ openclaw_state_rehearsal_workspace_root }}/current"
+      register: openclaw_state_rehearsal_existing_paths
+      check_mode: false
+
+    - name: Reject non-symlink OpenClaw state rehearsal selectors
+      ansible.builtin.assert:
+        that:
+          - >-
+            not item.stat.exists
+            or item.item == openclaw_state_rehearsal_tool
+            or item.stat.islnk | default(false)
+        fail_msg: >-
+          A rehearsal current selector is not a symlink. Refusing to replace
+          an unclassified path.
+      loop: "{{ openclaw_state_rehearsal_existing_paths.results }}"
+      loop_control:
+        label: "{{ item.item }}"
+
+    - name: Report OpenClaw state rehearsal check-mode boundary
+      ansible.builtin.debug:
+        msg: >-
+          Check mode validated the fixed sources, identity, roots, agent set,
+          and current-selector types. It does not copy or hash private session
+          history.
+      when: ansible_check_mode
+
+    - name: Stop OpenClaw state rehearsal before mutation in check mode
+      ansible.builtin.meta: end_host
+      when: ansible_check_mode
+
+    - name: Set OpenClaw state rehearsal generation paths
+      ansible.builtin.set_fact:
+        openclaw_state_rehearsal_stamp: "{{ lookup('pipe', 'date -u +%Y%m%dT%H%M%SZ') }}"
+
+    - name: Derive OpenClaw state rehearsal generation paths
+      ansible.builtin.set_fact:
+        openclaw_state_rehearsal_generation_state: >-
+          {{ openclaw_state_rehearsal_state_root }}/generations/{{ openclaw_state_rehearsal_stamp }}/state
+        openclaw_state_rehearsal_generation_workspace: >-
+          {{ openclaw_state_rehearsal_workspace_root }}/generations/{{ openclaw_state_rehearsal_stamp }}/workspace
+        openclaw_state_rehearsal_evidence_dir: >-
+          {{ openclaw_state_rehearsal_backup_dir }}/{{ openclaw_state_rehearsal_stamp }}
+
+    - name: Inspect candidate OpenClaw state rehearsal generation
+      ansible.builtin.stat:
+        path: "{{ item }}"
+        follow: false
+      loop:
+        - "{{ openclaw_state_rehearsal_generation_state }}"
+        - "{{ openclaw_state_rehearsal_generation_workspace }}"
+        - "{{ openclaw_state_rehearsal_evidence_dir }}"
+      register: openclaw_state_rehearsal_candidate_paths
+      check_mode: false
+
+    - name: Require a fresh OpenClaw state rehearsal generation
+      ansible.builtin.assert:
+        that:
+          - not item.stat.exists
+        fail_msg: >-
+          The timestamped rehearsal generation or evidence directory already
+          exists. Refusing to overwrite immutable evidence.
+      loop: "{{ openclaw_state_rehearsal_candidate_paths.results }}"
+      loop_control:
+        label: "{{ item.item }}"
+
+    - name: Create OpenClaw state rehearsal evidence directory
+      ansible.builtin.file:
+        path: "{{ openclaw_state_rehearsal_evidence_dir }}"
+        state: directory
+        owner: root
+        group: root
+        mode: "0700"
+
+    - name: Select prior OpenClaw state rehearsal paths for rollback
+      ansible.builtin.set_fact:
+        openclaw_state_rehearsal_backup_paths: >-
+          {{
+            openclaw_state_rehearsal_existing_paths.results
+            | selectattr('stat.exists')
+            | map(attribute='item')
+            | map('regex_replace', '^/', '')
+            | list
+          }}
+
+    - name: Back up prior OpenClaw state rehearsal selectors and tool
+      ansible.builtin.command:
+        argv: >-
+          {{
+            [
+              '/usr/bin/tar',
+              '--create',
+              '--gzip',
+              '--acls',
+              '--xattrs',
+              '--numeric-owner',
+              '--file',
+              openclaw_state_rehearsal_evidence_dir + '/rollback.tar.gz',
+              '--directory',
+              '/'
+            ]
+            + openclaw_state_rehearsal_backup_paths
+          }}
+      when: openclaw_state_rehearsal_backup_paths | length > 0
+      changed_when: true
+
+    - name: Record empty OpenClaw state rehearsal rollback baseline
+      ansible.builtin.copy:
+        dest: "{{ openclaw_state_rehearsal_evidence_dir }}/EMPTY_BASELINE"
+        owner: root
+        group: root
+        mode: "0600"
+        content: "No prior rehearsal selector or managed tool existed.\n"
+      when: openclaw_state_rehearsal_backup_paths | length == 0
+
+    - name: Record OpenClaw state rehearsal modernization disposition
+      ansible.builtin.copy:
+        dest: "{{ openclaw_state_rehearsal_evidence_dir }}/disposition.json"
+        owner: root
+        group: root
+        mode: "0600"
+        content: >-
+          {{
+            {
+              'schemaVersion': 1,
+              'mode': 'sessions',
+              'sessionStores': 'retain-relocate',
+              'referencedWorkspaceDependencies': 'retain-selectively',
+              'fullLegacyWorkspace': 'not-copied',
+              'legacyConfig': 'not-copied',
+              'credentials': 'not-copied',
+              'plugins': 'not-copied',
+              'channels': 'not-activated',
+              'productionGateway': 'untouched'
+            }
+            | to_nice_json
+          }}
+
+    - name: Create OpenClaw state rehearsal group
+      ansible.builtin.group:
+        name: "{{ openclaw_state_rehearsal_group }}"
+        system: true
+        state: present
+
+    - name: Create OpenClaw state rehearsal account
+      ansible.builtin.user:
+        name: "{{ openclaw_state_rehearsal_user }}"
+        group: "{{ openclaw_state_rehearsal_group }}"
+        groups: []
+        append: false
+        home: "{{ openclaw_state_rehearsal_state_root }}"
+        create_home: false
+        shell: /usr/sbin/nologin
+        system: true
+        state: present
+
+    - name: Verify OpenClaw state rehearsal account groups
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/id
+          - -Gn
+          - "{{ openclaw_state_rehearsal_user }}"
+      register: openclaw_state_rehearsal_account_groups
+      changed_when: false
+
+    - name: Require one OpenClaw state rehearsal group only
+      ansible.builtin.assert:
+        that:
+          - openclaw_state_rehearsal_account_groups.stdout.split() == [openclaw_state_rehearsal_group]
+        fail_msg: >-
+          The openclaw-migrate account has unexpected supplementary groups.
+
+    - name: Create OpenClaw state rehearsal managed roots
+      ansible.builtin.file:
+        path: "{{ item.path }}"
+        state: directory
+        owner: root
+        group: "{{ item.group }}"
+        mode: "{{ item.mode }}"
+      loop:
+        - path: "{{ openclaw_state_rehearsal_state_root }}"
+          group: "{{ openclaw_state_rehearsal_group }}"
+          mode: "0750"
+        - path: "{{ openclaw_state_rehearsal_state_root }}/generations"
+          group: "{{ openclaw_state_rehearsal_group }}"
+          mode: "0750"
+        - path: "{{ openclaw_state_rehearsal_workspace_root }}"
+          group: "{{ openclaw_state_rehearsal_group }}"
+          mode: "0750"
+        - path: "{{ openclaw_state_rehearsal_workspace_root }}/generations"
+          group: "{{ openclaw_state_rehearsal_group }}"
+          mode: "0750"
+        - path: /usr/local/libexec/openclaw-migration
+          group: root
+          mode: "0755"
+
+    - name: Deploy OpenClaw session relocation verifier
+      ansible.builtin.copy:
+        src: "{{ ansible_config_file | dirname }}/scripts/agents/openclaw-session-relocate.py"
+        dest: "{{ openclaw_state_rehearsal_tool }}"
+        owner: root
+        group: root
+        mode: "0755"
+
+    - name: Create root-only OpenClaw state rehearsal generation
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: directory
+        owner: root
+        group: root
+        mode: "0700"
+      loop:
+        - "{{ openclaw_state_rehearsal_generation_state }}"
+        - "{{ openclaw_state_rehearsal_generation_workspace }}"
+
+    - name: Manifest production OpenClaw session state before copy
+      ansible.builtin.command:
+        argv: >-
+          {{
+            [
+              openclaw_state_rehearsal_tool,
+              'inspect',
+              '--state-root', openclaw_state_rehearsal_source_state_dir,
+              '--workspace-root', openclaw_state_rehearsal_source_workspace_dir,
+              '--output', openclaw_state_rehearsal_evidence_dir + '/source-before.json'
+            ]
+            + openclaw_state_rehearsal_agent_arguments
+          }}
+      register: openclaw_state_rehearsal_source_before
+      changed_when: false
+
+    - name: Read OpenClaw state rehearsal source manifest
+      ansible.builtin.slurp:
+        src: "{{ openclaw_state_rehearsal_evidence_dir }}/source-before.json"
+      register: openclaw_state_rehearsal_source_manifest_raw
+
+    - name: Parse OpenClaw state rehearsal source manifest
+      ansible.builtin.set_fact:
+        openclaw_state_rehearsal_source_manifest: >-
+          {{ openclaw_state_rehearsal_source_manifest_raw.content | b64decode | from_json }}
+
+    - name: Derive OpenClaw state rehearsal dependency sets
+      ansible.builtin.set_fact:
+        openclaw_state_rehearsal_reference_details: >-
+          {{ openclaw_state_rehearsal_source_manifest.agents | map(attribute='referenceDetails') | flatten }}
+        openclaw_state_rehearsal_workspace_file_refs: >-
+          {{
+            openclaw_state_rehearsal_source_manifest.agents
+            | map(attribute='referenceDetails')
+            | flatten
+            | selectattr('category', 'equalto', 'workspace')
+            | selectattr('pathKind', 'equalto', 'file')
+            | map(attribute='relativePath')
+            | unique
+            | sort
+            | list
+          }}
+        openclaw_state_rehearsal_workspace_directory_refs: >-
+          {{
+            openclaw_state_rehearsal_source_manifest.agents
+            | map(attribute='referenceDetails')
+            | flatten
+            | selectattr('category', 'equalto', 'workspace')
+            | selectattr('pathKind', 'equalto', 'directory')
+            | map(attribute='relativePath')
+            | reject('equalto', '.')
+            | unique
+            | sort
+            | list
+          }}
+        openclaw_state_rehearsal_state_refs: >-
+          {{
+            openclaw_state_rehearsal_source_manifest.agents
+            | map(attribute='referenceDetails')
+            | flatten
+            | selectattr('category', 'equalto', 'state')
+            | list
+          }}
+
+    - name: Validate OpenClaw state rehearsal state dependencies
+      ansible.builtin.assert:
+        that:
+          - item.field == 'sessionFile'
+          - item.pathKind == 'file'
+          - item.relativePath is match('^agents/(antares|dubble|main|rigel|vega)/sessions/')
+        fail_msg: >-
+          Session metadata references state outside the copied active session
+          trees. Classify that dependency before rehearsal.
+      loop: "{{ openclaw_state_rehearsal_state_refs }}"
+      loop_control:
+        label: "{{ item.field }}"
+      no_log: true
+
+    - name: Record OpenClaw state rehearsal workspace file list
+      ansible.builtin.copy:
+        dest: "{{ openclaw_state_rehearsal_evidence_dir }}/workspace-files-from.txt"
+        owner: root
+        group: root
+        mode: "0600"
+        content: "{{ openclaw_state_rehearsal_workspace_file_refs | join('\n') }}\n"
+
+    - name: Inspect OpenClaw state rehearsal source workspace size
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/du
+          - --summarize
+          - --bytes
+          - "{{ openclaw_state_rehearsal_source_workspace_dir }}"
+      register: openclaw_state_rehearsal_workspace_size
+      changed_when: false
+
+    - name: Inspect OpenClaw state rehearsal destination filesystems
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/stat
+          - --file-system
+          - --format=%i:%a:%S
+          - "{{ item }}"
+      loop:
+        - /var/lib
+        - /usr/local/share
+      register: openclaw_state_rehearsal_filesystems
+      changed_when: false
+
+    - name: Derive OpenClaw state rehearsal capacity facts
+      ansible.builtin.set_fact:
+        openclaw_state_rehearsal_session_bytes: "{{ openclaw_state_rehearsal_source_manifest.summary.bytes | int }}"
+        openclaw_state_rehearsal_workspace_bytes: "{{ openclaw_state_rehearsal_workspace_size.stdout.split()[0] | int }}"
+        openclaw_state_rehearsal_state_device: "{{ openclaw_state_rehearsal_filesystems.results[0].stdout.split(':')[0] }}"
+        openclaw_state_rehearsal_workspace_device: "{{ openclaw_state_rehearsal_filesystems.results[1].stdout.split(':')[0] }}"
+        openclaw_state_rehearsal_state_available: >-
+          {{
+            (openclaw_state_rehearsal_filesystems.results[0].stdout.split(':')[1] | int)
+            * (openclaw_state_rehearsal_filesystems.results[0].stdout.split(':')[2] | int)
+          }}
+        openclaw_state_rehearsal_workspace_available: >-
+          {{
+            (openclaw_state_rehearsal_filesystems.results[1].stdout.split(':')[1] | int)
+            * (openclaw_state_rehearsal_filesystems.results[1].stdout.split(':')[2] | int)
+          }}
+
+    - name: Require capacity for OpenClaw state rehearsal
+      ansible.builtin.assert:
+        that:
+          - >-
+            (
+              openclaw_state_rehearsal_state_device == openclaw_state_rehearsal_workspace_device
+              and
+              openclaw_state_rehearsal_state_available | int
+              >
+              openclaw_state_rehearsal_session_bytes | int
+              + openclaw_state_rehearsal_workspace_bytes | int
+              + openclaw_state_rehearsal_free_space_margin | int
+            )
+            or
+            (
+              openclaw_state_rehearsal_state_device != openclaw_state_rehearsal_workspace_device
+              and
+              openclaw_state_rehearsal_state_available | int
+              >
+              openclaw_state_rehearsal_session_bytes | int
+              + openclaw_state_rehearsal_free_space_margin | int
+              and
+              openclaw_state_rehearsal_workspace_available | int
+              >
+              openclaw_state_rehearsal_workspace_bytes | int
+              + openclaw_state_rehearsal_free_space_margin | int
+            )
+        fail_msg: >-
+          The rehearsal destinations lack conservative free space for the
+          session trees, referenced workspace dependencies, and safety margin.
+
+    - name: Copy session-referenced OpenClaw workspace files
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/rsync
+          - --archive
+          - --hard-links
+          - --xattrs
+          - --relative
+          - --chown=root:root
+          - "--files-from={{ openclaw_state_rehearsal_evidence_dir }}/workspace-files-from.txt"
+          - "{{ openclaw_state_rehearsal_source_workspace_dir }}/"
+          - "{{ openclaw_state_rehearsal_generation_workspace }}/"
+      when: openclaw_state_rehearsal_workspace_file_refs | length > 0
+      changed_when: true
+
+    - name: Create session-referenced OpenClaw workspace directories
+      ansible.builtin.file:
+        path: "{{ openclaw_state_rehearsal_generation_workspace }}/{{ item }}"
+        state: directory
+        owner: root
+        group: root
+        mode: "0700"
+      loop: "{{ openclaw_state_rehearsal_workspace_directory_refs }}"
+
+    - name: Create OpenClaw state rehearsal session destinations
+      ansible.builtin.file:
+        path: "{{ openclaw_state_rehearsal_generation_state }}/agents/{{ item }}/sessions"
+        state: directory
+        owner: root
+        group: root
+        mode: "0700"
+      loop: "{{ openclaw_state_rehearsal_agents }}"
+
+    - name: Copy active OpenClaw session stores into rehearsal generation
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/rsync
+          - --archive
+          - --hard-links
+          - --xattrs
+          - --delete
+          - --chown=root:root
+          - "{{ openclaw_state_rehearsal_source_state_dir }}/agents/{{ item }}/sessions/"
+          - "{{ openclaw_state_rehearsal_generation_state }}/agents/{{ item }}/sessions/"
+      loop: "{{ openclaw_state_rehearsal_agents }}"
+      changed_when: true
+
+    - name: Manifest production OpenClaw session state after copy
+      ansible.builtin.command:
+        argv: >-
+          {{
+            [
+              openclaw_state_rehearsal_tool,
+              'inspect',
+              '--state-root', openclaw_state_rehearsal_source_state_dir,
+              '--workspace-root', openclaw_state_rehearsal_source_workspace_dir,
+              '--output', openclaw_state_rehearsal_evidence_dir + '/source-after.json'
+            ]
+            + openclaw_state_rehearsal_agent_arguments
+          }}
+      changed_when: false
+
+    - name: Require stable production OpenClaw state during copy
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/cmp
+          - --silent
+          - "{{ openclaw_state_rehearsal_evidence_dir }}/source-before.json"
+          - "{{ openclaw_state_rehearsal_evidence_dir }}/source-after.json"
+      changed_when: false
+
+    - name: Rewrite copied OpenClaw session paths
+      ansible.builtin.command:
+        argv: >-
+          {{
+            [
+              openclaw_state_rehearsal_tool,
+              'rewrite',
+              '--source-state-root', openclaw_state_rehearsal_source_state_dir,
+              '--source-workspace-root', openclaw_state_rehearsal_source_workspace_dir,
+              '--target-state-root', openclaw_state_rehearsal_generation_state,
+              '--target-workspace-root', openclaw_state_rehearsal_generation_workspace,
+              '--output', openclaw_state_rehearsal_evidence_dir + '/rewrite.json'
+            ]
+            + openclaw_state_rehearsal_agent_arguments
+          }}
+      changed_when: true
+
+    - name: Verify copied OpenClaw session relocation
+      ansible.builtin.command:
+        argv: >-
+          {{
+            [
+              openclaw_state_rehearsal_tool,
+              'verify',
+              '--source-state-root', openclaw_state_rehearsal_source_state_dir,
+              '--source-workspace-root', openclaw_state_rehearsal_source_workspace_dir,
+              '--target-state-root', openclaw_state_rehearsal_generation_state,
+              '--target-workspace-root', openclaw_state_rehearsal_generation_workspace,
+              '--output', openclaw_state_rehearsal_evidence_dir + '/verify.json'
+            ]
+            + openclaw_state_rehearsal_agent_arguments
+          }}
+      changed_when: false
+
+    - name: Manifest relocated OpenClaw session generation
+      ansible.builtin.command:
+        argv: >-
+          {{
+            [
+              openclaw_state_rehearsal_tool,
+              'inspect',
+              '--state-root', openclaw_state_rehearsal_generation_state,
+              '--workspace-root', openclaw_state_rehearsal_generation_workspace,
+              '--output', openclaw_state_rehearsal_evidence_dir + '/target.json'
+            ]
+            + openclaw_state_rehearsal_agent_arguments
+          }}
+      changed_when: false
+
+    - name: Inspect OpenClaw state rehearsal top-level state
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/find
+          - "{{ openclaw_state_rehearsal_generation_state }}"
+          - -mindepth
+          - '1'
+          - -maxdepth
+          - '1'
+          - -printf
+          - '%f\n'
+      register: openclaw_state_rehearsal_top_level_state
+      changed_when: false
+
+    - name: Require sessions-only OpenClaw rehearsal state
+      ansible.builtin.assert:
+        that:
+          - openclaw_state_rehearsal_top_level_state.stdout_lines | sort == ['agents']
+        fail_msg: >-
+          The rehearsal state generation contains config, credentials,
+          plugins, channels, or another unclassified top-level artifact.
+
+    - name: Assign validated OpenClaw rehearsal reader group
+      ansible.builtin.file:
+        path: "{{ item }}"
+        owner: root
+        group: "{{ openclaw_state_rehearsal_group }}"
+        recurse: true
+      loop:
+        - "{{ openclaw_state_rehearsal_generation_state }}"
+        - "{{ openclaw_state_rehearsal_generation_workspace }}"
+
+    - name: Freeze validated OpenClaw rehearsal generation
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/chmod
+          - --recursive
+          - u=rwX,g=rX,o=
+          - "{{ openclaw_state_rehearsal_generation_state }}"
+          - "{{ openclaw_state_rehearsal_generation_workspace }}"
+      changed_when: true
+
+    - name: Inspect OpenClaw rehearsal generation ownership
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/find
+          - "{{ openclaw_state_rehearsal_generation_state }}"
+          - "{{ openclaw_state_rehearsal_generation_workspace }}"
+          - -xdev
+          - '('
+          - '!'
+          - -user
+          - root
+          - -o
+          - '!'
+          - -group
+          - "{{ openclaw_state_rehearsal_group }}"
+          - ')'
+          - -print
+          - -quit
+      register: openclaw_state_rehearsal_wrong_owner
+      changed_when: false
+
+    - name: Require dedicated OpenClaw rehearsal ownership
+      ansible.builtin.assert:
+        that:
+          - openclaw_state_rehearsal_wrong_owner.stdout | length == 0
+        fail_msg: >-
+          The validated rehearsal generation contains an unexpected owner or
+          group.
+
+    - name: Prove OpenClaw rehearsal identity can read the frozen generation
+      block:
+        - name: Read frozen OpenClaw rehearsal generation as migration account
+          ansible.builtin.command:
+            argv: >-
+              {{
+                [
+                  openclaw_state_rehearsal_tool,
+                  'inspect',
+                  '--state-root', openclaw_state_rehearsal_generation_state,
+                  '--workspace-root', openclaw_state_rehearsal_generation_workspace,
+                  '--output', '/tmp/openclaw-rehearsal-read-' + openclaw_state_rehearsal_stamp + '.json'
+                ]
+                + openclaw_state_rehearsal_agent_arguments
+              }}
+          become_user: "{{ openclaw_state_rehearsal_user }}"
+          changed_when: false
+      always:
+        - name: Remove OpenClaw rehearsal read proof output
+          ansible.builtin.file:
+            path: "/tmp/openclaw-rehearsal-read-{{ openclaw_state_rehearsal_stamp }}.json"
+            state: absent
+
+    - name: Promote validated OpenClaw rehearsal generation selectors
+      block:
+        - name: Create candidate OpenClaw rehearsal state selector
+          ansible.builtin.command:
+            argv:
+              - /usr/bin/ln
+              - --symbolic
+              - --no-target-directory
+              - "{{ openclaw_state_rehearsal_generation_state }}"
+              - "{{ openclaw_state_rehearsal_state_root }}/.current-{{ openclaw_state_rehearsal_stamp }}"
+          changed_when: true
+
+        - name: Create candidate OpenClaw rehearsal workspace selector
+          ansible.builtin.command:
+            argv:
+              - /usr/bin/ln
+              - --symbolic
+              - --no-target-directory
+              - "{{ openclaw_state_rehearsal_generation_workspace }}"
+              - "{{ openclaw_state_rehearsal_workspace_root }}/.current-{{ openclaw_state_rehearsal_stamp }}"
+          changed_when: true
+
+        - name: Atomically promote OpenClaw rehearsal state selector
+          ansible.builtin.command:
+            argv:
+              - /usr/bin/mv
+              - --force
+              - --no-target-directory
+              - "{{ openclaw_state_rehearsal_state_root }}/.current-{{ openclaw_state_rehearsal_stamp }}"
+              - "{{ openclaw_state_rehearsal_state_root }}/current"
+          changed_when: true
+
+        - name: Atomically promote OpenClaw rehearsal workspace selector
+          ansible.builtin.command:
+            argv:
+              - /usr/bin/mv
+              - --force
+              - --no-target-directory
+              - "{{ openclaw_state_rehearsal_workspace_root }}/.current-{{ openclaw_state_rehearsal_stamp }}"
+              - "{{ openclaw_state_rehearsal_workspace_root }}/current"
+          changed_when: true
+
+        - name: Resolve promoted OpenClaw rehearsal selectors
+          ansible.builtin.command:
+            argv:
+              - /usr/bin/readlink
+              - --canonicalize-existing
+              - "{{ item }}"
+          loop:
+            - "{{ openclaw_state_rehearsal_state_root }}/current"
+            - "{{ openclaw_state_rehearsal_workspace_root }}/current"
+          register: openclaw_state_rehearsal_promoted_selectors
+          changed_when: false
+
+        - name: Verify promoted OpenClaw rehearsal selectors
+          ansible.builtin.assert:
+            that:
+              - openclaw_state_rehearsal_promoted_selectors.results[0].stdout == openclaw_state_rehearsal_generation_state
+              - openclaw_state_rehearsal_promoted_selectors.results[1].stdout == openclaw_state_rehearsal_generation_workspace
+            fail_msg: >-
+              A promoted rehearsal selector does not resolve to the validated
+              immutable generation.
+      rescue:
+        - name: Remove failed OpenClaw rehearsal selectors
+          ansible.builtin.file:
+            path: "{{ item }}"
+            state: absent
+          loop:
+            - "{{ openclaw_state_rehearsal_state_root }}/.current-{{ openclaw_state_rehearsal_stamp }}"
+            - "{{ openclaw_state_rehearsal_workspace_root }}/.current-{{ openclaw_state_rehearsal_stamp }}"
+            - "{{ openclaw_state_rehearsal_state_root }}/current"
+            - "{{ openclaw_state_rehearsal_workspace_root }}/current"
+
+        - name: Restore prior OpenClaw rehearsal state selector
+          ansible.builtin.file:
+            src: "{{ openclaw_state_rehearsal_existing_paths.results[1].stat.lnk_source }}"
+            dest: "{{ openclaw_state_rehearsal_state_root }}/current"
+            state: link
+            force: true
+          when: openclaw_state_rehearsal_existing_paths.results[1].stat.exists
+
+        - name: Restore prior OpenClaw rehearsal workspace selector
+          ansible.builtin.file:
+            src: "{{ openclaw_state_rehearsal_existing_paths.results[2].stat.lnk_source }}"
+            dest: "{{ openclaw_state_rehearsal_workspace_root }}/current"
+            state: link
+            force: true
+          when: openclaw_state_rehearsal_existing_paths.results[2].stat.exists
+
+        - name: Stop after OpenClaw rehearsal selector rollback
+          ansible.builtin.fail:
+            msg: >-
+              Rehearsal selector promotion failed. Prior selectors were
+              restored and the failed generation remains root-only evidence.
+
+    - name: Record successful OpenClaw state rehearsal promotion
+      ansible.builtin.copy:
+        dest: "{{ openclaw_state_rehearsal_evidence_dir }}/PROMOTED.json"
+        owner: root
+        group: root
+        mode: "0600"
+        content: >-
+          {{
+            {
+              'schemaVersion': 1,
+              'stamp': openclaw_state_rehearsal_stamp,
+              'state': openclaw_state_rehearsal_generation_state,
+              'workspace': openclaw_state_rehearsal_generation_workspace,
+              'productionGateway': 'untouched'
+            }
+            | to_nice_json
+          }}

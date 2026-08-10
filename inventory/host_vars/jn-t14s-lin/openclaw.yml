@@ -39,6 +39,27 @@ openclaw_isolated_gateway_workspace_dir: >-
   /usr/local/share/openclaw-isolated/workspace
 openclaw_isolated_gateway_backup_dir: /var/backups/openclaw-isolated
 
+# Copy-only migration rehearsal. Disabled mode is inert. Sessions mode copies
+# only active file-backed session trees and their exact workspace dependencies;
+# it never copies config, credentials, channels, plugins, or the full workspace.
+openclaw_state_rehearsal_mode: disabled
+openclaw_state_rehearsal_approved: false
+openclaw_state_rehearsal_user: openclaw-migrate
+openclaw_state_rehearsal_group: openclaw-migrate
+openclaw_state_rehearsal_source_state_dir: /home/johnny/.openclaw
+openclaw_state_rehearsal_source_workspace_dir: /home/johnny/.openclaw/workspace
+openclaw_state_rehearsal_state_root: /var/lib/openclaw-migration-rehearsal
+openclaw_state_rehearsal_workspace_root: >-
+  /usr/local/share/openclaw-migration-rehearsal
+openclaw_state_rehearsal_backup_dir: >-
+  /var/backups/openclaw-migration-rehearsal
+openclaw_state_rehearsal_agents:
+  - main
+  - dubble
+  - rigel
+  - vega
+  - antares
+
 # Dedicated Health receiver migration. Disabled leaves the current user service
 # untouched. Canary and production are attended rollout modes; first production
 # activation additionally requires both request and approval booleans.

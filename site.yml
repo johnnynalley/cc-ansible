@@ -205,6 +205,10 @@
   ansible.builtin.import_playbook: playbooks/agents/openclaw-isolated-gateway.yml
   tags: [openclaw, openclaw-isolated, openclaw-canary]
 
+- name: Rehearse OpenClaw state relocation
+  ansible.builtin.import_playbook: playbooks/agents/openclaw-state-rehearsal.yml
+  tags: [openclaw, openclaw-migration, openclaw-rehearsal]
+
 - name: Deploy OpenClaw AI agent
   ansible.builtin.import_playbook: playbooks/agents/openclaw.yml
   tags: [openclaw]

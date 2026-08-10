@@ -168,7 +168,38 @@ def _collect_references(
                 raise SessionRelocationError(
                     "approved metadata path resolves outside its managed root"
                 )
-            references.append({"field": field, "category": category})
+            relative = candidate.relative_to(expected_root)
+            if ".." in relative.parts:
+                raise SessionRelocationError(
+                    "approved metadata path contains parent traversal"
+                )
+            current = expected_root
+            for component in relative.parts:
+                current /= component
+                if current.is_symlink():
+                    raise SessionRelocationError(
+                        "approved metadata path traverses a symlink"
+                    )
+            if "\n" in str(relative) or "\x00" in str(relative):
+                raise SessionRelocationError(
+                    "approved metadata path contains an unsupported separator"
+                )
+            if resolved.is_dir():
+                path_kind = "directory"
+            elif resolved.is_file():
+                path_kind = "file"
+            else:
+                raise SessionRelocationError(
+                    "approved metadata path is not a regular file or directory"
+                )
+            references.append(
+                {
+                    "field": field,
+                    "category": category,
+                    "relativePath": str(relative) or ".",
+                    "pathKind": path_kind,
+                }
+            )
             return
         if isinstance(value, list):
             for item in value:
@@ -197,6 +228,7 @@ def inspect_session_stores(
     agent_reports: list[dict[str, Any]] = []
     aggregate_kinds: Counter[str] = Counter()
     aggregate_fields: Counter[str] = Counter()
+    aggregate_categories: Counter[str] = Counter()
     aggregate_bytes = 0
     aggregate_entries = 0
 
@@ -220,9 +252,11 @@ def inspect_session_stores(
         files = _session_files(resolved_state, resolved_sessions)
         kinds = Counter(row["kind"] for row in files)
         fields = Counter(row["field"] for row in references)
+        categories = Counter(row["category"] for row in references)
         bytes_total = sum(int(row["size"]) for row in files)
         aggregate_kinds.update(kinds)
         aggregate_fields.update(fields)
+        aggregate_categories.update(categories)
         aggregate_bytes += bytes_total
         aggregate_entries += len(store)
         agent_reports.append(
@@ -231,6 +265,8 @@ def inspect_session_stores(
                 "entries": len(store),
                 "references": len(references),
                 "referenceFields": dict(sorted(fields.items())),
+                "referenceCategories": dict(sorted(categories.items())),
+                "referenceDetails": references,
                 "fileKinds": dict(sorted(kinds.items())),
                 "fileCount": len(files),
                 "bytes": bytes_total,
@@ -248,6 +284,7 @@ def inspect_session_stores(
             "entries": aggregate_entries,
             "references": sum(aggregate_fields.values()),
             "referenceFields": dict(sorted(aggregate_fields.items())),
+            "referenceCategories": dict(sorted(aggregate_categories.items())),
             "fileKinds": dict(sorted(aggregate_kinds.items())),
             "fileCount": sum(aggregate_kinds.values()),
             "bytes": aggregate_bytes,
@@ -319,7 +356,13 @@ def _rewrite_payload(
     return visit(payload), counts
 
 
-def _write_json_atomic(path: Path, payload: Any, mode: int = 0o600) -> None:
+def _write_json_atomic(
+    path: Path,
+    payload: Any,
+    mode: int = 0o600,
+    owner_uid: int | None = None,
+    owner_gid: int | None = None,
+) -> None:
     encoded = (json.dumps(payload, indent=2, sort_keys=True) + "\n").encode("utf-8")
     descriptor, temporary_name = tempfile.mkstemp(
         dir=path.parent,
@@ -329,6 +372,12 @@ def _write_json_atomic(path: Path, payload: Any, mode: int = 0o600) -> None:
     temporary = Path(temporary_name)
     try:
         os.fchmod(descriptor, mode)
+        if owner_uid is not None or owner_gid is not None:
+            os.fchown(
+                descriptor,
+                -1 if owner_uid is None else owner_uid,
+                -1 if owner_gid is None else owner_gid,
+            )
         with os.fdopen(descriptor, "wb") as handle:
             handle.write(encoded)
             handle.flush()
@@ -384,7 +433,13 @@ def rewrite_session_stores(
             target_workspace,
         )
         if rewritten != payload:
-            _write_json_atomic(index_path, rewritten, stat.S_IMODE(metadata.st_mode))
+            _write_json_atomic(
+                index_path,
+                rewritten,
+                stat.S_IMODE(metadata.st_mode),
+                metadata.st_uid,
+                metadata.st_gid,
+            )
             changed_files += 1
         reference_counts.update(counts)
 

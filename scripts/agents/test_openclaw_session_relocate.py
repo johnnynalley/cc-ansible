@@ -68,6 +68,8 @@ class SessionRelocationTests(unittest.TestCase):
             before = (
                 target / "agents" / "main" / "sessions" / "session-one.jsonl"
             ).read_bytes()
+            index = target / "agents" / "main" / "sessions" / "sessions.json"
+            index_metadata_before = index.stat()
             result = MODULE.rewrite_session_stores(
                 target,
                 source,
@@ -81,6 +83,13 @@ class SessionRelocationTests(unittest.TestCase):
                 target / "agents" / "main" / "sessions" / "session-one.jsonl"
             ).read_bytes()
             self.assertEqual(before, after)
+            index_metadata_after = index.stat()
+            self.assertEqual(index_metadata_after.st_uid, index_metadata_before.st_uid)
+            self.assertEqual(index_metadata_after.st_gid, index_metadata_before.st_gid)
+            self.assertEqual(
+                index_metadata_after.st_mode & 0o777,
+                index_metadata_before.st_mode & 0o777,
+            )
 
             verified = MODULE.verify_relocation(
                 source,
@@ -91,6 +100,25 @@ class SessionRelocationTests(unittest.TestCase):
             )
             self.assertEqual(verified["status"], "ok")
             self.assertEqual(verified["entries"], 1)
+
+            inspected = MODULE.inspect_session_stores(
+                source,
+                source_workspace,
+                ["main"],
+            )
+            reference_details = inspected["agents"][0]["referenceDetails"]
+            self.assertEqual(len(reference_details), 5)
+            self.assertEqual(
+                inspected["summary"]["referenceCategories"],
+                {"state": 1, "workspace": 4},
+            )
+            self.assertTrue(
+                any(
+                    row["relativePath"] == "skills/demo.md"
+                    and row["pathKind"] == "file"
+                    for row in reference_details
+                )
+            )
 
             second = MODULE.rewrite_session_stores(
                 target,
@@ -160,6 +188,38 @@ class SessionRelocationTests(unittest.TestCase):
                     target_workspace,
                     ["main"],
                 )
+
+    def test_rejects_reference_that_traverses_symlink(self) -> None:
+        with tempfile.TemporaryDirectory() as directory_name:
+            root = Path(directory_name)
+            source, source_workspace = self._fixture(root, "source")
+            real_directory = source_workspace / "real"
+            real_directory.mkdir()
+            (real_directory / "prompt.md").write_text("prompt\n", encoding="utf-8")
+            (source_workspace / "linked").symlink_to(real_directory)
+            index = source / "agents" / "main" / "sessions" / "sessions.json"
+            payload = json.loads(index.read_text(encoding="utf-8"))
+            payload["agent:main:main"]["skillSnapshot"]["path"] = str(
+                source_workspace / "linked" / "prompt.md"
+            )
+            index.write_text(json.dumps(payload), encoding="utf-8")
+
+            with self.assertRaises(MODULE.SessionRelocationError):
+                MODULE.inspect_session_stores(source, source_workspace, ["main"])
+
+    def test_rejects_lexical_parent_traversal(self) -> None:
+        with tempfile.TemporaryDirectory() as directory_name:
+            root = Path(directory_name)
+            source, source_workspace = self._fixture(root, "source")
+            index = source / "agents" / "main" / "sessions" / "sessions.json"
+            payload = json.loads(index.read_text(encoding="utf-8"))
+            payload["agent:main:main"]["skillSnapshot"][
+                "path"
+            ] = f"{source_workspace}/skills/../skills/demo.md"
+            index.write_text(json.dumps(payload), encoding="utf-8")
+
+            with self.assertRaises(MODULE.SessionRelocationError):
+                MODULE.inspect_session_stores(source, source_workspace, ["main"])
 
 
 if __name__ == "__main__":
