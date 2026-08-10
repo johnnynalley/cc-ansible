@@ -1,3 +1,4 @@
+---
 # =============================================================================
 # jn-t14s-lin - OpenClaw AI Agent Platform
 # =============================================================================
@@ -22,12 +23,20 @@ openclaw_isolated_gateway_report_groups: []
 openclaw_isolated_gateway_legacy_user: johnny
 openclaw_isolated_gateway_port: 19789
 openclaw_isolated_gateway_model: openai/gpt-5.6-sol
-openclaw_isolated_gateway_runtime_dir: /opt/openclaw-isolated
+openclaw_isolated_gateway_runtime_root: /opt/openclaw-isolated
+openclaw_isolated_gateway_releases_dir: /opt/openclaw-isolated/releases
+openclaw_isolated_gateway_runtime_dir: /opt/openclaw-isolated/current
+openclaw_isolated_gateway_codex_plugin_dir: >-
+  /opt/openclaw-isolated/current/plugins/codex/node_modules/@openclaw/codex
+openclaw_isolated_gateway_build_user: openclaw-build
+openclaw_isolated_gateway_build_group: openclaw-build
+openclaw_isolated_gateway_build_dir: /var/cache/openclaw-isolated-build
 openclaw_isolated_gateway_config_dir: /etc/openclaw-isolated
 openclaw_isolated_gateway_config_file: /etc/openclaw-isolated/openclaw.json
 openclaw_isolated_gateway_secret_file: /etc/openclaw-isolated/secrets.json
 openclaw_isolated_gateway_state_dir: /var/lib/openclaw-isolated
-openclaw_isolated_gateway_workspace_dir: /usr/local/share/openclaw-isolated/workspace
+openclaw_isolated_gateway_workspace_dir: >-
+  /usr/local/share/openclaw-isolated/workspace
 openclaw_isolated_gateway_backup_dir: /var/backups/openclaw-isolated
 
 # Dedicated Health receiver migration. Disabled leaves the current user service
@@ -45,10 +54,14 @@ openclaw_health_receiver_report_dir: /var/lib/openclaw-health/reports
 openclaw_health_receiver_config_dir: /etc/openclaw-health
 openclaw_health_receiver_backup_dir: /var/backups/openclaw-health
 openclaw_health_receiver_legacy_user: johnny
-openclaw_health_receiver_legacy_db: /home/johnny/.openclaw/workspace/data/health.db
-openclaw_health_receiver_legacy_unit: /home/johnny/.config/systemd/user/health-receiver.service
-openclaw_health_receiver_legacy_env: /home/johnny/.config/openclaw/receivers/health-receiver.env
-openclaw_health_receiver_token_source: /home/johnny/.config/openclaw/receivers/health-receiver.token
+openclaw_health_receiver_legacy_db: >-
+  /home/johnny/.openclaw/workspace/data/health.db
+openclaw_health_receiver_legacy_unit: >-
+  /home/johnny/.config/systemd/user/health-receiver.service
+openclaw_health_receiver_legacy_env: >-
+  /home/johnny/.config/openclaw/receivers/health-receiver.env
+openclaw_health_receiver_token_source: >-
+  /home/johnny/.config/openclaw/receivers/health-receiver.token
 openclaw_health_receiver_canary_bind: 127.0.0.1
 openclaw_health_receiver_canary_port: 19791
 openclaw_health_receiver_canary_sources:

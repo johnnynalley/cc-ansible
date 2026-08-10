@@ -1,6 +1,6 @@
 ---
 # yamllint disable rule:line-length
-# Purpose: Stage a parallel, deny-by-default OpenClaw Gateway canary.
+# Purpose: Stage a modernized, deny-by-default OpenClaw Gateway canary.
 # Hosts: openclaw_hosts.
 # Key vars: openclaw_isolated_gateway_*.
 # Templates: templates/openclaw/openclaw-isolated*.j2.
@@ -58,7 +58,13 @@
           - openclaw_isolated_gateway_config_file == openclaw_isolated_gateway_config_dir + '/openclaw.json'
           - openclaw_isolated_gateway_secret_file == openclaw_isolated_gateway_config_dir + '/secrets.json'
           - openclaw_isolated_gateway_state_dir is match('^/var/lib/openclaw-isolated$')
-          - openclaw_isolated_gateway_runtime_dir is match('^/opt/openclaw-isolated$')
+          - openclaw_isolated_gateway_runtime_root == '/opt/openclaw-isolated'
+          - openclaw_isolated_gateway_releases_dir == openclaw_isolated_gateway_runtime_root + '/releases'
+          - openclaw_isolated_gateway_runtime_dir == openclaw_isolated_gateway_runtime_root + '/current'
+          - openclaw_isolated_gateway_codex_plugin_dir == openclaw_isolated_gateway_runtime_dir + '/plugins/codex/node_modules/@openclaw/codex'
+          - openclaw_isolated_gateway_build_user == 'openclaw-build'
+          - openclaw_isolated_gateway_build_group == 'openclaw-build'
+          - openclaw_isolated_gateway_build_dir == '/var/cache/openclaw-isolated-build'
           - openclaw_isolated_gateway_workspace_dir is match('^/usr/local/share/openclaw-isolated/workspace$')
           - openclaw_isolated_gateway_model is match('^openai/')
           - openclaw_isolated_gateway_port | int >= 1024
@@ -75,7 +81,9 @@
       loop:
         - "{{ openclaw_isolated_gateway_config_dir }}"
         - "{{ openclaw_isolated_gateway_state_dir }}"
-        - "{{ openclaw_isolated_gateway_workspace_dir }}"
+        - "{{ openclaw_isolated_gateway_runtime_root }}"
+        - /usr/local/share/openclaw-isolated
+        - /usr/local/libexec/openclaw-isolated
         - /etc/systemd/system/openclaw-isolated-gateway.service
       register: openclaw_isolated_gateway_existing_paths
       check_mode: false
@@ -118,9 +126,44 @@
           A pre-existing openclaw account has an unexpected home or shell.
           Refusing to repurpose an identity owned by another deployment.
 
+    - name: Inspect pre-existing isolated build account
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/getent
+          - passwd
+          - "{{ openclaw_isolated_gateway_build_user }}"
+      register: openclaw_isolated_gateway_existing_build_account
+      check_mode: false
+      changed_when: false
+      failed_when: false
+
+    - name: Reject an unrelated pre-existing isolated build account
+      ansible.builtin.assert:
+        that:
+          - >-
+            openclaw_isolated_gateway_existing_build_account.rc != 0
+            or (
+              openclaw_isolated_gateway_existing_build_account.stdout.split(':')[5]
+              == openclaw_isolated_gateway_build_dir
+              and
+              openclaw_isolated_gateway_existing_build_account.stdout.split(':')[6]
+              == '/usr/sbin/nologin'
+            )
+        fail_msg: >-
+          A pre-existing openclaw-build account has an unexpected home or
+          shell. Refusing to reuse an identity owned by another deployment.
+
     - name: Set isolated Gateway backup timestamp
       ansible.builtin.set_fact:
         openclaw_isolated_gateway_backup_stamp: "{{ lookup('pipe', 'date -u +%Y%m%dT%H%M%SZ') }}"
+        openclaw_isolated_gateway_backup_paths: >-
+          {{
+            openclaw_isolated_gateway_existing_paths.results
+            | selectattr('stat.exists')
+            | map(attribute='item')
+            | map('regex_replace', '^/', '')
+            | list
+          }}
 
     - name: Create isolated Gateway backup directory
       ansible.builtin.file:
@@ -140,25 +183,50 @@
 
         - name: Back up existing isolated Gateway state
           ansible.builtin.command:
+            argv: >-
+              {{
+                [
+                  '/usr/bin/tar',
+                  '--create',
+                  '--gzip',
+                  '--acls',
+                  '--xattrs',
+                  '--numeric-owner',
+                  '--file',
+                  openclaw_isolated_gateway_backup_dir + '/' + openclaw_isolated_gateway_backup_stamp + '/state.tar.gz',
+                  '--directory',
+                  '/'
+                ]
+                + openclaw_isolated_gateway_backup_paths
+              }}
+          when: >-
+            not ansible_check_mode
+            and (
+              openclaw_isolated_gateway_existing_paths.results
+              | selectattr('stat.exists')
+              | list
+              | length > 0
+            )
+          changed_when: true
+          no_log: true
+
+        - name: Verify isolated Gateway rollback archive against stopped state
+          ansible.builtin.command:
             argv:
               - /usr/bin/tar
-              - --create
+              - --compare
               - --gzip
-              - --ignore-failed-read
+              - --acls
+              - --xattrs
+              - --numeric-owner
               - --file
               - "{{ openclaw_isolated_gateway_backup_dir }}/{{ openclaw_isolated_gateway_backup_stamp }}/state.tar.gz"
               - --directory
               - /
-              - "{{ openclaw_isolated_gateway_config_dir | regex_replace('^/', '') }}"
-              - "{{ openclaw_isolated_gateway_state_dir | regex_replace('^/', '') }}"
-              - "{{ openclaw_isolated_gateway_workspace_dir | regex_replace('^/', '') }}"
-              - etc/systemd/system/openclaw-isolated-gateway.service
-          when: >-
-            openclaw_isolated_gateway_existing_paths.results
-            | selectattr('stat.exists')
-            | list
-            | length > 0
-          changed_when: true
+          when:
+            - not ansible_check_mode
+            - openclaw_isolated_gateway_backup_paths | length > 0
+          changed_when: false
           no_log: true
 
         - name: Protect isolated Gateway rollback archive
@@ -167,11 +235,13 @@
             owner: root
             group: root
             mode: "0600"
-          when: >-
-            openclaw_isolated_gateway_existing_paths.results
-            | selectattr('stat.exists')
-            | list
-            | length > 0
+          when:
+            - not ansible_check_mode
+            - >-
+              openclaw_isolated_gateway_existing_paths.results
+              | selectattr('stat.exists')
+              | list
+              | length > 0
 
         - name: Record empty isolated Gateway backup baseline
           ansible.builtin.copy:
@@ -180,11 +250,13 @@
             group: root
             mode: "0600"
             content: "No pre-existing isolated Gateway state was present.\n"
-          when: >-
-            openclaw_isolated_gateway_existing_paths.results
-            | selectattr('stat.exists')
-            | list
-            | length == 0
+          when:
+            - not ansible_check_mode
+            - >-
+              openclaw_isolated_gateway_existing_paths.results
+              | selectattr('stat.exists')
+              | list
+              | length == 0
 
       rescue:
         - name: Restart isolated Gateway after backup failure
@@ -219,6 +291,26 @@
             comment: "Isolated OpenClaw Gateway"
             password: "!"
 
+        - name: Create isolated release-builder group
+          ansible.builtin.group:
+            name: "{{ openclaw_isolated_gateway_build_group }}"
+            system: true
+          when: not ansible_check_mode
+
+        - name: Create isolated release-builder account
+          ansible.builtin.user:
+            name: "{{ openclaw_isolated_gateway_build_user }}"
+            group: "{{ openclaw_isolated_gateway_build_group }}"
+            groups: []
+            append: false
+            shell: /usr/sbin/nologin
+            system: true
+            create_home: false
+            home: "{{ openclaw_isolated_gateway_build_dir }}"
+            comment: "Ephemeral OpenClaw release builder"
+            password: "!"
+          when: not ansible_check_mode
+
         - name: Create isolated Gateway directories
           ansible.builtin.file:
             path: "{{ item.path }}"
@@ -227,7 +319,11 @@
             group: "{{ item.group }}"
             mode: "{{ item.mode }}"
           loop:
-            - path: "{{ openclaw_isolated_gateway_runtime_dir }}"
+            - path: "{{ openclaw_isolated_gateway_runtime_root }}"
+              owner: root
+              group: root
+              mode: "0755"
+            - path: "{{ openclaw_isolated_gateway_releases_dir }}"
               owner: root
               group: root
               mode: "0755"
@@ -260,6 +356,334 @@
               group: root
               mode: "0755"
 
+        - name: Reset isolated release staging directory
+          ansible.builtin.file:
+            path: "{{ openclaw_isolated_gateway_build_dir }}"
+            state: absent
+          when: not ansible_check_mode
+
+        - name: Create isolated release staging directory
+          ansible.builtin.file:
+            path: "{{ item.path }}"
+            state: directory
+            owner: "{{ openclaw_isolated_gateway_build_user }}"
+            group: "{{ openclaw_isolated_gateway_build_group }}"
+            mode: "0700"
+          loop:
+            - path: "{{ openclaw_isolated_gateway_build_dir }}"
+            - path: "{{ openclaw_isolated_gateway_build_dir }}/tmp"
+          when: not ansible_check_mode
+
+        - name: Prove isolated release builder cannot read privileged state
+          ansible.builtin.command:
+            argv:
+              - /usr/sbin/runuser
+              - -u
+              - "{{ openclaw_isolated_gateway_build_user }}"
+              - --
+              - /usr/bin/test
+              - "!"
+              - -r
+              - "{{ item }}"
+          loop:
+            - "{{ openclaw_isolated_gateway_secret_file }}"
+            - /home/{{ openclaw_isolated_gateway_legacy_user }}
+            - /home/{{ openclaw_isolated_gateway_legacy_user }}/.ansible/vault_pass.txt
+            - /var/run/docker.sock
+            - "{{ openclaw_workspace }}"
+          changed_when: false
+          when: not ansible_check_mode
+
+        - name: Build isolated OpenClaw runtime from stable channel
+          ansible.builtin.command:
+            argv:
+              - /usr/sbin/runuser
+              - -u
+              - "{{ openclaw_isolated_gateway_build_user }}"
+              - --
+              - /usr/bin/env
+              - -i
+              - "HOME={{ openclaw_isolated_gateway_build_dir }}"
+              - "USER={{ openclaw_isolated_gateway_build_user }}"
+              - "LOGNAME={{ openclaw_isolated_gateway_build_user }}"
+              - PATH=/usr/bin:/bin
+              - "TMPDIR={{ openclaw_isolated_gateway_build_dir }}/tmp"
+              - "NPM_CONFIG_CACHE={{ openclaw_isolated_gateway_build_dir }}/npm-cache"
+              - NPM_CONFIG_AUDIT=false
+              - NPM_CONFIG_FUND=false
+              - NPM_CONFIG_IGNORE_SCRIPTS=true
+              - NPM_CONFIG_UPDATE_NOTIFIER=false
+              - /usr/bin/npm
+              - --prefix
+              - "{{ openclaw_isolated_gateway_build_dir }}/runtime"
+              - install
+              - --global
+              - --no-audit
+              - --no-fund
+              - --ignore-scripts
+              - openclaw@latest
+          changed_when: true
+          when: not ansible_check_mode
+
+        - name: Build isolated Codex provider from stable channel
+          ansible.builtin.command:
+            argv:
+              - /usr/sbin/runuser
+              - -u
+              - "{{ openclaw_isolated_gateway_build_user }}"
+              - --
+              - /usr/bin/env
+              - -i
+              - "HOME={{ openclaw_isolated_gateway_build_dir }}"
+              - "USER={{ openclaw_isolated_gateway_build_user }}"
+              - "LOGNAME={{ openclaw_isolated_gateway_build_user }}"
+              - PATH=/usr/bin:/bin
+              - "TMPDIR={{ openclaw_isolated_gateway_build_dir }}/tmp"
+              - "NPM_CONFIG_CACHE={{ openclaw_isolated_gateway_build_dir }}/npm-cache"
+              - NPM_CONFIG_AUDIT=false
+              - NPM_CONFIG_FUND=false
+              - NPM_CONFIG_IGNORE_SCRIPTS=true
+              - NPM_CONFIG_UPDATE_NOTIFIER=false
+              - /usr/bin/npm
+              - --prefix
+              - "{{ openclaw_isolated_gateway_build_dir }}/codex"
+              - install
+              - --omit=dev
+              - --no-audit
+              - --no-fund
+              - --ignore-scripts
+              - "@openclaw/codex@latest"
+          changed_when: true
+          when: not ansible_check_mode
+
+        - name: Read staged OpenClaw runtime metadata
+          ansible.builtin.slurp:
+            path: "{{ openclaw_isolated_gateway_build_dir }}/runtime/lib/node_modules/openclaw/package.json"
+          register: openclaw_isolated_gateway_staged_runtime_metadata
+          when: not ansible_check_mode
+
+        - name: Read staged Codex provider metadata
+          ansible.builtin.slurp:
+            path: "{{ item }}"
+          loop:
+            - "{{ openclaw_isolated_gateway_build_dir }}/codex/node_modules/@openclaw/codex/package.json"
+            - "{{ openclaw_isolated_gateway_build_dir }}/codex/node_modules/@openclaw/codex/openclaw.plugin.json"
+          register: openclaw_isolated_gateway_staged_codex_metadata
+          when: not ansible_check_mode
+
+        - name: Decode isolated release metadata
+          ansible.builtin.set_fact:
+            openclaw_isolated_gateway_runtime_package: >-
+              {{ openclaw_isolated_gateway_staged_runtime_metadata.content | b64decode | from_json }}
+            openclaw_isolated_gateway_codex_package: >-
+              {{ openclaw_isolated_gateway_staged_codex_metadata.results[0].content | b64decode | from_json }}
+            openclaw_isolated_gateway_codex_manifest: >-
+              {{ openclaw_isolated_gateway_staged_codex_metadata.results[1].content | b64decode | from_json }}
+          when: not ansible_check_mode
+
+        - name: Validate isolated release package identities
+          ansible.builtin.assert:
+            that:
+              - openclaw_isolated_gateway_runtime_package.name == 'openclaw'
+              - openclaw_isolated_gateway_runtime_package.version is match('^[0-9A-Za-z][0-9A-Za-z.+_-]*$')
+              - openclaw_isolated_gateway_codex_package.name == '@openclaw/codex'
+              - openclaw_isolated_gateway_codex_package.version is match('^[0-9A-Za-z][0-9A-Za-z.+_-]*$')
+              - openclaw_isolated_gateway_codex_manifest.id == 'codex'
+              - openclaw_isolated_gateway_codex_package.openclaw.build.openclawVersion == (openclaw_isolated_gateway_runtime_package.version | regex_replace('-.*$', ''))
+            fail_msg: >-
+              The stable-channel runtime and Codex provider do not form the
+              expected compatible official release pair.
+          when: not ansible_check_mode
+
+        - name: Select isolated versioned release pair
+          ansible.builtin.set_fact:
+            openclaw_isolated_gateway_release_id: >-
+              {{ openclaw_isolated_gateway_runtime_package.version }}-codex-{{ openclaw_isolated_gateway_codex_package.version }}
+            openclaw_isolated_gateway_release_path: >-
+              {{ openclaw_isolated_gateway_releases_dir }}/{{ openclaw_isolated_gateway_runtime_package.version }}-codex-{{ openclaw_isolated_gateway_codex_package.version }}
+            openclaw_isolated_gateway_release_stage_path: >-
+              {{ openclaw_isolated_gateway_releases_dir }}/.{{ openclaw_isolated_gateway_runtime_package.version }}-codex-{{ openclaw_isolated_gateway_codex_package.version }}.staging-{{ openclaw_isolated_gateway_backup_stamp }}
+          when: not ansible_check_mode
+
+        - name: Inspect isolated versioned runtime release
+          ansible.builtin.stat:
+            path: "{{ openclaw_isolated_gateway_release_path }}"
+          register: openclaw_isolated_gateway_release_stat
+          when: not ansible_check_mode
+
+        - name: Remove stale isolated release staging path
+          ansible.builtin.file:
+            path: "{{ openclaw_isolated_gateway_release_stage_path }}"
+            state: absent
+          when:
+            - not ansible_check_mode
+            - not openclaw_isolated_gateway_release_stat.stat.exists
+
+        - name: Stage new isolated runtime release
+          ansible.builtin.command:
+            argv:
+              - /usr/bin/cp
+              - --archive
+              - --reflink=auto
+              - "{{ openclaw_isolated_gateway_build_dir }}/runtime"
+              - "{{ openclaw_isolated_gateway_release_stage_path }}"
+          when:
+            - not ansible_check_mode
+            - not openclaw_isolated_gateway_release_stat.stat.exists
+          changed_when: true
+
+        - name: Create staged isolated release plugin directory
+          ansible.builtin.file:
+            path: "{{ openclaw_isolated_gateway_release_stage_path }}/plugins"
+            state: directory
+            owner: root
+            group: root
+            mode: "0755"
+          when:
+            - not ansible_check_mode
+            - not openclaw_isolated_gateway_release_stat.stat.exists
+
+        - name: Stage new isolated Codex provider release
+          ansible.builtin.command:
+            argv:
+              - /usr/bin/cp
+              - --archive
+              - --reflink=auto
+              - "{{ openclaw_isolated_gateway_build_dir }}/codex"
+              - "{{ openclaw_isolated_gateway_release_stage_path }}/plugins/codex"
+          when:
+            - not ansible_check_mode
+            - not openclaw_isolated_gateway_release_stat.stat.exists
+          changed_when: true
+
+        - name: Make staged isolated release root-owned and immutable to the service
+          ansible.builtin.file:
+            path: "{{ openclaw_isolated_gateway_release_stage_path }}"
+            state: directory
+            owner: root
+            group: root
+            mode: u=rwX,go=rX
+            recurse: true
+          when:
+            - not ansible_check_mode
+            - not openclaw_isolated_gateway_release_stat.stat.exists
+
+        - name: Record staged isolated release provenance
+          ansible.builtin.copy:
+            dest: "{{ openclaw_isolated_gateway_release_stage_path }}/OPENCLAW_RELEASE"
+            owner: root
+            group: root
+            mode: "0444"
+            content: |
+              release={{ openclaw_isolated_gateway_release_id }}
+              channel=stable
+              openclaw={{ openclaw_isolated_gateway_runtime_package.version }}
+              codex={{ openclaw_isolated_gateway_codex_package.version }}
+              built_without_service_credentials=true
+              lifecycle_scripts=disabled
+          when:
+            - not ansible_check_mode
+            - not openclaw_isolated_gateway_release_stat.stat.exists
+
+        - name: Promote isolated release pair atomically
+          ansible.builtin.command:
+            argv:
+              - /usr/bin/mv
+              - --no-target-directory
+              - "{{ openclaw_isolated_gateway_release_stage_path }}"
+              - "{{ openclaw_isolated_gateway_release_path }}"
+          when:
+            - not ansible_check_mode
+            - not openclaw_isolated_gateway_release_stat.stat.exists
+          changed_when: true
+
+        - name: Read promoted isolated release metadata
+          ansible.builtin.slurp:
+            path: "{{ item }}"
+          loop:
+            - "{{ openclaw_isolated_gateway_release_path }}/lib/node_modules/openclaw/package.json"
+            - "{{ openclaw_isolated_gateway_release_path }}/plugins/codex/node_modules/@openclaw/codex/package.json"
+            - "{{ openclaw_isolated_gateway_release_path }}/OPENCLAW_RELEASE"
+          register: openclaw_isolated_gateway_promoted_metadata
+          when: not ansible_check_mode
+
+        - name: Decode promoted isolated release package metadata
+          ansible.builtin.set_fact:
+            openclaw_isolated_gateway_promoted_runtime_package: >-
+              {{ openclaw_isolated_gateway_promoted_metadata.results[0].content | b64decode | from_json }}
+            openclaw_isolated_gateway_promoted_codex_package: >-
+              {{ openclaw_isolated_gateway_promoted_metadata.results[1].content | b64decode | from_json }}
+            openclaw_isolated_gateway_promoted_provenance: >-
+              {{ openclaw_isolated_gateway_promoted_metadata.results[2].content | b64decode }}
+          when: not ansible_check_mode
+
+        - name: Require exact promoted isolated release pair
+          ansible.builtin.assert:
+            that:
+              - openclaw_isolated_gateway_promoted_runtime_package.name == 'openclaw'
+              - openclaw_isolated_gateway_promoted_runtime_package.version == openclaw_isolated_gateway_runtime_package.version
+              - openclaw_isolated_gateway_promoted_codex_package.name == '@openclaw/codex'
+              - openclaw_isolated_gateway_promoted_codex_package.version == openclaw_isolated_gateway_codex_package.version
+              - "'release=' + openclaw_isolated_gateway_release_id in openclaw_isolated_gateway_promoted_provenance"
+              - "'lifecycle_scripts=disabled' in openclaw_isolated_gateway_promoted_provenance"
+            fail_msg: >-
+              The promoted release does not exactly match the staged OpenClaw
+              and Codex package pair or lacks modernized build provenance.
+          when: not ansible_check_mode
+
+        - name: Select current isolated runtime release atomically
+          ansible.builtin.file:
+            src: "{{ openclaw_isolated_gateway_release_path }}"
+            dest: "{{ openclaw_isolated_gateway_runtime_dir }}"
+            state: link
+            owner: root
+            group: root
+            force: true
+          when: not ansible_check_mode
+
+        - name: Retire legacy global-prefix runtime layout
+          ansible.builtin.file:
+            path: "{{ item }}"
+            state: absent
+          loop:
+            - "{{ openclaw_isolated_gateway_runtime_root }}/bin"
+            - "{{ openclaw_isolated_gateway_runtime_root }}/lib"
+          when: not ansible_check_mode
+
+        - name: Remove writable managed-plugin state
+          ansible.builtin.file:
+            path: "{{ openclaw_isolated_gateway_state_dir }}/state/npm"
+            state: absent
+          when: not ansible_check_mode
+
+        - name: Create read-only managed-plugin sentinel
+          ansible.builtin.file:
+            path: "{{ openclaw_isolated_gateway_state_dir }}/state/npm"
+            state: directory
+            owner: root
+            group: root
+            mode: "0555"
+          when: not ansible_check_mode
+
+        - name: Remove isolated release staging directory
+          ansible.builtin.file:
+            path: "{{ openclaw_isolated_gateway_build_dir }}"
+            state: absent
+          when: not ansible_check_mode
+
+        - name: Remove ephemeral isolated release-builder account
+          ansible.builtin.user:
+            name: "{{ openclaw_isolated_gateway_build_user }}"
+            state: absent
+            remove: false
+          when: not ansible_check_mode
+
+        - name: Remove ephemeral isolated release-builder group
+          ansible.builtin.group:
+            name: "{{ openclaw_isolated_gateway_build_group }}"
+            state: absent
+          when: not ansible_check_mode
+
         - name: Install isolated Gateway credential bootstrapper
           ansible.builtin.copy:
             src: "{{ ansible_config_file | dirname }}/scripts/agents/openclaw-isolated-secrets.py"
@@ -267,17 +691,6 @@
             owner: root
             group: root
             mode: "0755"
-
-        - name: Install isolated OpenClaw runtime from stable channel
-          ansible.builtin.command:
-            argv:
-              - /usr/bin/npm
-              - --prefix
-              - "{{ openclaw_isolated_gateway_runtime_dir }}"
-              - install
-              - --global
-              - openclaw@latest
-            creates: "{{ openclaw_isolated_gateway_runtime_dir }}/bin/openclaw"
 
         - name: Bootstrap isolated Gateway secrets
           ansible.builtin.command:
@@ -352,6 +765,94 @@
               - config
               - validate
           changed_when: false
+          when: not ansible_check_mode
+
+        - name: Inventory root-managed isolated Gateway plugins
+          ansible.builtin.command:
+            argv:
+              - /usr/sbin/runuser
+              - -u
+              - "{{ openclaw_isolated_gateway_user }}"
+              - --
+              - /usr/bin/env
+              - "HOME={{ openclaw_isolated_gateway_state_dir }}"
+              - "OPENCLAW_HOME={{ openclaw_isolated_gateway_state_dir }}"
+              - "OPENCLAW_STATE_DIR={{ openclaw_isolated_gateway_state_dir }}/state"
+              - "OPENCLAW_CONFIG_PATH={{ openclaw_isolated_gateway_config_file }}"
+              - "OPENCLAW_WORKSPACE_DIR={{ openclaw_isolated_gateway_workspace_dir }}"
+              - OPENCLAW_SKIP_CHANNELS=1
+              - "{{ openclaw_isolated_gateway_runtime_dir }}/bin/openclaw"
+              - plugins
+              - list
+              - --json
+          register: openclaw_isolated_gateway_plugin_inventory_raw
+          changed_when: false
+          when: not ansible_check_mode
+
+        - name: Decode root-managed isolated Gateway plugin inventory
+          ansible.builtin.set_fact:
+            openclaw_isolated_gateway_plugin_inventory: >-
+              {{ openclaw_isolated_gateway_plugin_inventory_raw.stdout | from_json }}
+            openclaw_isolated_gateway_codex_inventory: >-
+              {{
+                (openclaw_isolated_gateway_plugin_inventory_raw.stdout | from_json).plugins
+                | selectattr('id', 'equalto', 'codex')
+                | list
+              }}
+          when: not ansible_check_mode
+
+        - name: Require one compatible root-managed Codex provider
+          ansible.builtin.assert:
+            that:
+              - openclaw_isolated_gateway_codex_inventory | length == 1
+              - openclaw_isolated_gateway_codex_inventory[0].enabled | bool
+              - openclaw_isolated_gateway_codex_inventory[0].status == 'loaded'
+              - openclaw_isolated_gateway_codex_inventory[0].origin == 'config'
+              - openclaw_isolated_gateway_codex_inventory[0].rootDir == openclaw_isolated_gateway_codex_plugin_dir
+              - openclaw_isolated_gateway_codex_inventory[0].dependencyStatus.requiredInstalled | bool
+              - openclaw_isolated_gateway_plugin_inventory.diagnostics | length == 0
+            fail_msg: >-
+              The root-managed Codex provider is missing, incompatible, or
+              still dependent on writable runtime installation state.
+          when: not ansible_check_mode
+
+        - name: Prove isolated Gateway cannot mutate provider code
+          ansible.builtin.command:
+            argv:
+              - /usr/sbin/runuser
+              - -u
+              - "{{ openclaw_isolated_gateway_user }}"
+              - --
+              - /usr/bin/test
+              - "!"
+              - -w
+              - "{{ openclaw_isolated_gateway_codex_plugin_dir }}"
+          changed_when: false
+          when: not ansible_check_mode
+
+        - name: Inspect isolated managed-plugin sentinel contents
+          ansible.builtin.command:
+            argv:
+              - /usr/bin/find
+              - "{{ openclaw_isolated_gateway_state_dir }}/state/npm"
+              - -mindepth
+              - "1"
+              - -maxdepth
+              - "1"
+              - -print
+              - -quit
+          register: openclaw_isolated_gateway_managed_plugin_state
+          changed_when: false
+          when: not ansible_check_mode
+
+        - name: Reject writable or regenerated managed-plugin state
+          ansible.builtin.assert:
+            that:
+              - openclaw_isolated_gateway_managed_plugin_state.stdout | length == 0
+            fail_msg: >-
+              OpenClaw regenerated service-writable plugin state instead of
+              using the explicit root-managed provider release.
+          when: not ansible_check_mode
 
         - name: Deploy hardened isolated Gateway system service
           ansible.builtin.template:
@@ -360,6 +861,16 @@
             owner: root
             group: root
             mode: "0644"
+
+        - name: Record isolated Gateway boot-validation start time
+          ansible.builtin.command:
+            argv:
+              - /usr/bin/date
+              - --utc
+              - +%Y-%m-%dT%H:%M:%SZ
+          register: openclaw_isolated_gateway_boot_check_started
+          changed_when: false
+          when: not ansible_check_mode
 
         - name: Keep isolated Gateway canary non-persistent
           ansible.builtin.systemd_service:
@@ -390,6 +901,7 @@
               - --property=ProtectSystem
               - --property=ProtectHome
               - --property=PrivateDevices
+              - --property=ReadOnlyPaths
               - --property=MainPID
           register: openclaw_isolated_gateway_service_properties
           changed_when: false
@@ -405,6 +917,8 @@
               - "'ProtectSystem=strict' in openclaw_isolated_gateway_service_properties.stdout_lines"
               - "'ProtectHome=yes' in openclaw_isolated_gateway_service_properties.stdout_lines"
               - "'PrivateDevices=yes' in openclaw_isolated_gateway_service_properties.stdout_lines"
+              - "openclaw_isolated_gateway_runtime_root in openclaw_isolated_gateway_service_properties.stdout"
+              - "openclaw_isolated_gateway_state_dir + '/state/npm' in openclaw_isolated_gateway_service_properties.stdout"
             fail_msg: "The running canary does not match the required systemd boundary."
           when: not ansible_check_mode
 
@@ -451,6 +965,58 @@
           register: openclaw_isolated_gateway_health
           changed_when: false
           no_log: true
+          when: not ansible_check_mode
+
+        - name: Inspect current isolated Gateway boot journal
+          ansible.builtin.command:
+            argv:
+              - /usr/bin/journalctl
+              - --unit
+              - openclaw-isolated-gateway.service
+              - --since
+              - "{{ openclaw_isolated_gateway_boot_check_started.stdout }}"
+              - --no-pager
+              - --output
+              - cat
+          register: openclaw_isolated_gateway_current_boot_journal
+          changed_when: false
+          when: not ansible_check_mode
+
+        - name: Reject provider self-install and known startup failures
+          ansible.builtin.assert:
+            that:
+              - "'Installed missing configured plugin' not in openclaw_isolated_gateway_current_boot_journal.stdout"
+              - "'permissions are too open' not in openclaw_isolated_gateway_current_boot_journal.stdout"
+              - "'failed to promote config last-known-good backup' not in openclaw_isolated_gateway_current_boot_journal.stdout"
+              - "'Gateway failed to start' not in openclaw_isolated_gateway_current_boot_journal.stdout"
+              - "'restart-loop breaker tripped' not in openclaw_isolated_gateway_current_boot_journal.stdout"
+            fail_msg: >-
+              The current canary boot contains provider self-install or a
+              known startup failure. It cannot be marked validated.
+          when: not ansible_check_mode
+
+        - name: Recheck isolated managed-plugin sentinel after startup
+          ansible.builtin.command:
+            argv:
+              - /usr/bin/find
+              - "{{ openclaw_isolated_gateway_state_dir }}/state/npm"
+              - -mindepth
+              - "1"
+              - -maxdepth
+              - "1"
+              - -print
+              - -quit
+          register: openclaw_isolated_gateway_managed_plugin_state_after_start
+          changed_when: false
+          when: not ansible_check_mode
+
+        - name: Require no runtime-managed provider code after startup
+          ansible.builtin.assert:
+            that:
+              - openclaw_isolated_gateway_managed_plugin_state_after_start.stdout | length == 0
+            fail_msg: >-
+              Gateway startup wrote provider code into mutable state despite
+              the explicit root-managed release.
           when: not ansible_check_mode
 
         - name: Run isolated Gateway model canary
@@ -507,6 +1073,9 @@
               validated_at={{ openclaw_isolated_gateway_backup_stamp }}
               port={{ openclaw_isolated_gateway_port }}
               mode={{ openclaw_isolated_gateway_mode }}
+              openclaw={{ openclaw_isolated_gateway_runtime_package.version }}
+              codex={{ openclaw_isolated_gateway_codex_package.version }}
+              release={{ openclaw_isolated_gateway_release_path }}
           when: not ansible_check_mode
 
         - name: Mark isolated Gateway canary validated
@@ -519,6 +1088,9 @@
               validated_at={{ openclaw_isolated_gateway_backup_stamp }}
               port={{ openclaw_isolated_gateway_port }}
               mode=parallel-canary-only
+              openclaw={{ openclaw_isolated_gateway_runtime_package.version }}
+              codex={{ openclaw_isolated_gateway_codex_package.version }}
+              release={{ openclaw_isolated_gateway_release_path }}
           when:
             - not ansible_check_mode
             - openclaw_isolated_gateway_mode == 'canary'
@@ -532,12 +1104,33 @@
             daemon_reload: true
           failed_when: false
 
-        - name: Restore prior isolated Gateway state
+        - name: Remove failed isolated release staging directory
+          ansible.builtin.file:
+            path: "{{ openclaw_isolated_gateway_build_dir }}"
+            state: absent
+          failed_when: false
+
+        - name: Remove failed isolated Gateway managed paths before rollback
+          ansible.builtin.file:
+            path: "{{ item }}"
+            state: absent
+          loop:
+            - /etc/systemd/system/openclaw-isolated-gateway.service
+            - "{{ openclaw_isolated_gateway_config_dir }}"
+            - "{{ openclaw_isolated_gateway_state_dir }}"
+            - "{{ openclaw_isolated_gateway_runtime_root }}"
+            - /usr/local/share/openclaw-isolated
+            - /usr/local/libexec/openclaw-isolated
+
+        - name: Restore prior isolated Gateway state exactly
           ansible.builtin.command:
             argv:
               - /usr/bin/tar
               - --extract
               - --gzip
+              - --acls
+              - --xattrs
+              - --numeric-owner
               - --file
               - "{{ openclaw_isolated_gateway_backup_dir }}/{{ openclaw_isolated_gateway_backup_stamp }}/state.tar.gz"
               - --directory
@@ -550,47 +1143,31 @@
           changed_when: true
           no_log: true
 
-        - name: Remove failed first-run isolated Gateway artifacts
-          ansible.builtin.file:
-            path: "{{ item }}"
+        - name: Remove isolated release-builder account created by failed run
+          ansible.builtin.user:
+            name: "{{ openclaw_isolated_gateway_build_user }}"
             state: absent
-          loop:
-            - /etc/systemd/system/openclaw-isolated-gateway.service
-            - "{{ openclaw_isolated_gateway_config_dir }}"
-            - "{{ openclaw_isolated_gateway_state_dir }}"
-            - /usr/local/share/openclaw-isolated
-            - /usr/local/libexec/openclaw-isolated
-            - "{{ openclaw_isolated_gateway_runtime_dir }}"
-          when: >-
-            openclaw_isolated_gateway_existing_paths.results
-            | selectattr('stat.exists')
-            | list
-            | length == 0
+            remove: false
+          when: openclaw_isolated_gateway_existing_build_account.rc != 0
 
-        - name: Remove failed first-run isolated Gateway account
+        - name: Remove isolated release-builder group created by failed run
+          ansible.builtin.group:
+            name: "{{ openclaw_isolated_gateway_build_group }}"
+            state: absent
+          when: openclaw_isolated_gateway_existing_build_account.rc != 0
+
+        - name: Remove isolated Gateway account created by failed run
           ansible.builtin.user:
             name: "{{ openclaw_isolated_gateway_user }}"
             state: absent
             remove: false
-          when:
-            - >-
-              openclaw_isolated_gateway_existing_paths.results
-              | selectattr('stat.exists')
-              | list
-              | length == 0
-            - openclaw_isolated_gateway_existing_account.rc != 0
+          when: openclaw_isolated_gateway_existing_account.rc != 0
 
-        - name: Remove failed first-run isolated Gateway group
+        - name: Remove isolated Gateway group created by failed run
           ansible.builtin.group:
             name: "{{ openclaw_isolated_gateway_group }}"
             state: absent
-          when:
-            - >-
-              openclaw_isolated_gateway_existing_paths.results
-              | selectattr('stat.exists')
-              | list
-              | length == 0
-            - openclaw_isolated_gateway_existing_account.rc != 0
+          when: openclaw_isolated_gateway_existing_account.rc != 0
 
         - name: Reload systemd after isolated Gateway rollback
           ansible.builtin.systemd_service:

@@ -296,7 +296,7 @@ Packages are merged from multiple sources (all applicable variables combined):
 | `vm-storage-gate.yml` | `proxmox_nodes` | Per-VM start gate: hookscript blocks `qm start`/`pct start` if VM's declared host mountpoints aren't mounted. Per-VM declarations in `host_vars/<vm>/storage.yml` |
 | `openclaw.yml` | `openclaw_hosts` | OpenClaw AI agent (npm install, gateway service, repo-sync/update-check timers) |
 | `openclaw-health-receiver.yml` | `openclaw_hosts` | Isolated Health receiver and aggregate-only report publisher (disabled by default) |
-| `openclaw-isolated-gateway.yml` | `openclaw_hosts` | Two-phase deny-by-default Gateway canary with isolated OAuth enrollment and model proof (disabled by default) |
+| `openclaw-isolated-gateway.yml` | `openclaw_hosts` | Modernized two-phase Gateway canary with immutable core/provider releases, isolated OAuth enrollment, and model proof (disabled by default) |
 
 ## NFS Configuration
 
@@ -1046,9 +1046,12 @@ OpenClaw AI agent platform — personal homelab admin assistant via web UI and D
 - **Config**: `~/.openclaw/openclaw.json` + `.env` — manual, backed up by restic
 - **Timers**: repo-sync (5 min), update-check (daily 08:00 → Apprise)
 - **Playbook**: `ansible-playbook playbooks/agents/openclaw.yml` (opt-in via `openclaw_enabled`)
-- **Isolation canary**: A root-owned minimal runtime/config and hardened
-  `openclaw` system service are implemented but disabled. The attended canary
-  uses loopback port 19789 and does not stop or modify production.
+- **Isolation canary**: A hardened `openclaw` system service and modernized
+  release pipeline are implemented but disabled by default. A credential-less
+  ephemeral account resolves the stable core/provider pair with lifecycle
+  scripts disabled; root atomically promotes the immutable versioned release.
+  The attended canary uses loopback port 19789 and does not stop or modify
+  production. Existing canary infrastructure is currently stopped.
 - **Mem0 memory**: `@mem0/openclaw-mem0` plugin with Qdrant (localhost:6333), Gemini embeddings, and the configured OpenAI-compatible LLM for fact extraction. Auto-capture + auto-recall across sessions.
 - **dbc ops access**: Narrow host-specific wrappers, including result-only Immich Media Inbox access on docker-vm; no image, raw OCR, credential, SQLite, or general Docker access. Existing media-stack/Caddy operational paths remain separately scoped.
 - **Docker reporting**: A strict result-only reporter is implemented but remains disabled until the dedicated runtime identity and key are deployed. See `docs/openclaw-docker-access.md`.

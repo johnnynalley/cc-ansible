@@ -138,11 +138,40 @@
   },
   "plugins": {
     "allow": [
-      "openai"
+      "codex"
     ],
+    "load": {
+      "paths": [
+        {{ openclaw_isolated_gateway_codex_plugin_dir | to_json }}
+      ]
+    },
     "entries": {
-      "openai": {
-        "enabled": true
+      "codex": {
+        "enabled": true,
+        "hooks": {
+          "allowPromptInjection": false,
+          "allowConversationAccess": false
+        },
+        "config": {
+          "discovery": {
+            "enabled": false
+          },
+          "computerUse": {
+            "enabled": false,
+            "autoInstall": false
+          },
+          "codexPlugins": {
+            "enabled": false,
+            "allow_all_plugins": false,
+            "allow_destructive_actions": false
+          },
+          "appServer": {
+            "homeScope": "agent",
+            "approvalPolicy": "never",
+            "sandbox": "read-only",
+            "codeModeOnly": true
+          }
+        }
       }
     }
   }

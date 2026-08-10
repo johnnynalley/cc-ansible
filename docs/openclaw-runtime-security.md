@@ -18,14 +18,23 @@ The first deterministic boundaries are implemented but deliberately disabled:
 - `scripts/agents/health-summary.py` publishes only fixed daily aggregates.
 - `playbooks/agents/openclaw-isolated-gateway.yml` stages a parallel system
   service under the no-login `openclaw` account without stopping production.
+  A credential-less ephemeral build account resolves the current stable core
+  and Codex provider with package lifecycle scripts disabled. Root promotes
+  the validated pair into a versioned release and selects it through
+  `/opt/openclaw-isolated/current`.
 - `templates/openclaw/openclaw-isolated.json.j2` starts from a blank config:
-  one OpenAI model, a file-backed Gateway token, no channel, heartbeat, memory,
-  plugin-tool, delegation, filesystem, web, messaging, or execution surfaces.
+  one OpenAI model, an explicitly loaded root-managed Codex provider, a
+  file-backed Gateway token, no channel, heartbeat, memory, delegation,
+  filesystem, web, messaging, or execution surfaces. Provider prompt hooks,
+  conversation access, computer use, plugin loading, and destructive actions
+  are disabled.
 - `templates/openclaw/openclaw-isolated-gateway.service.j2` makes the runtime,
-  primary config, and workspace root-owned/read-only. The SecretRef payload is
-  service-owned mode `0400` because the current file provider requires the
-  running UID to own it. Only `/var/lib/openclaw-isolated` and the exact
-  service-owned `.last-good` config backup are writable inside the sandbox.
+  provider, primary config, and workspace root-owned/read-only. The SecretRef
+  payload is service-owned mode `0400` because the current file provider
+  requires the running UID to own it. Only data under
+  `/var/lib/openclaw-isolated` and the exact service-owned `.last-good` config
+  backup are writable inside the sandbox; the managed-plugin path inside that
+  state tree is a root-owned read-only sentinel.
 - The future `openclaw` Gateway identity will receive membership only in
   `openclaw-health-report`, which can read generated reports but cannot read the
   database, token, receiver configuration, or raw payloads.
@@ -33,9 +42,35 @@ The first deterministic boundaries are implemented but deliberately disabled:
 Two attended canary attempts were rolled back automatically on 2026-08-10: the
 first exposed and fixed the current file-provider ownership contract, and the
 second passed every infrastructure check before proving that the legacy
-OpenRouter fallback was unfunded. No canary account, unit, listener, or path
-remains active. Production was not stopped or modified. Inventory remains
-`disabled` outside attended bootstrap, canary, and cutover work.
+OpenRouter fallback was unfunded. A later infrastructure bootstrap passed with
+a dedicated account and loopback-only, boot-disabled service. The service is
+currently stopped, so the `johnny` production Gateway is the only running
+Gateway. The next bootstrap replaces the stopped canary's legacy global npm
+prefix and runtime-managed provider with the versioned release design above.
+Production was not stopped or modified. Inventory remains `disabled` outside
+attended bootstrap, canary, and cutover work.
+
+## Modernization Contract
+
+Behavior and data parity do not require legacy mechanism parity. Every
+discovered component must receive one explicit disposition:
+
+- **replace** with a current supported mechanism and prove equivalent required
+  behavior;
+- **retain** because it remains current, intentional, and inside the new trust
+  boundary;
+- **archive** outside active discovery paths with a manifest and restore proof;
+- **retire** because the capability is no longer wanted; or
+- **discard** only after proving that the artifact is generated junk with no
+  live references.
+
+The runtime layer already applies that rule: human-home global npm state,
+root-run package lifecycle scripts, service-writable provider code, copied
+OAuth refresh material, and the unfunded OpenRouter fallback are not migrated.
+They are replaced or retired. Stable-channel policy is retained, while each
+resolved core/provider pair is recorded as an immutable deployment artifact
+for rollback. Other agents, integrations, schedules, stores, and workspace
+artifacts remain subject to the same classification before production cutover.
 
 ## Gateway Canary Design
 
@@ -44,9 +79,19 @@ legacy config or `.env` would transfer Discord, GitHub, Home Assistant, Plex,
 Sonarr, Radarr, iCloud, image, and other credentials into the new account and
 would reproduce the current authority convergence.
 
-Instead, the playbook installs `openclaw@latest` into the root-owned
-`/opt/openclaw-isolated` prefix and generates only a dedicated Gateway token in
-`/etc/openclaw-isolated/secrets.json`. It imports nothing from the legacy broad
+Instead, the playbook creates a no-login `openclaw-build` account only for the
+duration of the run. That account receives no service credentials and must
+prove it cannot read the human home, vault password, Docker socket, active
+workspace, or canary secret. It resolves `openclaw@latest` and
+`@openclaw/codex@latest` with lifecycle scripts disabled, verifies the official
+package identities and build compatibility, stages the complete pair under
+`/opt/openclaw-isolated/releases`, and atomically promotes it. Root ownership
+then prevents the Gateway from changing executable code. The old global-prefix
+`bin` and `lib` layout and writable provider cache are removed after the
+rollback artifact exists.
+
+Only a dedicated Gateway token is generated in
+`/etc/openclaw-isolated/secrets.json`. Nothing is imported from the legacy broad
 environment. Production uses a current OpenAI OAuth profile whose refresh
 material is intentionally nonportable, so the dedicated identity receives a
 fresh device-code login rather than a copied token. The unfunded OpenRouter
@@ -67,20 +112,25 @@ The system service adds the effective boundary:
   inaccessibility for the Docker socket, controller repo, human home, Ansible,
   Docker state, and bulk data mounts;
 - pre-start assertions that the process can read but not write its primary
-  config or secret, can write its state and exact `.last-good` file, cannot
-  write the workspace, and cannot read the human home, Docker socket, vault
-  password, or controller guidance.
+  config or secret, can write its data state and exact `.last-good` file,
+  cannot write its release, provider, managed-plugin sentinel, or workspace,
+  and cannot read the human home, Docker socket, vault password, or controller
+  guidance.
 
 Both live modes require `openclaw_isolated_gateway_canary_approved: true` and
-take a root-only targeted backup of prior canary state. `canary-bootstrap`
-validates the config, token, listener, systemd properties, account groups, and
-authenticated health endpoint, then writes `.infrastructure-validated`. It
-leaves the loopback-only, boot-disabled service available for a fresh OpenAI
-device-code login. It does not claim model parity. After authentication,
-`canary` repeats every infrastructure check, requires the fixed-response model
-probe, and only then writes `.canary-validated`. Failure stops the canary and
-restores prior canary state; the production Gateway is never touched. This
-playbook deliberately has no production-cutover mode.
+take a root-only targeted backup of prior canary config, state, complete runtime
+root, support files, and unit. The stopped-state archive preserves ownership,
+ACLs, and extended attributes and must compare cleanly against its source before
+mutation begins. `canary-bootstrap` validates the release pair,
+explicit provider loading, config, token, listener, systemd properties,
+account groups, authenticated health endpoint, and absence of provider
+self-installation, then writes `.infrastructure-validated`. It leaves the
+loopback-only, boot-disabled service available for a fresh OpenAI device-code
+login. It does not claim model parity. After authentication, `canary` repeats
+every infrastructure check, requires the fixed-response model probe, and only
+then writes `.canary-validated`. Failure stops the canary and restores prior
+canary state; the production Gateway is never touched. This playbook
+deliberately has no production-cutover mode.
 
 ## Required Trust Boundaries
 
@@ -88,7 +138,7 @@ The final deployment must keep these principals separate:
 
 | Principal | May access | Must not access |
 | --- | --- | --- |
-| `openclaw` | Root-deployed behavior, its own writable runtime state, aggregate Health and Docker reports, explicitly scoped tools | sudo, Docker socket/group, human home, Ansible vault/SSH/Git credentials, raw Health data, active source writes |
+| `openclaw` | Root-deployed immutable runtime/provider/behavior, its own writable data state, aggregate Health and Docker reports, explicitly scoped tools | sudo, Docker socket/group, human home, Ansible vault/SSH/Git credentials, raw Health data, executable-code writes, active source writes |
 | `openclaw-health` | Health token, receiver configuration, raw Health SQLite database, aggregate report output | OpenClaw sessions/tools, Docker, sudo, controller credentials, network destinations other than its listener |
 | `openclaw-health-report` | Generated `yesterday.json` and `yesterday.md` only | Token, database, row-level records, source-device names, write access |
 | Docker reporter accounts | One fresh, redacted report through a forced SSH command | Docker socket, arbitrary SSH commands, environment/mount/log data, updates |
@@ -185,6 +235,9 @@ parallel Gateway canary proves all of the following:
 - generic host execution is denied by default;
 - active instructions, skills, plugins, hooks, and collectors are root-owned
   and read-only to the Gateway;
+- the core/provider pair was built without service credentials or lifecycle
+  scripts, loads only from the selected root-managed release, and does not
+  regenerate writable provider code;
 - writable memory/project facts cannot promote themselves into behavior;
 - session visibility and agent-to-agent delivery are scoped;
 - Discord routes have explicit sender authorization;
