@@ -189,6 +189,14 @@ class InboxTests(unittest.TestCase):
         self.assertEqual(payload["request"]["state"], "processing")
         self.assertEqual(self.seerr.request_calls, 0)
 
+    def test_starting_state_cannot_reuse_stale_completion_health(self) -> None:
+        self.store.set_meta("scan_completed_at", "2026-08-10T01:00:00+00:00")
+        self.store.set_meta("scan_state", "starting")
+        payload = self.inbox().status()
+        self.assertFalse(payload["healthy"])
+        self.assertEqual(payload["pipeline_version"], 0)
+        self.assertEqual(payload["expected_pipeline_version"], 2)
+
 
 if __name__ == "__main__":
     unittest.main()

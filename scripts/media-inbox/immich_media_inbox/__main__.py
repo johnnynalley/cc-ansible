@@ -32,6 +32,9 @@ def main() -> int:
         request_delay_ms=config.api_request_delay_ms,
     )
     scanner = Scanner(config, store, immich, seerr)
+    # Prevent a stale completion timestamp from making a restarted scanner look
+    # validated before its new process has entered and completed a scan cycle.
+    store.set_meta("scan_state", "starting")
     scanner.start()
     stopped = threading.Event()
 

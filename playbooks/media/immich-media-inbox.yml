@@ -398,13 +398,32 @@
       changed_when: false
       retries: 120
       delay: 5
-      until: immich_media_inbox_ready.rc == 0
+      until:
+        - immich_media_inbox_ready.rc == 0
+        - >-
+          (immich_media_inbox_ready.stdout | from_json).scan_state == 'idle'
+        - >-
+          (immich_media_inbox_ready.stdout | from_json).pipeline_version
+          ==
+          (
+            immich_media_inbox_ready.stdout
+            | from_json
+          ).expected_pipeline_version
       when: not ansible_check_mode
 
     - name: Validate review-only health policy
       ansible.builtin.assert:
         that:
           - (immich_media_inbox_ready.stdout | from_json).ok
+          - >-
+            (immich_media_inbox_ready.stdout | from_json).scan_state == 'idle'
+          - >-
+            (immich_media_inbox_ready.stdout | from_json).pipeline_version
+            ==
+            (
+              immich_media_inbox_ready.stdout
+              | from_json
+            ).expected_pipeline_version
           - not ((immich_media_inbox_ready.stdout | from_json).requests_enabled)
           - >-
             (immich_media_inbox_ready.stdout | from_json).allowed_visibilities

@@ -8,7 +8,7 @@ from typing import Any
 
 from .clients import ApiError, ImmichClient, SeerrClient
 from .config import Config
-from .scanner import Scanner
+from .scanner import PIPELINE_VERSION, Scanner
 from .scoring import extract_year
 from .store import Store
 
@@ -70,12 +70,15 @@ class Inbox:
     def status(self) -> dict[str, Any]:
         scan_state = self.store.get_meta("scan_state") or "starting"
         completed_at = self.store.get_meta("scan_completed_at")
+        pipeline_version = int(self.store.get_meta("pipeline_version") or "0")
         return {
             "schema": 1,
-            "healthy": scan_state != "error" and bool(completed_at),
+            "healthy": scan_state in {"idle", "running"} and bool(completed_at),
             "scan_state": scan_state,
             "scan_completed_at": completed_at,
             "full_crawl_completed_at": self.store.get_meta("full_crawl_completed_at"),
+            "pipeline_version": pipeline_version,
+            "expected_pipeline_version": PIPELINE_VERSION,
             "requests_enabled": self.config.requests_enabled,
             "allowed_visibilities": list(self.config.allowed_visibilities),
             "counts": self.store.stats(self.config.candidate_threshold),
