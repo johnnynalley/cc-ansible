@@ -146,6 +146,7 @@
         - name: Create least-privilege Immich Media Inbox API key
           ansible.builtin.command:
             argv:
+              - /usr/bin/python3
               - "{{ immich_media_inbox_bootstrap_helper }}"
               - --api-url
               - "{{ immich_media_inbox_bootstrap_api_url }}"
