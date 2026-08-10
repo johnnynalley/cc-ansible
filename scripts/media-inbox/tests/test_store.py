@@ -31,6 +31,23 @@ def completed_analysis() -> AnalysisResult:
     )
 
 
+def not_media_analysis() -> AnalysisResult:
+    return AnalysisResult(
+        decision="not_media",
+        media_type="unknown",
+        title=None,
+        year=None,
+        alternate_titles=(),
+        certainty="high",
+        evidence=(
+            Evidence("scene", "Only a generic application interface is visible"),
+        ),
+        summary="The candidate contains no movie or television reference.",
+        needs_cloud=False,
+        uncertainty_reasons=(),
+    )
+
+
 class StoreTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temporary = tempfile.TemporaryDirectory()
@@ -133,6 +150,20 @@ class StoreTests(unittest.TestCase):
         )
         self.assertFalse(self.store.ensure_pipeline_version(2))
 
+        self.store.record_local_analysis_error(
+            ASSET_ID,
+            "fixed transport contract",
+            maximum_attempts=1,
+            escalate=False,
+        )
+        self.assertEqual(self.store.candidate(ASSET_ID)["analysis_state"], "error")
+        self.assertTrue(self.store.ensure_pipeline_version(3))
+        self.store.prepare_analysis_queue(0.4)
+        retried = self.store.candidate(ASSET_ID)
+        self.assertEqual(retried["analysis_state"], "local_pending")
+        self.assertEqual(retried["analysis_attempts"], 0)
+        self.assertIsNone(retried["analysis_error"])
+
         self.store.upsert_asset(
             self.asset,
             [],
@@ -194,6 +225,23 @@ class StoreTests(unittest.TestCase):
         ]
         self.assertEqual(len(queue_updates), 3)
         self.assertEqual(self.store.stats(0.4)["local_pending"], 205)
+
+    def test_pipeline_bump_resets_only_automatic_not_media_dispositions(
+        self,
+    ) -> None:
+        self.insert_asset()
+        self.store.enqueue_local_analysis(ASSET_ID)
+        self.store.record_analysis(ASSET_ID, not_media_analysis(), provider="local")
+        self.assertEqual(self.store.candidate(ASSET_ID)["review_status"], "not_media")
+
+        self.assertTrue(self.store.ensure_pipeline_version(1))
+        self.assertEqual(self.store.candidate(ASSET_ID)["review_status"], "pending")
+
+        self.store.prepare_analysis_queue(0.4)
+        self.store.record_analysis(ASSET_ID, not_media_analysis(), provider="local")
+        self.store.set_status(ASSET_ID, "not_media", {"actor": "manual-review"})
+        self.assertTrue(self.store.ensure_pipeline_version(2))
+        self.assertEqual(self.store.candidate(ASSET_ID)["review_status"], "not_media")
 
     def test_queue_orders_large_ocr_rows_without_grouping_them_for_sort(self) -> None:
         large_ocr = "dialogue " * 131072

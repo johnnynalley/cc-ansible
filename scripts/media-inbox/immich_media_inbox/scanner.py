@@ -10,6 +10,7 @@ from typing import Any
 
 from .analysis import AnalysisResult
 from .clients import (
+    AnalysisInputError,
     AnalysisResponseError,
     ApiError,
     ImmichClient,
@@ -36,7 +37,7 @@ SMART_SEARCH_PROMPTS = (
     "a cinematic scene with subtitles",
     "a vertical video clip from a movie or television show",
 )
-PIPELINE_VERSION = 4
+PIPELINE_VERSION = 6
 
 
 def _parse_time(value: str | None) -> datetime | None:
@@ -358,11 +359,27 @@ class Scanner:
                     self.store.delete_asset(asset_id)
                     continue
                 image_bytes, _content_type = self.immich.get_preview(asset_id)
+            except ApiError as exc:
+                self.store.record_local_analysis_error(
+                    asset_id,
+                    str(exc),
+                    maximum_attempts=self.config.local_analysis_max_attempts,
+                    escalate=False,
+                )
+                LOGGER.warning(
+                    "candidate source retrieval failed for asset %s: %s",
+                    asset_id,
+                    exc,
+                )
+                errors += 1
+                continue
+
+            try:
                 result = self.ollama.analyze(
                     image_bytes,
                     str(candidate.get("ocr_text") or ""),
                 )
-            except AnalysisResponseError as exc:
+            except (AnalysisInputError, AnalysisResponseError) as exc:
                 self.store.record_local_analysis_error(
                     asset_id,
                     str(exc),
@@ -373,14 +390,21 @@ class Scanner:
                 escalated += 1
                 continue
             except ApiError as exc:
-                self.store.record_local_analysis_error(
+                state = self.store.record_local_analysis_error(
                     asset_id,
                     str(exc),
                     maximum_attempts=self.config.local_analysis_max_attempts,
                     escalate=False,
+                    escalate_on_exhaustion=True,
                 )
-                LOGGER.warning("local analysis failed for asset %s: %s", asset_id, exc)
-                errors += 1
+                LOGGER.warning(
+                    "local model analysis failed for asset %s: %s", asset_id, exc
+                )
+                if state == "cloud_pending":
+                    self.store.replace_matches(asset_id, [])
+                    escalated += 1
+                else:
+                    errors += 1
                 continue
 
             matches: list[RankedMatch] = []

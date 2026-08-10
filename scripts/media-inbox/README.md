@@ -5,11 +5,14 @@ movie and TV screenshots in Immich into a human-reviewed Seerr queue.
 
 ## Components
 
-- `immich_media_inbox/`: Python standard-library service. It incrementally
+- `immich_media_inbox/`: Python service with a single Pillow image-codec
+  dependency. It incrementally
   crawls stable Immich metadata, OCR, and Smart Search APIs; sends admitted
   candidates to isolated semantic vision; canonicalizes only model-selected
   titles through Seerr; stores review state in SQLite; and provides a strict
-  candidate-scoped CLI for Astra.
+  candidate-scoped CLI for Astra. Exhausted local-model transport retries
+  escalate to the cloud worker, while source/metadata transport failures remain
+  fail-closed.
 - `bootstrap-immich-api-key`: one-time helper that derives a narrowly scoped
   `asset.read` plus `asset.view` key from the existing Immich helper container.
   It first creates and verifies a fresh app-native database backup, refuses
@@ -22,8 +25,12 @@ movie and TV screenshots in Immich into a human-reviewed Seerr queue.
   the playbook has taken a standard `live-rollback-backup` copy.
 - `run-cloud-analysis`: bounded controller-side worker that claims only
   uncertain candidates, uses the explicit tool-less `openai/gpt-5.6-sol` image
-  route, submits strict JSON, and deletes its protected temporary image.
-- `tests/`: dependency-free unit and service-boundary tests.
+  route, submits strict JSON, and deletes its protected temporary image. A
+  provider failure ends the current drain so a requeued candidate cannot
+  consume multiple attempts in one timer invocation; journal diagnostics are
+  classified tokens and never raw provider, prompt, OCR, or image content.
+- `tests/`: unit and service-boundary tests, including the Immich WebP to
+  Ollama JPEG handoff.
 
 The service defaults to calibration mode (`REQUESTS_ENABLED=false`). It can
 classify and match assets, but it cannot submit a Seerr request until that flag

@@ -67,7 +67,10 @@ never chooses a movie or show title.
 
 For every admitted candidate:
 
-1. Immich supplies a preview plus ordered OCR to Qwen3-VL 2B.
+1. Immich supplies a preview plus ordered OCR to Qwen3-VL 2B. Immich 3.0.1
+   serves those previews as WebP, so the scanner converts each admitted
+   candidate in memory to a bounded high-quality JPEG before the local Ollama
+   call. No original-asset download permission is needed.
 2. The local model returns a strict semantic record: decision, movie/TV type,
    title, optional year, selected evidence, summary, certainty, and uncertainty
    reasons.
@@ -77,7 +80,10 @@ For every admitted candidate:
    locally.
 4. Ambiguity, lower certainty, scene/dialogue-only recognition, unknown media
    type, invalid structured output, or an explicit `needs_cloud` result enters
-   the cloud queue automatically. There is no per-image approval prompt.
+   the cloud queue automatically. A local model transport timeout retries once,
+   then also escalates. Immich source retrieval and Seerr metadata failures stay
+   fail-closed because GPT cannot repair missing source data or canonical
+   metadata. There is no per-image approval prompt.
 5. A timer on `jn-t14s-lin` claims only those queued candidates, exports one
    preview to a mode-`0600` private temporary directory, and invokes the
    tool-less `openai/gpt-5.6-sol` image route with high reasoning. The file is
@@ -105,8 +111,11 @@ configured with `cpu: host` so AVX, AVX2, and FMA are visible after a guest
 reboot. Qwen3-VL 2B Q4 is intentionally selected as the local filter because it
 fits the constrained VM better than the 4B variant.
 
-The Ollama service receives four CPU cores, a 3072 MB memory limit, one parallel
-request, one loaded model, and `OLLAMA_KEEP_ALIVE=0`. It has no NVIDIA device,
+The Ollama service receives four CPU cores, a 4096 MB memory limit, one parallel
+request, one loaded model, and `OLLAMA_KEEP_ALIVE=0`. The first live 3 GiB
+benchmark reached 99.7% of its cgroup and forced heavy swap I/O, so 4 GiB is the
+measured minimum with useful headroom rather than an inference-speed guess. The
+CPU client allows up to six minutes for one candidate. It has no NVIDIA device,
 no `/dev/dri` device, no host port, and no steady-state egress network. Ansible
 attaches a private, empty bridge only while pulling the selected model and
 removes it before candidate analysis begins. The Quadro P2200 and all of its
@@ -143,6 +152,11 @@ VRAM remain available to Plex transcoding.
   cloud-analysis broker.
 - The cloud worker specifies `openai/gpt-5.6-sol` explicitly and rejects a
   response envelope from any other provider/model route.
+- A provider failure stops that bounded worker run after requeueing the
+  candidate. Retries therefore occur on later timer invocations instead of
+  immediately consuming the same candidate's remaining attempts. The journal
+  records only a fixed diagnostic category or an opaque short fingerprint, not
+  raw provider output, OCR, prompts, or image data.
 - Its systemd sandbox exposes only OpenClaw state, the OpenClaw installation,
   and the controller SSH identity from Johnny's home. Other home content,
   controller configuration, Docker sockets, and bulk-data mounts are hidden.
@@ -173,6 +187,7 @@ and return `SQLITE_FULL` even when the host filesystem has ample free space.
 | Path | Owner | Purpose |
 | --- | --- | --- |
 | `/opt/immich-media-inbox/app` | Ansible, root | Python application |
+| `/opt/immich-media-inbox/app-image` | Ansible, root | Scanner Dockerfile with pinned candidate-preview codec |
 | `/opt/immich-media-inbox/data/media-inbox.sqlite3` | `immich-media-inbox` | Scan, analysis, matches, decisions, events |
 | `/opt/immich-media-inbox/ollama` | `immich-media-inbox` | Reproducible local model data |
 | `/opt/immich-media-inbox/secrets/immich_api_key` | `root:immich-media-inbox`, `0440` | Scoped Immich key |
@@ -224,8 +239,10 @@ credential mutation. Temporary helper/key material under
 
 ## Validation
 
-The playbook waits for one successful v4 scan cycle and asserts request-disabled
-timeline/archive policy. It also exercises the normal Astra SSH result path.
+The playbook waits up to 30 minutes for one successful v6 scan cycle, covering
+the incremental crawl plus two configured six-minute CPU inference timeouts,
+and asserts request-disabled timeline/archive policy. It also exercises the
+normal Astra SSH result path.
 
 Operator checks:
 
@@ -245,6 +262,33 @@ journalctl -u immich-media-inbox-cloud.service --since today
 The Ollama process list should be empty between requests because the model is
 unloaded immediately. Worker logs contain candidate IDs and state codes only,
 never OCR, model responses, or image paths.
+
+If Ollama returns HTTP 400 before inference and its log reports that it could
+not decode the image buffer, first verify the preview signature. Immich 3.0.1
+returns WebP even when `format=jpeg` or `Accept: image/jpeg` is supplied because
+the running thumbnail DTO supports only `size` and `edited`. Do not broaden the
+API key to original downloads as a workaround; the managed Pillow boundary
+must convert the candidate-only preview to JPEG, and the WebP regression test
+must pass before deployment.
+
+Keep the scanner image build inside the Docker Compose CLI's same
+`up --build` convergence operation that recreates the scanner. A build can
+replace the image tag while the old container still references its prior config
+digest; with Docker's containerd image store, an intervening Compose inventory
+then fails with `No such image: sha256:...`. Do not use the Ansible Compose
+module's `build: always` path here: that module internally builds and retags,
+then inventories project images before recreating the old container. Even a
+module call scoped to only the Ollama service performs that project-wide image
+inventory on the next run. The managed service lifecycle therefore uses direct,
+service-scoped `docker compose up` commands; the scanner command adds
+`--build` only when its managed Dockerfile changed, its explicit local image
+tag is missing, or a pull finds a newer `python:3.13-slim` base. Every such
+build forces scanner recreation in that same call; a no-change run never
+retags the image. Before convergence, the playbook also checks whether the
+running scanner's exact image object still exists and adds `--force-recreate`
+for a dangling reference or a normal managed config change. It then requires
+project image inventory to succeed, so a healthy container cannot silently
+remain attached to a deleted digest.
 
 ## Astra Commands
 

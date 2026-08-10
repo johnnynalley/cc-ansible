@@ -3,13 +3,17 @@
 from __future__ import annotations
 
 import base64
+import io
 import json
+import math
 import threading
 import time
 import urllib.error
 import urllib.parse
 import urllib.request
 from typing import Any
+
+from PIL import Image, UnidentifiedImageError
 
 from .analysis import (
     LOCAL_SYSTEM_PROMPT,
@@ -26,6 +30,56 @@ class ApiError(RuntimeError):
 
 class AnalysisResponseError(ApiError):
     """A reachable model returned content that violated the analysis contract."""
+
+
+class AnalysisInputError(ApiError):
+    """A candidate preview could not be prepared for local semantic vision."""
+
+
+OLLAMA_MAX_IMAGE_PIXELS = 4_000_000
+OLLAMA_MAX_IMAGE_EDGE = 2_048
+
+
+def prepare_ollama_image(image_bytes: bytes) -> bytes:
+    """Decode an Immich preview and return a bounded JPEG Ollama can consume."""
+
+    try:
+        with Image.open(io.BytesIO(image_bytes)) as source:
+            source.load()
+            image = source.convert("RGB")
+    except (Image.DecompressionBombError, UnidentifiedImageError, OSError) as exc:
+        raise AnalysisInputError(
+            "candidate preview could not be decoded for local vision"
+        ) from exc
+
+    width, height = image.size
+    if width < 1 or height < 1:
+        raise AnalysisInputError("candidate preview has invalid dimensions")
+    scale = min(
+        1.0,
+        OLLAMA_MAX_IMAGE_EDGE / max(width, height),
+        math.sqrt(OLLAMA_MAX_IMAGE_PIXELS / (width * height)),
+    )
+    if scale < 1.0:
+        image = image.resize(
+            (max(1, int(width * scale)), max(1, int(height * scale))),
+            Image.Resampling.LANCZOS,
+        )
+
+    output = io.BytesIO()
+    try:
+        image.save(
+            output,
+            format="JPEG",
+            quality=95,
+            subsampling=0,
+            optimize=True,
+        )
+    except OSError as exc:
+        raise AnalysisInputError(
+            "candidate preview could not be encoded for local vision"
+        ) from exc
+    return output.getvalue()
 
 
 class JsonClient:
@@ -225,7 +279,7 @@ class ImmichClient:
 
 
 class OllamaClient:
-    def __init__(self, base_url: str, model: str, *, timeout: int = 240) -> None:
+    def __init__(self, base_url: str, model: str, *, timeout: int = 360) -> None:
         self.model = model
         self.http = JsonClient(
             base_url.rstrip("/"),
@@ -238,6 +292,7 @@ class OllamaClient:
         image_bytes: bytes,
         ocr: str,
     ) -> AnalysisResult:
+        prepared_image = prepare_ollama_image(image_bytes)
         body = {
             "model": self.model,
             "messages": [
@@ -245,7 +300,7 @@ class OllamaClient:
                 {
                     "role": "user",
                     "content": analysis_prompt(ocr, provider="local"),
-                    "images": [base64.b64encode(image_bytes).decode("ascii")],
+                    "images": [base64.b64encode(prepared_image).decode("ascii")],
                 },
             ],
             "format": analysis_schema(),

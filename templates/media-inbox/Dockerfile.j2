@@ -1,0 +1,6 @@
+FROM {{ immich_media_inbox_scanner_base_image }}
+
+# Immich 3.0 previews are WebP, while the selected Ollama Qwen3-VL runner
+# accepts JPEG/PNG input. This pinned runtime dependency performs only the
+# in-memory candidate-preview conversion at that boundary.
+RUN python -m pip install --no-cache-dir "Pillow==12.3.0"

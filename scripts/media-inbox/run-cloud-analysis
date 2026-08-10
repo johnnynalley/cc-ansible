@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import base64
 import binascii
+import hashlib
 import json
 import os
 import re
@@ -24,9 +25,53 @@ MAX_MODEL_BYTES = 64 * 1024
 
 
 class WorkerError(RuntimeError):
-    def __init__(self, message: str, error_code: str) -> None:
+    def __init__(
+        self,
+        message: str,
+        error_code: str,
+        *,
+        diagnostic: str | None = None,
+    ) -> None:
         super().__init__(message)
         self.error_code = error_code
+        self.diagnostic = diagnostic
+
+
+def classify_provider_failure(stdout: str, stderr: str) -> str:
+    """Return a bounded diagnostic without emitting provider or prompt text."""
+    combined = f"{stderr}\n{stdout}".lower()
+    classifications = (
+        ("no_text", ("no text output returned",)),
+        (
+            "rate_limited",
+            ("rate limit", "too many requests", "status 429", " 429"),
+        ),
+        (
+            "authentication",
+            ("unauthorized", "authentication", "token expired", "status 401", " 401"),
+        ),
+        ("forbidden", ("forbidden", "status 403", " 403")),
+        ("context_limit", ("context_length", "context length", "too many tokens")),
+        ("image_rejected", ("unsupported image", "invalid image", "image could not")),
+        ("policy_rejected", ("moderation", "safety policy", "content policy")),
+        ("timeout", ("timed out", "timeout")),
+        (
+            "upstream_unavailable",
+            (
+                "server_error",
+                "internal server error",
+                "status 502",
+                "status 503",
+                "status 504",
+            ),
+        ),
+        ("request_rejected", ("invalid_request_error", "invalid request")),
+    )
+    for name, markers in classifications:
+        if any(marker in combined for marker in markers):
+            return name
+    digest = hashlib.sha256(combined.encode("utf-8", errors="replace")).hexdigest()[:12]
+    return f"unclassified_{digest}"
 
 
 def run_control(
@@ -203,12 +248,24 @@ def analyze_image(
             timeout=timeout,
             check=False,
         )
+    except subprocess.TimeoutExpired as exc:
+        raise WorkerError(
+            "vision provider invocation timed out",
+            "provider_error",
+            diagnostic="timeout",
+        ) from exc
     except (OSError, subprocess.SubprocessError) as exc:
         raise WorkerError(
-            "vision provider invocation failed", "provider_error"
+            "vision provider invocation failed",
+            "provider_error",
+            diagnostic="invocation_failed",
         ) from exc
     if result.returncode != 0:
-        raise WorkerError("vision provider returned an error", "provider_error")
+        raise WorkerError(
+            "vision provider returned an error",
+            "provider_error",
+            diagnostic=classify_provider_failure(result.stdout, result.stderr),
+        )
     return extract_model_payload(result.stdout, expected_model=model)
 
 
@@ -321,10 +378,15 @@ def main() -> int:
                     asset_id,
                     exc.error_code,
                 )
+            diagnostic = f" diagnostic={exc.diagnostic}" if exc.diagnostic else ""
             print(
-                f"candidate={asset_id} state={final_state} error={exc.error_code}",
+                f"candidate={asset_id} state={final_state} error={exc.error_code}"
+                f"{diagnostic}",
                 file=sys.stderr,
             )
+            # A failed claim can be requeued. Leave it for a later timer run so
+            # one transient provider incident consumes only one attempt.
+            break
     print(f"completed={completed}")
     return 0
 

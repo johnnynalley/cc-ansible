@@ -32,7 +32,9 @@ immich_media_inbox_smart_search_interval_hours: 24
 immich_media_inbox_ollama_image: ollama/ollama:latest
 immich_media_inbox_ollama_model: qwen3-vl:2b-instruct-q4_K_M
 immich_media_inbox_ollama_cpus: 4.0
-immich_media_inbox_ollama_memory: 3072m
+immich_media_inbox_ollama_memory: 4096m
+immich_media_inbox_scanner_image: immich-media-inbox-scanner:local
+immich_media_inbox_scanner_base_image: python:3.13-slim
 immich_media_inbox_analysis_batch_size: 2
 immich_media_inbox_local_analysis_max_attempts: 2
 immich_media_inbox_cloud_analysis_max_attempts: 3

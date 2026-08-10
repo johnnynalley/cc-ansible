@@ -148,6 +148,12 @@ class FakeOllama:
         return self.result
 
 
+class FailingPreviewImmich(FakeImmich):
+    def get_preview(self, asset_id: str) -> tuple[bytes, str]:
+        del asset_id
+        raise ApiError("Immich preview unavailable")
+
+
 class FakeSeerr:
     def __init__(self, results: dict[str, list[dict[str, Any]]] | None = None) -> None:
         self.results = results or {
@@ -299,7 +305,7 @@ class ScannerTests(unittest.TestCase):
             self.assertEqual(store.queue(status="pending", threshold=0.4), [])
             self.assertEqual(seerr.queries, [])
 
-    def test_invalid_model_output_escalates_but_transport_failure_retries(self) -> None:
+    def test_invalid_output_and_exhausted_model_transport_escalate(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             scanner, store, _immich, _seerr, _ollama = self.scanner(
                 temporary,
@@ -315,6 +321,25 @@ class ScannerTests(unittest.TestCase):
             scanner, store, _immich, _seerr, _ollama = self.scanner(
                 temporary,
                 ApiError("Ollama unavailable"),
+                attempts=2,
+            )
+            scanner._process_asset(dict(ASSET), source="metadata-crawl")
+            scanner._analyze_batch()
+            self.assertEqual(
+                store.candidate(ASSET["id"])["analysis_state"], "local_pending"
+            )
+            report = scanner._analyze_batch()
+            self.assertEqual(
+                store.candidate(ASSET["id"])["analysis_state"], "cloud_pending"
+            )
+            self.assertEqual(report["escalated"], 1)
+
+    def test_immich_source_failure_does_not_escalate_to_cloud(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            scanner, store, _immich, _seerr, _ollama = self.scanner(
+                temporary,
+                analysis("Unused"),
+                immich=FailingPreviewImmich(),
                 attempts=2,
             )
             scanner._process_asset(dict(ASSET), source="metadata-crawl")

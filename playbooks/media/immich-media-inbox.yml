@@ -95,6 +95,10 @@
           owner: root
           group: root
           mode: "0755"
+        - path: "{{ immich_media_inbox_root }}/app-image"
+          owner: root
+          group: root
+          mode: "0755"
         - path: "{{ immich_media_inbox_root }}/data"
           owner: "{{ immich_media_inbox_runtime_user }}"
           group: "{{ immich_media_inbox_runtime_group }}"
@@ -482,6 +486,17 @@
         label: "{{ item | basename }}"
       register: immich_media_inbox_app_deploy
 
+    - name: Deploy Immich Media Inbox application image source
+      ansible.builtin.template:
+        src: >-
+          {{ immich_media_inbox_repo_root
+             }}/templates/media-inbox/Dockerfile.j2
+        dest: "{{ immich_media_inbox_root }}/app-image/Dockerfile"
+        owner: root
+        group: root
+        mode: "0644"
+      register: immich_media_inbox_app_image_source
+
     - name: Find deployed Immich Media Inbox application modules
       ansible.builtin.find:
         paths: "{{ immich_media_inbox_root }}/app/immich_media_inbox"
@@ -562,12 +577,28 @@
       changed_when: false
       when: not ansible_check_mode
 
-    - name: Start isolated CPU-only Ollama runtime
-      community.docker.docker_compose_v2:
-        project_src: "{{ immich_media_inbox_root }}"
-        services:
+    - name: Start isolated CPU-only Ollama without project image inventory
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/docker
+          - compose
+          - up
+          - --detach
+          - --no-deps
           - ollama
-        state: present
+      args:
+        chdir: "{{ immich_media_inbox_root }}"
+      register: immich_media_inbox_ollama_up
+      changed_when: >-
+        ' Created' in
+        (immich_media_inbox_ollama_up.stdout
+         ~ immich_media_inbox_ollama_up.stderr)
+        or ' Starting' in
+        (immich_media_inbox_ollama_up.stdout
+         ~ immich_media_inbox_ollama_up.stderr)
+        or ' Recreate' in
+        (immich_media_inbox_ollama_up.stdout
+         ~ immich_media_inbox_ollama_up.stderr)
       when: not ansible_check_mode
 
     - name: Verify Ollama has no GPU or host device access
@@ -596,12 +627,12 @@
             in ['null', '[]']
           - >-
             immich_media_inbox_ollama_isolation.stdout.split('|')[2] | int
-            == 3221225472
+            == 4294967296
           - >-
             immich_media_inbox_ollama_isolation.stdout.split('|')[3] | int
             == 4000000000
         fail_msg: >-
-          Ollama must have zero GPU/device requests, a 3 GiB memory cap, and a
+          Ollama must have zero GPU/device requests, a 4 GiB memory cap, and a
           four-CPU quota before candidate analysis starts.
       when: not ansible_check_mode
 
@@ -665,18 +696,132 @@
           candidate image can be analyzed.
       when: not ansible_check_mode
 
-    - name: Start Immich Media Inbox
-      community.docker.docker_compose_v2:
-        project_src: "{{ immich_media_inbox_root }}"
-        state: present
-        recreate: >-
-          {{ 'always'
-             if (immich_media_inbox_app_deploy.changed
-                 or immich_media_inbox_retired_module_cleanup.changed
-                 or immich_media_inbox_bytecode_cleanup.changed
-                 or immich_media_inbox_compose_deploy.changed
-                 or (immich_media_inbox_seerr_export.changed | default(false)))
-             else 'auto' }}
+    - name: Refresh tracked Immich Media Inbox scanner base image
+      community.docker.docker_image:
+        name: "{{ immich_media_inbox_scanner_base_image }}"
+        source: pull
+        force_source: true
+      register: immich_media_inbox_scanner_base_pull
+      when: not ansible_check_mode
+
+    - name: Check managed Immich Media Inbox scanner image tag
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/docker
+          - image
+          - inspect
+          - "{{ immich_media_inbox_scanner_image }}"
+      register: immich_media_inbox_scanner_image_present
+      changed_when: false
+      failed_when: false
+      when: not ansible_check_mode
+
+    - name: Read current Immich Media Inbox scanner image reference
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/docker
+          - container
+          - inspect
+          - --format
+          - "{{ '{{.Image}}' }}"
+          - immich-media-inbox
+      register: immich_media_inbox_container_image
+      changed_when: false
+      failed_when: false
+      when: not ansible_check_mode
+
+    - name: Verify current scanner image object still exists
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/docker
+          - image
+          - inspect
+          - "{{ immich_media_inbox_container_image.stdout }}"
+      register: immich_media_inbox_container_image_present
+      changed_when: false
+      failed_when: false
+      when:
+        - not ansible_check_mode
+        - (immich_media_inbox_container_image.rc | default(1)) == 0
+
+    - name: Build and converge Immich Media Inbox without stale image inventory
+      ansible.builtin.command:
+        argv: >-
+          {{
+            [
+              '/usr/bin/docker',
+              'compose',
+              'up',
+              '--detach',
+              '--no-deps'
+            ]
+            + (
+                ['--build']
+                if (immich_media_inbox_build_required | bool)
+                else []
+              )
+            + (
+                ['--force-recreate']
+                if (immich_media_inbox_recreate_required | bool)
+                else []
+              )
+            + ['media-inbox']
+          }}
+      args:
+        chdir: "{{ immich_media_inbox_root }}"
+      vars:
+        immich_media_inbox_build_required: >-
+          {{
+            immich_media_inbox_app_image_source.changed
+            or immich_media_inbox_scanner_base_pull.changed
+            or (
+              (immich_media_inbox_scanner_image_present.rc | default(1))
+              != 0
+            )
+          }}
+        immich_media_inbox_recreate_required: >-
+          {{
+            immich_media_inbox_app_deploy.changed
+            or immich_media_inbox_retired_module_cleanup.changed
+            or immich_media_inbox_bytecode_cleanup.changed
+            or immich_media_inbox_app_image_source.changed
+            or immich_media_inbox_scanner_base_pull.changed
+            or (
+              (immich_media_inbox_scanner_image_present.rc | default(1))
+              != 0
+            )
+            or immich_media_inbox_compose_deploy.changed
+            or (immich_media_inbox_seerr_export.changed | default(false))
+            or (
+              (immich_media_inbox_container_image.rc | default(1)) == 0
+              and
+              (
+                immich_media_inbox_container_image_present.rc
+                | default(1)
+              ) != 0
+            )
+          }}
+      register: immich_media_inbox_up
+      changed_when: >-
+        ' Recreate' in
+        (immich_media_inbox_up.stdout ~ immich_media_inbox_up.stderr)
+        or ' Created' in
+        (immich_media_inbox_up.stdout ~ immich_media_inbox_up.stderr)
+        or ' Starting' in
+        (immich_media_inbox_up.stdout ~ immich_media_inbox_up.stderr)
+      when: not ansible_check_mode
+
+    - name: Verify converged Compose image inventory
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/docker
+          - compose
+          - images
+          - --format
+          - json
+      args:
+        chdir: "{{ immich_media_inbox_root }}"
+      changed_when: false
       when: not ansible_check_mode
 
     - name: Wait for a successful review-only scan cycle
@@ -696,7 +841,10 @@
         chdir: "{{ immich_media_inbox_root }}"
       register: immich_media_inbox_ready
       changed_when: false
-      retries: 120
+      # Two CPU-only candidates may each consume the configured six-minute
+      # model timeout after the incremental Immich crawl. Keep the rollout gate
+      # bounded, but large enough to observe that full valid cycle.
+      retries: 360
       delay: 5
       until:
         - immich_media_inbox_ready.rc == 0

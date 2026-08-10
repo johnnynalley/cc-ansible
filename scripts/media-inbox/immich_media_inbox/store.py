@@ -202,7 +202,17 @@ class Store:
                 connection.execute(
                     f"""
                     UPDATE assets
-                    SET analysis_state = 'unprocessed', analysis_media = NULL,
+                    SET review_status = CASE
+                            WHEN review_status = 'not_media'
+                             AND NOT EXISTS (
+                                SELECT 1 FROM events
+                                WHERE events.asset_id = assets.asset_id
+                                  AND events.event_type = 'status:not_media'
+                             )
+                            THEN 'pending'
+                            ELSE review_status
+                        END,
+                        analysis_state = 'unprocessed', analysis_media = NULL,
                         analysis_provider = NULL, analysis_result = NULL,
                         analysis_attempts = 0, cloud_analysis_attempts = 0,
                         analysis_updated_at = NULL,
@@ -473,6 +483,7 @@ class Store:
         *,
         maximum_attempts: int,
         escalate: bool,
+        escalate_on_exhaustion: bool = False,
     ) -> str:
         with self.connect() as connection:
             row = connection.execute(
@@ -482,8 +493,10 @@ class Store:
             if row is None:
                 raise KeyError(asset_id)
             attempts = int(row["analysis_attempts"] or 0) + 1
-            if escalate or attempts >= maximum_attempts:
-                state = "cloud_pending" if escalate else "error"
+            if escalate or (attempts >= maximum_attempts and escalate_on_exhaustion):
+                state = "cloud_pending"
+            elif attempts >= maximum_attempts:
+                state = "error"
             else:
                 state = "local_pending"
             connection.execute(

@@ -48,7 +48,11 @@ services:
       - model-runtime
 
   media-inbox:
-    image: python:3.13-slim
+    image: "{{ immich_media_inbox_scanner_image }}"
+    build:
+      context: ./app-image
+      dockerfile: Dockerfile
+      pull: true
     container_name: immich-media-inbox
     init: true
     restart: unless-stopped
