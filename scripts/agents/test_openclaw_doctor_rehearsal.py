@@ -45,7 +45,7 @@ class DoctorRehearsalTests(unittest.TestCase):
         )
         self.assertIn("--property=ProtectHome=tmpfs", playbook)
         self.assertNotIn("--property=ProtectHome=yes", playbook)
-        self.assertIn("--property=InaccessiblePaths=/home/johnny", playbook)
+        self.assertNotIn("--property=InaccessiblePaths=/home/johnny", playbook)
         self.assertIn("--property=RuntimeMaxSec=300s", playbook)
         self.assertIn("NPM_CONFIG_OFFLINE=true", playbook)
         self.assertIn("NPM_CONFIG_FETCH_RETRIES=0", playbook)

@@ -697,7 +697,6 @@
           - "--property=WorkingDirectory={{ openclaw_doctor_rehearsal_generation_config_dir }}"
           - "--property=ReadWritePaths={{ openclaw_doctor_rehearsal_generation_state }}"
           - "--property=ReadWritePaths={{ openclaw_doctor_rehearsal_generation_config_dir }}"
-          - --property=InaccessiblePaths=/home/johnny
           - --property=InaccessiblePaths=/var/lib/openclaw-migration-rehearsal
           - --property=InaccessiblePaths=/usr/local/share/openclaw-migration-rehearsal
           - --property=InaccessiblePaths=/var/run/docker.sock
