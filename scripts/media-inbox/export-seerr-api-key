@@ -1,0 +1,109 @@
+#!/usr/bin/env python3
+"""Export Seerr's existing API key to a protected file without printing it."""
+
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import sys
+import tempfile
+from pathlib import Path
+
+
+def parse_mode(value: str) -> int:
+    try:
+        mode = int(value, 8)
+    except ValueError:
+        raise argparse.ArgumentTypeError("mode must be an octal number") from None
+    if not 0 <= mode <= 0o777:
+        raise argparse.ArgumentTypeError("mode must be between 0000 and 0777")
+    return mode
+
+
+def load_key(settings_path: Path) -> str:
+    try:
+        settings = json.loads(settings_path.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        raise RuntimeError(f"Seerr settings file is missing: {settings_path}") from None
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise RuntimeError("Seerr settings are not valid UTF-8 JSON") from exc
+    key = str((settings.get("main") or {}).get("apiKey") or "").strip()
+    if not key:
+        raise RuntimeError("Seerr settings do not contain main.apiKey")
+    return key
+
+
+def secure_owner(path: Path, uid: int, gid: int, mode: int) -> None:
+    os.chmod(path, mode)
+    os.chown(path, uid if uid >= 0 else -1, gid if gid >= 0 else -1)
+
+
+def write_atomic(path: Path, value: str, uid: int, gid: int, mode: int) -> None:
+    temporary_name = ""
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            encoding="utf-8",
+            dir=path.parent,
+            prefix=f".{path.name}.",
+            delete=False,
+        ) as temporary:
+            temporary_name = temporary.name
+            temporary.write(value + "\n")
+            temporary.flush()
+            os.fsync(temporary.fileno())
+        secure_owner(Path(temporary_name), uid, gid, mode)
+        os.replace(temporary_name, path)
+        temporary_name = ""
+    finally:
+        if temporary_name:
+            Path(temporary_name).unlink(missing_ok=True)
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--settings", type=Path, default=Path("/opt/seerr/config/settings.json")
+    )
+    parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--uid", type=int, default=-1)
+    parser.add_argument("--gid", type=int, default=-1)
+    parser.add_argument("--mode", type=parse_mode, default=0o440)
+    parser.add_argument("--check", action="store_true")
+    parser.add_argument("--allow-replace", action="store_true")
+    return parser.parse_args()
+
+
+def main() -> int:
+    args = parse_args()
+    key = load_key(args.settings)
+    args.output.parent.mkdir(parents=True, exist_ok=True, mode=0o750)
+    if args.output.exists():
+        existing = args.output.read_text(encoding="utf-8").strip()
+        if existing == key:
+            if not args.check:
+                secure_owner(args.output, args.uid, args.gid, args.mode)
+            print("changed=false")
+            return 0
+        if args.check:
+            print("changed=true existing=true")
+            return 0
+        if not args.allow_replace:
+            raise RuntimeError(
+                "the exported Seerr key changed; take a live rollback backup and rerun with --allow-replace"
+            )
+    elif args.check:
+        print("changed=true existing=false")
+        return 0
+    write_atomic(args.output, key, args.uid, args.gid, args.mode)
+    print("changed=true")
+    return 0
+
+
+if __name__ == "__main__":
+    try:
+        sys.exit(main())
+    except RuntimeError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        sys.exit(1)

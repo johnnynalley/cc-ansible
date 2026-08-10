@@ -43,6 +43,12 @@ docker_stacks:
     path: /opt/seerr
     build: false
     auto_update: true
+  - name: immich-media-inbox
+    path: /opt/immich-media-inbox
+    build: false
+    auto_update: true
+    compose_template: media-inbox/docker-compose.yml.j2
+    compose_mode: "0600"
   - name: cloudflared
     path: /opt/cloudflared
     build: false

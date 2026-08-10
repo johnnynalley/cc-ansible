@@ -46,6 +46,7 @@ settings into a broad catch-all file when a concern-specific file exists.
 | VirtioFS | `host_vars/<proxmox-node>/virtiofs.yml`, `host_vars/<vm>/virtiofs.yml` | `playbooks/storage/virtiofs.yml` | `templates/proxmox/` |
 | Windows tuning | `host_vars/lj-gaming-pc/*.yml` | `playbooks/windows/` | `templates/windows/`, `scripts/gaming/` |
 | Streaming | `host_vars/media-vm/stream-relay.yml` | `playbooks/media/stream-relay.yml` | `docs/streaming-runbook.md`, `templates/streaming/`, `scripts/streaming/` |
+| Immich media inbox | `host_vars/docker-vm/immich-media-inbox.yml` | `playbooks/media/immich-media-inbox.yml` | `docs/immich-media-inbox.md`, Astra skill, `templates/media-inbox/`, `scripts/media-inbox/` |
 | Media release policy | `host_vars/docker-vm/*release*`, `host_vars/docker-vm/nightly-media-maintenance.yml` | `playbooks/media/media-release-stamper.yml`, `playbooks/media/nightly-media-maintenance.yml` | `docs/media-release-policy.md`, `scripts/media-release/` |
 | Storage pools and shares | `group_vars/nas_server/`, `host_vars/ts440/` | `playbooks/storage/` | `templates/storage/`, `templates/samba/`, `scripts/storage/` |
 | Agent services | `host_vars/*/codex.yml`, `host_vars/*/openclaw.yml` | `playbooks/agents/` | `templates/openclaw/`, `docs/openclaw-heartbeats.md` |

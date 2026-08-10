@@ -18,6 +18,7 @@ audits, controlled repairs, and deployment support.
 
 - `docker/`: Docker stack update helpers.
 - `gaming/`: Capture and frame-time analysis helpers.
+- `media-inbox/`: Immich OCR/Smart Search screenshot review service, credential bootstrap/export helpers, and tests.
 - `media-maintenance/`: Overnight maintenance coordinators.
 - `media-release/`: Sonarr, Radarr, Profilarr, and release-policy tools.
 - `repo/`: Repository layout and cross-reference audit helpers.

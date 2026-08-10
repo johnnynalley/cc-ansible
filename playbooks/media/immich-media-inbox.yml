@@ -1,0 +1,430 @@
+---
+# Purpose: Deploy the private Immich screenshot movie/TV review queue.
+# Hosts: docker_hosts (explicit opt-in with immich_media_inbox_enabled).
+# Key vars: immich_media_inbox_*.
+# Templates: templates/media-inbox.
+# Scripts: scripts/media-inbox.
+# Validation: ansible-playbook playbooks/media/immich-media-inbox.yml
+#             --syntax-check.
+
+- name: Configure Immich Media Inbox
+  hosts: docker_hosts
+  become: true
+  gather_facts: false
+  serial: 1
+
+  vars:
+    immich_media_inbox_bootstrap_api_key: false
+    immich_media_inbox_bootstrap_work_dir: /run/immich-media-inbox-bootstrap
+    immich_media_inbox_repo_root: "{{ ansible_config_file | dirname }}"
+    immich_media_inbox_bootstrap_helper: >-
+      {{ immich_media_inbox_bootstrap_work_dir }}/bootstrap-immich-api-key
+    immich_media_inbox_bootstrap_secret_path: >-
+      {{ immich_media_inbox_bootstrap_work_dir }}/immich_api_key
+    immich_media_inbox_bootstrap_metadata_path: >-
+      {{ immich_media_inbox_bootstrap_work_dir }}/immich_api_key.json
+
+  tasks:
+    - name: Skip hosts without Immich Media Inbox enabled
+      ansible.builtin.meta: end_host
+      when: not (immich_media_inbox_enabled | default(false) | bool)
+
+    - name: Validate Immich Media Inbox safety settings
+      ansible.builtin.assert:
+        that:
+          - immich_media_inbox_allowed_visibilities | length > 0
+          - "'locked' not in immich_media_inbox_allowed_visibilities"
+          - "'hidden' not in immich_media_inbox_allowed_visibilities"
+          - not (immich_media_inbox_requests_enabled | bool)
+          - immich_media_inbox_runtime_uid | int > 0
+          - immich_media_inbox_runtime_gid | int > 0
+        fail_msg: >-
+          Initial deployment must remain review-only and exclude hidden/locked
+          Immich assets. Change that policy only as a separately reviewed
+          rollout.
+
+    - name: Ensure Immich Media Inbox runtime group exists
+      ansible.builtin.group:
+        name: "{{ immich_media_inbox_runtime_group }}"
+        gid: "{{ immich_media_inbox_runtime_gid }}"
+        system: true
+        state: present
+
+    - name: Ensure Immich Media Inbox runtime user exists
+      ansible.builtin.user:
+        name: "{{ immich_media_inbox_runtime_user }}"
+        uid: "{{ immich_media_inbox_runtime_uid }}"
+        group: "{{ immich_media_inbox_runtime_group }}"
+        system: true
+        create_home: false
+        home: /nonexistent
+        shell: /usr/sbin/nologin
+        password_lock: true
+        state: present
+
+    - name: Ensure Immich Media Inbox directories exist
+      ansible.builtin.file:
+        path: "{{ item.path }}"
+        state: directory
+        owner: "{{ item.owner }}"
+        group: "{{ item.group }}"
+        mode: "{{ item.mode }}"
+      loop:
+        - path: "{{ immich_media_inbox_root }}"
+          owner: root
+          group: root
+          mode: "0755"
+        - path: "{{ immich_media_inbox_root }}/app"
+          owner: root
+          group: root
+          mode: "0755"
+        - path: "{{ immich_media_inbox_root }}/data"
+          owner: "{{ immich_media_inbox_runtime_user }}"
+          group: "{{ immich_media_inbox_runtime_group }}"
+          mode: "0750"
+        - path: "{{ immich_media_inbox_root }}/secrets"
+          owner: root
+          group: "{{ immich_media_inbox_runtime_group }}"
+          mode: "0750"
+        - path: "{{ immich_media_inbox_root }}/tools"
+          owner: root
+          group: root
+          mode: "0700"
+      loop_control:
+        label: "{{ item.path }}"
+
+    - name: Check for the scoped Immich API key
+      ansible.builtin.stat:
+        path: "{{ immich_media_inbox_root }}/secrets/immich_api_key"
+      register: immich_media_inbox_immich_secret
+
+    - name: Explain skipped API key bootstrap in check mode
+      ansible.builtin.debug:
+        msg: >-
+          The scoped Immich API key is absent. Check mode will not create or
+          transfer credentials; an applied bootstrap requires the explicit
+          bootstrap flag and creates a fresh app-native database backup first.
+      when:
+        - ansible_check_mode
+        - not immich_media_inbox_immich_secret.stat.exists
+
+    - name: Bootstrap a scoped Immich API key
+      when:
+        - not ansible_check_mode
+        - not immich_media_inbox_immich_secret.stat.exists
+      block:
+        - name: Require explicit authorization for Immich key creation
+          ansible.builtin.assert:
+            that:
+              - immich_media_inbox_bootstrap_api_key | bool
+            fail_msg: >-
+              The Immich key is absent. Rerun with the explicit
+              immich_media_inbox_bootstrap_api_key=true extra var. The scoped
+              helper will create and verify an app-native database backup
+              before it creates the key.
+
+        - name: Create temporary Immich key bootstrap directory
+          ansible.builtin.file:
+            path: "{{ immich_media_inbox_bootstrap_work_dir }}"
+            state: directory
+            owner: root
+            group: root
+            mode: "0700"
+          delegate_to: "{{ immich_media_inbox_bootstrap_host }}"
+
+        - name: Copy temporary Immich key bootstrap helper
+          ansible.builtin.copy:
+            src: >-
+              {{ immich_media_inbox_repo_root
+                 }}/scripts/media-inbox/bootstrap-immich-api-key
+            dest: "{{ immich_media_inbox_bootstrap_helper }}"
+            owner: root
+            group: root
+            mode: "0700"
+          delegate_to: "{{ immich_media_inbox_bootstrap_host }}"
+
+        - name: Create least-privilege Immich Media Inbox API key
+          ansible.builtin.command:
+            argv:
+              - "{{ immich_media_inbox_bootstrap_helper }}"
+              - --api-url
+              - "{{ immich_media_inbox_bootstrap_api_url }}"
+              - --source-container
+              - "{{ immich_media_inbox_bootstrap_container }}"
+              - --name
+              - "{{ immich_media_inbox_bootstrap_key_name }}"
+              - --output
+              - "{{ immich_media_inbox_bootstrap_secret_path }}"
+              - --metadata-output
+              - "{{ immich_media_inbox_bootstrap_metadata_path }}"
+              - --require-new-backup
+              - --backup-timeout
+              - "600"
+          delegate_to: "{{ immich_media_inbox_bootstrap_host }}"
+          no_log: true
+
+        - name: Read newly created Immich API key for protected transfer
+          ansible.builtin.slurp:
+            src: "{{ immich_media_inbox_bootstrap_secret_path }}"
+          delegate_to: "{{ immich_media_inbox_bootstrap_host }}"
+          register: immich_media_inbox_bootstrap_secret
+          no_log: true
+
+        - name: Read Immich API key metadata for rollback
+          ansible.builtin.slurp:
+            src: "{{ immich_media_inbox_bootstrap_metadata_path }}"
+          delegate_to: "{{ immich_media_inbox_bootstrap_host }}"
+          register: immich_media_inbox_bootstrap_metadata
+          no_log: true
+
+        - name: Install scoped Immich API key
+          ansible.builtin.copy:
+            # yamllint disable-line rule:line-length
+            content: "{{ immich_media_inbox_bootstrap_secret.content | b64decode }}"
+            dest: "{{ immich_media_inbox_root }}/secrets/immich_api_key"
+            owner: root
+            group: "{{ immich_media_inbox_runtime_group }}"
+            mode: "0440"
+          no_log: true
+
+        - name: Install Immich API key rollback metadata
+          ansible.builtin.copy:
+            # yamllint disable-line rule:line-length
+            content: "{{ immich_media_inbox_bootstrap_metadata.content | b64decode }}"
+            dest: "{{ immich_media_inbox_root }}/secrets/immich_api_key.json"
+            owner: root
+            group: root
+            mode: "0600"
+          no_log: true
+      always:
+        - name: Remove temporary Immich key bootstrap material
+          ansible.builtin.file:
+            path: "{{ immich_media_inbox_bootstrap_work_dir }}"
+            state: absent
+          delegate_to: "{{ immich_media_inbox_bootstrap_host }}"
+          when: not ansible_check_mode
+
+    - name: Recheck the scoped Immich API key
+      ansible.builtin.stat:
+        path: "{{ immich_media_inbox_root }}/secrets/immich_api_key"
+      register: immich_media_inbox_immich_secret_after
+      when: not ansible_check_mode
+
+    - name: Require the scoped Immich API key before deployment
+      ansible.builtin.assert:
+        that:
+          - immich_media_inbox_immich_secret_after.stat.exists
+          - immich_media_inbox_immich_secret_after.stat.isreg
+        fail_msg: "The scoped Immich API key was not installed."
+      when: not ansible_check_mode
+
+    - name: Deploy Seerr API key export helper
+      ansible.builtin.copy:
+        src: >-
+          {{ immich_media_inbox_repo_root
+             }}/scripts/media-inbox/export-seerr-api-key
+        dest: "{{ immich_media_inbox_root }}/tools/export-seerr-api-key"
+        owner: root
+        group: root
+        mode: "0700"
+
+    - name: Check whether the protected Seerr key export changed
+      ansible.builtin.command:
+        argv:
+          - "{{ immich_media_inbox_root }}/tools/export-seerr-api-key"
+          - --settings
+          - /opt/seerr/config/settings.json
+          - --output
+          - "{{ immich_media_inbox_root }}/secrets/seerr_api_key"
+          - --uid
+          - "0"
+          - --gid
+          - "{{ immich_media_inbox_runtime_gid | string }}"
+          - --mode
+          - "0440"
+          - --check
+      register: immich_media_inbox_seerr_export_check
+      changed_when: false
+      no_log: true
+      when: not ansible_check_mode
+
+    - name: Check for an existing protected Seerr key export
+      ansible.builtin.stat:
+        path: "{{ immich_media_inbox_root }}/secrets/seerr_api_key"
+      register: immich_media_inbox_seerr_secret
+
+    - name: Verify live rollback storage before Seerr key rotation
+      ansible.builtin.command: mountpoint -q /srv/live-rollbacks
+      changed_when: false
+      when:
+        - not ansible_check_mode
+        - immich_media_inbox_seerr_secret.stat.exists
+        - "'changed=true' in immich_media_inbox_seerr_export_check.stdout"
+
+    - name: Back up prior Seerr key export before rotation
+      ansible.builtin.command:
+        argv:
+          - /usr/local/sbin/live-rollback-backup
+          - --domain
+          - media-inbox
+          - --name
+          - seerr-api-key-rotation
+          - --path
+          - "{{ immich_media_inbox_root }}/secrets/seerr_api_key"
+      register: immich_media_inbox_seerr_backup
+      changed_when: true
+      when:
+        - not ansible_check_mode
+        - immich_media_inbox_seerr_secret.stat.exists
+        - "'changed=true' in immich_media_inbox_seerr_export_check.stdout"
+
+    - name: Export Seerr API key to protected mount file
+      ansible.builtin.command:
+        argv:
+          - "{{ immich_media_inbox_root }}/tools/export-seerr-api-key"
+          - --settings
+          - /opt/seerr/config/settings.json
+          - --output
+          - "{{ immich_media_inbox_root }}/secrets/seerr_api_key"
+          - --uid
+          - "0"
+          - --gid
+          - "{{ immich_media_inbox_runtime_gid | string }}"
+          - --mode
+          - "0440"
+          - --allow-replace
+      register: immich_media_inbox_seerr_export
+      changed_when: >-
+        'changed=true' in immich_media_inbox_seerr_export.stdout
+      no_log: true
+      when: not ansible_check_mode
+
+    - name: Deploy Immich Media Inbox application
+      ansible.builtin.copy:
+        src: >-
+          {{ immich_media_inbox_repo_root
+             }}/scripts/media-inbox/immich_media_inbox/
+        dest: "{{ immich_media_inbox_root }}/app/immich_media_inbox/"
+        owner: root
+        group: root
+        mode: preserve
+        directory_mode: "0755"
+
+    - name: Remove generated Python bytecode from deployed application
+      ansible.builtin.file:
+        path: >-
+          {{ immich_media_inbox_root
+             }}/app/immich_media_inbox/__pycache__
+        state: absent
+
+    - name: Deploy Astra result-only command wrapper
+      ansible.builtin.template:
+        src: >-
+          {{ immich_media_inbox_repo_root
+             }}/templates/media-inbox/immich-media-inbox-cli.sh.j2
+        dest: /usr/local/sbin/immich-media-inbox
+        owner: root
+        group: root
+        mode: "0755"
+
+    # Sudoers command specifications cannot be folded across physical lines.
+    # yamllint disable rule:line-length
+    - name: Allow dbc to run only the Immich Media Inbox wrapper
+      ansible.builtin.copy:
+        dest: /etc/sudoers.d/immich-media-inbox-dbc
+        owner: root
+        group: root
+        mode: "0440"
+        validate: "visudo -cf %s"
+        content: |
+          # Astra result-only media inbox access. The root-owned wrapper
+          # validates every dynamic argument before invoking Docker.
+          dbc ALL=(root) NOPASSWD: /usr/local/sbin/immich-media-inbox status
+          dbc ALL=(root) NOPASSWD: /usr/local/sbin/immich-media-inbox list
+          dbc ALL=(root) NOPASSWD: /usr/local/sbin/immich-media-inbox list *
+          dbc ALL=(root) NOPASSWD: /usr/local/sbin/immich-media-inbox show *
+          dbc ALL=(root) NOPASSWD: /usr/local/sbin/immich-media-inbox search *
+          dbc ALL=(root) NOPASSWD: /usr/local/sbin/immich-media-inbox set-status *
+          dbc ALL=(root) NOPASSWD: /usr/local/sbin/immich-media-inbox request *
+    # yamllint enable rule:line-length
+
+    - name: Deploy Immich Media Inbox Compose file
+      ansible.builtin.template:
+        src: >-
+          {{ immich_media_inbox_repo_root
+             }}/templates/media-inbox/docker-compose.yml.j2
+        dest: "{{ immich_media_inbox_root }}/docker-compose.yml"
+        owner: root
+        group: root
+        mode: "0600"
+        validate: "/usr/bin/docker compose -f %s config --quiet"
+
+    - name: Ensure caddy-proxy Docker network exists
+      ansible.builtin.command: docker network inspect caddy-proxy
+      changed_when: false
+      when: not ansible_check_mode
+
+    - name: Start Immich Media Inbox
+      community.docker.docker_compose_v2:
+        project_src: "{{ immich_media_inbox_root }}"
+        state: present
+      when: not ansible_check_mode
+
+    - name: Wait for a successful review-only scan cycle
+      ansible.builtin.command:
+        argv:
+          - docker
+          - compose
+          - exec
+          - -T
+          - media-inbox
+          - python
+          - -m
+          - immich_media_inbox.cli
+          - status
+          - --healthcheck
+      args:
+        chdir: "{{ immich_media_inbox_root }}"
+      register: immich_media_inbox_ready
+      changed_when: false
+      retries: 120
+      delay: 5
+      until: immich_media_inbox_ready.rc == 0
+      when: not ansible_check_mode
+
+    - name: Validate review-only health policy
+      ansible.builtin.assert:
+        that:
+          - (immich_media_inbox_ready.stdout | from_json).ok
+          - not ((immich_media_inbox_ready.stdout | from_json).requests_enabled)
+          - >-
+            (immich_media_inbox_ready.stdout | from_json).allowed_visibilities
+            | sort == ['archive', 'timeline']
+      when: not ansible_check_mode
+
+    - name: Exercise Astra result-only SSH path
+      ansible.builtin.command:
+        argv:
+          - ssh
+          - -o
+          - BatchMode=yes
+          - -o
+          - ConnectTimeout=8
+          - "{{ immich_media_inbox_astra_ssh_target }}"
+          - >-
+            sudo -n /usr/local/sbin/immich-media-inbox list --limit 1
+      delegate_to: "{{ immich_media_inbox_astra_controller }}"
+      become: false
+      register: immich_media_inbox_astra_result
+      changed_when: false
+      when: not ansible_check_mode
+
+    - name: Verify Astra output contains results but no source content
+      ansible.builtin.assert:
+        that:
+          - (immich_media_inbox_astra_result.stdout | from_json).ok
+          - "'ocr_text' not in immich_media_inbox_astra_result.stdout"
+          - "'filename' not in immich_media_inbox_astra_result.stdout"
+          - "'thumbnail' not in immich_media_inbox_astra_result.stdout"
+          - "'api_key' not in immich_media_inbox_astra_result.stdout"
+      when: not ansible_check_mode

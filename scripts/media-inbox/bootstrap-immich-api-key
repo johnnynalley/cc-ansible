@@ -1,0 +1,267 @@
+#!/usr/bin/env python3
+"""Create one scoped Immich API key without emitting either key to stdout."""
+
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import subprocess
+import sys
+import tempfile
+import time
+import urllib.error
+import urllib.request
+from pathlib import Path
+from typing import Any
+
+PERMISSIONS = ("asset.read",)
+
+
+def api_request(
+    api_url: str,
+    source_key: str,
+    method: str,
+    path: str,
+    body: dict[str, Any] | None = None,
+) -> Any:
+    data = json.dumps(body).encode("utf-8") if body is not None else None
+    headers = {"x-api-key": source_key, "Accept": "application/json"}
+    if data is not None:
+        headers["Content-Type"] = "application/json"
+    request = urllib.request.Request(
+        f"{api_url.rstrip('/')}{path}",
+        data=data,
+        headers=headers,
+        method=method,
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=30) as response:
+            payload = response.read()
+            return json.loads(payload.decode("utf-8")) if payload else None
+    except urllib.error.HTTPError as exc:
+        # Immich error bodies are deliberately omitted. This helper's output
+        # must remain safe even if an upstream response echoes request data.
+        raise RuntimeError(
+            f"Immich {method} {path} failed with HTTP {exc.code}"
+        ) from None
+    except urllib.error.URLError as exc:
+        raise RuntimeError(f"Immich {method} {path} failed: {exc.reason}") from None
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise RuntimeError(f"Immich {method} {path} returned invalid JSON") from exc
+
+
+def source_key_from_container(container: str, environment_name: str) -> str:
+    try:
+        result = subprocess.run(
+            ["docker", "exec", container, "printenv", environment_name],
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise RuntimeError(
+            "could not read the bootstrap key from the Immich helper container"
+        ) from exc
+    key = result.stdout.strip()
+    if not key:
+        raise RuntimeError(
+            "the Immich helper container returned an empty bootstrap key"
+        )
+    return key
+
+
+def write_atomic(path: Path, value: str, mode: int) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    if path.exists():
+        raise RuntimeError(f"refusing to overwrite existing output: {path}")
+    temporary_name = ""
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            encoding="utf-8",
+            dir=path.parent,
+            prefix=f".{path.name}.",
+            delete=False,
+        ) as temporary:
+            temporary_name = temporary.name
+            os.fchmod(temporary.fileno(), mode)
+            temporary.write(value)
+            temporary.flush()
+            os.fsync(temporary.fileno())
+        os.replace(temporary_name, path)
+        temporary_name = ""
+    finally:
+        if temporary_name:
+            Path(temporary_name).unlink(missing_ok=True)
+
+
+def revoke_created_key(api_url: str, source_key: str, key_id: str) -> None:
+    api_request(api_url, source_key, "DELETE", f"/api-keys/{key_id}")
+
+
+def backup_items(response: Any) -> list[dict[str, Any]]:
+    if isinstance(response, dict):
+        response = response.get("backups") or []
+    if not isinstance(response, list):
+        return []
+    return [item for item in response if isinstance(item, dict)]
+
+
+def create_verified_database_backup(
+    api_url: str,
+    source_key: str,
+    *,
+    timeout: int,
+) -> dict[str, Any]:
+    before = backup_items(
+        api_request(api_url, source_key, "GET", "/admin/database-backups")
+    )
+    previous_names = {str(item.get("filename") or "") for item in before}
+    api_request(
+        api_url,
+        source_key,
+        "POST",
+        "/jobs",
+        {"name": "backup-database"},
+    )
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        time.sleep(2)
+        current = backup_items(
+            api_request(api_url, source_key, "GET", "/admin/database-backups")
+        )
+        for item in current:
+            filename = str(item.get("filename") or "")
+            try:
+                filesize = int(item.get("filesize") or 0)
+            except (TypeError, ValueError):
+                filesize = 0
+            if filename and filename not in previous_names and filesize > 0:
+                return {
+                    "filename": filename,
+                    "filesize": filesize,
+                    "timezone": item.get("timezone"),
+                }
+    raise RuntimeError("timed out waiting for a new verified Immich database backup")
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--api-url", default="http://127.0.0.1:2283/api")
+    parser.add_argument("--source-container", default="immich_folder_album_creator")
+    parser.add_argument("--source-env", default="API_KEY")
+    parser.add_argument("--name", default="immich-media-inbox")
+    parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--metadata-output", type=Path, required=True)
+    parser.add_argument("--require-new-backup", action="store_true")
+    parser.add_argument("--backup-timeout", type=int, default=600)
+    return parser.parse_args()
+
+
+def main() -> int:
+    args = parse_args()
+    if args.output == args.metadata_output:
+        raise RuntimeError("secret and metadata outputs must be different paths")
+    if args.output.exists() or args.metadata_output.exists():
+        raise RuntimeError("refusing to run because an output path already exists")
+
+    source_key = source_key_from_container(args.source_container, args.source_env)
+    keys = list(api_request(args.api_url, source_key, "GET", "/api-keys") or [])
+    duplicate = next((item for item in keys if item.get("name") == args.name), None)
+    if duplicate:
+        duplicate_id = str(duplicate.get("id") or "unknown")
+        raise RuntimeError(
+            f"Immich API key {args.name!r} already exists (id={duplicate_id}); "
+            "refusing to create an unrecoverable duplicate"
+        )
+
+    rollback_backup = None
+    if args.require_new_backup:
+        if not 30 <= args.backup_timeout <= 3600:
+            raise RuntimeError("backup timeout must be between 30 and 3600 seconds")
+        rollback_backup = create_verified_database_backup(
+            args.api_url,
+            source_key,
+            timeout=args.backup_timeout,
+        )
+    response = api_request(
+        args.api_url,
+        source_key,
+        "POST",
+        "/api-keys",
+        {"name": args.name, "permissions": list(PERMISSIONS)},
+    )
+    api_key = (response or {}).get("apiKey") or {}
+    key_id = str(api_key.get("id") or "")
+    secret = str((response or {}).get("secret") or "")
+    if not key_id or not secret:
+        if not key_id:
+            created_keys = list(
+                api_request(args.api_url, source_key, "GET", "/api-keys") or []
+            )
+            created = next(
+                (item for item in created_keys if item.get("name") == args.name), None
+            )
+            key_id = str((created or {}).get("id") or "")
+        if key_id:
+            revoke_created_key(args.api_url, source_key, key_id)
+            raise RuntimeError(
+                "Immich returned an incomplete key response; the created key was revoked"
+            )
+        raise RuntimeError(
+            "Immich returned an incomplete key response and the created key "
+            "could not be identified for revocation"
+        )
+
+    try:
+        current = api_request(args.api_url, secret, "GET", "/api-keys/me") or {}
+        actual_permissions = tuple(
+            sorted(str(item) for item in current.get("permissions") or [])
+        )
+        if actual_permissions != tuple(sorted(PERMISSIONS)):
+            raise RuntimeError(
+                "the new Immich key did not receive the exact requested permissions"
+            )
+        metadata = {
+            "id": key_id,
+            "name": str(api_key.get("name") or args.name),
+            "permissions": list(PERMISSIONS),
+            "createdAt": api_key.get("createdAt"),
+            "rollbackBackup": rollback_backup,
+        }
+        write_atomic(args.output, secret + "\n", 0o600)
+        write_atomic(
+            args.metadata_output,
+            json.dumps(metadata, sort_keys=True, indent=2) + "\n",
+            0o600,
+        )
+    except Exception as exc:
+        args.output.unlink(missing_ok=True)
+        args.metadata_output.unlink(missing_ok=True)
+        try:
+            revoke_created_key(args.api_url, source_key, key_id)
+        except Exception as revoke_exc:
+            raise RuntimeError(
+                f"failed to persist the new key and could not revoke key id={key_id}: {revoke_exc}"
+            ) from exc
+        raise RuntimeError(
+            "failed to persist the new key; the created key was revoked"
+        ) from exc
+
+    backup_note = (
+        f" after backup {rollback_backup['filename']}" if rollback_backup else ""
+    )
+    print(
+        f"created Immich API key id={key_id} with scoped metadata/OCR read permission{backup_note}"
+    )
+    return 0
+
+
+if __name__ == "__main__":
+    try:
+        sys.exit(main())
+    except RuntimeError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        sys.exit(1)

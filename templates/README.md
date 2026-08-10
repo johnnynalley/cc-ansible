@@ -21,6 +21,7 @@ service units, scripts, Docker Compose files, and host-side helper files.
 - `freepbx/`: FreePBX support templates.
 - `gluetun/`: Gluetun and qBittorrent port-sync templates.
 - `logging/`: Alloy/Loki centralized logging templates.
+- `media-inbox/`: Headless Immich screenshot review service and Astra wrapper templates.
 - `media-maintenance/`: Nightly media maintenance units and clients.
 - `motd/`: Custom Linux MOTD templates.
 - `network/`: Network recovery watchdog templates.

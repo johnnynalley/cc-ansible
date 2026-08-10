@@ -1,0 +1,87 @@
+#!/bin/bash
+# Managed by Ansible. Result-only command boundary for Astra.
+set -euo pipefail
+
+readonly APP_COMPOSE_FILE="{{ immich_media_inbox_root }}/docker-compose.yml"
+readonly ASSET_ID_RE='^[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}$'
+readonly BASE64URL_RE='^[A-Za-z0-9_-]{1,400}$'
+
+export PATH=/usr/bin:/bin
+unset DOCKER_HOST DOCKER_CONTEXT DOCKER_CONFIG DOCKER_CERT_PATH DOCKER_TLS_VERIFY
+unset COMPOSE_FILE COMPOSE_PROFILES COMPOSE_PROJECT_NAME COMPOSE_PATH_SEPARATOR
+unset COMPOSE_IGNORE_ORPHANS COMPOSE_PARALLEL_LIMIT COMPOSE_STATUS_STDOUT
+unset COMPOSE_ANSI COMPOSE_PROGRESS PYTHONPATH PYTHONHOME
+
+fail() {
+  echo '{"ok":false,"error":"invalid command arguments"}' >&2
+  exit 2
+}
+
+require_asset_id() {
+  [[ "$1" =~ $ASSET_ID_RE ]] || fail
+}
+
+[[ $# -ge 1 ]] || fail
+readonly ORIGINAL_ARGS=("$@")
+case "$1" in
+  status)
+    [[ $# -eq 1 ]] || fail
+    ;;
+  list)
+    shift
+    while [[ $# -gt 0 ]]; do
+      case "$1" in
+        --status)
+          [[ $# -ge 2 ]] || fail
+          [[ "$2" =~ ^(pending|ignored|not_media|requested|available|error)$ ]] || fail
+          shift 2
+          ;;
+        --limit)
+          [[ $# -ge 2 ]] || fail
+          [[ "$2" =~ ^[0-9]+$ ]] || fail
+          (( 10#$2 >= 1 && 10#$2 <= 50 )) || fail
+          shift 2
+          ;;
+        *) fail ;;
+      esac
+    done
+    ;;
+  show)
+    [[ $# -eq 2 ]] || fail
+    require_asset_id "$2"
+    ;;
+  search)
+    [[ $# -eq 3 ]] || fail
+    require_asset_id "$2"
+    [[ "$3" =~ $BASE64URL_RE ]] || fail
+    ;;
+  set-status)
+    [[ $# -eq 3 ]] || fail
+    require_asset_id "$2"
+    [[ "$3" =~ ^(pending|ignored|not_media)$ ]] || fail
+    ;;
+  request)
+    [[ $# -ge 4 ]] || fail
+    require_asset_id "$2"
+    [[ "$3" =~ ^(movie|tv)$ ]] || fail
+    [[ "$4" =~ ^[1-9][0-9]*$ ]] || fail
+    shift 4
+    while [[ $# -gt 0 ]]; do
+      case "$1" in
+        --season)
+          [[ $# -ge 2 ]] || fail
+          [[ "$2" =~ ^[1-9][0-9]*$ ]] || fail
+          shift 2
+          ;;
+        --confirm|--confirm-ambiguous)
+          shift
+          ;;
+        *) fail ;;
+      esac
+    done
+    ;;
+  *) fail ;;
+esac
+
+exec /usr/bin/docker compose -f "$APP_COMPOSE_FILE" exec -T media-inbox \
+  python -m immich_media_inbox.cli "${ORIGINAL_ARGS[@]}"

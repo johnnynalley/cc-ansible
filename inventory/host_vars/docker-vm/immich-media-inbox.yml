@@ -1,0 +1,37 @@
+---
+# Immich screenshot -> reviewed Seerr request queue.
+immich_media_inbox_enabled: true
+immich_media_inbox_root: /opt/immich-media-inbox
+immich_media_inbox_runtime_user: immich-media-inbox
+immich_media_inbox_runtime_group: immich-media-inbox
+immich_media_inbox_runtime_uid: 65532
+immich_media_inbox_runtime_gid: 65532
+
+immich_media_inbox_immich_api_url: http://100.66.6.113:2283/api
+immich_media_inbox_immich_web_url: https://photos.jnalley.me
+immich_media_inbox_seerr_api_url: http://seerr:5055/api/v1
+immich_media_inbox_astra_controller: jn-t14s-lin
+immich_media_inbox_astra_ssh_target: dbc@100.108.254.100
+
+# Calibration is intentionally review-only. Enable requests only after the
+# candidate and title-match precision has been measured through Astra's inbox.
+immich_media_inbox_requests_enabled: false
+immich_media_inbox_allowed_visibilities:
+  - timeline
+  - archive
+
+immich_media_inbox_scan_interval_seconds: 300
+immich_media_inbox_scan_batch_size: 250
+immich_media_inbox_api_request_delay_ms: 75
+immich_media_inbox_candidate_threshold: 0.40
+immich_media_inbox_auto_match_threshold: 0.55
+immich_media_inbox_smart_search_size: 100
+immich_media_inbox_smart_search_interval_hours: 24
+
+# One-time bootstrap source on media-vm. The playbook still requires the
+# explicit immich_media_inbox_bootstrap_api_key=true extra var. The helper must
+# create and verify a fresh app-native Immich database backup before the key.
+immich_media_inbox_bootstrap_host: media-vm
+immich_media_inbox_bootstrap_container: immich_folder_album_creator
+immich_media_inbox_bootstrap_api_url: http://127.0.0.1:2283/api
+immich_media_inbox_bootstrap_key_name: immich-media-inbox

@@ -1,6 +1,6 @@
 # CC-Ansible
 
-> **Last updated:** 2026-05-26
+> **Last updated:** 2026-08-09
 
 Ansible automation for Johnny's homelab infrastructure (4 Proxmox nodes, VMs/LXCs, flat T14s Ansible controller/server, Raspberry Pi Plex appliance, Windows gaming workstation, and MacBook).
 
@@ -40,6 +40,7 @@ Source-of-truth docs currently include:
 - [docs/capture-card-streaming-plan.md](docs/capture-card-streaming-plan.md)
 - [docs/fortnite-performance-investigation.md](docs/fortnite-performance-investigation.md)
 - [docs/gaming-benchmark.md](docs/gaming-benchmark.md)
+- [docs/immich-media-inbox.md](docs/immich-media-inbox.md)
 - [docs/media-release-policy.md](docs/media-release-policy.md)
 - [docs/openclaw-heartbeats.md](docs/openclaw-heartbeats.md)
 - [docs/plex-appliance-operations.md](docs/plex-appliance-operations.md)
@@ -271,6 +272,7 @@ Packages are merged from multiple sources (all applicable variables combined):
 | `filesystem-mounts.yml` | `linux_hosts` | Local filesystem mounts (NTFS, exFAT) |
 | `samba.yml` | `linux_hosts` | Samba shares + Time Machine (ts440 + pve-herc) |
 | `docker-stacks.yml` | `docker_hosts` | Deploy Docker Compose stacks and the managed Caddyfile (per-service update reporting with version diffs) |
+| `immich-media-inbox.yml` | `docker_hosts` (opt-in) | Deploy Astra's headless Immich screenshot movie/TV review queue |
 | `gluetun-watchdog.yml` | media-vm | Gluetun VPN crash loop detection, port forwarding monitoring, auto-restart, and qBittorrent port sync |
 | `stream-relay.yml` | media-vm | OBS SRT ingest, Quadro NVENC encode, reliable local fanout, platform RTMP workers, and VOD delivery |
 | `plex-server-health.yml` | media-vm, `nas_server` | Plex identity, guest VirtioFS, host virtiofsd, VM 100, and scrub-window sentinel |

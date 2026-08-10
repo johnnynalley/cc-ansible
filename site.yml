@@ -153,6 +153,10 @@
   ansible.builtin.import_playbook: playbooks/proxmox/proxmox-boot-order.yml
   tags: [proxmox, boot-order]
 
+- name: Configure Immich screenshot media inbox
+  ansible.builtin.import_playbook: playbooks/media/immich-media-inbox.yml
+  tags: [immich, media-inbox]
+
 - name: Deploy Docker Compose stacks
   ansible.builtin.import_playbook: playbooks/docker/docker-stacks.yml
   tags: [docker, stacks]
