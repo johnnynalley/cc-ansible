@@ -1,0 +1,196 @@
+# Purpose: Install a disabled-by-default, approval-gated Docker update broker.
+# Hosts: docker_hosts.
+# Key vars: openclaw_docker_update_broker_*.
+# Templates: templates/docker/openclaw-docker-update-manifest.json.j2.
+# Scripts: scripts/docker/openclaw-docker-update-broker.py.
+# Validation: ansible-playbook
+# playbooks/docker/openclaw-docker-update-broker.yml --syntax-check.
+
+---
+- name: Configure OpenClaw Docker update broker
+  hosts: docker_hosts
+  become: true
+  gather_facts: false
+  serial: 1
+
+  vars:
+    openclaw_docker_update_broker_sudoers_path: >-
+      /etc/sudoers.d/openclaw-docker-update-broker
+    openclaw_docker_update_broker_binary: >-
+      /usr/local/sbin/openclaw-docker-update-broker
+
+  tasks:
+    - name: Revoke OpenClaw Docker update SSH access when disabled
+      ansible.builtin.file:
+        path: >-
+          {{ openclaw_docker_update_broker_home |
+             default('/var/lib/openclaw-docker-update-request')
+          }}/.ssh/authorized_keys
+        state: absent
+      when: not (openclaw_docker_update_broker_enabled | default(false) | bool)
+
+    - name: Revoke OpenClaw Docker update sudo access when disabled
+      ansible.builtin.file:
+        path: "{{ openclaw_docker_update_broker_sudoers_path }}"
+        state: absent
+      when: not (openclaw_docker_update_broker_enabled | default(false) | bool)
+
+    - name: Skip hosts without OpenClaw Docker update broker enabled
+      ansible.builtin.meta: end_host
+      when: not (openclaw_docker_update_broker_enabled | default(false) | bool)
+
+    - name: Require explicit OpenClaw Docker update rollout approval
+      ansible.builtin.assert:
+        that:
+          - >-
+            openclaw_docker_update_broker_rollout_approved |
+            default(false) | bool
+          - >-
+            openclaw_docker_update_broker_authorized_keys |
+            default([]) | length > 0
+          - >-
+            openclaw_docker_update_broker_source_cidrs |
+            default([]) | length > 0
+          - openclaw_docker_update_broker_targets | default({}) | length > 0
+        fail_msg: >-
+          Enabling the OpenClaw Docker update broker requires explicit rollout
+          approval, a dedicated key, exact source CIDRs, and at least one
+          reviewed service target.
+
+    - name: Validate dedicated OpenClaw Docker update keys
+      ansible.builtin.assert:
+        that:
+          - item is match('^ssh-ed25519 [A-Za-z0-9+/=]+( [^\r\n]+)?$')
+          - item | length <= 1024
+        fail_msg: "Only bounded dedicated Ed25519 public keys are accepted."
+      loop: "{{ openclaw_docker_update_broker_authorized_keys }}"
+      no_log: true
+
+    - name: Validate OpenClaw Docker update source CIDRs
+      ansible.builtin.assert:
+        that:
+          - item is match('^[0-9A-Fa-f:.]+/[0-9]{1,3}$')
+          - item | length <= 64
+        fail_msg: "Each update source must be an explicit IPv4 or IPv6 CIDR."
+      loop: "{{ openclaw_docker_update_broker_source_cidrs }}"
+
+    - name: Validate OpenClaw Docker update target IDs
+      ansible.builtin.assert:
+        that:
+          - item.key is match('^[a-z0-9][a-z0-9_.-]{0,127}$')
+          - item.value.projectDir is match('^/opt/[A-Za-z0-9._/-]+$')
+          - item.value.composeFiles | length > 0
+          - >-
+            item.value.composeFiles |
+            difference(item.value.backupFiles) | length == 0
+          - item.value.service in item.value.recreateServices
+          - item.value.service in item.value.verifyServices
+          - item.value.healthTimeoutSeconds | int >= 10
+          - item.value.healthTimeoutSeconds | int <= 1800
+        fail_msg: >-
+          Update targets must use an opaque ID, an /opt project, explicit
+          Compose/backup files, fixed service sets, and a bounded health
+          timeout.
+      loop: "{{ openclaw_docker_update_broker_targets | dict2items }}"
+      loop_control:
+        label: "{{ item.key }}"
+
+    - name: Create OpenClaw Docker update group
+      ansible.builtin.group:
+        name: "{{ openclaw_docker_update_broker_group }}"
+        system: true
+
+    - name: Create OpenClaw Docker update request account
+      ansible.builtin.user:
+        name: "{{ openclaw_docker_update_broker_user }}"
+        group: "{{ openclaw_docker_update_broker_group }}"
+        groups: ""
+        append: false
+        shell: /bin/sh
+        system: true
+        create_home: false
+        home: "{{ openclaw_docker_update_broker_home }}"
+        comment: "Forced-command client for approval-gated Docker updates"
+        password: >-
+          {{ lookup('pipe', 'openssl rand -base64 48') |
+             password_hash('sha512') }}
+        update_password: on_create
+
+    - name: Create OpenClaw Docker update directories
+      ansible.builtin.file:
+        path: "{{ item.path }}"
+        state: directory
+        owner: "{{ item.owner }}"
+        group: "{{ item.group }}"
+        mode: "{{ item.mode }}"
+      loop:
+        - path: "{{ openclaw_docker_update_broker_home }}"
+          owner: root
+          group: root
+          mode: "0755"
+        - path: "{{ openclaw_docker_update_broker_home }}/.ssh"
+          owner: root
+          group: root
+          mode: "0755"
+        - path: "{{ openclaw_docker_update_broker_state_dir }}"
+          owner: root
+          group: root
+          mode: "0700"
+        - path: "{{ openclaw_docker_update_broker_config_dir }}"
+          owner: root
+          group: root
+          mode: "0700"
+
+    - name: Deploy OpenClaw Docker update broker
+      ansible.builtin.copy:
+        src: >-
+          {{ ansible_config_file | dirname
+          }}/scripts/docker/openclaw-docker-update-broker.py
+        dest: "{{ openclaw_docker_update_broker_binary }}"
+        owner: root
+        group: root
+        mode: "0755"
+
+    - name: Render root-owned OpenClaw Docker update manifest
+      ansible.builtin.template:
+        src: >-
+          {{ ansible_config_file | dirname
+          }}/templates/docker/openclaw-docker-update-manifest.json.j2
+        dest: "{{ openclaw_docker_update_broker_config_dir }}/manifest.json"
+        owner: root
+        group: root
+        mode: "0600"
+
+    - name: Install root-owned forced-command update keys
+      ansible.builtin.copy:
+        dest: "{{ openclaw_docker_update_broker_home }}/.ssh/authorized_keys"
+        owner: root
+        group: root
+        mode: "0644"
+        # yamllint disable rule:line-length
+        content: |
+          {% for key in openclaw_docker_update_broker_authorized_keys %}
+          restrict,command="/usr/bin/sudo -n {{ openclaw_docker_update_broker_binary }} request",from="{{ openclaw_docker_update_broker_source_cidrs | join(',') }}" {{ key }}
+          {% endfor %}
+        # yamllint enable rule:line-length
+
+    - name: Install exact OpenClaw Docker update sudo rule
+      ansible.builtin.copy:
+        dest: "{{ openclaw_docker_update_broker_sudoers_path }}"
+        owner: root
+        group: root
+        mode: "0440"
+        validate: /usr/sbin/visudo -cf %s
+        # yamllint disable rule:line-length
+        content: |
+          Defaults:{{ openclaw_docker_update_broker_user }} !setenv
+          Defaults:{{ openclaw_docker_update_broker_user }} secure_path=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+          {{ openclaw_docker_update_broker_user }} ALL=(root) NOPASSWD: {{ openclaw_docker_update_broker_binary }} request
+        # yamllint enable rule:line-length
+
+    - name: Validate installed OpenClaw Docker update broker
+      ansible.builtin.command:
+        argv:
+          - "{{ openclaw_docker_update_broker_binary }}"
+          - validate
+      changed_when: false

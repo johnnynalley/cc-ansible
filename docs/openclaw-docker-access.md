@@ -61,18 +61,51 @@ remains owned by the existing auto-update and Diun workflows.
 
 ## Update Boundary
 
-The read-only reporter does not update containers. A future update broker must
-be a separate root-owned service with all of these properties:
+The read-only reporter does not update containers. The separately managed
+`playbooks/docker/openclaw-docker-update-broker.yml` implementation is also
+disabled by default. It gives the isolated Gateway only a forced-command SSH
+request interface; it does not give the Gateway Docker, sudo, shell, or Compose
+access.
+
+The broker enforces these properties:
 
 - Astra may create a proposal, but may not approve or alter the accepted plan.
 - Approval occurs outside the Gateway trust boundary through a human/Codex or
   dedicated operator path.
-- The broker accepts a short-lived, content-addressed plan for an allowlisted
-  host, stack, and service; free-form compose arguments are rejected.
+- The broker accepts only strict JSON with `propose`, `status`, or `execute`
+  plus one opaque target or plan ID. Paths, image references, service names,
+  Compose arguments, health checks, and backup files cannot come from Astra.
+- A root-owned inventory manifest maps an opaque target ID to one Compose
+  service transaction. Unknown fields, path traversal, multiple container
+  replicas, missing image digests, stale plans, runtime drift, configuration
+  drift, and candidate-tag drift are rejected.
+- Proposal creation pulls the allowlisted service image into the local cache,
+  but cannot recreate a container. It records the current and candidate image
+  IDs/digests in a short-lived content-addressed plan.
+- Only a local root/operator command can approve that exact plan. Approval is
+  short-lived, stored outside the request account's access, and consumed before
+  the first execution attempt. Astra cannot call the approve or reject paths.
 - It captures the relevant compose/config rollback artifact, applies the exact
-  approved image change, runs service-specific health checks, and rolls back on
-  failure.
+  approved digest through a generated Compose override, runs fixed
+  service-specific health checks, and recreates the previous locally tagged
+  image on failure.
+- Plans are one-use. A process interruption after execution starts leaves the
+  transaction in `executing` for operator recovery rather than replaying it.
 - It returns a bounded result document and never returns secrets or raw logs.
+
+The operator flow, after a broker proposal is independently reviewed, is:
+
+```bash
+sudo openclaw-docker-update-broker show PLAN_ID
+sudo openclaw-docker-update-broker approve PLAN_ID
+# Astra may now send the one-use execute request before approval expires.
+sudo openclaw-docker-update-broker reject PLAN_ID
+```
+
+Approval must compare the exact target, current image, candidate digest,
+version/revision evidence, and expected downtime. A registry image remains
+untrusted code: digest pinning prevents tag movement between approval and
+execution, but it cannot make a compromised upstream image safe.
 
 Do not expose `/usr/local/sbin/docker-auto-update`, the Docker socket, Portainer,
 or the existing broad `dbc` helpers directly to Astra as an update mechanism.
@@ -87,16 +120,24 @@ or the existing broad `dbc` helpers directly to Astra as an update mechanism.
    source CIDR, enable the reporter, and canary one Docker host.
 4. Verify the report schema, forced-command rejection, source restriction,
    timer health, and absence of every secret sentinel before estate rollout.
-5. Design and separately approve the immutable update broker.
+5. Populate one reviewed service target and a separate update-request key, then
+   canary the broker only after a distinct owner approval.
+6. Verify proposal redaction, approval separation, digest/config drift
+   rejection, health failure rollback, replay rejection, and root-only audit
+   artifacts before adding another target or host.
 
 ## Validation
 
 ```bash
 python3 scripts/docker/test_openclaw_docker_report.py
+python3 scripts/docker/test_openclaw_docker_update_broker.py
 shellcheck scripts/docker/openclaw-docker-report-cat
 ansible-playbook playbooks/docker/openclaw-docker-report.yml --syntax-check
 ansible-playbook playbooks/docker/openclaw-docker-report.yml --check --diff
+ansible-playbook playbooks/docker/openclaw-docker-update-broker.yml --syntax-check
+ansible-playbook playbooks/docker/openclaw-docker-update-broker.yml --check --diff
 ```
 
-The default check run must leave all hosts disabled and must not provision a
-key, account, timer, report, or Docker access path.
+The default check runs must leave all hosts disabled and must not provision a
+key, account, timer, report, broker target, proposal, credential, or Docker
+access path.

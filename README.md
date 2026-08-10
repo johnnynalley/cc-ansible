@@ -280,6 +280,7 @@ Packages are merged from multiple sources (all applicable variables combined):
 | `plex-server-health.yml` | media-vm, `nas_server` | Plex identity, guest VirtioFS, host virtiofsd, VM 100, and scrub-window sentinel |
 | `docker-auto-update.yml` | `docker_hosts` | Auto-update selected containers every 6h with major version guard |
 | `openclaw-docker-report.yml` | `docker_hosts` | Publish a redacted result-only Docker inventory for a future dedicated OpenClaw identity (disabled by default) |
+| `openclaw-docker-update-broker.yml` | `docker_hosts` | Install a digest-bound, separately approved service update broker for the isolated OpenClaw identity (disabled by default) |
 | `virtiofs.yml` | `proxmox_nodes`, `vms` | Configure VirtioFS shares between Proxmox hosts and VMs |
 | `proxmox-vm-hardware.yml` | `proxmox_nodes` | Apply durable Proxmox VM hardware settings such as CPU model overrides |
 | `proxmox-boot-order.yml` | `proxmox_nodes` | Configure Proxmox boot ordering guardrails so `pve-cluster` waits for local filesystems and guest autostart waits for `pve-cluster` |
@@ -1051,6 +1052,7 @@ OpenClaw AI agent platform — personal homelab admin assistant via web UI and D
 - **Mem0 memory**: `@mem0/openclaw-mem0` plugin with Qdrant (localhost:6333), Gemini embeddings, and the configured OpenAI-compatible LLM for fact extraction. Auto-capture + auto-recall across sessions.
 - **dbc ops access**: Narrow host-specific wrappers, including result-only Immich Media Inbox access on docker-vm; no image, raw OCR, credential, SQLite, or general Docker access. Existing media-stack/Caddy operational paths remain separately scoped.
 - **Docker reporting**: A strict result-only reporter is implemented but remains disabled until the dedicated runtime identity and key are deployed. See `docs/openclaw-docker-access.md`.
+- **Docker updates**: A separate target-allowlisted, digest-bound broker is implemented but remains disabled. Astra can propose or execute an independently approved one-use plan; it cannot approve plans, choose paths/commands, or access Docker directly. See `docs/openclaw-docker-access.md`.
 - **Health isolation**: The dedicated receiver and aggregate report boundary are implemented but disabled pending an approved canary/cutover. See `docs/openclaw-runtime-security.md`.
 
 ```bash

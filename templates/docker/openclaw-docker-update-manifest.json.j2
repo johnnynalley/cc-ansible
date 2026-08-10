@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 1,
+  "host": {{ inventory_hostname | to_json }},
+  "stateDir": {{ openclaw_docker_update_broker_state_dir | to_json }},
+  "dockerBinary": "/usr/bin/docker",
+  "planTtlSeconds": {{ openclaw_docker_update_broker_plan_ttl_seconds }},
+  "approvalTtlSeconds": {{ openclaw_docker_update_broker_approval_ttl_seconds }},
+  "proposalCooldownSeconds": {{ openclaw_docker_update_broker_proposal_cooldown_seconds }},
+  "commandTimeoutSeconds": {{ openclaw_docker_update_broker_command_timeout_seconds }},
+  "healthPollSeconds": {{ openclaw_docker_update_broker_health_poll_seconds }},
+  "targets": {{ openclaw_docker_update_broker_targets | to_nice_json }}
+}
