@@ -19,7 +19,7 @@ curl -sf -o /dev/null \
   -X POST "{{ apprise_endpoint }}/notify/{{ apprise_token }}" \
   --form-string "title=[Security] ${HOSTNAME}" \
   --form-string "body=${PKG_COUNT} security patches applied: ${PACKAGES}" \
-  --form-string "tag=push-quiet,dbc" \
+  --form-string "tag=push-quiet" \
   --form-string "type=info" \
   --max-time 10 \
   --retry 2 \

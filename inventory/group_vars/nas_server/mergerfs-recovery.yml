@@ -8,8 +8,8 @@ mergerfs_recovery_enabled: true
 mergerfs_recovery_check_interval: 60          # seconds between checks
 mergerfs_recovery_failure_threshold: 3        # alert after N consecutive missing checks (~3 min)
 mergerfs_recovery_alert_dedup_hours: 6        # don't re-alert for the same branch within N hours
-mergerfs_recovery_alert_tag: "push,dbc"       # loud alert tag — branch persistently missing
-mergerfs_recovery_recovered_tag: "push-quiet,dbc"  # quiet tag — branch came back
+mergerfs_recovery_alert_tag: "push"       # loud alert tag — branch persistently missing
+mergerfs_recovery_recovered_tag: "push-quiet"  # quiet tag — branch came back
 
 # Branches to guard. Each entry needs:
 #   name        — short identifier used in logs/alerts/state file

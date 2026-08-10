@@ -8,7 +8,7 @@ admin_user: johnny
 # Gluetun VPN watchdog - auto-restart on crash loops
 gluetun_watchdog_enabled: false
 gluetun_watchdog_compose_dir: /opt/media-stack
-gluetun_watchdog_notify_tag: "push-quiet,dbc"
+gluetun_watchdog_notify_tag: "push-quiet"
 
 # Static LAN address for Plex and stream relay ingress.
 network_static_netplan_enabled: true

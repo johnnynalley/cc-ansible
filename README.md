@@ -920,7 +920,7 @@ auto-updates (weekly) ─────────┼──→ Apprise API (docke
 unattended-upgrades (daily) ───┤                           → Pushover "Computer Corner" (silent/quiet)
 network-watchdog (recovery) ───┤                           → Email (iCloud SMTP)
 gluetun-watchdog (VPN) ────────┤                           → Pushover "cc-media-feed" (silent)
-docker-auto-update (6h) ───────┤                           → DBC alert receiver (openclaw-vm)
+docker-auto-update (6h) ───────┤
 Sonarr/Radarr (grabs) ─────────┤
 Seerr (requests) ──────────────┘
 
@@ -929,7 +929,7 @@ Sonarr/Radarr ──→ Discord (native connection, rich embeds with poster art)
 
 - **Apprise API**: Notification router at `/opt/notifications/` on docker-vm. Config uses `pover://` URLs for Pushover
 - **Two Pushover apps**: "Computer Corner" (normal + quiet priority) and "cc-media-feed" (priority -2, silent/in-app only)
-- **Six Apprise tags**: `push` (infrastructure → Computer Corner app, Time Sensitive), `push-quiet` (automated recovery → Computer Corner app, silent), `email` (iCloud SMTP), `media-feed` (Sonarr/Radarr → cc-media-feed app), `media-requests` (Seerr → cc-media-feed app), `dbc` (DBC alert receiver on openclaw-vm). All Ansible-managed notifications include `dbc` automatically via tag variables; Sonarr/Radarr/Seerr have `dbc` added in their web UI Apprise settings
+- **Five Apprise tags**: `push` (infrastructure → Computer Corner app, Time Sensitive), `push-quiet` (automated recovery → Computer Corner app, silent), `email` (iCloud SMTP), `media-feed` (Sonarr/Radarr → cc-media-feed app), and `media-requests` (Seerr → cc-media-feed app). The retired `dbc` destination must not be restored.
 - **Diun**: Container image update notifier on all Docker VMs. Config managed by Ansible (`docker-auto-update.yml`), schedule offset to run after auto-updates. Sends with `push` tag
 - **smartd/apcupsd**: Infrastructure alerts, send with `push` tag
 - **auto-updates**: Notifies before updates (package count), after completion, and before reboots
@@ -1021,22 +1021,22 @@ PVE notifications route to Apprise → Pushover via webhook. Deployed by `playbo
 ansible-playbook playbooks/proxmox/proxmox-notifications.yml
 ```
 
-## OpenClaw (openclaw-vm, VM 140 on ts440)
+## OpenClaw (jn-t14s-lin)
 
-OpenClaw AI agent platform — personal homelab admin assistant via web UI and Discord. Can read/edit the Ansible repo but cannot run playbooks or SSH into hosts.
+OpenClaw AI agent platform — personal homelab admin assistant via web UI and Discord. The current Gateway still runs as `johnny` and therefore inherits that account's sudo, Docker, controller credentials, and repository access; the dedicated least-privilege runtime migration remains pending.
 
 - **Web UI**: `https://openclaw.jnalley.me` (Tailscale only)
 - **Gateway**: Port 18789, token auth, trustedProxies: docker-vm only
-- **VM**: 4 cores, 8GB RAM (balloon 6144MB), Ubuntu 25.10, Node.js 22 (NodeSource)
+- **Host**: `jn-t14s-lin` (current OpenClaw controller/runtime)
 - **Service**: User-level systemd via `openclaw gateway install` (NOT a custom system service)
 - **Config**: `~/.openclaw/openclaw.json` + `.env` — manual, backed up by restic
 - **Timers**: repo-sync (5 min), update-check (daily 08:00 → Apprise)
 - **Playbook**: `ansible-playbook playbooks/agents/openclaw.yml` (opt-in via `openclaw_enabled`)
 - **Mem0 memory**: `@mem0/openclaw-mem0` plugin with Qdrant (localhost:6333), Gemini embeddings, and the configured OpenAI-compatible LLM for fact extraction. Auto-capture + auto-recall across sessions.
-- **dbc ops access**: Least-privilege write on media-vm (`docker-compose.yml`, `.env`) and emergency live Caddy access on docker-vm. The canonical Caddy source is `templates/docker/Caddyfile.j2`; live edits must be backported. Deployed by `user-separation.yml` Phase 1d (`--tags dbc-ops`).
+- **dbc ops access**: Narrow host-specific wrappers, including result-only Immich Media Inbox access on docker-vm; no image, raw OCR, credential, SQLite, or general Docker access. Existing media-stack/Caddy operational paths remain separately scoped.
 
 ```bash
-# Check gateway status (on openclaw-vm)
+# Check gateway status (on the current OpenClaw host)
 systemctl --user status openclaw-gateway.service
 
 # Check update-check timer

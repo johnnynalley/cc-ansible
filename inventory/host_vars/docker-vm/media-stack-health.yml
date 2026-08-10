@@ -7,7 +7,7 @@ media_stack_health_state_dir: /var/lib/media-stack-health
 media_stack_health_interval: 5min
 media_stack_health_accuracy: 30s
 media_stack_health_alert_cooldown_seconds: 1800
-media_stack_health_alert_tags: "push,dbc"
+media_stack_health_alert_tags: "push"
 media_stack_health_qbit_env_file: /etc/qbit-port-sync.env
 media_stack_health_consecutive_failure_threshold: 2
 media_stack_health_library_probe_path: /srv/media/plex/Movies

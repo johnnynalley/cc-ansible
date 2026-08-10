@@ -35,7 +35,7 @@ restic_excludes: []
 # Apprise notification router (centralized alerts)
 apprise_endpoint: "https://apprise.jnalley.me"
 apprise_token: "notifications"
-apprise_alert_tags: "push,dbc"
+apprise_alert_tags: "push"
 
 # SMART monitoring defaults (disabled by default, enabled per-group)
 smartd_enabled: false

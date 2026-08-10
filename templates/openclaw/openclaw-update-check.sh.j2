@@ -35,7 +35,7 @@ curl -sf -o /dev/null \
 Use the guarded updater so Node/runtime compatibility is checked before the live package is swapped:
   /usr/local/sbin/openclaw-safe-update --tag $LATEST --dry-run
   /usr/local/sbin/openclaw-safe-update --tag $LATEST --yes" \
-    --form-string "tag=push-quiet,dbc" \
+    --form-string "tag=push-quiet" \
     --form-string "type=info" \
     --max-time 10 \
     --retry 2 \

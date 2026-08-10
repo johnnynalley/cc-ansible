@@ -122,16 +122,16 @@ grafana.jnalley.me {
 # 	reverse_proxy dispatcharr:9191
 # }
 
-# OpenClaw AI Gateway + Siri Relay + Health Receiver on jn-t14s-lin
+# OpenClaw AI Gateway + Health Receiver on jn-t14s-lin
 openclaw.jnalley.me {
 	handle /ask {
-		reverse_proxy 100.73.46.86:18790
+		respond "Not Found" 404
 	}
 	handle /health {
 		reverse_proxy 100.73.46.86:18791
 	}
 	handle /alerts {
-		reverse_proxy 100.73.46.86:18792
+		respond "Not Found" 404
 	}
 	handle /nct-main {
 		reverse_proxy 100.73.46.86:8788

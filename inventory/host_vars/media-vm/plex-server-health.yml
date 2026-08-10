@@ -5,7 +5,7 @@ plex_server_health_state_dir: /var/lib/plex-server-health
 plex_server_health_interval: 5min
 plex_server_health_accuracy: 30s
 plex_server_health_alert_cooldown_seconds: 1800
-plex_server_health_alert_tags: "push,dbc"
+plex_server_health_alert_tags: "push"
 plex_server_health_consecutive_failure_threshold: 2
 plex_server_health_plex_container: plex
 plex_server_health_plex_mount_path: /srv/plex

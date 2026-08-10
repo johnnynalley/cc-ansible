@@ -42,7 +42,7 @@ if [ -n "${missing[*]:-}" ]; then
     # Fire an alert via Apprise if it's reachable. Best effort, never block start fail.
     curl -fsS --max-time 5 \
         -H 'Content-Type: application/json' \
-        -d "{\"title\":\"VM $VMID start blocked\",\"body\":\"$msg\",\"tag\":\"{{ apprise_alert_tags | default('push,dbc') }}\"}" \
+        -d "{\"title\":\"VM $VMID start blocked\",\"body\":\"$msg\",\"tag\":\"{{ apprise_alert_tags | default('push') }}\"}" \
         "{{ apprise_endpoint }}/notify/{{ apprise_token }}" >/dev/null 2>&1 || true
     exit 1
 fi
