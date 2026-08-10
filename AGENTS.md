@@ -54,6 +54,15 @@ Every user correction is a self-maintenance signal, even if it is phrased casual
 
 For quick live-state requests, especially when the user says "quick", "right now", or "rn", prioritize the fastest authoritative read path and answer as soon as that evidence is sufficient. Do not delay the answer for enrichment, broad repo discovery, service-status checks, or metadata lookups unless they are required to avoid giving a misleading result. If a slower path was taken and the faster path becomes clear during the turn, call that out immediately after answering and persist a repo guidance or runbook update before closing the correction.
 
+When a formatter, validator, diagnostic, or sandboxed command returns without a
+definitive terminal status, do not treat blank output or a vanished tool session
+as success and do not immediately start duplicate workers. Inspect the exact
+host-side process tree, identify whether the original worker is still active,
+and terminate only workers proven abandoned before retrying through a bounded
+execution path. Record wrapper/sandbox failures separately from failures in the
+target application so superficial tooling errors do not become false incident
+evidence or leaked resource pressure.
+
 For substantial, interruption-prone, or self-evolving work, keep an active plan current with `update_plan` and a unique durable plan file. In this public repo, use `.codex/work-plans/active/<timestamp>-<task-slug>.md` for local agent-visible runtime plans and keep `.codex/work-plans/` Git-ignored for privacy; do not confuse Git-ignore with agent-ignore. Before pivoting to fix Codex guidance or memory, save the current objective, completed work, remaining work, touched files, validation state, git dirt, and exact resume step. If the self-maintenance improves the current task, do it after checkpointing and then reload the plan; otherwise record it as deferred and continue. At closeout, back up/archive the plan under `.codex/work-plans/completed/` or the relevant task backup path, then clear the active state.
 
 When self-updating `AGENTS.md` or another shared file, still follow the shared-file rules: inspect existing dirt, isolate unrelated hunks, validate the scoped change, check for secrets, and stage/commit only the approved hunk when committing is required. Scheduled audits can catch missed drift, but they do not replace instant self-maintenance at the moment the gap is found.
@@ -840,7 +849,7 @@ OpenClaw AI agent platform (Node.js gateway daemon). Provides a web UI and Disco
 - **Docker**: Installed for OpenClaw sandbox containers and Qdrant. In `docker_hosts` group — Qdrant is managed by `docker-stacks.yml`.
 - **Gateway service**: Managed by OpenClaw itself via `openclaw gateway install` (user-level systemd unit)
 - **Config**: `~/.openclaw/openclaw.json` and `~/.openclaw/.env` — created manually, backed up by restic (NOT templated by Ansible)
-- **Astra heartbeat**: The active heartbeat prompt is `/home/johnny/.openclaw/workspace/HEARTBEAT.md` on the OpenClaw host. Treat it as live OpenClaw workspace content that Astra may edit; update it directly when changing heartbeat behavior and document the expectation in this repo. Do not create an OpenClaw cron when the right primitive is the heartbeat file. Heartbeat procedure details, including stream relay and Plex appliance verified-corruption checks, live in `docs/openclaw-heartbeats.md`.
+- **Astra heartbeat**: The active heartbeat prompt is `/home/johnny/.openclaw/workspace/HEARTBEAT.md` on the OpenClaw host. Treat it as live OpenClaw workspace content that Astra may edit; update it directly when changing heartbeat behavior and document the expectation in this repo. Keep the heartbeat continuously enabled, but schedule checks from structured per-check completion timestamps and the catalog cadence. Never launch the full catalog as one batch: only explicitly lightweight checks may overlap, with a maximum concurrency of three; heavy and OpenClaw CLI checks run serially behind the live host-pressure gate. Do not create an OpenClaw cron when the right primitive is the heartbeat file. Heartbeat procedure details, including the 2026-08-10 OOM RCA, stream relay, and Plex appliance verified-corruption checks, live in `docs/openclaw-heartbeats.md`.
 
 **Astra autonomy contract**: For Astra improvements, teach the agent how to think and when to use its tools. Durable changes should usually land in `HEARTBEAT.md`, OpenClaw skills, references, memory, and logs-channel reporting rules so Astra can notice problems, decide whether it can safely fix them, back up first, act on safe reversible cases, and ask Johnny for approval on risky cases. Do not default to creating separate helper scripts or cron-specific doctors unless Astra's own workflow needs that tool for repeated safe execution.
 - **Linting tools**: `ansible-lint`, `yamllint` in venv at `/opt/openclaw-venv/`

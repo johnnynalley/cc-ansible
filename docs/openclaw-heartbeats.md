@@ -8,7 +8,10 @@ OpenClaw's Astra heartbeat is file-driven. The active prompt is:
 
 on the current OpenClaw host (`jn-t14s-lin` / T14s as of 2026-05-24).
 
-Do not model this as an OpenClaw cron unless exact timing or isolated delivery is the requirement. Batched recurring health checks belong in `HEARTBEAT.md`.
+Do not model this as an OpenClaw cron unless exact timing or isolated delivery
+is the requirement. Heartbeat-owned policy belongs in the live heartbeat
+catalog, but checks run by cadence and cost rather than as one all-at-once
+batch.
 
 ## Management Model
 
@@ -17,8 +20,66 @@ Do not model this as an OpenClaw cron unless exact timing or isolated delivery i
 When adding a heartbeat check:
 
 1. Edit `/home/johnny/.openclaw/workspace/HEARTBEAT.md` on the OpenClaw host.
-2. Verify the exact command in that file works from the OpenClaw host.
-3. Document the operational expectation in this repo.
+2. Add the exact procedure under
+   `/home/johnny/.openclaw/workspace/references/heartbeat-checks.md` and assign
+   a stable check ID, cadence, and execution lane.
+3. Verify the exact command works from the OpenClaw host without overlapping
+   another heavy or OpenClaw CLI check.
+4. Document the operational expectation in this repo.
+
+## Scheduling And Resource Model
+
+The heartbeat stays enabled continuously so it is ready when a check or alert
+becomes relevant. An idle heartbeat should produce no Discord message.
+
+The live sources of truth are:
+
+```text
+/home/johnny/.openclaw/workspace/HEARTBEAT.md
+/home/johnny/.openclaw/workspace/references/heartbeat-procedures.md
+/home/johnny/.openclaw/workspace/references/heartbeat-checks.md
+/home/johnny/.openclaw/workspace/memory/heartbeat-state.json
+```
+
+`heartbeat-state.json` schema 2 stores an ISO-8601 `lastCompletedAt` and a
+concise `lastResult` per check. Result prose, alert timestamps, and the mere
+existence of a prior state row do not decide whether a check is due. A missing
+or legacy state file cold-starts the every-poll lane plus at most one deferred
+check; it never makes the full catalog due at once.
+
+Execution boundaries:
+
+- At most three explicitly lightweight checks may run concurrently.
+- Heavy checks run one at a time.
+- OpenClaw CLI checks run one at a time and wait for their process trees to
+  exit before another OpenClaw CLI check starts.
+- Heavy checks are deferred when `MemAvailable` is below 4 GiB, `SwapFree` is
+  below 2 GiB, or kernel `Writeback` exceeds 512 MiB.
+- Deferral is silent scheduling state. It is not itself a Discord alert and it
+  does not advance `lastCompletedAt`.
+
+The every-poll lane keeps calendar, cron status, live empty-turn detection, and
+the cached media/stream sentinels responsive. Estate-wide storage, Doctor,
+skills, memory, model, bootstrap, corruption, DAS, hygiene, and self-evolution
+checks are staggered at longer cadences in the live catalog.
+
+## 2026-08-10 OOM RCA
+
+At 09:17 CDT the production Gateway was killed by the global OOM killer and
+restarted automatically at 09:18. The heartbeat trajectory showed one turn
+launching 21 checks through an unbounded `Promise.all`, including Doctor,
+skills, cron, remote storage, media, weather, bootstrap, hygiene, and
+self-evolution probes. Those OpenClaw commands spawned additional hook workers
+inside the Gateway cgroup while the host had exhausted swap and was carrying
+heavy NFS writeback. The heartbeat fan-out was the immediate resource
+amplifier; NFS writeback and existing swap pressure were contributing host
+conditions.
+
+The durable fix is the scheduling/resource model above. Restarting the Gateway,
+muting alerts, or suppressing individual check errors would not address this
+cause. A controlled non-delivering validation after the repair ran only the
+five every-poll checks, produced no tool failure or Discord `message` call, and
+left the production service on the same PID.
 
 ## Stream Relay Check
 
@@ -123,6 +184,19 @@ send a recovery/clear note only when the weekly window is clean after a prior
 alert.
 
 ## Verify
+
+Verify the scheduler contract and structured state first:
+
+```bash
+grep -n 'Schedule And Execution Lanes' /home/johnny/.openclaw/workspace/references/heartbeat-checks.md
+jq -e '.schemaVersion == 2 and (.checks | type == "object")' /home/johnny/.openclaw/workspace/memory/heartbeat-state.json
+awk '/^(MemAvailable|SwapFree|Writeback):/ {print}' /proc/meminfo
+```
+
+For a controlled no-op test, invoke one heartbeat turn without `--deliver`,
+inspect its trajectory for the due check IDs, verify there is no `message` tool
+call, and compare the Gateway PID/cgroup memory before and after. A returned
+`HEARTBEAT_OK` alone is not sufficient proof.
 
 Check the live heartbeat section:
 
