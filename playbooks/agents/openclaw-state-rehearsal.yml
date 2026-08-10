@@ -586,8 +586,6 @@
               'rewrite',
               '--source-state-root', openclaw_state_rehearsal_source_state_dir,
               '--source-workspace-root', openclaw_state_rehearsal_source_workspace_dir,
-              '--source-manifest', openclaw_state_rehearsal_evidence_dir + '/source-after.json',
-              '--source-index-root', openclaw_state_rehearsal_evidence_dir + '/source-indexes',
               '--target-state-root', openclaw_state_rehearsal_generation_state,
               '--target-workspace-root', openclaw_state_rehearsal_generation_workspace,
               '--output', openclaw_state_rehearsal_evidence_dir + '/rewrite.json'
@@ -605,6 +603,8 @@
               'verify',
               '--source-state-root', openclaw_state_rehearsal_source_state_dir,
               '--source-workspace-root', openclaw_state_rehearsal_source_workspace_dir,
+              '--source-manifest', openclaw_state_rehearsal_evidence_dir + '/source-after.json',
+              '--source-index-root', openclaw_state_rehearsal_evidence_dir + '/source-indexes',
               '--target-state-root', openclaw_state_rehearsal_generation_state,
               '--target-workspace-root', openclaw_state_rehearsal_generation_workspace,
               '--output', openclaw_state_rehearsal_evidence_dir + '/verify.json'
