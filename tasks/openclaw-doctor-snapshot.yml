@@ -2,6 +2,20 @@
 # yamllint disable rule:line-length
 # Data-free evidence snapshot for one OpenClaw Doctor rehearsal phase.
 
+- name: Checkpoint OpenClaw Doctor rehearsal databases at {{ openclaw_doctor_snapshot_phase }}
+  ansible.builtin.command:
+    argv:
+      - "{{ openclaw_doctor_rehearsal_tool }}"
+      - sqlite-checkpoint
+      - --database
+      - "{{ item.path }}"
+      - --output
+      - "{{ openclaw_doctor_rehearsal_evidence_dir }}/{{ openclaw_doctor_snapshot_phase }}-checkpoint-{{ item.name }}.json"
+  loop: "{{ openclaw_doctor_rehearsal_database_specs }}"
+  loop_control:
+    label: "{{ item.name }}"
+  changed_when: true
+
 - name: Manifest OpenClaw Doctor rehearsal state at {{ openclaw_doctor_snapshot_phase }}
   ansible.builtin.command:
     argv: >-
@@ -15,6 +29,21 @@
         + openclaw_doctor_rehearsal_state_manifest_exclude_arguments
         + openclaw_doctor_rehearsal_plugin_skill_manifest_arguments
       }}
+  changed_when: false
+
+- name: Manifest read-only npm plugin store at {{ openclaw_doctor_snapshot_phase }}
+  ansible.builtin.command:
+    argv:
+      - "{{ openclaw_doctor_rehearsal_tool }}"
+      - manifest
+      - --root
+      - "{{ openclaw_doctor_rehearsal_generation_state }}/npm"
+      - --output
+      - "{{ openclaw_doctor_rehearsal_evidence_dir }}/{{ openclaw_doctor_snapshot_phase }}-plugins.json"
+      - --allow-symlink-target-root
+      - "{{ openclaw_doctor_rehearsal_generation_state }}/npm"
+      - --allow-symlink-target-root
+      - "{{ openclaw_doctor_rehearsal_resolved_selectors.results[2].stdout }}"
   changed_when: false
 
 - name: Manifest OpenClaw Doctor rehearsal workspace at {{ openclaw_doctor_snapshot_phase }}
@@ -52,6 +81,11 @@
         + (
             item.exclusions
             | map('regex_replace', '^', '--exclude-table=')
+            | list
+          )
+        + (
+            item.ignoredColumns
+            | map('regex_replace', '^', '--ignore-column=')
             | list
           )
       }}

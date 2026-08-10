@@ -34,11 +34,13 @@ loopback and remains disabled at boot:
 - `playbooks/agents/openclaw-doctor-rehearsal.yml` consumes that verified
   session generation, takes online SQLite backups of authoritative shared,
   per-agent, Lossless Claw, and Mem0 history stores, and scrubs copied provider
-  auth. It disables channels and network access, retires all eight classified
-  legacy plugin install records through the supported CLI, registers only four
-  canonical `source:path` ownership records for retained immutable plugins, and
-  requires two successful idempotent Doctor passes before promoting
-  rehearsal-only selectors.
+  auth. It removes channel configuration, disables credential-dependent memory
+  search and Mem0 runtime initialization only in the networkless copy, retires
+  all eight classified legacy plugin records through the supported CLI, and
+  replaces path-linked plugins with four integrity-bearing npm ownership
+  records produced by OpenClaw's official installer. Plugin code is then frozen
+  root-owned and read-only. Two successful, warning-gated, idempotent Doctor
+  passes are required before rehearsal-only selectors can be promoted.
 - `templates/openclaw/openclaw-isolated.json.j2` starts from a blank config:
   one OpenAI model, an explicitly loaded root-managed Codex provider, a
   file-backed Gateway token, no channel, heartbeat, memory, delegation,
@@ -90,6 +92,23 @@ immutable plugin release and contained a regular `SKILL.md`. The narrowed
 manifest policy below accepts only that bounded form. Production remained
 active and unchanged.
 
+Generation `20260810T104747Z` then completed both Doctor commands with exit
+zero but was correctly rejected before promotion. The root cause was not one
+failure: Doctor updated a documented model-catalog cache, rewrote
+`schema_meta.updated_at` whenever it opened SQLite, left WAL/SHM sidecars, and
+loaded the official Codex plugin from an unsupported path-link record that did
+not confer trusted-plugin status. The credential-free copy also retained fake
+secret values, a second-state home layout, enabled Gemini memory search, and an
+enabled Mem0/Qdrant runtime despite having no credentials or network. The
+rehearsal now checkpoints SQLite before every snapshot, excludes only the
+documented cache table and timestamp column from stable comparisons, removes
+credential-bearing keys instead of inserting placeholders, gives Doctor one
+canonical state path, and preserves external integration state while disabling
+those integrations only for the credential-free phase. A successful rerun must
+prove the plugin store is unchanged and non-writable, supported npm provenance
+and trust survive Doctor, and the prior trusted-plugin, duplicate-state,
+plaintext-secret, missing-memory-provider, and Qdrant error classes are absent.
+
 ## Modernization Contract
 
 Behavior and data parity do not require legacy mechanism parity. Every
@@ -104,7 +123,7 @@ discovered component must receive one explicit disposition:
 - **discard** only after proving that the artifact is generated junk with no
   live references.
 
-The runtime layer already applies that rule: human-home global npm state,
+The runtime layer applies that rule: human-home global npm state,
 root-run package lifecycle scripts, service-writable provider code, copied
 OAuth refresh material, and the unfunded OpenRouter fallback are not migrated.
 They are replaced or retired. Codex, Discord, Lossless Claw, and Mem0 are
@@ -113,14 +132,19 @@ by root-managed current-channel artifacts. Brave, Nextcloud Talk, Perplexity,
 and the former self-evolution gate are retired because they are disabled or no
 longer configured as live channels. The eight copied global/npm install records
 are part of the legacy runtime mechanism, not user data, and are removed through
-the supported plugin CLI. Current OpenClaw still requires an ownership ledger
-for configured external plugins, so the retained four receive new
-`source:path` records through `plugins install --link`. Those records point at
-canonical root-owned immutable release paths; they neither copy executable code
-into writable state nor grant package-update authority to the service. Plugin
-state, Lossless Claw history, and Mem0 history are separate data and remain
-migration inputs. Stable-channel policy is retained, while each resolved
-core/plugin set is recorded as one immutable deployment artifact for rollback.
+the supported plugin CLI. Current OpenClaw requires a trusted ownership ledger
+for configured external plugins. The retained four are therefore reinstalled
+through `plugins install npm:<package>@<resolved-version> --pin` in a clean,
+credential-free build state, and their exact source, integrity, package,
+version, install path, and official-trust classification are validated before
+the records are transferred into the rehearsal config. This exact-version
+record describes one immutable rollback artifact; it does not replace the
+repository's stable/current-channel update policy. Root then removes build
+control state and makes the npm store read-only to the migration/runtime
+identity. Plugin data, Lossless Claw history, and Mem0 history are separate
+migration inputs and remain retained. Stable-channel policy is retained, while
+each resolved core/plugin set is recorded as one immutable deployment artifact
+for rollback.
 Other agents, integrations, schedules, stores, and workspace artifacts remain
 subject to the same classification before production cutover.
 
@@ -342,29 +366,43 @@ The run is a modernization gate rather than a legacy clone:
 2. Take consistent online SQLite backups of the shared database, each active
    per-agent database, Lossless Claw, and Mem0 history. Delete copied per-agent
    auth rows while retaining memory and index state.
-3. Transform a copied config to dedicated roots, redact secret values, disable
-   channels and updates, and reject surviving production path references.
+3. Transform a copied config to dedicated roots, remove credential-bearing
+   keys and all channel configuration, disable updates, and reject surviving
+   production path references. Preserve configured memory and Mem0 state but
+   disable their credential/network-dependent runtime only in this rehearsal.
 4. Require the exact eight classified legacy plugin install records and retire
-   each through `plugins uninstall --keep-files --force`. Register only Codex,
-   Discord, Lossless Claw, and Mem0 through `plugins install --link` against
-   their canonical root-owned immutable paths. Require the current and
-   persisted ownership ledgers to contain exactly those four `source:path`
-   records before refreshing the registry.
+   each through `plugins uninstall --keep-files --force`. In a separate empty,
+   credential-free network sandbox, install the exact resolved Codex, Discord,
+   Lossless Claw, and Mem0 packages through OpenClaw's npm installer. Require
+   exact integrity-bearing npm records, canonical state-local paths, and the
+   expected official-trust classification, then freeze that plugin store
+   root-owned and read-only before any copied production state is processed.
 5. Run Doctor twice inside a transient `PrivateNetwork` systemd sandbox. An
-   empty read-only `ProtectHome=tmpfs` view hides the human home while making
-   retired absolute install paths resolve as absent, which the supported
-   uninstall transaction requires. NPM metadata lookup is forced offline and
-   every transient command is bounded to five minutes. The Docker socket and
-   controller checkout remain explicitly inaccessible.
+   empty `ProtectHome=tmpfs` view hides the human home while making retired
+   absolute install paths resolve as absent, which the supported uninstall
+   transaction requires. The conventional `$HOME/.openclaw` path resolves to
+   the one explicit rehearsal state instead of creating a duplicate-state
+   warning. NPM metadata lookup is forced offline and every transient command
+   is bounded to five minutes. The Docker socket and controller checkout remain
+   explicitly inaccessible.
 6. Compare data-free filesystem manifests and stable SQLite table digests.
    OpenClaw-owned generated `plugin-skills/<name>` symlinks are recorded only
    when their real targets and regular `SKILL.md` files remain inside one of the
-   four canonical immutable plugin roots; every other symlink is rejected. Only
-   a reviewed list of known volatile shared control-plane tables is excluded
-   from the stable comparison; an unknown exclusion fails closed.
-7. Promote root-owned rehearsal selectors only after both passes and
-   error-level lint succeed, then prove the production config checksum and user
-   Gateway state are unchanged.
+   four canonical immutable plugin roots; npm-package symlinks must remain
+   inside the npm store or resolve to the exact selected immutable OpenClaw
+   runtime. Every other symlink is rejected. Each SQLite database is
+   checkpointed before capture. Only a reviewed list of known volatile shared
+   control-plane tables and exact columns is excluded from the stable
+   comparison; an unknown table or column fails closed.
+7. Reject a zero-exit Doctor run if it still emits a trusted-plugin,
+   duplicate-state, plaintext-secret, missing-memory-provider, or Qdrant error.
+   Re-read the plugin registry after both passes and require npm provenance,
+   integrity, immutable paths, and trust to remain exact.
+8. Promote root-owned rehearsal selectors only after both passes, filesystem
+   and database idempotency, plugin-store immutability, and error-level lint
+   succeed, then prove the production config checksum and user Gateway state
+   are unchanged. Orphan transcripts are preserved for a separate backed-up,
+   rename-only archival decision before cutover; they are not silently deleted.
 
 Root-only evidence and the rollback artifact live under
 `/var/backups/openclaw-doctor-rehearsal/<timestamp>`. A successful result proves

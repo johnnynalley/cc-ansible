@@ -33,18 +33,22 @@ openclaw_isolated_gateway_managed_plugins:
     package: "@openclaw/codex"
     install_spec: "@openclaw/codex@latest"
     require_core_match: true
+    trusted_official: true
   - id: discord
     package: "@openclaw/discord"
     install_spec: "@openclaw/discord@latest"
     require_core_match: true
+    trusted_official: true
   - id: lossless-claw
     package: "@martian-engineering/lossless-claw"
     install_spec: "@martian-engineering/lossless-claw@latest"
     require_core_match: false
+    trusted_official: false
   - id: openclaw-mem0
     package: "@mem0/openclaw-mem0"
     install_spec: "@mem0/openclaw-mem0@latest"
     require_core_match: false
+    trusted_official: false
 openclaw_isolated_gateway_retired_global_plugins:
   - brave
   - nextcloud-talk
@@ -119,7 +123,13 @@ openclaw_doctor_rehearsal_install_records:
   - openclaw-mem0
   - perplexity
   - self-evolution-gate
+openclaw_doctor_rehearsal_disabled_runtime_plugins:
+  # Preserved and provenance-checked, but it cannot initialize its external
+  # Qdrant dependency inside the intentionally networkless Doctor rehearsal.
+  - openclaw-mem0
 openclaw_doctor_rehearsal_stable_shared_db_exclusions:
+  # OpenClaw defines this as a 30-minute, regenerable model-catalog cache.
+  - agent_model_catalogs
   - audit_events
   - config_health_entries
   - gateway_boot_lifecycle

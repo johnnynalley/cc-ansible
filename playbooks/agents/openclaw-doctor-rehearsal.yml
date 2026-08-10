@@ -54,9 +54,23 @@
           - openclaw_doctor_rehearsal_install_records | sort == ['brave', 'codex', 'discord', 'lossless-claw', 'nextcloud-talk', 'openclaw-mem0', 'perplexity', 'self-evolution-gate']
           - openclaw_isolated_gateway_managed_plugins | map(attribute='id') | sort == ['codex', 'discord', 'lossless-claw', 'openclaw-mem0']
           - openclaw_isolated_gateway_retired_global_plugins | sort == ['brave', 'nextcloud-talk', 'perplexity', 'self-evolution-gate']
+          - openclaw_doctor_rehearsal_disabled_runtime_plugins | sort == ['openclaw-mem0']
+          - openclaw_doctor_rehearsal_disabled_runtime_plugins | difference(openclaw_isolated_gateway_managed_plugins | map(attribute='id') | list) | length == 0
         fail_msg: >-
           The Doctor rehearsal identity, roots, source, agent set, runtime, or
           plugin disposition is outside the reviewed modernization boundary.
+
+    - name: Validate managed plugin provenance policy
+      ansible.builtin.assert:
+        that:
+          - item.trusted_official is boolean
+          - item.install_spec is match('^' + (item.package | regex_escape) + '@latest$')
+        fail_msg: >-
+          Managed plugin {{ item.id | default('unknown') }} lacks an explicit
+          official-trust classification or current-channel install policy.
+      loop: "{{ openclaw_isolated_gateway_managed_plugins }}"
+      loop_control:
+        label: "{{ item.id | default('unknown') }}"
 
     - name: Inspect OpenClaw Doctor rehearsal selectors
       ansible.builtin.stat:
@@ -256,28 +270,12 @@
           {{ openclaw_doctor_rehearsal_config_root }}/generations/{{ openclaw_doctor_rehearsal_stamp }}
         openclaw_doctor_rehearsal_generation_config: >-
           {{ openclaw_doctor_rehearsal_config_root }}/generations/{{ openclaw_doctor_rehearsal_stamp }}/openclaw.json
+        openclaw_doctor_rehearsal_plugin_build_config: >-
+          {{ openclaw_doctor_rehearsal_config_root }}/generations/{{ openclaw_doctor_rehearsal_stamp }}/plugin-build.json
+        openclaw_doctor_rehearsal_plugin_build_cache: >-
+          {{ openclaw_doctor_rehearsal_config_root }}/generations/{{ openclaw_doctor_rehearsal_stamp }}/npm-cache
         openclaw_doctor_rehearsal_evidence_dir: >-
           {{ openclaw_doctor_rehearsal_backup_dir }}/{{ openclaw_doctor_rehearsal_stamp }}
-
-    - name: Derive OpenClaw Doctor rehearsal plugin paths
-      ansible.builtin.set_fact:
-        openclaw_doctor_rehearsal_plugin_arguments: >-
-          {{
-            (openclaw_doctor_rehearsal_plugin_arguments | default([]))
-            + [
-                '--plugin-path',
-                item.id
-                + '='
-                + openclaw_doctor_rehearsal_runtime
-                + '/plugins/'
-                + item.id
-                + '/node_modules/'
-                + item.package
-              ]
-          }}
-      loop: "{{ openclaw_isolated_gateway_managed_plugins }}"
-      loop_control:
-        label: "{{ item.id }}"
 
     - name: Derive OpenClaw Doctor rehearsal retired plugin arguments
       ansible.builtin.set_fact:
@@ -288,6 +286,17 @@
           }}
       loop: "{{ openclaw_isolated_gateway_retired_global_plugins }}"
 
+    - name: Derive credential-free OpenClaw Doctor isolation arguments
+      ansible.builtin.set_fact:
+        openclaw_doctor_rehearsal_isolation_arguments: >-
+          {{
+            (openclaw_doctor_rehearsal_isolation_arguments | default(['--disable-memory-search']))
+            + ['--disable-plugin-runtime', item]
+          }}
+      loop: "{{ openclaw_doctor_rehearsal_disabled_runtime_plugins }}"
+      loop_control:
+        label: "{{ item }}"
+
     - name: Derive OpenClaw Doctor rehearsal database and manifest policy
       ansible.builtin.set_fact:
         openclaw_doctor_rehearsal_state_manifest_exclude_arguments: >-
@@ -295,7 +304,8 @@
             [
               '--exclude', 'state/openclaw.sqlite',
               '--exclude', 'state/mem0/history.db',
-              '--exclude', 'lcm.db'
+              '--exclude', 'lcm.db',
+              '--exclude', 'npm'
             ]
           }}
         openclaw_doctor_rehearsal_database_specs: >-
@@ -305,24 +315,28 @@
                 'name': 'shared-full',
                 'path': openclaw_doctor_rehearsal_generation_state + '/state/openclaw.sqlite',
                 'exclusions': [],
+                'ignoredColumns': [],
                 'idempotency': false
               },
               {
                 'name': 'shared-stable',
                 'path': openclaw_doctor_rehearsal_generation_state + '/state/openclaw.sqlite',
                 'exclusions': openclaw_doctor_rehearsal_stable_shared_db_exclusions,
+                'ignoredColumns': ['schema_meta.updated_at'],
                 'idempotency': true
               },
               {
                 'name': 'lossless-claw',
                 'path': openclaw_doctor_rehearsal_generation_state + '/lcm.db',
                 'exclusions': [],
+                'ignoredColumns': [],
                 'idempotency': true
               },
               {
                 'name': 'mem0-history',
                 'path': openclaw_doctor_rehearsal_generation_state + '/state/mem0/history.db',
                 'exclusions': [],
+                'ignoredColumns': [],
                 'idempotency': true
               }
             ]
@@ -338,6 +352,7 @@
                   'name': 'agent-' + item,
                   'path': openclaw_doctor_rehearsal_generation_state + '/agents/' + item + '/agent/openclaw-agent.sqlite',
                   'exclusions': [],
+                  'ignoredColumns': [],
                   'idempotency': true
                 }
               ]
@@ -441,10 +456,13 @@
               'mem0Qdrant': 'retain-external-not-copied',
               'codexProviderHome': 'archive-not-runnable-not-copied',
               'credentials': 'replace-fresh-not-copied',
-              'pluginCode': 'replace-root-managed-current-channel',
+              'pluginCode': 'replace-supported-npm-provenance-root-locked',
               'legacyInstallRecords': 'retire-supported-cli',
               'disabledLegacyPlugins': 'retire',
-              'channels': 'disabled',
+              'channels': 'remove-from-credential-free-rehearsal',
+              'memorySearchRuntime': 'retain-disabled-until-credentialed-canary',
+              'externalPluginRuntime': 'retain-disabled-until-networked-canary',
+              'orphanTranscripts': 'archive-before-cutover',
               'fullLegacyWorkspace': 'not-copied',
               'backupsCachesLogs': 'archive-or-discard-not-copied',
               'productionGateway': 'untouched'
@@ -548,6 +566,288 @@
         - "{{ openclaw_doctor_rehearsal_generation_state }}"
         - "{{ openclaw_doctor_rehearsal_generation_workspace }}"
         - "{{ openclaw_doctor_rehearsal_generation_config_dir }}"
+
+    - name: Link conventional OpenClaw state path to rehearsal generation
+      ansible.builtin.file:
+        src: "{{ openclaw_doctor_rehearsal_generation_state }}"
+        dest: >-
+          {{ openclaw_doctor_rehearsal_state_root }}/generations/{{ openclaw_doctor_rehearsal_stamp }}/.openclaw
+        state: link
+        owner: root
+        group: "{{ openclaw_doctor_rehearsal_group }}"
+        force: false
+
+    - name: Assign empty plugin-build generation to migration identity
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: directory
+        owner: "{{ openclaw_doctor_rehearsal_user }}"
+        group: "{{ openclaw_doctor_rehearsal_group }}"
+        mode: "0700"
+      loop:
+        - "{{ openclaw_doctor_rehearsal_generation_state }}"
+        - "{{ openclaw_doctor_rehearsal_generation_config_dir }}"
+
+    - name: Read immutable managed plugin package metadata
+      ansible.builtin.slurp:
+        src: >-
+          {{ openclaw_doctor_rehearsal_runtime }}/plugins/{{ item.id }}/node_modules/{{ item.package }}/package.json
+      loop: "{{ openclaw_isolated_gateway_managed_plugins }}"
+      loop_control:
+        label: "{{ item.id }}"
+      register: openclaw_doctor_rehearsal_plugin_packages
+
+    - name: Read immutable managed plugin manifests
+      ansible.builtin.slurp:
+        src: >-
+          {{ openclaw_doctor_rehearsal_runtime }}/plugins/{{ item.id }}/node_modules/{{ item.package }}/openclaw.plugin.json
+      loop: "{{ openclaw_isolated_gateway_managed_plugins }}"
+      loop_control:
+        label: "{{ item.id }}"
+      register: openclaw_doctor_rehearsal_plugin_manifests
+
+    - name: Initialize managed plugin build metadata
+      ansible.builtin.set_fact:
+        openclaw_doctor_rehearsal_plugin_metadata: []
+
+    - name: Decode managed plugin build metadata
+      ansible.builtin.set_fact:
+        openclaw_doctor_rehearsal_plugin_metadata: >-
+          {{
+            openclaw_doctor_rehearsal_plugin_metadata
+            + [
+                {
+                  'definition': openclaw_isolated_gateway_managed_plugins[item],
+                  'package': (
+                    openclaw_doctor_rehearsal_plugin_packages.results[item].content
+                    | b64decode
+                    | from_json
+                  ),
+                  'manifest': (
+                    openclaw_doctor_rehearsal_plugin_manifests.results[item].content
+                    | b64decode
+                    | from_json
+                  )
+                }
+              ]
+          }}
+      loop: "{{ range(0, openclaw_isolated_gateway_managed_plugins | length) | list }}"
+      loop_control:
+        label: "{{ openclaw_isolated_gateway_managed_plugins[item].id }}"
+
+    - name: Require exact managed plugin build inputs
+      ansible.builtin.assert:
+        that:
+          - item.package.name == item.definition.package
+          - item.package.version is match('^[0-9A-Za-z][0-9A-Za-z.+_-]*$')
+          - item.manifest.id == item.definition.id
+        fail_msg: >-
+          An immutable runtime plugin has the wrong package, version, or plugin
+          identity for the npm-provenance build.
+      loop: "{{ openclaw_doctor_rehearsal_plugin_metadata }}"
+      loop_control:
+        label: "{{ item.definition.id }}"
+
+    - name: Create private managed plugin build cache
+      ansible.builtin.file:
+        path: "{{ openclaw_doctor_rehearsal_plugin_build_cache }}"
+        state: directory
+        owner: "{{ openclaw_doctor_rehearsal_user }}"
+        group: "{{ openclaw_doctor_rehearsal_group }}"
+        mode: "0700"
+
+    - name: Create credential-free managed plugin build config
+      ansible.builtin.copy:
+        dest: "{{ openclaw_doctor_rehearsal_plugin_build_config }}"
+        owner: "{{ openclaw_doctor_rehearsal_user }}"
+        group: "{{ openclaw_doctor_rehearsal_group }}"
+        mode: "0600"
+        content: "{}\n"
+
+    - name: Define isolated networked managed plugin build command
+      ansible.builtin.set_fact:
+        openclaw_doctor_rehearsal_plugin_build_prefix:
+          - /usr/bin/systemd-run
+          - --quiet
+          - --wait
+          - --collect
+          - --pipe
+          - --service-type=exec
+          - --property=RuntimeMaxSec=300s
+          - "--property=User={{ openclaw_doctor_rehearsal_user }}"
+          - "--property=Group={{ openclaw_doctor_rehearsal_group }}"
+          - --property=NoNewPrivileges=yes
+          - --property=PrivateDevices=yes
+          - --property=PrivateTmp=yes
+          - --property=ProtectClock=yes
+          - --property=ProtectControlGroups=yes
+          - --property=ProtectHome=tmpfs
+          - --property=ProtectHostname=yes
+          - --property=ProtectKernelLogs=yes
+          - --property=ProtectKernelModules=yes
+          - --property=ProtectKernelTunables=yes
+          - --property=ProtectProc=invisible
+          - --property=ProtectSystem=strict
+          - "--property=RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6"
+          - --property=RestrictSUIDSGID=yes
+          - --property=LockPersonality=yes
+          - --property=CapabilityBoundingSet=
+          - --property=AmbientCapabilities=
+          - --property=UMask=0077
+          - "--property=WorkingDirectory={{ openclaw_doctor_rehearsal_generation_config_dir }}"
+          - "--property=ReadWritePaths={{ openclaw_doctor_rehearsal_generation_state }}"
+          - "--property=ReadWritePaths={{ openclaw_doctor_rehearsal_generation_config_dir }}"
+          - --property=InaccessiblePaths=/home/johnny
+          - --property=InaccessiblePaths=/var/lib/openclaw-migration-rehearsal
+          - --property=InaccessiblePaths=/usr/local/share/openclaw-migration-rehearsal
+          - --property=InaccessiblePaths=/var/run/docker.sock
+          - --property=InaccessiblePaths=/opt/cc-ansible
+        openclaw_doctor_rehearsal_plugin_build_environment:
+          - /usr/bin/env
+          - -i
+          - HOME=/tmp/openclaw-plugin-build-home
+          - PATH=/usr/bin:/bin
+          - TMPDIR=/tmp
+          - OPENCLAW_HOME=/tmp/openclaw-plugin-build-home
+          - "OPENCLAW_STATE_DIR={{ openclaw_doctor_rehearsal_generation_state }}"
+          - "OPENCLAW_CONFIG_PATH={{ openclaw_doctor_rehearsal_plugin_build_config }}"
+          - OPENCLAW_WORKSPACE_DIR=/tmp/openclaw-plugin-build-workspace
+          - "NPM_CONFIG_CACHE={{ openclaw_doctor_rehearsal_plugin_build_cache }}"
+          - NPM_CONFIG_FETCH_RETRIES=2
+          - NPM_CONFIG_FETCH_TIMEOUT=30000
+          - NO_COLOR=1
+
+    - name: Install exact managed plugins with supported npm provenance
+      ansible.builtin.command:
+        argv: >-
+          {{
+            openclaw_doctor_rehearsal_plugin_build_prefix
+            + [
+                '--unit=openclaw-doctor-plugin-build-'
+                + item.definition.id
+                + '-'
+                + openclaw_doctor_rehearsal_stamp
+              ]
+            + openclaw_doctor_rehearsal_plugin_build_environment
+            + [
+                openclaw_doctor_rehearsal_runtime + '/bin/openclaw',
+                'plugins', 'install',
+                'npm:' + item.package.name + '@' + item.package.version,
+                '--pin'
+              ]
+          }}
+      loop: "{{ openclaw_doctor_rehearsal_plugin_metadata }}"
+      loop_control:
+        label: "{{ item.definition.id }}"
+      changed_when: true
+      no_log: true
+
+    - name: Inspect supported managed plugin build registry
+      ansible.builtin.command:
+        argv: >-
+          {{
+            openclaw_doctor_rehearsal_plugin_build_prefix
+            + ['--unit=openclaw-doctor-plugin-registry-' + openclaw_doctor_rehearsal_stamp]
+            + openclaw_doctor_rehearsal_plugin_build_environment
+            + [
+                openclaw_doctor_rehearsal_runtime + '/bin/openclaw',
+                'plugins', 'registry', '--json'
+              ]
+          }}
+      register: openclaw_doctor_rehearsal_plugin_build_registry_raw
+      changed_when: false
+      no_log: true
+
+    - name: Decode supported managed plugin build registry
+      ansible.builtin.set_fact:
+        openclaw_doctor_rehearsal_plugin_build_registry: >-
+          {{ openclaw_doctor_rehearsal_plugin_build_registry_raw.stdout | from_json }}
+      no_log: true
+
+    - name: Require exact npm-provenance plugin record set
+      ansible.builtin.assert:
+        that:
+          - openclaw_doctor_rehearsal_plugin_build_registry.current.installRecords | dict2items | map(attribute='key') | sort == openclaw_isolated_gateway_managed_plugins | map(attribute='id') | sort
+          - openclaw_doctor_rehearsal_plugin_build_registry.persisted.installRecords | dict2items | map(attribute='key') | sort == openclaw_isolated_gateway_managed_plugins | map(attribute='id') | sort
+        fail_msg: >-
+          The clean plugin build did not produce exactly the classified managed
+          npm install records.
+
+    - name: Require supported npm provenance and trust classification
+      ansible.builtin.assert:
+        that:
+          - openclaw_doctor_rehearsal_plugin_build_registry.current.installRecords[item.definition.id].source == 'npm'
+          - openclaw_doctor_rehearsal_plugin_build_registry.current.installRecords[item.definition.id].resolvedName == item.package.name
+          - openclaw_doctor_rehearsal_plugin_build_registry.current.installRecords[item.definition.id].resolvedVersion == item.package.version
+          - openclaw_doctor_rehearsal_plugin_build_registry.current.installRecords[item.definition.id].integrity | length > 0
+          - (openclaw_doctor_rehearsal_plugin_build_registry.current.plugins | selectattr('pluginId', 'equalto', item.definition.id) | list | length) == 1
+          - (openclaw_doctor_rehearsal_plugin_build_registry.current.plugins | selectattr('pluginId', 'equalto', item.definition.id) | list | first).origin == 'global'
+          - ((openclaw_doctor_rehearsal_plugin_build_registry.current.plugins | selectattr('pluginId', 'equalto', item.definition.id) | list | first).trustedOfficialInstall | default(false) | bool) == (item.definition.trusted_official | bool)
+          - (openclaw_doctor_rehearsal_plugin_build_registry.current.plugins | selectattr('pluginId', 'equalto', item.definition.id) | list | first).rootDir is match('^' + (openclaw_doctor_rehearsal_generation_state | regex_escape) + '/npm/')
+        fail_msg: >-
+          Managed plugin {{ item.definition.id }} lacks exact npm provenance,
+          integrity, immutable-state placement, or the expected official trust.
+      loop: "{{ openclaw_doctor_rehearsal_plugin_metadata }}"
+      loop_control:
+        label: "{{ item.definition.id }}"
+
+    - name: Preserve supported managed plugin build registry
+      ansible.builtin.copy:
+        dest: "{{ openclaw_doctor_rehearsal_evidence_dir }}/plugin-build-registry.json"
+        owner: root
+        group: root
+        mode: "0600"
+        content: >-
+          {{ openclaw_doctor_rehearsal_plugin_build_registry | to_nice_json }}
+      no_log: true
+
+    - name: Initialize managed plugin roots and transform arguments
+      ansible.builtin.set_fact:
+        openclaw_doctor_rehearsal_managed_plugin_root_paths: []
+        openclaw_doctor_rehearsal_plugin_arguments: []
+
+    - name: Derive npm-managed plugin roots and transform arguments
+      ansible.builtin.set_fact:
+        openclaw_doctor_rehearsal_managed_plugin_root_paths: >-
+          {{
+            openclaw_doctor_rehearsal_managed_plugin_root_paths
+            + [
+                (
+                  openclaw_doctor_rehearsal_plugin_build_registry.current.plugins
+                  | selectattr('pluginId', 'equalto', item.id)
+                  | map(attribute='rootDir')
+                  | first
+                )
+              ]
+          }}
+        openclaw_doctor_rehearsal_plugin_arguments: >-
+          {{
+            openclaw_doctor_rehearsal_plugin_arguments
+            + [
+                '--plugin-path',
+                item.id
+                + '='
+                + (
+                    openclaw_doctor_rehearsal_plugin_build_registry.current.plugins
+                    | selectattr('pluginId', 'equalto', item.id)
+                    | map(attribute='rootDir')
+                    | first
+                  )
+              ]
+          }}
+      loop: "{{ openclaw_isolated_gateway_managed_plugins }}"
+      loop_control:
+        label: "{{ item.id }}"
+
+    - name: Remove credential-free plugin build control state
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: absent
+      loop:
+        - "{{ openclaw_doctor_rehearsal_generation_state }}/state"
+        - "{{ openclaw_doctor_rehearsal_generation_state }}/logs"
+        - "{{ openclaw_doctor_rehearsal_plugin_build_config }}"
+        - "{{ openclaw_doctor_rehearsal_plugin_build_cache }}"
 
     - name: Derive OpenClaw Doctor source copy set
       ansible.builtin.set_fact:
@@ -748,6 +1048,7 @@
             ]
             + openclaw_doctor_rehearsal_plugin_arguments
             + openclaw_doctor_rehearsal_retired_plugin_arguments
+            + openclaw_doctor_rehearsal_isolation_arguments
           }}
       changed_when: true
 
@@ -763,6 +1064,15 @@
         - "{{ openclaw_doctor_rehearsal_generation_state }}"
         - "{{ openclaw_doctor_rehearsal_generation_workspace }}"
         - "{{ openclaw_doctor_rehearsal_generation_config_dir }}"
+
+    - name: Freeze npm-managed plugin code before copied-state processing
+      ansible.builtin.file:
+        path: "{{ openclaw_doctor_rehearsal_generation_state }}/npm"
+        state: directory
+        owner: root
+        group: "{{ openclaw_doctor_rehearsal_group }}"
+        mode: u=rwX,g=rX,o=
+        recurse: true
 
     - name: Define networkless OpenClaw Doctor transient command
       ansible.builtin.set_fact:
@@ -782,7 +1092,7 @@
           - --property=PrivateTmp=yes
           - --property=ProtectClock=yes
           - --property=ProtectControlGroups=yes
-          # An empty private home makes retired absolute install paths resolve
+          # The private /home view makes retired absolute install paths resolve
           # as absent. ProtectHome=yes returns EACCES, which makes OpenClaw's
           # supported uninstall transaction abort while checking old markers.
           - --property=ProtectHome=tmpfs
@@ -807,13 +1117,14 @@
         openclaw_doctor_rehearsal_command_environment:
           - /usr/bin/env
           - -i
-          - "HOME={{ openclaw_doctor_rehearsal_generation_state }}"
+          - >-
+            HOME={{ openclaw_doctor_rehearsal_state_root }}/generations/{{ openclaw_doctor_rehearsal_stamp }}
           - "PATH=/usr/bin:/bin"
           - "TMPDIR=/tmp"
-          - "XDG_CONFIG_HOME={{ openclaw_doctor_rehearsal_generation_state }}/.config"
-          - "XDG_DATA_HOME={{ openclaw_doctor_rehearsal_generation_state }}/.local/share"
-          - "XDG_CACHE_HOME={{ openclaw_doctor_rehearsal_generation_state }}/.cache"
-          - "OPENCLAW_HOME={{ openclaw_doctor_rehearsal_generation_state }}"
+          - XDG_CONFIG_HOME=/tmp/openclaw-doctor-home/.config
+          - XDG_DATA_HOME=/tmp/openclaw-doctor-home/.local/share
+          - XDG_CACHE_HOME=/tmp/openclaw-doctor-home/.cache
+          - OPENCLAW_HOME=/tmp/openclaw-doctor-home
           - "OPENCLAW_STATE_DIR={{ openclaw_doctor_rehearsal_generation_state }}"
           - "OPENCLAW_CONFIG_PATH={{ openclaw_doctor_rehearsal_generation_config }}"
           - "OPENCLAW_WORKSPACE_DIR={{ openclaw_doctor_rehearsal_generation_workspace }}"
@@ -831,6 +1142,19 @@
             openclaw_doctor_rehearsal_transient_prefix
             + ['--unit=openclaw-doctor-source-proof-' + openclaw_doctor_rehearsal_stamp]
             + ['/usr/bin/test', '!', '-r', openclaw_doctor_rehearsal_source_config]
+          }}
+      changed_when: false
+
+    - name: Prove migration identity cannot modify managed plugin code
+      ansible.builtin.command:
+        argv: >-
+          {{
+            openclaw_doctor_rehearsal_transient_prefix
+            + ['--unit=openclaw-doctor-plugin-write-proof-' + openclaw_doctor_rehearsal_stamp]
+            + [
+                '/usr/bin/test', '!', '-w',
+                openclaw_doctor_rehearsal_generation_state + '/npm'
+              ]
           }}
       changed_when: false
 
@@ -909,10 +1233,12 @@
               '--source-workspace-root', openclaw_doctor_rehearsal_source_state_dir + '/workspace',
               '--target-state-root', openclaw_doctor_rehearsal_generation_state,
               '--target-workspace-root', openclaw_doctor_rehearsal_generation_workspace,
-              '--gateway-port', '19789'
+              '--gateway-port', '19789',
+              '--install-records-source', openclaw_doctor_rehearsal_evidence_dir + '/plugin-build-registry.json'
             ]
             + openclaw_doctor_rehearsal_plugin_arguments
             + openclaw_doctor_rehearsal_retired_plugin_arguments
+            + openclaw_doctor_rehearsal_isolation_arguments
           }}
       changed_when: true
 
@@ -934,19 +1260,6 @@
           - "{{ openclaw_doctor_rehearsal_generation_config }}"
       changed_when: true
 
-    - name: Resolve immutable managed plugin roots
-      ansible.builtin.command:
-        argv:
-          - /usr/bin/readlink
-          - --canonicalize-existing
-          - >-
-            {{ openclaw_doctor_rehearsal_runtime }}/plugins/{{ item.id }}/node_modules/{{ item.package }}
-      loop: "{{ openclaw_isolated_gateway_managed_plugins }}"
-      loop_control:
-        label: "{{ item.id }}"
-      register: openclaw_doctor_rehearsal_managed_plugin_roots
-      changed_when: false
-
     - name: Allow only immutable plugin roots for generated skill links
       ansible.builtin.set_fact:
         openclaw_doctor_rehearsal_plugin_skill_manifest_arguments: >-
@@ -954,37 +1267,14 @@
             (openclaw_doctor_rehearsal_plugin_skill_manifest_arguments | default([]))
             + [
                 '--allow-plugin-skill-target-root',
-                item.stdout
+                item
               ]
           }}
-      loop: "{{ openclaw_doctor_rehearsal_managed_plugin_roots.results }}"
+      loop: "{{ openclaw_doctor_rehearsal_managed_plugin_root_paths }}"
       loop_control:
-        label: "{{ item.item.id }}"
+        label: "{{ item }}"
 
-    - name: Register immutable OpenClaw plugin ownership through supported links
-      ansible.builtin.command:
-        argv: >-
-          {{
-            openclaw_doctor_rehearsal_transient_prefix
-            + [
-                '--unit=openclaw-doctor-link-'
-                + openclaw_isolated_gateway_managed_plugins[item].id
-                + '-'
-                + openclaw_doctor_rehearsal_stamp
-              ]
-            + openclaw_doctor_rehearsal_command_environment
-            + [
-                openclaw_doctor_rehearsal_runtime + '/bin/openclaw',
-                'plugins', 'install', '--link',
-                openclaw_doctor_rehearsal_managed_plugin_roots.results[item].stdout
-              ]
-          }}
-      loop: "{{ range(0, openclaw_isolated_gateway_managed_plugins | length) | list }}"
-      loop_control:
-        label: "{{ openclaw_isolated_gateway_managed_plugins[item].id }}"
-      changed_when: true
-
-    - name: Refresh copied OpenClaw plugin registry from immutable sources
+    - name: Migrate supported npm records and refresh copied plugin registry
       ansible.builtin.command:
         argv: >-
           {{
@@ -1021,20 +1311,20 @@
           - (openclaw_doctor_rehearsal_registry_after.persisted.installRecords | default({}, true) | dict2items | map(attribute='key') | sort) == (openclaw_isolated_gateway_managed_plugins | map(attribute='id') | sort)
         fail_msg: >-
           A legacy record survived or a root-managed plugin lacks its modern
-          path ownership record.
+          npm provenance record.
 
     - name: Require canonical immutable OpenClaw plugin ownership records
       ansible.builtin.assert:
         that:
-          - openclaw_doctor_rehearsal_registry_after.current.installRecords[openclaw_isolated_gateway_managed_plugins[item].id].source == 'path'
-          - openclaw_doctor_rehearsal_registry_after.current.installRecords[openclaw_isolated_gateway_managed_plugins[item].id].sourcePath == openclaw_doctor_rehearsal_managed_plugin_roots.results[item].stdout
-          - openclaw_doctor_rehearsal_registry_after.current.installRecords[openclaw_isolated_gateway_managed_plugins[item].id].installPath == openclaw_doctor_rehearsal_managed_plugin_roots.results[item].stdout
-          - openclaw_doctor_rehearsal_registry_after.persisted.installRecords[openclaw_isolated_gateway_managed_plugins[item].id].source == 'path'
-          - openclaw_doctor_rehearsal_registry_after.persisted.installRecords[openclaw_isolated_gateway_managed_plugins[item].id].sourcePath == openclaw_doctor_rehearsal_managed_plugin_roots.results[item].stdout
-          - openclaw_doctor_rehearsal_registry_after.persisted.installRecords[openclaw_isolated_gateway_managed_plugins[item].id].installPath == openclaw_doctor_rehearsal_managed_plugin_roots.results[item].stdout
+          - openclaw_doctor_rehearsal_registry_after.current.installRecords[openclaw_isolated_gateway_managed_plugins[item].id].source == 'npm'
+          - openclaw_doctor_rehearsal_registry_after.current.installRecords[openclaw_isolated_gateway_managed_plugins[item].id].installPath == openclaw_doctor_rehearsal_managed_plugin_root_paths[item]
+          - openclaw_doctor_rehearsal_registry_after.current.installRecords[openclaw_isolated_gateway_managed_plugins[item].id].resolvedName == openclaw_isolated_gateway_managed_plugins[item].package
+          - openclaw_doctor_rehearsal_registry_after.current.installRecords[openclaw_isolated_gateway_managed_plugins[item].id].integrity | length > 0
+          - openclaw_doctor_rehearsal_registry_after.persisted.installRecords[openclaw_isolated_gateway_managed_plugins[item].id].source == 'npm'
+          - openclaw_doctor_rehearsal_registry_after.persisted.installRecords[openclaw_isolated_gateway_managed_plugins[item].id].installPath == openclaw_doctor_rehearsal_managed_plugin_root_paths[item]
         fail_msg: >-
-          A retained plugin ownership record is writable-package-managed,
-          noncanonical, or outside the selected immutable release.
+          A retained plugin lacks supported npm provenance, integrity, or the
+          exact read-only managed install path.
       loop: "{{ range(0, openclaw_isolated_gateway_managed_plugins | length) | list }}"
       loop_control:
         label: "{{ openclaw_isolated_gateway_managed_plugins[item].id }}"
@@ -1043,9 +1333,10 @@
       ansible.builtin.assert:
         that:
           - openclaw_doctor_rehearsal_registry_after.current.plugins | selectattr('pluginId', 'equalto', openclaw_isolated_gateway_managed_plugins[item].id) | list | length == 1
-          - (openclaw_doctor_rehearsal_registry_after.current.plugins | selectattr('pluginId', 'equalto', openclaw_isolated_gateway_managed_plugins[item].id) | list | first).origin == 'config'
-          - (openclaw_doctor_rehearsal_registry_after.current.plugins | selectattr('pluginId', 'equalto', openclaw_isolated_gateway_managed_plugins[item].id) | list | first).enabled | bool
-          - (openclaw_doctor_rehearsal_registry_after.current.plugins | selectattr('pluginId', 'equalto', openclaw_isolated_gateway_managed_plugins[item].id) | list | first).rootDir == openclaw_doctor_rehearsal_managed_plugin_roots.results[item].stdout
+          - (openclaw_doctor_rehearsal_registry_after.current.plugins | selectattr('pluginId', 'equalto', openclaw_isolated_gateway_managed_plugins[item].id) | list | first).origin == 'global'
+          - ((openclaw_doctor_rehearsal_registry_after.current.plugins | selectattr('pluginId', 'equalto', openclaw_isolated_gateway_managed_plugins[item].id) | list | first).enabled | bool) == (openclaw_isolated_gateway_managed_plugins[item].id not in openclaw_doctor_rehearsal_disabled_runtime_plugins)
+          - (openclaw_doctor_rehearsal_registry_after.current.plugins | selectattr('pluginId', 'equalto', openclaw_isolated_gateway_managed_plugins[item].id) | list | first).rootDir == openclaw_doctor_rehearsal_managed_plugin_root_paths[item]
+          - ((openclaw_doctor_rehearsal_registry_after.current.plugins | selectattr('pluginId', 'equalto', openclaw_isolated_gateway_managed_plugins[item].id) | list | first).trustedOfficialInstall | default(false) | bool) == (openclaw_isolated_gateway_managed_plugins[item].trusted_official | bool)
         fail_msg: >-
           A retained plugin is missing, duplicated, disabled, or loaded outside
           the immutable release.
@@ -1074,7 +1365,8 @@
                 | map(attribute='id')
                 | sort
               ),
-              'ownershipRecordSource': 'path',
+              'ownershipRecordSource': 'npm',
+              'pluginCode': 'root-owned-read-only-state-npm',
               'registryState': openclaw_doctor_rehearsal_registry_after.state
             }
             | to_nice_json
@@ -1122,6 +1414,29 @@
           The first credential-free Doctor pass failed. Root-only output remains
           in the timestamped evidence directory.
 
+    - name: Require resolved first-pass OpenClaw Doctor regressions
+      ansible.builtin.assert:
+        that:
+          - >-
+            item not in
+            (
+              openclaw_doctor_rehearsal_pass1.stdout
+              + '\n'
+              + openclaw_doctor_rehearsal_pass1.stderr
+            )
+        fail_msg: >-
+          The first Doctor pass still contains a regression that this
+          modernization is required to eliminate. Root-only output remains in
+          the timestamped evidence directory.
+      loop:
+        - openKeyedStore is only available for trusted plugins
+        - Multiple state directories detected
+        - contains plaintext secret-bearing config
+        - Error initializing Qdrant
+        - Memory search provider is set to
+      loop_control:
+        label: "{{ item }}"
+
     - name: Capture OpenClaw Doctor first-pass evidence
       ansible.builtin.include_tasks: ../../tasks/openclaw-doctor-snapshot.yml
       vars:
@@ -1140,6 +1455,7 @@
           - "{{ openclaw_doctor_rehearsal_evidence_dir }}/pass1-diff-{{ item }}.json"
       loop:
         - state
+        - plugins
         - workspace
         - config
       changed_when: false
@@ -1181,6 +1497,98 @@
           The second credential-free Doctor pass failed. Root-only output
           remains in the timestamped evidence directory.
 
+    - name: Require resolved second-pass OpenClaw Doctor regressions
+      ansible.builtin.assert:
+        that:
+          - >-
+            item not in
+            (
+              openclaw_doctor_rehearsal_pass2.stdout
+              + '\n'
+              + openclaw_doctor_rehearsal_pass2.stderr
+            )
+        fail_msg: >-
+          The second Doctor pass still contains a regression that this
+          modernization is required to eliminate. Root-only output remains in
+          the timestamped evidence directory.
+      loop:
+        - openKeyedStore is only available for trusted plugins
+        - Multiple state directories detected
+        - contains plaintext secret-bearing config
+        - Error initializing Qdrant
+        - Memory search provider is set to
+      loop_control:
+        label: "{{ item }}"
+
+    - name: Inspect managed plugin registry after OpenClaw Doctor
+      ansible.builtin.command:
+        argv: >-
+          {{
+            openclaw_doctor_rehearsal_transient_prefix
+            + ['--unit=openclaw-doctor-registry-post-doctor-' + openclaw_doctor_rehearsal_stamp]
+            + openclaw_doctor_rehearsal_command_environment
+            + [openclaw_doctor_rehearsal_runtime + '/bin/openclaw', 'plugins', 'registry', '--json']
+          }}
+      register: openclaw_doctor_rehearsal_registry_post_doctor_raw
+      changed_when: false
+      no_log: true
+
+    - name: Parse managed plugin registry after OpenClaw Doctor
+      ansible.builtin.set_fact:
+        openclaw_doctor_rehearsal_registry_post_doctor: >-
+          {{ openclaw_doctor_rehearsal_registry_post_doctor_raw.stdout | from_json }}
+      no_log: true
+
+    - name: Require clean managed plugin registration after OpenClaw Doctor
+      ansible.builtin.assert:
+        that:
+          - openclaw_doctor_rehearsal_registry_post_doctor_raw.rc == 0
+          - "'openKeyedStore is only available for trusted plugins' not in openclaw_doctor_rehearsal_registry_post_doctor_raw.stderr"
+          - (openclaw_doctor_rehearsal_registry_post_doctor.current.installRecords | default({}, true) | dict2items | map(attribute='key') | sort) == (openclaw_isolated_gateway_managed_plugins | map(attribute='id') | sort)
+          - (openclaw_doctor_rehearsal_registry_post_doctor.persisted.installRecords | default({}, true) | dict2items | map(attribute='key') | sort) == (openclaw_isolated_gateway_managed_plugins | map(attribute='id') | sort)
+        fail_msg: >-
+          Doctor changed supported plugin provenance or plugin registration
+          still emits a trusted-plugin failure.
+
+    - name: Require exact managed plugin provenance after OpenClaw Doctor
+      ansible.builtin.assert:
+        that:
+          - openclaw_doctor_rehearsal_registry_post_doctor.current.installRecords[openclaw_isolated_gateway_managed_plugins[item].id].source == 'npm'
+          - openclaw_doctor_rehearsal_registry_post_doctor.current.installRecords[openclaw_isolated_gateway_managed_plugins[item].id].installPath == openclaw_doctor_rehearsal_managed_plugin_root_paths[item]
+          - openclaw_doctor_rehearsal_registry_post_doctor.current.installRecords[openclaw_isolated_gateway_managed_plugins[item].id].integrity | length > 0
+          - (openclaw_doctor_rehearsal_registry_post_doctor.current.plugins | selectattr('pluginId', 'equalto', openclaw_isolated_gateway_managed_plugins[item].id) | list | length) == 1
+          - (openclaw_doctor_rehearsal_registry_post_doctor.current.plugins | selectattr('pluginId', 'equalto', openclaw_isolated_gateway_managed_plugins[item].id) | list | first).rootDir == openclaw_doctor_rehearsal_managed_plugin_root_paths[item]
+          - ((openclaw_doctor_rehearsal_registry_post_doctor.current.plugins | selectattr('pluginId', 'equalto', openclaw_isolated_gateway_managed_plugins[item].id) | list | first).trustedOfficialInstall | default(false) | bool) == (openclaw_isolated_gateway_managed_plugins[item].trusted_official | bool)
+          - ((openclaw_doctor_rehearsal_registry_post_doctor.current.plugins | selectattr('pluginId', 'equalto', openclaw_isolated_gateway_managed_plugins[item].id) | list | first).enabled | bool) == (openclaw_isolated_gateway_managed_plugins[item].id not in openclaw_doctor_rehearsal_disabled_runtime_plugins)
+        fail_msg: >-
+          A managed plugin lost its npm ownership, integrity, immutable path,
+          trust classification, or credential-free enablement state.
+      loop: "{{ range(0, openclaw_isolated_gateway_managed_plugins | length) | list }}"
+      loop_control:
+        label: "{{ openclaw_isolated_gateway_managed_plugins[item].id }}"
+
+    - name: Record post-Doctor managed plugin validation
+      ansible.builtin.copy:
+        dest: "{{ openclaw_doctor_rehearsal_evidence_dir }}/plugin-registry-post-doctor.json"
+        owner: root
+        group: root
+        mode: "0600"
+        content: >-
+          {{
+            {
+              'schemaVersion': 1,
+              'validatedAfterDoctor': true,
+              'ownershipRecordSource': 'npm',
+              'managedPlugins': (
+                openclaw_isolated_gateway_managed_plugins
+                | map(attribute='id')
+                | sort
+              ),
+              'runtimeDisabledPlugins': openclaw_doctor_rehearsal_disabled_runtime_plugins | sort
+            }
+            | to_nice_json
+          }}
+
     - name: Capture OpenClaw Doctor second-pass evidence
       ansible.builtin.include_tasks: ../../tasks/openclaw-doctor-snapshot.yml
       vars:
@@ -1199,6 +1607,7 @@
           - "{{ openclaw_doctor_rehearsal_evidence_dir }}/pass2-diff-{{ item }}.json"
       loop:
         - state
+        - plugins
         - workspace
         - config
       changed_when: false
@@ -1208,6 +1617,7 @@
         src: "{{ openclaw_doctor_rehearsal_evidence_dir }}/pass2-diff-{{ item }}.json"
       loop:
         - state
+        - plugins
         - workspace
         - config
       register: openclaw_doctor_rehearsal_pass2_diffs

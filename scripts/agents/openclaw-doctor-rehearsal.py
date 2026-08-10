@@ -13,9 +13,8 @@ import tempfile
 from pathlib import Path
 from typing import Any, Iterable
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 MANIFEST_SCHEMA_VERSION = 2
-REDACTED = "doctor-rehearsal-redacted"
 SECRET_KEYS = {
     "accesstoken",
     "apikey",
@@ -109,7 +108,7 @@ def sanitize_and_rewrite(
     *,
     path: tuple[str, ...],
     replacements: list[tuple[str, str]],
-    redacted_paths: list[str],
+    removed_credential_paths: list[str],
     rewritten_paths: list[str],
 ) -> Any:
     if isinstance(value, dict):
@@ -119,14 +118,13 @@ def sanitize_and_rewrite(
             normalized = canonical_key(str(key))
             upper_key = str(key).upper()
             if normalized in SECRET_KEYS or upper_key.endswith(SECRET_SUFFIXES):
-                result[key] = REDACTED
-                redacted_paths.append(json_pointer(child_path))
+                removed_credential_paths.append(json_pointer(child_path))
                 continue
             result[key] = sanitize_and_rewrite(
                 child,
                 path=child_path,
                 replacements=replacements,
-                redacted_paths=redacted_paths,
+                removed_credential_paths=removed_credential_paths,
                 rewritten_paths=rewritten_paths,
             )
         return result
@@ -136,7 +134,7 @@ def sanitize_and_rewrite(
                 child,
                 path=(*path, str(index)),
                 replacements=replacements,
-                redacted_paths=redacted_paths,
+                removed_credential_paths=removed_credential_paths,
                 rewritten_paths=rewritten_paths,
             )
             for index, child in enumerate(value)
@@ -185,6 +183,61 @@ def parse_plugin_paths(values: list[str]) -> dict[str, Path]:
     return plugins
 
 
+def load_managed_install_records(
+    source: str | None,
+    managed_plugins: dict[str, Path],
+    target_state: str,
+) -> dict[str, dict[str, Any]]:
+    if not source:
+        return {}
+    source_path = Path(source)
+    require_regular_file(source_path)
+    try:
+        payload = json.loads(source_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as error:
+        raise RehearsalError(
+            f"failed to read plugin install records: {error}"
+        ) from error
+    records = payload.get("current", {}).get("installRecords")
+    if not isinstance(records, dict):
+        raise RehearsalError(
+            "plugin registry source does not contain current.installRecords"
+        )
+    if set(records) != set(managed_plugins):
+        raise RehearsalError(
+            "plugin install-record ids do not match managed plugins: "
+            + ", ".join(sorted(set(records) ^ set(managed_plugins)))
+        )
+    npm_root = Path(target_state, "npm").resolve()
+    validated: dict[str, dict[str, Any]] = {}
+    for plugin_id, record in records.items():
+        if not isinstance(record, dict) or record.get("source") != "npm":
+            raise RehearsalError(
+                f"managed plugin lacks npm install provenance: {plugin_id}"
+            )
+        install_path_value = record.get("installPath")
+        if not isinstance(install_path_value, str):
+            raise RehearsalError(
+                f"managed plugin install record lacks installPath: {plugin_id}"
+            )
+        install_path = Path(install_path_value)
+        if (
+            not install_path.is_absolute()
+            or install_path.resolve() != managed_plugins[plugin_id]
+            or not is_within(install_path.resolve(), npm_root)
+        ):
+            raise RehearsalError(
+                f"managed plugin install record escapes target npm state: {plugin_id}"
+            )
+        for field in ("integrity", "resolvedName", "resolvedVersion", "spec"):
+            if not isinstance(record.get(field), str) or not record[field].strip():
+                raise RehearsalError(
+                    f"managed plugin npm record lacks {field}: {plugin_id}"
+                )
+        validated[plugin_id] = record
+    return validated
+
+
 def transform_config(args: argparse.Namespace) -> dict[str, Any]:
     source = Path(args.source)
     output = Path(args.output)
@@ -207,19 +260,19 @@ def transform_config(args: argparse.Namespace) -> dict[str, Any]:
         key=lambda pair: len(pair[0]),
         reverse=True,
     )
-    redacted_paths: list[str] = []
+    removed_credential_paths: list[str] = []
     rewritten_paths: list[str] = []
     transformed = sanitize_and_rewrite(
         parsed,
         path=(),
         replacements=replacements,
-        redacted_paths=redacted_paths,
+        removed_credential_paths=removed_credential_paths,
         rewritten_paths=rewritten_paths,
     )
 
     if "env" in transformed:
         transformed["env"] = {}
-        redacted_paths.append("/env")
+        removed_credential_paths.append("/env")
 
     gateway = transformed.setdefault("gateway", {})
     if not isinstance(gateway, dict):
@@ -228,24 +281,51 @@ def transform_config(args: argparse.Namespace) -> dict[str, Any]:
     gateway["bind"] = "loopback"
     gateway["port"] = args.gateway_port
     gateway.pop("remote", None)
-    auth = gateway.setdefault("auth", {})
-    if not isinstance(auth, dict):
-        auth = {}
-        gateway["auth"] = auth
-    auth["mode"] = "token"
-    auth["token"] = REDACTED
-    if "/gateway/auth/token" not in redacted_paths:
-        redacted_paths.append("/gateway/auth/token")
+    gateway["auth"] = {"mode": "none"}
 
-    channels = transformed.get("channels")
+    channels = transformed.pop("channels", None)
     disabled_channels: list[str] = []
     if isinstance(channels, dict):
-        for channel_id, channel_config in channels.items():
+        for channel_id in channels:
             if channel_id in {"defaults", "modelByChannel"}:
                 continue
-            if isinstance(channel_config, dict):
-                channel_config["enabled"] = False
-                disabled_channels.append(str(channel_id))
+            disabled_channels.append(str(channel_id))
+
+    disabled_memory_search_paths: list[str] = []
+    if getattr(args, "disable_memory_search", False):
+        memory_search_candidates: list[tuple[tuple[str, ...], Any]] = [
+            (("memorySearch",), transformed.get("memorySearch")),
+        ]
+        agents = transformed.get("agents")
+        if isinstance(agents, dict):
+            defaults = agents.get("defaults")
+            if isinstance(defaults, dict):
+                memory_search_candidates.append(
+                    (
+                        ("agents", "defaults", "memorySearch"),
+                        defaults.get("memorySearch"),
+                    )
+                )
+            agent_entries = agents.get("list")
+            if isinstance(agent_entries, list):
+                for index, agent in enumerate(agent_entries):
+                    if isinstance(agent, dict):
+                        memory_search_candidates.append(
+                            (
+                                ("agents", "list", str(index), "memorySearch"),
+                                agent.get("memorySearch"),
+                            )
+                        )
+        for candidate_path, memory_search in memory_search_candidates:
+            if memory_search is None:
+                continue
+            if not isinstance(memory_search, dict):
+                raise RehearsalError(
+                    "memorySearch config must be an object when present: "
+                    + json_pointer(candidate_path)
+                )
+            memory_search["enabled"] = False
+            disabled_memory_search_paths.append(json_pointer(candidate_path))
 
     update = transformed.get("update")
     if isinstance(update, dict):
@@ -257,7 +337,13 @@ def transform_config(args: argparse.Namespace) -> dict[str, Any]:
     plugins = transformed.setdefault("plugins", {})
     if not isinstance(plugins, dict):
         raise RehearsalError("plugins config must be an object")
+    plugins.pop("installs", None)
     managed_plugins = parse_plugin_paths(args.plugin_path)
+    managed_install_records = load_managed_install_records(
+        getattr(args, "install_records_source", None),
+        managed_plugins,
+        target_state,
+    )
     retired_plugins = set(args.retire_plugin)
     overlap = retired_plugins & set(managed_plugins)
     if overlap:
@@ -281,9 +367,27 @@ def transform_config(args: argparse.Namespace) -> dict[str, Any]:
     entries = plugins.get("entries")
     if entries is not None and not isinstance(entries, dict):
         raise RehearsalError("plugins.entries must be an object when present")
+    if entries is None:
+        entries = {}
+        plugins["entries"] = entries
     if isinstance(entries, dict):
         for plugin_id in retired_plugins:
             entries.pop(plugin_id, None)
+
+    disabled_runtime_plugins = set(getattr(args, "disable_plugin_runtime", []))
+    unmanaged_disabled_plugins = disabled_runtime_plugins - set(managed_plugins)
+    if unmanaged_disabled_plugins:
+        raise RehearsalError(
+            "runtime-disabled plugins are not managed plugins: "
+            + ", ".join(sorted(unmanaged_disabled_plugins))
+        )
+    for plugin_id in sorted(disabled_runtime_plugins):
+        entry = entries.setdefault(plugin_id, {})
+        if not isinstance(entry, dict):
+            raise RehearsalError(
+                f"plugin entry must be an object when present: {plugin_id}"
+            )
+        entry["enabled"] = False
 
     slots = plugins.get("slots")
     if slots is not None and not isinstance(slots, dict):
@@ -302,13 +406,9 @@ def transform_config(args: argparse.Namespace) -> dict[str, Any]:
             )
         )
 
-    load = plugins.setdefault("load", {})
-    if not isinstance(load, dict):
-        load = {}
-        plugins["load"] = load
-    load["paths"] = [
-        str(managed_plugins[plugin_id]) for plugin_id in sorted(managed_plugins)
-    ]
+    plugins.pop("load", None)
+    if managed_install_records:
+        plugins["installs"] = managed_install_records
 
     remaining = find_source_references(transformed, (source_state, source_workspace))
     if remaining:
@@ -327,8 +427,11 @@ def transform_config(args: argparse.Namespace) -> dict[str, Any]:
         "schemaVersion": SCHEMA_VERSION,
         "status": "ok",
         "disabledChannels": sorted(disabled_channels),
+        "disabledMemorySearchPaths": sorted(disabled_memory_search_paths),
+        "disabledRuntimePlugins": sorted(disabled_runtime_plugins),
+        "installRecordPlugins": sorted(managed_install_records),
         "managedPlugins": sorted(managed_plugins),
-        "redactedPaths": sorted(set(redacted_paths)),
+        "removedCredentialPaths": sorted(set(removed_credential_paths)),
         "retiredPlugins": sorted(retired_plugins),
         "rewrittenPaths": sorted(set(rewritten_paths)),
         "sourceConfigSha256": hashlib.sha256(source.read_bytes()).hexdigest(),
@@ -409,6 +512,81 @@ def sqlite_backup(args: argparse.Namespace) -> dict[str, Any]:
     return result
 
 
+def sqlite_checkpoint(args: argparse.Namespace) -> dict[str, Any]:
+    database = Path(args.database)
+    require_regular_file(database)
+
+    connection = sqlite3.connect(database, timeout=30)
+    try:
+        connection.execute("PRAGMA busy_timeout=30000")
+        journal_mode = str(connection.execute("PRAGMA journal_mode").fetchone()[0])
+        checkpoint_row = connection.execute(
+            "PRAGMA wal_checkpoint(TRUNCATE)"
+        ).fetchone()
+        if checkpoint_row is None or len(checkpoint_row) != 3:
+            raise RehearsalError("SQLite checkpoint returned an invalid result")
+        busy, log_frames, checkpointed_frames = (int(value) for value in checkpoint_row)
+        if busy != 0:
+            raise RehearsalError(
+                f"SQLite checkpoint remained busy with {log_frames} WAL frames"
+            )
+        if log_frames not in {-1, 0} or checkpointed_frames not in {-1, 0}:
+            raise RehearsalError(
+                "SQLite TRUNCATE checkpoint left uncheckpointed WAL frames: "
+                f"log={log_frames}, checkpointed={checkpointed_frames}"
+            )
+        quick_check = sqlite_quick_check(connection)
+        if quick_check != "ok":
+            raise RehearsalError(f"SQLite checkpoint quick_check failed: {quick_check}")
+    finally:
+        connection.close()
+
+    removed_sidecars: list[str] = []
+    for suffix in ("-wal", "-shm"):
+        sidecar = Path(f"{database}{suffix}")
+        try:
+            metadata = sidecar.lstat()
+        except FileNotFoundError:
+            continue
+        if stat.S_ISLNK(metadata.st_mode) or not stat.S_ISREG(metadata.st_mode):
+            raise RehearsalError(
+                f"SQLite sidecar is not a regular non-symlink file: {sidecar}"
+            )
+        if suffix == "-wal" and metadata.st_size != 0:
+            raise RehearsalError(
+                f"SQLite WAL remains non-empty after TRUNCATE checkpoint: {sidecar}"
+            )
+        sidecar.unlink()
+        removed_sidecars.append(sidecar.name)
+
+    immutable_uri = database.resolve().as_uri() + "?mode=ro&immutable=1"
+    verification = sqlite3.connect(immutable_uri, uri=True)
+    try:
+        quick_check = sqlite_quick_check(verification)
+        if quick_check != "ok":
+            raise RehearsalError(
+                f"checkpointed SQLite immutable quick_check failed: {quick_check}"
+            )
+    finally:
+        verification.close()
+
+    result = {
+        "schemaVersion": SCHEMA_VERSION,
+        "status": "ok",
+        "journalMode": journal_mode,
+        "checkpoint": {
+            "busy": busy,
+            "checkpointedFrames": checkpointed_frames,
+            "logFrames": log_frames,
+        },
+        "quickCheck": "ok",
+        "removedSidecars": sorted(removed_sidecars),
+    }
+    if args.output:
+        atomic_write_json(Path(args.output), result)
+    return result
+
+
 def encode_sqlite_value(value: Any) -> Any:
     if isinstance(value, bytes):
         return {"blobSha256": hashlib.sha256(value).hexdigest(), "bytes": len(value)}
@@ -417,10 +595,37 @@ def encode_sqlite_value(value: Any) -> Any:
     return value
 
 
+def parse_ignored_sqlite_columns(
+    values: list[str], available_columns: dict[str, list[str]]
+) -> dict[str, set[str]]:
+    ignored: dict[str, set[str]] = {}
+    for value in values:
+        table, separator, column = value.partition(".")
+        if not separator or not table or not column:
+            raise RehearsalError(
+                "ignored SQLite columns must use the form table.column"
+            )
+        if table not in available_columns:
+            raise RehearsalError(f"ignored SQLite column uses unknown table: {table}")
+        if column not in available_columns[table]:
+            raise RehearsalError(
+                f"ignored SQLite column does not exist: {table}.{column}"
+            )
+        ignored.setdefault(table, set()).add(column)
+    for table, columns in ignored.items():
+        if len(columns) == len(available_columns[table]):
+            raise RehearsalError(
+                f"refusing to ignore every column in SQLite table: {table}"
+            )
+    return ignored
+
+
 def sqlite_summary(args: argparse.Namespace) -> dict[str, Any]:
     database = Path(args.database)
     require_regular_file(database)
-    connection = sqlite3.connect(database.resolve().as_uri() + "?mode=ro", uri=True)
+    connection = sqlite3.connect(
+        database.resolve().as_uri() + "?mode=ro&immutable=1", uri=True
+    )
     try:
         quick_check = sqlite_quick_check(connection)
         if quick_check != "ok":
@@ -443,6 +648,25 @@ def sqlite_summary(args: argparse.Namespace) -> dict[str, Any]:
                 "SQLite summary excludes unknown tables: "
                 + ", ".join(sorted(unknown_exclusions))
             )
+        available_columns = {
+            name: [
+                row[1]
+                for row in connection.execute(
+                    f"PRAGMA table_info({quote_identifier(name)})"
+                )
+            ]
+            for name, create_sql in table_rows
+            if not create_sql.upper().startswith("CREATE VIRTUAL TABLE")
+        }
+        ignored_columns = parse_ignored_sqlite_columns(
+            args.ignore_column, available_columns
+        )
+        ignored_excluded_tables = set(ignored_columns) & excluded_tables
+        if ignored_excluded_tables:
+            raise RehearsalError(
+                "SQLite summary cannot ignore columns in excluded tables: "
+                + ", ".join(sorted(ignored_excluded_tables))
+            )
         tables: dict[str, Any] = {}
         for name, create_sql in table_rows:
             if name in excluded_tables:
@@ -451,21 +675,23 @@ def sqlite_summary(args: argparse.Namespace) -> dict[str, Any]:
                 tables[name] = {"kind": "virtual"}
                 continue
             columns = [
-                row[1]
-                for row in connection.execute(
-                    f"PRAGMA table_info({quote_identifier(name)})"
-                )
+                column
+                for column in available_columns[name]
+                if column not in ignored_columns.get(name, set())
             ]
             order_columns = [
                 row[1]
                 for row in connection.execute(
                     f"PRAGMA table_info({quote_identifier(name)})"
                 )
-                if int(row[5]) > 0
+                if int(row[5]) > 0 and row[1] in columns
             ]
             if not order_columns:
                 order_columns = columns
-            statement = f"SELECT * FROM {quote_identifier(name)}"
+            statement = "SELECT " + ", ".join(
+                quote_identifier(column) for column in columns
+            )
+            statement += f" FROM {quote_identifier(name)}"
             if order_columns:
                 statement += " ORDER BY " + ", ".join(
                     quote_identifier(column) for column in order_columns
@@ -484,6 +710,8 @@ def sqlite_summary(args: argparse.Namespace) -> dict[str, Any]:
                 row_count += 1
             tables[name] = {
                 "kind": "table",
+                "columns": columns,
+                "ignoredColumns": sorted(ignored_columns.get(name, set())),
                 "rowCount": row_count,
                 "rowsSha256": digest.hexdigest(),
             }
@@ -494,6 +722,9 @@ def sqlite_summary(args: argparse.Namespace) -> dict[str, Any]:
         "status": "ok",
         "quickCheck": "ok",
         "excludedTables": sorted(excluded_tables),
+        "ignoredColumns": {
+            table: sorted(columns) for table, columns in sorted(ignored_columns.items())
+        },
         "schemaSha256": schema_hash,
         "tables": tables,
     }
@@ -542,6 +773,48 @@ def canonical_plugin_skill_roots(args: argparse.Namespace) -> tuple[Path, ...]:
     return tuple(sorted(roots, key=str))
 
 
+def canonical_symlink_target_roots(args: argparse.Namespace) -> tuple[Path, ...]:
+    roots: set[Path] = set()
+    for raw_root in getattr(args, "allow_symlink_target_root", []):
+        supplied = Path(raw_root)
+        if not supplied.is_absolute():
+            raise RehearsalError(f"symlink target root is not absolute: {supplied}")
+        resolved = supplied.resolve(strict=True)
+        if supplied != resolved:
+            raise RehearsalError(f"symlink target root is not canonical: {supplied}")
+        require_directory(resolved)
+        roots.add(resolved)
+    return tuple(sorted(roots, key=str))
+
+
+def manifest_safe_symlink(
+    child: Path,
+    relative: str,
+    metadata: os.stat_result,
+    allowed_roots: tuple[Path, ...],
+) -> dict[str, Any]:
+    try:
+        resolved = child.resolve(strict=True)
+    except (OSError, RuntimeError) as error:
+        raise RehearsalError(
+            f"manifest symlink does not resolve safely: {relative}"
+        ) from error
+    if not any(is_within(resolved, root) for root in allowed_roots):
+        raise RehearsalError(f"manifest symlink escapes reviewed roots: {relative}")
+    if not resolved.is_dir() and not resolved.is_file():
+        raise RehearsalError(
+            f"manifest symlink target is not a regular file or directory: {relative}"
+        )
+    return {
+        "relativePath": relative,
+        "type": "symlink",
+        "mode": stat.S_IMODE(metadata.st_mode),
+        "target": os.readlink(child),
+        "resolvedTarget": str(resolved),
+        "targetType": "directory" if resolved.is_dir() else "file",
+    }
+
+
 def manifest_plugin_skill_symlink(
     child: Path,
     relative: str,
@@ -579,6 +852,7 @@ def manifest_tree(args: argparse.Namespace) -> dict[str, Any]:
     require_directory(root)
     exclusions = tuple(sorted(set(args.exclude)))
     plugin_skill_roots = canonical_plugin_skill_roots(args)
+    symlink_target_roots = canonical_symlink_target_roots(args)
     entries: list[dict[str, Any]] = []
     total_bytes = 0
     for current_root, directories, files in os.walk(root, followlinks=False):
@@ -592,11 +866,22 @@ def manifest_tree(args: argparse.Namespace) -> dict[str, Any]:
                 continue
             metadata = child.lstat()
             if stat.S_ISLNK(metadata.st_mode):
-                entries.append(
-                    manifest_plugin_skill_symlink(
-                        child, relative, metadata, plugin_skill_roots
+                if relative_root.as_posix() == "plugin-skills":
+                    entries.append(
+                        manifest_plugin_skill_symlink(
+                            child, relative, metadata, plugin_skill_roots
+                        )
                     )
-                )
+                elif symlink_target_roots:
+                    entries.append(
+                        manifest_safe_symlink(
+                            child, relative, metadata, symlink_target_roots
+                        )
+                    )
+                else:
+                    raise RehearsalError(
+                        f"manifest refuses directory symlink: {relative}"
+                    )
                 continue
             if relative_root.as_posix() == "plugin-skills" and plugin_skill_roots:
                 raise RehearsalError(
@@ -620,6 +905,13 @@ def manifest_tree(args: argparse.Namespace) -> dict[str, Any]:
                 continue
             metadata = child.lstat()
             if stat.S_ISLNK(metadata.st_mode):
+                if symlink_target_roots:
+                    entries.append(
+                        manifest_safe_symlink(
+                            child, relative, metadata, symlink_target_roots
+                        )
+                    )
+                    continue
                 raise RehearsalError(f"manifest refuses file symlink: {relative}")
             if relative_root.as_posix() == "plugin-skills" and plugin_skill_roots:
                 raise RehearsalError(
@@ -644,6 +936,7 @@ def manifest_tree(args: argparse.Namespace) -> dict[str, Any]:
         "root": str(root.resolve()),
         "exclusions": list(exclusions),
         "allowedPluginSkillTargetRoots": [str(path) for path in plugin_skill_roots],
+        "allowedSymlinkTargetRoots": [str(path) for path in symlink_target_roots],
         "entries": entries,
         "summary": {
             "entries": len(entries),
@@ -714,6 +1007,27 @@ def build_parser() -> argparse.ArgumentParser:
         default=[],
         help="legacy global plugin id to remove from the transformed config",
     )
+    transform.add_argument(
+        "--install-records-source",
+        help=(
+            "OpenClaw plugin registry JSON whose npm install records are "
+            "shipped into the transformed config for supported migration"
+        ),
+    )
+    transform.add_argument(
+        "--disable-memory-search",
+        action="store_true",
+        help="disable configured embedding search in the credential-free copy",
+    )
+    transform.add_argument(
+        "--disable-plugin-runtime",
+        action="append",
+        default=[],
+        help=(
+            "managed external-service plugin to preserve but disable only in "
+            "the credential-free rehearsal"
+        ),
+    )
     transform.add_argument("--gateway-port", type=int, default=19789)
     transform.add_argument("--forbidden-literal", action="append", default=[])
     transform.set_defaults(handler=transform_config)
@@ -725,10 +1039,21 @@ def build_parser() -> argparse.ArgumentParser:
     backup.add_argument("--scrub-agent-auth", action="store_true")
     backup.set_defaults(handler=sqlite_backup)
 
+    checkpoint = subparsers.add_parser("sqlite-checkpoint")
+    checkpoint.add_argument("--database", required=True)
+    checkpoint.add_argument("--output")
+    checkpoint.set_defaults(handler=sqlite_checkpoint)
+
     summary = subparsers.add_parser("sqlite-summary")
     summary.add_argument("--database", required=True)
     summary.add_argument("--output", required=True)
     summary.add_argument("--exclude-table", action="append", default=[])
+    summary.add_argument(
+        "--ignore-column",
+        action="append",
+        default=[],
+        metavar="TABLE.COLUMN",
+    )
     summary.set_defaults(handler=sqlite_summary)
 
     manifest = subparsers.add_parser("manifest")
@@ -743,6 +1068,12 @@ def build_parser() -> argparse.ArgumentParser:
             "canonical immutable plugin root allowed as a generated "
             "plugin-skills symlink target"
         ),
+    )
+    manifest.add_argument(
+        "--allow-symlink-target-root",
+        action="append",
+        default=[],
+        help="canonical root allowed for explicitly reviewed manifest symlinks",
     )
     manifest.set_defaults(handler=manifest_tree)
 
