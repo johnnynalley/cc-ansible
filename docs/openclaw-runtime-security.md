@@ -1152,11 +1152,17 @@ The attended apply transaction is canary-only:
    indexes before native config validation or model execution.
 3. Require a clean delivery queue and no active session recovery fields, then
    start the all-heartbeats-disabled baseline and run a deterministic Dubble
-   response probe plus a real Astra Star probe. The Star audit proves one
-   top-level Vega orchestrator, one nested Antares leaf, native parent/depth/model
-   provenance, exact Vega-to-Antares task lineage, and the returned verdict. The
-   only visible Astra result must be one ordinary bounded sentence; internal
-   packets and review narration remain private.
+   response probe, two direct Astra reasoning probes, and a real Astra Star
+   probe. The first reasoning case presents two products that each violate a
+   different hard requirement and requires Astra to reject both without issuing
+   setup steps. The second presents a cheaper alternative after a valid purchase
+   and requires Astra to preserve the owned item rather than recommend another
+   purchase. These use unrelated synthetic names and facts, so they exercise the
+   general reasoning contract instead of MeshCore or Zoho phrase triggers. The
+   Star audit proves one top-level Vega orchestrator, one nested Antares leaf,
+   native parent/depth/model provenance, exact Vega-to-Antares task lineage,
+   and the returned verdict. The only visible Astra result must be one ordinary
+   bounded sentence; internal packets and review narration remain private.
 4. Temporarily deploy the controlled Rigel config, trigger one targeted native
    heartbeat, and require a new isolated transcript with exactly one
    `heartbeat_respond(notify=false)`, no visible assistant text or tool error,

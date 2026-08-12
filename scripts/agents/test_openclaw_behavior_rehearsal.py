@@ -96,6 +96,7 @@ class BehaviorRehearsalTests(unittest.TestCase):
 
     def test_behavior_probes_and_native_evidence_gate_are_ordered(self) -> None:
         dubble = self.playbook.index("- name: Run Dubble behavior probe")
+        reasoning = self.playbook.index("- name: Run semantic reasoning probes")
         star = self.playbook.index("- name: Run real Star delegation behavior probe")
         controlled = self.playbook.index(
             "- name: Deploy controlled Rigel heartbeat config"
@@ -110,7 +111,8 @@ class BehaviorRehearsalTests(unittest.TestCase):
         archive = self.playbook.index(
             "- name: Archive synthetic behavior sessions through native OpenClaw RPC"
         )
-        self.assertLess(dubble, star)
+        self.assertLess(dubble, reasoning)
+        self.assertLess(reasoning, star)
         self.assertLess(star, controlled)
         self.assertLess(controlled, heartbeat)
         self.assertLess(heartbeat, audit)
@@ -120,6 +122,20 @@ class BehaviorRehearsalTests(unittest.TestCase):
         self.assertIn("Spawn only Vega from this Astra session", self.playbook)
         self.assertIn("Vega's actual preliminary evidence", self.playbook)
         self.assertIn("Do not spawn Antares directly", self.playbook)
+        self.assertIn("--infeasible-result", self.playbook)
+        self.assertIn("--owned-result", self.playbook)
+        self.assertIn("reasoningCaseCount", self.playbook)
+
+    def test_semantic_cases_cover_full_intersection_and_owned_state(self) -> None:
+        self.assertIn("Lumen costs $18", self.playbook)
+        self.assertIn("Vale costs $26", self.playbook)
+        self.assertIn("If neither plan is feasible", self.playbook)
+        self.assertIn("Do not provide setup steps", self.playbook)
+        self.assertIn("already bought Quartz for $49", self.playbook)
+        self.assertIn("Mica now appears for $39", self.playbook)
+        self.assertIn("Preserve the valid prior purchase", self.playbook)
+        self.assertIn("reasoningCasesValidated': 2", self.playbook)
+        self.assertIn("summary.archivePlanned | int >= 7", self.playbook)
 
     def test_delivery_and_production_gateway_are_compared_before_and_after(
         self,

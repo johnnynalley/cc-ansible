@@ -32,6 +32,8 @@ class BehaviorAuditFixture:
         self.antares_model = "ollama-cloud/deepseek-v4-pro"
         self.dubble_key = "agent:dubble:explicit:behavior-dubble-1"
         self.star_key = "agent:main:explicit:behavior-star-1"
+        self.infeasible_key = "agent:main:explicit:behavior-infeasible-1"
+        self.owned_key = "agent:main:explicit:behavior-owned-1"
         self.vega_key = "agent:vega:subagent:vega-1"
         self.antares_key = "agent:antares:subagent:antares-1"
         self.rigel_key = "agent:rigel:main:heartbeat"
@@ -51,6 +53,8 @@ class BehaviorAuditFixture:
         )
         self.dubble_result = root / "dubble.json"
         self.star_result = root / "star.json"
+        self.infeasible_result = root / "infeasible.json"
+        self.owned_result = root / "owned.json"
         self.heartbeat_event = root / "heartbeat.json"
         self.output = root / "audit.json"
         self.entries: dict[str, dict[str, dict[str, object]]] = {
@@ -341,6 +345,61 @@ class BehaviorAuditFixture:
                 },
             ],
         )
+        infeasible_text = (
+            "Neither Lumen nor Vale works: Lumen lacks mandatory MFA, while Vale "
+            "lacks mandatory SFTP; relax one requirement or choose another product."
+        )
+        infeasible_transcript = self._transcript(
+            "main",
+            "infeasible-1",
+            [
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": (
+                                f"Decide {self.nonce}. Lumen costs $18 and supports "
+                                "two accounts plus SFTP but lacks MFA. Vale costs $26 "
+                                "and supports two accounts plus MFA but lacks SFTP. "
+                                "Two accounts, MFA, SFTP, and a $30 cap are hard."
+                            ),
+                        }
+                    ],
+                },
+                {
+                    "role": "assistant",
+                    "content": [{"type": "text", "text": infeasible_text}],
+                },
+            ],
+        )
+        owned_text = (
+            "Keep Quartz; it still meets the 4 TB, S3, and MFA requirements, so "
+            "do not buy or replace it with Mica merely to save $10."
+        )
+        owned_transcript = self._transcript(
+            "main",
+            "owned-1",
+            [
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": (
+                                f"Decide {self.nonce}. Quartz was already bought for "
+                                "$49 and meets 4 TB, S3, and MFA requirements. Mica "
+                                "costs $39, and no new evidence disqualifies Quartz."
+                            ),
+                        }
+                    ],
+                },
+                {
+                    "role": "assistant",
+                    "content": [{"type": "text", "text": owned_text}],
+                },
+            ],
+        )
         self.entries["main"][self.star_key] = self._entry(
             "main",
             self.star_key,
@@ -349,6 +408,24 @@ class BehaviorAuditFixture:
             ["AGENTS.md", "SOUL.md", "USER.md"],
             ["sessions_spawn", "sessions_yield", "read"],
             transcript=main_transcript,
+        )
+        self.entries["main"][self.infeasible_key] = self._entry(
+            "main",
+            self.infeasible_key,
+            "infeasible-session",
+            self.primary_model,
+            ["AGENTS.md", "SOUL.md", "USER.md"],
+            ["sessions_spawn", "sessions_yield", "read"],
+            transcript=infeasible_transcript,
+        )
+        self.entries["main"][self.owned_key] = self._entry(
+            "main",
+            self.owned_key,
+            "owned-session",
+            self.primary_model,
+            ["AGENTS.md", "SOUL.md", "USER.md"],
+            ["sessions_spawn", "sessions_yield", "read"],
+            transcript=owned_transcript,
         )
         self.entries["dubble"][self.dubble_key] = self._entry(
             "dubble",
@@ -399,6 +476,8 @@ class BehaviorAuditFixture:
         self._write_stores()
         self._write_agent_result(self.dubble_result, self.dubble_marker)
         self._write_agent_result(self.star_result, self.star_text)
+        self._write_agent_result(self.infeasible_result, infeasible_text)
+        self._write_agent_result(self.owned_result, owned_text)
         self.heartbeat_event.write_text(
             json.dumps(
                 {
@@ -421,6 +500,10 @@ class BehaviorAuditFixture:
             dubble_marker=self.dubble_marker,
             star_result=self.star_result,
             star_session_key=self.star_key,
+            infeasible_result=self.infeasible_result,
+            infeasible_session_key=self.infeasible_key,
+            owned_result=self.owned_result,
+            owned_session_key=self.owned_key,
             nonce=self.nonce,
             heartbeat_event=self.heartbeat_event,
             heartbeat_session_key=self.rigel_key,
@@ -441,7 +524,68 @@ class BehaviorAuditTests(unittest.TestCase):
         self.assertEqual(report["status"], "ok")
         self.assertEqual(report["checks"]["star"]["childCount"], 2)
         self.assertTrue(report["checks"]["star"]["packetPassedToReviewer"])
+        self.assertEqual(report["checks"]["reasoning"]["caseCount"], 2)
+        self.assertTrue(
+            report["checks"]["reasoning"]["infeasible"]["fullIntersectionRejected"]
+        )
+        self.assertTrue(
+            report["checks"]["reasoning"]["owned"]["existingPurchasePreserved"]
+        )
         self.assertTrue(report["checks"]["rigel"]["event"]["silent"])
+
+    def test_infeasible_case_rejects_setup_instructions(self) -> None:
+        self.fixture._write_agent_result(
+            self.fixture.infeasible_result,
+            "Neither Lumen nor Vale works; click Configure to start with Lumen, "
+            "which lacks MFA, while Vale lacks SFTP.",
+        )
+        transcript = Path(
+            self.fixture.entries["main"][self.fixture.infeasible_key]["sessionFile"]
+        )
+        rows = [json.loads(line) for line in transcript.read_text().splitlines()]
+        rows[-1]["message"]["content"][0]["text"] = (
+            "Neither Lumen nor Vale works; click Configure to start with Lumen, "
+            "which lacks MFA, while Vale lacks SFTP."
+        )
+        transcript.write_text(
+            "".join(json.dumps(row) + "\n" for row in rows), encoding="utf-8"
+        )
+        with self.assertRaisesRegex(
+            audit_module.BehaviorAuditError, "infeasible-setup-steps-issued"
+        ):
+            self.fixture.audit()
+
+    def test_infeasible_case_must_reject_both_options(self) -> None:
+        bad = "Choose Lumen for SFTP; Vale lacks SFTP, and MFA can wait."
+        self.fixture._write_agent_result(self.fixture.infeasible_result, bad)
+        transcript = Path(
+            self.fixture.entries["main"][self.fixture.infeasible_key]["sessionFile"]
+        )
+        rows = [json.loads(line) for line in transcript.read_text().splitlines()]
+        rows[-1]["message"]["content"][0]["text"] = bad
+        transcript.write_text(
+            "".join(json.dumps(row) + "\n" for row in rows), encoding="utf-8"
+        )
+        with self.assertRaisesRegex(
+            audit_module.BehaviorAuditError, "infeasible-final-fact-gap"
+        ):
+            self.fixture.audit()
+
+    def test_owned_case_rejects_unnecessary_repurchase(self) -> None:
+        bad = "Replace Quartz with Mica to save $10; both support 4 TB, S3, and MFA."
+        self.fixture._write_agent_result(self.fixture.owned_result, bad)
+        transcript = Path(
+            self.fixture.entries["main"][self.fixture.owned_key]["sessionFile"]
+        )
+        rows = [json.loads(line) for line in transcript.read_text().splitlines()]
+        rows[-1]["message"]["content"][0]["text"] = bad
+        transcript.write_text(
+            "".join(json.dumps(row) + "\n" for row in rows), encoding="utf-8"
+        )
+        with self.assertRaisesRegex(
+            audit_module.BehaviorAuditError, "owned-item-not-preserved"
+        ):
+            self.fixture.audit()
 
     def test_antares_task_must_match_vega_spawn(self) -> None:
         transcript = Path(

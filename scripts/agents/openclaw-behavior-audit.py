@@ -14,13 +14,17 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 AGENTS = ("main", "dubble", "vega", "antares", "rigel")
 MAX_JSON_BYTES = 32 * 1024 * 1024
 MAX_TRANSCRIPT_BYTES = 16 * 1024 * 1024
 MAX_TRANSCRIPT_ROWS = 20_000
 INTERNAL_FINAL_TERMS = re.compile(
     r"\b(?:antares|dispute|pass|reviewer|star|vega)\b", re.IGNORECASE
+)
+SETUP_STEP_TERMS = re.compile(
+    r"\b(?:click|configure|install|open the|step\s*\d|then go to)\b",
+    re.IGNORECASE,
 )
 DANGEROUS_TOOLS = {
     "apply_patch",
@@ -535,6 +539,86 @@ def _audit_vega_orchestration(
     return {"spawnCalls": 1, "yieldCalls": len(yields)}
 
 
+def _audit_direct_reasoning_case(
+    *,
+    label: str,
+    result_path: Path,
+    entry: dict[str, Any],
+    state_root: Path,
+    session_key: str,
+    nonce: str,
+    model_reference: str,
+    workspace_root: Path,
+    required_prompt_facts: tuple[str, ...],
+) -> tuple[str, dict[str, Any]]:
+    text = _agent_result_text(result_path, f"{label}-result")
+    _require(len(text) <= 300, f"{label}-final-too-long")
+    _require("\n" not in text, f"{label}-final-not-one-line")
+    _require(
+        text.count(".") + text.count("!") + text.count("?") <= 2,
+        f"{label}-final-too-many-sentences",
+    )
+    _require(INTERNAL_FINAL_TERMS.search(text) is None, f"{label}-internal-meta")
+    _require(nonce not in text, f"{label}-leaked-nonce")
+    report = _audit_prompt_report(
+        entry,
+        agent="main",
+        session_key=session_key,
+        model_reference=model_reference,
+        workspace_root=workspace_root,
+        required_files={"AGENTS.md", "SOUL.md", "USER.md"},
+        required_tools={"sessions_spawn", "sessions_yield"},
+    )
+    messages = _messages(_read_transcript(entry, state_root, label))
+    _require(
+        _last_text(messages, "assistant", label) == text,
+        f"{label}-result-transcript-mismatch",
+    )
+    visible_texts = [
+        visible
+        for message in messages
+        if message.get("role") == "assistant"
+        for visible in [_message_text(message)]
+        if visible
+    ]
+    _require(visible_texts == [text], f"{label}-visible-answer-count")
+    _require(
+        not _assistant_tool_calls(messages, label),
+        f"{label}-unexpected-tool-call",
+    )
+    user_text = _all_text(messages, "user")
+    _require(nonce in user_text, f"{label}-prompt-lineage")
+    _require(
+        all(fact.casefold() in user_text.casefold() for fact in required_prompt_facts),
+        f"{label}-prompt-fact-gap",
+    )
+    return text, report
+
+
+def _audit_infeasible_decision(text: str) -> None:
+    for required in ("neither", "Lumen", "Vale", "MFA", "SFTP"):
+        _require(required.casefold() in text.casefold(), "infeasible-final-fact-gap")
+    _require(SETUP_STEP_TERMS.search(text) is None, "infeasible-setup-steps-issued")
+
+
+def _audit_owned_item_decision(text: str) -> None:
+    _require("Quartz" in text and "Mica" in text, "owned-final-fact-gap")
+    _require(
+        re.search(r"\bkeep\b.{0,80}\bQuartz\b|\bQuartz\b.{0,80}\bkeep\b", text, re.I)
+        is not None,
+        "owned-item-not-preserved",
+    )
+    _require(
+        re.search(
+            r"\b(?:do not|don't|no need to)\b.{0,100}\b(?:buy|replace|switch)\b.{0,100}\bMica\b",
+            text,
+            re.I,
+        )
+        is not None,
+        "owned-unnecessary-purchase",
+    )
+
+
 def _audit_heartbeat_transcript(
     rows: list[dict[str, Any]], started_at_ms: int
 ) -> dict[str, int]:
@@ -625,6 +709,10 @@ def audit_behavior(
     dubble_marker: str,
     star_result: Path,
     star_session_key: str,
+    infeasible_result: Path,
+    infeasible_session_key: str,
+    owned_result: Path,
+    owned_session_key: str,
     nonce: str,
     heartbeat_event: Path,
     heartbeat_session_key: str,
@@ -752,6 +840,34 @@ def audit_behavior(
         star_text=star_text,
     )
 
+    infeasible_entry = _session_entry(stores, "main", infeasible_session_key)
+    infeasible_text, infeasible_report = _audit_direct_reasoning_case(
+        label="infeasible",
+        result_path=infeasible_result,
+        entry=infeasible_entry,
+        state_root=resolved_state,
+        session_key=infeasible_session_key,
+        nonce=nonce,
+        model_reference=primary_model,
+        workspace_root=resolved_workspace,
+        required_prompt_facts=("Lumen", "Vale", "$18", "$26", "$30", "MFA", "SFTP"),
+    )
+    _audit_infeasible_decision(infeasible_text)
+
+    owned_entry = _session_entry(stores, "main", owned_session_key)
+    owned_text, owned_report = _audit_direct_reasoning_case(
+        label="owned",
+        result_path=owned_result,
+        entry=owned_entry,
+        state_root=resolved_state,
+        session_key=owned_session_key,
+        nonce=nonce,
+        model_reference=primary_model,
+        workspace_root=resolved_workspace,
+        required_prompt_facts=("Quartz", "Mica", "$49", "$39", "4 TB", "S3", "MFA"),
+    )
+    _audit_owned_item_decision(owned_text)
+
     rigel_entry = _session_entry(stores, "rigel", heartbeat_session_key)
     rigel_report = _audit_prompt_report(
         rigel_entry,
@@ -790,6 +906,19 @@ def audit_behavior(
                 "vega": {**vega_report, **vega_orchestration},
                 "antares": antares_report,
             },
+            "reasoning": {
+                "caseCount": 2,
+                "infeasible": {
+                    "fullIntersectionRejected": True,
+                    "noSetupSteps": True,
+                    **infeasible_report,
+                },
+                "owned": {
+                    "existingPurchasePreserved": True,
+                    "noReplacementPurchase": True,
+                    **owned_report,
+                },
+            },
             "rigel": {
                 **rigel_report,
                 **rigel_transcript,
@@ -802,6 +931,12 @@ def audit_behavior(
             ).hexdigest(),
             "starResult": hashlib.sha256(
                 _regular_file(star_result, "star-result").read_bytes()
+            ).hexdigest(),
+            "infeasibleResult": hashlib.sha256(
+                _regular_file(infeasible_result, "infeasible-result").read_bytes()
+            ).hexdigest(),
+            "ownedResult": hashlib.sha256(
+                _regular_file(owned_result, "owned-result").read_bytes()
             ).hexdigest(),
             "heartbeatEvent": hashlib.sha256(
                 _regular_file(heartbeat_event, "heartbeat-event").read_bytes()
@@ -844,6 +979,10 @@ def main() -> int:
     parser.add_argument("--dubble-marker", required=True)
     parser.add_argument("--star-result", required=True, type=Path)
     parser.add_argument("--star-session-key", required=True)
+    parser.add_argument("--infeasible-result", required=True, type=Path)
+    parser.add_argument("--infeasible-session-key", required=True)
+    parser.add_argument("--owned-result", required=True, type=Path)
+    parser.add_argument("--owned-session-key", required=True)
     parser.add_argument("--nonce", required=True)
     parser.add_argument("--heartbeat-event", required=True, type=Path)
     parser.add_argument("--heartbeat-session-key", required=True)
@@ -861,6 +1000,10 @@ def main() -> int:
             dubble_marker=args.dubble_marker,
             star_result=args.star_result,
             star_session_key=args.star_session_key,
+            infeasible_result=args.infeasible_result,
+            infeasible_session_key=args.infeasible_session_key,
+            owned_result=args.owned_result,
+            owned_session_key=args.owned_session_key,
             nonce=args.nonce,
             heartbeat_event=args.heartbeat_event,
             heartbeat_session_key=args.heartbeat_session_key,
@@ -878,6 +1021,7 @@ def main() -> int:
                 "status": "ok",
                 "agentCount": len(report["agentsValidated"]),
                 "starChildCount": report["checks"]["star"]["childCount"],
+                "reasoningCaseCount": report["checks"]["reasoning"]["caseCount"],
                 "rigelSilent": report["checks"]["rigel"]["event"]["silent"],
             },
             sort_keys=True,

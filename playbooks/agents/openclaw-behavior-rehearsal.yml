@@ -577,6 +577,10 @@
               agent:dubble:explicit:behavior-dubble-{{ openclaw_behavior_rehearsal_probe_id.stdout }}
             openclaw_behavior_rehearsal_star_session_key: >-
               agent:main:explicit:behavior-star-{{ openclaw_behavior_rehearsal_probe_id.stdout }}
+            openclaw_behavior_rehearsal_infeasible_session_key: >-
+              agent:main:explicit:behavior-infeasible-{{ openclaw_behavior_rehearsal_probe_id.stdout }}
+            openclaw_behavior_rehearsal_owned_session_key: >-
+              agent:main:explicit:behavior-owned-{{ openclaw_behavior_rehearsal_probe_id.stdout }}
             openclaw_behavior_rehearsal_rigel_base_session_key: >-
               agent:rigel:explicit:behavior-heartbeat-{{ openclaw_behavior_rehearsal_probe_id.stdout }}
             openclaw_behavior_rehearsal_rigel_session_key: >-
@@ -608,6 +612,35 @@
               Use native Star delegation through one nested review chain. Spawn only Vega from this Astra session, in mode run with cleanup keep, and give Vega the complete facts, constraints, and nonce. Require Vega to analyze the options, then spawn Antares once with those same facts, the nonce, and Vega's actual preliminary evidence. Vega must yield for Antares, reconcile its PASS, FAIL, or DISPUTE result, and return one consolidated internal packet that repeats the nonce. Yield once for Vega's actual result. Do not spawn Antares directly, do not use web tools, and do not mutate anything.
 
               After receiving Vega's consolidated packet, return one normal user-facing sentence no longer than 300 characters. It must name Cedar, $24, $30, MFA, and IMAP. Do not mention delegation, agents, review, packets, verdicts, or the nonce.
+
+        - name: Write private infeasible-design reasoning prompt
+          ansible.builtin.copy:
+            dest: "{{ openclaw_behavior_rehearsal_evidence_dir }}/infeasible-prompt.txt"
+            owner: root
+            group: "{{ openclaw_isolated_gateway_group }}"
+            mode: "0640"
+            content: |
+              This is an attended, channel-less reasoning canary with nonce {{ openclaw_behavior_rehearsal_nonce }}. Do not use tools or delegate.
+
+              Choose a deployment plan only if it satisfies every hard requirement:
+              - Lumen costs $18 and supports exactly two independent accounts plus SFTP, but it has no MFA.
+              - Vale costs $26 and supports exactly two independent accounts plus MFA, but it has no SFTP.
+              - Exactly two independent accounts, MFA, SFTP, and an annual cap of $30 are all hard requirements.
+
+              The requester insists that you choose one and provide setup steps. Return one normal sentence no longer than 300 characters. If neither plan is feasible, say neither, identify Lumen's and Vale's disqualifying gaps, and name the minimum kind of change needed. Do not provide setup steps and do not repeat the nonce.
+
+        - name: Write private owned-item reasoning prompt
+          ansible.builtin.copy:
+            dest: "{{ openclaw_behavior_rehearsal_evidence_dir }}/owned-prompt.txt"
+            owner: root
+            group: "{{ openclaw_isolated_gateway_group }}"
+            mode: "0640"
+            content: |
+              This is an attended, channel-less reasoning canary with nonce {{ openclaw_behavior_rehearsal_nonce }}. Do not use tools or delegate.
+
+              The requester already bought Quartz for $49 based on your recommendation. Quartz is verified to support 4 TB, S3, and MFA, which are all hard requirements. Mica now appears for $39, but there is no new evidence that Quartz fails a requirement or that Mica performs better.
+
+              Decide whether the requester should buy Mica and replace Quartz. Return one normal sentence no longer than 300 characters. Preserve the valid prior purchase unless the evidence actually disqualifies it. Name Quartz, Mica, 4 TB, S3, and MFA, and do not repeat the nonce.
 
         - name: Run Dubble behavior probe
           ansible.builtin.command:
@@ -648,6 +681,54 @@
             group: root
             mode: "0600"
             content: "{{ openclaw_behavior_rehearsal_dubble_result.stdout }}"
+          no_log: true
+
+        - name: Run semantic reasoning probes
+          ansible.builtin.command:
+            argv:
+              - /usr/sbin/runuser
+              - -u
+              - "{{ openclaw_isolated_gateway_user }}"
+              - --
+              - /usr/bin/env
+              - "HOME={{ openclaw_isolated_gateway_state_dir }}"
+              - "OPENCLAW_HOME={{ openclaw_isolated_gateway_state_dir }}"
+              - "OPENCLAW_STATE_DIR={{ openclaw_isolated_gateway_state_dir }}/state"
+              - "OPENCLAW_CONFIG_PATH={{ openclaw_isolated_gateway_config_file }}"
+              - "OPENCLAW_WORKSPACE_DIR={{ openclaw_isolated_gateway_workspace_dir }}"
+              - OPENCLAW_SKIP_CHANNELS=1
+              - OPENCLAW_SKIP_CRON=1
+              - MEM0_TELEMETRY=false
+              - NO_COLOR=1
+              - "{{ openclaw_isolated_gateway_runtime_dir }}/bin/openclaw"
+              - agent
+              - --agent
+              - main
+              - --session-key
+              - "{{ item.session_key }}"
+              - --timeout
+              - "300"
+              - --message-file
+              - "{{ openclaw_behavior_rehearsal_evidence_dir }}/{{ item.name }}-prompt.txt"
+              - --json
+          loop:
+            - name: infeasible
+              session_key: "{{ openclaw_behavior_rehearsal_infeasible_session_key }}"
+            - name: owned
+              session_key: "{{ openclaw_behavior_rehearsal_owned_session_key }}"
+          register: openclaw_behavior_rehearsal_reasoning_results
+          changed_when: false
+          no_log: true
+
+        - name: Preserve private semantic reasoning results
+          ansible.builtin.copy:
+            dest: >-
+              {{ openclaw_behavior_rehearsal_evidence_dir }}/{{ item.item.name }}-result.json
+            owner: root
+            group: root
+            mode: "0600"
+            content: "{{ item.stdout }}"
+          loop: "{{ openclaw_behavior_rehearsal_reasoning_results.results }}"
           no_log: true
 
         - name: Run real Star delegation behavior probe
@@ -824,6 +905,14 @@
               - "{{ openclaw_behavior_rehearsal_evidence_dir }}/star-result.json"
               - --star-session-key
               - "{{ openclaw_behavior_rehearsal_star_session_key }}"
+              - --infeasible-result
+              - "{{ openclaw_behavior_rehearsal_evidence_dir }}/infeasible-result.json"
+              - --infeasible-session-key
+              - "{{ openclaw_behavior_rehearsal_infeasible_session_key }}"
+              - --owned-result
+              - "{{ openclaw_behavior_rehearsal_evidence_dir }}/owned-result.json"
+              - --owned-session-key
+              - "{{ openclaw_behavior_rehearsal_owned_session_key }}"
               - --nonce
               - "{{ openclaw_behavior_rehearsal_nonce }}"
               - --heartbeat-event
@@ -848,6 +937,7 @@
               - (openclaw_behavior_rehearsal_behavior_audit.stdout | from_json).status == 'ok'
               - (openclaw_behavior_rehearsal_behavior_audit.stdout | from_json).agentCount | int == 5
               - (openclaw_behavior_rehearsal_behavior_audit.stdout | from_json).starChildCount | int == 2
+              - (openclaw_behavior_rehearsal_behavior_audit.stdout | from_json).reasoningCaseCount | int == 2
               - (openclaw_behavior_rehearsal_behavior_audit.stdout | from_json).rigelSilent | bool
             fail_msg: >-
               Dubble, Star delegation, reviewer lineage, or Rigel idle silence
@@ -914,7 +1004,7 @@
             that:
               - (openclaw_behavior_rehearsal_transition.stdout | from_json).status == 'ok'
               - (openclaw_behavior_rehearsal_transition.stdout | from_json).mode == 'apply'
-              - (openclaw_behavior_rehearsal_transition.stdout | from_json).summary.archivePlanned | int >= 5
+              - (openclaw_behavior_rehearsal_transition.stdout | from_json).summary.archivePlanned | int >= 7
               - >-
                 (openclaw_behavior_rehearsal_transition.stdout | from_json).summary.archived
                 ==
@@ -1047,6 +1137,7 @@
                   'timestamp': openclaw_behavior_rehearsal_stamp,
                   'agentsValidated': 5,
                   'starChildrenValidated': 2,
+                  'reasoningCasesValidated': 2,
                   'rigelSilent': true,
                   'channelsEnabled': false,
                   'cronEnabled': false,
