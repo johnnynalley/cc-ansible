@@ -3,7 +3,7 @@
 # Purpose: Prove the dedicated Codex executor cannot cross the Gateway boundary.
 # Hosts: openclaw_hosts.
 # Key vars: openclaw_security_rehearsal_* and openclaw_isolated_*.
-# Scripts: scripts/agents/openclaw-{provider-auth-boundary-audit,security-rehearsal-audit,security-session-cleanup,delivery-cutover-audit,modern-config-audit,native-session-transition,session-transition}.py.
+# Scripts: scripts/agents/openclaw-provider-auth-boundary-audit.py, scripts/agents/openclaw-security-rehearsal-audit.py, scripts/agents/openclaw-security-session-cleanup.py, scripts/agents/openclaw-delivery-cutover-audit.py, scripts/agents/openclaw-modern-config-audit.py, scripts/agents/openclaw-native-session-transition.py, scripts/agents/openclaw-session-transition.py.
 # Validation: ansible-playbook playbooks/agents/openclaw-security-rehearsal.yml --syntax-check.
 
 - name: Rehearse OpenClaw prompt-injection and executor confinement

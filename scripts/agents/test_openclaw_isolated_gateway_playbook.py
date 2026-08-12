@@ -232,12 +232,259 @@ class IsolatedGatewayPlaybookTests(unittest.TestCase):
             self.assertNotIn("--password", task)
         self.assertIn("- --deep", self.task("Run deep isolated Gateway security audit"))
 
+    def test_static_security_failure_reports_only_safe_classifications(self) -> None:
+        run_audit = self.playbook.index(
+            "- name: Run static isolated Gateway security audit"
+        )
+        classify = self.playbook.index(
+            "- name: Classify safe isolated Gateway static audit findings"
+        )
+        report = self.playbook.index(
+            "- name: Report isolated Gateway static security finding classifications"
+        )
+        gate = self.playbook.index(
+            "- name: Require clean static isolated Gateway security policy"
+        )
+        self.assertLess(run_audit, classify)
+        self.assertLess(classify, report)
+        self.assertLess(report, gate)
+        classify_task = self.task(
+            "Classify safe isolated Gateway static audit findings"
+        )
+        self.assertIn("'checkId': item.checkId", classify_task)
+        self.assertIn("'severity': item.severity", classify_task)
+        self.assertIn("'title': item.title", classify_task)
+        self.assertNotIn("item.detail", classify_task)
+        self.assertNotIn("item.remediation", classify_task)
+        self.assertIn("no_log: true", classify_task)
+
+    def test_deep_security_failure_reports_only_safe_classifications(self) -> None:
+        run_audit = self.playbook.index(
+            "- name: Run deep isolated Gateway security audit"
+        )
+        classify = self.playbook.index(
+            "- name: Classify safe isolated Gateway deep audit findings"
+        )
+        report = self.playbook.index(
+            "- name: Report isolated Gateway deep security finding classifications"
+        )
+        gate = self.playbook.index(
+            "- name: Require clean deep isolated Gateway security audit"
+        )
+        self.assertLess(run_audit, classify)
+        self.assertLess(classify, report)
+        self.assertLess(report, gate)
+        classify_task = self.task("Classify safe isolated Gateway deep audit findings")
+        self.assertIn("'checkId': item.checkId", classify_task)
+        self.assertIn("'severity': item.severity", classify_task)
+        self.assertIn("'title': item.title", classify_task)
+        self.assertNotIn("item.detail", classify_task)
+        self.assertNotIn("item.remediation", classify_task)
+        self.assertIn("no_log: true", classify_task)
+
+    def test_deep_probe_uses_native_read_only_device_pairing(self) -> None:
+        runtime = self.playbook.index(
+            "- name: Require trusted Codex runtime and durable ownership records"
+        )
+        pairing = self.playbook.index(
+            "- name: Bootstrap native read-only CLI device authentication"
+        )
+        auth_gate = self.playbook.index(
+            "- name: Require native read-only CLI device authentication boundary"
+        )
+        deep = self.playbook.index("- name: Run deep isolated Gateway security audit")
+        self.assertLess(runtime, pairing)
+        self.assertLess(pairing, auth_gate)
+        self.assertLess(auth_gate, deep)
+
+        resolution = self.task("Require pairing proxy hostname to remain host-local")
+        self.assertIn("openclaw_isolated_gateway_pairing_proxy_bind", resolution)
+        proxy = self.task("Start one-shot isolated Gateway pairing proxy")
+        self.assertIn("127.0.0.1:{{ openclaw_isolated_gateway_port }}", proxy)
+        self.assertIn("NoNewPrivileges=yes", proxy)
+        self.assertIn("CapabilityBoundingSet=", proxy)
+        listener = self.task("Observe one-shot isolated Gateway pairing proxy listener")
+        self.assertIn("/usr/bin/ss", listener)
+        self.assertIn("-ltn4", listener)
+        self.assertNotIn("wait_for", listener)
+        cleanup = self.task("Stop one-shot isolated Gateway pairing proxy")
+        self.assertIn("state: stopped", cleanup)
+        self.assertIn("failed_when: false", cleanup)
+
+        create = self.task(
+            "Create native least-privilege CLI pairing without exposing token"
+        )
+        self.assertIn("ansible.builtin.command", create)
+        self.assertIn("stdin: |", create)
+        self.assertIn('OPENCLAW_GATEWAY_TOKEN="$(', create)
+        self.assertNotIn("--token", create)
+        self.assertIn("gateway call health --json", create)
+        self.assertIn("no_log: true", create)
+
+        metadata = self.task("Inspect native CLI device authentication metadata")
+        self.assertIn("operatorTokenPresent", metadata)
+        self.assertIn("operatorScopes", metadata)
+        self.assertNotIn("token:", metadata)
+        gate = self.task("Require native read-only CLI device authentication boundary")
+        self.assertIn("operatorScopes == ['operator.read']", gate)
+        self.assertIn("stat.mode", gate)
+        self.assertIn("'0600'", gate)
+
+        self.assertEqual(
+            self.inventory["openclaw_isolated_gateway_pairing_proxy_bind"],
+            "127.0.1.1",
+        )
+        self.assertEqual(
+            self.inventory["openclaw_isolated_gateway_pairing_proxy_host"],
+            "jn-t14s-lin",
+        )
+        self.assertNotIn(
+            self.inventory["openclaw_isolated_gateway_pairing_proxy_port"],
+            {
+                self.inventory["openclaw_isolated_gateway_port"],
+                self.inventory["openclaw_isolated_codex_port"],
+            },
+        )
+
+    def test_config_read_warning_has_independent_boundary_gates(self) -> None:
+        self.assertNotIn('"security"', self.config_template)
+        group_gate = self.task(
+            "Require exclusive isolated Gateway config-reading group"
+        )
+        self.assertIn("== [openclaw_isolated_gateway_user]", group_gate)
+        config_gate = self.task(
+            "Require root-managed read-only isolated Gateway configuration"
+        )
+        self.assertIn("stat.mode == '0640'", config_gate)
+        self.assertIn("stat.pw_name == 'root'", config_gate)
+        self.assertIn("openclaw_isolated_gateway_group", config_gate)
+        audit_gate = self.task("Require clean static isolated Gateway security policy")
+        self.assertIn("suppressedFindings", audit_gate)
+        self.assertIn("fs.config.perms_group_readable", audit_gate)
+        self.assertIn("== 1", audit_gate)
+        self.assertIn("== 0", audit_gate)
+
+    def test_recursive_cleanup_does_not_emit_dependency_tree_diffs(self) -> None:
+        for name in (
+            "Remove generated plugin-code remnants before native install",
+            "Remove native plugin convergence scratch state",
+            "Remove failed isolated Gateway managed paths before rollback",
+        ):
+            self.assertIn("diff: false", self.task(name))
+
+    def test_gateway_reads_plugins_through_primary_group_after_cleanup(self) -> None:
+        freeze = self.task("Freeze native managed-plugin code against service writes")
+        self.assertIn('group: "{{ openclaw_isolated_gateway_group }}"', freeze)
+        self.assertNotIn("openclaw_isolated_runtime_group", self.playbook)
+        cleanup = self.playbook.index(
+            "- name: Remove native plugin convergence scratch state"
+        )
+        read_gate = self.playbook.index(
+            "- name: Prove isolated Gateway can read frozen native plugin manifest"
+        )
+        service = self.playbook.index(
+            "- name: Restart isolated Gateway from converged immutable release"
+        )
+        self.assertLess(cleanup, read_gate)
+        self.assertLess(read_gate, service)
+        probe = self.task(
+            "Prove isolated Gateway can read frozen native plugin manifest"
+        )
+        self.assertIn("runuser", probe)
+        self.assertIn("openclaw.plugin.json", probe)
+
+    def test_workspace_uses_owner_writer_and_gateway_primary_group(self) -> None:
+        directory_task = self.task("Create isolated Gateway directories")
+        self.assertIn('group: "{{ openclaw_isolated_gateway_group }}"', directory_task)
+        self.assertIn('mode: "2750"', directory_task)
+        self.assertEqual(
+            self.inventory["openclaw_isolated_gateway_supplementary_groups"], []
+        )
+        self.assertNotIn("openclaw_isolated_workspace_group", self.playbook)
+        self.assertIn("UMask=0027", self.codex_service_template)
+
+    def test_codex_filesystem_boundaries_are_independently_diagnosed(self) -> None:
+        source_gate = self.task("Prove root-managed Codex runtime source exists")
+        self.assertIn("@openai/codex/bin/codex.js", source_gate)
+        self.assertNotIn("runuser", source_gate)
+        task = self.task("Prove isolated Codex executor filesystem boundaries")
+        self.assertNotIn("/usr/bin/bash", task)
+        self.assertNotIn("&&", task)
+        for label in (
+            "Gateway-owned Codex runtime source is unreadable",
+            "Gateway-owned provider source is immutable",
+            "isolated Codex runtime mirror is readable",
+            "isolated Codex runtime mirror is immutable",
+            "shared workspace is writable",
+            "Gateway secrets are unreadable",
+            "Gateway config is unreadable",
+            "Docker socket is unreadable",
+            "legacy human home is not traversable",
+        ):
+            self.assertIn(f"label: {label}", task)
+        self.assertIn('label: "{{ item.label }}"', task)
+        self.assertIn(
+            'label: Gateway-owned Codex runtime source is unreadable\n              argv:\n                - "!"\n                - -r',
+            task,
+        )
+
+    def test_codex_runtime_mirror_is_atomic_and_content_verified(self) -> None:
+        stage = self.playbook.index(
+            "- name: Stage exact isolated Codex runtime dependency tree"
+        )
+        verify = self.playbook.index(
+            "- name: Require exact isolated Codex runtime mirror content"
+        )
+        remove = self.playbook.index(
+            "- name: Remove prior isolated Codex runtime mirror"
+        )
+        promote = self.playbook.index(
+            "- name: Promote isolated Codex runtime mirror atomically"
+        )
+        service = self.playbook.index(
+            "- name: Restart isolated Codex executor from frozen provider package"
+        )
+        self.assertLess(stage, verify)
+        self.assertLess(verify, remove)
+        self.assertLess(remove, promote)
+        self.assertLess(promote, service)
+        self.assertIn(
+            "--no-dereference",
+            self.task("Require exact isolated Codex runtime mirror content"),
+        )
+
+    def test_rollback_reports_preflight_status_before_cleanup(self) -> None:
+        inspect = self.playbook.index(
+            "- name: Inspect failed isolated service preflight statuses"
+        )
+        report = self.playbook.index(
+            "- name: Report failed isolated service preflight statuses"
+        )
+        stop = self.playbook.index("- name: Stop failed isolated Gateway canary")
+        cleanup = self.playbook.index(
+            "- name: Remove failed isolated Gateway managed paths before rollback"
+        )
+        self.assertLess(inspect, report)
+        self.assertLess(report, stop)
+        self.assertLess(stop, cleanup)
+        task = self.task("Inspect failed isolated service preflight statuses")
+        self.assertIn("--property=ExecStartPre", task)
+        self.assertIn("failed_when: false", task)
+
     def test_canary_disables_channels_and_scheduler(self) -> None:
         self.assertIn("Environment=OPENCLAW_SKIP_CHANNELS=1", self.service_template)
         self.assertIn("Environment=OPENCLAW_SKIP_CRON=1", self.service_template)
         self.assertIn('"every": "0m"', self.config_template)
         self.assertIn('"target": "none"', self.config_template)
         self.assertIs(self.inventory["openclaw_isolated_gateway_skip_cron"], True)
+
+    def test_codex_executor_has_no_supplementary_groups(self) -> None:
+        self.assertEqual(
+            self.inventory["openclaw_isolated_codex_supplementary_groups"], []
+        )
+        gate = self.task("Reject supplementary isolated Codex executor privileges")
+        self.assertIn("openclaw_isolated_codex_supplementary_groups", gate)
+        self.assertIn("only its primary group", gate)
 
     def test_service_denies_privileged_syscall_classes(self) -> None:
         for template in (self.service_template, self.codex_service_template):
@@ -254,10 +501,7 @@ class IsolatedGatewayPlaybookTests(unittest.TestCase):
         rendered = template.render(
             openclaw_isolated_gateway_user="openclaw",
             openclaw_isolated_gateway_group="openclaw",
-            openclaw_isolated_gateway_supplementary_groups=[
-                "openclaw-runtime",
-                "openclaw-workspace",
-            ],
+            openclaw_isolated_gateway_supplementary_groups=[],
             openclaw_isolated_gateway_state_dir="/var/lib/openclaw-isolated",
             openclaw_isolated_gateway_config_file=(
                 "/etc/openclaw-isolated/openclaw.json"
@@ -285,10 +529,7 @@ class IsolatedGatewayPlaybookTests(unittest.TestCase):
         codex_rendered = codex_template.render(
             openclaw_isolated_codex_user="openclaw-codex",
             openclaw_isolated_codex_group="openclaw-codex",
-            openclaw_isolated_codex_supplementary_groups=[
-                "openclaw-runtime",
-                "openclaw-workspace",
-            ],
+            openclaw_isolated_codex_supplementary_groups=[],
             openclaw_isolated_codex_state_dir="/var/lib/openclaw-codex",
             openclaw_isolated_codex_config_dir="/etc/openclaw-codex",
             openclaw_isolated_codex_token_file=("/etc/openclaw-codex/app-server.token"),
@@ -352,10 +593,7 @@ class IsolatedGatewayPlaybookTests(unittest.TestCase):
         rendered = template.render(
             openclaw_isolated_codex_user="openclaw-codex",
             openclaw_isolated_codex_group="openclaw-codex",
-            openclaw_isolated_codex_supplementary_groups=[
-                "openclaw-runtime",
-                "openclaw-workspace",
-            ],
+            openclaw_isolated_codex_supplementary_groups=[],
             openclaw_isolated_codex_state_dir="/var/lib/openclaw-codex",
             openclaw_isolated_codex_config_dir="/etc/openclaw-codex",
             openclaw_isolated_codex_token_file=("/etc/openclaw-codex/app-server.token"),
@@ -412,7 +650,20 @@ class IsolatedGatewayPlaybookTests(unittest.TestCase):
         )
         self.assertIn("--listen ws://127.0.0.1:", self.codex_service_template)
         self.assertIn("--ws-auth capability-token", self.codex_service_template)
-        self.assertIn("BindReadOnlyPaths=", self.codex_service_template)
+        self.assertNotIn("BindReadOnlyPaths=", self.codex_service_template)
+        self.assertIn(
+            "ReadOnlyPaths={{ openclaw_isolated_codex_runtime_dir }}",
+            self.codex_service_template,
+        )
+        self.assertIn(
+            "TemporaryFileSystem={{ openclaw_isolated_gateway_state_dir }}:ro",
+            self.codex_service_template,
+        )
+        self.assertNotIn(
+            "InaccessiblePaths=-{{ openclaw_isolated_gateway_config_dir }} "
+            "-{{ openclaw_isolated_gateway_state_dir }}",
+            self.codex_service_template,
+        )
         self.assertIn(
             "InaccessiblePaths=-{{ openclaw_isolated_gateway_config_dir }}",
             self.codex_service_template,

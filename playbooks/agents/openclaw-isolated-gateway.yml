@@ -72,13 +72,17 @@
           - openclaw_isolated_gateway_group == 'openclaw'
           - openclaw_isolated_codex_user == 'openclaw-codex'
           - openclaw_isolated_codex_group == 'openclaw-codex'
-          - openclaw_isolated_runtime_group == 'openclaw-runtime'
-          - openclaw_isolated_workspace_group == 'openclaw-workspace'
-          - openclaw_isolated_gateway_supplementary_groups | sort == ['openclaw-runtime', 'openclaw-workspace']
-          - openclaw_isolated_codex_supplementary_groups | sort == ['openclaw-runtime', 'openclaw-workspace']
+          - openclaw_isolated_gateway_supplementary_groups | length == 0
+          - openclaw_isolated_codex_supplementary_groups | length == 0
           - openclaw_isolated_gateway_config_dir is match('^/etc/openclaw-isolated$')
           - openclaw_isolated_gateway_config_file == openclaw_isolated_gateway_config_dir + '/openclaw.json'
           - openclaw_isolated_gateway_secret_file == openclaw_isolated_gateway_config_dir + '/secrets.json'
+          - openclaw_isolated_gateway_pairing_proxy_bind == '127.0.1.1'
+          - openclaw_isolated_gateway_pairing_proxy_host == inventory_hostname
+          - openclaw_isolated_gateway_pairing_proxy_port | int > 1024
+          - openclaw_isolated_gateway_pairing_proxy_port | int < 65536
+          - openclaw_isolated_gateway_pairing_proxy_port | int != openclaw_isolated_gateway_port | int
+          - openclaw_isolated_gateway_pairing_proxy_port | int != openclaw_isolated_codex_port | int
           - openclaw_isolated_codex_config_dir == '/etc/openclaw-codex'
           - openclaw_isolated_codex_token_file == openclaw_isolated_codex_config_dir + '/app-server.token'
           - openclaw_isolated_codex_state_dir == '/var/lib/openclaw-codex'
@@ -278,8 +282,6 @@
       loop:
         - "{{ openclaw_isolated_gateway_group }}"
         - "{{ openclaw_isolated_codex_group }}"
-        - "{{ openclaw_isolated_runtime_group }}"
-        - "{{ openclaw_isolated_workspace_group }}"
       register: openclaw_isolated_existing_service_groups
       check_mode: false
       changed_when: false
@@ -653,14 +655,6 @@
             name: "{{ openclaw_isolated_codex_group }}"
             system: true
 
-        - name: Create isolated runtime and workspace groups
-          ansible.builtin.group:
-            name: "{{ item }}"
-            system: true
-          loop:
-            - "{{ openclaw_isolated_runtime_group }}"
-            - "{{ openclaw_isolated_workspace_group }}"
-
         - name: Create isolated Gateway service account
           ansible.builtin.user:
             name: "{{ openclaw_isolated_gateway_user }}"
@@ -686,6 +680,43 @@
             home: "{{ openclaw_isolated_codex_state_dir }}"
             comment: "Isolated Codex app-server executor"
             password: "!"
+
+        - name: Inspect isolated Gateway config-reading group
+          ansible.builtin.command:
+            argv:
+              - /usr/bin/getent
+              - group
+              - "{{ openclaw_isolated_gateway_group }}"
+          register: openclaw_isolated_gateway_config_group_record
+          changed_when: false
+          when: not ansible_check_mode
+
+        - name: Inspect accounts assigned the isolated Gateway primary group
+          ansible.builtin.command:
+            argv:
+              - /usr/bin/awk
+              - "-F:"
+              - >-
+                $4 == {{ openclaw_isolated_gateway_config_group_record.stdout.split(':')[2] }} { print $1 }
+              - /etc/passwd
+          register: openclaw_isolated_gateway_config_group_primary_accounts
+          changed_when: false
+          when: not ansible_check_mode
+
+        - name: Require exclusive isolated Gateway config-reading group
+          ansible.builtin.assert:
+            that:
+              - >-
+                openclaw_isolated_gateway_config_group_record.stdout.split(':')[3]
+                | trim
+                == ''
+              - >-
+                openclaw_isolated_gateway_config_group_primary_accounts.stdout_lines
+                == [openclaw_isolated_gateway_user]
+            fail_msg: >-
+              The isolated Gateway config-reading group contains another
+              account. Refusing to expose root-managed service configuration.
+          when: not ansible_check_mode
 
         - name: Create isolated release-builder group
           ansible.builtin.group:
@@ -753,11 +784,11 @@
               mode: "0700"
             - path: /opt/openclaw-codex
               owner: root
-              group: "{{ openclaw_isolated_runtime_group }}"
+              group: "{{ openclaw_isolated_codex_group }}"
               mode: "0750"
             - path: "{{ openclaw_isolated_codex_runtime_dir }}"
               owner: root
-              group: "{{ openclaw_isolated_runtime_group }}"
+              group: "{{ openclaw_isolated_codex_group }}"
               mode: "0750"
             - path: /usr/local/share/openclaw-isolated
               owner: root
@@ -765,8 +796,8 @@
               mode: "0755"
             - path: "{{ openclaw_isolated_gateway_workspace_dir }}"
               owner: "{{ openclaw_isolated_codex_user }}"
-              group: "{{ openclaw_isolated_workspace_group }}"
-              mode: "0750"
+              group: "{{ openclaw_isolated_gateway_group }}"
+              mode: "2750"
             - path: /usr/local/libexec/openclaw-isolated
               owner: root
               group: root
@@ -1407,6 +1438,7 @@
           ansible.builtin.file:
             path: "{{ openclaw_isolated_gateway_plugin_state_root }}"
             state: absent
+          diff: false
           when:
             - not ansible_check_mode
             - not (openclaw_isolated_gateway_plugin_records_match | bool)
@@ -1619,7 +1651,7 @@
             path: "{{ openclaw_isolated_gateway_plugin_state_root }}"
             state: directory
             owner: root
-            group: "{{ openclaw_isolated_runtime_group }}"
+            group: "{{ openclaw_isolated_gateway_group }}"
             mode: u=rwX,g=rX,o=
             recurse: true
             follow: false
@@ -1646,9 +1678,23 @@
           ansible.builtin.file:
             path: "{{ item }}"
             state: absent
+          diff: false
           loop:
             - "{{ openclaw_isolated_gateway_state_dir }}/.plugin-convergence.json"
             - "{{ openclaw_isolated_gateway_state_dir }}/.plugin-install-cache"
+          when: not ansible_check_mode
+
+        - name: Prove isolated Gateway can read frozen native plugin manifest
+          ansible.builtin.command:
+            argv:
+              - /usr/sbin/runuser
+              - -u
+              - "{{ openclaw_isolated_gateway_user }}"
+              - --
+              - /usr/bin/test
+              - -r
+              - "{{ openclaw_isolated_gateway_codex_plugin_dir }}/openclaw.plugin.json"
+          changed_when: false
           when: not ansible_check_mode
 
         - name: Remove isolated release staging directory
@@ -1744,6 +1790,29 @@
             group: "{{ openclaw_isolated_gateway_group }}"
             mode: "0640"
 
+        - name: Inspect isolated Gateway configuration boundary
+          ansible.builtin.stat:
+            path: "{{ openclaw_isolated_gateway_config_file }}"
+            follow: false
+          register: openclaw_isolated_gateway_config_stat
+          when: not ansible_check_mode
+
+        - name: Require root-managed read-only isolated Gateway configuration
+          ansible.builtin.assert:
+            that:
+              - openclaw_isolated_gateway_config_stat.stat.exists
+              - openclaw_isolated_gateway_config_stat.stat.isreg
+              - not openclaw_isolated_gateway_config_stat.stat.islnk
+              - openclaw_isolated_gateway_config_stat.stat.mode == '0640'
+              - openclaw_isolated_gateway_config_stat.stat.pw_name == 'root'
+              - >-
+                openclaw_isolated_gateway_config_stat.stat.gr_name
+                == openclaw_isolated_gateway_group
+            fail_msg: >-
+              The isolated Gateway configuration is not root-managed and
+              read-only to the dedicated service group.
+          when: not ansible_check_mode
+
         - name: Deploy writable isolated Gateway last-good target
           ansible.builtin.template:
             src: "{{ ansible_config_file | dirname }}/templates/openclaw/openclaw-isolated.json.j2"
@@ -1836,20 +1905,70 @@
           no_log: true
           when: not ansible_check_mode
 
+        - name: Initialize safe isolated Gateway static audit findings
+          ansible.builtin.set_fact:
+            openclaw_isolated_gateway_static_security_findings_safe: []
+          no_log: true
+          when: not ansible_check_mode
+
+        - name: Classify safe isolated Gateway static audit findings
+          ansible.builtin.set_fact:
+            openclaw_isolated_gateway_static_security_findings_safe: >-
+              {{
+                openclaw_isolated_gateway_static_security_findings_safe
+                + [
+                    {
+                      'checkId': item.checkId,
+                      'severity': item.severity,
+                      'title': item.title
+                    }
+                  ]
+              }}
+          loop: >-
+            {{
+              (openclaw_isolated_gateway_static_security_audit_raw.stdout
+              | from_json).findings
+              | rejectattr('severity', 'equalto', 'info')
+              | list
+            }}
+          no_log: true
+          when: not ansible_check_mode
+
+        - name: Report isolated Gateway static security finding classifications
+          ansible.builtin.debug:
+            var: openclaw_isolated_gateway_static_security_findings_safe
+          when:
+            - not ansible_check_mode
+            - openclaw_isolated_gateway_static_security_findings_safe | length > 0
+
         - name: Require clean static isolated Gateway security policy
           ansible.builtin.assert:
             that:
               - (openclaw_isolated_gateway_static_security_audit_raw.stdout | from_json).summary.critical | int == 0
-              - (openclaw_isolated_gateway_static_security_audit_raw.stdout | from_json).summary.warn | int == 0
+              - (openclaw_isolated_gateway_static_security_audit_raw.stdout | from_json).summary.warn | int == 1
               - >-
                 (openclaw_isolated_gateway_static_security_audit_raw.stdout | from_json).findings
                 | rejectattr('severity', 'equalto', 'info')
                 | list
                 | length
+                == 1
+              - >-
+                (openclaw_isolated_gateway_static_security_audit_raw.stdout | from_json).findings
+                | selectattr('checkId', 'equalto', 'fs.config.perms_group_readable')
+                | selectattr('severity', 'equalto', 'warn')
+                | list
+                | length
+                == 1
+              - >-
+                (openclaw_isolated_gateway_static_security_audit_raw.stdout
+                | from_json).suppressedFindings
+                | default([])
+                | length
                 == 0
             fail_msg: >-
               The isolated Gateway static security audit found a critical or
-              warning-level configuration issue.
+              unexpected warning-level issue, hid a finding, or did not retain
+              the one independently bounded service-config warning.
           no_log: true
           when: not ansible_check_mode
 
@@ -2005,29 +2124,158 @@
           changed_when: false
           when: not ansible_check_mode
 
-        - name: Prove isolated Codex executor filesystem boundary
+        - name: Prove root-managed Codex runtime source exists
           ansible.builtin.command:
             argv:
-              - /usr/sbin/runuser
-              - -u
-              - "{{ openclaw_isolated_codex_user }}"
-              - --
-              - /usr/bin/bash
-              - -c
+              - /usr/bin/test
+              - -r
+              - "{{ openclaw_isolated_gateway_codex_plugin_dir }}/node_modules/@openai/codex/bin/codex.js"
+          changed_when: false
+          when: not ansible_check_mode
+
+        - name: Select isolated Codex runtime mirror staging path
+          ansible.builtin.set_fact:
+            openclaw_isolated_codex_runtime_staging_dir: >-
+              {{
+                openclaw_isolated_codex_runtime_dir
+                + '.staging-'
+                + openclaw_isolated_gateway_backup_stamp
+              }}
+          when: not ansible_check_mode
+
+        - name: Reset isolated Codex runtime mirror staging path
+          ansible.builtin.file:
+            path: "{{ openclaw_isolated_codex_runtime_staging_dir }}"
+            state: absent
+          diff: false
+          when: not ansible_check_mode
+
+        - name: Create isolated Codex runtime mirror staging parent
+          ansible.builtin.file:
+            path: "{{ openclaw_isolated_codex_runtime_staging_dir }}/node_modules"
+            state: directory
+            owner: root
+            group: "{{ openclaw_isolated_codex_group }}"
+            mode: "0750"
+          when: not ansible_check_mode
+
+        - name: Stage exact isolated Codex runtime dependency tree
+          ansible.builtin.command:
+            argv:
+              - /usr/bin/cp
+              - --archive
+              - --reflink=auto
               - >-
-                test -r "$1/node_modules/@openai/codex/bin/codex.js"
-                && test ! -w "$1"
-                && test -w "$2"
-                && test ! -r "$3"
-                && test ! -r "$4"
-                && test ! -r /var/run/docker.sock
-                && test ! -x "/home/$5"
-              - openclaw-codex-boundary
-              - "{{ openclaw_isolated_gateway_codex_plugin_dir }}"
-              - "{{ openclaw_isolated_gateway_workspace_dir }}"
-              - "{{ openclaw_isolated_gateway_secret_file }}"
-              - "{{ openclaw_isolated_gateway_config_file }}"
-              - "{{ openclaw_isolated_gateway_legacy_user }}"
+                {{
+                  openclaw_isolated_gateway_codex_plugin_dir
+                  + '/node_modules/@openai'
+                }}
+              - "{{ openclaw_isolated_codex_runtime_staging_dir }}/node_modules/@openai"
+          changed_when: true
+          when: not ansible_check_mode
+
+        - name: Freeze staged isolated Codex runtime mirror
+          ansible.builtin.file:
+            path: "{{ openclaw_isolated_codex_runtime_staging_dir }}"
+            state: directory
+            owner: root
+            group: "{{ openclaw_isolated_codex_group }}"
+            mode: u=rwX,g=rX,o=
+            recurse: true
+            follow: false
+          when: not ansible_check_mode
+
+        - name: Require exact isolated Codex runtime mirror content
+          ansible.builtin.command:
+            argv:
+              - /usr/bin/diff
+              - --recursive
+              - --brief
+              - --no-dereference
+              - >-
+                {{
+                  openclaw_isolated_gateway_codex_plugin_dir
+                  + '/node_modules/@openai'
+                }}
+              - "{{ openclaw_isolated_codex_runtime_staging_dir }}/node_modules/@openai"
+          changed_when: false
+          when: not ansible_check_mode
+
+        - name: Remove prior isolated Codex runtime mirror
+          ansible.builtin.file:
+            path: "{{ openclaw_isolated_codex_runtime_dir }}"
+            state: absent
+          diff: false
+          when: not ansible_check_mode
+
+        - name: Promote isolated Codex runtime mirror atomically
+          ansible.builtin.command:
+            argv:
+              - /usr/bin/mv
+              - "{{ openclaw_isolated_codex_runtime_staging_dir }}"
+              - "{{ openclaw_isolated_codex_runtime_dir }}"
+          changed_when: true
+          when: not ansible_check_mode
+
+        - name: Prove isolated Codex executor filesystem boundaries
+          ansible.builtin.command:
+            argv: >-
+              {{
+                [
+                  '/usr/sbin/runuser',
+                  '-u',
+                  openclaw_isolated_codex_user,
+                  '--',
+                  '/usr/bin/test'
+                ]
+                + item.argv
+              }}
+          loop:
+            - label: Gateway-owned Codex runtime source is unreadable
+              argv:
+                - "!"
+                - -r
+                - "{{ openclaw_isolated_gateway_codex_plugin_dir }}/node_modules/@openai/codex/bin/codex.js"
+            - label: Gateway-owned provider source is immutable
+              argv:
+                - "!"
+                - -w
+                - "{{ openclaw_isolated_gateway_codex_plugin_dir }}"
+            - label: isolated Codex runtime mirror is readable
+              argv:
+                - -r
+                - "{{ openclaw_isolated_codex_runtime_dir }}/node_modules/@openai/codex/bin/codex.js"
+            - label: isolated Codex runtime mirror is immutable
+              argv:
+                - "!"
+                - -w
+                - "{{ openclaw_isolated_codex_runtime_dir }}"
+            - label: shared workspace is writable
+              argv:
+                - -w
+                - "{{ openclaw_isolated_gateway_workspace_dir }}"
+            - label: Gateway secrets are unreadable
+              argv:
+                - "!"
+                - -r
+                - "{{ openclaw_isolated_gateway_secret_file }}"
+            - label: Gateway config is unreadable
+              argv:
+                - "!"
+                - -r
+                - "{{ openclaw_isolated_gateway_config_file }}"
+            - label: Docker socket is unreadable
+              argv:
+                - "!"
+                - -r
+                - /var/run/docker.sock
+            - label: legacy human home is not traversable
+              argv:
+                - "!"
+                - -x
+                - "/home/{{ openclaw_isolated_gateway_legacy_user }}"
+          loop_control:
+            label: "{{ item.label }}"
           changed_when: false
           when: not ansible_check_mode
 
@@ -2133,7 +2381,8 @@
               - --property=ProtectSystem
               - --property=ProtectHome
               - --property=PrivateDevices
-              - --property=BindReadOnlyPaths
+              - --property=TemporaryFileSystem
+              - --property=ReadOnlyPaths
               - --property=InaccessiblePaths
               - --property=MainPID
           register: openclaw_isolated_codex_service_properties
@@ -2165,10 +2414,13 @@
               - "'ProtectSystem=strict' in openclaw_isolated_codex_service_properties.stdout_lines"
               - "'ProtectHome=yes' in openclaw_isolated_codex_service_properties.stdout_lines"
               - "'PrivateDevices=yes' in openclaw_isolated_codex_service_properties.stdout_lines"
-              - openclaw_isolated_gateway_codex_plugin_dir in openclaw_isolated_codex_service_properties.stdout
               - openclaw_isolated_codex_runtime_dir in openclaw_isolated_codex_service_properties.stdout
+              - openclaw_isolated_gateway_codex_plugin_dir not in openclaw_isolated_codex_service_properties.stdout
               - openclaw_isolated_gateway_config_dir in openclaw_isolated_codex_service_properties.stdout
-              - openclaw_isolated_gateway_state_dir in openclaw_isolated_codex_service_properties.stdout
+              - >-
+                'TemporaryFileSystem=' + openclaw_isolated_gateway_state_dir
+                + ':ro'
+                in openclaw_isolated_codex_service_properties.stdout_lines
             fail_msg: >-
               The running Codex executor does not match the separate-account,
               read-only runtime, or Gateway-secret isolation boundary.
@@ -2215,8 +2467,8 @@
                 == ([openclaw_isolated_codex_group] + openclaw_isolated_codex_supplementary_groups) | sort
             fail_msg: >-
               The isolated Codex executor has an unexpected group. It may have
-              only its primary group plus the read-only runtime and shared
-              workspace groups, never sudo, Docker, journal, or human access.
+              only its primary group, never sudo, Docker, journal, or human
+              access.
           when: not ansible_check_mode
 
         - name: Probe isolated Gateway health without exposing its token
@@ -2356,6 +2608,196 @@
               startup discarded its native integrity-bearing ownership record.
           when: not ansible_check_mode
 
+        - name: Bootstrap native read-only CLI device authentication
+          when: not ansible_check_mode
+          block:
+            - name: Resolve isolated Gateway pairing proxy hostname
+              ansible.builtin.command:
+                argv:
+                  - /usr/bin/getent
+                  - ahostsv4
+                  - "{{ openclaw_isolated_gateway_pairing_proxy_host }}"
+              register: openclaw_isolated_gateway_pairing_proxy_resolution
+              changed_when: false
+
+            - name: Require pairing proxy hostname to remain host-local
+              ansible.builtin.assert:
+                that:
+                  - openclaw_isolated_gateway_pairing_proxy_resolution.stdout_lines | length > 0
+                  - >-
+                    openclaw_isolated_gateway_pairing_proxy_resolution.stdout_lines
+                    | map('split')
+                    | map('first')
+                    | unique
+                    | list
+                    == [openclaw_isolated_gateway_pairing_proxy_bind]
+                fail_msg: >-
+                  The one-shot CLI pairing hostname no longer resolves only to
+                  its dedicated loopback address. Refusing to expose Gateway
+                  authentication beyond the local host.
+
+            - name: Clear stale isolated Gateway pairing proxy unit state
+              ansible.builtin.command:
+                argv:
+                  - /usr/bin/systemctl
+                  - reset-failed
+                  - openclaw-isolated-device-pairing-proxy.service
+              changed_when: false
+              failed_when: false
+
+            - name: Start one-shot isolated Gateway pairing proxy
+              ansible.builtin.command:
+                argv:
+                  - /usr/bin/systemd-run
+                  - --unit=openclaw-isolated-device-pairing-proxy.service
+                  - --collect
+                  - --property=Type=exec
+                  - "--property=User={{ openclaw_isolated_gateway_user }}"
+                  - "--property=Group={{ openclaw_isolated_gateway_group }}"
+                  - --property=NoNewPrivileges=yes
+                  - --property=PrivateDevices=yes
+                  - --property=PrivateTmp=yes
+                  - --property=ProtectHome=yes
+                  - --property=ProtectSystem=strict
+                  - --property=RestrictAddressFamilies=AF_INET
+                  - --property=CapabilityBoundingSet=
+                  - --property=AmbientCapabilities=
+                  - --property=UMask=0077
+                  - /usr/bin/socat
+                  - >-
+                    TCP4-LISTEN:{{ openclaw_isolated_gateway_pairing_proxy_port }},bind={{ openclaw_isolated_gateway_pairing_proxy_bind }},reuseaddr
+                  - >-
+                    TCP4:127.0.0.1:{{ openclaw_isolated_gateway_port }}
+              changed_when: true
+
+            - name: Observe one-shot isolated Gateway pairing proxy listener
+              ansible.builtin.command:
+                argv:
+                  - /usr/bin/ss
+                  - -H
+                  - -ltn4
+                  - sport
+                  - "="
+                  - ":{{ openclaw_isolated_gateway_pairing_proxy_port }}"
+              register: openclaw_isolated_gateway_pairing_proxy_listener
+              changed_when: false
+              retries: 10
+              delay: 1
+              until: >-
+                openclaw_isolated_gateway_pairing_proxy_bind
+                ~ ':' ~ openclaw_isolated_gateway_pairing_proxy_port
+                in openclaw_isolated_gateway_pairing_proxy_listener.stdout
+
+            - name: Create native least-privilege CLI pairing without exposing token
+              ansible.builtin.command:
+                argv:
+                  - /usr/sbin/runuser
+                  - -u
+                  - "{{ openclaw_isolated_gateway_user }}"
+                  - --
+                  - /bin/sh
+                  - -s
+                stdin: |
+                  set -eu
+                  export HOME={{ openclaw_isolated_gateway_state_dir }}
+                  export OPENCLAW_HOME={{ openclaw_isolated_gateway_state_dir }}
+                  export OPENCLAW_STATE_DIR={{ openclaw_isolated_gateway_state_dir }}/state
+                  export OPENCLAW_CONFIG_PATH={{ openclaw_isolated_gateway_config_file }}
+                  export OPENCLAW_WORKSPACE_DIR={{ openclaw_isolated_gateway_workspace_dir }}
+                  export OPENCLAW_SKIP_CHANNELS=1
+                  export OPENCLAW_ALLOW_INSECURE_PRIVATE_WS=1
+                  export OPENCLAW_GATEWAY_URL=ws://{{ openclaw_isolated_gateway_pairing_proxy_host }}:{{ openclaw_isolated_gateway_pairing_proxy_port }}
+                  OPENCLAW_GATEWAY_TOKEN="$(/usr/bin/jq -er '
+                    .gateway.token
+                    | select(type == "string" and length >= 32)
+                  ' {{ openclaw_isolated_gateway_secret_file }})"
+                  export OPENCLAW_GATEWAY_TOKEN
+                  exec {{ openclaw_isolated_gateway_runtime_dir }}/bin/openclaw gateway call health --json
+              register: openclaw_isolated_gateway_cli_pairing
+              changed_when: false
+              no_log: true
+          always:
+            - name: Stop one-shot isolated Gateway pairing proxy
+              ansible.builtin.systemd_service:
+                name: openclaw-isolated-device-pairing-proxy.service
+                enabled: false
+                state: stopped
+              failed_when: false
+
+            - name: Clear one-shot isolated Gateway pairing proxy unit state
+              ansible.builtin.command:
+                argv:
+                  - /usr/bin/systemctl
+                  - reset-failed
+                  - openclaw-isolated-device-pairing-proxy.service
+              changed_when: false
+              failed_when: false
+        - name: Inspect native CLI device authentication files
+          ansible.builtin.stat:
+            path: "{{ item }}"
+          loop:
+            - "{{ openclaw_isolated_gateway_state_dir }}/state/identity/device.json"
+            - "{{ openclaw_isolated_gateway_state_dir }}/state/identity/device-auth.json"
+          register: openclaw_isolated_gateway_cli_auth_stats
+          no_log: true
+          when: not ansible_check_mode
+
+        - name: Inspect native CLI device authentication metadata
+          ansible.builtin.command:
+            argv:
+              - /usr/sbin/runuser
+              - -u
+              - "{{ openclaw_isolated_gateway_user }}"
+              - --
+              - /usr/bin/jq
+              - -n
+              - -c
+              - --slurpfile
+              - identity
+              - "{{ openclaw_isolated_gateway_state_dir }}/state/identity/device.json"
+              - --slurpfile
+              - auth
+              - "{{ openclaw_isolated_gateway_state_dir }}/state/identity/device-auth.json"
+              - >-
+                {
+                  identityVersion: ($identity[0].version // null),
+                  authVersion: ($auth[0].version // null),
+                  deviceIdsMatch: (
+                    ($identity[0].deviceId // "") != ""
+                    and $identity[0].deviceId == $auth[0].deviceId
+                  ),
+                  operatorTokenPresent: (
+                    ($auth[0].tokens.operator.token // "")
+                    | type == "string" and length >= 32
+                  ),
+                  operatorScopes: (
+                    $auth[0].tokens.operator.scopes // [] | sort
+                  )
+                }
+          register: openclaw_isolated_gateway_cli_auth_metadata_raw
+          changed_when: false
+          no_log: true
+          when: not ansible_check_mode
+
+        - name: Require native read-only CLI device authentication boundary
+          ansible.builtin.assert:
+            that:
+              - openclaw_isolated_gateway_cli_auth_stats.results | length == 2
+              - openclaw_isolated_gateway_cli_auth_stats.results | map(attribute='stat.exists') | min
+              - openclaw_isolated_gateway_cli_auth_stats.results | map(attribute='stat.pw_name') | unique | list == [openclaw_isolated_gateway_user]
+              - openclaw_isolated_gateway_cli_auth_stats.results | map(attribute='stat.gr_name') | unique | list == [openclaw_isolated_gateway_group]
+              - openclaw_isolated_gateway_cli_auth_stats.results | map(attribute='stat.mode') | unique | list == ['0600']
+              - (openclaw_isolated_gateway_cli_auth_metadata_raw.stdout | from_json).identityVersion | int == 1
+              - (openclaw_isolated_gateway_cli_auth_metadata_raw.stdout | from_json).authVersion | int == 1
+              - (openclaw_isolated_gateway_cli_auth_metadata_raw.stdout | from_json).deviceIdsMatch | bool
+              - (openclaw_isolated_gateway_cli_auth_metadata_raw.stdout | from_json).operatorTokenPresent | bool
+              - (openclaw_isolated_gateway_cli_auth_metadata_raw.stdout | from_json).operatorScopes == ['operator.read']
+            fail_msg: >-
+              OpenClaw did not persist one owner-only CLI identity and an exact
+              operator.read device token for native deep probes.
+          no_log: true
+          when: not ansible_check_mode
+
         - name: Run deep isolated Gateway security audit
           ansible.builtin.command:
             argv:
@@ -2380,15 +2822,64 @@
           no_log: true
           when: not ansible_check_mode
 
+        - name: Initialize safe isolated Gateway deep audit findings
+          ansible.builtin.set_fact:
+            openclaw_isolated_gateway_deep_security_findings_safe: []
+          no_log: true
+          when: not ansible_check_mode
+
+        - name: Classify safe isolated Gateway deep audit findings
+          ansible.builtin.set_fact:
+            openclaw_isolated_gateway_deep_security_findings_safe: >-
+              {{
+                openclaw_isolated_gateway_deep_security_findings_safe
+                + [
+                    {
+                      'checkId': item.checkId,
+                      'severity': item.severity,
+                      'title': item.title
+                    }
+                  ]
+              }}
+          loop: >-
+            {{
+              (openclaw_isolated_gateway_deep_security_audit_raw.stdout
+              | from_json).findings
+              | rejectattr('severity', 'equalto', 'info')
+              | list
+            }}
+          no_log: true
+          when: not ansible_check_mode
+
+        - name: Report isolated Gateway deep security finding classifications
+          ansible.builtin.debug:
+            var: openclaw_isolated_gateway_deep_security_findings_safe
+          when:
+            - not ansible_check_mode
+            - openclaw_isolated_gateway_deep_security_findings_safe | length > 0
+
         - name: Require clean deep isolated Gateway security audit
           ansible.builtin.assert:
             that:
               - (openclaw_isolated_gateway_deep_security_audit_raw.stdout | from_json).summary.critical | int == 0
-              - (openclaw_isolated_gateway_deep_security_audit_raw.stdout | from_json).summary.warn | int == 0
+              - (openclaw_isolated_gateway_deep_security_audit_raw.stdout | from_json).summary.warn | int == 1
               - >-
                 (openclaw_isolated_gateway_deep_security_audit_raw.stdout | from_json).findings
                 | rejectattr('severity', 'equalto', 'info')
                 | list
+                | length
+                == 1
+              - >-
+                (openclaw_isolated_gateway_deep_security_audit_raw.stdout | from_json).findings
+                | selectattr('checkId', 'equalto', 'fs.config.perms_group_readable')
+                | selectattr('severity', 'equalto', 'warn')
+                | list
+                | length
+                == 1
+              - >-
+                (openclaw_isolated_gateway_deep_security_audit_raw.stdout
+                | from_json).suppressedFindings
+                | default([])
                 | length
                 == 0
               - >-
@@ -2397,8 +2888,8 @@
                 | length
                 == 0
             fail_msg: >-
-              The running isolated Gateway failed its native deep security or
-              runtime SecretRef audit.
+              The running isolated Gateway failed its native deep security,
+              accepted-warning boundary, or runtime SecretRef audit.
           no_log: true
           when: not ansible_check_mode
 
@@ -2491,6 +2982,30 @@
             - openclaw_isolated_gateway_mode == 'canary'
 
       rescue:
+        - name: Inspect failed isolated service preflight statuses
+          ansible.builtin.command:
+            argv:
+              - /usr/bin/systemctl
+              - show
+              - openclaw-isolated-gateway.service
+              - openclaw-isolated-codex.service
+              - --property=Id
+              - --property=LoadState
+              - --property=ActiveState
+              - --property=SubState
+              - --property=Result
+              - --property=ExecStartPre
+              - --no-pager
+          register: openclaw_isolated_failed_service_preflights
+          changed_when: false
+          failed_when: false
+
+        - name: Report failed isolated service preflight statuses
+          ansible.builtin.debug:
+            var: openclaw_isolated_failed_service_preflights.stdout_lines
+          when:
+            - openclaw_isolated_failed_service_preflights.stdout | trim | length > 0
+
         - name: Stop failed isolated Gateway canary
           ansible.builtin.systemd_service:
             name: openclaw-isolated-gateway.service
@@ -2517,6 +3032,7 @@
           ansible.builtin.file:
             path: "{{ item }}"
             state: absent
+          diff: false
           loop:
             - /etc/systemd/system/openclaw-isolated-gateway.service
             - /etc/systemd/system/openclaw-isolated-codex.service
@@ -2602,18 +3118,6 @@
             name: "{{ openclaw_isolated_codex_group }}"
             state: absent
           when: openclaw_isolated_existing_service_groups.results[1].rc != 0
-
-        - name: Remove isolated runtime group created by failed run
-          ansible.builtin.group:
-            name: "{{ openclaw_isolated_runtime_group }}"
-            state: absent
-          when: openclaw_isolated_existing_service_groups.results[2].rc != 0
-
-        - name: Remove isolated workspace group created by failed run
-          ansible.builtin.group:
-            name: "{{ openclaw_isolated_workspace_group }}"
-            state: absent
-          when: openclaw_isolated_existing_service_groups.results[3].rc != 0
 
         - name: Reload systemd after isolated Gateway rollback
           ansible.builtin.systemd_service:

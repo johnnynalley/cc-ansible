@@ -108,12 +108,11 @@
       },
       "subagents": {
         "allowAgents": [
-          "antares",
           "rigel",
           "vega"
         ],
         "maxConcurrent": 8,
-        "maxSpawnDepth": 1,
+        "maxSpawnDepth": 2,
         "maxChildrenPerAgent": 4,
         "archiveAfterMinutes": 60,
         "runTimeoutSeconds": 900
@@ -158,7 +157,6 @@
         },
         "subagents": {
           "allowAgents": [
-            "antares",
             "rigel",
             "vega"
           ]
@@ -218,7 +216,9 @@
         },
         "thinkingDefault": "xhigh",
         "subagents": {
-          "allowAgents": []
+          "allowAgents": [
+            "antares"
+          ]
         },
         "tools": {
           "allow": [
@@ -229,6 +229,9 @@
             "web_search",
             "web_fetch",
             {% endif %}
+            "sessions_spawn",
+            "sessions_yield",
+            "subagents",
             "session_status"
           ]
         }

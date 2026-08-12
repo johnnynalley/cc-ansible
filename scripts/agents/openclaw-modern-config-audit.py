@@ -55,7 +55,13 @@ BEHAVIOR_CANARY_AGENT_TOOLS = {
         "sessions_send",
         "sessions_yield",
     },
-    "vega": {"read", "session_status"},
+    "vega": {
+        "read",
+        "session_status",
+        "sessions_spawn",
+        "sessions_yield",
+        "subagents",
+    },
     "antares": {"read", "session_status"},
     "rigel": {
         "heartbeat_respond",
@@ -229,9 +235,30 @@ def _audit_agents(
     )
     subagents = _at(defaults, "subagents")
     _require("model" not in subagents, "global-subagent-model-override-present")
+    _require(
+        subagents.get("maxSpawnDepth") == 2,
+        "star-orchestrator-depth-drift",
+    )
+    _require(
+        subagents.get("allowAgents") == ["rigel", "vega"],
+        "default-subagent-route-drift",
+    )
 
     by_id = {agent["id"]: agent for agent in listed}
     _require(by_id["main"].get("default") is True, "main-not-default-agent")
+    _require(
+        _at(by_id["main"], "subagents", "allowAgents") == ["rigel", "vega"],
+        "main-subagent-route-drift",
+    )
+    _require(
+        _at(by_id["vega"], "subagents", "allowAgents") == ["antares"],
+        "vega-reviewer-route-drift",
+    )
+    for leaf_id in ("dubble", "antares", "rigel"):
+        _require(
+            _at(by_id[leaf_id], "subagents", "allowAgents") == [],
+            f"leaf-subagent-route:{leaf_id}",
+        )
     _require(
         _at(by_id["antares"], "model", "primary").startswith("ollama-cloud/"),
         "antares-not-independent-provider",

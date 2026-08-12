@@ -505,14 +505,14 @@ non-main run, caught every read error silently, and would misclassify the new
 workspace root. Keeping it would preserve both prompt bloat and migration drift.
 
 The measured legacy standard and hook-injected role files total about 105,716
-bytes. The reviewed replacement under `files/openclaw/workspace/` is 21,819
+bytes. The reviewed replacement under `files/openclaw/workspace/` is 22,316
 ASCII characters across 20 files, a reduction of about 79 percent. It preserves
 only the unique contracts:
 
 - Astra reconstructs stable task state, builds a causal model, verifies exact
   consequential claims, delegates by semantics, and returns one concise answer.
-- Vega produces sourced internal research with confidence, contradictions, and
-  open questions.
+- Vega produces sourced internal research, runs one nested Antares challenge,
+  and returns one reconciled packet with confidence and open questions.
 - Antares independently challenges framing and evidence and returns a severity-
   ordered `PASS`, `FAIL`, or `DISPUTE` packet with residual risk.
 - Dubble remains the public front desk, derives authority only from metadata and
@@ -716,10 +716,18 @@ The two system services add the effective boundary:
 
 - `openclaw` is the no-login Gateway identity. It owns Gateway state and
   channel/provider SecretRefs, reads immutable behavior and project data, and
-  cannot write the workspace or access Codex OAuth/config state.
+  cannot write the workspace or access Codex OAuth/config state. Native plugin
+  code is `root:openclaw` and group-read-only, so the Gateway reads its own
+  frozen packages through its primary group instead of a separate runtime
+  group. The workspace is `openclaw-codex:openclaw` with setgid inheritance:
+  the executor owns writes, its `0027` umask keeps new data group-readable, and
+  the Gateway receives read/traverse access through its primary group.
 - `openclaw-codex` is the no-login model executor. It owns its OpenAI auth and
   app-server state, may write only the classified project-data workspace, and
-  cannot read Gateway config, channel/provider SecretRefs, or Gateway state.
+  cannot read Gateway config, channel/provider SecretRefs, or Gateway state. It
+  has no supplementary groups; its private runtime mirror and workspace are
+  reachable through its primary identity only.
+- Neither service has supplementary groups.
 - The Gateway listens only on loopback port `19789`; the authenticated Codex
   app server listens only on loopback port `19790`. Both units stay disabled at
   boot during rehearsal, and the canary has disabled Control UI, HTTP
@@ -732,11 +740,27 @@ The two system services add the effective boundary:
   devices/temp/IPC, empty capability sets, no privilege gain, namespace
   restrictions, and explicit inaccessibility for Docker, the controller repo,
   the human home, Ansible, Docker state, and bulk data mounts. The Gateway also
-  blocks Codex state/config; the executor blocks Gateway state/config and the
+  blocks Codex state/config; the executor masks Gateway state with an empty
+  read-only temporary filesystem, blocks Gateway config, and blocks the
   root-owned hostile-test secret lane.
 - Pre-start and playbook assertions prove exact account/group membership,
   cross-account secret denial, runtime immutability, workspace read/write
   asymmetry, sudo denial, Docker denial, and service-specific writable paths.
+- The provider package source remains below the Gateway's owner-only state
+  directory and is unreadable to the raw executor account. The playbook copies
+  only its installed `@openai` dependency subtree into a staged root-owned
+  mirror, compares source and mirror without dereferencing links, and atomically
+  promotes it at `/opt/openclaw-codex/runtime`. The service sees that immutable
+  mirror and an empty read-only Gateway-state view; an executor pre-start check
+  requires the mirrored Codex entrypoint before the app server can start.
+- OpenClaw's native audit generically warns when its config is group-readable.
+  This deployment leaves that warning active and accepts only
+  `fs.config.perms_group_readable`: the config is root-owned `0640`, the reading
+  group is proven exclusive to the Gateway account, and a separate SecretRef
+  audit requires zero plaintext credentials. Runtime config contains no audit
+  suppressions. The playbook requires exactly that one visible warning and
+  fails closed if it disappears, changes identity, or any additional finding
+  appears.
 
 The canary sets both `OPENCLAW_SKIP_CHANNELS=1` and
 `OPENCLAW_SKIP_CRON=1`, and its rendered agent heartbeat schedules are
@@ -764,12 +788,31 @@ filesystem/write/capacity gate runs before the service is stopped.
 runtime trust, config, token, listener, systemd properties, account groups,
 authenticated health endpoint, and absence of plugin self-installation. Before
 restart, native SecretRef audit must report no plaintext, unresolved, shadowed,
-legacy, or executable references and static security audit must report zero
-critical/warning findings. After restart and health, `security audit --deep`
-must also report zero critical/warning findings and no runtime secret
-diagnostics. Only then does the playbook write `.infrastructure-validated`. It
-leaves the loopback-only, boot-disabled split services ready for a fresh OpenAI
-device-code login owned by `openclaw-codex`. It does not claim model parity.
+legacy, or executable references. Static and deep security audits must each
+report zero critical findings and exactly the independently bounded
+`fs.config.perms_group_readable` warning described above, with no suppressed
+findings or runtime secret diagnostics.
+
+OpenClaw's deep probe is intentionally non-mutating and will not create its
+first CLI identity. In the current release, token-authenticated `probe` mode
+also clears `operator.read` when no paired device token exists, so an otherwise
+healthy fresh canary reports `gateway.probe_failed`. The playbook resolves that
+native bootstrap boundary once: a capability-empty `socat` process accepts one
+connection on a second address in `127.0.0.0/8` and forwards it to the canary's
+`127.0.0.1` listener. The ordinary OpenClaw CLI then includes its device
+identity, the Gateway recognizes the connection as direct loopback and
+auto-approves only the least privilege required by `gateway call health`, and
+OpenClaw writes its own `operator.read` device token. The shared Gateway token
+is read after dropping to `openclaw`, exported only in that process environment,
+and never appears in command arguments or output. Hostname resolution is proven
+loopback-only first; the proxy is stopped in an unconditional cleanup block;
+both identity files must be owner-only `0600`; and the resulting scope set must
+equal `operator.read` before deep audit runs.
+
+Only after those checks pass does the playbook write
+`.infrastructure-validated`. It leaves the loopback-only, boot-disabled split
+services ready for a fresh OpenAI device-code login owned by `openclaw-codex`.
+It does not claim model parity.
 After authentication, `canary` repeats every infrastructure check, requires
 the fixed-response model probe, and only then writes `.canary-validated`.
 Failure stops the canary and restores prior canary state; the production
@@ -892,6 +935,29 @@ generic-service conclusions applied to DFW, unsupported Zoho UI branches,
 ambiguous-project guesses, noisy expected probe failures, and incident-specific
 policy patches that did not stop the next variation.
 
+The Zoho sequence is the clearest architecture-level example. Astra selected a
+provider and began issuing UI steps before eliciting the complete constraint
+set: two paid users, a shared operational identity, private named mailboxes,
+ordinary Apple Mail/Gmail IMAP clients, non-deletable evidence, restricted
+password control, and maintainable future membership. It evaluated forwarding,
+distribution lists, BCC rules, delegation, and shared mailboxes one feature at
+a time instead of proving the full intersection. That produced an unverified
+circular bootstrap path, repeated UI guesses, and architecture changes while
+the user was already acting. When no candidate satisfies every hard constraint,
+the correct answer is to say so first and identify the minimum constraint or
+product change, not keep switching branches.
+
+The Star transcript wall had a separate runtime cause. Current OpenClaw
+top-level subagent completion schedules a requester-agent follow-up with
+delivery enabled. Directly spawning both Vega and Antares from a user-routed
+Astra session therefore created two external follow-up opportunities. The old
+route-less CLI canary checked child content but could not expose that delivery
+topology. The modern route permits one top-level Vega orchestrator only. Vega
+spawns Antares at depth two, receives its private verdict, and returns one
+consolidated packet; Astra receives one completion and emits one concise answer.
+The behavior audit rejects direct main-to-Antares lineage, multiple visible
+Astra answers, mismatched child tasks, or a missing returned verdict.
+
 The target behavior contract is:
 
 1. Reconstruct current state before analysis: objective, hard constraints,
@@ -901,7 +967,9 @@ The target behavior contract is:
 2. Build the causal model before recommending. For a network, represent each
    link and role; for mail, represent identities, clients, retention, and
    license limits; for an alert, represent source, scheduler, delivery, and
-   state write. Do not repair one branch while another premise remains implicit.
+   state write. Record hard versus soft constraints, test every candidate
+   against their full intersection, and trace bootstrap dependencies end to end.
+   Do not repair one branch while another premise remains implicit.
 3. Verify the exact product, model/SKU, software version, plan tier, UI surface,
    region, and permission model from primary or live evidence. Generic product
    documentation cannot settle an exact regional service or account-plan
@@ -926,10 +994,10 @@ The target behavior contract is:
 8. Research asserted local facts directly. Separate service existence,
    reachability, authentication, publish/subscribe rights, and true bidirectional
    capability; do not infer them from a generic integration with a similar name.
-9. Multi-agent review is internal evidence, not user-facing ceremony. Vega and
-   Antares must independently check the same explicit constraints, conflicts are
-   resolved or summarized as one concise uncertainty, and Astra sends one normal
-   answer with the decision first.
+9. Multi-agent review is internal evidence, not user-facing ceremony. Astra
+   starts one Vega run; Vega performs the independent Antares challenge and
+   returns one consolidated packet. Conflicts become one concise uncertainty,
+   and Astra sends one normal answer with the decision first.
 10. Persist only verified state. An unsourced alert or inferred event must never
     write a durable marker that later becomes evidence for itself. User opt-outs
     are hard notification policy, and unchanged/no-action conditions remain
@@ -1084,10 +1152,10 @@ The attended apply transaction is canary-only:
    indexes before native config validation or model execution.
 3. Require a clean delivery queue and no active session recovery fields, then
    start the all-heartbeats-disabled baseline and run a deterministic Dubble
-   response probe plus a real Astra Star probe. The Star audit proves exactly
-   one Vega and one Antares child, native parent/depth/model provenance, and
-   that Antares received Vega's complete actual evidence packet verbatim. The
-   only user-facing result must be one ordinary bounded sentence; internal
+   response probe plus a real Astra Star probe. The Star audit proves one
+   top-level Vega orchestrator, one nested Antares leaf, native parent/depth/model
+   provenance, exact Vega-to-Antares task lineage, and the returned verdict. The
+   only visible Astra result must be one ordinary bounded sentence; internal
    packets and review narration remain private.
 4. Temporarily deploy the controlled Rigel config, trigger one targeted native
    heartbeat, and require a new isolated transcript with exactly one
@@ -1257,6 +1325,28 @@ parallel Gateway canary proves all of the following:
 The current `dbc` account is not a replacement for this boundary. Its arbitrary
 Ansible dry-run arguments, writable Compose/Caddy inputs, and broad sudo rules
 require separate removal or redesign.
+
+### 2026-08-12 live isolation checkpoint
+
+An attended `canary-bootstrap` completed with `175` successful tasks and no
+failure or rescue. The transaction created and verified the protected rollback
+artifact `/var/backups/openclaw-isolated/20260812T171158Z/state.tar.gz` plus its
+manifest before changing canary state. The native CLI bootstrap produced one
+owner-only identity and an exact `operator.read` cached device scope; deep
+audit then reported zero critical findings, zero SecretRef diagnostics, no
+suppressed findings, and only the accepted
+`fs.config.perms_group_readable` warning.
+
+Post-run host evidence shows production still listening on the Tailscale
+address at `18789`, Health on `18791`, the isolated Gateway only on loopback
+`19789`, and the isolated Codex executor only on loopback `19790`. Both canary
+units are active but disabled at boot and have no supplementary groups. The
+transient pairing proxy unit is absent and port `19788` is closed. The canary
+config has no channels, bindings, cron block, owner route, configured heartbeat,
+or Control UI, while the service environment independently sets
+`OPENCLAW_SKIP_CHANNELS=1` and `OPENCLAW_SKIP_CRON=1`. Infrastructure isolation
+is therefore proven; fresh executor OAuth, a real model canary, behavior/data
+parity, hostile-prompt rehearsal, and channel handoff remain open gates.
 
 ## Validation
 

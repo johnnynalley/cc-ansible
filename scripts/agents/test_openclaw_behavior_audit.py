@@ -36,9 +36,14 @@ class BehaviorAuditFixture:
         self.antares_key = "agent:antares:subagent:antares-1"
         self.rigel_key = "agent:rigel:main:heartbeat"
         self.dubble_marker = "DUBBLE_CANARY_123456"
+        self.vega_preliminary = (
+            f"Preliminary packet {self.nonce}: Cedar costs $24 for two users "
+            "and supports MFA plus IMAP; Birch lacks mandatory MFA; the cap is $30."
+        )
+        self.antares_final = f"PASS {self.nonce}: Cedar satisfies every hard constraint and Birch does not."
         self.vega_final = (
-            f"Packet {self.nonce}: Cedar costs $24 for two users and supports "
-            "MFA plus IMAP; Birch lacks mandatory MFA; the cap is $30."
+            f"PASS {self.nonce}: choose Cedar because two users cost $24 and "
+            "it satisfies the $30 cap, MFA, and IMAP requirements."
         )
         self.star_text = (
             "Choose Cedar: two accounts cost $24 per year, stay under the $30 "
@@ -91,6 +96,8 @@ class BehaviorAuditFixture:
         *,
         transcript: Path | None = None,
         spawned_by: str | None = None,
+        spawn_depth: int = 1,
+        subagent_role: str = "leaf",
     ) -> dict[str, object]:
         entry: dict[str, object] = {
             "sessionId": session_id,
@@ -110,8 +117,8 @@ class BehaviorAuditFixture:
             entry.update(
                 {
                     "spawnedBy": spawned_by,
-                    "spawnDepth": 1,
-                    "subagentRole": "leaf",
+                    "spawnDepth": spawn_depth,
+                    "subagentRole": subagent_role,
                     "status": "done",
                 }
             )
@@ -173,13 +180,60 @@ class BehaviorAuditFixture:
                 },
             ],
         )
+        complete_facts = (
+            "Cedar costs $12 per user per year and supports independent accounts, "
+            "MFA, and IMAP. Birch costs $10 total per year and supports independent "
+            "accounts and IMAP, but has no MFA. Exactly two accounts are needed, "
+            "MFA and IMAP are mandatory, and the cap is $30."
+        )
+        antares_task = (
+            f"Independently review {self.nonce}. {complete_facts}\n"
+            f"Vega preliminary packet:\n{self.vega_preliminary}"
+        )
         vega_transcript = self._transcript(
             "vega",
             "vega-1",
             [
                 {
                     "role": "user",
-                    "content": [{"type": "text", "text": f"Task {self.nonce}"}],
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": (
+                                f"Verify {self.nonce}. {complete_facts} "
+                                "Perform one nested Antares review."
+                            ),
+                        }
+                    ],
+                },
+                {
+                    "role": "assistant",
+                    "content": [
+                        {
+                            "type": "toolCall",
+                            "name": "sessions_spawn",
+                            "arguments": {
+                                "agentId": "antares",
+                                "mode": "run",
+                                "cleanup": "keep",
+                                "task": antares_task,
+                            },
+                        }
+                    ],
+                },
+                {
+                    "role": "assistant",
+                    "content": [
+                        {
+                            "type": "toolCall",
+                            "name": "sessions_yield",
+                            "arguments": {},
+                        }
+                    ],
+                },
+                {
+                    "role": "user",
+                    "content": [{"type": "text", "text": self.antares_final}],
                 },
                 {
                     "role": "assistant",
@@ -196,21 +250,13 @@ class BehaviorAuditFixture:
                     "content": [
                         {
                             "type": "text",
-                            "text": (
-                                f"Review {self.nonce}. Vega actual findings:\n"
-                                f"{self.vega_final}"
-                            ),
+                            "text": antares_task,
                         }
                     ],
                 },
                 {
                     "role": "assistant",
-                    "content": [
-                        {
-                            "type": "text",
-                            "text": f"PASS {self.nonce}: every hard constraint is covered.",
-                        }
-                    ],
+                    "content": [{"type": "text", "text": self.antares_final}],
                 },
             ],
         )
@@ -243,12 +289,6 @@ class BehaviorAuditFixture:
                 },
             ],
         )
-        complete_facts = (
-            "Cedar costs $12 per user per year and supports independent accounts, "
-            "MFA, and IMAP. Birch costs $10 total per year and supports independent "
-            "accounts and IMAP, but has no MFA. Exactly two accounts are needed, "
-            "MFA and IMAP are mandatory, and the cap is $30."
-        )
         main_transcript = self._transcript(
             "main",
             "star-1",
@@ -272,38 +312,10 @@ class BehaviorAuditFixture:
                                 "agentId": "vega",
                                 "mode": "run",
                                 "cleanup": "keep",
-                                "task": f"Verify {self.nonce}. {complete_facts}",
-                            },
-                        }
-                    ],
-                },
-                {
-                    "role": "assistant",
-                    "content": [
-                        {
-                            "type": "toolCall",
-                            "name": "sessions_yield",
-                            "arguments": {},
-                        }
-                    ],
-                },
-                {
-                    "role": "user",
-                    "content": [{"type": "text", "text": self.vega_final}],
-                },
-                {
-                    "role": "assistant",
-                    "content": [
-                        {
-                            "type": "toolCall",
-                            "name": "sessions_spawn",
-                            "arguments": {
-                                "agentId": "antares",
-                                "mode": "run",
-                                "cleanup": "keep",
                                 "task": (
-                                    f"Review {self.nonce}. {complete_facts}\n"
-                                    f"Vega actual packet:\n{self.vega_final}"
+                                    f"Verify {self.nonce}. {complete_facts} "
+                                    "Perform one nested Antares review and return one "
+                                    "consolidated packet."
                                 ),
                             },
                         }
@@ -321,12 +333,7 @@ class BehaviorAuditFixture:
                 },
                 {
                     "role": "user",
-                    "content": [
-                        {
-                            "type": "text",
-                            "text": f"PASS {self.nonce}: constraints verified.",
-                        }
-                    ],
+                    "content": [{"type": "text", "text": self.vega_final}],
                 },
                 {
                     "role": "assistant",
@@ -358,9 +365,16 @@ class BehaviorAuditFixture:
             "vega-session",
             self.primary_model,
             ["AGENTS.md", "SOUL.md"],
-            ["read", "session_status"],
+            [
+                "read",
+                "session_status",
+                "sessions_spawn",
+                "sessions_yield",
+                "subagents",
+            ],
             transcript=vega_transcript,
             spawned_by=self.star_key,
+            subagent_role="orchestrator",
         )
         self.entries["antares"][self.antares_key] = self._entry(
             "antares",
@@ -370,7 +384,8 @@ class BehaviorAuditFixture:
             ["AGENTS.md", "SOUL.md"],
             ["read", "session_status"],
             transcript=antares_transcript,
-            spawned_by=self.star_key,
+            spawned_by=self.vega_key,
+            spawn_depth=2,
         )
         self.entries["rigel"][self.rigel_key] = self._entry(
             "rigel",
@@ -428,17 +443,52 @@ class BehaviorAuditTests(unittest.TestCase):
         self.assertTrue(report["checks"]["star"]["packetPassedToReviewer"])
         self.assertTrue(report["checks"]["rigel"]["event"]["silent"])
 
-    def test_antares_must_receive_exact_vega_packet(self) -> None:
+    def test_antares_task_must_match_vega_spawn(self) -> None:
         transcript = Path(
             self.fixture.entries["antares"][self.fixture.antares_key]["sessionFile"]
         )
         text = transcript.read_text(encoding="utf-8")
         transcript.write_text(
-            text.replace(self.fixture.vega_final, "A summary was omitted."),
+            text.replace(self.fixture.vega_preliminary, "A summary was omitted."),
             encoding="utf-8",
         )
         with self.assertRaisesRegex(
-            audit_module.BehaviorAuditError, "antares-missing-vega-packet"
+            audit_module.BehaviorAuditError, "antares-task-transcript-mismatch"
+        ):
+            self.fixture.audit()
+
+    def test_direct_main_to_antares_topology_is_rejected(self) -> None:
+        self.fixture.entries["antares"][self.fixture.antares_key][
+            "spawnedBy"
+        ] = self.fixture.star_key
+        self.fixture.entries["antares"][self.fixture.antares_key]["spawnDepth"] = 1
+        self.fixture._write_stores()
+        with self.assertRaisesRegex(
+            audit_module.BehaviorAuditError, "star-top-level-child-count"
+        ):
+            self.fixture.audit()
+
+    def test_multiple_visible_main_answers_are_rejected(self) -> None:
+        transcript = Path(
+            self.fixture.entries["main"][self.fixture.star_key]["sessionFile"]
+        )
+        rows = [json.loads(line) for line in transcript.read_text().splitlines()]
+        rows.insert(
+            -1,
+            {
+                **rows[-1],
+                "id": "extra-visible-answer",
+                "message": {
+                    "role": "assistant",
+                    "content": [{"type": "text", "text": "Intermediate packet"}],
+                },
+            },
+        )
+        transcript.write_text(
+            "".join(json.dumps(row) + "\n" for row in rows), encoding="utf-8"
+        )
+        with self.assertRaisesRegex(
+            audit_module.BehaviorAuditError, "star-visible-answer-count"
         ):
             self.fixture.audit()
 
@@ -470,7 +520,7 @@ class BehaviorAuditTests(unittest.TestCase):
         self.fixture.entries["vega"][self.fixture.vega_key]["spawnedBy"] = "wrong"
         self.fixture._write_stores()
         with self.assertRaisesRegex(
-            audit_module.BehaviorAuditError, "vega-child-count"
+            audit_module.BehaviorAuditError, "star-top-level-child-count"
         ):
             self.fixture.audit()
 

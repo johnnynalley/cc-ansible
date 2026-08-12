@@ -3,7 +3,7 @@
 # Purpose: Hand verified modern workspace/session data to the isolated canary.
 # Hosts: openclaw_hosts.
 # Key vars: openclaw_canary_data_* and openclaw_isolated_gateway_*.
-# Scripts: scripts/agents/openclaw-{workspace-stage,session-relocate,native-session-transition,session-transition}.py.
+# Scripts: scripts/agents/openclaw-workspace-stage.py, scripts/agents/openclaw-session-relocate.py, scripts/agents/openclaw-native-session-transition.py, scripts/agents/openclaw-session-transition.py.
 # Validation: ansible-playbook playbooks/agents/openclaw-canary-data-rehearsal.yml --syntax-check.
 
 - name: Rehearse modern OpenClaw data in the isolated Gateway canary

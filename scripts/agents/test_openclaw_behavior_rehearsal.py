@@ -117,7 +117,9 @@ class BehaviorRehearsalTests(unittest.TestCase):
         self.assertLess(audit, baseline)
         self.assertLess(baseline, archive)
         self.assertIn("cleanup keep", self.playbook)
-        self.assertIn("Vega's complete actual packet verbatim", self.playbook)
+        self.assertIn("Spawn only Vega from this Astra session", self.playbook)
+        self.assertIn("Vega's actual preliminary evidence", self.playbook)
+        self.assertIn("Do not spawn Antares directly", self.playbook)
 
     def test_delivery_and_production_gateway_are_compared_before_and_after(
         self,

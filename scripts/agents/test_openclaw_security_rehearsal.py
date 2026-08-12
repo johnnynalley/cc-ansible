@@ -95,6 +95,20 @@ class SecurityRehearsalTests(unittest.TestCase):
             self.codex_unit,
         )
         self.assertIn(
+            "TemporaryFileSystem={{ openclaw_isolated_gateway_state_dir }}:ro",
+            self.codex_unit,
+        )
+        self.assertIn(
+            "ReadOnlyPaths={{ openclaw_isolated_codex_runtime_dir }}",
+            self.codex_unit,
+        )
+        self.assertNotIn("BindReadOnlyPaths=", self.codex_unit)
+        self.assertNotIn(
+            "InaccessiblePaths=-{{ openclaw_isolated_gateway_config_dir }} "
+            "-{{ openclaw_isolated_gateway_state_dir }}",
+            self.codex_unit,
+        )
+        self.assertIn(
             "InaccessiblePaths=-{{ openclaw_security_rehearsal_root }}",
             self.codex_unit,
         )

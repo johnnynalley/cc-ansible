@@ -3,7 +3,7 @@
 # Purpose: Prove modern agent behavior in the loopback-only OpenClaw canary.
 # Hosts: openclaw_hosts.
 # Key vars: openclaw_behavior_rehearsal_* and openclaw_isolated_gateway_*.
-# Scripts: scripts/agents/openclaw-{behavior-audit,delivery-cutover-audit,modern-config-audit,native-session-transition,session-transition}.py.
+# Scripts: scripts/agents/openclaw-behavior-audit.py, scripts/agents/openclaw-delivery-cutover-audit.py, scripts/agents/openclaw-modern-config-audit.py, scripts/agents/openclaw-native-session-transition.py, scripts/agents/openclaw-session-transition.py.
 # Validation: ansible-playbook playbooks/agents/openclaw-behavior-rehearsal.yml --syntax-check.
 
 - name: Rehearse modern OpenClaw behavior without channel delivery
@@ -605,9 +605,9 @@
               - Birch costs $10 total per year, supports independent accounts and IMAP, but has no MFA.
               - The organization needs exactly two independent accounts, MFA is mandatory, IMAP is mandatory, and the annual cap is $30.
 
-              Use native Star delegation. Spawn Vega in mode run with cleanup keep and give Vega the complete facts, constraints, and nonce; require its internal evidence packet to repeat the nonce. Wait for Vega's actual result. Then spawn Antares in mode run with cleanup keep and give Antares the complete facts, constraints, nonce, and Vega's complete actual packet verbatim; require a PASS, FAIL, or DISPUTE packet that repeats the nonce. Wait for Antares. Do not use web tools and do not mutate anything.
+              Use native Star delegation through one nested review chain. Spawn only Vega from this Astra session, in mode run with cleanup keep, and give Vega the complete facts, constraints, and nonce. Require Vega to analyze the options, then spawn Antares once with those same facts, the nonce, and Vega's actual preliminary evidence. Vega must yield for Antares, reconcile its PASS, FAIL, or DISPUTE result, and return one consolidated internal packet that repeats the nonce. Yield once for Vega's actual result. Do not spawn Antares directly, do not use web tools, and do not mutate anything.
 
-              After resolving the two internal packets, return one normal user-facing sentence no longer than 300 characters. It must name Cedar, $24, $30, MFA, and IMAP. Do not mention delegation, agents, review, packets, verdicts, or the nonce.
+              After receiving Vega's consolidated packet, return one normal user-facing sentence no longer than 300 characters. It must name Cedar, $24, $30, MFA, and IMAP. Do not mention delegation, agents, review, packets, verdicts, or the nonce.
 
         - name: Run Dubble behavior probe
           ansible.builtin.command:

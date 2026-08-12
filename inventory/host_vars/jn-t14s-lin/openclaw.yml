@@ -21,17 +21,14 @@ openclaw_isolated_gateway_user: openclaw
 openclaw_isolated_gateway_group: openclaw
 openclaw_isolated_codex_user: openclaw-codex
 openclaw_isolated_codex_group: openclaw-codex
-openclaw_isolated_runtime_group: openclaw-runtime
-openclaw_isolated_workspace_group: openclaw-workspace
-openclaw_isolated_gateway_supplementary_groups:
-  - openclaw-runtime
-  - openclaw-workspace
-openclaw_isolated_codex_supplementary_groups:
-  - openclaw-runtime
-  - openclaw-workspace
+openclaw_isolated_gateway_supplementary_groups: []
+openclaw_isolated_codex_supplementary_groups: []
 openclaw_isolated_gateway_legacy_user: johnny
 openclaw_isolated_gateway_port: 19789
 openclaw_isolated_codex_port: 19790
+openclaw_isolated_gateway_pairing_proxy_bind: 127.0.1.1
+openclaw_isolated_gateway_pairing_proxy_host: jn-t14s-lin
+openclaw_isolated_gateway_pairing_proxy_port: 19788
 openclaw_isolated_gateway_model: openai/gpt-5.6-sol
 # The temporary canary must never schedule copied production jobs. Final
 # production activation uses a separate attended cutover gate.

@@ -56,11 +56,15 @@ ROLE_FORBIDDEN = {
 
 REQUIRED_FRAGMENTS = {
     "AGENTS.md": (
-        "Reconstruct the active objective",
+        "reconstruct the objective",
         "Build the causal model",
-        "Manifest descriptions define responsibility",
-        "Keep both reports internal",
-        "configured proposal queue",
+        "hard and soft requirements",
+        "If none passes",
+        "descriptions\n   define responsibility",
+        "Spawn one top-level Vega run",
+        "Never spawn Antares directly",
+        "Keep packets",
+        "configured\nqueue",
     ),
     "HEARTBEAT.md": (
         "heartbeat_respond",
@@ -71,6 +75,7 @@ REQUIRED_FRAGMENTS = {
         "current primary sources",
         "contradictory evidence",
         "confidence",
+        "spawn Antares once",
         "internal packet",
     ),
     "antares/AGENTS.md": (

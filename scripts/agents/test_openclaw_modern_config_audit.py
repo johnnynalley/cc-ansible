@@ -19,20 +19,49 @@ from jinja2 import Environment, StrictUndefined
 SCRIPT = Path(__file__).with_name("openclaw-modern-config-audit.py")
 TEMPLATE = Path(__file__).parents[2] / "templates/openclaw/openclaw-modern.json.j2"
 OPENCLAW = Path("/opt/openclaw-isolated/current/bin/openclaw")
+PLUGIN_PROJECTS = Path("/var/lib/openclaw-isolated/state/npm/projects")
+
+
+def _readable_plugin_root(legacy: str, project_pattern: str) -> Path | None:
+    candidates = [Path(legacy), *sorted(PLUGIN_PROJECTS.glob(project_pattern))]
+    return next(
+        (
+            path
+            for path in candidates
+            if path.is_dir() and os.access(path, os.R_OK | os.X_OK)
+        ),
+        None,
+    )
+
+
 PLUGIN_ROOTS = [
-    Path("/opt/openclaw-isolated/current/plugins/codex/node_modules/@openclaw/codex"),
-    Path(
-        "/opt/openclaw-isolated/current/plugins/discord/node_modules/@openclaw/discord"
+    _readable_plugin_root(
+        "/opt/openclaw-isolated/current/plugins/codex/node_modules/@openclaw/codex",
+        "openclaw-codex-*/node_modules/@openclaw/codex",
     ),
-    Path(
+    _readable_plugin_root(
+        "/opt/openclaw-isolated/current/plugins/discord/node_modules/@openclaw/discord",
+        "openclaw-discord-*/node_modules/@openclaw/discord",
+    ),
+    _readable_plugin_root(
         "/opt/openclaw-isolated/current/plugins/lossless-claw/node_modules/"
-        "@martian-engineering/lossless-claw"
+        "@martian-engineering/lossless-claw",
+        "martian-engineering-lossless-claw-*/node_modules/"
+        "@martian-engineering/lossless-claw",
     ),
-    Path(
+    _readable_plugin_root(
         "/opt/openclaw-isolated/current/plugins/openclaw-mem0/node_modules/"
-        "@mem0/openclaw-mem0"
+        "@mem0/openclaw-mem0",
+        "mem0-openclaw-mem0-*/node_modules/@mem0/openclaw-mem0",
     ),
 ]
+NATIVE_OPENCLAW_AVAILABLE = OPENCLAW.exists() and os.access(OPENCLAW, os.X_OK)
+NATIVE_CODEX_FIXTURE_AVAILABLE = (
+    NATIVE_OPENCLAW_AVAILABLE and PLUGIN_ROOTS[0] is not None
+)
+NATIVE_FULL_FIXTURE_AVAILABLE = NATIVE_OPENCLAW_AVAILABLE and all(
+    path is not None for path in PLUGIN_ROOTS
+)
 SPEC = importlib.util.spec_from_file_location("openclaw_modern_config_audit", SCRIPT)
 assert SPEC and SPEC.loader
 audit_module = importlib.util.module_from_spec(SPEC)
@@ -148,6 +177,9 @@ class ModernConfigAuditTests(unittest.TestCase):
         }
         config["auth"]["order"]["openai"] = ["openai:default"]
         self.assert_rejected(config, "gateway-provider-auth-boundary")
+
+    def test_runtime_config_does_not_hide_native_security_findings(self) -> None:
+        self.assertNotIn("security", self.config)
 
     def test_canary_render_disables_every_heartbeat(self) -> None:
         config = render_config(heartbeats_enabled=False)
@@ -278,7 +310,10 @@ class ModernConfigAuditTests(unittest.TestCase):
                 deployment_mode="behavior-canary",
             )
 
-    @unittest.skipUnless(OPENCLAW.exists(), "managed OpenClaw runtime unavailable")
+    @unittest.skipUnless(
+        NATIVE_FULL_FIXTURE_AVAILABLE,
+        "readable managed OpenClaw runtime/plugin fixtures unavailable",
+    )
     def test_rendered_config_passes_native_schema_in_isolated_state(self) -> None:
         with tempfile.TemporaryDirectory() as directory_name:
             root = Path(directory_name)
@@ -292,12 +327,12 @@ class ModernConfigAuditTests(unittest.TestCase):
 
             config = copy.deepcopy(self.config)
             config["secrets"]["providers"]["production"]["path"] = str(secret_path)
-            self.assertTrue(all(path.exists() for path in PLUGIN_ROOTS))
             # Schema validation needs plugin manifests, while deployment separately
             # proves native npm ownership, integrity, trust, and frozen code.
             plugin_fixture_root.mkdir()
             plugin_fixtures = []
             for source in PLUGIN_ROOTS:
+                assert source is not None
                 destination = plugin_fixture_root / source.name
                 shutil.copytree(
                     source,
@@ -370,7 +405,10 @@ class ModernConfigAuditTests(unittest.TestCase):
             payload = json.loads(result.stdout)
             self.assertTrue(payload.get("valid"), payload)
 
-    @unittest.skipUnless(OPENCLAW.exists(), "managed OpenClaw runtime unavailable")
+    @unittest.skipUnless(
+        NATIVE_CODEX_FIXTURE_AVAILABLE,
+        "readable managed OpenClaw runtime/Codex fixture unavailable",
+    )
     def test_behavior_canary_passes_native_schema_in_isolated_state(self) -> None:
         with tempfile.TemporaryDirectory() as directory_name:
             root = Path(directory_name)
@@ -392,7 +430,7 @@ class ModernConfigAuditTests(unittest.TestCase):
             )
             config["secrets"]["providers"]["production"]["path"] = str(secret_path)
             codex_source = PLUGIN_ROOTS[0]
-            self.assertTrue(codex_source.exists())
+            assert codex_source is not None
             plugin_fixture_root.mkdir()
             codex_fixture = plugin_fixture_root / codex_source.name
             shutil.copytree(
@@ -478,6 +516,35 @@ class ModernConfigAuditTests(unittest.TestCase):
             "primary": "openai/gpt-5.6-sol"
         }
         self.assert_rejected(config, "global-subagent-model-override")
+
+    def test_star_uses_one_nested_review_route(self) -> None:
+        defaults = self.config["agents"]["defaults"]["subagents"]
+        agents = {agent["id"]: agent for agent in self.config["agents"]["list"]}
+        self.assertEqual(defaults["maxSpawnDepth"], 2)
+        self.assertEqual(defaults["allowAgents"], ["rigel", "vega"])
+        self.assertEqual(agents["main"]["subagents"]["allowAgents"], ["rigel", "vega"])
+        self.assertEqual(agents["vega"]["subagents"]["allowAgents"], ["antares"])
+        self.assertNotIn("antares", agents["main"]["subagents"]["allowAgents"])
+        self.assertTrue(
+            {"sessions_spawn", "sessions_yield", "subagents"}
+            <= set(agents["vega"]["tools"]["allow"])
+        )
+
+    def test_direct_main_to_antares_star_route_is_rejected(self) -> None:
+        config = copy.deepcopy(self.config)
+        main = next(
+            agent for agent in config["agents"]["list"] if agent["id"] == "main"
+        )
+        main["subagents"]["allowAgents"].insert(0, "antares")
+        self.assert_rejected(config, "main-subagent-route-drift")
+
+    def test_vega_without_antares_route_is_rejected(self) -> None:
+        config = copy.deepcopy(self.config)
+        vega = next(
+            agent for agent in config["agents"]["list"] if agent["id"] == "vega"
+        )
+        vega["subagents"]["allowAgents"] = []
+        self.assert_rejected(config, "vega-reviewer-route-drift")
 
     def test_rigel_message_tool_is_rejected(self) -> None:
         config = copy.deepcopy(self.config)

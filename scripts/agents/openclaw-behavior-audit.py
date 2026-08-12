@@ -14,7 +14,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 AGENTS = ("main", "dubble", "vega", "antares", "rigel")
 MAX_JSON_BYTES = 32 * 1024 * 1024
 MAX_TRANSCRIPT_BYTES = 16 * 1024 * 1024
@@ -320,7 +320,12 @@ def _audit_prompt_report(
 
 
 def _child_for_parent(
-    stores: dict[str, dict[str, Any]], agent: str, parent_key: str
+    stores: dict[str, dict[str, Any]],
+    agent: str,
+    parent_key: str,
+    *,
+    expected_depth: int,
+    expected_role: str,
 ) -> tuple[str, dict[str, Any]]:
     matches = [
         (key, entry)
@@ -330,9 +335,20 @@ def _child_for_parent(
     _require(len(matches) == 1, f"{agent}-child-count")
     key, entry = matches[0]
     _require(entry.get("status") == "done", f"{agent}-child-not-done")
-    _require(entry.get("spawnDepth") == 1, f"{agent}-spawn-depth")
-    _require(entry.get("subagentRole") == "leaf", f"{agent}-role-drift")
+    _require(entry.get("spawnDepth") == expected_depth, f"{agent}-spawn-depth")
+    _require(entry.get("subagentRole") == expected_role, f"{agent}-role-drift")
     return key, entry
+
+
+def _children_for_parent(
+    stores: dict[str, dict[str, Any]], parent_key: str
+) -> list[tuple[str, str, dict[str, Any]]]:
+    return [
+        (agent, key, entry)
+        for agent, entries in stores.items()
+        for key, entry in entries.items()
+        if isinstance(entry, dict) and entry.get("spawnedBy") == parent_key
+    ]
 
 
 def _parse_timestamp_ms(value: Any, label: str) -> int:
@@ -404,54 +420,119 @@ def _audit_star_transcript(
     messages: list[dict[str, Any]],
     *,
     nonce: str,
-    vega_final: str,
     star_text: str,
 ) -> dict[str, int]:
     _require(
         _last_text(messages, "assistant", "main") == star_text,
         "star-result-transcript-mismatch",
     )
+    visible_texts = [
+        text
+        for message in messages
+        if message.get("role") == "assistant"
+        for text in [_message_text(message)]
+        if text
+    ]
+    _require(visible_texts == [star_text], "star-visible-answer-count")
     calls = _assistant_tool_calls(messages, "main")
     _require(
         all(name in {"sessions_spawn", "sessions_yield"} for name, _ in calls),
         "star-unexpected-tool-call",
     )
     spawn_calls = [arguments for name, arguments in calls if name == "sessions_spawn"]
-    _require(len(spawn_calls) == 2, "star-spawn-count")
+    _require(len(spawn_calls) == 1, "star-spawn-count")
     required_facts = ("Cedar", "Birch", "$12", "$10", "$30", "MFA", "IMAP")
-    for index, (expected_agent, arguments) in enumerate(
-        zip(("vega", "antares"), spawn_calls, strict=True)
-    ):
-        _require(
-            _argument(arguments, "agentId", "agent_id", "agent") == expected_agent,
-            f"star-spawn-agent-{index}",
-        )
-        _require(arguments.get("mode") == "run", f"star-spawn-mode-{index}")
-        _require(arguments.get("cleanup") == "keep", f"star-spawn-cleanup-{index}")
-        task = _argument(arguments, "task", "prompt", "message")
-        _require(isinstance(task, str) and nonce in task, f"star-spawn-task-{index}")
-        _require(
-            all(fact.casefold() in task.casefold() for fact in required_facts),
-            f"star-spawn-facts-{index}",
-        )
-        if expected_agent == "antares":
-            _require(vega_final in task, "star-spawn-antares-missing-vega-packet")
+    arguments = spawn_calls[0]
+    _require(
+        _argument(arguments, "agentId", "agent_id", "agent") == "vega",
+        "star-spawn-agent-0",
+    )
+    _require(arguments.get("mode") == "run", "star-spawn-mode-0")
+    _require(arguments.get("cleanup") == "keep", "star-spawn-cleanup-0")
+    task = _argument(arguments, "task", "prompt", "message")
+    _require(isinstance(task, str) and nonce in task, "star-spawn-task-0")
+    _require(
+        all(fact.casefold() in task.casefold() for fact in required_facts),
+        "star-spawn-facts-0",
+    )
+    _require("antares" in task.casefold(), "star-nested-review-missing")
 
     call_names = [name for name, _ in calls]
     first_spawn = call_names.index("sessions_spawn")
-    second_spawn = call_names.index("sessions_spawn", first_spawn + 1)
     yields = [
         index for index, name in enumerate(call_names) if name == "sessions_yield"
     ]
     _require(
-        any(first_spawn < index < second_spawn for index in yields),
+        len(yields) == 1 and yields[0] > first_spawn,
         "star-vega-yield-missing",
     )
+    return {"spawnCalls": 1, "yieldCalls": len(yields)}
+
+
+def _audit_vega_orchestration(
+    messages: list[dict[str, Any]],
+    *,
+    nonce: str,
+    antares_user: str,
+    antares_final: str,
+    vega_final: str,
+) -> dict[str, int]:
     _require(
-        any(index > second_spawn for index in yields),
-        "star-antares-yield-missing",
+        _last_text(messages, "assistant", "vega") == vega_final,
+        "vega-final-transcript-mismatch",
     )
-    return {"spawnCalls": 2, "yieldCalls": len(yields)}
+    visible_texts = [
+        text
+        for message in messages
+        if message.get("role") == "assistant"
+        for text in [_message_text(message)]
+        if text
+    ]
+    _require(visible_texts == [vega_final], "vega-visible-packet-count")
+    calls = _assistant_tool_calls(messages, "vega")
+    _require(
+        all(name in {"sessions_spawn", "sessions_yield"} for name, _ in calls),
+        "vega-unexpected-tool-call",
+    )
+    spawn_calls = [arguments for name, arguments in calls if name == "sessions_spawn"]
+    _require(len(spawn_calls) == 1, "vega-spawn-count")
+    arguments = spawn_calls[0]
+    _require(
+        _argument(arguments, "agentId", "agent_id", "agent") == "antares",
+        "vega-spawn-agent",
+    )
+    _require(arguments.get("mode") == "run", "vega-spawn-mode")
+    _require(arguments.get("cleanup") == "keep", "vega-spawn-cleanup")
+    task = _argument(arguments, "task", "prompt", "message")
+    required_facts = ("Cedar", "Birch", "$12", "$10", "$30", "MFA", "IMAP")
+    _require(isinstance(task, str) and nonce in task, "vega-spawn-task")
+    _require(
+        all(fact.casefold() in task.casefold() for fact in required_facts),
+        "vega-spawn-facts",
+    )
+    _require(
+        "preliminary packet" in task.casefold(),
+        "antares-missing-vega-packet",
+    )
+    _require(task.strip() in antares_user, "antares-task-transcript-mismatch")
+    call_names = [name for name, _ in calls]
+    spawn_index = call_names.index("sessions_spawn")
+    yields = [
+        index for index, name in enumerate(call_names) if name == "sessions_yield"
+    ]
+    _require(
+        len(yields) == 1 and yields[0] > spawn_index,
+        "vega-antares-yield-missing",
+    )
+    _require(
+        antares_final in _all_text(messages, "user"), "vega-missing-antares-result"
+    )
+    _require(nonce in vega_final, "vega-final-lineage")
+    _require(
+        re.search(r"\b(?:PASS|FAIL|DISPUTE)\b", vega_final) is not None,
+        "vega-final-verdict-missing",
+    )
+    return {"spawnCalls": 1, "yieldCalls": len(yields)}
 
 
 def _audit_heartbeat_transcript(
@@ -604,8 +685,26 @@ def audit_behavior(
         required_tools={"sessions_spawn", "sessions_yield"},
     )
 
-    vega_key, vega_entry = _child_for_parent(stores, "vega", star_session_key)
-    antares_key, antares_entry = _child_for_parent(stores, "antares", star_session_key)
+    top_level_children = _children_for_parent(stores, star_session_key)
+    _require(len(top_level_children) == 1, "star-top-level-child-count")
+    _require(top_level_children[0][0] == "vega", "star-top-level-child-agent")
+    vega_key, vega_entry = _child_for_parent(
+        stores,
+        "vega",
+        star_session_key,
+        expected_depth=1,
+        expected_role="orchestrator",
+    )
+    vega_children = _children_for_parent(stores, vega_key)
+    _require(len(vega_children) == 1, "vega-child-count-all-agents")
+    _require(vega_children[0][0] == "antares", "vega-child-agent")
+    antares_key, antares_entry = _child_for_parent(
+        stores,
+        "antares",
+        vega_key,
+        expected_depth=2,
+        expected_role="leaf",
+    )
     vega_report = _audit_prompt_report(
         vega_entry,
         agent="vega",
@@ -613,7 +712,7 @@ def audit_behavior(
         model_reference=primary_model,
         workspace_root=resolved_workspace,
         required_files={"AGENTS.md", "SOUL.md"},
-        required_tools={"read", "session_status"},
+        required_tools={"read", "session_status", "sessions_spawn", "sessions_yield"},
     )
     antares_report = _audit_prompt_report(
         antares_entry,
@@ -635,16 +734,21 @@ def audit_behavior(
     antares_final = _last_text(antares_messages, "assistant", "antares")
     _require(nonce in vega_user and nonce in vega_final, "vega-nonce-lineage")
     _require(nonce in antares_user and nonce in antares_final, "antares-nonce-lineage")
-    _require(vega_final in antares_user, "antares-missing-vega-packet")
     _require(
         re.search(r"\b(?:PASS|FAIL|DISPUTE)\b", antares_final) is not None,
         "antares-verdict-missing",
+    )
+    vega_orchestration = _audit_vega_orchestration(
+        vega_messages,
+        nonce=nonce,
+        antares_user=antares_user,
+        antares_final=antares_final,
+        vega_final=vega_final,
     )
     main_messages = _messages(_read_transcript(main_entry, resolved_state, "main"))
     star_transcript = _audit_star_transcript(
         main_messages,
         nonce=nonce,
-        vega_final=vega_final,
         star_text=star_text,
     )
 
@@ -678,11 +782,12 @@ def audit_behavior(
             "star": {
                 "childCount": 2,
                 "conciseFinal": True,
+                "nestedReview": True,
                 "packetPassedToReviewer": True,
                 "resultMatchesTranscript": True,
                 **star_transcript,
                 "main": main_report,
-                "vega": vega_report,
+                "vega": {**vega_report, **vega_orchestration},
                 "antares": antares_report,
             },
             "rigel": {
