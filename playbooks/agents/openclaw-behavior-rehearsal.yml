@@ -37,15 +37,15 @@
       - antares
     openclaw_behavior_rehearsal_session_index_arguments:
       - >-
-        --session-index=main={{ openclaw_isolated_gateway_state_dir }}/state/agents/main/sessions/sessions.json
+        --session-index=main={{ openclaw_isolated_gateway_runtime_state_dir }}/agents/main/sessions/sessions.json
       - >-
-        --session-index=dubble={{ openclaw_isolated_gateway_state_dir }}/state/agents/dubble/sessions/sessions.json
+        --session-index=dubble={{ openclaw_isolated_gateway_runtime_state_dir }}/agents/dubble/sessions/sessions.json
       - >-
-        --session-index=rigel={{ openclaw_isolated_gateway_state_dir }}/state/agents/rigel/sessions/sessions.json
+        --session-index=rigel={{ openclaw_isolated_gateway_runtime_state_dir }}/agents/rigel/sessions/sessions.json
       - >-
-        --session-index=vega={{ openclaw_isolated_gateway_state_dir }}/state/agents/vega/sessions/sessions.json
+        --session-index=vega={{ openclaw_isolated_gateway_runtime_state_dir }}/agents/vega/sessions/sessions.json
       - >-
-        --session-index=antares={{ openclaw_isolated_gateway_state_dir }}/state/agents/antares/sessions/sessions.json
+        --session-index=antares={{ openclaw_isolated_gateway_runtime_state_dir }}/agents/antares/sessions/sessions.json
     openclaw_behavior_rehearsal_agent_arguments: >-
       {{ openclaw_behavior_rehearsal_agents | map('regex_replace', '^', '--agent=') | list }}
 
@@ -91,6 +91,8 @@
           - openclaw_isolated_gateway_port | int == 19789
           - openclaw_isolated_gateway_config_file == '/etc/openclaw-isolated/openclaw.json'
           - openclaw_isolated_gateway_state_dir == '/var/lib/openclaw-isolated'
+          - openclaw_isolated_gateway_runtime_state_dir == '/var/lib/openclaw-isolated/state'
+          - openclaw_isolated_gateway_database_file == '/var/lib/openclaw-isolated/state/state/openclaw.sqlite'
           - openclaw_isolated_gateway_workspace_dir == '/usr/local/share/openclaw-isolated/workspace'
           - openclaw_isolated_gateway_runtime_root == '/opt/openclaw-isolated'
           - openclaw_isolated_gateway_skip_cron | bool
@@ -104,39 +106,116 @@
 
     - name: Inspect OpenClaw behavior rehearsal prerequisites
       ansible.builtin.stat:
-        path: "{{ item }}"
+        path: "{{ item.path }}"
         follow: false
       loop:
-        - /etc/systemd/system/openclaw-isolated-gateway.service
-        - "{{ openclaw_isolated_gateway_config_file }}"
-        - "{{ openclaw_isolated_gateway_config_file }}.last-good"
-        - "{{ openclaw_isolated_gateway_secret_file }}"
-        - "{{ openclaw_isolated_gateway_runtime_dir }}/bin/openclaw"
-        - "{{ openclaw_isolated_gateway_state_dir }}/state/openclaw.sqlite"
-        - "{{ openclaw_isolated_gateway_workspace_dir }}/AGENTS.md"
-        - "{{ openclaw_isolated_gateway_workspace_dir }}/dubble/AGENTS.md"
-        - "{{ openclaw_isolated_gateway_workspace_dir }}/vega/AGENTS.md"
-        - "{{ openclaw_isolated_gateway_workspace_dir }}/antares/AGENTS.md"
-        - "{{ openclaw_isolated_gateway_workspace_dir }}/rigel/HEARTBEAT.md"
-        - "{{ openclaw_isolated_gateway_config_dir }}/.infrastructure-validated"
-        - "{{ openclaw_isolated_gateway_config_dir }}/.canary-validated"
-        - "{{ openclaw_isolated_gateway_state_dir }}/state/agents/main/sessions/sessions.json"
-        - "{{ openclaw_isolated_gateway_state_dir }}/state/agents/dubble/sessions/sessions.json"
-        - "{{ openclaw_isolated_gateway_state_dir }}/state/agents/rigel/sessions/sessions.json"
-        - "{{ openclaw_isolated_gateway_state_dir }}/state/agents/vega/sessions/sessions.json"
-        - "{{ openclaw_isolated_gateway_state_dir }}/state/agents/antares/sessions/sessions.json"
+        - path: /etc/systemd/system/openclaw-isolated-gateway.service
+          expected_kind: regular
+        - path: "{{ openclaw_isolated_gateway_config_file }}"
+          expected_kind: regular
+        - path: "{{ openclaw_isolated_gateway_config_file }}.last-good"
+          expected_kind: regular
+        - path: "{{ openclaw_isolated_gateway_secret_file }}"
+          expected_kind: regular
+        - path: "{{ openclaw_isolated_gateway_runtime_dir }}/bin/openclaw"
+          expected_kind: symlink
+        - path: "{{ openclaw_isolated_gateway_database_file }}"
+          expected_kind: regular
+        - path: "{{ openclaw_isolated_gateway_workspace_dir }}/AGENTS.md"
+          expected_kind: regular
+        - path: "{{ openclaw_isolated_gateway_workspace_dir }}/dubble/AGENTS.md"
+          expected_kind: regular
+        - path: "{{ openclaw_isolated_gateway_workspace_dir }}/vega/AGENTS.md"
+          expected_kind: regular
+        - path: "{{ openclaw_isolated_gateway_workspace_dir }}/antares/AGENTS.md"
+          expected_kind: regular
+        - path: "{{ openclaw_isolated_gateway_workspace_dir }}/rigel/HEARTBEAT.md"
+          expected_kind: regular
+        - path: "{{ openclaw_isolated_gateway_config_dir }}/.infrastructure-validated"
+          expected_kind: regular
+        - path: "{{ openclaw_isolated_gateway_runtime_state_dir }}/agents/main/sessions/sessions.json"
+          expected_kind: regular
+        - path: "{{ openclaw_isolated_gateway_runtime_state_dir }}/agents/dubble/sessions/sessions.json"
+          expected_kind: regular
+        - path: "{{ openclaw_isolated_gateway_runtime_state_dir }}/agents/rigel/sessions/sessions.json"
+          expected_kind: regular
+        - path: "{{ openclaw_isolated_gateway_runtime_state_dir }}/agents/vega/sessions/sessions.json"
+          expected_kind: regular
+        - path: "{{ openclaw_isolated_gateway_runtime_state_dir }}/agents/antares/sessions/sessions.json"
+          expected_kind: regular
+      loop_control:
+        label: "{{ item.path }}"
       register: openclaw_behavior_rehearsal_prerequisites
       check_mode: false
 
-    - name: Require complete OpenClaw behavior rehearsal prerequisites
+    - name: Require complete OpenClaw behavior rehearsal prerequisite inventory
       ansible.builtin.assert:
         that:
-          - openclaw_behavior_rehearsal_prerequisites.results | length == 18
-          - openclaw_behavior_rehearsal_prerequisites.results | map(attribute='stat.isreg') | select('equalto', true) | list | length == 18
-          - openclaw_behavior_rehearsal_prerequisites.results | map(attribute='stat.islnk') | select('equalto', true) | list | length == 0
+          - openclaw_behavior_rehearsal_prerequisites.results | length == 17
         fail_msg: >-
           The validated canary runtime, modern behavior, database, or five
           session indexes are incomplete.
+
+    - name: Require typed OpenClaw behavior rehearsal prerequisites
+      ansible.builtin.assert:
+        that:
+          - item.stat.exists | default(false) | bool
+          - >-
+            (
+              item.item.expected_kind == 'regular'
+              and (item.stat.isreg | default(false) | bool)
+              and not (item.stat.islnk | default(false) | bool)
+            )
+            or
+            (
+              item.item.expected_kind == 'symlink'
+              and (item.stat.islnk | default(false) | bool)
+            )
+        quiet: true
+        fail_msg: >-
+          {{ item.item.path }} is not the required {{ item.item.expected_kind }}
+          prerequisite.
+      loop: "{{ openclaw_behavior_rehearsal_prerequisites.results }}"
+      loop_control:
+        label: "{{ item.item.path }}"
+
+    - name: Resolve selected immutable OpenClaw behavior runtime and CLI
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/readlink
+          - --canonicalize-existing
+          - "{{ item }}"
+      loop:
+        - "{{ openclaw_isolated_gateway_runtime_dir }}"
+        - "{{ openclaw_isolated_gateway_runtime_dir }}/bin/openclaw"
+      register: openclaw_behavior_rehearsal_runtime_selectors
+      changed_when: false
+      check_mode: false
+
+    - name: Require canonical immutable OpenClaw behavior runtime CLI
+      ansible.builtin.assert:
+        that:
+          - openclaw_behavior_rehearsal_runtime_selectors.results[0].stdout is match('^/opt/openclaw-isolated/releases/[0-9A-Za-z._+-]+-plugins-[0-9a-f]{16}$')
+          - >-
+            openclaw_behavior_rehearsal_runtime_selectors.results[1].stdout
+            ==
+            openclaw_behavior_rehearsal_runtime_selectors.results[0].stdout
+            + '/lib/node_modules/openclaw/openclaw.mjs'
+        fail_msg: >-
+          The selected OpenClaw behavior CLI does not resolve inside the
+          selected immutable runtime release.
+
+    - name: Prove isolated Gateway identity can execute behavior CLI
+      ansible.builtin.command:
+        argv:
+          - /usr/sbin/runuser
+          - -u
+          - "{{ openclaw_isolated_gateway_user }}"
+          - --
+          - "{{ openclaw_behavior_rehearsal_runtime_selectors.results[1].stdout }}"
+          - --version
+      changed_when: false
+      check_mode: false
 
     - name: Find successful OpenClaw canary data handoffs
       ansible.builtin.find:
@@ -244,6 +323,20 @@
         - openclaw-modern-config-audit.py
         - openclaw-native-session-transition.py
         - openclaw-session-transition.py
+
+    - name: Prove deployed OpenClaw behavior rehearsal helpers load
+      ansible.builtin.command:
+        argv:
+          - "{{ openclaw_behavior_rehearsal_helper_dir }}/{{ item }}"
+          - --help
+      loop:
+        - openclaw-behavior-audit.py
+        - openclaw-delivery-cutover-audit.py
+        - openclaw-modern-config-audit.py
+        - openclaw-native-session-transition.py
+        - openclaw-session-transition.py
+      changed_when: false
+      check_mode: false
 
     - name: Generate OpenClaw behavior rehearsal timestamp
       ansible.builtin.command:
@@ -404,8 +497,8 @@
             path: "{{ item }}"
             follow: false
           loop:
-            - "{{ openclaw_isolated_gateway_state_dir }}/state/openclaw.sqlite-wal"
-            - "{{ openclaw_isolated_gateway_state_dir }}/state/openclaw.sqlite-shm"
+            - "{{ openclaw_isolated_gateway_database_file }}-wal"
+            - "{{ openclaw_isolated_gateway_database_file }}-shm"
           register: openclaw_behavior_rehearsal_sqlite_sidecars
 
         - name: Record targeted OpenClaw behavior rollback paths
@@ -415,12 +508,12 @@
                 [
                   openclaw_isolated_gateway_config_file,
                   openclaw_isolated_gateway_config_file + '.last-good',
-                  openclaw_isolated_gateway_state_dir + '/state/openclaw.sqlite',
-                  openclaw_isolated_gateway_state_dir + '/state/agents/main/sessions/sessions.json',
-                  openclaw_isolated_gateway_state_dir + '/state/agents/dubble/sessions/sessions.json',
-                  openclaw_isolated_gateway_state_dir + '/state/agents/rigel/sessions/sessions.json',
-                  openclaw_isolated_gateway_state_dir + '/state/agents/vega/sessions/sessions.json',
-                  openclaw_isolated_gateway_state_dir + '/state/agents/antares/sessions/sessions.json'
+                  openclaw_isolated_gateway_database_file,
+                  openclaw_isolated_gateway_runtime_state_dir + '/agents/main/sessions/sessions.json',
+                  openclaw_isolated_gateway_runtime_state_dir + '/agents/dubble/sessions/sessions.json',
+                  openclaw_isolated_gateway_runtime_state_dir + '/agents/rigel/sessions/sessions.json',
+                  openclaw_isolated_gateway_runtime_state_dir + '/agents/vega/sessions/sessions.json',
+                  openclaw_isolated_gateway_runtime_state_dir + '/agents/antares/sessions/sessions.json'
                 ]
                 + (
                   openclaw_behavior_rehearsal_sqlite_sidecars.results
@@ -473,7 +566,7 @@
               - /usr/bin/env
               - "HOME={{ openclaw_isolated_gateway_state_dir }}"
               - "OPENCLAW_HOME={{ openclaw_isolated_gateway_state_dir }}"
-              - "OPENCLAW_STATE_DIR={{ openclaw_isolated_gateway_state_dir }}/state"
+              - "OPENCLAW_STATE_DIR={{ openclaw_isolated_gateway_runtime_state_dir }}"
               - "OPENCLAW_CONFIG_PATH={{ openclaw_behavior_rehearsal_evidence_dir }}/config-{{ item }}.json"
               - "OPENCLAW_WORKSPACE_DIR={{ openclaw_isolated_gateway_workspace_dir }}"
               - OPENCLAW_SKIP_CHANNELS=1
@@ -524,7 +617,7 @@
               {{
                 [
                   openclaw_behavior_rehearsal_delivery_audit_tool,
-                  '--database', openclaw_isolated_gateway_state_dir + '/state/openclaw.sqlite',
+                  '--database', openclaw_isolated_gateway_database_file,
                   '--output', openclaw_behavior_rehearsal_evidence_dir + '/delivery-before.json',
                   '--require-clean'
                 ]
@@ -652,7 +745,7 @@
               - /usr/bin/env
               - "HOME={{ openclaw_isolated_gateway_state_dir }}"
               - "OPENCLAW_HOME={{ openclaw_isolated_gateway_state_dir }}"
-              - "OPENCLAW_STATE_DIR={{ openclaw_isolated_gateway_state_dir }}/state"
+              - "OPENCLAW_STATE_DIR={{ openclaw_isolated_gateway_runtime_state_dir }}"
               - "OPENCLAW_CONFIG_PATH={{ openclaw_isolated_gateway_config_file }}"
               - "OPENCLAW_WORKSPACE_DIR={{ openclaw_isolated_gateway_workspace_dir }}"
               - OPENCLAW_SKIP_CHANNELS=1
@@ -693,7 +786,7 @@
               - /usr/bin/env
               - "HOME={{ openclaw_isolated_gateway_state_dir }}"
               - "OPENCLAW_HOME={{ openclaw_isolated_gateway_state_dir }}"
-              - "OPENCLAW_STATE_DIR={{ openclaw_isolated_gateway_state_dir }}/state"
+              - "OPENCLAW_STATE_DIR={{ openclaw_isolated_gateway_runtime_state_dir }}"
               - "OPENCLAW_CONFIG_PATH={{ openclaw_isolated_gateway_config_file }}"
               - "OPENCLAW_WORKSPACE_DIR={{ openclaw_isolated_gateway_workspace_dir }}"
               - OPENCLAW_SKIP_CHANNELS=1
@@ -741,7 +834,7 @@
               - /usr/bin/env
               - "HOME={{ openclaw_isolated_gateway_state_dir }}"
               - "OPENCLAW_HOME={{ openclaw_isolated_gateway_state_dir }}"
-              - "OPENCLAW_STATE_DIR={{ openclaw_isolated_gateway_state_dir }}/state"
+              - "OPENCLAW_STATE_DIR={{ openclaw_isolated_gateway_runtime_state_dir }}"
               - "OPENCLAW_CONFIG_PATH={{ openclaw_isolated_gateway_config_file }}"
               - "OPENCLAW_WORKSPACE_DIR={{ openclaw_isolated_gateway_workspace_dir }}"
               - OPENCLAW_SKIP_CHANNELS=1
@@ -821,7 +914,7 @@
               - /usr/bin/env
               - "HOME={{ openclaw_isolated_gateway_state_dir }}"
               - "OPENCLAW_HOME={{ openclaw_isolated_gateway_state_dir }}"
-              - "OPENCLAW_STATE_DIR={{ openclaw_isolated_gateway_state_dir }}/state"
+              - "OPENCLAW_STATE_DIR={{ openclaw_isolated_gateway_runtime_state_dir }}"
               - "OPENCLAW_CONFIG_PATH={{ openclaw_isolated_gateway_config_file }}"
               - "OPENCLAW_WORKSPACE_DIR={{ openclaw_isolated_gateway_workspace_dir }}"
               - OPENCLAW_SKIP_CHANNELS=1
@@ -852,7 +945,7 @@
               - /usr/bin/env
               - "HOME={{ openclaw_isolated_gateway_state_dir }}"
               - "OPENCLAW_HOME={{ openclaw_isolated_gateway_state_dir }}"
-              - "OPENCLAW_STATE_DIR={{ openclaw_isolated_gateway_state_dir }}/state"
+              - "OPENCLAW_STATE_DIR={{ openclaw_isolated_gateway_runtime_state_dir }}"
               - "OPENCLAW_CONFIG_PATH={{ openclaw_isolated_gateway_config_file }}"
               - "OPENCLAW_WORKSPACE_DIR={{ openclaw_isolated_gateway_workspace_dir }}"
               - OPENCLAW_SKIP_CHANNELS=1
@@ -892,7 +985,7 @@
             argv:
               - "{{ openclaw_behavior_rehearsal_audit_tool }}"
               - --state-root
-              - "{{ openclaw_isolated_gateway_state_dir }}/state"
+              - "{{ openclaw_isolated_gateway_runtime_state_dir }}"
               - --workspace-root
               - "{{ openclaw_isolated_gateway_workspace_dir }}"
               - --dubble-result
@@ -985,10 +1078,10 @@
                   '--',
                   openclaw_behavior_rehearsal_transition_tool,
                   '--mode', 'apply',
-                  '--openclaw', openclaw_isolated_gateway_runtime_dir + '/bin/openclaw',
+                  '--openclaw', openclaw_behavior_rehearsal_runtime_selectors.results[1].stdout,
                   '--runtime-root', openclaw_isolated_gateway_runtime_root,
                   '--home', openclaw_isolated_gateway_state_dir,
-                  '--state-root', openclaw_isolated_gateway_state_dir + '/state',
+                  '--state-root', openclaw_isolated_gateway_runtime_state_dir,
                   '--config', openclaw_isolated_gateway_config_file,
                   '--workspace', openclaw_isolated_gateway_workspace_dir,
                   '--output-dir', openclaw_behavior_rehearsal_transition_output
@@ -997,7 +1090,6 @@
               }}
           register: openclaw_behavior_rehearsal_transition
           changed_when: true
-          no_log: true
 
         - name: Require converged native behavior session archive
           ansible.builtin.assert:
@@ -1012,7 +1104,6 @@
             fail_msg: >-
               Synthetic behavior sessions did not converge through OpenClaw's
               native archive API.
-          no_log: true
 
         - name: Freeze native behavior transition evidence
           ansible.builtin.file:
@@ -1039,7 +1130,7 @@
               {{
                 [
                   openclaw_behavior_rehearsal_delivery_audit_tool,
-                  '--database', openclaw_isolated_gateway_state_dir + '/state/openclaw.sqlite',
+                  '--database', openclaw_isolated_gateway_database_file,
                   '--output', openclaw_behavior_rehearsal_evidence_dir + '/delivery-after.json',
                   '--require-clean'
                 ]

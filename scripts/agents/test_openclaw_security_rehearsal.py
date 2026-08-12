@@ -45,6 +45,78 @@ class SecurityRehearsalTests(unittest.TestCase):
         ):
             self.assertIn(assertion, self.playbook)
 
+    def test_prerequisites_are_typed_and_bind_an_immutable_cli(self) -> None:
+        inspect = self.playbook.index(
+            "- name: Inspect OpenClaw security rehearsal prerequisites"
+        )
+        handoff = self.playbook.index(
+            "- name: Find successful OpenClaw canary data handoffs"
+        )
+        gate = self.playbook[inspect:handoff]
+        self.assertNotIn("map(attribute='stat.isreg')", gate)
+        self.assertNotIn("map(attribute='stat.islnk')", gate)
+        self.assertEqual(gate.count("expected_kind: regular"), 14)
+        self.assertEqual(gate.count("expected_kind: symlink"), 1)
+        self.assertNotIn(".canary-validated", gate)
+        self.assertIn("openclaw_isolated_gateway_database_file", gate)
+        self.assertEqual(
+            self.inventory["openclaw_isolated_gateway_runtime_state_dir"],
+            "{{ openclaw_isolated_gateway_state_dir }}/state",
+        )
+        self.assertEqual(
+            self.inventory["openclaw_isolated_gateway_database_file"],
+            "{{ openclaw_isolated_gateway_runtime_state_dir }}/state/openclaw.sqlite",
+        )
+        self.assertIn("item.stat.isreg | default(false)", gate)
+        self.assertIn("item.stat.islnk | default(false)", gate)
+        self.assertIn(
+            "- name: Resolve selected immutable OpenClaw security runtime and CLI",
+            gate,
+        )
+        self.assertIn("--canonicalize-existing", gate)
+        self.assertIn("/lib/node_modules/openclaw/openclaw.mjs", gate)
+        self.assertIn(
+            "- name: Prove isolated Gateway identity can execute security CLI",
+            gate,
+        )
+        self.assertIn("- --version", gate)
+
+    def test_helper_bundle_loads_before_transaction_state(self) -> None:
+        install = self.playbook.index(
+            "- name: Install OpenClaw security rehearsal helpers"
+        )
+        smoke = self.playbook.index(
+            "- name: Prove deployed OpenClaw security rehearsal helpers load"
+        )
+        timestamp = self.playbook.index(
+            "- name: Generate OpenClaw security rehearsal timestamp"
+        )
+        bundle = self.playbook[install:timestamp]
+        self.assertLess(install, smoke)
+        self.assertLess(smoke, timestamp)
+        self.assertIn("- openclaw-native-session-transition.py", bundle)
+        self.assertIn("- openclaw-session-transition.py", bundle)
+        self.assertIn("- --help", bundle)
+
+    def test_native_archive_uses_resolved_cli_and_exposes_sanitized_failure(
+        self,
+    ) -> None:
+        transition = self.playbook.index(
+            "- name: Archive exact synthetic security session through native RPC"
+        )
+        freeze = self.playbook.index(
+            "- name: Freeze native security transition evidence"
+        )
+        native = self.playbook[transition:freeze]
+        self.assertIn(
+            "'--openclaw', openclaw_security_rehearsal_runtime_selectors.results[1].stdout",
+            native,
+        )
+        self.assertNotIn(
+            "openclaw_isolated_gateway_runtime_dir + '/bin/openclaw'", native
+        )
+        self.assertNotIn("no_log: true", native)
+
     def test_plan_stops_before_backup_probe_or_model_activity(self) -> None:
         plan_exit = self.playbook.index(
             "- name: Stop after non-runtime OpenClaw security plan"

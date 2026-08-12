@@ -1187,6 +1187,16 @@ applied generation. A plan renders and statically audits two channel-less
 configs, then exits before inspecting service activity, starting a Gateway,
 running a model, or triggering a heartbeat.
 
+The preflight treats the selected CLI as an intentional symlink, resolves it to
+the exact immutable release, and proves the `openclaw` identity can execute that
+resolved file. It also distinguishes the account home
+(`/var/lib/openclaw-isolated`) from `OPENCLAW_STATE_DIR`
+(`/var/lib/openclaw-isolated/state`) and the current shared database beneath
+that state root (`state/openclaw.sqlite`). It requires the infrastructure marker
+and applied data-handoff evidence, not `.canary-validated`: requiring the latter
+would make model validation circular because this rehearsal is itself a model
+behavior gate.
+
 The attended apply transaction is canary-only:
 
 1. Require the loopback unit to remain boot-disabled with channel and cron

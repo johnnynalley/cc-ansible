@@ -63,6 +63,14 @@ execution path. Record wrapper/sandbox failures separately from failures in the
 target application so superficial tooling errors do not become false incident
 evidence or leaked resource pressure.
 
+For Ansible preflights that inspect heterogeneous path types, declare the
+expected type for every item and validate each result with optional attributes
+guarded by `default(false)`. Do not aggregate `stat.isreg`, `stat.islnk`, or
+similar fields across mixed results because Ansible may omit attributes that do
+not apply. Resolve mutable runtime selectors separately, require their canonical
+target to remain inside the approved immutable root, and pass that canonical
+path to helpers that reject symlinks.
+
 Do not infer live host mount permissions or filesystem state from an
 unprivileged command running inside the Codex filesystem sandbox. Paths outside
 the workspace can appear read-only there even when the host mount is writable.
