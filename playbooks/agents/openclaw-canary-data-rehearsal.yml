@@ -371,10 +371,12 @@
     - name: Require replay-safe promoted OpenClaw rehearsal state
       ansible.builtin.assert:
         that:
-          - openclaw_canary_data_source_manifest.summary.activeDeliveryRecoveryEntries | int == 0
+          - openclaw_canary_data_source_manifest.summary.activeDeliveryRecoveryEntries is defined
+          - openclaw_canary_data_source_manifest.summary.activeDeliveryRecoveryEntries | default(-1) | int == 0
         fail_msg: >-
-          The promoted rehearsal still contains active delivery-recovery state
-          and cannot be handed to a running canary.
+          The promoted-rehearsal manifest lacks delivery-recovery evidence or
+          still contains active delivery-recovery state, so it cannot be handed
+          to a running canary.
 
     - name: Derive canary workspace session directories
       ansible.builtin.set_fact:

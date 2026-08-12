@@ -787,10 +787,12 @@
     - name: Reject delivery recovery state in relocated sessions
       ansible.builtin.assert:
         that:
-          - openclaw_state_rehearsal_target_manifest.summary.activeDeliveryRecoveryEntries | int == 0
+          - openclaw_state_rehearsal_target_manifest.summary.activeDeliveryRecoveryEntries is defined
+          - openclaw_state_rehearsal_target_manifest.summary.activeDeliveryRecoveryEntries | default(-1) | int == 0
         fail_msg: >-
-          Relocated active sessions still contain pending or restart recovery
-          delivery state that could replay a production response from rehearsal.
+          The relocated-session manifest lacks delivery-recovery evidence or
+          still contains pending/restart delivery state that could replay a
+          production response from rehearsal.
 
     - name: Inspect OpenClaw state rehearsal top-level state
       ansible.builtin.command:

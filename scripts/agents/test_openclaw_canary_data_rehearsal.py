@@ -67,6 +67,14 @@ class CanaryDataRehearsalTests(unittest.TestCase):
         self.assertIn("--quarantine-delivery-recovery", self.playbook)
         self.assertIn("activeDeliveryRecoveryEntries", self.playbook)
         self.assertIn(
+            "openclaw_canary_data_source_manifest.summary.activeDeliveryRecoveryEntries is defined",
+            self.playbook,
+        )
+        self.assertIn(
+            "openclaw_canary_data_source_manifest.summary.activeDeliveryRecoveryEntries | default(-1) | int == 0",
+            self.playbook,
+        )
+        self.assertIn(
             "Require canary workspace parity with promoted rehearsal",
             self.playbook,
         )

@@ -82,7 +82,11 @@ class StateRehearsalPlaybookTests(unittest.TestCase):
         task = self._task("Reject delivery recovery state in relocated sessions")
         assertions = task["ansible.builtin.assert"]["that"]
         self.assertIn(
-            "openclaw_state_rehearsal_target_manifest.summary.activeDeliveryRecoveryEntries | int == 0",
+            "openclaw_state_rehearsal_target_manifest.summary.activeDeliveryRecoveryEntries is defined",
+            assertions,
+        )
+        self.assertIn(
+            "openclaw_state_rehearsal_target_manifest.summary.activeDeliveryRecoveryEntries | default(-1) | int == 0",
             assertions,
         )
 
