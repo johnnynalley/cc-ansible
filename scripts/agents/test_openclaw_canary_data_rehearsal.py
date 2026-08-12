@@ -107,6 +107,28 @@ class CanaryDataRehearsalTests(unittest.TestCase):
         self.assertIn("OPENCLAW_SKIP_CHANNELS=1", self.playbook)
         self.assertIn("OPENCLAW_SKIP_CRON=1", self.playbook)
 
+    def test_workspace_ownership_preserves_behavior_and_data_classes(self) -> None:
+        self.assertEqual(
+            self.inventory["openclaw_isolated_workspace_group"],
+            "openclaw-workspace",
+        )
+        self.assertEqual(
+            self.inventory["openclaw_isolated_gateway_supplementary_groups"],
+            ["openclaw-workspace"],
+        )
+        self.assertEqual(
+            self.inventory["openclaw_isolated_codex_supplementary_groups"],
+            ["openclaw-workspace"],
+        )
+        self.assertIn("Set staged canary workspace root access", self.playbook)
+        self.assertIn(
+            "item.stat.pw_name in ['root', openclaw_isolated_codex_user]", self.playbook
+        )
+        self.assertIn(
+            "operator-read-only or Executor-writable ownership classes",
+            self.playbook,
+        )
+
     def test_rescue_restores_both_prior_data_roots(self) -> None:
         rescue = self.playbook.index("      rescue:")
         tail = self.playbook[rescue:]

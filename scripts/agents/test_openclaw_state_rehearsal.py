@@ -124,6 +124,17 @@ class StateRehearsalPlaybookTests(unittest.TestCase):
         self.assertLess(stage, ownership_gate)
         self.assertLess(ownership_gate, session_directories)
 
+        gate = self._task(
+            "Reject session references that cross workspace ownership classes"
+        )
+        assertions = gate["ansible.builtin.assert"]["that"]
+        self.assertIn("item.stat.pw_name == 'root'", assertions[0])
+        self.assertIn(
+            "item.stat.pw_name == openclaw_state_rehearsal_user",
+            assertions[0],
+        )
+        self.assertIn("item.stat.mode == '0750'", assertions[0])
+
     def test_only_session_state_is_recursively_frozen(self) -> None:
         freeze = self._task("Freeze validated OpenClaw rehearsal session generation")
         argv = freeze["ansible.builtin.command"]["argv"]

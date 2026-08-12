@@ -72,8 +72,9 @@
           - openclaw_isolated_gateway_group == 'openclaw'
           - openclaw_isolated_codex_user == 'openclaw-codex'
           - openclaw_isolated_codex_group == 'openclaw-codex'
-          - openclaw_isolated_gateway_supplementary_groups | length == 0
-          - openclaw_isolated_codex_supplementary_groups | length == 0
+          - openclaw_isolated_workspace_group == 'openclaw-workspace'
+          - openclaw_isolated_gateway_supplementary_groups == [openclaw_isolated_workspace_group]
+          - openclaw_isolated_codex_supplementary_groups == [openclaw_isolated_workspace_group]
           - openclaw_isolated_gateway_config_dir is match('^/etc/openclaw-isolated$')
           - openclaw_isolated_gateway_config_file == openclaw_isolated_gateway_config_dir + '/openclaw.json'
           - openclaw_isolated_gateway_secret_file == openclaw_isolated_gateway_config_dir + '/secrets.json'
@@ -655,6 +656,11 @@
             name: "{{ openclaw_isolated_codex_group }}"
             system: true
 
+        - name: Create isolated workspace sharing group
+          ansible.builtin.group:
+            name: "{{ openclaw_isolated_workspace_group }}"
+            system: true
+
         - name: Create isolated Gateway service account
           ansible.builtin.user:
             name: "{{ openclaw_isolated_gateway_user }}"
@@ -795,9 +801,9 @@
               group: root
               mode: "0755"
             - path: "{{ openclaw_isolated_gateway_workspace_dir }}"
-              owner: "{{ openclaw_isolated_codex_user }}"
-              group: "{{ openclaw_isolated_gateway_group }}"
-              mode: "2750"
+              owner: root
+              group: "{{ openclaw_isolated_workspace_group }}"
+              mode: "0750"
             - path: /usr/local/libexec/openclaw-isolated
               owner: root
               group: root
@@ -2250,8 +2256,13 @@
                 - "!"
                 - -w
                 - "{{ openclaw_isolated_codex_runtime_dir }}"
-            - label: shared workspace is writable
+            - label: shared workspace is readable
               argv:
+                - -r
+                - "{{ openclaw_isolated_gateway_workspace_dir }}"
+            - label: shared workspace root is immutable
+              argv:
+                - "!"
                 - -w
                 - "{{ openclaw_isolated_gateway_workspace_dir }}"
             - label: Gateway secrets are unreadable
@@ -2456,7 +2467,8 @@
                 == ([openclaw_isolated_gateway_group] + openclaw_isolated_gateway_supplementary_groups) | sort
             fail_msg: >-
               The isolated Gateway account has an unexpected supplementary
-              group. It must not inherit sudo, Docker, journal, or human access.
+              group. Only the data-only workspace group is allowed; sudo,
+              Docker, journal, and human access remain forbidden.
           when: not ansible_check_mode
 
         - name: Reject supplementary isolated Codex executor privileges
@@ -2467,8 +2479,8 @@
                 == ([openclaw_isolated_codex_group] + openclaw_isolated_codex_supplementary_groups) | sort
             fail_msg: >-
               The isolated Codex executor has an unexpected group. It may have
-              only its primary group, never sudo, Docker, journal, or human
-              access.
+              only its primary group and the data-only workspace group, never
+              sudo, Docker, journal, or human access.
           when: not ansible_check_mode
 
         - name: Probe isolated Gateway health without exposing its token

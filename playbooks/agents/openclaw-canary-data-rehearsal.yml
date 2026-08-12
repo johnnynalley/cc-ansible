@@ -52,6 +52,9 @@
         that:
           - openclaw_isolated_gateway_user == 'openclaw'
           - openclaw_isolated_gateway_group == 'openclaw'
+          - openclaw_isolated_workspace_group == 'openclaw-workspace'
+          - openclaw_isolated_gateway_supplementary_groups == [openclaw_isolated_workspace_group]
+          - openclaw_isolated_codex_supplementary_groups == [openclaw_isolated_workspace_group]
           - openclaw_isolated_gateway_state_dir == '/var/lib/openclaw-isolated'
           - openclaw_isolated_gateway_workspace_dir == '/usr/local/share/openclaw-isolated/workspace'
           - openclaw_isolated_gateway_config_file == '/etc/openclaw-isolated/openclaw.json'
@@ -585,7 +588,7 @@
       ansible.builtin.file:
         path: "{{ openclaw_canary_data_candidate_workspace }}"
         state: directory
-        owner: "{{ openclaw_isolated_codex_user }}"
+        owner: root
         group: "{{ openclaw_isolated_workspace_group }}"
         mode: "0750"
 
@@ -604,12 +607,13 @@
             or (
               item.stat.isdir
               and not item.stat.islnk | default(false)
-              and item.stat.pw_name == openclaw_isolated_codex_user
               and item.stat.gr_name == openclaw_isolated_workspace_group
+              and item.stat.mode == '0750'
+              and item.stat.pw_name in ['root', openclaw_isolated_codex_user]
             )
         fail_msg: >-
-          A session-referenced canary directory is outside the Executor-writable
-          workspace ownership class.
+          A session-referenced canary directory is outside the approved
+          operator-read-only or Executor-writable ownership classes.
       loop: "{{ openclaw_canary_data_staged_workspace_refs.results }}"
       loop_control:
         label: "{{ item.item }}"

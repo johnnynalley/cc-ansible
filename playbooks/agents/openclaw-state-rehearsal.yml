@@ -621,12 +621,21 @@
             or (
               item.stat.isdir
               and not item.stat.islnk | default(false)
-              and item.stat.pw_name == openclaw_state_rehearsal_user
               and item.stat.gr_name == openclaw_state_rehearsal_group
+              and (
+                (
+                  item.stat.pw_name == 'root'
+                  and item.stat.mode == '0750'
+                )
+                or (
+                  item.stat.pw_name == openclaw_state_rehearsal_user
+                  and item.stat.mode in ['0700', '0750']
+                )
+              )
             )
         fail_msg: >-
-          A spawned session directory resolves to a staged path that is not in
-          the Executor-writable ownership class.
+          A spawned session directory resolves outside the approved
+          operator-read-only or Executor-writable ownership classes.
       loop: "{{ openclaw_state_rehearsal_staged_workspace_refs.results }}"
       loop_control:
         label: "{{ item.item }}"

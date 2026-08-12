@@ -21,8 +21,11 @@ openclaw_isolated_gateway_user: openclaw
 openclaw_isolated_gateway_group: openclaw
 openclaw_isolated_codex_user: openclaw-codex
 openclaw_isolated_codex_group: openclaw-codex
-openclaw_isolated_gateway_supplementary_groups: []
-openclaw_isolated_codex_supplementary_groups: []
+openclaw_isolated_workspace_group: openclaw-workspace
+openclaw_isolated_gateway_supplementary_groups:
+  - openclaw-workspace
+openclaw_isolated_codex_supplementary_groups:
+  - openclaw-workspace
 openclaw_isolated_gateway_legacy_user: johnny
 openclaw_isolated_gateway_port: 19789
 openclaw_isolated_codex_port: 19790

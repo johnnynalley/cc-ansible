@@ -76,8 +76,10 @@ dedicated `openclaw-health` system service passes cutover validation.
   It rejects retained symlinks/special files, ambiguous glob remaps, nonempty
   targets, file/parent collisions, and source drift; hashes copied bytes and
   normalizes files to non-executable executor-writable or operator-read-only
-  ownership classes. Mutable project data is owned by `openclaw-codex` through
-  the shared workspace group; the Gateway receives read-only access.
+  ownership classes. The workspace root and behavior remain root-owned;
+  mutable project-data subtrees are owned by `openclaw-codex`. A dedicated
+  `openclaw-workspace` group gives both services read/traverse access without
+  exposing either service's private config, credentials, or state.
 - `test_openclaw_workspace_stage.py` covers retained/remapped data, modern
   overlay replacement, byte manifests, normalized modes, collision rejection,
   retained-symlink rejection, nonempty-target rejection, and ambiguous glob

@@ -393,14 +393,33 @@ class IsolatedGatewayPlaybookTests(unittest.TestCase):
         self.assertIn("runuser", probe)
         self.assertIn("openclaw.plugin.json", probe)
 
-    def test_workspace_uses_owner_writer_and_gateway_primary_group(self) -> None:
+    def test_workspace_root_uses_dedicated_read_only_sharing_group(self) -> None:
         directory_task = self.task("Create isolated Gateway directories")
-        self.assertIn('group: "{{ openclaw_isolated_gateway_group }}"', directory_task)
-        self.assertIn('mode: "2750"', directory_task)
-        self.assertEqual(
-            self.inventory["openclaw_isolated_gateway_supplementary_groups"], []
+        self.assertIn("owner: root", directory_task)
+        self.assertIn(
+            'group: "{{ openclaw_isolated_workspace_group }}"', directory_task
         )
-        self.assertNotIn("openclaw_isolated_workspace_group", self.playbook)
+        self.assertIn('mode: "0750"', directory_task)
+        self.assertEqual(
+            self.inventory["openclaw_isolated_workspace_group"],
+            "openclaw-workspace",
+        )
+        self.assertEqual(
+            self.inventory["openclaw_isolated_gateway_supplementary_groups"],
+            ["openclaw-workspace"],
+        )
+        self.assertEqual(
+            self.inventory["openclaw_isolated_codex_supplementary_groups"],
+            ["openclaw-workspace"],
+        )
+        self.assertNotEqual(
+            self.inventory["openclaw_isolated_workspace_group"],
+            self.inventory["openclaw_isolated_gateway_group"],
+        )
+        self.assertNotEqual(
+            self.inventory["openclaw_isolated_workspace_group"],
+            self.inventory["openclaw_isolated_codex_group"],
+        )
         self.assertIn("UMask=0027", self.codex_service_template)
 
     def test_codex_filesystem_boundaries_are_independently_diagnosed(self) -> None:
@@ -415,7 +434,8 @@ class IsolatedGatewayPlaybookTests(unittest.TestCase):
             "Gateway-owned provider source is immutable",
             "isolated Codex runtime mirror is readable",
             "isolated Codex runtime mirror is immutable",
-            "shared workspace is writable",
+            "shared workspace is readable",
+            "shared workspace root is immutable",
             "Gateway secrets are unreadable",
             "Gateway config is unreadable",
             "Docker socket is unreadable",
@@ -478,13 +498,14 @@ class IsolatedGatewayPlaybookTests(unittest.TestCase):
         self.assertIn('"target": "none"', self.config_template)
         self.assertIs(self.inventory["openclaw_isolated_gateway_skip_cron"], True)
 
-    def test_codex_executor_has_no_supplementary_groups(self) -> None:
+    def test_codex_executor_has_only_workspace_supplementary_group(self) -> None:
         self.assertEqual(
-            self.inventory["openclaw_isolated_codex_supplementary_groups"], []
+            self.inventory["openclaw_isolated_codex_supplementary_groups"],
+            ["openclaw-workspace"],
         )
         gate = self.task("Reject supplementary isolated Codex executor privileges")
         self.assertIn("openclaw_isolated_codex_supplementary_groups", gate)
-        self.assertIn("only its primary group", gate)
+        self.assertIn("data-only workspace group", gate)
 
     def test_service_denies_privileged_syscall_classes(self) -> None:
         for template in (self.service_template, self.codex_service_template):
@@ -501,7 +522,7 @@ class IsolatedGatewayPlaybookTests(unittest.TestCase):
         rendered = template.render(
             openclaw_isolated_gateway_user="openclaw",
             openclaw_isolated_gateway_group="openclaw",
-            openclaw_isolated_gateway_supplementary_groups=[],
+            openclaw_isolated_gateway_supplementary_groups=["openclaw-workspace"],
             openclaw_isolated_gateway_state_dir="/var/lib/openclaw-isolated",
             openclaw_isolated_gateway_config_file=(
                 "/etc/openclaw-isolated/openclaw.json"
@@ -529,7 +550,7 @@ class IsolatedGatewayPlaybookTests(unittest.TestCase):
         codex_rendered = codex_template.render(
             openclaw_isolated_codex_user="openclaw-codex",
             openclaw_isolated_codex_group="openclaw-codex",
-            openclaw_isolated_codex_supplementary_groups=[],
+            openclaw_isolated_codex_supplementary_groups=["openclaw-workspace"],
             openclaw_isolated_codex_state_dir="/var/lib/openclaw-codex",
             openclaw_isolated_codex_config_dir="/etc/openclaw-codex",
             openclaw_isolated_codex_token_file=("/etc/openclaw-codex/app-server.token"),
@@ -593,7 +614,7 @@ class IsolatedGatewayPlaybookTests(unittest.TestCase):
         rendered = template.render(
             openclaw_isolated_codex_user="openclaw-codex",
             openclaw_isolated_codex_group="openclaw-codex",
-            openclaw_isolated_codex_supplementary_groups=[],
+            openclaw_isolated_codex_supplementary_groups=["openclaw-workspace"],
             openclaw_isolated_codex_state_dir="/var/lib/openclaw-codex",
             openclaw_isolated_codex_config_dir="/etc/openclaw-codex",
             openclaw_isolated_codex_token_file=("/etc/openclaw-codex/app-server.token"),

@@ -67,16 +67,17 @@ status:
   destructive actions are disabled. No `plugins.load.paths` compatibility
   injection remains.
 - `templates/openclaw/openclaw-isolated-gateway.service.j2` makes runtime,
-  native plugin code, primary config, and workspace root-owned/read-only to the
-  Gateway. Only Gateway data and the exact service-owned `.last-good` config
-  backup are writable. Codex configuration and OAuth state are inaccessible,
-  as are Docker, the human home, the controller checkout, Ansible, and bulk
-  data paths.
+  native plugin code, primary config, and workspace behavior root-owned and
+  read-only to both service identities. Only Gateway data and the exact
+  service-owned `.last-good` config backup are writable by the Gateway. Codex
+  configuration and OAuth state are inaccessible, as are Docker, the human
+  home, the controller checkout, Ansible, and bulk data paths.
 - `templates/openclaw/openclaw-isolated-codex.service.j2` runs the Codex app
   server as `openclaw-codex` on loopback port `19790`. It owns only its Codex
-  state and the mutable project-data workspace, sees the reviewed Codex package
-  through a read-only bind, and cannot read Gateway config/state/SecretRefs,
-  Docker, the human home, the controller checkout, Ansible, or bulk data paths.
+  state and classified mutable project-data subtrees, sees the reviewed Codex
+  package through a read-only bind, and cannot read Gateway
+  config/state/SecretRefs, Docker, the human home, the controller checkout,
+  Ansible, or bulk data paths.
 - `scripts/agents/openclaw-isolated-secrets.py` maintains two owner-only token
   copies instead of one shared secret file: the Gateway JSON contains only the
   Gateway token and Codex app-server capability token, while the executor sees
@@ -717,17 +718,19 @@ The two system services add the effective boundary:
 - `openclaw` is the no-login Gateway identity. It owns Gateway state and
   channel/provider SecretRefs, reads immutable behavior and project data, and
   cannot write the workspace or access Codex OAuth/config state. Native plugin
-  code is `root:openclaw` and group-read-only, so the Gateway reads its own
-  frozen packages through its primary group instead of a separate runtime
-  group. The workspace is `openclaw-codex:openclaw` with setgid inheritance:
-  the executor owns writes, its `0027` umask keeps new data group-readable, and
-  the Gateway receives read/traverse access through its primary group.
+  code is `root:openclaw` and group-read-only. The separate
+  `openclaw-workspace` group grants read/traverse access only to classified
+  workspace content; it grants no access to Gateway or executor secrets,
+  config, runtime, or state.
 - `openclaw-codex` is the no-login model executor. It owns its OpenAI auth and
-  app-server state, may write only the classified project-data workspace, and
-  cannot read Gateway config, channel/provider SecretRefs, or Gateway state. It
-  has no supplementary groups; its private runtime mirror and workspace are
-  reachable through its primary identity only.
-- Neither service has supplementary groups.
+  app-server state, may write only explicitly classified project-data
+  subtrees, and cannot read Gateway config, channel/provider SecretRefs, or
+  Gateway state. The workspace root and behavior-bearing directories are
+  `root:openclaw-workspace` without group write; mutable data directories are
+  `openclaw-codex:openclaw-workspace`.
+- Each service has exactly one supplementary group, `openclaw-workspace`. It is
+  a data-only sharing boundary and is never used on config, credentials,
+  service state, plugin code, Docker, journal, or human-owned paths.
 - The Gateway listens only on loopback port `19789`; the authenticated Codex
   app server listens only on loopback port `19790`. Both units stay disabled at
   boot during rehearsal, and the canary has disabled Control UI, HTTP
@@ -1052,7 +1055,7 @@ The rehearsal is deliberately selective rather than a legacy workspace clone:
 2. Classify every legacy workspace path through the reviewed disposition
    policy. Stage only retained data plus the repo-owned modern behavior overlay,
    reject unknown/symlink/special/colliding paths, normalize operator-read-only
-   versus Gateway-writable ownership, and create any missing approved spawned
+   versus executor-writable ownership, and create any missing approved spawned
    workspace directories.
 3. Classify every structured session reference by its exact schema role and
    copy the file-backed stores without copying legacy config, credentials,
@@ -1305,7 +1308,8 @@ path is restored.
 Do not deploy the Docker reporter or claim the security work complete until a
 parallel Gateway canary proves all of the following:
 
-- the service runs as `openclaw` with no supplementary privilege groups;
+- the service runs as `openclaw` with only the unprivileged
+  `openclaw-workspace` supplementary group;
 - `/home/johnny`, Docker sockets, controller SSH keys, vault password, Git
   credentials, and human environment files are inaccessible;
 - generic host execution is denied by default;
@@ -1346,10 +1350,13 @@ suppressed findings, and only the accepted
 Post-run host evidence shows production still listening on the Tailscale
 address at `18789`, Health on `18791`, the isolated Gateway only on loopback
 `19789`, and the isolated Codex executor only on loopback `19790`. Both canary
-units are active but disabled at boot and have no supplementary groups. The
-transient pairing proxy unit is absent and port `19788` is closed. The canary
-config has no channels, bindings, cron block, owner route, configured heartbeat,
-or Control UI, while the service environment independently sets
+units are active but disabled at boot. That checkpoint predated the dedicated
+workspace-sharing group now required by the data handoff; account membership
+and immutable workspace ownership must be reconverged and reproven before the
+checkpoint is current. The transient pairing proxy unit is absent and port
+`19788` is closed. The canary config has no channels, bindings, cron block,
+owner route, configured heartbeat, or Control UI, while the service environment
+independently sets
 `OPENCLAW_SKIP_CHANNELS=1` and `OPENCLAW_SKIP_CRON=1`. Infrastructure isolation
 is therefore proven; fresh executor OAuth, a real model canary, behavior/data
 parity, hostile-prompt rehearsal, and channel handoff remain open gates.
