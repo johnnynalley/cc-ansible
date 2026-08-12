@@ -1,12 +1,14 @@
 [Unit]
 Description=Isolated OpenClaw Gateway canary
-After=network-online.target
+After=network-online.target openclaw-isolated-codex.service
 Wants=network-online.target
+Requires=openclaw-isolated-codex.service
 
 [Service]
 Type=simple
 User={{ openclaw_isolated_gateway_user }}
 Group={{ openclaw_isolated_gateway_group }}
+SupplementaryGroups={{ openclaw_isolated_gateway_supplementary_groups | join(' ') }}
 WorkingDirectory={{ openclaw_isolated_gateway_state_dir }}
 Environment=HOME={{ openclaw_isolated_gateway_state_dir }}
 Environment=OPENCLAW_HOME={{ openclaw_isolated_gateway_state_dir }}
@@ -14,6 +16,7 @@ Environment=OPENCLAW_STATE_DIR={{ openclaw_isolated_gateway_state_dir }}/state
 Environment=OPENCLAW_CONFIG_PATH={{ openclaw_isolated_gateway_config_file }}
 Environment=OPENCLAW_WORKSPACE_DIR={{ openclaw_isolated_gateway_workspace_dir }}
 Environment=OPENCLAW_SKIP_CHANNELS=1
+Environment=OPENCLAW_SKIP_CRON=1
 Environment=NODE_COMPILE_CACHE={{ openclaw_isolated_gateway_state_dir }}/compile-cache
 Environment=PATH={{ openclaw_isolated_gateway_runtime_dir }}/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin
 ExecStartPre=/usr/bin/test -r {{ openclaw_isolated_gateway_config_file }}
@@ -26,6 +29,7 @@ ExecStartPre=/usr/bin/test -r {{ openclaw_isolated_gateway_codex_plugin_dir }}/o
 ExecStartPre=/usr/bin/test ! -w {{ openclaw_isolated_gateway_codex_plugin_dir }}
 ExecStartPre=/usr/bin/test ! -w {{ openclaw_isolated_gateway_state_dir }}/state/npm
 ExecStartPre=/usr/bin/test ! -w {{ openclaw_isolated_gateway_workspace_dir }}
+ExecStartPre=/usr/bin/test -x {{ openclaw_isolated_gateway_workspace_dir }}
 ExecStartPre=/usr/bin/test ! -x /home/{{ openclaw_isolated_gateway_legacy_user }}
 ExecStartPre=/usr/bin/test ! -r /var/run/docker.sock
 ExecStartPre=/usr/bin/test ! -r /home/{{ openclaw_isolated_gateway_legacy_user }}/.ansible/vault_pass.txt
@@ -66,6 +70,8 @@ RemoveIPC=yes
 CapabilityBoundingSet=
 AmbientCapabilities=
 SystemCallArchitectures=native
+SystemCallFilter=~@clock @cpu-emulation @debug @module @mount @obsolete @privileged @raw-io @reboot @swap
+SystemCallErrorNumber=EPERM
 DevicePolicy=closed
 StateDirectory=openclaw-isolated
 StateDirectoryMode=0700
@@ -75,6 +81,7 @@ ReadOnlyPaths={{ openclaw_isolated_gateway_state_dir }}/state/npm
 ReadOnlyPaths={{ openclaw_isolated_gateway_config_dir }}
 ReadOnlyPaths={{ openclaw_isolated_gateway_workspace_dir }}
 ReadWritePaths={{ openclaw_isolated_gateway_config_file }}.last-good
+InaccessiblePaths=-{{ openclaw_isolated_codex_config_dir }} -{{ openclaw_isolated_codex_state_dir }}
 InaccessiblePaths=-/run/docker.sock -/var/run/docker.sock
 InaccessiblePaths=-/home/{{ openclaw_isolated_gateway_legacy_user }} -/root
 InaccessiblePaths=-{{ openclaw_workspace }} -/etc/ansible

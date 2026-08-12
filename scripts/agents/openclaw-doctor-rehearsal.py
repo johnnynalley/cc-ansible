@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Any, Iterable
 
 SCHEMA_VERSION = 4
-MANIFEST_SCHEMA_VERSION = 2
+MANIFEST_SCHEMA_VERSION = 3
 SECRET_KEYS = {
     "accesstoken",
     "apikey",
@@ -797,6 +797,8 @@ def manifest_safe_symlink(
         "relativePath": relative,
         "type": "symlink",
         "mode": stat.S_IMODE(metadata.st_mode),
+        "uid": metadata.st_uid,
+        "gid": metadata.st_gid,
         "target": os.readlink(child),
         "resolvedTarget": str(resolved),
         "targetType": "directory" if resolved.is_dir() else "file",
@@ -830,6 +832,8 @@ def manifest_plugin_skill_symlink(
         "relativePath": relative,
         "type": "symlink",
         "mode": stat.S_IMODE(metadata.st_mode),
+        "uid": metadata.st_uid,
+        "gid": metadata.st_gid,
         "target": os.readlink(child),
         "resolvedTarget": str(resolved),
     }
@@ -841,7 +845,16 @@ def manifest_tree(args: argparse.Namespace) -> dict[str, Any]:
     exclusions = tuple(sorted(set(args.exclude)))
     plugin_skill_roots = canonical_plugin_skill_roots(args)
     symlink_target_roots = canonical_symlink_target_roots(args)
-    entries: list[dict[str, Any]] = []
+    root_metadata = root.lstat()
+    entries: list[dict[str, Any]] = [
+        {
+            "relativePath": ".",
+            "type": "directory",
+            "mode": stat.S_IMODE(root_metadata.st_mode),
+            "uid": root_metadata.st_uid,
+            "gid": root_metadata.st_gid,
+        }
+    ]
     total_bytes = 0
     for current_root, directories, files in os.walk(root, followlinks=False):
         current = Path(current_root)
@@ -883,6 +896,8 @@ def manifest_tree(args: argparse.Namespace) -> dict[str, Any]:
                     "relativePath": relative,
                     "type": "directory",
                     "mode": stat.S_IMODE(metadata.st_mode),
+                    "uid": metadata.st_uid,
+                    "gid": metadata.st_gid,
                 }
             )
         directories[:] = retained_directories
@@ -913,6 +928,8 @@ def manifest_tree(args: argparse.Namespace) -> dict[str, Any]:
                     "relativePath": relative,
                     "type": "file",
                     "mode": stat.S_IMODE(metadata.st_mode),
+                    "uid": metadata.st_uid,
+                    "gid": metadata.st_gid,
                     "size": metadata.st_size,
                     "sha256": sha256_file(child),
                 }

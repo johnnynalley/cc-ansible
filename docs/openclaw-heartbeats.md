@@ -1,12 +1,16 @@
 # OpenClaw Heartbeats
 
-OpenClaw's Astra heartbeat is file-driven. The active prompt is:
+The current production Astra heartbeat is still driven by the legacy
+human-owned workspace:
 
 ```text
 /home/johnny/.openclaw/workspace/HEARTBEAT.md
 ```
 
-on the current OpenClaw host (`jn-t14s-lin` / T14s as of 2026-05-24).
+on the current OpenClaw host. That path remains production evidence only until
+the attended dedicated-user cutover. The modern source is
+`files/openclaw/workspace/HEARTBEAT.md`, with role-specific files for Dubble
+and Rigel. Vega and Antares are request-scoped and have no heartbeat file.
 
 Do not model this as an OpenClaw cron unless exact timing or isolated delivery
 is the requirement. Heartbeat-owned policy belongs in the live heartbeat
@@ -15,24 +19,53 @@ batch.
 
 ## Management Model
 
-`HEARTBEAT.md` is live OpenClaw workspace content, not an Ansible template. Astra may edit it during normal operation, so do not use Ansible markers or managed blocks for heartbeat checklist entries.
+In the modern runtime, heartbeat behavior is root-deployed, read-only source.
+Astra may write proposals and evidence but cannot mutate active heartbeat
+policy. Mutable cadence state and delivery receipts remain runtime data. This
+replaces the legacy model where Astra could edit live prompt policy in place.
 
 When adding a heartbeat check:
 
-1. Edit `/home/johnny/.openclaw/workspace/HEARTBEAT.md` on the OpenClaw host.
-2. Add the exact procedure under
-   `/home/johnny/.openclaw/workspace/references/heartbeat-checks.md` and assign
-   a stable check ID, cadence, and execution lane.
-3. Verify the exact command works from the OpenClaw host without overlapping
+1. Update the repo-owned role heartbeat source and the exact procedure under
+   the reviewed heartbeat catalog.
+2. Assign a stable check ID, cadence, owner, and execution lane.
+3. Run `scripts/agents/openclaw-bootstrap-audit.py` and the semantic heartbeat
+   regressions before promotion.
+4. Verify the exact command works as the dedicated identity without overlapping
    another heavy or OpenClaw CLI check.
-4. Document the operational expectation in this repo.
+5. Promote through the owner/Codex deployment path with rollback evidence.
 
 ## Scheduling And Resource Model
 
 The heartbeat stays enabled continuously so it is ready when a check or alert
 becomes relevant. An idle heartbeat should produce no Discord message.
 
-The live sources of truth are:
+The modern response contract uses OpenClaw's native structured
+`heartbeat_respond` tool. An idle run records `notify=false`; a real alert uses
+`notify=true` with one concise notification. `lightContext: true`,
+`isolatedSession: true`, and `includeReasoning: false` prevent old conversation
+history and hidden reasoning from becoming delivery input. This replaces the
+custom suffix-matching guard for heartbeat text. The guard is retired at
+cutover rather than expanded to match more truncated token variants.
+
+Rigel remains scheduled every 30 minutes around the clock. Its no-op path reads
+only the canonical semester source and an optional pending-calendar file after
+a non-failing existence check, then records `notify=false`. Empty semesters do
+not disable Rigel and do not produce a message, reasoning dump, or expected
+missing-file banner.
+
+Before production cutover, `playbooks/agents/openclaw-behavior-rehearsal.yml`
+proves this contract in the channel-less loopback canary. Its normal baseline
+sets every heartbeat to `0m`. The attended probe temporarily renders only
+Rigel at `24h`, triggers one targeted native system event, and requires a new
+isolated heartbeat transcript containing exactly one `heartbeat_respond` with
+`notify=false`, no visible assistant text or tool errors, and a silent
+structured heartbeat event with no channel or recipient. It then immediately
+restores the all-`0m` baseline and archives the synthetic sessions through
+OpenClaw's native session RPC. This proof has not run yet because it requires a
+successful applied silent-canary data handoff first.
+
+The legacy production sources remain:
 
 ```text
 /home/johnny/.openclaw/workspace/HEARTBEAT.md
@@ -53,6 +86,11 @@ Execution boundaries:
 - Heavy checks run one at a time.
 - OpenClaw CLI checks run one at a time and wait for their process trees to
   exit before another OpenClaw CLI check starts.
+- OpenClaw CLI initialization may touch or permission-check its configured
+  state even for `--help`, status, or dry-run commands. Product-discovery probes
+  use a credential-free writable scratch profile; live operational checks run
+  as the exact state-owning identity. Never point a read-only sandbox or wrong
+  user at production state and then publish its expected permission diagnostics.
 - Heavy checks are deferred when `MemAvailable` is below 4 GiB, `SwapFree` is
   below 2 GiB, or kernel `Writeback` exceeds 512 MiB.
 - Deferral is silent scheduling state. It is not itself a Discord alert and it
@@ -193,12 +231,20 @@ jq -e '.schemaVersion == 2 and (.checks | type == "object")' /home/johnny/.openc
 awk '/^(MemAvailable|SwapFree|Writeback):/ {print}' /proc/meminfo
 ```
 
-For a controlled no-op test, invoke one heartbeat turn without `--deliver`,
-inspect its trajectory for the due check IDs, verify there is no `message` tool
-call, and compare the Gateway PID/cgroup memory before and after. A returned
-`HEARTBEAT_OK` alone is not sufficient proof.
+For a controlled no-op test, invoke one heartbeat turn without direct delivery,
+inspect its trajectory for the due check IDs, require exactly one structured
+`heartbeat_respond` call with `notify=false`, verify there is no `message` tool
+call or assistant text/reasoning delivery, and compare the Gateway PID/cgroup
+memory before and after. Text-token suppression alone is not sufficient proof.
 
-Check the live heartbeat section:
+Validate the modern bundle before any deployment:
+
+```bash
+python3 scripts/agents/openclaw-bootstrap-audit.py --root files/openclaw/workspace
+PYTHONDONTWRITEBYTECODE=1 python3 -m unittest scripts.agents.test_openclaw_bootstrap_audit -v
+```
+
+Until cutover, check the legacy production heartbeat section separately:
 
 ```bash
 ansible jn-t14s-lin -m command -a "grep -n 'Stream Relay And VOD Health' /home/johnny/.openclaw/workspace/HEARTBEAT.md"

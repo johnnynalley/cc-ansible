@@ -1,0 +1,818 @@
+{
+  "schemaVersion": 1,
+  "archiveContract": "The complete stopped legacy workspace remains in the root-only cutover archive and original human-home rollback tree until production parity, sampled restore, and retention approval pass. Archive, retire, and discard dispositions never authorize pre-proof deletion.",
+  "rules": [
+    {
+      "id": "legacy-archive-dir",
+      "scope": "tree",
+      "pattern": ".archive",
+      "disposition": "archive",
+      "reason": "Historical material stays in the sealed legacy archive and is not active agent context."
+    },
+    {
+      "id": "calendar-client-config",
+      "scope": "tree",
+      "pattern": ".config",
+      "disposition": "replace",
+      "reason": "Calendar client configuration moves to a separately owned integration service without Gateway credentials."
+    },
+    {
+      "id": "workspace-git-repository",
+      "scope": "tree",
+      "pattern": ".git",
+      "disposition": "retire",
+      "reason": "The Gateway receives immutable promoted behavior and no Git repository or credential authority."
+    },
+    {
+      "id": "generated-workspace-state",
+      "scope": "tree",
+      "pattern": ".openclaw",
+      "disposition": "discard",
+      "reason": "OpenClaw regenerates workspace-local caches under the dedicated state root."
+    },
+    {
+      "id": "legacy-extension-symlink",
+      "scope": "tree",
+      "pattern": "_ext",
+      "disposition": "retire",
+      "reason": "Legacy extension path injection is replaced by reviewed native behavior and plugin ownership."
+    },
+    {
+      "id": "legacy-doc-symlink",
+      "scope": "tree",
+      "pattern": "_openclaw",
+      "disposition": "retire",
+      "reason": "Host package documentation is not an active writable workspace dependency."
+    },
+    {
+      "id": "antares-legacy-tree",
+      "scope": "tree",
+      "pattern": "antares",
+      "disposition": "archive",
+      "reason": "Legacy reviewer prompts and work packets remain evidence while compact root-owned behavior replaces them."
+    },
+    {
+      "id": "antares-memory-data",
+      "scope": "tree",
+      "pattern": "antares/memory",
+      "disposition": "retain",
+      "target": "antares/memory",
+      "ownerClass": "executor-writable",
+      "reason": "Reviewer memory remains mutable data and is not executable policy."
+    },
+    {
+      "id": "assets-data",
+      "scope": "tree",
+      "pattern": "assets",
+      "disposition": "retain",
+      "target": "assets",
+      "ownerClass": "executor-writable",
+      "reason": "Project assets remain available to current user workflows."
+    },
+    {
+      "id": "workspace-backups",
+      "scope": "tree",
+      "pattern": "backups",
+      "disposition": "archive",
+      "reason": "Nested backups remain in sealed migration evidence instead of active context."
+    },
+    {
+      "id": "case-data",
+      "scope": "tree",
+      "pattern": "cases",
+      "disposition": "retain",
+      "target": "cases",
+      "ownerClass": "executor-writable",
+      "reason": "Active case evidence and state remain user project data."
+    },
+    {
+      "id": "nested-controller-clone",
+      "scope": "tree",
+      "pattern": "cc-ansible-booklore-remove",
+      "disposition": "archive",
+      "reason": "An old controller checkout is preserved as evidence but cannot become Gateway executable source."
+    },
+    {
+      "id": "legacy-workspace-credentials",
+      "scope": "tree",
+      "pattern": "credentials",
+      "disposition": "replace",
+      "reason": "Secrets are re-provisioned as scoped root-managed SecretRefs and never copied into active workspace."
+    },
+    {
+      "id": "legacy-data-tree",
+      "scope": "tree",
+      "pattern": "data",
+      "disposition": "archive",
+      "reason": "Mixed generated databases and diagnostics require owner-specific migrations rather than a broad active copy."
+    },
+    {
+      "id": "health-database",
+      "scope": "exact",
+      "pattern": "data/health.db",
+      "disposition": "replace",
+      "reason": "The dedicated Health receiver migrates this database through a consistent SQLite backup."
+    },
+    {
+      "id": "apprise-alert-database",
+      "scope": "exact",
+      "pattern": "data/apprise-alerts.db",
+      "disposition": "retire",
+      "reason": "Unsafe model-facing Apprise ingress remains retired; historical rows stay archived."
+    },
+    {
+      "id": "draft-data",
+      "scope": "tree",
+      "pattern": "drafts",
+      "disposition": "retain",
+      "target": "drafts",
+      "ownerClass": "executor-writable",
+      "reason": "User-authored drafts remain active project data."
+    },
+    {
+      "id": "dubble-legacy-tree",
+      "scope": "tree",
+      "pattern": "dubble",
+      "disposition": "archive",
+      "reason": "Legacy front-desk prompts and caches are replaced or archived by responsibility."
+    },
+    {
+      "id": "dubble-authorization",
+      "scope": "exact",
+      "pattern": "dubble/AUTH.yaml",
+      "disposition": "retain",
+      "target": "dubble/AUTH.yaml",
+      "ownerClass": "operator-readonly",
+      "sensitivity": "authorization-policy",
+      "reason": "Dubble's explicit authorization map remains root-owned policy data."
+    },
+    {
+      "id": "dubble-knowledge",
+      "scope": "tree",
+      "pattern": "dubble/knowledge",
+      "disposition": "retain",
+      "target": "dubble/knowledge",
+      "ownerClass": "executor-writable",
+      "reason": "Front-desk knowledge remains mutable noncredential data."
+    },
+    {
+      "id": "dubble-memory",
+      "scope": "tree",
+      "pattern": "dubble/memory",
+      "disposition": "retain",
+      "target": "dubble/memory",
+      "ownerClass": "executor-writable",
+      "reason": "Front-desk memory remains mutable data."
+    },
+    {
+      "id": "dubble-users",
+      "scope": "tree",
+      "pattern": "dubble/users",
+      "disposition": "retain",
+      "target": "dubble/users",
+      "ownerClass": "executor-writable",
+      "reason": "Per-user front-desk state remains mutable data."
+    },
+    {
+      "id": "dubble-credentials",
+      "scope": "tree",
+      "pattern": "dubble/credentials",
+      "disposition": "replace",
+      "reason": "Front-desk credentials move to scoped root-managed secrets."
+    },
+    {
+      "id": "review-findings",
+      "scope": "tree",
+      "pattern": "findings",
+      "disposition": "archive",
+      "reason": "Historical reviewer packets remain evidence and are not injected into current turns."
+    },
+    {
+      "id": "fork-archive",
+      "scope": "tree",
+      "pattern": "fork-archive",
+      "disposition": "archive",
+      "reason": "Retired fork evidence remains outside the active stable-channel runtime."
+    },
+    {
+      "id": "fortnite-progress",
+      "scope": "tree",
+      "pattern": "fortnite-progress",
+      "disposition": "retain",
+      "target": "fortnite-progress",
+      "ownerClass": "executor-writable",
+      "reason": "Fortnite history, benchmarks, and current project state remain active data."
+    },
+    {
+      "id": "freshrss-legacy-tree",
+      "scope": "tree",
+      "pattern": "freshrss",
+      "disposition": "archive",
+      "reason": "Legacy executable collection code is replaced by an unprivileged deterministic service."
+    },
+    {
+      "id": "freshrss-state",
+      "scope": "exact",
+      "pattern": "freshrss/state.json",
+      "disposition": "retain",
+      "target": "freshrss/state.json",
+      "ownerClass": "executor-writable",
+      "reason": "Feed dedupe state remains data while collection code moves out of the Gateway."
+    },
+    {
+      "id": "freshrss-latest-json",
+      "scope": "exact",
+      "pattern": "freshrss/latest-briefing.json",
+      "disposition": "retain",
+      "target": "freshrss/latest-briefing.json",
+      "ownerClass": "executor-writable",
+      "reason": "The latest bounded collector artifact remains available to synthesis."
+    },
+    {
+      "id": "freshrss-latest-markdown",
+      "scope": "exact",
+      "pattern": "freshrss/latest-briefing.md",
+      "disposition": "retain",
+      "target": "freshrss/latest-briefing.md",
+      "ownerClass": "executor-writable",
+      "reason": "The latest human-readable collector artifact remains available to synthesis."
+    },
+    {
+      "id": "hardware-inventory",
+      "scope": "tree",
+      "pattern": "hardware-inventory",
+      "disposition": "retain",
+      "target": "hardware-inventory",
+      "ownerClass": "executor-writable",
+      "reason": "Owned, purchased, and planned hardware state is a required decision input."
+    },
+    {
+      "id": "job-search",
+      "scope": "tree",
+      "pattern": "job-search",
+      "disposition": "retain",
+      "target": "job-search",
+      "ownerClass": "executor-writable",
+      "reason": "Private job-search state remains active user data."
+    },
+    {
+      "id": "legacy-logs",
+      "scope": "tree",
+      "pattern": "logs",
+      "disposition": "archive",
+      "reason": "Historical runtime logs remain migration evidence and do not enter active context."
+    },
+    {
+      "id": "media-inbound",
+      "scope": "tree",
+      "pattern": "media-inbound",
+      "disposition": "retain",
+      "target": "media-inbound",
+      "ownerClass": "executor-writable",
+      "reason": "Uploaded user attachments remain active task data."
+    },
+    {
+      "id": "media-outbound",
+      "scope": "tree",
+      "pattern": "media-outbound",
+      "disposition": "retain",
+      "target": "media-outbound",
+      "ownerClass": "executor-writable",
+      "reason": "Generated user deliverables remain active task data."
+    },
+    {
+      "id": "legacy-memory-tree",
+      "scope": "tree",
+      "pattern": "memory",
+      "disposition": "retain",
+      "target": "memory",
+      "ownerClass": "executor-writable",
+      "reason": "Daily memory, project state, and user preferences remain mutable retrieval data."
+    },
+    {
+      "id": "memory-backups",
+      "scope": "tree",
+      "pattern": "memory/backups",
+      "disposition": "archive",
+      "reason": "Nested memory backups remain sealed evidence instead of duplicate active memory."
+    },
+    {
+      "id": "memory-evidence",
+      "scope": "tree",
+      "pattern": "memory/evidence",
+      "disposition": "archive",
+      "reason": "Large investigation evidence stays restorable but outside routine memory retrieval."
+    },
+    {
+      "id": "memory-incidents",
+      "scope": "tree",
+      "pattern": "memory/incidents",
+      "disposition": "archive",
+      "reason": "Historical incident payloads stay restorable but outside routine context."
+    },
+    {
+      "id": "memory-diagnostics",
+      "scope": "tree",
+      "pattern": "memory/diagnostics",
+      "disposition": "archive",
+      "reason": "Diagnostic artifacts remain evidence rather than active memory."
+    },
+    {
+      "id": "memory-alert-state",
+      "scope": "glob",
+      "pattern": "memory/*-alerts.json",
+      "disposition": "replace",
+      "reason": "Modern typed notification state is reconstructed to avoid legacy spam and self-reinforcement."
+    },
+    {
+      "id": "memory-self-evolution-state",
+      "scope": "glob",
+      "pattern": "memory/self-evolution*",
+      "disposition": "archive",
+      "reason": "Legacy self-authorizing state remains evidence while proposal-only self-evolution replaces it."
+    },
+    {
+      "id": "memory-container-version-state",
+      "scope": "exact",
+      "pattern": "memory/container-versions.json",
+      "disposition": "replace",
+      "reason": "The restricted Docker reporter becomes the authoritative version inventory."
+    },
+    {
+      "id": "memory-workspace-hygiene-state",
+      "scope": "glob",
+      "pattern": "memory/workspace-hygiene*",
+      "disposition": "replace",
+      "reason": "Immutable promotion and operator-side audits replace Gateway Git-worktree hygiene state."
+    },
+    {
+      "id": "memory-source-cleanup-state",
+      "scope": "exact",
+      "pattern": "memory/source-cleanup-plan-latest.json",
+      "disposition": "retire",
+      "reason": "The Gateway no longer owns source cleanup or promotion."
+    },
+    {
+      "id": "memory-bootstrap-budget-state",
+      "scope": "exact",
+      "pattern": "memory/bootstrap-budget-state.json",
+      "disposition": "replace",
+      "reason": "Build-time bootstrap audit replaces mutable runtime budget state."
+    },
+    {
+      "id": "memory-model-override-state",
+      "scope": "exact",
+      "pattern": "memory/model-override-drift-alerts.json",
+      "disposition": "replace",
+      "reason": "The global spawn override is removed and config audit owns regression detection."
+    },
+    {
+      "id": "memory-doctor-generated-state",
+      "scope": "glob",
+      "pattern": "memory/*doctor-state.json",
+      "disposition": "archive",
+      "reason": "Legacy Doctor scheduling state is retained as historical evidence only."
+    },
+    {
+      "id": "memory-janitor-state",
+      "scope": "glob",
+      "pattern": "memory/*janitor*",
+      "disposition": "archive",
+      "reason": "Legacy janitor state is preserved until current native cleanup declarations are requalified."
+    },
+    {
+      "id": "legacy-ops-code",
+      "scope": "tree",
+      "pattern": "ops",
+      "disposition": "replace",
+      "reason": "Deterministic host operations move to root-deployed unprivileged services outside Executor-writable code."
+    },
+    {
+      "id": "project-plans",
+      "scope": "tree",
+      "pattern": "plans",
+      "disposition": "retain",
+      "target": "plans",
+      "ownerClass": "executor-writable",
+      "reason": "Project plans remain explicit task data, not automatically loaded policy."
+    },
+    {
+      "id": "legacy-workspace-plugins",
+      "scope": "tree",
+      "pattern": "plugins",
+      "disposition": "retire",
+      "reason": "Native integrity-bearing plugin ownership replaces workspace plugin projects."
+    },
+    {
+      "id": "legacy-prompts",
+      "scope": "tree",
+      "pattern": "prompts",
+      "disposition": "replace",
+      "reason": "Retained scheduled work receives reviewed declarations and bounded artifacts instead of mutable prompt files."
+    },
+    {
+      "id": "reddit-legacy-tree",
+      "scope": "tree",
+      "pattern": "reddit",
+      "disposition": "archive",
+      "reason": "Legacy executable and credential-bearing Reddit integration files move to a separate service."
+    },
+    {
+      "id": "reddit-sync-state",
+      "scope": "exact",
+      "pattern": "reddit/sync-state.json",
+      "disposition": "retain",
+      "target": "reddit/sync-state.json",
+      "ownerClass": "executor-writable",
+      "reason": "Dedupe state remains data while collection credentials and code move out of the Gateway."
+    },
+    {
+      "id": "legacy-references",
+      "scope": "tree",
+      "pattern": "references",
+      "disposition": "retain",
+      "target": "references",
+      "ownerClass": "operator-readonly",
+      "reason": "Verified domain and project references remain readable but root-owned."
+    },
+    {
+      "id": "reference-agent-rules",
+      "scope": "glob",
+      "pattern": "references/*agent*",
+      "disposition": "replace",
+      "reason": "Compact role contracts and semantic reasoning replace legacy fleet behavior prose."
+    },
+    {
+      "id": "reference-cron-rules",
+      "scope": "glob",
+      "pattern": "references/cron*",
+      "disposition": "replace",
+      "reason": "Native declaration keys and external deterministic services replace legacy cron procedure prose."
+    },
+    {
+      "id": "reference-fleet-rules",
+      "scope": "glob",
+      "pattern": "references/fleet*",
+      "disposition": "replace",
+      "reason": "Native agent targeting and concise internal review replace legacy fleet/session protocol."
+    },
+    {
+      "id": "reference-heartbeat-rules",
+      "scope": "glob",
+      "pattern": "references/heartbeat*",
+      "disposition": "replace",
+      "reason": "Structured heartbeat outcomes replace token and message-delivery procedures."
+    },
+    {
+      "id": "reference-model-rules",
+      "scope": "glob",
+      "pattern": "references/model*",
+      "disposition": "replace",
+      "reason": "Per-agent model configuration and telemetry proof replace legacy routing prose."
+    },
+    {
+      "id": "reference-openclaw-rules",
+      "scope": "glob",
+      "pattern": "references/openclaw*",
+      "disposition": "archive",
+      "reason": "Historical runtime and fork references remain evidence; current operator docs own production behavior."
+    },
+    {
+      "id": "reference-self-evolution",
+      "scope": "exact",
+      "pattern": "references/self-evolution.md",
+      "disposition": "replace",
+      "reason": "Proposal-only separated promotion replaces legacy self-authorizing behavior."
+    },
+    {
+      "id": "reference-session-protocols",
+      "scope": "glob",
+      "pattern": "references/*protocol*",
+      "disposition": "replace",
+      "reason": "Native completion events and configured agent IDs replace hardcoded session protocols."
+    },
+    {
+      "id": "reference-manifest",
+      "scope": "exact",
+      "pattern": "references/reference-manifest.json",
+      "disposition": "replace",
+      "reason": "A modern semantic responsibility manifest is generated from retained references."
+    },
+    {
+      "id": "reference-tool-authority",
+      "scope": "exact",
+      "pattern": "references/tools-and-services.md",
+      "disposition": "replace",
+      "reason": "Current config and fixed brokers become the authority inventory."
+    },
+    {
+      "id": "reference-workspace-hygiene",
+      "scope": "exact",
+      "pattern": "references/workspace-hygiene.md",
+      "disposition": "replace",
+      "reason": "Root-owned immutable promotion replaces Gateway-side Git hygiene."
+    },
+    {
+      "id": "rigel-legacy-tree",
+      "scope": "tree",
+      "pattern": "rigel",
+      "disposition": "archive",
+      "reason": "Legacy academic prompts, caches, and temporary dependencies are not copied wholesale."
+    },
+    {
+      "id": "rigel-courses",
+      "scope": "tree",
+      "pattern": "rigel/courses",
+      "disposition": "retain",
+      "target": "rigel/courses",
+      "ownerClass": "operator-readonly",
+      "reason": "Canonical course and calendar-request state remains the source for always-on academic checks."
+    },
+    {
+      "id": "rigel-memory",
+      "scope": "tree",
+      "pattern": "rigel/memory",
+      "disposition": "retain",
+      "target": "rigel/memory",
+      "ownerClass": "executor-writable",
+      "reason": "Academic session memory remains mutable data."
+    },
+    {
+      "id": "rigel-syllabus",
+      "scope": "exact",
+      "pattern": "rigel/dracula-syllabus.pdf",
+      "disposition": "retain",
+      "target": "rigel/courses/dracula-syllabus.pdf",
+      "ownerClass": "operator-readonly",
+      "reason": "Course source material remains canonical read-only academic data."
+    },
+    {
+      "id": "legacy-executable-scripts",
+      "scope": "tree",
+      "pattern": "scripts",
+      "disposition": "replace",
+      "reason": "Required deterministic helpers move to reviewed root-deployed services; Executor-writable code does not cross."
+    },
+    {
+      "id": "legacy-shared-skills",
+      "scope": "tree",
+      "pattern": "shared-skills",
+      "disposition": "replace",
+      "reason": "Semantic compact behavior and independently promoted skills replace legacy self-evolution skill injection."
+    },
+    {
+      "id": "legacy-skills",
+      "scope": "tree",
+      "pattern": "skills",
+      "disposition": "replace",
+      "reason": "Legacy phrase-triggered and mutable skills require individual current-owner reconstruction before activation."
+    },
+    {
+      "id": "sobriety-state",
+      "scope": "tree",
+      "pattern": "sober-tracking",
+      "disposition": "retain",
+      "target": "sober-tracking",
+      "ownerClass": "executor-writable",
+      "reason": "User sobriety state remains private active data."
+    },
+    {
+      "id": "legacy-task-tree",
+      "scope": "tree",
+      "pattern": "tasks",
+      "disposition": "archive",
+      "reason": "Legacy executable task helpers move outside the Gateway while data is retained selectively."
+    },
+    {
+      "id": "nextcloud-task-state",
+      "scope": "exact",
+      "pattern": "tasks/nextcloud-tasks.json",
+      "disposition": "retain",
+      "target": "tasks/nextcloud-tasks.json",
+      "ownerClass": "executor-writable",
+      "reason": "Current task state remains data while synchronization code moves to an integration service."
+    },
+    {
+      "id": "task-config-state",
+      "scope": "exact",
+      "pattern": "tasks/config.json",
+      "disposition": "retain",
+      "target": "tasks/config.json",
+      "ownerClass": "operator-readonly",
+      "reason": "Nonsecret task mapping remains operator-owned integration data."
+    },
+    {
+      "id": "legacy-test-results",
+      "scope": "tree",
+      "pattern": "test-results",
+      "disposition": "archive",
+      "reason": "Historical test artifacts remain evidence outside active workspace."
+    },
+    {
+      "id": "legacy-tests",
+      "scope": "tree",
+      "pattern": "tests",
+      "disposition": "replace",
+      "reason": "Regression tests move to the independently owned operator repository."
+    },
+    {
+      "id": "legacy-temp",
+      "scope": "tree",
+      "pattern": "tmp",
+      "disposition": "discard",
+      "reason": "Transient scratch is recreated only as bounded service state after archive proof."
+    },
+    {
+      "id": "uefn-project",
+      "scope": "tree",
+      "pattern": "uefn",
+      "disposition": "retain",
+      "target": "uefn",
+      "ownerClass": "executor-writable",
+      "reason": "The paused Fortnite UEFN project remains active user project data."
+    },
+    {
+      "id": "vega-legacy-tree",
+      "scope": "tree",
+      "pattern": "vega",
+      "disposition": "archive",
+      "reason": "Legacy researcher prompts and result packets remain evidence while compact behavior replaces them."
+    },
+    {
+      "id": "vega-memory-data",
+      "scope": "tree",
+      "pattern": "vega/memory",
+      "disposition": "retain",
+      "target": "vega/memory",
+      "ownerClass": "executor-writable",
+      "reason": "Researcher memory remains mutable data and is not executable policy."
+    },
+    {
+      "id": "youtube-project",
+      "scope": "tree",
+      "pattern": "youtube",
+      "disposition": "retain",
+      "target": "youtube",
+      "ownerClass": "executor-writable",
+      "reason": "Current YouTube project state remains active data."
+    },
+    {
+      "id": "legacy-media-symlink",
+      "scope": "exact",
+      "pattern": "media",
+      "disposition": "retire",
+      "reason": "The dedicated Gateway cannot traverse bulk-media mounts; approved reports or brokers replace this symlink."
+    },
+    {
+      "id": "root-agents-contract",
+      "scope": "exact",
+      "pattern": "AGENTS.md",
+      "disposition": "replace",
+      "reason": "The compact reviewed Astra operating contract replaces legacy bootstrap prose."
+    },
+    {
+      "id": "root-soul-contract",
+      "scope": "exact",
+      "pattern": "SOUL.md",
+      "disposition": "replace",
+      "reason": "The compact reviewed Astra role replaces legacy bootstrap prose."
+    },
+    {
+      "id": "root-user-contract",
+      "scope": "exact",
+      "pattern": "USER.md",
+      "disposition": "replace",
+      "reason": "The compact reviewed user contract replaces legacy bootstrap prose."
+    },
+    {
+      "id": "root-tools-contract",
+      "scope": "exact",
+      "pattern": "TOOLS.md",
+      "disposition": "replace",
+      "reason": "Current config and broker authority replace legacy tool prose."
+    },
+    {
+      "id": "root-heartbeat-contract",
+      "scope": "exact",
+      "pattern": "HEARTBEAT.md",
+      "disposition": "replace",
+      "reason": "Structured heartbeat behavior replaces legacy text-token delivery."
+    },
+    {
+      "id": "root-legacy-role-files",
+      "scope": "top-level-glob",
+      "pattern": "*.md",
+      "disposition": "archive",
+      "reason": "Unselected root prose remains searchable migration evidence but is not active bootstrap policy."
+    },
+    {
+      "id": "fortnite-locker",
+      "scope": "exact",
+      "pattern": "fortnite-locker.md",
+      "disposition": "retain",
+      "target": "fortnite-locker.md",
+      "ownerClass": "executor-writable",
+      "reason": "The user's current Fortnite inventory remains active project data."
+    },
+    {
+      "id": "marvel-watchlist",
+      "scope": "exact",
+      "pattern": "marvel-missing-watchlist.md",
+      "disposition": "retain",
+      "target": "marvel-missing-watchlist.md",
+      "ownerClass": "executor-writable",
+      "reason": "The user's current media watch state remains active project data."
+    },
+    {
+      "id": "root-behavior-backups",
+      "scope": "top-level-glob",
+      "pattern": "*.bak*",
+      "disposition": "archive",
+      "reason": "Legacy prompt and data backups remain sealed evidence only."
+    },
+    {
+      "id": "root-daily-scratch",
+      "scope": "top-level-glob",
+      "pattern": ".daily_*",
+      "disposition": "replace",
+      "reason": "Deterministic collector artifacts move to separately owned bounded runtime state."
+    },
+    {
+      "id": "root-image-artifacts",
+      "scope": "top-level-glob",
+      "pattern": "*.jpg",
+      "disposition": "archive",
+      "reason": "Loose historical image-analysis artifacts remain in the legacy archive."
+    },
+    {
+      "id": "root-png-artifacts",
+      "scope": "top-level-glob",
+      "pattern": "*.png",
+      "disposition": "archive",
+      "reason": "Loose historical image-analysis artifacts remain in the legacy archive."
+    },
+    {
+      "id": "root-text-artifacts",
+      "scope": "top-level-glob",
+      "pattern": "*.txt",
+      "disposition": "archive",
+      "reason": "Loose diagnostics remain in the legacy archive."
+    },
+    {
+      "id": "root-json-artifacts",
+      "scope": "top-level-glob",
+      "pattern": "*.json",
+      "disposition": "archive",
+      "reason": "Generated root JSON remains in the legacy archive unless explicitly retained."
+    },
+    {
+      "id": "root-output-artifacts",
+      "scope": "top-level-glob",
+      "pattern": "*.out",
+      "disposition": "archive",
+      "reason": "Loose command output remains in the legacy archive."
+    },
+    {
+      "id": "root-diff-artifacts",
+      "scope": "top-level-glob",
+      "pattern": "*.diff",
+      "disposition": "archive",
+      "reason": "Historical patches remain in the legacy archive and cannot execute."
+    },
+    {
+      "id": "root-database-artifacts",
+      "scope": "top-level-glob",
+      "pattern": "*.db",
+      "disposition": "archive",
+      "reason": "Legacy workspace databases remain in the sealed archive; native state owners migrate their authoritative stores separately."
+    },
+    {
+      "id": "root-subtitle-artifacts",
+      "scope": "top-level-glob",
+      "pattern": "*.srt",
+      "disposition": "archive",
+      "reason": "Loose media artifacts remain in the legacy archive."
+    },
+    {
+      "id": "root-gitignore",
+      "scope": "exact",
+      "pattern": ".gitignore",
+      "disposition": "retire",
+      "reason": "The active Gateway workspace is not a Git checkout."
+    },
+    {
+      "id": "root-booklore-caddy-backup",
+      "scope": "exact",
+      "pattern": "booklore-disable-backup-caddyfile",
+      "disposition": "archive",
+      "reason": "Historical infrastructure backup remains in the sealed legacy archive."
+    },
+    {
+      "id": "root-booklore-compose-backup",
+      "scope": "exact",
+      "pattern": "booklore-disable-backup-media-docker-compose.yml",
+      "disposition": "archive",
+      "reason": "Historical infrastructure backup remains in the sealed legacy archive."
+    }
+  ]
+}

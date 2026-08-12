@@ -1,0 +1,853 @@
+{% set deployment_mode = openclaw_modern_deployment_mode | default('production') %}
+{% set behavior_canary = deployment_mode == 'behavior-canary' %}
+{% set security_canary = deployment_mode == 'security-canary' %}
+{% set channel_less = behavior_canary or security_canary %}
+{
+  "secrets": {
+    "providers": {
+      "production": {
+        "source": "file",
+        "path": {{ openclaw_modern_secret_file | to_json }},
+        "mode": "json"
+      }
+    },
+    "defaults": {
+      "file": "production"
+    }
+  },
+  "auth": {
+    "profiles": {
+      "ollama-cloud:default": {
+        "provider": "ollama-cloud",
+        "mode": "token"
+      }
+    },
+    "order": {
+      "ollama-cloud": [
+        "ollama-cloud:default"
+      ]
+    }
+  },
+  "agents": {
+    "defaults": {
+      "workspace": {{ openclaw_modern_workspace_dir | to_json }},
+      "skipBootstrap": true,
+      "skills": [],
+      "contextInjection": "continuation-skip",
+      "bootstrapMaxChars": 6500,
+      "bootstrapTotalMaxChars": 10000,
+      "model": {
+        "primary": {{ openclaw_modern_primary_model | to_json }},
+        "fallbacks": {{ openclaw_modern_default_fallbacks | to_json }}
+      },
+      "models": {
+        "openai/*": {
+          "agentRuntime": {
+            "id": "codex"
+          }
+        },
+        "ollama-cloud/*": {}
+      },
+      "imageModel": {
+        "primary": {{ openclaw_modern_primary_model | to_json }},
+        "fallbacks": {{ openclaw_modern_image_fallbacks | to_json }},
+        "timeoutMs": 120000
+      },
+      "imageGenerationModel": "openai/gpt-image-2",
+      "memorySearch": {
+        "enabled": {{ (not channel_less) | to_json }}{% if not channel_less %},
+        "provider": "gemini",
+        "model": "gemini-embedding-001",
+        "outputDimensionality": 3072,
+        "fallback": "none",
+        "remote": {
+          "apiKey": {
+            "source": "file",
+            "provider": "production",
+            "id": "/providers/google/apiKey"
+          }
+        },
+        "query": {
+          "hybrid": {
+            "enabled": true,
+            "vectorWeight": 0.6,
+            "textWeight": 0.4
+          }
+        }
+        {% endif %}
+      },
+      "contextPruning": {
+        "mode": "cache-ttl",
+        "ttl": "1h",
+        "keepLastAssistants": 4,
+        "softTrimRatio": 0.3,
+        "hardClearRatio": 0.5,
+        "minPrunableToolChars": 2000,
+        "hardClear": {
+          "enabled": true
+        }
+      },
+      "compaction": {
+        "mode": "safeguard",
+        "qualityGuard": {
+          "enabled": true,
+          "maxRetries": 1
+        },
+        "recentTurnsPreserve": 4,
+        "notifyUser": false
+      },
+      "heartbeat": {
+        "every": "0m",
+        "includeReasoning": false,
+        "directPolicy": "block",
+        "suppressToolErrorWarnings": true,
+        "lightContext": true,
+        "isolatedSession": true,
+        "skipWhenBusy": true,
+        "timeoutSeconds": 180
+      },
+      "subagents": {
+        "allowAgents": [
+          "antares",
+          "rigel",
+          "vega"
+        ],
+        "maxConcurrent": 8,
+        "maxSpawnDepth": 1,
+        "maxChildrenPerAgent": 4,
+        "archiveAfterMinutes": 60,
+        "runTimeoutSeconds": 900
+      },
+      "thinkingDefault": "high",
+      "timeoutSeconds": 1800,
+      "maxConcurrent": 4,
+      "typingMode": "instant"
+    },
+    "list": [
+      {
+        "id": "main",
+        "default": true,
+        "name": "Astra",
+        "workspace": {{ openclaw_modern_workspace_dir | to_json }},
+        "model": {
+          "primary": {{ openclaw_modern_primary_model | to_json }},
+          "fallbacks": {{ openclaw_modern_default_fallbacks | to_json }}
+        },
+        "thinkingDefault": "xhigh",
+        "heartbeat": {
+          "every": {{ ('0m' if channel_less else ('30m' if (openclaw_modern_heartbeats_enabled | default(true)) else '0m')) | to_json }},
+          {% if not channel_less %}
+          "activeHours": {
+            "start": "08:00",
+            "end": "23:00",
+            "timezone": {{ openclaw_modern_timezone | to_json }}
+          },
+          "target": "discord",
+          "accountId": "default",
+          "to": {{ openclaw_modern_main_heartbeat_recipient | to_json }},
+          {% else %}
+          "target": "none",
+          {% endif %}
+          "includeReasoning": false,
+          "directPolicy": "block",
+          "suppressToolErrorWarnings": true,
+          "lightContext": true,
+          "isolatedSession": true,
+          "skipWhenBusy": true,
+          "timeoutSeconds": 300
+        },
+        "subagents": {
+          "allowAgents": [
+            "antares",
+            "rigel",
+            "vega"
+          ]
+        }
+      },
+      {
+        "id": "dubble",
+        "name": "Dubble",
+        "workspace": {{ (openclaw_modern_workspace_dir ~ '/dubble') | to_json }},
+        "model": {
+          "primary": {{ openclaw_modern_primary_model | to_json }},
+          "fallbacks": {{ openclaw_modern_default_fallbacks | to_json }}
+        },
+        "thinkingDefault": "medium",
+        "heartbeat": {
+          "every": {{ ('0m' if channel_less else ('30m' if (openclaw_modern_heartbeats_enabled | default(true)) else '0m')) | to_json }},
+          {% if not channel_less %}
+          "activeHours": {
+            "start": "08:00",
+            "end": "23:00",
+            "timezone": {{ openclaw_modern_timezone | to_json }}
+          },
+          "target": "discord",
+          "accountId": "dubble",
+          "to": {{ openclaw_modern_dubble_heartbeat_recipient | to_json }},
+          {% else %}
+          "target": "none",
+          {% endif %}
+          "includeReasoning": false,
+          "directPolicy": "block",
+          "suppressToolErrorWarnings": true,
+          "lightContext": true,
+          "isolatedSession": true,
+          "skipWhenBusy": true,
+          "timeoutSeconds": 180
+        },
+        "subagents": {
+          "allowAgents": []
+        },
+        "tools": {
+          "allow": [
+            "read",
+            "sessions_send",
+            "sessions_yield",
+            "session_status",
+            "heartbeat_respond"
+          ]
+        }
+      },
+      {
+        "id": "vega",
+        "name": "Vega",
+        "workspace": {{ (openclaw_modern_workspace_dir ~ '/vega') | to_json }},
+        "model": {
+          "primary": {{ openclaw_modern_primary_model | to_json }},
+          "fallbacks": {{ openclaw_modern_default_fallbacks | to_json }}
+        },
+        "thinkingDefault": "xhigh",
+        "subagents": {
+          "allowAgents": []
+        },
+        "tools": {
+          "allow": [
+            "read",
+            {% if not channel_less %}
+            "memory_search",
+            "memory_get",
+            "web_search",
+            "web_fetch",
+            {% endif %}
+            "session_status"
+          ]
+        }
+      },
+      {
+        "id": "antares",
+        "name": "Antares",
+        "workspace": {{ (openclaw_modern_workspace_dir ~ '/antares') | to_json }},
+        "model": {
+          "primary": {{ openclaw_modern_antares_model | to_json }},
+          "fallbacks": {{ openclaw_modern_antares_fallbacks | to_json }}
+        },
+        "thinkingDefault": "high",
+        "subagents": {
+          "allowAgents": []
+        },
+        "tools": {
+          "allow": [
+            "read",
+            {% if not channel_less %}
+            "memory_search",
+            "memory_get",
+            "web_search",
+            "web_fetch",
+            {% endif %}
+            "session_status"
+          ]
+        }
+      },
+      {
+        "id": "rigel",
+        "name": "Rigel",
+        "workspace": {{ (openclaw_modern_workspace_dir ~ '/rigel') | to_json }},
+        "model": {
+          "primary": {{ openclaw_modern_primary_model | to_json }},
+          "fallbacks": {{ openclaw_modern_default_fallbacks | to_json }}
+        },
+        "thinkingDefault": "high",
+        "heartbeat": {
+          "every": {{ ((openclaw_modern_behavior_rigel_heartbeat_every | default('0m')) if behavior_canary else ('0m' if security_canary else ('30m' if (openclaw_modern_heartbeats_enabled | default(true)) else '0m'))) | to_json }},
+          {% if not channel_less %}
+          "target": "discord",
+          "accountId": "default",
+          "to": {{ openclaw_modern_rigel_heartbeat_recipient | to_json }},
+          {% else %}
+          "target": "none",
+          {% endif %}
+          "includeReasoning": false,
+          "directPolicy": "block",
+          "suppressToolErrorWarnings": true,
+          "lightContext": true,
+          "isolatedSession": true,
+          "skipWhenBusy": true,
+          "timeoutSeconds": 120
+        },
+        "subagents": {
+          "allowAgents": []
+        },
+        "tools": {
+          "allow": [
+            "read",
+            {% if not channel_less %}
+            "memory_search",
+            "memory_get",
+            {% endif %}
+            "sessions_send",
+            "sessions_yield",
+            "session_status",
+            "heartbeat_respond"
+          ]
+        }
+      }
+    ]
+  },
+  "tools": {
+    "profile": {{ ('minimal' if channel_less else 'coding') | to_json }},
+    "alsoAllow": [
+      {% if behavior_canary %}
+      "read",
+      "sessions_list",
+      "sessions_history",
+      "sessions_send",
+      "sessions_spawn",
+      "sessions_yield",
+      "subagents",
+      "session_status",
+      "heartbeat_respond",
+      "agents_list"
+      {% else %}
+      "heartbeat_respond",
+      "agents_list"
+      {% endif %}
+    ],
+    "deny": [
+      {% if behavior_canary %}
+      "write",
+      "edit",
+      "apply_patch",
+      "exec",
+      "process",
+      "message",
+      "gateway",
+      "cron",
+      "nodes",
+      "browser",
+      "canvas",
+      "memory_search",
+      "memory_get",
+      "web_search",
+      "web_fetch",
+      "tts",
+      "image",
+      "image_generate",
+      "music_generate",
+      "video_generate"
+      {% elif security_canary %}
+      "group:fs",
+      "group:automation",
+      "group:messaging",
+      "group:nodes",
+      "read",
+      "write",
+      "edit",
+      "apply_patch",
+      "exec",
+      "process",
+      "message",
+      "gateway",
+      "cron",
+      "nodes",
+      "browser",
+      "canvas",
+      "memory_search",
+      "memory_get",
+      "web_search",
+      "web_fetch",
+      "tts",
+      "image",
+      "image_generate",
+      "music_generate",
+      "video_generate"
+      {% else %}
+      "write",
+      "edit",
+      "apply_patch",
+      "exec",
+      "process",
+      "cron",
+      "gateway",
+      "message",
+      "nodes",
+      "canvas"
+      {% endif %}
+    ],
+    "fs": {
+      "workspaceOnly": true
+    },
+    "exec": {
+      "host": "gateway",
+      "mode": "auto",
+      "strictInlineEval": true,
+      "commandHighlighting": true,
+      "notifyOnExit": false,
+      "notifyOnExitEmptySuccess": false
+    },
+    "elevated": {
+      "enabled": false
+    },
+    "message": {
+      "crossContext": {
+        "allowWithinProvider": false,
+        "allowAcrossProviders": false
+      }
+    },
+    "sessions": {
+      "visibility": "all"
+    },
+    "agentToAgent": {
+      "enabled": true,
+      "allow": [
+        "main",
+        "vega",
+        "antares",
+        "rigel"
+      ]
+    },
+    "byProvider": {
+      "ollama-cloud": {
+        "deny": [
+          "group:runtime",
+          "write",
+          "edit",
+          "apply_patch",
+          "cron",
+          "gateway",
+          "message",
+          "nodes",
+          "browser",
+          "canvas",
+          "tts"
+        ]
+      }
+    },
+    "loopDetection": {
+      "enabled": true
+    }
+  },
+  "session": {
+    "dmScope": "per-account-channel-peer",
+    "agentToAgent": {
+      "maxPingPongTurns": 0
+    },
+    "reset": {
+      "mode": "idle",
+      "idleMinutes": 5256000
+    }
+  }{% if not channel_less %},
+  "channels": {
+    "defaults": {
+      "heartbeat": {
+        "showOk": false,
+        "showAlerts": true,
+        "useIndicator": false
+      }
+    },
+    "discord": {
+      "enabled": true,
+      "token": {
+        "source": "file",
+        "provider": "production",
+        "id": "/channels/discord/default/token"
+      },
+      "applicationId": {{ openclaw_modern_discord_application_id | to_json }},
+      "dmPolicy": "allowlist",
+      "allowFrom": {{ openclaw_modern_discord_allow_from | to_json }},
+      "groupPolicy": "allowlist",
+      "guilds": {{ openclaw_modern_discord_guilds | to_json }},
+      "heartbeat": {
+        "showOk": false,
+        "showAlerts": true,
+        "useIndicator": false
+      },
+      "actions": {
+        "channels": false
+      },
+      "execApprovals": {
+        "enabled": true,
+        "approvers": {{ openclaw_modern_discord_exec_approvers | to_json }},
+        "target": "dm",
+        "cleanupAfterResolve": true
+      },
+      "accounts": {
+        "dubble": {
+          "token": {
+            "source": "file",
+            "provider": "production",
+            "id": "/channels/discord/dubble/token"
+          },
+          "applicationId": {{ openclaw_modern_dubble_discord_application_id | to_json }},
+          "dmPolicy": "allowlist",
+          "allowFrom": {{ openclaw_modern_dubble_discord_allow_from | to_json }},
+          "groupPolicy": "allowlist",
+          "guilds": {{ openclaw_modern_dubble_discord_guilds | to_json }},
+          "heartbeat": {
+            "showOk": false,
+            "showAlerts": true,
+            "useIndicator": false
+          },
+          "execApprovals": {
+            "enabled": false
+          }
+        }
+      }
+    }
+  },
+  "bindings": [
+    {
+      "agentId": "rigel",
+      "match": {
+        "channel": "discord",
+        "peer": {
+          "kind": "channel",
+          "id": {{ openclaw_modern_rigel_discord_peer_id | to_json }}
+        }
+      }
+    },
+    {
+      "agentId": "main",
+      "match": {
+        "channel": "discord",
+        "accountId": "default"
+      }
+    },
+    {
+      "agentId": "dubble",
+      "match": {
+        "channel": "discord",
+        "accountId": "dubble"
+      }
+    }
+  ]{% endif %},
+  "commands": {
+    "native": "auto",
+    "nativeSkills": false,
+    "restart": false,
+    "ownerAllowFrom": {{ ([] if channel_less else openclaw_modern_command_owner_allow_from) | to_json }},
+    "ownerDisplay": "raw"
+  },
+  "messages": {
+    "visibleReplies": "automatic",
+    "ackReactionScope": "group-mentions"
+  },
+  "memory": {
+    "backend": "builtin",
+    "citations": "auto"
+  }{% if not channel_less %},
+  "cron": {
+    "maxConcurrentRuns": 8,
+    "failureAlert": {
+      "enabled": true,
+      "after": 1,
+      "mode": "announce"
+    },
+    "failureDestination": {
+      "channel": "discord",
+      "to": {{ openclaw_modern_cron_failure_recipient | to_json }},
+      "accountId": "default"
+    }
+  }{% endif %},
+  "skills": {
+    "allowBundled": [],
+    "load": {
+      "watch": false
+    },
+    "workshop": {
+      "autonomous": {
+        "enabled": true
+      },
+      "allowSymlinkTargetWrites": false,
+      "approvalPolicy": "pending",
+      "maxPending": 50,
+      "maxSkillBytes": 40000
+    }
+  },
+  "logging": {
+    "level": "info",
+    "redactSensitive": "tools"
+  },
+  "update": {
+    "channel": "stable",
+    "checkOnStart": false,
+    "auto": {
+      "enabled": false
+    }
+  },
+  "gateway": {
+    "mode": "local",
+    "port": {{ openclaw_modern_gateway_port | int }},
+    "bind": "loopback",
+    "auth": {
+      "mode": "token",
+      "token": {
+        "source": "file",
+        "provider": "production",
+        "id": "/gateway/token"
+      },
+      "allowTailscale": false,
+      "rateLimit": {
+        "maxAttempts": 5,
+        "windowMs": 60000,
+        "lockoutMs": 300000,
+        "exemptLoopback": false
+      }
+    },
+    "trustedProxies": [
+      "127.0.0.1",
+      "::1"
+    ],
+    "tailscale": {
+      "mode": "off",
+      "resetOnExit": false
+    },
+    "controlUi": {
+      "enabled": {{ (not channel_less) | to_json }}{% if not channel_less %},
+      "allowedOrigins": {{ openclaw_modern_control_ui_allowed_origins | to_json }}
+      {% endif %}
+    },
+    "terminal": {
+      "enabled": false
+    },
+    "http": {
+      "endpoints": {
+        "chatCompletions": {
+          "enabled": false
+        },
+        "responses": {
+          "enabled": false
+        }
+      }
+    },
+    "nodes": {
+      "browser": {
+        "mode": "off"
+      },
+      "denyCommands": [
+        "system.run",
+        "system.which",
+        "browser.proxy",
+        "camera.snap",
+        "camera.clip",
+        "screen.record"
+      ]
+    },
+    "reload": {
+      "mode": "off"
+    }
+  },
+  "discovery": {
+    "mdns": {
+      "mode": "off"
+    }
+  },
+  "plugins": {
+    "bundledDiscovery": "allowlist",
+    "allow": [
+      {% if channel_less %}
+      "codex",
+      "ollama",
+      "openai"
+      {% else %}
+      "codex",
+      "device-pair",
+      "discord",
+      "google",
+      "lossless-claw",
+      "ollama",
+      "openai",
+      "openclaw-mem0"
+      {% endif %}
+    ],
+    {% if not channel_less %}
+    "slots": {
+      "contextEngine": "lossless-claw",
+      "memory": "openclaw-mem0"
+    },
+    {% endif %}
+    "entries": {
+      "codex": {
+        "enabled": true,
+        "hooks": {
+          "allowPromptInjection": false,
+          "allowConversationAccess": false
+        },
+        "config": {
+          "discovery": {
+            "enabled": false
+          },
+          "computerUse": {
+            "enabled": false,
+            "autoInstall": false
+          },
+          "codexPlugins": {
+            "enabled": false,
+            "allow_all_plugins": false,
+            "allow_destructive_actions": false
+          },
+          "appServer": {
+            "mode": "guardian",
+            "transport": "websocket",
+            "homeScope": "agent",
+            "url": {{ ('ws://127.0.0.1:' ~ (openclaw_modern_codex_port | string)) | to_json }},
+            "authToken": {
+              "source": "file",
+              "provider": "production",
+              "id": "/codex/appServerToken"
+            },
+            "remoteWorkspaceRoot": {{ openclaw_modern_workspace_dir | to_json }},
+            "sandbox": {{ ('read-only' if behavior_canary else 'workspace-write') | to_json }},
+            "approvalPolicy": {{ ('never' if security_canary else 'on-request') | to_json }},
+            "approvalsReviewer": "auto_review",
+            "codeModeOnly": true
+          }
+        }
+      },
+      "ollama": {
+        "enabled": true,
+        "config": {
+          "discovery": {
+            "enabled": false
+          },
+          "nodeInference": {
+            "enabled": false
+          }
+        }
+      },
+      "openai": {
+        "enabled": true,
+        "config": {
+          "personality": "off"
+        }
+      }{% if not channel_less %},
+      "device-pair": {
+        "enabled": true,
+        "config": {
+          "publicUrl": {{ openclaw_modern_public_url | to_json }}
+        }
+      },
+      "discord": {
+        "enabled": true
+      },
+      "google": {
+        "enabled": true,
+        "config": {
+          "webSearch": {
+            "apiKey": {
+              "source": "file",
+              "provider": "production",
+              "id": "/providers/google/apiKey"
+            },
+            "model": "gemini-2.5-flash"
+          }
+        }
+      },
+      "lossless-claw": {
+        "enabled": true,
+        "llm": {
+          "allowModelOverride": true,
+          "allowedModels": [
+            {{ openclaw_modern_primary_model | to_json }}
+          ]
+        },
+        "config": {
+          "enabled": true,
+          "databasePath": {{ openclaw_modern_lossless_database | to_json }},
+          "largeFilesDir": {{ openclaw_modern_lossless_large_files_dir | to_json }},
+          "freshTailCount": 32,
+          "contextThreshold": 0.75,
+          "incrementalMaxDepth": 1,
+          "summaryModel": {{ openclaw_modern_primary_model | to_json }},
+          "ignoreSessionPatterns": [
+            "agent:*:cron:**",
+            "agent:*:*:heartbeat"
+          ],
+          "statelessSessionPatterns": [
+            "agent:*:subagent:**"
+          ],
+          "skipStatelessSessions": true,
+          "transcriptGcEnabled": false
+        }
+      },
+      "openclaw-mem0": {
+        "enabled": true,
+        "hooks": {
+          "allowConversationAccess": true
+        },
+        "config": {
+          "mode": "open-source",
+          "userId": {{ openclaw_modern_mem0_user_id | to_json }},
+          "autoCapture": false,
+          "autoRecall": true,
+          "topK": 5,
+          "searchThreshold": 0.5,
+          "oss": {
+            "embedder": {
+              "provider": "gemini",
+              "config": {
+                "apiKey": {
+                  "source": "file",
+                  "provider": "production",
+                  "id": "/providers/google/apiKey"
+                },
+                "model": "gemini-embedding-001",
+                "embeddingDims": 3072
+              }
+            },
+            "llm": {
+              "provider": "google",
+              "config": {
+                "apiKey": {
+                  "source": "file",
+                  "provider": "production",
+                  "id": "/providers/google/apiKey"
+                },
+                "model": "gemini-2.5-flash"
+              }
+            },
+            "vectorStore": {
+              "provider": "qdrant",
+              "config": {
+                "host": "127.0.0.1",
+                "port": 6333,
+                "collectionName": {{ openclaw_modern_mem0_collection | to_json }},
+                "dimension": 3072,
+                "embeddingModelDims": 3072
+              }
+            },
+            "historyDbPath": {{ openclaw_modern_mem0_history_database | to_json }}
+          },
+          "customPrompt": {{ openclaw_modern_mem0_custom_prompt | to_json }},
+          "skills": {
+            "triage": {
+              "enabled": true
+            },
+            "dream": {
+              "enabled": true,
+              "auto": true,
+              "minHours": 6,
+              "minSessions": 1
+            },
+            "recall": {
+              "enabled": true,
+              "threshold": 0.5,
+              "keywordSearch": true,
+              "identityAlwaysInclude": true
+            }
+          }
+        }
+      }
+      {% endif %}
+    }
+  }
+}

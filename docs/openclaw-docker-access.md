@@ -40,9 +40,10 @@ on each opted-in Docker host:
    The reader rejects reports older than 15 minutes instead of silently serving
    stale container state.
 
-The account has no Docker group, sudo rule, writable home, interactive command,
-port forwarding, agent forwarding, PTY, or writable `authorized_keys`. The
-reporter allows only these fields:
+The account has no password login, Docker group, sudo rule, writable home,
+interactive command, port forwarding, agent forwarding, PTY, or writable
+`authorized_keys`. Source restrictions are parsed as canonical IPv4/IPv6 CIDRs
+before OpenSSH configuration is written. The reporter allows only these fields:
 
 - Engine version, API version, OS, and architecture;
 - container short ID, name, state, status text, and health state;
@@ -52,7 +53,10 @@ reporter allows only these fields:
 
 It never serializes raw Docker responses. Regression tests inject secret
 sentinels into environment variables, commands, health logs, mounts, ports,
-networks, and private labels and require all of them to remain absent.
+networks, and private labels and require all of them to remain absent. OCI
+version and revision values must also be bounded single tokens; prose-shaped
+labels are dropped instead of being carried into an agent prompt. The reporter
+fails closed above 2,048 containers or a 16 MiB encoded report.
 
 `updateState` compares the running image with the image currently resolved by
 the same local tag. `pending-local` means a newer image is already present on
@@ -76,15 +80,32 @@ The broker enforces these properties:
   plus one opaque target or plan ID. Paths, image references, service names,
   Compose arguments, health checks, and backup files cannot come from Astra.
 - A root-owned inventory manifest maps an opaque target ID to one Compose
-  service transaction. Unknown fields, path traversal, multiple container
+  service transaction. Unknown fields, path traversal, multiple services or
   replicas, missing image digests, stale plans, runtime drift, configuration
-  drift, and candidate-tag drift are rejected.
+  drift, and candidate-tag drift are rejected. The complete Compose project
+  tree must be root-owned, contain no symlinks or special files, and be
+  non-writable by group or other so implicit `.env`, include, and extends
+  inputs cannot bypass the allowlist.
 - Proposal creation pulls the allowlisted service image into the local cache,
   but cannot recreate a container. It records the current and candidate image
   IDs/digests in a short-lived content-addressed plan.
 - Only a local root/operator command can approve that exact plan. Approval is
   short-lived, stored outside the request account's access, and consumed before
-  the first execution attempt. Astra cannot call the approve or reject paths.
+  the first transactional side effect. A preparation failure records a
+  terminal `failed` result and cannot reuse the approval. The root-only
+  approval record and audit log name the sudo operator when available. Astra
+  cannot call the approve or reject paths.
+- The initial broker supports only `stateless-image` targets. It rejects an
+  image that declares volumes; any running-container mount or device access;
+  and Compose services with volumes, secrets, configs, builds, added
+  capabilities, shared namespaces, or privileged mode. Eligible services must
+  run as a numeric non-root UID, use a read-only root filesystem, drop all
+  capabilities, set `no-new-privileges`, and expose a Docker health check.
+  Stateful or broadly privileged containers remain visible in the report but
+  are not eligible for Astra-driven updates.
+- Docker CLI subprocesses use an isolated root-only `DOCKER_CONFIG` directory,
+  not root's normal credential store. Candidate version and revision fields
+  use the same bounded-token rule as the reporter.
 - It captures the relevant compose/config rollback artifact, applies the exact
   approved digest through a generated Compose override, runs fixed
   service-specific health checks, and recreates the previous locally tagged
@@ -92,6 +113,11 @@ The broker enforces these properties:
 - Plans are one-use. A process interruption after execution starts leaves the
   transaction in `executing` for operator recovery rather than replaying it.
 - It returns a bounded result document and never returns secrets or raw logs.
+
+Image-and-config rollback is not application-data rollback. A stateful service
+may be added only after its target has a separately reviewed, application-native
+backup and restore transaction with a proved recovery test. Merely retaining the
+old image or copying Compose files is not sufficient for a database migration.
 
 The operator flow, after a broker proposal is independently reviewed, is:
 
@@ -117,11 +143,16 @@ or the existing broad `dbc` helpers directly to Astra as an update mechanism.
    SSH, Git, sudo, Docker, or vault credentials.
 2. Generate a dedicated Ed25519 report-reader key under the `openclaw` identity.
 3. Back up the affected host state, populate the public key and exact Tailscale
-   source CIDR, enable the reporter, and canary one Docker host.
+   source CIDR, enable the reporter, and canary one Docker host. The enabled
+   playbook backs up any pre-existing managed artifacts to
+   `/srv/live-rollbacks` before replacing them; a clean first install has no
+   prior artifact to copy.
 4. Verify the report schema, forced-command rejection, source restriction,
    timer health, and absence of every secret sentinel before estate rollout.
-5. Populate one reviewed service target and a separate update-request key, then
-   canary the broker only after a distinct owner approval.
+5. Populate one reviewed, health-checked, stateless service target and a
+   separate update-request key, then canary the broker only after a distinct
+   owner approval. Its enabled playbook applies the same pre-existing-artifact
+   backup gate.
 6. Verify proposal redaction, approval separation, digest/config drift
    rejection, health failure rollback, replay rejection, and root-only audit
    artifacts before adding another target or host.
@@ -131,6 +162,7 @@ or the existing broad `dbc` helpers directly to Astra as an update mechanism.
 ```bash
 python3 scripts/docker/test_openclaw_docker_report.py
 python3 scripts/docker/test_openclaw_docker_update_broker.py
+python3 scripts/docker/test_openclaw_docker_playbooks.py
 shellcheck scripts/docker/openclaw-docker-report-cat
 ansible-playbook playbooks/docker/openclaw-docker-report.yml --syntax-check
 ansible-playbook playbooks/docker/openclaw-docker-report.yml --check --diff

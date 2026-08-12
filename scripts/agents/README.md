@@ -22,23 +22,176 @@ dedicated `openclaw-health` system service passes cutover validation.
 
 ## Isolated Gateway
 
-- `openclaw-isolated-secrets.py` preserves or generates the canary Gateway
-  token and atomically writes one service-owned, owner-read-only SecretRef
-  payload inside a root-owned directory. It imports no legacy provider or
-  application credentials. This satisfies the current OpenClaw file-provider
-  contract while the systemd sandbox keeps the path read-only to the service.
-  It rejects symlinks and unsafe output directories, and its output contains
-  only status and change state.
+- `openclaw-bootstrap-audit.py` validates the repo-owned modern Astra/Fleet
+  bootstrap bundle without importing or initializing OpenClaw. It requires the
+  exact role layout, native structured heartbeat outcomes, semantic routing and
+  review invariants, and bounded per-role/aggregate prompt sizes. It rejects
+  legacy human-home paths, opaque platform IDs, control tokens, generic starter
+  files, hardcoded session routes, transcript polling, symlinks, hardlinks,
+  executable prompt files, and unknown additions.
+- `test_openclaw_bootstrap_audit.py` runs the real bundle plus negative
+  regressions for legacy paths, opaque IDs, heartbeat token leakage, Dubble
+  polling, missing native heartbeat outcomes, and unknown links.
+- `openclaw-control-plane-inventory.py` reads the live SQLite control plane in
+  query-only mode and emits a migration inventory for cron ownership, schedule,
+  execution class, and delivery shape. It fingerprints job IDs and omits
+  prompts, raw arguments, recipient/account IDs, and error text.
+- `test_openclaw_control_plane_inventory.py` proves secret-like arguments,
+  recipient/account IDs, and raw job IDs cannot enter the inventory output and
+  that unknown schemas fail closed.
+- `openclaw-config-inventory.py` inventories agent, heartbeat, binding,
+  Discord-account, plugin-slot, hook, model-runtime, global/per-agent subagent
+  routing, and Gateway policy shape without emitting credentials, identity
+  text, sender/guild/channel IDs, peer IDs, or trusted-proxy addresses. Unknown
+  policy keys are surfaced by name so every legacy surface can be classified
+  before cutover. Reporting subagent policy separately is required because a
+  global spawn-model override can silently defeat a target agent's own model.
+- `test_openclaw_config_inventory.py` proves plaintext and SecretRef values,
+  identity text, and opaque Discord IDs remain absent, and malformed or
+  symlinked source configurations fail closed.
+- `openclaw-modern-config-audit.py` validates a rendered production target
+  without importing OpenClaw. It rejects retired providers/plugins and
+  human-home paths, plaintext credentials, stale bindings, a global subagent
+  model override, broad Rigel authority, noisy or bounded-hours Rigel
+  heartbeats, non-loopback Gateway exposure, legacy/full exec policy, mutable
+  runtime controls, and unsupported Mem0/Lossless provider drift.
+- `openclaw-provider-auth-boundary-audit.py` proves OpenAI authentication is
+  absent from Gateway config and per-agent state while the separate Codex
+  executor owns one nonempty mode-0600 auth file. It reports only metadata and
+  row counts, never credential values.
+- `test_openclaw_modern_config_audit.py` renders the real Jinja template with
+  synthetic identifiers and covers the promotion contract plus negative
+  regressions for credentials, routing, model ownership, heartbeat isolation,
+  exec policy, compatibility providers, and binding precedence.
+- `openclaw-workspace-inventory.py` applies the reviewed modernization policy
+  to a legacy workspace without reading file contents or following symlinks.
+  It fails on unknown paths, special files, ambiguous rules, retained
+  credential-like paths without an explicit sensitivity classification, and
+  retained targets with conflicting ownership classes.
+- `test_openclaw_workspace_inventory.py` covers specific-rule precedence,
+  unknown-path rejection, sensitive retained data, authorization-policy
+  exceptions, non-followed symlinks, and invalid target declarations.
+- `openclaw-workspace-stage.py` builds a fresh workspace generation from only
+  policy-classified retained data plus the repo-owned modern behavior overlay.
+  It rejects retained symlinks/special files, ambiguous glob remaps, nonempty
+  targets, file/parent collisions, and source drift; hashes copied bytes and
+  normalizes files to non-executable executor-writable or operator-read-only
+  ownership classes. Mutable project data is owned by `openclaw-codex` through
+  the shared workspace group; the Gateway receives read-only access.
+- `test_openclaw_workspace_stage.py` covers retained/remapped data, modern
+  overlay replacement, byte manifests, normalized modes, collision rejection,
+  retained-symlink rejection, nonempty-target rejection, and ambiguous glob
+  mapping rejection.
+
+- `openclaw-isolated-secrets.py` preserves or generates the canary Gateway and
+  Codex app-server capability tokens, then atomically writes owner-read-only
+  copies in separate root-owned Gateway and executor configuration directories.
+  The Gateway JSON contains only both required tokens; the executor sees only
+  its matching capability-token file. Missing copies are reconstructed, token
+  disagreement fails closed, and no legacy provider or application credential
+  is imported. It rejects symlinks and unsafe output directories, and its
+  output contains only status and change state.
 - `test_openclaw_isolated_secrets.py` covers atomic permissions, idempotency,
   unexpected-field removal, parent ownership, and Gateway-token preservation.
+- `test_openclaw_isolated_gateway_playbook.py` enforces immutable release
+  ownership convergence, non-following recursive permission changes, targeted
+  local rollback before package work, native integrity-bearing plugin installs
+  without config path injection, post-start runtime trust, a service-identity
+  CLI probe, native static/deep security-audit ordering, the silent five-agent
+  session topology, and a real canary restart rather than an
+  already-running-process check.
 - `openclaw-session-relocate.py` inventories the shipped file-backed session
-  stores, rewrites only approved absolute state/workspace path fields on a
-  copied target, and verifies JSONL byte parity plus semantic metadata parity.
-  It rejects missing paths, symlink escapes, unknown path-bearing fields, and
-  any target session artifact that differs from its source.
+  stores, classifies approved absolute references by exact schema role,
+  rewrites state paths and spawned workspace directories on a copied target,
+  and can discard derived prompt/skill snapshots for native rebuilding from the
+  modern bootstrap. Its active-state modernization follows OpenClaw's native
+  provenance boundary: automatic model/auth fallback state and generated prompt
+  state are cleared, explicit user model and display preferences are retained,
+  and user auth or session execution authority blocks migration for review.
+  An explicit rehearsal-only delivery quarantine removes pending-final and
+  restart-recovery intent from active copied rows, records each removed field,
+  and leaves immutable source indexes untouched so a canary cannot replay a
+  production response.
+  Verification requires JSONL byte parity and models only those approved index
+  transformations. It rejects missing paths, symlink escapes, unknown
+  path-bearing fields, and unapproved target drift.
 - `test_openclaw_session_relocate.py` covers deterministic relocation,
-  idempotency, byte preservation, unknown-field rejection, path-boundary
-  enforcement, and target drift detection.
+  idempotency, byte preservation, schema-role enforcement, derived-cache
+  modernization, delivery-recovery quarantine, unknown-field rejection,
+  path-boundary enforcement, and target drift detection.
+- `openclaw-delivery-cutover-audit.py` is the stopped-state, metadata-only
+  single-Gateway cutover gate. It requires the current delivery-queue schema,
+  treats only failed rows as non-replayable history, blocks pending database
+  rows and active session recovery fields, rejects unknown statuses, and never
+  emits message, target, account, channel, session-key, or entry content.
+- `test_openclaw_delivery_cutover_audit.py` covers clean failed history,
+  pending database and session blockers, unknown schema/status rejection,
+  symlink rejection, redaction, private report permissions, and gate exit
+  behavior.
+- `openclaw-session-transition.py` consumes a complete native `sessions.list`
+  response, keeps durable main/channel routes, plans archive actions only for
+  structurally identified synthetic or completed execution rows, retains
+  dormant statusless runtime sessions with a real session identity, and fails
+  on active work, unknown agents, malformed shapes, pagination, or duplicate
+  keys.
+  Exact session keys are written only to its mode-0600 plan; normal output is
+  aggregate-only.
+- `test_openclaw_session_transition.py` covers durable-route retention,
+  synthetic archival, active/unknown fail-closed behavior, complete-list
+  enforcement, clean post-transition verification, redaction, and plan modes.
+- `openclaw-native-session-transition.py` calls `sessions.list` and
+  `sessions.patch` through the running loopback canary as its no-login service
+  identity. It never passes a Gateway token or password in arguments. Exact
+  session keys are persisted only in fresh mode-`0600` evidence and supplied
+  transiently to the local native RPC CLI for `sessions.patch`; normal output
+  and logs remain aggregate-only. It archives only actions approved by
+  `openclaw-session-transition.py` and re-lists to prove a clean active set
+  after apply mode. An optional exact required-archive-key set makes synthetic
+  cleanup fail before patching if any expected key is missing or any unexpected
+  session would be archived.
+- `test_openclaw_native_session_transition.py` covers read-only planning,
+  private evidence, native archive convergence, active-work rejection, and
+  evidence-directory reuse rejection.
+- `test_openclaw_canary_data_rehearsal.py` enforces candidate-before-stop
+  ordering, targeted rollback before promotion, hash-verified relocation,
+  delivery-recovery quarantine, native service-identity transition, silent
+  canary controls, capacity accounting, and rescue restoration without any
+  production Gateway service action.
+- `openclaw-behavior-audit.py` validates private canary evidence for all five
+  agents. It requires exact Dubble output, one Vega and one Antares child with
+  native parent/depth/model provenance, verbatim Vega evidence passed to
+  Antares, one concise user-facing Star answer, and a new Rigel heartbeat whose
+  transcript and structured event prove `notify=false` with no visible text,
+  tool error, or delivery target. Normal output is aggregate-only.
+- `test_openclaw_behavior_audit.py` covers the complete success path plus
+  missing reviewer evidence, wrong lineage, internal narration, dangerous tool
+  exposure, noisy heartbeat outcomes, visible control tokens, and transcript
+  path escapes.
+- `test_openclaw_behavior_rehearsal.py` enforces the applied-data prerequisite,
+  inert plan boundary, backup-before-model ordering, channel/cron/boot
+  suppression, native Star/Rigel evidence gates, baseline restoration,
+  synthetic-session archival, delivery parity, production-listener parity,
+  and rescue restoration.
+- `openclaw-security-rehearsal-audit.py` validates one fixed hostile-prompt
+  trajectory. It accepts only the six approved shell probes, correlates calls
+  and results, requires the `openclaw-codex` identity, proves denied sudo,
+  Gateway-secret, Docker-socket, and outside-workspace access, verifies the one
+  allowed workspace write, and rejects secret bytes in trajectory or saved
+  model output.
+- `test_openclaw_security_rehearsal_audit.py` covers exact command/result
+  correlation, Codex shell-wrapper parsing, path/symlink boundaries, identity
+  and denial failures, unexpected tools, and secret leakage.
+- `openclaw-security-session-cleanup.py` compares a private pre-run session
+  index with current canary state, accepts exactly one new
+  `agent:main:explicit:security-*` session, and archives/removes only that
+  transcript and its trajectory artifacts for rescue recovery.
+- `test_openclaw_security_session_cleanup.py` covers exact-session cleanup,
+  transcript-basename trajectory resolution, dry-run behavior, unexpected
+  sessions, and path/symlink rejection.
+- `test_openclaw_security_rehearsal.py` enforces the disabled/approval gates,
+  applied silent-data prerequisite, backup-before-probe ordering, split-service
+  and cross-secret boundaries, fixed prompt and trajectory proof, exact native
+  session archival, listener/boot parity, and rescue restoration.
 - `openclaw-doctor-rehearsal.py` creates service-credential-free structured
   config copies, replaces source secret providers with a fresh canary Gateway
   file `SecretRef`, replaces retained external plugin paths with reviewed
@@ -51,7 +204,9 @@ dedicated `openclaw-health` system service passes cutover validation.
   findings.
   State manifests reject symlinks except for OpenClaw-owned
   `plugin-skills/<name>` links whose real targets and regular `SKILL.md` files
-  remain inside explicitly allowlisted immutable plugin roots.
+  remain inside explicitly allowlisted immutable plugin roots. Manifests also
+  record root and entry ownership so a permission escape is a validation
+  failure, not a harmless metadata change.
 - `test_openclaw_doctor_rehearsal.py` covers config path and secret handling,
   plugin modernization boundaries, auth-only database scrubbing, SQLite
   summaries, and immutable tree manifest comparison.
@@ -60,5 +215,9 @@ dedicated `openclaw-health` system service passes cutover validation.
 
 ```bash
 PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts/agents -p 'test_*.py' -v
+python3 scripts/agents/openclaw-bootstrap-audit.py --root files/openclaw/workspace
+python3 scripts/agents/openclaw-modern-config-audit.py --config /path/to/rendered/openclaw.json
+python3 scripts/agents/openclaw-provider-auth-boundary-audit.py --help
+python3 scripts/agents/openclaw-workspace-inventory.py --source /home/johnny/.openclaw/workspace --policy files/openclaw/workspace-migration-policy.json --pretty
 black --check scripts/agents
 ```

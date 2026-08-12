@@ -18,6 +18,16 @@
       /etc/sudoers.d/openclaw-docker-update-broker
     openclaw_docker_update_broker_binary: >-
       /usr/local/sbin/openclaw-docker-update-broker
+    openclaw_docker_update_broker_managed_artifacts:
+      - "{{ openclaw_docker_update_broker_binary }}"
+      - >-
+        {{ openclaw_docker_update_broker_home |
+           default('/var/lib/openclaw-docker-update-request')
+        }}/.ssh/authorized_keys
+      - "{{ openclaw_docker_update_broker_sudoers_path }}"
+      - >-
+        {{ openclaw_docker_update_broker_config_dir
+        }}/manifest.json
 
   tasks:
     - name: Revoke OpenClaw Docker update SSH access when disabled
@@ -74,6 +84,92 @@
         fail_msg: "Each update source must be an explicit IPv4 or IPv6 CIDR."
       loop: "{{ openclaw_docker_update_broker_source_cidrs }}"
 
+    - name: Parse OpenClaw Docker update source CIDRs exactly
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/python3
+          - -c
+          - >-
+            import ipaddress, sys;
+            value = ipaddress.ip_network(sys.argv[1], strict=True);
+            raise SystemExit(0 if str(value) == sys.argv[1] else 2)
+          - "{{ item }}"
+      changed_when: false
+      check_mode: false
+      loop: "{{ openclaw_docker_update_broker_source_cidrs }}"
+      loop_control:
+        label: "{{ item }}"
+
+    - name: Inspect prior OpenClaw Docker update broker artifacts
+      ansible.builtin.stat:
+        path: "{{ item }}"
+        follow: false
+      loop: "{{ openclaw_docker_update_broker_managed_artifacts }}"
+      register: openclaw_docker_update_broker_prior_artifacts
+
+    - name: Reject symlinked OpenClaw Docker update broker artifacts
+      ansible.builtin.assert:
+        that:
+          - not (item.stat.islnk | default(false))
+        fail_msg: >-
+          Refusing to replace a symlinked Docker update artifact at
+          {{ item.item }}.
+      loop: "{{ openclaw_docker_update_broker_prior_artifacts.results }}"
+      loop_control:
+        label: "{{ item.item }}"
+      when: item.stat.exists | default(false)
+
+    - name: Select prior OpenClaw Docker update artifacts for backup
+      ansible.builtin.set_fact:
+        openclaw_docker_update_broker_backup_paths: >-
+          {{
+            openclaw_docker_update_broker_prior_artifacts.results
+            | selectattr('stat.exists', 'defined')
+            | selectattr('stat.exists')
+            | map(attribute='item')
+            | list
+          }}
+
+    - name: Initialize OpenClaw Docker update backup command
+      ansible.builtin.set_fact:
+        openclaw_docker_update_broker_backup_argv:
+          - /usr/local/sbin/live-rollback-backup
+          - --domain
+          - openclaw-docker-access
+          - --name
+          - docker-update-broker-rollout
+      when: openclaw_docker_update_broker_backup_paths | length > 0
+
+    - name: Add prior Docker update paths to backup command
+      ansible.builtin.set_fact:
+        openclaw_docker_update_broker_backup_argv: >-
+          {{
+            openclaw_docker_update_broker_backup_argv
+            + ['--path', item]
+          }}
+      loop: "{{ openclaw_docker_update_broker_backup_paths }}"
+      when: openclaw_docker_update_broker_backup_paths | length > 0
+
+    - name: Verify live rollback storage before Docker update rollout
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/mountpoint
+          - -q
+          - /srv/live-rollbacks
+      changed_when: false
+      when:
+        - not ansible_check_mode
+        - openclaw_docker_update_broker_backup_paths | length > 0
+
+    - name: Back up prior OpenClaw Docker update broker artifacts
+      ansible.builtin.command:
+        argv: "{{ openclaw_docker_update_broker_backup_argv }}"
+      register: openclaw_docker_update_broker_rollout_backup
+      changed_when: true
+      when:
+        - not ansible_check_mode
+        - openclaw_docker_update_broker_backup_paths | length > 0
+
     - name: Validate OpenClaw Docker update target IDs
       ansible.builtin.assert:
         that:
@@ -85,12 +181,15 @@
             difference(item.value.backupFiles) | length == 0
           - item.value.service in item.value.recreateServices
           - item.value.service in item.value.verifyServices
+          - item.value.recreateServices == [item.value.service]
+          - item.value.verifyServices == [item.value.service]
           - item.value.healthTimeoutSeconds | int >= 10
           - item.value.healthTimeoutSeconds | int <= 1800
+          - item.value.updateClass == 'stateless-image'
         fail_msg: >-
           Update targets must use an opaque ID, an /opt project, explicit
-          Compose/backup files, fixed service sets, and a bounded health
-          timeout.
+          Compose/backup files, exactly one recreated and verified service, a
+          bounded health timeout, and the stateless-image update class.
       loop: "{{ openclaw_docker_update_broker_targets | dict2items }}"
       loop_control:
         label: "{{ item.key }}"
@@ -111,10 +210,26 @@
         create_home: false
         home: "{{ openclaw_docker_update_broker_home }}"
         comment: "Forced-command client for approval-gated Docker updates"
-        password: >-
-          {{ lookup('pipe', 'openssl rand -base64 48') |
-             password_hash('sha512') }}
-        update_password: on_create
+        password_lock: true
+
+    - name: Inspect OpenClaw Docker update request account groups
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/id
+          - --groups
+          - --name
+          - "{{ openclaw_docker_update_broker_user }}"
+      register: openclaw_docker_update_broker_account_groups
+      changed_when: false
+
+    - name: Require isolated OpenClaw Docker update request account groups
+      ansible.builtin.assert:
+        that:
+          - >-
+            openclaw_docker_update_broker_account_groups.stdout.split() ==
+            [openclaw_docker_update_broker_group]
+        fail_msg: >-
+          The update-request account has an unexpected supplementary group.
 
     - name: Create OpenClaw Docker update directories
       ansible.builtin.file:
@@ -137,6 +252,10 @@
           group: root
           mode: "0700"
         - path: "{{ openclaw_docker_update_broker_config_dir }}"
+          owner: root
+          group: root
+          mode: "0700"
+        - path: "{{ openclaw_docker_update_broker_config_dir }}/docker-client"
           owner: root
           group: root
           mode: "0700"

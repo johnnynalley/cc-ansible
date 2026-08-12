@@ -14,6 +14,7 @@ import fcntl
 import hashlib
 import json
 import os
+import pwd
 import re
 import resource
 import select
@@ -28,19 +29,23 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 MAX_REQUEST_BYTES = 4096
 MAX_COMMAND_OUTPUT_BYTES = 4 * 1024 * 1024
 MAX_BACKUP_FILE_BYTES = 8 * 1024 * 1024
 MAX_BACKUP_TOTAL_BYTES = 32 * 1024 * 1024
 MAX_PLAN_FILES = 2048
+MAX_PROJECT_ENTRIES = 10_000
 REQUEST_READ_TIMEOUT_SECONDS = 10
 LOCK_WAIT_SECONDS = 5
 ID_RE = re.compile(r"^[a-z0-9][a-z0-9_.-]{0,127}$")
 PLAN_ID_RE = re.compile(r"^[a-f0-9]{64}$")
 IMAGE_ID_RE = re.compile(r"^sha256:[a-f0-9]{64}$")
 DIGEST_RE = re.compile(r"^[^\s@]+@sha256:[a-f0-9]{64}$")
+OPERATOR_RE = re.compile(r"^[a-z_][a-z0-9_-]{0,31}$")
+STATELESS_UPDATE_CLASS = "stateless-image"
 SAFE_ENV = {
+    "DOCKER_CONFIG": "/etc/openclaw-docker-update/docker-client",
     "HOME": "/root",
     "LANG": "C.UTF-8",
     "LC_ALL": "C.UTF-8",
@@ -85,11 +90,13 @@ def canonical_bytes(value: Any) -> bytes:
     ).encode("ascii")
 
 
-def bounded_text(value: Any, limit: int = 160) -> str | None:
+def bounded_token(value: Any, limit: int = 160) -> str | None:
     if not isinstance(value, str):
         return None
-    clean = "".join(ch for ch in value if 32 <= ord(ch) <= 126).strip()
-    return clean[:limit] or None
+    clean = value.strip()
+    if len(clean) > limit or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._+:/@-]*", clean):
+        return None
+    return clean
 
 
 def atomic_write_json(path: Path, value: Any, mode: int = 0o600) -> None:
@@ -103,11 +110,28 @@ def atomic_write_json(path: Path, value: Any, mode: int = 0o600) -> None:
             handle.flush()
             os.fsync(handle.fileno())
         os.replace(temporary_path, path)
+        directory_fd = os.open(path.parent, os.O_RDONLY | os.O_DIRECTORY)
+        try:
+            os.fsync(directory_fd)
+        finally:
+            os.close(directory_fd)
     finally:
         try:
             temporary_path.unlink()
         except FileNotFoundError:
             pass
+
+
+def durable_unlink(path: Path) -> None:
+    try:
+        path.unlink()
+    except FileNotFoundError:
+        return
+    directory_fd = os.open(path.parent, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        os.fsync(directory_fd)
+    finally:
+        os.close(directory_fd)
 
 
 def load_json(path: Path, error_code: str) -> Any:
@@ -124,11 +148,20 @@ def load_json(path: Path, error_code: str) -> Any:
 
 
 def assert_secure_root_file(path: Path) -> None:
+    assert_secure_file(path, 0)
+
+
+def assert_secure_file(path: Path, owner_uid: int) -> None:
     try:
         info = path.lstat()
     except OSError as exc:
         raise BrokerError("insecure-installation") from exc
-    if not stat.S_ISREG(info.st_mode) or info.st_uid != 0 or info.st_mode & 0o022:
+    if (
+        not stat.S_ISREG(info.st_mode)
+        or stat.S_ISLNK(info.st_mode)
+        or info.st_uid != owner_uid
+        or info.st_mode & 0o022
+    ):
         raise BrokerError("insecure-installation")
 
 
@@ -139,6 +172,52 @@ def assert_secure_root_directory(path: Path) -> None:
         raise BrokerError("insecure-installation") from exc
     if not stat.S_ISDIR(info.st_mode) or info.st_uid != 0 or info.st_mode & 0o022:
         raise BrokerError("insecure-installation")
+
+
+def assert_secure_directory_chain(
+    path: Path, boundary: Path, owner_uid: int = 0
+) -> None:
+    if not path.is_absolute() or not boundary.is_absolute():
+        raise BrokerError("insecure-installation")
+    try:
+        relative = path.relative_to(boundary)
+    except ValueError as exc:
+        raise BrokerError("insecure-installation") from exc
+    current = boundary
+    candidates = [current]
+    for part in relative.parts:
+        current /= part
+        candidates.append(current)
+    for candidate in candidates:
+        try:
+            info = candidate.lstat()
+        except OSError as exc:
+            raise BrokerError("insecure-installation") from exc
+        if (
+            not stat.S_ISDIR(info.st_mode)
+            or stat.S_ISLNK(info.st_mode)
+            or info.st_uid != owner_uid
+            or info.st_mode & 0o022
+        ):
+            raise BrokerError("insecure-installation")
+
+
+def operator_identity() -> str:
+    sudo_uid = os.environ.get("SUDO_UID")
+    sudo_user = os.environ.get("SUDO_USER")
+    if (
+        sudo_uid
+        and sudo_uid.isdecimal()
+        and sudo_user
+        and OPERATOR_RE.fullmatch(sudo_user)
+    ):
+        try:
+            account = pwd.getpwuid(int(sudo_uid))
+        except (KeyError, ValueError):
+            account = None
+        if account is not None and account.pw_name == sudo_user:
+            return f"{sudo_user}:uid-{sudo_uid}"
+    return f"uid-{os.getuid()}"
 
 
 @dataclass(frozen=True)
@@ -152,6 +231,7 @@ class Target:
     verify_services: tuple[str, ...]
     required_paths: tuple[Path, ...]
     health_timeout_seconds: int
+    update_class: str
 
 
 @dataclass(frozen=True)
@@ -198,12 +278,7 @@ def relative_project_file(project_dir: Path, value: Any) -> Path:
     relative = Path(value)
     if relative.is_absolute() or ".." in relative.parts:
         raise BrokerError("invalid-manifest")
-    resolved = (project_dir / relative).resolve(strict=False)
-    try:
-        resolved.relative_to(project_dir)
-    except ValueError as exc:
-        raise BrokerError("invalid-manifest") from exc
-    return resolved
+    return project_dir / relative
 
 
 def parse_target(target_id: str, value: Any) -> Target:
@@ -221,14 +296,19 @@ def parse_target(target_id: str, value: Any) -> Target:
             "verifyServices",
             "requiredPaths",
             "healthTimeoutSeconds",
+            "updateClass",
         },
         "invalid-manifest",
     )
     project_raw = value["projectDir"]
     if not isinstance(project_raw, str) or not project_raw.startswith("/opt/"):
         raise BrokerError("invalid-manifest")
-    project_dir = Path(project_raw).resolve(strict=False)
-    if project_dir == Path("/opt") or "\x00" in project_raw:
+    project_dir = Path(project_raw)
+    if (
+        project_dir == Path("/opt")
+        or "\x00" in project_raw
+        or ".." in project_dir.parts
+    ):
         raise BrokerError("invalid-manifest")
     try:
         project_dir.relative_to("/opt")
@@ -265,12 +345,15 @@ def parse_target(target_id: str, value: Any) -> Target:
     service = require_id(value["service"], "invalid-manifest")
     recreate = service_list("recreateServices")
     verify = service_list("verifyServices")
-    if service not in recreate or service not in verify:
+    if recreate != (service,) or verify != (service,):
         raise BrokerError("invalid-manifest")
 
     compose_files = file_list("composeFiles", 1)
     backup_files = file_list("backupFiles", 0)
     if not set(compose_files).issubset(set(backup_files)):
+        raise BrokerError("invalid-manifest")
+    update_class = value["updateClass"]
+    if update_class != STATELESS_UPDATE_CLASS:
         raise BrokerError("invalid-manifest")
 
     return Target(
@@ -283,6 +366,7 @@ def parse_target(target_id: str, value: Any) -> Target:
         verify_services=verify,
         required_paths=tuple(required_paths),
         health_timeout_seconds=require_int(value["healthTimeoutSeconds"], 10, 1800),
+        update_class=update_class,
     )
 
 
@@ -377,9 +461,17 @@ class CommandRunner:
 
 
 class Broker:
-    def __init__(self, settings: Settings, runner: CommandRunner):
+    def __init__(
+        self,
+        settings: Settings,
+        runner: CommandRunner,
+        project_boundary: Path = Path("/opt"),
+        trusted_owner_uid: int = 0,
+    ):
         self.settings = settings
         self.runner = runner
+        self.project_boundary = project_boundary
+        self.trusted_owner_uid = trusted_owner_uid
         self.state_dir = settings.state_dir
         self.plans_dir = self.state_dir / "plans"
         self.states_dir = self.state_dir / "states"
@@ -477,6 +569,67 @@ class Broker:
             raise BrokerError("service-image-not-pullable")
         return image
 
+    @staticmethod
+    def verify_config_healthchecks(config: dict[str, Any], target: Target) -> None:
+        services = config.get("services")
+        if not isinstance(services, dict):
+            raise BrokerError("compose-config-failed")
+        for service_name in target.verify_services:
+            service = services.get(service_name)
+            if not isinstance(service, dict):
+                raise BrokerError("service-not-configured")
+            healthcheck = service.get("healthcheck")
+            test = healthcheck.get("test") if isinstance(healthcheck, dict) else None
+            if (
+                not isinstance(test, list)
+                or not test
+                or not all(isinstance(item, str) and item for item in test)
+                or test[0].upper() == "NONE"
+            ):
+                raise BrokerError("healthcheck-required")
+
+    @staticmethod
+    def verify_config_sandbox(config: dict[str, Any], target: Target) -> None:
+        services = config.get("services")
+        service = services.get(target.service) if isinstance(services, dict) else None
+        if not isinstance(service, dict):
+            raise BrokerError("service-not-configured")
+        user = service.get("user")
+        if not isinstance(user, str) or not re.fullmatch(
+            r"[1-9][0-9]*(?::[1-9][0-9]*)?", user
+        ):
+            raise BrokerError("nonroot-user-required")
+        security_opt = service.get("security_opt")
+        if not isinstance(security_opt, list) or not any(
+            isinstance(item, str)
+            and item.casefold().replace("=", ":") == "no-new-privileges:true"
+            for item in security_opt
+        ):
+            raise BrokerError("no-new-privileges-required")
+        cap_drop = service.get("cap_drop")
+        if not isinstance(cap_drop, list) or not any(
+            isinstance(item, str) and item.casefold() == "all" for item in cap_drop
+        ):
+            raise BrokerError("cap-drop-all-required")
+        if service.get("read_only") is not True:
+            raise BrokerError("readonly-root-required")
+        forbidden_nonempty = (
+            "build",
+            "cap_add",
+            "configs",
+            "devices",
+            "group_add",
+            "secrets",
+            "volumes",
+        )
+        if service.get("privileged") is True or any(
+            service.get(field) not in (None, [], {}) for field in forbidden_nonempty
+        ):
+            raise BrokerError("privileged-surface-unsupported")
+        for namespace in ("ipc", "network_mode", "pid", "uts"):
+            if service.get(namespace) not in (None, ""):
+                raise BrokerError("shared-namespace-unsupported")
+
     def compose_container_id(self, target: Target, service: str) -> str:
         raw = self.runner.run(
             self.compose_base(target) + ["ps", "-q", service],
@@ -523,11 +676,15 @@ class Broker:
         config = inspected.get("Config")
         labels = config.get("Labels") if isinstance(config, dict) else None
         labels = labels if isinstance(labels, dict) else {}
+        declared_volumes = config.get("Volumes") if isinstance(config, dict) else None
+        if declared_volumes is not None and not isinstance(declared_volumes, dict):
+            raise BrokerError("image-inspect-failed")
         return {
             "imageId": image_id,
             "digest": digest,
-            "version": bounded_text(labels.get("org.opencontainers.image.version")),
-            "revision": bounded_text(labels.get("org.opencontainers.image.revision")),
+            "version": bounded_token(labels.get("org.opencontainers.image.version")),
+            "revision": bounded_token(labels.get("org.opencontainers.image.revision")),
+            "declaredVolumes": bool(declared_volumes),
         }
 
     @staticmethod
@@ -606,6 +763,7 @@ class Broker:
         if value["status"] not in {
             "proposed",
             "executing",
+            "failed",
             "succeeded",
             "rolled-back",
             "rollback-failed",
@@ -644,15 +802,21 @@ class Broker:
                 raise BrokerError("plan-capacity-reached")
             now = utc_now()
             self.enforce_rate_limit(target_id, now)
+            self.verify_files(target)
+            self.verify_stateless_runtime(target)
             config, config_hash = self.compose_config(target)
+            self.verify_config_healthchecks(config, target)
+            self.verify_config_sandbox(config, target)
             image_ref = self.configured_image(config, target)
             current = self.running_image(target, image_ref)
+            self.verify_stateless_image(current)
             self.runner.run(
                 self.compose_base(target)
                 + ["pull", "--policy", "always", target.service],
                 "image-pull-failed",
             )
             candidate = self.image_details(image_ref, image_ref)
+            self.verify_stateless_image(candidate)
             if candidate["digest"] is None:
                 raise BrokerError("candidate-digest-unavailable")
             if candidate["imageId"] == current["imageId"]:
@@ -693,8 +857,14 @@ class Broker:
         value = load_json(path, "invalid-approval")
         if not isinstance(value, dict):
             raise BrokerError("invalid-approval")
-        require_keys(value, {"planId", "approvedAt", "expiresAt"}, "invalid-approval")
+        require_keys(
+            value,
+            {"planId", "approvedAt", "expiresAt", "approvedBy"},
+            "invalid-approval",
+        )
         if value["planId"] != plan_id:
+            raise BrokerError("invalid-approval")
+        if not isinstance(value["approvedBy"], str) or not value["approvedBy"]:
             raise BrokerError("invalid-approval")
         return value
 
@@ -732,9 +902,15 @@ class Broker:
                         now + dt.timedelta(seconds=self.settings.approval_ttl_seconds),
                     )
                 ),
+                "approvedBy": operator_identity(),
             }
             atomic_write_json(self.approval_path(plan_id), approval)
-            self.audit("plan-approved", planId=plan_id, targetId=plan["targetId"])
+            self.audit(
+                "plan-approved",
+                planId=plan_id,
+                targetId=plan["targetId"],
+                approvedBy=approval["approvedBy"],
+            )
             return self.public_plan(plan, "approved")
 
     def reject(self, plan_id: str) -> dict[str, Any]:
@@ -743,13 +919,21 @@ class Broker:
             if self.load_state(plan_id)["status"] != "proposed":
                 raise BrokerError("plan-not-rejectable")
             self.write_state(plan_id, "rejected")
-            self.approval_path(plan_id).unlink(missing_ok=True)
-            self.audit("plan-rejected", planId=plan_id, targetId=plan["targetId"])
+            durable_unlink(self.approval_path(plan_id))
+            self.audit(
+                "plan-rejected",
+                planId=plan_id,
+                targetId=plan["targetId"],
+                rejectedBy=operator_identity(),
+            )
             return self.public_plan(plan, "rejected")
 
     def verify_files(self, target: Target) -> None:
-        if not target.project_dir.is_dir():
-            raise BrokerError("project-path-unavailable")
+        assert_secure_directory_chain(
+            target.project_dir,
+            self.project_boundary,
+            self.trusted_owner_uid,
+        )
         for path in target.compose_files:
             try:
                 info = path.lstat()
@@ -757,9 +941,88 @@ class Broker:
                 raise BrokerError("compose-file-unavailable") from exc
             if not stat.S_ISREG(info.st_mode) or stat.S_ISLNK(info.st_mode):
                 raise BrokerError("compose-file-unavailable")
+        for path in target.backup_files:
+            if path.exists():
+                assert_secure_file(path, self.trusted_owner_uid)
         for path in target.required_paths:
             if not path.exists():
                 raise BrokerError("required-path-unavailable")
+        self.verify_project_tree(target)
+
+    def verify_project_tree(self, target: Target) -> None:
+        entries = 0
+        for current_root, directories, files in os.walk(
+            target.project_dir, topdown=True, followlinks=False
+        ):
+            for name in [*directories, *files]:
+                entries += 1
+                if entries > MAX_PROJECT_ENTRIES:
+                    raise BrokerError("project-tree-too-large")
+                path = Path(current_root) / name
+                try:
+                    info = path.lstat()
+                except OSError as exc:
+                    raise BrokerError("insecure-installation") from exc
+                if (
+                    stat.S_ISLNK(info.st_mode)
+                    or info.st_uid != self.trusted_owner_uid
+                    or info.st_mode & 0o022
+                    or not (stat.S_ISREG(info.st_mode) or stat.S_ISDIR(info.st_mode))
+                ):
+                    raise BrokerError("insecure-installation")
+
+    def verify_stateless_runtime(self, target: Target) -> None:
+        if target.update_class != STATELESS_UPDATE_CLASS:
+            raise BrokerError("stateful-target-unsupported")
+        for service in target.recreate_services:
+            container_id = self.compose_container_id(target, service)
+            container = self.inspect_json(
+                [self.settings.docker_binary, "inspect", container_id],
+                "container-inspect-failed",
+            )
+            mounts = container.get("Mounts")
+            if not isinstance(mounts, list):
+                raise BrokerError("container-inspect-failed")
+            if mounts:
+                raise BrokerError("stateful-target-unsupported")
+            config = container.get("Config")
+            host_config = container.get("HostConfig")
+            if not isinstance(config, dict) or not isinstance(host_config, dict):
+                raise BrokerError("container-inspect-failed")
+            user = config.get("User")
+            if not isinstance(user, str) or not re.fullmatch(
+                r"[1-9][0-9]*(?::[1-9][0-9]*)?", user
+            ):
+                raise BrokerError("nonroot-user-required")
+            security_opt = host_config.get("SecurityOpt")
+            cap_drop = host_config.get("CapDrop")
+            if host_config.get("Privileged") is not False:
+                raise BrokerError("privileged-surface-unsupported")
+            if host_config.get("ReadonlyRootfs") is not True:
+                raise BrokerError("readonly-root-required")
+            if host_config.get("CapAdd") not in (None, []):
+                raise BrokerError("privileged-surface-unsupported")
+            for field in ("Binds", "Devices", "DeviceRequests", "GroupAdd", "Tmpfs"):
+                if host_config.get(field) not in (None, [], {}):
+                    raise BrokerError("privileged-surface-unsupported")
+            for field in ("IpcMode", "PidMode", "UTSMode", "UsernsMode"):
+                if host_config.get(field) not in (None, ""):
+                    raise BrokerError("shared-namespace-unsupported")
+            if not isinstance(cap_drop, list) or not any(
+                isinstance(item, str) and item.casefold() == "all" for item in cap_drop
+            ):
+                raise BrokerError("cap-drop-all-required")
+            if not isinstance(security_opt, list) or not any(
+                isinstance(item, str)
+                and item.casefold().replace("=", ":") == "no-new-privileges:true"
+                for item in security_opt
+            ):
+                raise BrokerError("no-new-privileges-required")
+
+    @staticmethod
+    def verify_stateless_image(details: dict[str, Any]) -> None:
+        if details.get("declaredVolumes") is not False:
+            raise BrokerError("stateful-target-unsupported")
 
     def capture_backup(self, target: Target, plan_id: str) -> Path:
         transaction_dir = self.rollbacks_dir / plan_id
@@ -830,9 +1093,9 @@ class Broker:
                 if state_value.get("Status") in {"dead", "exited"}:
                     raise BrokerError("health-check-failed")
                 health = state_value.get("Health")
-                health_status = (
-                    health.get("Status") if isinstance(health, dict) else None
-                )
+                if not isinstance(health, dict):
+                    raise BrokerError("healthcheck-required")
+                health_status = health.get("Status")
                 if health_status == "unhealthy":
                     raise BrokerError("health-check-failed")
                 if (
@@ -867,63 +1130,75 @@ class Broker:
             config, config_hash = self.compose_config(target)
             if config_hash != plan["configSha256"]:
                 raise BrokerError("compose-config-drift")
+            self.verify_config_healthchecks(config, target)
+            self.verify_config_sandbox(config, target)
             image_ref = self.configured_image(config, target)
             current = self.running_image(target, image_ref)
             if current["imageId"] != plan["current"]["imageId"]:
                 raise BrokerError("runtime-drift")
+            self.verify_stateless_image(current)
+            self.verify_stateless_runtime(target)
             candidate = self.image_details(image_ref, image_ref)
             if (
                 candidate["imageId"] != plan["candidate"]["imageId"]
                 or candidate["digest"] != plan["candidate"]["digest"]
             ):
                 raise BrokerError("candidate-drift")
-
-            transaction_dir = self.capture_backup(target, plan_id)
-            rollback_tag = (
-                f"openclaw-rollback/{target.target_id.replace('.', '-')}:"
-                f"{plan_id[:16]}"
-            )
-            self.runner.run(
-                [
-                    self.settings.docker_binary,
-                    "image",
-                    "tag",
-                    plan["current"]["imageId"],
-                    rollback_tag,
-                ],
-                "rollback-tag-failed",
-            )
-            candidate_override = self.write_override(
-                transaction_dir,
-                "candidate.json",
-                target.service,
-                plan["candidate"]["digest"],
-            )
-            rollback_override = self.write_override(
-                transaction_dir, "rollback.json", target.service, rollback_tag
-            )
+            self.verify_stateless_image(candidate)
 
             self.write_state(plan_id, "executing")
-            self.approval_path(plan_id).unlink(missing_ok=True)
+            durable_unlink(self.approval_path(plan_id))
             self.audit("execution-started", planId=plan_id, targetId=target.target_id)
             started_at = format_time(utc_now())
             failure_code: str | None = None
             rollback_status = "not-needed"
+            candidate_apply_started = False
+            rollback_override: Path | None = None
+            rollback_tag = (
+                f"openclaw-rollback/{target.target_id.replace('.', '-')}:"
+                f"{plan_id[:16]}"
+            )
             try:
+                transaction_dir = self.capture_backup(target, plan_id)
+                self.runner.run(
+                    [
+                        self.settings.docker_binary,
+                        "image",
+                        "tag",
+                        plan["current"]["imageId"],
+                        rollback_tag,
+                    ],
+                    "rollback-tag-failed",
+                )
+                candidate_override = self.write_override(
+                    transaction_dir,
+                    "candidate.json",
+                    target.service,
+                    plan["candidate"]["digest"],
+                )
+                rollback_override = self.write_override(
+                    transaction_dir, "rollback.json", target.service, rollback_tag
+                )
+                candidate_apply_started = True
                 self.compose_apply(target, candidate_override)
+                self.verify_stateless_runtime(target)
                 self.verify_health(target)
                 terminal_status = "succeeded"
             except BrokerError as exc:
                 failure_code = exc.code
-                rollback_status = "attempted"
-                try:
-                    self.compose_apply(target, rollback_override)
-                    self.verify_health(target)
-                    terminal_status = "rolled-back"
-                    rollback_status = "succeeded"
-                except BrokerError:
-                    terminal_status = "rollback-failed"
-                    rollback_status = "failed"
+                if candidate_apply_started and rollback_override is not None:
+                    rollback_status = "attempted"
+                    try:
+                        self.compose_apply(target, rollback_override)
+                        self.verify_stateless_runtime(target)
+                        self.verify_health(target)
+                        terminal_status = "rolled-back"
+                        rollback_status = "succeeded"
+                    except BrokerError:
+                        terminal_status = "rollback-failed"
+                        rollback_status = "failed"
+                else:
+                    terminal_status = "failed"
 
             result = {
                 "schemaVersion": SCHEMA_VERSION,

@@ -8,13 +8,17 @@ Owner area: Codex, Claude archive sync, and OpenClaw services.
 - Template owners: templates/openclaw.
 - Script owners: templates/openclaw managed helper scripts.
 - Isolated non-model services use repo-managed sources under `scripts/agents/`.
+- The modern production behavior bundle is rooted at
+  `files/openclaw/workspace/`; it is reconstructed and audited source, not a
+  legacy workspace clone. Mutable memories and project data remain separate.
 - Keep playbook metadata headers and `playbooks/README.md` in sync when behavior changes.
 - OpenClaw intentionally tracks the npm `latest` channel. Do not add an exact package-version variable: native OpenClaw updates must survive later Ansible convergence instead of being downgraded.
-- The isolated Gateway resolves the stable core plus the reviewed Codex,
+- The isolated runtime resolves the stable core plus the reviewed Codex,
   Discord, Lossless Claw, and Mem0 plugins under a credential-less ephemeral
   build account with lifecycle scripts disabled. It validates and atomically
-  promotes one root-owned versioned release. Resolved versions are rollback
-  records, not update-policy pins.
+  promotes one root-owned versioned release, then separates the `openclaw`
+  Gateway from the `openclaw-codex` model executor. Resolved versions are
+  rollback records, not update-policy pins.
 
 ## Playbooks
 
@@ -25,6 +29,9 @@ Owner area: Codex, Claude archive sync, and OpenClaw services.
 | `codex-memory-sync.yml` | `nas_server, orchestrator` | Configure Codex memory sync to NAS. | `ansible-playbook playbooks/agents/codex-memory-sync.yml --syntax-check` |
 | `openclaw.yml` | `openclaw_hosts` | Deploy OpenClaw AI agent. | `ansible-playbook playbooks/agents/openclaw.yml --syntax-check` |
 | `openclaw-health-receiver.yml` | `openclaw_hosts` | Stage or cut over the isolated Health receiver and aggregate-only publisher; disabled by default. | `ansible-playbook playbooks/agents/openclaw-health-receiver.yml --syntax-check` |
-| `openclaw-isolated-gateway.yml` | `openclaw_hosts` | Stage a modernized two-phase Gateway canary with an immutable versioned core/plugin release, fresh OAuth enrollment, and a required model proof; disabled by default. | `ansible-playbook playbooks/agents/openclaw-isolated-gateway.yml --syntax-check` |
-| `openclaw-state-rehearsal.yml` | `openclaw_hosts` | Rehearse deterministic relocation of active file-backed session stores and only their exact workspace dependencies; disabled by default. | `ansible-playbook playbooks/agents/openclaw-state-rehearsal.yml --syntax-check` |
+| `openclaw-isolated-gateway.yml` | `openclaw_hosts` | Stage a modernized split Gateway/Codex canary with immutable runtime/plugin code, separate no-login identities and secrets, fresh executor OAuth, and a required model proof; disabled by default. | `ansible-playbook playbooks/agents/openclaw-isolated-gateway.yml --syntax-check` |
+| `openclaw-state-rehearsal.yml` | `openclaw_hosts` | Rehearse deterministic relocation of active file-backed session stores, preserve spawned directory structure, rebuild derived legacy prompt caches, and quarantine copied delivery-recovery intent so the canary cannot replay production; disabled by default. | `ansible-playbook playbooks/agents/openclaw-state-rehearsal.yml --syntax-check` |
 | `openclaw-doctor-rehearsal.yml` | `openclaw_hosts` | Rehearse credential-free supported state migrations and plugin modernization on protected copies; disabled by default. | `ansible-playbook playbooks/agents/openclaw-doctor-rehearsal.yml --syntax-check` |
+| `openclaw-canary-data-rehearsal.yml` | `openclaw_hosts` | Transactionally hand the classified modern workspace and verified file-backed sessions to the loopback-only, channel/cron/heartbeat-suppressed five-agent canary, then plan or apply native session archival with rollback; disabled by default. | `ansible-playbook playbooks/agents/openclaw-canary-data-rehearsal.yml --syntax-check` |
+| `openclaw-behavior-rehearsal.yml` | `openclaw_hosts` | Prove Dubble response discipline, native Vega/Antares Star lineage, and idle-silent Rigel heartbeat behavior in the channel-less loopback canary, then archive only the synthetic probe sessions; disabled by default. | `ansible-playbook playbooks/agents/openclaw-behavior-rehearsal.yml --syntax-check` |
+| `openclaw-security-rehearsal.yml` | `openclaw_hosts` | Run one channel-less hostile-prompt probe against the split Gateway/executor and prove sudo, Gateway-secret, Docker, and outside-workspace denial from trajectory and filesystem evidence; disabled by default. | `ansible-playbook playbooks/agents/openclaw-security-rehearsal.yml --syntax-check` |

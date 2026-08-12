@@ -7,6 +7,7 @@ Jinja rendering. Use `templates/` when a file needs variable substitution.
 
 | File | Owner area | Consumers | Notes |
 | --- | --- | --- | --- |
+| `openclaw/` | OpenClaw behavior modernization | Future dedicated-service production workspace deployment | Compact credential-free Astra/Fleet bootstrap sources plus an explicit legacy-workspace disposition policy. Mutable memories and retained project data are staged separately by ownership class. |
 | `qbit-release-stamper.py` | Media release stamping | Legacy/static source for qBittorrent post-download stamping | Prefer repo-managed script/template paths for new work. |
 | `sab-release-stamper.py` | Media release stamping | Legacy/static source for SABnzbd post-download stamping | Prefer repo-managed script/template paths for new work. |
 | `sonarr-transaction-monitor.py` | Media release monitoring | Legacy/static source for Sonarr transaction monitoring | Calls the repo-managed subtitle mismatch audit for new Sonarr imports when enabled. Prefer `scripts/media-release/` for new diagnostics. |
@@ -25,5 +26,8 @@ Jinja rendering. Use `templates/` when a file needs variable substitution.
 - Do not add rendered configs here when a Jinja template is appropriate.
 - If this directory grows, split files into domain folders such as
   `files/media/`, `files/proxmox/`, or `files/windows/` and update this catalog.
+- OpenClaw behavior files under `files/openclaw/` are root-deployed active
+  source for the modern runtime. Do not mix mutable memory or runtime data into
+  that tree.
 - Update playbooks, docs, and `scripts/repo/repo-audit` expectations when
   moving or retiring a static file.

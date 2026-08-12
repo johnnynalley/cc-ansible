@@ -22,17 +22,24 @@ openclaw_docker_update_broker_health_poll_seconds: 5
 openclaw_docker_update_broker_authorized_keys: []
 openclaw_docker_update_broker_source_cidrs: []
 
-# Targets are explicit service transactions. Paths, Compose files, dependent
-# recreates, and health checks are selected here by the operator, never by
-# Astra. Example shape (do not enable without a reviewed host-specific entry):
+# Targets are explicit single-service stateless transactions. The broker
+# requires numeric non-root execution, a read-only root filesystem, all
+# capabilities dropped, no-new-privileges, and a health check. It rejects all
+# mounts, devices, build contexts, secrets, configs, shared namespaces, and
+# image-declared volumes. Stateful services require a separate
+# application-native backup/restore design before they can be added.
+# Paths, Compose files, dependent recreates, and health checks are selected
+# here by the operator, never by Astra. Example shape (do not enable without a
+# reviewed host-specific entry):
 # openclaw_docker_update_broker_targets:
-#   media-stack.gluetun:
-#     projectDir: /opt/media-stack
+#   example.stateless-service:
+#     projectDir: /opt/example-stack
 #     composeFiles: [docker-compose.yml]
 #     backupFiles: [docker-compose.yml, .env]
-#     service: gluetun
-#     recreateServices: [gluetun, qbittorrent]
-#     verifyServices: [gluetun, qbittorrent]
-#     requiredPaths: [/srv/archive]
+#     service: app
+#     recreateServices: [app]
+#     verifyServices: [app]
+#     requiredPaths: []
 #     healthTimeoutSeconds: 180
+#     updateClass: stateless-image
 openclaw_docker_update_broker_targets: {}

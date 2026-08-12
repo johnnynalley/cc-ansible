@@ -10,13 +10,17 @@
 - `openclaw-docker-report-cat`: Forced-command SSH wrapper that returns only the
   generated report and rejects client-supplied commands.
 - `test_openclaw_docker_report.py`: Regression coverage for schema redaction,
-  local image comparison, and report permissions.
+  bounded metadata, local image comparison, and report permissions.
 - `openclaw-docker-update-broker.py`: Root-owned transaction broker that accepts
   only allowlisted target IDs, creates digest-bound plans, requires separate
   root approval, verifies health, and rolls back failed Compose updates.
 - `test_openclaw_docker_update_broker.py`: Regression coverage for strict input,
-  plan integrity, approval separation, redaction, drift rejection, one-use
-  execution, and rollback.
+  plan integrity, approval separation, redaction, drift rejection,
+  one-use failure handling, stateless sandbox enforcement, trusted Compose
+  inputs, and rollback.
+- `test_openclaw_docker_playbooks.py`: Static regression coverage for locked
+  forced-command accounts, exact CIDR parsing, pre-change rollback backups,
+  stateless target policy, and complete disabled-state unit shutdown.
 
 ## Safety Notes
 
@@ -28,3 +32,6 @@
 - The update request account may invoke only the broker's fixed `request`
   command. Root-only `approve` and `reject` commands remain outside Astra's
   trust boundary.
+- Eligible broker targets are intentionally narrow: one stateless, non-root,
+  read-only, capability-free, health-checked service with no mounts, devices,
+  build context, secrets, configs, or shared host namespaces.

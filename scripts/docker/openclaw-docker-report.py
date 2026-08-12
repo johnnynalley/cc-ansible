@@ -21,9 +21,10 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import quote
 
-
 SCHEMA_VERSION = 1
 MAX_RESPONSE_BYTES = 32 * 1024 * 1024
+MAX_REPORT_BYTES = 16 * 1024 * 1024
+MAX_CONTAINERS = 2048
 OCI_LABELS = (
     "org.opencontainers.image.version",
     "org.opencontainers.image.revision",
@@ -72,7 +73,9 @@ class DockerAPI:
         request_path = f"/v{self.api_version}{path}" if versioned else path
         connection = UnixHTTPConnection(self.socket_path, self.timeout)
         try:
-            connection.request("GET", request_path, headers={"Accept": "application/json"})
+            connection.request(
+                "GET", request_path, headers={"Accept": "application/json"}
+            )
             response = connection.getresponse()
             body = response.read(MAX_RESPONSE_BYTES + 1)
         finally:
@@ -90,10 +93,23 @@ class DockerAPI:
 def safe_text(value: Any, max_length: int) -> str | None:
     if not isinstance(value, str):
         return None
-    cleaned = "".join(character if character.isprintable() else "?" for character in value).strip()
+    cleaned = "".join(
+        character if character.isprintable() else "?" for character in value
+    ).strip()
     if not cleaned:
         return None
     return cleaned[:max_length]
+
+
+def safe_token(value: Any, max_length: int) -> str | None:
+    if not isinstance(value, str):
+        return None
+    cleaned = value.strip()
+    if len(cleaned) > max_length or not re.fullmatch(
+        r"[A-Za-z0-9][A-Za-z0-9._+:/@-]*", cleaned
+    ):
+        return None
+    return cleaned
 
 
 def normalize_name(names: Any) -> str:
@@ -103,7 +119,9 @@ def normalize_name(names: Any) -> str:
     return name.lstrip("/") or "unknown"
 
 
-def image_update_state(api: DockerAPI, image_ref: str | None, running_image_id: str | None) -> tuple[str, str | None]:
+def image_update_state(
+    api: DockerAPI, image_ref: str | None, running_image_id: str | None
+) -> tuple[str, str | None]:
     if not image_ref or not running_image_id:
         return "unknown", None
     if "@sha256:" in image_ref:
@@ -137,11 +155,19 @@ def container_record(api: DockerAPI, summary: dict[str, Any]) -> dict[str, Any]:
     image_ref = safe_text(config.get("Image") or summary.get("Image"), 512)
     running_image_id = safe_text(detail.get("Image") or summary.get("ImageID"), 128)
 
-    image = api.get(f"/images/{quote(running_image_id, safe='')}/json") if running_image_id else {}
+    image = (
+        api.get(f"/images/{quote(running_image_id, safe='')}/json")
+        if running_image_id
+        else {}
+    )
     if not isinstance(image, dict):
         raise DockerAPIError("/images/id/json", 200, "expected object")
     image_config = image.get("Config") if isinstance(image.get("Config"), dict) else {}
-    image_labels = image_config.get("Labels") if isinstance(image_config.get("Labels"), dict) else {}
+    image_labels = (
+        image_config.get("Labels")
+        if isinstance(image_config.get("Labels"), dict)
+        else {}
+    )
     raw_repo_digests = image.get("RepoDigests")
     if not isinstance(raw_repo_digests, list):
         raw_repo_digests = []
@@ -159,7 +185,8 @@ def container_record(api: DockerAPI, summary: dict[str, Any]) -> dict[str, Any]:
     return {
         "containerId": container_id[:12],
         "name": normalize_name(summary.get("Names")),
-        "state": safe_text(state.get("Status") or summary.get("State"), 32) or "unknown",
+        "state": safe_text(state.get("Status") or summary.get("State"), 32)
+        or "unknown",
         "status": safe_text(summary.get("Status"), 256),
         "health": health,
         "compose": {
@@ -172,8 +199,8 @@ def container_record(api: DockerAPI, summary: dict[str, Any]) -> dict[str, Any]:
             "taggedLocalId": tagged_image_id,
             "repoDigests": repo_digests,
             "created": safe_text(image.get("Created"), 64),
-            "version": safe_text(image_labels.get(OCI_LABELS[0]), 128),
-            "revision": safe_text(image_labels.get(OCI_LABELS[1]), 128),
+            "version": safe_token(image_labels.get(OCI_LABELS[0]), 128),
+            "revision": safe_token(image_labels.get(OCI_LABELS[1]), 128),
             "updateState": update_state,
         },
     }
@@ -185,6 +212,8 @@ def build_report(api: DockerAPI, hostname: str) -> dict[str, Any]:
         raise DockerAPIError("/containers/json", 200, "expected array")
     if any(not isinstance(item, dict) for item in summaries):
         raise DockerAPIError("/containers/json", 200, "array contained a non-object")
+    if len(summaries) > MAX_CONTAINERS:
+        raise DockerAPIError("/containers/json", 200, "too many containers")
     containers = [container_record(api, item) for item in summaries]
     containers.sort(key=lambda item: item["name"].casefold())
     version = api.version_payload
@@ -212,6 +241,8 @@ def write_atomic(path: Path, payload: dict[str, Any], group_name: str | None) ->
 
     group_id = -1 if not group_name else grp.getgrnam(group_name).gr_gid
     encoded = (json.dumps(payload, indent=2, sort_keys=True) + "\n").encode("utf-8")
+    if len(encoded) > MAX_REPORT_BYTES:
+        raise RuntimeError("report too large")
     fd, temporary_name = tempfile.mkstemp(prefix=f".{path.name}.", dir=parent)
     try:
         os.fchmod(fd, 0o640)

@@ -114,6 +114,25 @@ class DoctorRehearsalTests(unittest.TestCase):
         self.assertEqual(len(trust_assertions), 3)
         for assertion in trust_assertions:
             self.assertIn("inspections", assertion)
+        for task_name in (
+            "Assign writable OpenClaw Doctor generation to migration identity",
+            "Freeze npm-managed plugin code before Doctor",
+            "Freeze validated OpenClaw Doctor generation",
+        ):
+            task_start = playbook.index(f"- name: {task_name}")
+            task_end = playbook.find("\n    - name:", task_start + 1)
+            task = playbook[task_start:task_end]
+            self.assertIn("recurse: true", task)
+            self.assertIn("follow: false", task)
+        self.assertIn(
+            "Capture immutable OpenClaw runtime before rehearsal mutation", playbook
+        )
+        self.assertIn(
+            "Capture immutable OpenClaw runtime after rehearsal mutation", playbook
+        )
+        self.assertIn(
+            "Require rehearsal confinement to copied OpenClaw state", playbook
+        )
 
     def test_transform_rewrites_paths_and_removes_secret_values(self) -> None:
         with tempfile.TemporaryDirectory() as directory_name:
@@ -506,6 +525,25 @@ class DoctorRehearsalTests(unittest.TestCase):
                         root=str(tree), output=str(root / "manifest.json"), exclude=[]
                     )
                 )
+
+    def test_manifest_records_root_and_entry_ownership(self) -> None:
+        with tempfile.TemporaryDirectory() as directory_name:
+            root = Path(directory_name)
+            tree = root / "tree"
+            tree.mkdir()
+            payload = tree / "payload.txt"
+            payload.write_text("payload\n", encoding="utf-8")
+
+            result = MODULE.manifest_tree(
+                argparse.Namespace(
+                    root=str(tree), output=str(root / "manifest.json"), exclude=[]
+                )
+            )
+            entries = {entry["relativePath"]: entry for entry in result["entries"]}
+            self.assertEqual(entries["."]["uid"], tree.stat().st_uid)
+            self.assertEqual(entries["."]["gid"], tree.stat().st_gid)
+            self.assertEqual(entries["payload.txt"]["uid"], payload.stat().st_uid)
+            self.assertEqual(entries["payload.txt"]["gid"], payload.stat().st_gid)
 
     def test_manifest_allows_only_reviewed_plugin_skill_symlinks(self) -> None:
         with tempfile.TemporaryDirectory() as directory_name:

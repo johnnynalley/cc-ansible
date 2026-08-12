@@ -1,0 +1,1040 @@
+---
+# yamllint disable rule:line-length
+# Purpose: Hand verified modern workspace/session data to the isolated canary.
+# Hosts: openclaw_hosts.
+# Key vars: openclaw_canary_data_* and openclaw_isolated_gateway_*.
+# Scripts: scripts/agents/openclaw-{workspace-stage,session-relocate,native-session-transition,session-transition}.py.
+# Validation: ansible-playbook playbooks/agents/openclaw-canary-data-rehearsal.yml --syntax-check.
+
+- name: Rehearse modern OpenClaw data in the isolated Gateway canary
+  hosts: openclaw_hosts
+  become: true
+  gather_facts: false
+
+  vars:
+    openclaw_canary_data_helper_dir: /usr/local/libexec/openclaw-isolated
+    openclaw_canary_data_workspace_stage_tool: >-
+      /usr/local/libexec/openclaw-isolated/openclaw-workspace-stage.py
+    openclaw_canary_data_session_tool: >-
+      /usr/local/libexec/openclaw-isolated/openclaw-session-relocate.py
+    openclaw_canary_data_native_transition_tool: >-
+      /usr/local/libexec/openclaw-isolated/openclaw-native-session-transition.py
+    openclaw_canary_data_transition_planner: >-
+      /usr/local/libexec/openclaw-isolated/openclaw-session-transition.py
+    openclaw_canary_data_input_root: >-
+      /usr/local/share/openclaw-isolated/migration-input
+    openclaw_canary_data_transition_root: >-
+      /var/lib/openclaw-isolated/native-transition
+    openclaw_canary_data_free_space_margin: 2147483648
+
+  tasks:
+    - name: Validate OpenClaw canary data rehearsal mode
+      ansible.builtin.assert:
+        that:
+          - openclaw_canary_data_mode | default('disabled') in ['disabled', 'plan', 'apply']
+        fail_msg: >-
+          openclaw_canary_data_mode must be disabled, plan, or apply.
+
+    - name: Skip hosts without approved OpenClaw canary data work
+      ansible.builtin.meta: end_host
+      when: openclaw_canary_data_mode == 'disabled'
+
+    - name: Require explicit OpenClaw canary data approval
+      ansible.builtin.assert:
+        that:
+          - openclaw_canary_data_approved | default(false) | bool
+        fail_msg: >-
+          The data rehearsal stages private workspace/session copies and starts
+          the loopback-only canary. Explicit owner approval is required.
+
+    - name: Validate fixed OpenClaw canary data boundaries
+      ansible.builtin.assert:
+        that:
+          - openclaw_isolated_gateway_user == 'openclaw'
+          - openclaw_isolated_gateway_group == 'openclaw'
+          - openclaw_isolated_gateway_state_dir == '/var/lib/openclaw-isolated'
+          - openclaw_isolated_gateway_workspace_dir == '/usr/local/share/openclaw-isolated/workspace'
+          - openclaw_isolated_gateway_config_file == '/etc/openclaw-isolated/openclaw.json'
+          - openclaw_isolated_gateway_runtime_root == '/opt/openclaw-isolated'
+          - openclaw_isolated_gateway_port | int == 19789
+          - openclaw_isolated_gateway_skip_cron | bool
+          - openclaw_canary_data_source_state == '/var/lib/openclaw-migration-rehearsal/current'
+          - openclaw_canary_data_source_workspace == '/usr/local/share/openclaw-migration-rehearsal/current'
+          - openclaw_canary_data_legacy_workspace == '/home/johnny/.openclaw/workspace'
+          - openclaw_canary_data_backup_dir == '/var/backups/openclaw-isolated/data-handoff'
+          - openclaw_canary_data_agents | sort == ['antares', 'dubble', 'main', 'rigel', 'vega']
+          - openclaw_canary_data_agents | unique | length == 5
+        fail_msg: >-
+          The canary handoff paths, agents, scheduler policy, or listener are
+          outside the reviewed migration boundary.
+
+    - name: Inspect OpenClaw canary data prerequisites
+      ansible.builtin.stat:
+        path: "{{ item }}"
+        follow: false
+      loop:
+        - /etc/systemd/system/openclaw-isolated-gateway.service
+        - "{{ openclaw_isolated_gateway_config_file }}"
+        - "{{ openclaw_isolated_gateway_secret_file }}"
+        - "{{ openclaw_isolated_gateway_runtime_dir }}/bin/openclaw"
+        - "{{ openclaw_canary_data_source_state }}"
+        - "{{ openclaw_canary_data_source_workspace }}"
+        - "{{ openclaw_canary_data_legacy_workspace }}"
+      register: openclaw_canary_data_prerequisites
+      check_mode: false
+
+    - name: Require complete OpenClaw canary data prerequisites
+      ansible.builtin.assert:
+        that:
+          - openclaw_canary_data_prerequisites.results[0].stat.isreg
+          - openclaw_canary_data_prerequisites.results[1].stat.isreg
+          - not openclaw_canary_data_prerequisites.results[1].stat.islnk
+          - openclaw_canary_data_prerequisites.results[2].stat.isreg
+          - not openclaw_canary_data_prerequisites.results[2].stat.islnk
+          - openclaw_canary_data_prerequisites.results[3].stat.isreg
+          - openclaw_canary_data_prerequisites.results[4].stat.islnk
+          - openclaw_canary_data_prerequisites.results[5].stat.islnk
+          - openclaw_canary_data_prerequisites.results[6].stat.isdir
+          - not openclaw_canary_data_prerequisites.results[6].stat.islnk
+        fail_msg: >-
+          The isolated service/config/runtime, promoted rehearsal selectors,
+          or legacy retained-data source is unavailable.
+
+    - name: Resolve promoted OpenClaw rehearsal selectors
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/readlink
+          - --canonicalize-existing
+          - "{{ item }}"
+      loop:
+        - "{{ openclaw_canary_data_source_state }}"
+        - "{{ openclaw_canary_data_source_workspace }}"
+      register: openclaw_canary_data_source_selectors
+      changed_when: false
+      check_mode: false
+
+    - name: Record resolved OpenClaw rehearsal generations
+      ansible.builtin.set_fact:
+        openclaw_canary_data_resolved_state: >-
+          {{ openclaw_canary_data_source_selectors.results[0].stdout }}
+        openclaw_canary_data_resolved_workspace: >-
+          {{ openclaw_canary_data_source_selectors.results[1].stdout }}
+        openclaw_canary_data_source_stamp: >-
+          {{ openclaw_canary_data_source_selectors.results[0].stdout | dirname | basename }}
+
+    - name: Require promoted OpenClaw rehearsal generations
+      ansible.builtin.assert:
+        that:
+          - openclaw_canary_data_resolved_state is match('^/var/lib/openclaw-migration-rehearsal/generations/[0-9]{8}T[0-9]{6}Z/state$')
+          - openclaw_canary_data_resolved_workspace is match('^/usr/local/share/openclaw-migration-rehearsal/generations/[0-9]{8}T[0-9]{6}Z/workspace$')
+        fail_msg: >-
+          A rehearsal selector does not resolve to one timestamped validated
+          generation.
+
+    - name: Inspect promoted workspace-stage parity evidence
+      ansible.builtin.stat:
+        path: >-
+          {{ openclaw_state_rehearsal_backup_dir }}/{{ openclaw_canary_data_source_stamp }}/workspace-stage.json
+        follow: false
+      register: openclaw_canary_data_promoted_workspace_evidence
+      check_mode: false
+
+    - name: Require promoted workspace-stage parity evidence
+      ansible.builtin.assert:
+        that:
+          - openclaw_canary_data_promoted_workspace_evidence.stat.isreg
+          - not openclaw_canary_data_promoted_workspace_evidence.stat.islnk
+        fail_msg: >-
+          The promoted session/workspace generation lacks its immutable
+          workspace-stage manifest.
+
+    - name: Read isolated Gateway canary configuration
+      ansible.builtin.slurp:
+        src: "{{ openclaw_isolated_gateway_config_file }}"
+      register: openclaw_canary_data_config_raw
+      no_log: true
+
+    - name: Parse isolated Gateway canary configuration
+      ansible.builtin.set_fact:
+        openclaw_canary_data_config: >-
+          {{ openclaw_canary_data_config_raw.content | b64decode | from_json }}
+      no_log: true
+
+    - name: Require silent five-agent canary configuration
+      ansible.builtin.assert:
+        that:
+          - openclaw_canary_data_config.agents.list | map(attribute='id') | list == ['main', 'dubble', 'vega', 'antares', 'rigel']
+          - openclaw_canary_data_config.agents.defaults.heartbeat.every == '0m'
+          - openclaw_canary_data_config.agents.defaults.heartbeat.target == 'none'
+          - openclaw_canary_data_config.agents.defaults.heartbeat.includeReasoning == false
+          - openclaw_canary_data_config.agents.defaults.heartbeat.suppressToolErrorWarnings == true
+          - openclaw_canary_data_config.channels is not defined
+          - openclaw_canary_data_config.bindings is not defined
+          - openclaw_canary_data_config.cron is not defined
+          - openclaw_canary_data_config.gateway.bind == 'loopback'
+          - openclaw_canary_data_config.gateway.port | int == 19789
+        fail_msg: >-
+          The installed canary is not the silent five-agent topology required
+          for native session validation.
+      no_log: true
+
+    - name: Read isolated Gateway service confinement
+      ansible.builtin.slurp:
+        src: /etc/systemd/system/openclaw-isolated-gateway.service
+      register: openclaw_canary_data_unit_raw
+
+    - name: Require canary channel and scheduler suppression
+      ansible.builtin.assert:
+        that:
+          - "'Environment=OPENCLAW_SKIP_CHANNELS=1' in (openclaw_canary_data_unit_raw.content | b64decode)"
+          - "'Environment=OPENCLAW_SKIP_CRON=1' in (openclaw_canary_data_unit_raw.content | b64decode)"
+          - "'ReadOnlyPaths=' + openclaw_isolated_gateway_workspace_dir in (openclaw_canary_data_unit_raw.content | b64decode)"
+        fail_msg: >-
+          The installed canary unit does not suppress channels, cron, and
+          workspace writes at the service boundary.
+
+    - name: Require isolated Gateway to remain disabled at boot
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/systemctl
+          - is-enabled
+          - openclaw-isolated-gateway.service
+      register: openclaw_canary_data_enabled_state
+      changed_when: false
+      failed_when: false
+      check_mode: false
+
+    - name: Reject boot-enabled isolated Gateway
+      ansible.builtin.assert:
+        that:
+          - openclaw_canary_data_enabled_state.stdout == 'disabled'
+        fail_msg: >-
+          The loopback canary must remain disabled at boot throughout rehearsal.
+
+    - name: Inspect prior isolated Gateway activity
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/systemctl
+          - is-active
+          - openclaw-isolated-gateway.service
+      register: openclaw_canary_data_prior_service
+      changed_when: false
+      failed_when: false
+      check_mode: false
+
+    - name: Report OpenClaw canary data check-mode boundary
+      ansible.builtin.debug:
+        msg: >-
+          Check mode validated the silent five-agent canary, promoted rehearsal
+          selectors, boot-disabled service, and fixed paths. It does not stage,
+          copy, stop, start, archive, or promote private data.
+      when: ansible_check_mode
+
+    - name: Stop OpenClaw canary data rehearsal before mutation in check mode
+      ansible.builtin.meta: end_host
+      when: ansible_check_mode
+
+    - name: Install OpenClaw canary data migration helpers
+      ansible.builtin.copy:
+        src: "{{ ansible_config_file | dirname }}/scripts/agents/{{ item }}"
+        dest: "{{ openclaw_canary_data_helper_dir }}/{{ item }}"
+        owner: root
+        group: root
+        mode: "0755"
+      loop:
+        - openclaw-workspace-stage.py
+        - openclaw-session-relocate.py
+        - openclaw-session-transition.py
+        - openclaw-native-session-transition.py
+
+    - name: Create protected OpenClaw migration input paths
+      ansible.builtin.file:
+        path: "{{ item.path }}"
+        state: directory
+        owner: root
+        group: root
+        mode: "{{ item.mode }}"
+      loop:
+        - path: "{{ openclaw_canary_data_input_root }}"
+          mode: "0755"
+        - path: "{{ openclaw_canary_data_input_root }}/modern"
+          mode: "0755"
+
+    - name: Deploy reviewed OpenClaw workspace migration policy
+      ansible.builtin.copy:
+        src: "{{ ansible_config_file | dirname }}/files/openclaw/workspace-migration-policy.json"
+        dest: "{{ openclaw_canary_data_input_root }}/policy.json"
+        owner: root
+        group: root
+        mode: "0644"
+
+    - name: Deploy reviewed modern OpenClaw behavior overlay
+      ansible.builtin.copy:
+        src: "{{ ansible_config_file | dirname }}/files/openclaw/workspace/"
+        dest: "{{ openclaw_canary_data_input_root }}/modern/"
+        owner: root
+        group: root
+        mode: preserve
+        directory_mode: "0755"
+
+    - name: Generate OpenClaw canary data timestamp
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/date
+          - --utc
+          - +%Y%m%dT%H%M%SZ
+      register: openclaw_canary_data_stamp_raw
+      changed_when: false
+
+    - name: Record OpenClaw canary data transaction paths
+      ansible.builtin.set_fact:
+        openclaw_canary_data_stamp: "{{ openclaw_canary_data_stamp_raw.stdout }}"
+        openclaw_canary_data_evidence_dir: >-
+          {{ openclaw_canary_data_backup_dir }}/{{ openclaw_canary_data_stamp_raw.stdout }}
+        openclaw_canary_data_candidate_state: >-
+          {{ openclaw_isolated_gateway_state_dir }}/migration-candidates/{{ openclaw_canary_data_stamp_raw.stdout }}/state
+        openclaw_canary_data_candidate_workspace: >-
+          /usr/local/share/openclaw-isolated/.workspace-candidate-{{ openclaw_canary_data_stamp_raw.stdout }}
+        openclaw_canary_data_state_rollback: >-
+          {{ openclaw_isolated_gateway_state_dir }}/state/.agents-pre-data-{{ openclaw_canary_data_stamp_raw.stdout }}
+        openclaw_canary_data_workspace_rollback: >-
+          /usr/local/share/openclaw-isolated/.workspace-pre-data-{{ openclaw_canary_data_stamp_raw.stdout }}
+        openclaw_canary_data_transition_output: >-
+          {{ openclaw_canary_data_transition_root }}/{{ openclaw_canary_data_stamp_raw.stdout }}
+        openclaw_canary_data_agent_arguments: >-
+          {{ openclaw_canary_data_agents | map('regex_replace', '^', '--agent=') | list }}
+
+    - name: Create OpenClaw canary data staging roots
+      ansible.builtin.file:
+        path: "{{ item.path }}"
+        state: directory
+        owner: "{{ item.owner }}"
+        group: "{{ item.group }}"
+        mode: "0700"
+      loop:
+        - path: "{{ openclaw_canary_data_evidence_dir }}"
+          owner: root
+          group: root
+        - path: "{{ openclaw_canary_data_candidate_state }}"
+          owner: root
+          group: root
+        - path: "{{ openclaw_canary_data_candidate_workspace }}"
+          owner: root
+          group: root
+        - path: "{{ openclaw_canary_data_transition_root }}"
+          owner: "{{ openclaw_isolated_gateway_user }}"
+          group: "{{ openclaw_isolated_gateway_group }}"
+
+    - name: Resolve isolated Codex executor UID
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/id
+          - -u
+          - "{{ openclaw_isolated_codex_user }}"
+      register: openclaw_canary_data_executor_uid
+      changed_when: false
+
+    - name: Resolve isolated workspace group GID
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/getent
+          - group
+          - "{{ openclaw_isolated_workspace_group }}"
+      register: openclaw_canary_data_workspace_group
+      changed_when: false
+
+    - name: Manifest promoted OpenClaw rehearsal sessions before copy
+      ansible.builtin.command:
+        argv: >-
+          {{
+            [
+              openclaw_canary_data_session_tool,
+              'inspect',
+              '--state-root', openclaw_canary_data_resolved_state,
+              '--workspace-root', openclaw_canary_data_resolved_workspace,
+              '--output', openclaw_canary_data_evidence_dir + '/source-before.json'
+            ]
+            + openclaw_canary_data_agent_arguments
+          }}
+      changed_when: false
+
+    - name: Read promoted OpenClaw rehearsal manifest
+      ansible.builtin.slurp:
+        src: "{{ openclaw_canary_data_evidence_dir }}/source-before.json"
+      register: openclaw_canary_data_source_manifest_raw
+
+    - name: Parse promoted OpenClaw rehearsal manifest
+      ansible.builtin.set_fact:
+        openclaw_canary_data_source_manifest: >-
+          {{ openclaw_canary_data_source_manifest_raw.content | b64decode | from_json }}
+
+    - name: Require replay-safe promoted OpenClaw rehearsal state
+      ansible.builtin.assert:
+        that:
+          - openclaw_canary_data_source_manifest.summary.activeDeliveryRecoveryEntries | int == 0
+        fail_msg: >-
+          The promoted rehearsal still contains active delivery-recovery state
+          and cannot be handed to a running canary.
+
+    - name: Derive canary workspace session directories
+      ansible.builtin.set_fact:
+        openclaw_canary_data_workspace_refs: >-
+          {{
+            openclaw_canary_data_source_manifest.agents
+            | map(attribute='referenceDetails')
+            | flatten
+            | selectattr('category', 'equalto', 'workspace')
+            | selectattr('role', 'match', '^spawned-(workspace|cwd)$')
+            | selectattr('pathKind', 'equalto', 'directory')
+            | map(attribute='relativePath')
+            | reject('equalto', '.')
+            | unique
+            | sort
+            | list
+          }}
+
+    - name: Plan retained and modern canary workspace
+      ansible.builtin.command:
+        argv:
+          - "{{ openclaw_canary_data_workspace_stage_tool }}"
+          - --source
+          - "{{ openclaw_canary_data_legacy_workspace }}"
+          - --overlay
+          - "{{ openclaw_canary_data_input_root }}/modern"
+          - --policy
+          - "{{ openclaw_canary_data_input_root }}/policy.json"
+          - --output
+          - "{{ openclaw_canary_data_evidence_dir }}/workspace-plan.json"
+          - --plan-only
+      changed_when: false
+
+    - name: Read planned canary workspace
+      ansible.builtin.slurp:
+        src: "{{ openclaw_canary_data_evidence_dir }}/workspace-plan.json"
+      register: openclaw_canary_data_workspace_plan_raw
+
+    - name: Parse planned canary workspace
+      ansible.builtin.set_fact:
+        openclaw_canary_data_workspace_plan: >-
+          {{ openclaw_canary_data_workspace_plan_raw.content | b64decode | from_json }}
+
+    - name: Inspect existing canary rollback inputs for capacity
+      ansible.builtin.stat:
+        path: "{{ item }}"
+        follow: false
+      loop:
+        - "{{ openclaw_isolated_gateway_state_dir }}/state/agents"
+        - "{{ openclaw_isolated_gateway_workspace_dir }}"
+      register: openclaw_canary_data_capacity_inputs
+
+    - name: Measure existing canary rollback inputs
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/du
+          - --bytes
+          - --summarize
+          - "{{ item.item }}"
+      loop: "{{ openclaw_canary_data_capacity_inputs.results }}"
+      when: item.stat.exists
+      register: openclaw_canary_data_rollback_sizes
+      changed_when: false
+
+    - name: Inspect canary data destination filesystems
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/stat
+          - --file-system
+          - --format=%i:%a:%S
+          - "{{ item }}"
+      loop:
+        - /var/lib
+        - /usr/local/share
+        - /var/backups
+      register: openclaw_canary_data_filesystems
+      changed_when: false
+
+    - name: Derive canary data capacity requirements
+      ansible.builtin.set_fact:
+        openclaw_canary_data_session_bytes: >-
+          {{ openclaw_canary_data_source_manifest.summary.bytes | int }}
+        openclaw_canary_data_workspace_bytes: >-
+          {{ openclaw_canary_data_workspace_plan.summary.plannedBytes | int }}
+        openclaw_canary_data_rollback_bytes: >-
+          {{
+            openclaw_canary_data_rollback_sizes.results
+            | rejectattr('skipped', 'defined')
+            | map(attribute='stdout')
+            | map('regex_replace', '\\s.*$', '')
+            | map('int')
+            | sum
+          }}
+        openclaw_canary_data_state_device: >-
+          {{ openclaw_canary_data_filesystems.results[0].stdout.split(':')[0] }}
+        openclaw_canary_data_workspace_device: >-
+          {{ openclaw_canary_data_filesystems.results[1].stdout.split(':')[0] }}
+        openclaw_canary_data_backup_device: >-
+          {{ openclaw_canary_data_filesystems.results[2].stdout.split(':')[0] }}
+        openclaw_canary_data_state_available: >-
+          {{
+            (openclaw_canary_data_filesystems.results[0].stdout.split(':')[1] | int)
+            * (openclaw_canary_data_filesystems.results[0].stdout.split(':')[2] | int)
+          }}
+        openclaw_canary_data_workspace_available: >-
+          {{
+            (openclaw_canary_data_filesystems.results[1].stdout.split(':')[1] | int)
+            * (openclaw_canary_data_filesystems.results[1].stdout.split(':')[2] | int)
+          }}
+        openclaw_canary_data_backup_available: >-
+          {{
+            (openclaw_canary_data_filesystems.results[2].stdout.split(':')[1] | int)
+            * (openclaw_canary_data_filesystems.results[2].stdout.split(':')[2] | int)
+          }}
+
+    - name: Derive per-filesystem canary allocation totals
+      ansible.builtin.set_fact:
+        openclaw_canary_data_state_required: >-
+          {{
+            openclaw_canary_data_session_bytes | int
+            + (
+              openclaw_canary_data_workspace_bytes | int
+              if openclaw_canary_data_workspace_device == openclaw_canary_data_state_device
+              else 0
+            )
+            + (
+              openclaw_canary_data_rollback_bytes | int
+              if openclaw_canary_data_backup_device == openclaw_canary_data_state_device
+              else 0
+            )
+          }}
+        openclaw_canary_data_workspace_required: >-
+          {{
+            openclaw_canary_data_workspace_bytes | int
+            + (
+              openclaw_canary_data_session_bytes | int
+              if openclaw_canary_data_state_device == openclaw_canary_data_workspace_device
+              else 0
+            )
+            + (
+              openclaw_canary_data_rollback_bytes | int
+              if openclaw_canary_data_backup_device == openclaw_canary_data_workspace_device
+              else 0
+            )
+          }}
+        openclaw_canary_data_backup_required: >-
+          {{
+            openclaw_canary_data_rollback_bytes | int
+            + (
+              openclaw_canary_data_session_bytes | int
+              if openclaw_canary_data_state_device == openclaw_canary_data_backup_device
+              else 0
+            )
+            + (
+              openclaw_canary_data_workspace_bytes | int
+              if openclaw_canary_data_workspace_device == openclaw_canary_data_backup_device
+              else 0
+            )
+          }}
+
+    - name: Require capacity for canary data and rollback
+      ansible.builtin.assert:
+        that:
+          - openclaw_canary_data_state_available | int > openclaw_canary_data_state_required | int + openclaw_canary_data_free_space_margin | int
+          - openclaw_canary_data_workspace_available | int > openclaw_canary_data_workspace_required | int + openclaw_canary_data_free_space_margin | int
+          - openclaw_canary_data_backup_available | int > openclaw_canary_data_backup_required | int + openclaw_canary_data_free_space_margin | int
+        fail_msg: >-
+          The canary state, workspace, or rollback filesystem lacks conservative
+          capacity for the staged generation and targeted backup.
+
+    - name: Stage retained data and modern behavior for canary
+      ansible.builtin.command:
+        argv:
+          - "{{ openclaw_canary_data_workspace_stage_tool }}"
+          - --source
+          - "{{ openclaw_canary_data_legacy_workspace }}"
+          - --overlay
+          - "{{ openclaw_canary_data_input_root }}/modern"
+          - --target
+          - "{{ openclaw_canary_data_candidate_workspace }}"
+          - --policy
+          - "{{ openclaw_canary_data_input_root }}/policy.json"
+          - --output
+          - "{{ openclaw_canary_data_evidence_dir }}/workspace-stage.json"
+          - --executor-uid
+          - "{{ openclaw_canary_data_executor_uid.stdout }}"
+          - --workspace-gid
+          - "{{ openclaw_canary_data_workspace_group.stdout.split(':')[2] }}"
+          - --operator-uid
+          - '0'
+          - --operator-gid
+          - "{{ openclaw_canary_data_workspace_group.stdout.split(':')[2] }}"
+      changed_when: true
+
+    - name: Require canary workspace parity with promoted rehearsal
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/cmp
+          - --silent
+          - >-
+            {{ openclaw_state_rehearsal_backup_dir }}/{{ openclaw_canary_data_source_stamp }}/workspace-stage.json
+          - "{{ openclaw_canary_data_evidence_dir }}/workspace-stage.json"
+      changed_when: false
+
+    - name: Set staged canary workspace root access
+      ansible.builtin.file:
+        path: "{{ openclaw_canary_data_candidate_workspace }}"
+        state: directory
+        owner: "{{ openclaw_isolated_codex_user }}"
+        group: "{{ openclaw_isolated_workspace_group }}"
+        mode: "0750"
+
+    - name: Inspect staged session-referenced canary directories
+      ansible.builtin.stat:
+        path: "{{ openclaw_canary_data_candidate_workspace }}/{{ item }}"
+        follow: false
+      loop: "{{ openclaw_canary_data_workspace_refs }}"
+      register: openclaw_canary_data_staged_workspace_refs
+
+    - name: Reject canary session references crossing ownership classes
+      ansible.builtin.assert:
+        that:
+          - >-
+            not item.stat.exists
+            or (
+              item.stat.isdir
+              and not item.stat.islnk | default(false)
+              and item.stat.pw_name == openclaw_isolated_codex_user
+              and item.stat.gr_name == openclaw_isolated_workspace_group
+            )
+        fail_msg: >-
+          A session-referenced canary directory is outside the Executor-writable
+          workspace ownership class.
+      loop: "{{ openclaw_canary_data_staged_workspace_refs.results }}"
+      loop_control:
+        label: "{{ item.item }}"
+
+    - name: Create missing session-referenced canary directories
+      ansible.builtin.file:
+        path: "{{ openclaw_canary_data_candidate_workspace }}/{{ item }}"
+        state: directory
+        owner: "{{ openclaw_isolated_codex_user }}"
+        group: "{{ openclaw_isolated_workspace_group }}"
+        mode: "0750"
+      loop: "{{ openclaw_canary_data_workspace_refs }}"
+
+    - name: Create canary session candidate destinations
+      ansible.builtin.file:
+        path: "{{ openclaw_canary_data_candidate_state }}/agents/{{ item }}/sessions"
+        state: directory
+        owner: "{{ openclaw_isolated_gateway_user }}"
+        group: "{{ openclaw_isolated_gateway_group }}"
+        mode: "0700"
+      loop: "{{ openclaw_canary_data_agents }}"
+
+    - name: Copy verified OpenClaw sessions into canary candidates
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/rsync
+          - --archive
+          - --hard-links
+          - --xattrs
+          - --delete
+          - "--chown={{ openclaw_isolated_gateway_user }}:{{ openclaw_isolated_gateway_group }}"
+          - "{{ openclaw_canary_data_resolved_state }}/agents/{{ item }}/sessions/"
+          - "{{ openclaw_canary_data_candidate_state }}/agents/{{ item }}/sessions/"
+      loop: "{{ openclaw_canary_data_agents }}"
+      changed_when: true
+
+    - name: Manifest promoted OpenClaw rehearsal sessions after copy
+      ansible.builtin.command:
+        argv: >-
+          {{
+            [
+              openclaw_canary_data_session_tool,
+              'inspect',
+              '--state-root', openclaw_canary_data_resolved_state,
+              '--workspace-root', openclaw_canary_data_resolved_workspace,
+              '--output', openclaw_canary_data_evidence_dir + '/source-after.json'
+            ]
+            + openclaw_canary_data_agent_arguments
+          }}
+      changed_when: false
+
+    - name: Require stable promoted OpenClaw rehearsal during copy
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/cmp
+          - --silent
+          - "{{ openclaw_canary_data_evidence_dir }}/source-before.json"
+          - "{{ openclaw_canary_data_evidence_dir }}/source-after.json"
+      changed_when: false
+
+    - name: Create immutable canary source-index evidence paths
+      ansible.builtin.file:
+        path: "{{ openclaw_canary_data_evidence_dir }}/source-indexes/{{ item }}"
+        state: directory
+        owner: root
+        group: root
+        mode: "0700"
+      loop: "{{ openclaw_canary_data_agents }}"
+
+    - name: Preserve canary source indexes before transformation
+      ansible.builtin.copy:
+        src: "{{ openclaw_canary_data_resolved_state }}/agents/{{ item }}/sessions/sessions.json"
+        dest: "{{ openclaw_canary_data_evidence_dir }}/source-indexes/{{ item }}/sessions.json"
+        remote_src: true
+        owner: root
+        group: root
+        mode: "0600"
+      loop: "{{ openclaw_canary_data_agents }}"
+
+    - name: Inspect current canary data paths before promotion
+      ansible.builtin.stat:
+        path: "{{ item }}"
+        follow: false
+      loop:
+        - "{{ openclaw_isolated_gateway_state_dir }}/state/agents"
+        - "{{ openclaw_isolated_gateway_workspace_dir }}"
+      register: openclaw_canary_data_current_paths
+
+    - name: Record current canary data backup paths
+      ansible.builtin.set_fact:
+        openclaw_canary_data_backup_paths: >-
+          {{
+            []
+            + (
+              [openclaw_isolated_gateway_state_dir + '/state/agents']
+              if openclaw_canary_data_current_paths.results[0].stat.exists
+              else []
+            )
+            + (
+              [openclaw_isolated_gateway_workspace_dir]
+              if openclaw_canary_data_current_paths.results[1].stat.exists
+              else []
+            )
+          }}
+        openclaw_canary_data_state_promoted: false
+        openclaw_canary_data_workspace_promoted: false
+        openclaw_canary_data_state_rollback_present: false
+        openclaw_canary_data_workspace_rollback_present: false
+
+    - name: Require an existing canary workspace rollback source
+      ansible.builtin.assert:
+        that:
+          - openclaw_canary_data_current_paths.results[1].stat.isdir
+          - not openclaw_canary_data_current_paths.results[1].stat.islnk
+        fail_msg: >-
+          The existing canary workspace is unavailable for targeted rollback.
+
+    - name: Promote and validate OpenClaw canary data transaction
+      block:
+        - name: Stop isolated Gateway before canary data promotion
+          ansible.builtin.systemd_service:
+            name: openclaw-isolated-gateway.service
+            enabled: false
+            state: stopped
+
+        - name: Back up existing isolated canary data
+          ansible.builtin.command:
+            argv: >-
+              {{
+                [
+                  '/usr/bin/tar',
+                  '--create',
+                  '--file', openclaw_canary_data_evidence_dir + '/canary-data-before.tar',
+                  '--absolute-names',
+                  '--numeric-owner',
+                  '--acls',
+                  '--xattrs'
+                ]
+                + openclaw_canary_data_backup_paths
+              }}
+          changed_when: true
+
+        - name: Move current canary workspace to rollback path
+          ansible.builtin.command:
+            argv:
+              - /usr/bin/mv
+              - --no-clobber
+              - "{{ openclaw_isolated_gateway_workspace_dir }}"
+              - "{{ openclaw_canary_data_workspace_rollback }}"
+          changed_when: true
+
+        - name: Record canary workspace rollback availability
+          ansible.builtin.set_fact:
+            openclaw_canary_data_workspace_rollback_present: true
+
+        - name: Move current canary sessions to rollback path
+          ansible.builtin.command:
+            argv:
+              - /usr/bin/mv
+              - --no-clobber
+              - "{{ openclaw_isolated_gateway_state_dir }}/state/agents"
+              - "{{ openclaw_canary_data_state_rollback }}"
+          changed_when: true
+          when: openclaw_canary_data_current_paths.results[0].stat.exists
+
+        - name: Record canary session rollback availability
+          ansible.builtin.set_fact:
+            openclaw_canary_data_state_rollback_present: true
+          when: openclaw_canary_data_current_paths.results[0].stat.exists
+
+        - name: Promote candidate canary workspace
+          ansible.builtin.command:
+            argv:
+              - /usr/bin/mv
+              - --no-clobber
+              - "{{ openclaw_canary_data_candidate_workspace }}"
+              - "{{ openclaw_isolated_gateway_workspace_dir }}"
+          changed_when: true
+
+        - name: Record promoted canary workspace
+          ansible.builtin.set_fact:
+            openclaw_canary_data_workspace_promoted: true
+
+        - name: Promote candidate canary sessions
+          ansible.builtin.command:
+            argv:
+              - /usr/bin/mv
+              - --no-clobber
+              - "{{ openclaw_canary_data_candidate_state }}/agents"
+              - "{{ openclaw_isolated_gateway_state_dir }}/state/agents"
+          changed_when: true
+
+        - name: Record promoted canary sessions
+          ansible.builtin.set_fact:
+            openclaw_canary_data_state_promoted: true
+
+        - name: Rewrite promoted canary session paths
+          ansible.builtin.command:
+            argv: >-
+              {{
+                [
+                  openclaw_canary_data_session_tool,
+                  'rewrite',
+                  '--source-state-root', openclaw_canary_data_resolved_state,
+                  '--source-workspace-root', openclaw_canary_data_resolved_workspace,
+                  '--target-state-root', openclaw_isolated_gateway_state_dir + '/state',
+                  '--target-workspace-root', openclaw_isolated_gateway_workspace_dir,
+                  '--modernize-derived-snapshots',
+                  '--modernize-active-runtime-state',
+                  '--quarantine-delivery-recovery',
+                  '--output', openclaw_canary_data_evidence_dir + '/rewrite.json'
+                ]
+                + openclaw_canary_data_agent_arguments
+              }}
+          changed_when: true
+
+        - name: Verify promoted canary session relocation
+          ansible.builtin.command:
+            argv: >-
+              {{
+                [
+                  openclaw_canary_data_session_tool,
+                  'verify',
+                  '--source-state-root', openclaw_canary_data_resolved_state,
+                  '--source-workspace-root', openclaw_canary_data_resolved_workspace,
+                  '--source-manifest', openclaw_canary_data_evidence_dir + '/source-after.json',
+                  '--source-index-root', openclaw_canary_data_evidence_dir + '/source-indexes',
+                  '--target-state-root', openclaw_isolated_gateway_state_dir + '/state',
+                  '--target-workspace-root', openclaw_isolated_gateway_workspace_dir,
+                  '--modernize-derived-snapshots',
+                  '--modernize-active-runtime-state',
+                  '--quarantine-delivery-recovery',
+                  '--output', openclaw_canary_data_evidence_dir + '/verify.json'
+                ]
+                + openclaw_canary_data_agent_arguments
+              }}
+          changed_when: false
+
+        - name: Start silent isolated Gateway with promoted data
+          ansible.builtin.systemd_service:
+            name: openclaw-isolated-gateway.service
+            enabled: false
+            state: started
+            daemon_reload: true
+
+        - name: Wait for loopback-only OpenClaw canary
+          ansible.builtin.wait_for:
+            host: 127.0.0.1
+            port: "{{ openclaw_isolated_gateway_port }}"
+            state: started
+            timeout: 60
+
+        - name: Plan or apply native OpenClaw session transition
+          ansible.builtin.command:
+            argv: >-
+              {{
+                [
+                  '/usr/sbin/runuser',
+                  '-u', openclaw_isolated_gateway_user,
+                  '--',
+                  openclaw_canary_data_native_transition_tool,
+                  '--mode', openclaw_canary_data_mode,
+                  '--openclaw', openclaw_isolated_gateway_runtime_dir + '/bin/openclaw',
+                  '--runtime-root', openclaw_isolated_gateway_runtime_root,
+                  '--home', openclaw_isolated_gateway_state_dir,
+                  '--state-root', openclaw_isolated_gateway_state_dir + '/state',
+                  '--config', openclaw_isolated_gateway_config_file,
+                  '--workspace', openclaw_isolated_gateway_workspace_dir,
+                  '--output-dir', openclaw_canary_data_transition_output
+                ]
+                + openclaw_canary_data_agent_arguments
+              }}
+          register: openclaw_canary_data_native_transition
+          changed_when: openclaw_canary_data_mode == 'apply'
+          no_log: true
+
+        - name: Require successful native OpenClaw session transition
+          ansible.builtin.assert:
+            that:
+              - (openclaw_canary_data_native_transition.stdout | from_json).status == 'ok'
+              - (openclaw_canary_data_native_transition.stdout | from_json).mode == openclaw_canary_data_mode
+              - >-
+                openclaw_canary_data_mode == 'plan'
+                or (
+                  (openclaw_canary_data_native_transition.stdout | from_json).summary.archived
+                  ==
+                  (openclaw_canary_data_native_transition.stdout | from_json).summary.archivePlanned
+                )
+            fail_msg: >-
+              Native canary session classification or archival did not converge.
+          no_log: true
+
+        - name: Freeze native transition evidence
+          ansible.builtin.file:
+            path: "{{ openclaw_canary_data_transition_output }}"
+            state: directory
+            owner: root
+            group: root
+            mode: u=rwX,go=
+            recurse: true
+            follow: false
+
+        - name: Move native transition evidence into rollback record
+          ansible.builtin.command:
+            argv:
+              - /usr/bin/mv
+              - --no-clobber
+              - "{{ openclaw_canary_data_transition_output }}"
+              - "{{ openclaw_canary_data_evidence_dir }}/native-transition"
+          changed_when: true
+
+        - name: Recheck isolated Gateway service state
+          ansible.builtin.command:
+            argv:
+              - /usr/bin/systemctl
+              - is-active
+              - openclaw-isolated-gateway.service
+          register: openclaw_canary_data_final_active
+          changed_when: false
+
+        - name: Recheck isolated Gateway boot state
+          ansible.builtin.command:
+            argv:
+              - /usr/bin/systemctl
+              - is-enabled
+              - openclaw-isolated-gateway.service
+          register: openclaw_canary_data_final_enabled
+          changed_when: false
+          failed_when: false
+
+        - name: Require active but boot-disabled isolated canary
+          ansible.builtin.assert:
+            that:
+              - openclaw_canary_data_final_active.stdout == 'active'
+              - openclaw_canary_data_final_enabled.stdout == 'disabled'
+            fail_msg: >-
+              The validated canary must be active only for this attended test
+              and remain disabled at boot.
+
+        - name: Remove validated local canary rollback trees
+          ansible.builtin.file:
+            path: "{{ item }}"
+            state: absent
+          loop:
+            - "{{ openclaw_canary_data_state_rollback }}"
+            - "{{ openclaw_canary_data_workspace_rollback }}"
+
+        - name: Remove empty canary candidate generation
+          ansible.builtin.file:
+            path: >-
+              {{ openclaw_isolated_gateway_state_dir }}/migration-candidates/{{ openclaw_canary_data_stamp }}
+            state: absent
+
+        - name: Record successful OpenClaw canary data rehearsal
+          ansible.builtin.copy:
+            content: >-
+              {{
+                {
+                  'status': 'ok',
+                  'mode': openclaw_canary_data_mode,
+                  'timestamp': openclaw_canary_data_stamp,
+                  'sourceState': openclaw_canary_data_resolved_state,
+                  'sourceWorkspace': openclaw_canary_data_resolved_workspace,
+                  'productionGatewayChanged': false,
+                  'channelsEnabled': false,
+                  'cronEnabled': false,
+                  'heartbeatsEnabled': false,
+                  'bootEnabled': false
+                }
+                | to_nice_json
+              }}
+            dest: "{{ openclaw_canary_data_evidence_dir }}/result.json"
+            owner: root
+            group: root
+            mode: "0600"
+
+      rescue:
+        - name: Stop failed isolated canary data generation
+          ansible.builtin.systemd_service:
+            name: openclaw-isolated-gateway.service
+            enabled: false
+            state: stopped
+          failed_when: false
+
+        - name: Remove failed promoted canary sessions
+          ansible.builtin.file:
+            path: "{{ openclaw_isolated_gateway_state_dir }}/state/agents"
+            state: absent
+          when: openclaw_canary_data_state_promoted | bool
+
+        - name: Restore prior canary sessions from rollback path
+          ansible.builtin.command:
+            argv:
+              - /usr/bin/mv
+              - --no-clobber
+              - "{{ openclaw_canary_data_state_rollback }}"
+              - "{{ openclaw_isolated_gateway_state_dir }}/state/agents"
+          when: openclaw_canary_data_state_rollback_present | bool
+          changed_when: true
+
+        - name: Remove failed promoted canary workspace
+          ansible.builtin.file:
+            path: "{{ openclaw_isolated_gateway_workspace_dir }}"
+            state: absent
+          when: openclaw_canary_data_workspace_promoted | bool
+
+        - name: Restore prior canary workspace from rollback path
+          ansible.builtin.command:
+            argv:
+              - /usr/bin/mv
+              - --no-clobber
+              - "{{ openclaw_canary_data_workspace_rollback }}"
+              - "{{ openclaw_isolated_gateway_workspace_dir }}"
+          when: openclaw_canary_data_workspace_rollback_present | bool
+          changed_when: true
+
+        - name: Restore prior isolated canary activity
+          ansible.builtin.systemd_service:
+            name: openclaw-isolated-gateway.service
+            enabled: false
+            state: >-
+              {{ 'started' if openclaw_canary_data_prior_service.stdout == 'active' else 'stopped' }}
+          failed_when: false
+
+        - name: Fail OpenClaw canary data rehearsal after rollback
+          ansible.builtin.fail:
+            msg: >-
+              OpenClaw canary data rehearsal failed. The prior canary paths
+              were restored where promotion had begun; the targeted archive
+              remains under {{ openclaw_canary_data_evidence_dir }}.

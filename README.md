@@ -109,7 +109,7 @@ managed_hosts
 │   ├── debian_hosts
 │   │   ├── proxmox_nodes (ts440, pve-alto, pve-herc, pve-m70q)
 │   │   ├── vms_lxcs
-│   │   │   ├── vms (docker-vm, media-vm, nextcloud-vm, freepbx-vm, openclaw-vm, pdm-vm) ← gets qemu-guest-agent
+│   │   │   ├── vms (docker-vm, media-vm, nextcloud-vm, freepbx-vm, pdm-vm) ← gets qemu-guest-agent
 │   │   │   └── lxcs (homebridge-lxc, syncthing-lxc, pbs-lxc)
 │   │   ├── raspberry_pis (mercury)
 │   │   └── orchestrator (jn-t14s-lin) ← ThinkPad T14s (Kubuntu)
@@ -122,7 +122,7 @@ nas_server (ts440) ← portable NAS role group
 
 development (currently empty) ← dev tooling (gh, shellcheck, yq)
 
-docker_hosts (docker-vm, media-vm, nextcloud-vm, openclaw-vm) ← Docker Compose stacks
+docker_hosts (docker-vm, media-vm, nextcloud-vm, jn-t14s-lin) ← Docker Compose stacks
 
 gluetun_hosts (media-vm) ← Gluetun/qBittorrent VPN automation
 
@@ -296,9 +296,12 @@ Packages are merged from multiple sources (all applicable variables combined):
 | `vm-storage-gate.yml` | `proxmox_nodes` | Per-VM start gate: hookscript blocks `qm start`/`pct start` if VM's declared host mountpoints aren't mounted. Per-VM declarations in `host_vars/<vm>/storage.yml` |
 | `openclaw.yml` | `openclaw_hosts` | OpenClaw AI agent (npm install, gateway service, repo-sync/update-check timers) |
 | `openclaw-health-receiver.yml` | `openclaw_hosts` | Isolated Health receiver and aggregate-only report publisher (disabled by default) |
-| `openclaw-isolated-gateway.yml` | `openclaw_hosts` | Modernized two-phase Gateway canary with immutable core/provider releases, isolated OAuth enrollment, and model proof (disabled by default) |
-| `openclaw-state-rehearsal.yml` | `openclaw_hosts` | Verified relocation rehearsal for active file-backed sessions and their exact workspace dependencies (disabled by default) |
+| `openclaw-isolated-gateway.yml` | `openclaw_hosts` | Modernized split Gateway/Codex canary with immutable runtime/provider code, separate no-login identities and secrets, isolated executor OAuth, and model proof (disabled by default) |
+| `openclaw-state-rehearsal.yml` | `openclaw_hosts` | Verified relocation rehearsal for active file-backed sessions with derived legacy prompt caches rebuilt (disabled by default) |
 | `openclaw-doctor-rehearsal.yml` | `openclaw_hosts` | Credential-free Doctor and plugin-modernization rehearsal on protected copied state (disabled by default) |
+| `openclaw-canary-data-rehearsal.yml` | `openclaw_hosts` | Transactional modern-workspace/session handoff to the silent loopback canary with native session plan/apply and rollback (disabled by default) |
+| `openclaw-behavior-rehearsal.yml` | `openclaw_hosts` | Channel-less Dubble, native Star delegation, and idle-silent Rigel behavior proof with synthetic-session cleanup (disabled by default) |
+| `openclaw-security-rehearsal.yml` | `openclaw_hosts` | Channel-less hostile-prompt proof of the split executor's sudo, Gateway-secret, Docker, and filesystem boundaries (disabled by default) |
 
 ## NFS Configuration
 
@@ -758,7 +761,7 @@ docker-vm (VM 110 on pve-m70q) runs infrastructure services:
 |---------|-----|---------|
 | Caddy | - | Reverse proxy (DNS-01 via Cloudflare) |
 | Vaultwarden | `vaultwarden.jnalley.me` | Password manager |
-| Portainer CE | `portainer.jnalley.me` | Multi-host Docker UI (edge agents on media-vm/nextcloud-vm/openclaw-vm) |
+| Portainer CE | `portainer.jnalley.me` | Multi-host Docker UI (managed edge agents on media-vm/nextcloud-vm) |
 | Seerr | `requests.jnalley.me` | Media requests (Plex OAuth) |
 | Cloudflared | - | Cloudflare Tunnel (public access) |
 | Apprise API | `apprise.jnalley.me` | Notification router (Pushover + email) |
@@ -769,7 +772,7 @@ docker-vm (VM 110 on pve-m70q) runs infrastructure services:
 | Proxmox Backup Server | `pbs.jnalley.me` | PBS web UI via Caddy |
 | Proxmox Datacenter Manager | `pdm.jnalley.me` | PDM web UI via Caddy |
 | Dispatcharr | `iptv.jnalley.me` | HDHomeRun emulator for Plex Live TV (disabled — free streams unreliable) |
-| OpenClaw | `openclaw.jnalley.me` | AI agent gateway (proxied to openclaw-vm:18789) |
+| OpenClaw | `openclaw.jnalley.me` | AI agent gateway; current direct tailnet origin is retained only until loopback + Tailscale Serve cutover |
 | Mercury Tailscale peer relay | `mercury-relay.jnalley.me` | DNS-only A record for Mercury UDP 40000 relay endpoint; updated by `cloudflare-ddns.yml` on docker-vm |
 | ~~Uptime Kuma~~ | ~~`status.jnalley.me`~~ | Disabled 2026-04-13 (unused); compose preserved at `/opt/uptime-kuma/` |
 | ~~Homepage~~ | ~~`home.jnalley.me`~~ | Disabled 2026-04-13 (unused); compose preserved at `/opt/homepage/` |
@@ -873,7 +876,12 @@ Without `cache=never`, virtiofsd daemons cache aggressively (5GB+ each), causing
 
 **VirtioFS ACL Limitation**: VirtioFS does **not** pass through POSIX ACLs to guest VMs. Files accessed via VirtioFS must have adequate base permissions (`chmod`) — ACLs set via `setfacl` on the host are invisible to guests. ZFS ACLs are managed by `playbooks/storage/zfs.yml`; normal runs set dataset-root ACLs and default ACLs for new files. Existing-tree recursive ACL repair is intentionally opt-in with `zfs_acl_recursive_repair: true` because it can walk large datasets.
 
-**ts440 memory budget** (32GB total, upgraded from 16GB on 2026-05-12): media-vm 10GB, nextcloud-vm 8GB, openclaw-vm 8GB max / 6GB balloon minimum, homebridge-lxc 736MB, ZFS ARC 4GB (`/etc/modprobe.d/zfs.conf`), Proxmox ~2-3GB. Proxmox nodes use `vm.swappiness=10` to avoid swapping QEMU guest RAM too eagerly. Balloon disabled on media-vm due to GPU passthrough; memory changes apply on VM restart.
+**ts440 memory policy**: verify current guest allocations from live Proxmox
+configuration before capacity work; the old static budget included the retired
+`openclaw-vm` and is no longer authoritative. ZFS ARC remains managed through
+`/etc/modprobe.d/zfs.conf`, and Proxmox nodes use `vm.swappiness=10` to avoid
+swapping QEMU guest RAM too eagerly. Ballooning remains disabled on `media-vm`
+because of GPU passthrough; VM memory changes require a Proxmox-level restart.
 
 ## Ansible Environment
 
@@ -1042,7 +1050,11 @@ ansible-playbook playbooks/proxmox/proxmox-notifications.yml
 OpenClaw AI agent platform — personal homelab admin assistant via web UI and Discord. The current Gateway still runs as `johnny` and therefore inherits that account's sudo, Docker, controller credentials, and repository access; the dedicated least-privilege runtime migration remains pending.
 
 - **Web UI**: `https://openclaw.jnalley.me` (Tailscale only)
-- **Gateway**: Port 18789, token auth, trustedProxies: docker-vm only
+- **Gateway**: Current production uses port 18789 on the tailnet with token auth
+  and `docker-vm` as its only trusted proxy. The migration target preserves
+  `openclaw.jnalley.me` while moving the Gateway to loopback behind a root-owned
+  named Tailscale Serve service; the OpenClaw account receives no Tailscale
+  operator authority.
 - **Host**: `jn-t14s-lin` (current OpenClaw controller/runtime)
 - **Service**: User-level systemd via `openclaw gateway install` (NOT a custom system service)
 - **Config**: `~/.openclaw/openclaw.json` + `.env` — manual, backed up by restic
@@ -1050,20 +1062,43 @@ OpenClaw AI agent platform — personal homelab admin assistant via web UI and D
 - **Playbook**: `ansible-playbook playbooks/agents/openclaw.yml` (opt-in via `openclaw_enabled`)
 - **Isolation canary**: A hardened `openclaw` system service and modernized
   release pipeline are implemented but disabled by default. A credential-less
-  ephemeral account resolves the stable core/provider pair with lifecycle
-  scripts disabled; root atomically promotes the immutable versioned release.
-  The attended canary uses loopback port 19789 and does not stop or modify
-  production. The temporary loopback canary is currently active, has no
-  channels, and remains disabled at boot.
-- **State modernization rehearsals**: The promoted session relocation contains
-  only active file-backed history and exact workspace dependencies. A separate
-  disabled-by-default Doctor rehearsal takes online SQLite backups, scrubs
-  copied provider auth, retires eight legacy plugin install records through the
-  supported CLI, rebuilds four retained plugins with integrity-bearing npm
-  provenance in an isolated credential-free builder, freezes their code
-  root-owned/read-only, and requires clean warning gates plus a second
-  idempotent Doctor pass before promotion. Neither rehearsal modifies or
-  authenticates production.
+  ephemeral account resolves stable core and reviewed plugin versions with
+  lifecycle scripts disabled; root atomically promotes immutable core, while
+  OpenClaw's native installer creates integrity-bearing plugin ownership rows
+  before root freezes plugin code read-only. The attended canary uses loopback
+  port 19789, has no channels, and does not stop or modify production. Verify
+  its current unit/listener state before relying on it; the final corrected
+  native-plugin bootstrap replay is still pending.
+- **State modernization rehearsals**: The promoted generation contains active
+  file-backed history plus only policy-classified retained workspace data and
+  the root-owned modern behavior overlay; cached legacy bootstrap snapshots are
+  discarded for native rebuilding. Active copied delivery-recovery fields are explicitly
+  quarantined and counted so a canary cannot replay a production reply; the
+  untouched source indexes remain rollback evidence, and final cutover must
+  reconcile pending delivery rather than discard it. A separate
+  disabled-by-default Doctor rehearsal
+  takes online SQLite backups, scrubs copied provider auth, retires eight
+  legacy plugin install records through the supported CLI, rebuilds four
+  retained plugins with integrity-bearing npm provenance in an isolated
+  credential-free builder, freezes their code root-owned/read-only, and
+  requires clean warning gates plus a second idempotent Doctor pass before
+  promotion. Neither rehearsal modifies or authenticates production. A third
+  attended handoff can transactionally place those verified file-backed
+  sessions and a freshly policy-staged workspace into the silent five-agent
+  loopback canary, then use native `sessions.list`/`sessions.patch` in plan or
+  apply mode. It backs up and restores only canary data and never controls the
+  production Gateway.
+- **Behavior modernization**: The compact repo-owned Astra/Fleet bootstrap is
+  under `files/openclaw/workspace/` and is guarded by
+  `scripts/agents/openclaw-bootstrap-audit.py`. It replaces generic worker
+  prompts, the hardcoded cognitive-stack hook, hardcoded session routes,
+  transcript polling, and text-token heartbeat suppression. It is not deployed
+  to production until the attended dedicated-user cutover. A separate
+  disabled-by-default behavior rehearsal now proves concise Dubble output,
+  native Vega-to-Antares review lineage, and a structured idle-silent Rigel
+  heartbeat in the channel-less canary. It restores the heartbeat-disabled
+  baseline and archives only its synthetic sessions; it has not run because an
+  applied silent-canary data handoff is still a prerequisite.
 - **Mem0 memory**: `@mem0/openclaw-mem0` plugin with Qdrant (localhost:6333), Gemini embeddings, and the configured OpenAI-compatible LLM for fact extraction. Auto-capture + auto-recall across sessions.
 - **dbc ops access**: Narrow host-specific wrappers, including candidate-scoped Immich Media Inbox access on docker-vm. Its isolated vision workers may read pixels/OCR only for admitted candidates; there is no arbitrary Immich, credential, SQLite, or general Docker access. Existing media-stack/Caddy operational paths remain separately scoped.
 - **Docker reporting**: A strict result-only reporter is implemented but remains disabled until the dedicated runtime identity and key are deployed. See `docs/openclaw-docker-access.md`.

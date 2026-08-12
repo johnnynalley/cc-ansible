@@ -1,0 +1,1120 @@
+---
+# yamllint disable rule:line-length
+# Purpose: Prove modern agent behavior in the loopback-only OpenClaw canary.
+# Hosts: openclaw_hosts.
+# Key vars: openclaw_behavior_rehearsal_* and openclaw_isolated_gateway_*.
+# Scripts: scripts/agents/openclaw-{behavior-audit,delivery-cutover-audit,modern-config-audit,native-session-transition,session-transition}.py.
+# Validation: ansible-playbook playbooks/agents/openclaw-behavior-rehearsal.yml --syntax-check.
+
+- name: Rehearse modern OpenClaw behavior without channel delivery
+  hosts: openclaw_hosts
+  become: true
+  gather_facts: false
+
+  vars:
+    openclaw_behavior_rehearsal_helper_dir: /usr/local/libexec/openclaw-isolated
+    openclaw_behavior_rehearsal_audit_tool: >-
+      /usr/local/libexec/openclaw-isolated/openclaw-behavior-audit.py
+    openclaw_behavior_rehearsal_config_audit_tool: >-
+      /usr/local/libexec/openclaw-isolated/openclaw-modern-config-audit.py
+    openclaw_behavior_rehearsal_delivery_audit_tool: >-
+      /usr/local/libexec/openclaw-isolated/openclaw-delivery-cutover-audit.py
+    openclaw_behavior_rehearsal_transition_tool: >-
+      /usr/local/libexec/openclaw-isolated/openclaw-native-session-transition.py
+    openclaw_behavior_rehearsal_backup_dir: >-
+      /var/backups/openclaw-isolated/behavior-rehearsal
+    openclaw_behavior_rehearsal_transition_root: >-
+      /var/lib/openclaw-isolated/behavior-transitions
+    openclaw_behavior_rehearsal_primary_model: >-
+      {{ openclaw_isolated_gateway_model }}
+    openclaw_behavior_rehearsal_antares_model: >-
+      ollama-cloud/deepseek-v4-pro
+    openclaw_behavior_rehearsal_agents:
+      - main
+      - dubble
+      - rigel
+      - vega
+      - antares
+    openclaw_behavior_rehearsal_session_index_arguments:
+      - >-
+        --session-index=main={{ openclaw_isolated_gateway_state_dir }}/state/agents/main/sessions/sessions.json
+      - >-
+        --session-index=dubble={{ openclaw_isolated_gateway_state_dir }}/state/agents/dubble/sessions/sessions.json
+      - >-
+        --session-index=rigel={{ openclaw_isolated_gateway_state_dir }}/state/agents/rigel/sessions/sessions.json
+      - >-
+        --session-index=vega={{ openclaw_isolated_gateway_state_dir }}/state/agents/vega/sessions/sessions.json
+      - >-
+        --session-index=antares={{ openclaw_isolated_gateway_state_dir }}/state/agents/antares/sessions/sessions.json
+    openclaw_behavior_rehearsal_agent_arguments: >-
+      {{ openclaw_behavior_rehearsal_agents | map('regex_replace', '^', '--agent=') | list }}
+
+    # Variables consumed only by the channel-less branch of the shared modern
+    # configuration template.
+    openclaw_modern_deployment_mode: behavior-canary
+    openclaw_modern_secret_file: "{{ openclaw_isolated_gateway_secret_file }}"
+    openclaw_modern_workspace_dir: "{{ openclaw_isolated_gateway_workspace_dir }}"
+    openclaw_modern_primary_model: "{{ openclaw_behavior_rehearsal_primary_model }}"
+    openclaw_modern_default_fallbacks: []
+    openclaw_modern_image_fallbacks: []
+    openclaw_modern_antares_model: "{{ openclaw_behavior_rehearsal_antares_model }}"
+    openclaw_modern_antares_fallbacks: []
+    openclaw_modern_heartbeats_enabled: false
+    openclaw_modern_gateway_port: "{{ openclaw_isolated_gateway_port }}"
+    openclaw_modern_codex_port: "{{ openclaw_isolated_codex_port }}"
+
+  tasks:
+    - name: Validate OpenClaw behavior rehearsal mode
+      ansible.builtin.assert:
+        that:
+          - openclaw_behavior_rehearsal_mode | default('disabled') in ['disabled', 'plan', 'apply']
+        fail_msg: >-
+          openclaw_behavior_rehearsal_mode must be disabled, plan, or apply.
+
+    - name: Skip hosts without approved OpenClaw behavior work
+      ansible.builtin.meta: end_host
+      when: openclaw_behavior_rehearsal_mode == 'disabled'
+
+    - name: Require explicit OpenClaw behavior rehearsal approval
+      ansible.builtin.assert:
+        that:
+          - openclaw_behavior_rehearsal_approved | default(false) | bool
+        fail_msg: >-
+          The behavior rehearsal runs model turns and a controlled heartbeat in
+          the private canary. Explicit owner approval is required.
+
+    - name: Validate fixed OpenClaw behavior rehearsal boundaries
+      ansible.builtin.assert:
+        that:
+          - openclaw_isolated_gateway_user == 'openclaw'
+          - openclaw_isolated_gateway_group == 'openclaw'
+          - openclaw_isolated_gateway_port | int == 19789
+          - openclaw_isolated_gateway_config_file == '/etc/openclaw-isolated/openclaw.json'
+          - openclaw_isolated_gateway_state_dir == '/var/lib/openclaw-isolated'
+          - openclaw_isolated_gateway_workspace_dir == '/usr/local/share/openclaw-isolated/workspace'
+          - openclaw_isolated_gateway_runtime_root == '/opt/openclaw-isolated'
+          - openclaw_isolated_gateway_skip_cron | bool
+          - openclaw_behavior_rehearsal_agents | sort == ['antares', 'dubble', 'main', 'rigel', 'vega']
+          - openclaw_behavior_rehearsal_agents | unique | length == 5
+          - openclaw_behavior_rehearsal_primary_model is match('^openai/')
+          - openclaw_behavior_rehearsal_antares_model is match('^ollama-cloud/')
+        fail_msg: >-
+          The behavior canary account, listener, state, models, or agent set is
+          outside the reviewed migration boundary.
+
+    - name: Inspect OpenClaw behavior rehearsal prerequisites
+      ansible.builtin.stat:
+        path: "{{ item }}"
+        follow: false
+      loop:
+        - /etc/systemd/system/openclaw-isolated-gateway.service
+        - "{{ openclaw_isolated_gateway_config_file }}"
+        - "{{ openclaw_isolated_gateway_config_file }}.last-good"
+        - "{{ openclaw_isolated_gateway_secret_file }}"
+        - "{{ openclaw_isolated_gateway_runtime_dir }}/bin/openclaw"
+        - "{{ openclaw_isolated_gateway_state_dir }}/state/openclaw.sqlite"
+        - "{{ openclaw_isolated_gateway_workspace_dir }}/AGENTS.md"
+        - "{{ openclaw_isolated_gateway_workspace_dir }}/dubble/AGENTS.md"
+        - "{{ openclaw_isolated_gateway_workspace_dir }}/vega/AGENTS.md"
+        - "{{ openclaw_isolated_gateway_workspace_dir }}/antares/AGENTS.md"
+        - "{{ openclaw_isolated_gateway_workspace_dir }}/rigel/HEARTBEAT.md"
+        - "{{ openclaw_isolated_gateway_config_dir }}/.infrastructure-validated"
+        - "{{ openclaw_isolated_gateway_config_dir }}/.canary-validated"
+        - "{{ openclaw_isolated_gateway_state_dir }}/state/agents/main/sessions/sessions.json"
+        - "{{ openclaw_isolated_gateway_state_dir }}/state/agents/dubble/sessions/sessions.json"
+        - "{{ openclaw_isolated_gateway_state_dir }}/state/agents/rigel/sessions/sessions.json"
+        - "{{ openclaw_isolated_gateway_state_dir }}/state/agents/vega/sessions/sessions.json"
+        - "{{ openclaw_isolated_gateway_state_dir }}/state/agents/antares/sessions/sessions.json"
+      register: openclaw_behavior_rehearsal_prerequisites
+      check_mode: false
+
+    - name: Require complete OpenClaw behavior rehearsal prerequisites
+      ansible.builtin.assert:
+        that:
+          - openclaw_behavior_rehearsal_prerequisites.results | length == 18
+          - openclaw_behavior_rehearsal_prerequisites.results | map(attribute='stat.isreg') | select('equalto', true) | list | length == 18
+          - openclaw_behavior_rehearsal_prerequisites.results | map(attribute='stat.islnk') | select('equalto', true) | list | length == 0
+        fail_msg: >-
+          The validated canary runtime, modern behavior, database, or five
+          session indexes are incomplete.
+
+    - name: Find successful OpenClaw canary data handoffs
+      ansible.builtin.find:
+        paths: "{{ openclaw_canary_data_backup_dir }}"
+        patterns: result.json
+        file_type: file
+        recurse: true
+        follow: false
+      register: openclaw_behavior_rehearsal_data_results
+      check_mode: false
+
+    - name: Require an applied OpenClaw canary data handoff
+      ansible.builtin.assert:
+        that:
+          - openclaw_behavior_rehearsal_data_results.matched | int > 0
+        fail_msg: >-
+          No successful canary data handoff evidence is available.
+
+    - name: Select latest OpenClaw canary data handoff evidence
+      ansible.builtin.set_fact:
+        openclaw_behavior_rehearsal_data_result_path: >-
+          {{ (openclaw_behavior_rehearsal_data_results.files | sort(attribute='mtime') | last).path }}
+
+    - name: Read latest OpenClaw canary data handoff evidence
+      ansible.builtin.slurp:
+        src: "{{ openclaw_behavior_rehearsal_data_result_path }}"
+      register: openclaw_behavior_rehearsal_data_result_raw
+
+    - name: Parse latest OpenClaw canary data handoff evidence
+      ansible.builtin.set_fact:
+        openclaw_behavior_rehearsal_data_result: >-
+          {{ openclaw_behavior_rehearsal_data_result_raw.content | b64decode | from_json }}
+
+    - name: Require replay-safe applied OpenClaw data handoff
+      ansible.builtin.assert:
+        that:
+          - openclaw_behavior_rehearsal_data_result.status == 'ok'
+          - openclaw_behavior_rehearsal_data_result.mode == 'apply'
+          - openclaw_behavior_rehearsal_data_result.productionGatewayChanged == false
+          - openclaw_behavior_rehearsal_data_result.channelsEnabled == false
+          - openclaw_behavior_rehearsal_data_result.cronEnabled == false
+          - openclaw_behavior_rehearsal_data_result.heartbeatsEnabled == false
+          - openclaw_behavior_rehearsal_data_result.bootEnabled == false
+        fail_msg: >-
+          The latest data handoff is not the applied, silent, replay-safe
+          generation required for behavior testing.
+
+    - name: Read isolated Gateway service confinement
+      ansible.builtin.slurp:
+        src: /etc/systemd/system/openclaw-isolated-gateway.service
+      register: openclaw_behavior_rehearsal_unit_raw
+
+    - name: Require channel-less boot-disabled canary service boundary
+      ansible.builtin.assert:
+        that:
+          - "'Environment=OPENCLAW_SKIP_CHANNELS=1' in (openclaw_behavior_rehearsal_unit_raw.content | b64decode)"
+          - "'Environment=OPENCLAW_SKIP_CRON=1' in (openclaw_behavior_rehearsal_unit_raw.content | b64decode)"
+          - "'ReadOnlyPaths=' + openclaw_isolated_gateway_workspace_dir in (openclaw_behavior_rehearsal_unit_raw.content | b64decode)"
+          - "'InaccessiblePaths=-/run/docker.sock -/var/run/docker.sock' in (openclaw_behavior_rehearsal_unit_raw.content | b64decode)"
+        fail_msg: >-
+          The canary unit does not suppress channels and cron or preserve the
+          reviewed read-only workspace and Docker boundary.
+
+    - name: Inspect isolated Gateway boot state
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/systemctl
+          - is-enabled
+          - openclaw-isolated-gateway.service
+      register: openclaw_behavior_rehearsal_boot_state
+      changed_when: false
+      failed_when: false
+      check_mode: false
+
+    - name: Require isolated Gateway to remain disabled at boot
+      ansible.builtin.assert:
+        that:
+          - openclaw_behavior_rehearsal_boot_state.stdout == 'disabled'
+        fail_msg: >-
+          The temporary loopback canary must remain disabled at boot.
+
+    - name: Report OpenClaw behavior check-mode boundary
+      ansible.builtin.debug:
+        msg: >-
+          Check mode validated the applied data handoff, private canary paths,
+          modern behavior files, service suppression, and boot-disabled state.
+          It does not render configs, run models, trigger a heartbeat, or
+          change either Gateway.
+      when: ansible_check_mode
+
+    - name: Stop OpenClaw behavior rehearsal before mutation in check mode
+      ansible.builtin.meta: end_host
+      when: ansible_check_mode
+
+    - name: Install OpenClaw behavior rehearsal helpers
+      ansible.builtin.copy:
+        src: "{{ ansible_config_file | dirname }}/scripts/agents/{{ item }}"
+        dest: "{{ openclaw_behavior_rehearsal_helper_dir }}/{{ item }}"
+        owner: root
+        group: root
+        mode: "0755"
+      loop:
+        - openclaw-behavior-audit.py
+        - openclaw-delivery-cutover-audit.py
+        - openclaw-modern-config-audit.py
+        - openclaw-native-session-transition.py
+        - openclaw-session-transition.py
+
+    - name: Generate OpenClaw behavior rehearsal timestamp
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/date
+          - --utc
+          - +%Y%m%dT%H%M%SZ
+      register: openclaw_behavior_rehearsal_stamp_raw
+      changed_when: false
+
+    - name: Record OpenClaw behavior rehearsal transaction paths
+      ansible.builtin.set_fact:
+        openclaw_behavior_rehearsal_stamp: "{{ openclaw_behavior_rehearsal_stamp_raw.stdout }}"
+        openclaw_behavior_rehearsal_evidence_dir: >-
+          {{ openclaw_behavior_rehearsal_backup_dir }}/{{ openclaw_behavior_rehearsal_stamp_raw.stdout }}
+        openclaw_behavior_rehearsal_transition_output: >-
+          {{ openclaw_behavior_rehearsal_transition_root }}/{{ openclaw_behavior_rehearsal_stamp_raw.stdout }}
+        openclaw_behavior_rehearsal_backup_ready: false
+
+    - name: Create private OpenClaw behavior evidence directory
+      ansible.builtin.file:
+        path: "{{ openclaw_behavior_rehearsal_evidence_dir }}"
+        state: directory
+        owner: root
+        group: "{{ openclaw_isolated_gateway_group }}"
+        mode: "0770"
+
+    - name: Create service-owned OpenClaw behavior transition parent
+      ansible.builtin.file:
+        path: "{{ openclaw_behavior_rehearsal_transition_root }}"
+        state: directory
+        owner: "{{ openclaw_isolated_gateway_user }}"
+        group: "{{ openclaw_isolated_gateway_group }}"
+        mode: "0700"
+
+    - name: Render channel-less OpenClaw behavior configurations
+      ansible.builtin.template:
+        src: "{{ ansible_config_file | dirname }}/templates/openclaw/openclaw-modern.json.j2"
+        dest: "{{ openclaw_behavior_rehearsal_evidence_dir }}/config-{{ item.name }}.json"
+        owner: root
+        group: "{{ openclaw_isolated_gateway_group }}"
+        mode: "0640"
+      vars:
+        openclaw_modern_behavior_rigel_heartbeat_every: "{{ item.cadence }}"
+      loop:
+        - name: baseline
+          cadence: 0m
+          audit_mode: canary
+        - name: controlled-rigel
+          cadence: 24h
+          audit_mode: controlled-rigel
+
+    - name: Audit rendered OpenClaw behavior configurations
+      ansible.builtin.command:
+        argv:
+          - "{{ openclaw_behavior_rehearsal_config_audit_tool }}"
+          - --config
+          - "{{ openclaw_behavior_rehearsal_evidence_dir }}/config-{{ item.name }}.json"
+          - --heartbeat-mode
+          - "{{ item.audit_mode }}"
+          - --deployment-mode
+          - behavior-canary
+      loop:
+        - name: baseline
+          audit_mode: canary
+        - name: controlled-rigel
+          audit_mode: controlled-rigel
+      register: openclaw_behavior_rehearsal_static_audits
+      changed_when: false
+
+    - name: Require clean static OpenClaw behavior audits
+      ansible.builtin.assert:
+        that:
+          - (item.stdout | from_json).status == 'ok'
+          - (item.stdout | from_json).deploymentMode == 'behavior-canary'
+          - (item.stdout | from_json).bindingCount | int == 0
+          - (item.stdout | from_json).pluginCount | int == 3
+        fail_msg: >-
+          A rendered behavior canary config violates the channel-less static
+          contract.
+      loop: "{{ openclaw_behavior_rehearsal_static_audits.results }}"
+
+    - name: Record OpenClaw behavior plan result
+      ansible.builtin.copy:
+        dest: "{{ openclaw_behavior_rehearsal_evidence_dir }}/plan-result.json"
+        owner: root
+        group: root
+        mode: "0600"
+        content: >-
+          {{
+            {
+              'status': 'ok',
+              'mode': openclaw_behavior_rehearsal_mode,
+              'configsAudited': 2,
+              'productionGatewayChanged': false,
+              'modelsRun': false,
+              'heartbeatRun': false
+            }
+            | to_nice_json
+          }}
+
+    - name: Freeze planned OpenClaw behavior evidence
+      ansible.builtin.file:
+        path: "{{ openclaw_behavior_rehearsal_evidence_dir }}"
+        state: directory
+        owner: root
+        group: root
+        mode: u=rwX,go=
+        recurse: true
+        follow: false
+      when: openclaw_behavior_rehearsal_mode == 'plan'
+
+    - name: Stop after non-mutating OpenClaw behavior plan
+      ansible.builtin.meta: end_host
+      when: openclaw_behavior_rehearsal_mode == 'plan'
+
+    - name: Inspect prior isolated Gateway activity
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/systemctl
+          - is-active
+          - openclaw-isolated-gateway.service
+      register: openclaw_behavior_rehearsal_prior_service
+      changed_when: false
+      failed_when: false
+
+    - name: Capture production Gateway listener before behavior rehearsal
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/ss
+          - --tcp
+          - --listening
+          - --numeric
+          - --processes
+          - "sport = :{{ openclaw_port }}"
+      register: openclaw_behavior_rehearsal_production_before
+      changed_when: false
+
+    - name: Require one visible production Gateway listener before rehearsal
+      ansible.builtin.assert:
+        that:
+          - "':' + (openclaw_port | string) in openclaw_behavior_rehearsal_production_before.stdout"
+          - "'pid=' in openclaw_behavior_rehearsal_production_before.stdout"
+        fail_msg: >-
+          The existing production Gateway listener is not visible for the
+          no-change comparison.
+
+    - name: Promote and validate OpenClaw behavior transaction
+      block:
+        - name: Stop isolated Gateway before behavior backup
+          ansible.builtin.systemd_service:
+            name: openclaw-isolated-gateway.service
+            enabled: false
+            state: stopped
+
+        - name: Inspect optional stopped-state SQLite sidecars
+          ansible.builtin.stat:
+            path: "{{ item }}"
+            follow: false
+          loop:
+            - "{{ openclaw_isolated_gateway_state_dir }}/state/openclaw.sqlite-wal"
+            - "{{ openclaw_isolated_gateway_state_dir }}/state/openclaw.sqlite-shm"
+          register: openclaw_behavior_rehearsal_sqlite_sidecars
+
+        - name: Record targeted OpenClaw behavior rollback paths
+          ansible.builtin.set_fact:
+            openclaw_behavior_rehearsal_backup_paths: >-
+              {{
+                [
+                  openclaw_isolated_gateway_config_file,
+                  openclaw_isolated_gateway_config_file + '.last-good',
+                  openclaw_isolated_gateway_state_dir + '/state/openclaw.sqlite',
+                  openclaw_isolated_gateway_state_dir + '/state/agents/main/sessions/sessions.json',
+                  openclaw_isolated_gateway_state_dir + '/state/agents/dubble/sessions/sessions.json',
+                  openclaw_isolated_gateway_state_dir + '/state/agents/rigel/sessions/sessions.json',
+                  openclaw_isolated_gateway_state_dir + '/state/agents/vega/sessions/sessions.json',
+                  openclaw_isolated_gateway_state_dir + '/state/agents/antares/sessions/sessions.json'
+                ]
+                + (
+                  openclaw_behavior_rehearsal_sqlite_sidecars.results
+                  | selectattr('stat.exists', 'equalto', true)
+                  | map(attribute='item')
+                  | list
+                )
+              }}
+
+        - name: Back up targeted OpenClaw behavior state
+          ansible.builtin.command:
+            argv: >-
+              {{
+                [
+                  '/usr/bin/tar',
+                  '--create',
+                  '--file', openclaw_behavior_rehearsal_evidence_dir + '/rollback.tar',
+                  '--absolute-names',
+                  '--numeric-owner',
+                  '--acls',
+                  '--xattrs'
+                ]
+                + openclaw_behavior_rehearsal_backup_paths
+              }}
+          changed_when: true
+
+        - name: Record completed OpenClaw behavior rollback artifact
+          ansible.builtin.set_fact:
+            openclaw_behavior_rehearsal_backup_ready: true
+
+        - name: Prepare writable last-good files for native config validation
+          ansible.builtin.copy:
+            src: "{{ openclaw_behavior_rehearsal_evidence_dir }}/config-{{ item }}.json"
+            dest: "{{ openclaw_behavior_rehearsal_evidence_dir }}/config-{{ item }}.json.last-good"
+            remote_src: true
+            owner: "{{ openclaw_isolated_gateway_user }}"
+            group: "{{ openclaw_isolated_gateway_group }}"
+            mode: "0600"
+          loop:
+            - baseline
+            - controlled-rigel
+
+        - name: Validate behavior configs with the installed OpenClaw schema
+          ansible.builtin.command:
+            argv:
+              - /usr/sbin/runuser
+              - -u
+              - "{{ openclaw_isolated_gateway_user }}"
+              - --
+              - /usr/bin/env
+              - "HOME={{ openclaw_isolated_gateway_state_dir }}"
+              - "OPENCLAW_HOME={{ openclaw_isolated_gateway_state_dir }}"
+              - "OPENCLAW_STATE_DIR={{ openclaw_isolated_gateway_state_dir }}/state"
+              - "OPENCLAW_CONFIG_PATH={{ openclaw_behavior_rehearsal_evidence_dir }}/config-{{ item }}.json"
+              - "OPENCLAW_WORKSPACE_DIR={{ openclaw_isolated_gateway_workspace_dir }}"
+              - OPENCLAW_SKIP_CHANNELS=1
+              - OPENCLAW_SKIP_CRON=1
+              - MEM0_TELEMETRY=false
+              - NO_COLOR=1
+              - "{{ openclaw_isolated_gateway_runtime_dir }}/bin/openclaw"
+              - config
+              - validate
+              - --json
+          loop:
+            - baseline
+            - controlled-rigel
+          register: openclaw_behavior_rehearsal_native_config_audits
+          changed_when: false
+          no_log: true
+
+        - name: Require native OpenClaw config validation
+          ansible.builtin.assert:
+            that:
+              - (item.stdout | from_json).valid | bool
+            fail_msg: >-
+              The installed OpenClaw runtime rejected a behavior canary config.
+          loop: "{{ openclaw_behavior_rehearsal_native_config_audits.results }}"
+          no_log: true
+
+        - name: Deploy baseline channel-less behavior config
+          ansible.builtin.copy:
+            src: "{{ openclaw_behavior_rehearsal_evidence_dir }}/config-baseline.json"
+            dest: "{{ openclaw_isolated_gateway_config_file }}"
+            remote_src: true
+            owner: root
+            group: "{{ openclaw_isolated_gateway_group }}"
+            mode: "0640"
+
+        - name: Deploy writable baseline last-good config
+          ansible.builtin.copy:
+            src: "{{ openclaw_behavior_rehearsal_evidence_dir }}/config-baseline.json"
+            dest: "{{ openclaw_isolated_gateway_config_file }}.last-good"
+            remote_src: true
+            owner: "{{ openclaw_isolated_gateway_user }}"
+            group: "{{ openclaw_isolated_gateway_group }}"
+            mode: "0600"
+
+        - name: Audit replay-capable canary delivery state before behavior turns
+          ansible.builtin.command:
+            argv: >-
+              {{
+                [
+                  openclaw_behavior_rehearsal_delivery_audit_tool,
+                  '--database', openclaw_isolated_gateway_state_dir + '/state/openclaw.sqlite',
+                  '--output', openclaw_behavior_rehearsal_evidence_dir + '/delivery-before.json',
+                  '--require-clean'
+                ]
+                + openclaw_behavior_rehearsal_session_index_arguments
+              }}
+          register: openclaw_behavior_rehearsal_delivery_before
+          changed_when: false
+          no_log: true
+
+        - name: Require replay-safe canary before behavior turns
+          ansible.builtin.assert:
+            that:
+              - (openclaw_behavior_rehearsal_delivery_before.stdout | from_json).status == 'clean'
+              - (openclaw_behavior_rehearsal_delivery_before.stdout | from_json).pendingDatabaseDeliveries | int == 0
+              - (openclaw_behavior_rehearsal_delivery_before.stdout | from_json).activeSessionRecoveryEntries | int == 0
+            fail_msg: >-
+              The canary contains replay-capable delivery state before the
+              behavior test.
+          no_log: true
+
+        - name: Start baseline OpenClaw behavior canary
+          ansible.builtin.systemd_service:
+            name: openclaw-isolated-gateway.service
+            enabled: false
+            state: started
+            daemon_reload: true
+
+        - name: Wait for baseline OpenClaw behavior canary
+          ansible.builtin.wait_for:
+            host: 127.0.0.1
+            port: "{{ openclaw_isolated_gateway_port }}"
+            state: started
+            timeout: 90
+
+        - name: Generate OpenClaw behavior probe identity
+          ansible.builtin.command:
+            argv:
+              - /usr/bin/cat
+              - /proc/sys/kernel/random/uuid
+          register: openclaw_behavior_rehearsal_probe_id
+          changed_when: false
+
+        - name: Record OpenClaw behavior probe keys
+          ansible.builtin.set_fact:
+            openclaw_behavior_rehearsal_nonce: >-
+              behavior-{{ openclaw_behavior_rehearsal_probe_id.stdout }}
+            openclaw_behavior_rehearsal_dubble_marker: >-
+              DUBBLE_CANARY_{{ openclaw_behavior_rehearsal_probe_id.stdout }}
+            openclaw_behavior_rehearsal_dubble_session_key: >-
+              agent:dubble:explicit:behavior-dubble-{{ openclaw_behavior_rehearsal_probe_id.stdout }}
+            openclaw_behavior_rehearsal_star_session_key: >-
+              agent:main:explicit:behavior-star-{{ openclaw_behavior_rehearsal_probe_id.stdout }}
+            openclaw_behavior_rehearsal_rigel_base_session_key: >-
+              agent:rigel:explicit:behavior-heartbeat-{{ openclaw_behavior_rehearsal_probe_id.stdout }}
+            openclaw_behavior_rehearsal_rigel_session_key: >-
+              agent:rigel:explicit:behavior-heartbeat-{{ openclaw_behavior_rehearsal_probe_id.stdout }}:heartbeat
+
+        - name: Write private Dubble behavior prompt
+          ansible.builtin.copy:
+            dest: "{{ openclaw_behavior_rehearsal_evidence_dir }}/dubble-prompt.txt"
+            owner: root
+            group: "{{ openclaw_isolated_gateway_group }}"
+            mode: "0640"
+            content: >-
+              Reply with exactly {{ openclaw_behavior_rehearsal_dubble_marker }} and no other text.
+
+        - name: Write private Star delegation behavior prompt
+          ansible.builtin.copy:
+            dest: "{{ openclaw_behavior_rehearsal_evidence_dir }}/star-prompt.txt"
+            owner: root
+            group: "{{ openclaw_isolated_gateway_group }}"
+            mode: "0640"
+            content: |
+              This is an attended, channel-less behavior canary with nonce {{ openclaw_behavior_rehearsal_nonce }}.
+
+              Decide between these two exact synthetic plans:
+              - Cedar costs $12 per user per year, supports independent accounts, MFA, and IMAP.
+              - Birch costs $10 total per year, supports independent accounts and IMAP, but has no MFA.
+              - The organization needs exactly two independent accounts, MFA is mandatory, IMAP is mandatory, and the annual cap is $30.
+
+              Use native Star delegation. Spawn Vega in mode run with cleanup keep and give Vega the complete facts, constraints, and nonce; require its internal evidence packet to repeat the nonce. Wait for Vega's actual result. Then spawn Antares in mode run with cleanup keep and give Antares the complete facts, constraints, nonce, and Vega's complete actual packet verbatim; require a PASS, FAIL, or DISPUTE packet that repeats the nonce. Wait for Antares. Do not use web tools and do not mutate anything.
+
+              After resolving the two internal packets, return one normal user-facing sentence no longer than 300 characters. It must name Cedar, $24, $30, MFA, and IMAP. Do not mention delegation, agents, review, packets, verdicts, or the nonce.
+
+        - name: Run Dubble behavior probe
+          ansible.builtin.command:
+            argv:
+              - /usr/sbin/runuser
+              - -u
+              - "{{ openclaw_isolated_gateway_user }}"
+              - --
+              - /usr/bin/env
+              - "HOME={{ openclaw_isolated_gateway_state_dir }}"
+              - "OPENCLAW_HOME={{ openclaw_isolated_gateway_state_dir }}"
+              - "OPENCLAW_STATE_DIR={{ openclaw_isolated_gateway_state_dir }}/state"
+              - "OPENCLAW_CONFIG_PATH={{ openclaw_isolated_gateway_config_file }}"
+              - "OPENCLAW_WORKSPACE_DIR={{ openclaw_isolated_gateway_workspace_dir }}"
+              - OPENCLAW_SKIP_CHANNELS=1
+              - OPENCLAW_SKIP_CRON=1
+              - MEM0_TELEMETRY=false
+              - NO_COLOR=1
+              - "{{ openclaw_isolated_gateway_runtime_dir }}/bin/openclaw"
+              - agent
+              - --agent
+              - dubble
+              - --session-key
+              - "{{ openclaw_behavior_rehearsal_dubble_session_key }}"
+              - --timeout
+              - "300"
+              - --message-file
+              - "{{ openclaw_behavior_rehearsal_evidence_dir }}/dubble-prompt.txt"
+              - --json
+          register: openclaw_behavior_rehearsal_dubble_result
+          changed_when: false
+          no_log: true
+
+        - name: Preserve private Dubble behavior result
+          ansible.builtin.copy:
+            dest: "{{ openclaw_behavior_rehearsal_evidence_dir }}/dubble-result.json"
+            owner: root
+            group: root
+            mode: "0600"
+            content: "{{ openclaw_behavior_rehearsal_dubble_result.stdout }}"
+          no_log: true
+
+        - name: Run real Star delegation behavior probe
+          ansible.builtin.command:
+            argv:
+              - /usr/sbin/runuser
+              - -u
+              - "{{ openclaw_isolated_gateway_user }}"
+              - --
+              - /usr/bin/env
+              - "HOME={{ openclaw_isolated_gateway_state_dir }}"
+              - "OPENCLAW_HOME={{ openclaw_isolated_gateway_state_dir }}"
+              - "OPENCLAW_STATE_DIR={{ openclaw_isolated_gateway_state_dir }}/state"
+              - "OPENCLAW_CONFIG_PATH={{ openclaw_isolated_gateway_config_file }}"
+              - "OPENCLAW_WORKSPACE_DIR={{ openclaw_isolated_gateway_workspace_dir }}"
+              - OPENCLAW_SKIP_CHANNELS=1
+              - OPENCLAW_SKIP_CRON=1
+              - MEM0_TELEMETRY=false
+              - NO_COLOR=1
+              - "{{ openclaw_isolated_gateway_runtime_dir }}/bin/openclaw"
+              - agent
+              - --agent
+              - main
+              - --session-key
+              - "{{ openclaw_behavior_rehearsal_star_session_key }}"
+              - --timeout
+              - "900"
+              - --message-file
+              - "{{ openclaw_behavior_rehearsal_evidence_dir }}/star-prompt.txt"
+              - --json
+          register: openclaw_behavior_rehearsal_star_result
+          changed_when: false
+          no_log: true
+
+        - name: Preserve private Star behavior result
+          ansible.builtin.copy:
+            dest: "{{ openclaw_behavior_rehearsal_evidence_dir }}/star-result.json"
+            owner: root
+            group: root
+            mode: "0600"
+            content: "{{ openclaw_behavior_rehearsal_star_result.stdout }}"
+          no_log: true
+
+        - name: Deploy controlled Rigel heartbeat config
+          ansible.builtin.copy:
+            src: "{{ openclaw_behavior_rehearsal_evidence_dir }}/config-controlled-rigel.json"
+            dest: "{{ openclaw_isolated_gateway_config_file }}"
+            remote_src: true
+            owner: root
+            group: "{{ openclaw_isolated_gateway_group }}"
+            mode: "0640"
+
+        - name: Deploy controlled Rigel last-good config
+          ansible.builtin.copy:
+            src: "{{ openclaw_behavior_rehearsal_evidence_dir }}/config-controlled-rigel.json"
+            dest: "{{ openclaw_isolated_gateway_config_file }}.last-good"
+            remote_src: true
+            owner: "{{ openclaw_isolated_gateway_user }}"
+            group: "{{ openclaw_isolated_gateway_group }}"
+            mode: "0600"
+
+        - name: Restart canary for controlled Rigel heartbeat
+          ansible.builtin.systemd_service:
+            name: openclaw-isolated-gateway.service
+            enabled: false
+            state: restarted
+
+        - name: Wait for controlled Rigel heartbeat canary
+          ansible.builtin.wait_for:
+            host: 127.0.0.1
+            port: "{{ openclaw_isolated_gateway_port }}"
+            state: started
+            timeout: 90
+
+        - name: Record controlled Rigel heartbeat start time
+          ansible.builtin.command:
+            argv:
+              - /usr/bin/date
+              - +%s%3N
+          register: openclaw_behavior_rehearsal_heartbeat_started
+          changed_when: false
+
+        - name: Trigger one targeted Rigel heartbeat
+          ansible.builtin.command:
+            argv:
+              - /usr/sbin/runuser
+              - -u
+              - "{{ openclaw_isolated_gateway_user }}"
+              - --
+              - /usr/bin/env
+              - "HOME={{ openclaw_isolated_gateway_state_dir }}"
+              - "OPENCLAW_HOME={{ openclaw_isolated_gateway_state_dir }}"
+              - "OPENCLAW_STATE_DIR={{ openclaw_isolated_gateway_state_dir }}/state"
+              - "OPENCLAW_CONFIG_PATH={{ openclaw_isolated_gateway_config_file }}"
+              - "OPENCLAW_WORKSPACE_DIR={{ openclaw_isolated_gateway_workspace_dir }}"
+              - OPENCLAW_SKIP_CHANNELS=1
+              - OPENCLAW_SKIP_CRON=1
+              - MEM0_TELEMETRY=false
+              - NO_COLOR=1
+              - "{{ openclaw_isolated_gateway_runtime_dir }}/bin/openclaw"
+              - system
+              - event
+              - --text
+              - Run Rigel's idle academic source gate now.
+              - --mode
+              - now
+              - --session-key
+              - "{{ openclaw_behavior_rehearsal_rigel_base_session_key }}"
+              - --json
+          register: openclaw_behavior_rehearsal_heartbeat_trigger
+          changed_when: false
+          no_log: true
+
+        - name: Wait for new silent Rigel heartbeat evidence
+          ansible.builtin.command:
+            argv:
+              - /usr/sbin/runuser
+              - -u
+              - "{{ openclaw_isolated_gateway_user }}"
+              - --
+              - /usr/bin/env
+              - "HOME={{ openclaw_isolated_gateway_state_dir }}"
+              - "OPENCLAW_HOME={{ openclaw_isolated_gateway_state_dir }}"
+              - "OPENCLAW_STATE_DIR={{ openclaw_isolated_gateway_state_dir }}/state"
+              - "OPENCLAW_CONFIG_PATH={{ openclaw_isolated_gateway_config_file }}"
+              - "OPENCLAW_WORKSPACE_DIR={{ openclaw_isolated_gateway_workspace_dir }}"
+              - OPENCLAW_SKIP_CHANNELS=1
+              - OPENCLAW_SKIP_CRON=1
+              - MEM0_TELEMETRY=false
+              - NO_COLOR=1
+              - "{{ openclaw_isolated_gateway_runtime_dir }}/bin/openclaw"
+              - system
+              - heartbeat
+              - last
+              - --json
+          register: openclaw_behavior_rehearsal_heartbeat_last
+          changed_when: false
+          failed_when: false
+          retries: 90
+          delay: 2
+          until: >-
+            openclaw_behavior_rehearsal_heartbeat_last.rc == 0
+            and openclaw_behavior_rehearsal_heartbeat_last.stdout is match('^\s*\{')
+            and (
+              ((openclaw_behavior_rehearsal_heartbeat_last.stdout | from_json).ts | int)
+              >= (openclaw_behavior_rehearsal_heartbeat_started.stdout | int)
+            )
+          no_log: true
+
+        - name: Preserve private Rigel heartbeat event
+          ansible.builtin.copy:
+            dest: "{{ openclaw_behavior_rehearsal_evidence_dir }}/heartbeat-event.json"
+            owner: root
+            group: root
+            mode: "0600"
+            content: "{{ openclaw_behavior_rehearsal_heartbeat_last.stdout }}"
+          no_log: true
+
+        - name: Audit persisted OpenClaw behavior evidence
+          ansible.builtin.command:
+            argv:
+              - "{{ openclaw_behavior_rehearsal_audit_tool }}"
+              - --state-root
+              - "{{ openclaw_isolated_gateway_state_dir }}/state"
+              - --workspace-root
+              - "{{ openclaw_isolated_gateway_workspace_dir }}"
+              - --dubble-result
+              - "{{ openclaw_behavior_rehearsal_evidence_dir }}/dubble-result.json"
+              - --dubble-session-key
+              - "{{ openclaw_behavior_rehearsal_dubble_session_key }}"
+              - --dubble-marker
+              - "{{ openclaw_behavior_rehearsal_dubble_marker }}"
+              - --star-result
+              - "{{ openclaw_behavior_rehearsal_evidence_dir }}/star-result.json"
+              - --star-session-key
+              - "{{ openclaw_behavior_rehearsal_star_session_key }}"
+              - --nonce
+              - "{{ openclaw_behavior_rehearsal_nonce }}"
+              - --heartbeat-event
+              - "{{ openclaw_behavior_rehearsal_evidence_dir }}/heartbeat-event.json"
+              - --heartbeat-session-key
+              - "{{ openclaw_behavior_rehearsal_rigel_session_key }}"
+              - --heartbeat-started-at-ms
+              - "{{ openclaw_behavior_rehearsal_heartbeat_started.stdout }}"
+              - --primary-model
+              - "{{ openclaw_behavior_rehearsal_primary_model }}"
+              - --antares-model
+              - "{{ openclaw_behavior_rehearsal_antares_model }}"
+              - --output
+              - "{{ openclaw_behavior_rehearsal_evidence_dir }}/behavior-audit.json"
+          register: openclaw_behavior_rehearsal_behavior_audit
+          changed_when: false
+          no_log: true
+
+        - name: Require complete private OpenClaw behavior proof
+          ansible.builtin.assert:
+            that:
+              - (openclaw_behavior_rehearsal_behavior_audit.stdout | from_json).status == 'ok'
+              - (openclaw_behavior_rehearsal_behavior_audit.stdout | from_json).agentCount | int == 5
+              - (openclaw_behavior_rehearsal_behavior_audit.stdout | from_json).starChildCount | int == 2
+              - (openclaw_behavior_rehearsal_behavior_audit.stdout | from_json).rigelSilent | bool
+            fail_msg: >-
+              Dubble, Star delegation, reviewer lineage, or Rigel idle silence
+              failed its private runtime evidence gate.
+          no_log: true
+
+        - name: Restore baseline channel-less behavior config immediately
+          ansible.builtin.copy:
+            src: "{{ openclaw_behavior_rehearsal_evidence_dir }}/config-baseline.json"
+            dest: "{{ openclaw_isolated_gateway_config_file }}"
+            remote_src: true
+            owner: root
+            group: "{{ openclaw_isolated_gateway_group }}"
+            mode: "0640"
+
+        - name: Restore writable baseline last-good config immediately
+          ansible.builtin.copy:
+            src: "{{ openclaw_behavior_rehearsal_evidence_dir }}/config-baseline.json"
+            dest: "{{ openclaw_isolated_gateway_config_file }}.last-good"
+            remote_src: true
+            owner: "{{ openclaw_isolated_gateway_user }}"
+            group: "{{ openclaw_isolated_gateway_group }}"
+            mode: "0600"
+
+        - name: Restart canary with disabled heartbeat baseline
+          ansible.builtin.systemd_service:
+            name: openclaw-isolated-gateway.service
+            enabled: false
+            state: restarted
+
+        - name: Wait for disabled-heartbeat baseline canary
+          ansible.builtin.wait_for:
+            host: 127.0.0.1
+            port: "{{ openclaw_isolated_gateway_port }}"
+            state: started
+            timeout: 90
+
+        - name: Archive synthetic behavior sessions through native OpenClaw RPC
+          ansible.builtin.command:
+            argv: >-
+              {{
+                [
+                  '/usr/sbin/runuser',
+                  '-u', openclaw_isolated_gateway_user,
+                  '--',
+                  openclaw_behavior_rehearsal_transition_tool,
+                  '--mode', 'apply',
+                  '--openclaw', openclaw_isolated_gateway_runtime_dir + '/bin/openclaw',
+                  '--runtime-root', openclaw_isolated_gateway_runtime_root,
+                  '--home', openclaw_isolated_gateway_state_dir,
+                  '--state-root', openclaw_isolated_gateway_state_dir + '/state',
+                  '--config', openclaw_isolated_gateway_config_file,
+                  '--workspace', openclaw_isolated_gateway_workspace_dir,
+                  '--output-dir', openclaw_behavior_rehearsal_transition_output
+                ]
+                + openclaw_behavior_rehearsal_agent_arguments
+              }}
+          register: openclaw_behavior_rehearsal_transition
+          changed_when: true
+          no_log: true
+
+        - name: Require converged native behavior session archive
+          ansible.builtin.assert:
+            that:
+              - (openclaw_behavior_rehearsal_transition.stdout | from_json).status == 'ok'
+              - (openclaw_behavior_rehearsal_transition.stdout | from_json).mode == 'apply'
+              - (openclaw_behavior_rehearsal_transition.stdout | from_json).summary.archivePlanned | int >= 5
+              - >-
+                (openclaw_behavior_rehearsal_transition.stdout | from_json).summary.archived
+                ==
+                (openclaw_behavior_rehearsal_transition.stdout | from_json).summary.archivePlanned
+            fail_msg: >-
+              Synthetic behavior sessions did not converge through OpenClaw's
+              native archive API.
+          no_log: true
+
+        - name: Freeze native behavior transition evidence
+          ansible.builtin.file:
+            path: "{{ openclaw_behavior_rehearsal_transition_output }}"
+            state: directory
+            owner: root
+            group: root
+            mode: u=rwX,go=
+            recurse: true
+            follow: false
+
+        - name: Move native behavior transition evidence into rollback record
+          ansible.builtin.command:
+            argv:
+              - /usr/bin/mv
+              - --no-clobber
+              - "{{ openclaw_behavior_rehearsal_transition_output }}"
+              - "{{ openclaw_behavior_rehearsal_evidence_dir }}/native-transition"
+          changed_when: true
+
+        - name: Audit replay-capable canary delivery state after behavior turns
+          ansible.builtin.command:
+            argv: >-
+              {{
+                [
+                  openclaw_behavior_rehearsal_delivery_audit_tool,
+                  '--database', openclaw_isolated_gateway_state_dir + '/state/openclaw.sqlite',
+                  '--output', openclaw_behavior_rehearsal_evidence_dir + '/delivery-after.json',
+                  '--require-clean'
+                ]
+                + openclaw_behavior_rehearsal_session_index_arguments
+              }}
+          register: openclaw_behavior_rehearsal_delivery_after
+          changed_when: false
+          no_log: true
+
+        - name: Read before and after delivery audit evidence
+          ansible.builtin.slurp:
+            src: "{{ item }}"
+          loop:
+            - "{{ openclaw_behavior_rehearsal_evidence_dir }}/delivery-before.json"
+            - "{{ openclaw_behavior_rehearsal_evidence_dir }}/delivery-after.json"
+          register: openclaw_behavior_rehearsal_delivery_evidence
+          no_log: true
+
+        - name: Require no delivery queue or recovery-state regression
+          ansible.builtin.assert:
+            that:
+              - (openclaw_behavior_rehearsal_delivery_after.stdout | from_json).status == 'clean'
+              - (openclaw_behavior_rehearsal_delivery_after.stdout | from_json).pendingDatabaseDeliveries | int == 0
+              - (openclaw_behavior_rehearsal_delivery_after.stdout | from_json).activeSessionRecoveryEntries | int == 0
+              - >-
+                (openclaw_behavior_rehearsal_delivery_evidence.results[0].content | b64decode | from_json).database.entries
+                ==
+                (openclaw_behavior_rehearsal_delivery_evidence.results[1].content | b64decode | from_json).database.entries
+              - >-
+                (openclaw_behavior_rehearsal_delivery_evidence.results[0].content | b64decode | from_json).database.failedHistory
+                ==
+                (openclaw_behavior_rehearsal_delivery_evidence.results[1].content | b64decode | from_json).database.failedHistory
+            fail_msg: >-
+              The behavior canary created replay-capable delivery state or
+              altered delivery history.
+          no_log: true
+
+        - name: Restore prior isolated Gateway activity
+          ansible.builtin.systemd_service:
+            name: openclaw-isolated-gateway.service
+            enabled: false
+            state: >-
+              {{ 'started' if openclaw_behavior_rehearsal_prior_service.stdout == 'active' else 'stopped' }}
+
+        - name: Recheck isolated Gateway boot state after behavior rehearsal
+          ansible.builtin.command:
+            argv:
+              - /usr/bin/systemctl
+              - is-enabled
+              - openclaw-isolated-gateway.service
+          register: openclaw_behavior_rehearsal_final_boot_state
+          changed_when: false
+          failed_when: false
+
+        - name: Require boot-disabled isolated Gateway after behavior rehearsal
+          ansible.builtin.assert:
+            that:
+              - openclaw_behavior_rehearsal_final_boot_state.stdout == 'disabled'
+            fail_msg: >-
+              The behavior rehearsal changed the canary's boot policy.
+
+        - name: Capture production Gateway listener after behavior rehearsal
+          ansible.builtin.command:
+            argv:
+              - /usr/bin/ss
+              - --tcp
+              - --listening
+              - --numeric
+              - --processes
+              - "sport = :{{ openclaw_port }}"
+          register: openclaw_behavior_rehearsal_production_after
+          changed_when: false
+
+        - name: Require unchanged production Gateway listener
+          ansible.builtin.assert:
+            that:
+              - >-
+                openclaw_behavior_rehearsal_production_after.stdout
+                == openclaw_behavior_rehearsal_production_before.stdout
+            fail_msg: >-
+              The production Gateway listener changed during the isolated
+              behavior rehearsal.
+
+        - name: Record successful OpenClaw behavior rehearsal
+          ansible.builtin.copy:
+            dest: "{{ openclaw_behavior_rehearsal_evidence_dir }}/result.json"
+            owner: root
+            group: root
+            mode: "0600"
+            content: >-
+              {{
+                {
+                  'status': 'ok',
+                  'mode': 'apply',
+                  'timestamp': openclaw_behavior_rehearsal_stamp,
+                  'agentsValidated': 5,
+                  'starChildrenValidated': 2,
+                  'rigelSilent': true,
+                  'channelsEnabled': false,
+                  'cronEnabled': false,
+                  'baselineHeartbeatsEnabled': false,
+                  'bootEnabled': false,
+                  'productionGatewayChanged': false
+                }
+                | to_nice_json
+              }}
+
+        - name: Freeze successful OpenClaw behavior evidence
+          ansible.builtin.file:
+            path: "{{ openclaw_behavior_rehearsal_evidence_dir }}"
+            state: directory
+            owner: root
+            group: root
+            mode: u=rwX,go=
+            recurse: true
+            follow: false
+
+      rescue:
+        - name: Stop failed OpenClaw behavior canary
+          ansible.builtin.systemd_service:
+            name: openclaw-isolated-gateway.service
+            enabled: false
+            state: stopped
+          failed_when: false
+
+        - name: Restore targeted OpenClaw behavior rollback artifact
+          ansible.builtin.command:
+            argv:
+              - /usr/bin/tar
+              - --extract
+              - --file
+              - "{{ openclaw_behavior_rehearsal_evidence_dir }}/rollback.tar"
+              - --absolute-names
+              - --numeric-owner
+              - --acls
+              - --xattrs
+              - --directory
+              - /
+          when: openclaw_behavior_rehearsal_backup_ready | bool
+          changed_when: true
+          failed_when: false
+
+        - name: Restore prior isolated Gateway activity after failure
+          ansible.builtin.systemd_service:
+            name: openclaw-isolated-gateway.service
+            enabled: false
+            state: >-
+              {{ 'started' if openclaw_behavior_rehearsal_prior_service.stdout == 'active' else 'stopped' }}
+          failed_when: false
+
+        - name: Preserve failed OpenClaw behavior evidence privately
+          ansible.builtin.file:
+            path: "{{ openclaw_behavior_rehearsal_evidence_dir }}"
+            state: directory
+            owner: root
+            group: root
+            mode: u=rwX,go=
+            recurse: true
+            follow: false
+          failed_when: false
+
+        - name: Fail OpenClaw behavior rehearsal after rollback
+          ansible.builtin.fail:
+            msg: >-
+              OpenClaw behavior rehearsal failed. The prior canary config,
+              database, session indexes, activity, and boot-disabled policy
+              were restored; private evidence remains under
+              {{ openclaw_behavior_rehearsal_evidence_dir }}.

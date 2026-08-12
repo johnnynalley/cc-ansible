@@ -19,36 +19,53 @@ openclaw_isolated_gateway_mode: disabled
 openclaw_isolated_gateway_canary_approved: false
 openclaw_isolated_gateway_user: openclaw
 openclaw_isolated_gateway_group: openclaw
-openclaw_isolated_gateway_report_groups: []
+openclaw_isolated_codex_user: openclaw-codex
+openclaw_isolated_codex_group: openclaw-codex
+openclaw_isolated_runtime_group: openclaw-runtime
+openclaw_isolated_workspace_group: openclaw-workspace
+openclaw_isolated_gateway_supplementary_groups:
+  - openclaw-runtime
+  - openclaw-workspace
+openclaw_isolated_codex_supplementary_groups:
+  - openclaw-runtime
+  - openclaw-workspace
 openclaw_isolated_gateway_legacy_user: johnny
 openclaw_isolated_gateway_port: 19789
+openclaw_isolated_codex_port: 19790
 openclaw_isolated_gateway_model: openai/gpt-5.6-sol
+# The temporary canary must never schedule copied production jobs. Final
+# production activation uses a separate attended cutover gate.
+openclaw_isolated_gateway_skip_cron: true
 openclaw_isolated_gateway_runtime_root: /opt/openclaw-isolated
 openclaw_isolated_gateway_releases_dir: /opt/openclaw-isolated/releases
 openclaw_isolated_gateway_runtime_dir: /opt/openclaw-isolated/current
-openclaw_isolated_gateway_codex_plugin_dir: >-
-  /opt/openclaw-isolated/current/plugins/codex/node_modules/@openclaw/codex
+openclaw_isolated_gateway_plugin_state_root: >-
+  /var/lib/openclaw-isolated/state/npm
 openclaw_isolated_gateway_managed_plugins:
   - id: codex
     package: "@openclaw/codex"
     install_spec: "@openclaw/codex@latest"
     require_core_match: true
     trusted_official: true
+    convergence_status: loaded
   - id: discord
     package: "@openclaw/discord"
     install_spec: "@openclaw/discord@latest"
     require_core_match: true
     trusted_official: true
+    convergence_status: loaded
   - id: lossless-claw
     package: "@martian-engineering/lossless-claw"
     install_spec: "@martian-engineering/lossless-claw@latest"
     require_core_match: false
     trusted_official: false
+    convergence_status: loaded
   - id: openclaw-mem0
     package: "@mem0/openclaw-mem0"
     install_spec: "@mem0/openclaw-mem0@latest"
     require_core_match: false
     trusted_official: false
+    convergence_status: disabled
 openclaw_isolated_gateway_retired_global_plugins:
   - brave
   - nextcloud-talk
@@ -60,14 +77,23 @@ openclaw_isolated_gateway_build_dir: /var/cache/openclaw-isolated-build
 openclaw_isolated_gateway_config_dir: /etc/openclaw-isolated
 openclaw_isolated_gateway_config_file: /etc/openclaw-isolated/openclaw.json
 openclaw_isolated_gateway_secret_file: /etc/openclaw-isolated/secrets.json
+openclaw_isolated_codex_config_dir: /etc/openclaw-codex
+openclaw_isolated_codex_token_file: /etc/openclaw-codex/app-server.token
+openclaw_isolated_codex_state_dir: /var/lib/openclaw-codex
+openclaw_isolated_codex_runtime_dir: /opt/openclaw-codex/runtime
 openclaw_isolated_gateway_state_dir: /var/lib/openclaw-isolated
 openclaw_isolated_gateway_workspace_dir: >-
   /usr/local/share/openclaw-isolated/workspace
+# Transactional rollback stays local so migration safety does not depend on a
+# hard-mounted network filesystem. Durable production backups remain separate.
 openclaw_isolated_gateway_backup_dir: /var/backups/openclaw-isolated
+openclaw_isolated_gateway_backup_headroom_bytes: 2147483648
+openclaw_isolated_gateway_min_build_free_bytes: 8589934592
 
 # Copy-only migration rehearsal. Disabled mode is inert. Sessions mode copies
-# only active file-backed session trees and their exact workspace dependencies;
-# it never copies config, credentials, channels, plugins, or the full workspace.
+# the active file-backed session trees, retains only spawned workspace directory
+# structure, and rebuilds generated prompt/runtime state from the modern target.
+# It never copies config, credentials, channels, plugins, or legacy behavior.
 openclaw_state_rehearsal_mode: disabled
 openclaw_state_rehearsal_approved: false
 openclaw_state_rehearsal_user: openclaw-migrate
@@ -139,6 +165,43 @@ openclaw_doctor_rehearsal_stable_shared_db_exclusions:
   - installed_plugin_index
   - state_leases
   - update_check_state
+
+# Attended handoff of the verified modern workspace and file-backed sessions
+# into the loopback-only isolated canary. Plan mode performs the same protected
+# staging but uses read-only native session classification; apply mode archives
+# only classified synthetic/completed rows through sessions.patch. Neither mode
+# enables channels, cron, heartbeats, boot startup, or production cutover.
+openclaw_canary_data_mode: disabled
+openclaw_canary_data_approved: false
+openclaw_canary_data_source_state: >-
+  /var/lib/openclaw-migration-rehearsal/current
+openclaw_canary_data_source_workspace: >-
+  /usr/local/share/openclaw-migration-rehearsal/current
+openclaw_canary_data_legacy_workspace: /home/johnny/.openclaw/workspace
+openclaw_canary_data_backup_dir: /var/backups/openclaw-isolated/data-handoff
+openclaw_canary_data_agents:
+  - main
+  - dubble
+  - rigel
+  - vega
+  - antares
+
+# Attended behavior proof against the applied, loopback-only canary. Plan mode
+# renders and audits both configurations without starting a Gateway. Apply mode
+# is separately approved, keeps channels and cron suppressed, runs isolated
+# Dubble/Star/Rigel probes, restores the heartbeat-disabled baseline, archives
+# only its synthetic sessions through native RPC, and verifies no delivery or
+# production-listener state changed.
+openclaw_behavior_rehearsal_mode: disabled
+openclaw_behavior_rehearsal_approved: false
+
+# Adversarial proof for the separate Codex executor boundary. Disabled is
+# inert. Apply mode remains an attended, channel-less loopback canary and uses
+# synthetic sentinels only; it never reads production credentials.
+openclaw_security_rehearsal_mode: disabled
+openclaw_security_rehearsal_approved: false
+openclaw_security_rehearsal_root: /var/lib/openclaw-security-rehearsal
+openclaw_security_rehearsal_backup_dir: /var/backups/openclaw-security-rehearsal
 
 # Dedicated Health receiver migration. Disabled leaves the current user service
 # untouched. Canary and production are attended rollout modes; first production

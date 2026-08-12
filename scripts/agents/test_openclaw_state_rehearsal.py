@@ -44,9 +44,15 @@ class StateRehearsalPlaybookTests(unittest.TestCase):
         self.assertIn("'rewrite'", rewrite_argv)
         self.assertNotIn("--source-manifest", rewrite_argv)
         self.assertNotIn("--source-index-root", rewrite_argv)
+        self.assertIn("--modernize-derived-snapshots", rewrite_argv)
+        self.assertIn("--modernize-active-runtime-state", rewrite_argv)
+        self.assertIn("--quarantine-delivery-recovery", rewrite_argv)
         self.assertIn("'verify'", verify_argv)
         self.assertIn("--source-manifest", verify_argv)
         self.assertIn("--source-index-root", verify_argv)
+        self.assertIn("--modernize-derived-snapshots", verify_argv)
+        self.assertIn("--modernize-active-runtime-state", verify_argv)
+        self.assertIn("--quarantine-delivery-recovery", verify_argv)
 
     def test_source_indexes_are_preserved_before_rewrite(self) -> None:
         names = [task.get("name") for task in self.tasks]
@@ -57,6 +63,28 @@ class StateRehearsalPlaybookTests(unittest.TestCase):
         verify = names.index("Verify copied OpenClaw session relocation")
         self.assertLess(preserve_index, rewrite)
         self.assertLess(rewrite, verify)
+
+    def test_legacy_workspace_files_are_not_copied(self) -> None:
+        names = [task.get("name") for task in self.tasks]
+        self.assertNotIn("Copy session-referenced OpenClaw workspace files", names)
+
+    def test_target_manifest_is_created_before_it_is_read(self) -> None:
+        names = [task.get("name") for task in self.tasks]
+        manifest = names.index("Manifest relocated OpenClaw session generation")
+        read = names.index("Read relocated OpenClaw session manifest")
+        reject = names.index(
+            "Reject legacy prompt cache references in relocated sessions"
+        )
+        self.assertLess(manifest, read)
+        self.assertLess(read, reject)
+
+    def test_rehearsal_rejects_replay_capable_delivery_state(self) -> None:
+        task = self._task("Reject delivery recovery state in relocated sessions")
+        assertions = task["ansible.builtin.assert"]["that"]
+        self.assertIn(
+            "openclaw_state_rehearsal_target_manifest.summary.activeDeliveryRecoveryEntries | int == 0",
+            assertions,
+        )
 
     def test_read_proof_drops_identity_inside_root_module(self) -> None:
         read_proof = self._task(
@@ -79,6 +107,24 @@ class StateRehearsalPlaybookTests(unittest.TestCase):
             names.index("Create OpenClaw state rehearsal generation containers"),
             names.index("Create root-only OpenClaw state rehearsal generation"),
         )
+
+    def test_workspace_is_staged_before_session_directories(self) -> None:
+        names = [task.get("name") for task in self.tasks]
+        stage = names.index("Stage retained data and modern OpenClaw workspace")
+        ownership_gate = names.index(
+            "Reject session references that cross workspace ownership classes"
+        )
+        session_directories = names.index(
+            "Create session-referenced OpenClaw workspace directories"
+        )
+        self.assertLess(stage, ownership_gate)
+        self.assertLess(ownership_gate, session_directories)
+
+    def test_only_session_state_is_recursively_frozen(self) -> None:
+        freeze = self._task("Freeze validated OpenClaw rehearsal session generation")
+        argv = freeze["ansible.builtin.command"]["argv"]
+        self.assertIn("{{ openclaw_state_rehearsal_generation_state }}", argv)
+        self.assertNotIn("{{ openclaw_state_rehearsal_generation_workspace }}", argv)
 
 
 if __name__ == "__main__":

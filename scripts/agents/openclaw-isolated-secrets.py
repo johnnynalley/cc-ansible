@@ -1,19 +1,19 @@
 #!/usr/bin/env python3
-"""Create the isolated OpenClaw secret payload without exposing secret values."""
+"""Create isolated Gateway and Codex transport secrets without exposing values."""
 
 from __future__ import annotations
 
 import argparse
+import grp
 import json
 import os
 import pwd
-import grp
 import secrets
 import stat
 import tempfile
 from pathlib import Path
 
-MIN_GATEWAY_TOKEN_BYTES = 32
+MIN_TOKEN_BYTES = 32
 
 
 class SecretBootstrapError(RuntimeError):
@@ -31,22 +31,50 @@ def _identity_id(value: str, database: str) -> int:
         raise SecretBootstrapError(f"unknown {database}: {value}") from exc
 
 
-def _existing_gateway_token(path: Path) -> str | None:
-    if not path.exists():
-        return None
+def _valid_token(value: object) -> str | None:
+    if isinstance(value, str) and len(value.encode("utf-8")) >= MIN_TOKEN_BYTES:
+        return value
+    return None
+
+
+def _regular_file(path: Path, label: str) -> None:
     try:
         metadata = path.lstat()
-        if not stat.S_ISREG(metadata.st_mode) or path.is_symlink():
-            raise SecretBootstrapError("existing secret payload is not a regular file")
+    except OSError as exc:
+        raise SecretBootstrapError(f"{label} is unavailable") from exc
+    if not stat.S_ISREG(metadata.st_mode) or path.is_symlink():
+        raise SecretBootstrapError(f"{label} is not a regular file")
+
+
+def _existing_gateway_tokens(path: Path) -> tuple[str | None, str | None]:
+    if not path.exists():
+        return None, None
+    _regular_file(path, "existing Gateway secret payload")
+    try:
         payload = json.loads(path.read_text(encoding="utf-8"))
-        token = payload["gateway"]["token"]
+        gateway_token = _valid_token(payload["gateway"]["token"])
+        codex_token = _valid_token(payload.get("codex", {}).get("appServerToken"))
     except (OSError, KeyError, TypeError, json.JSONDecodeError) as exc:
-        raise SecretBootstrapError("existing secret payload is invalid") from exc
-    if (
-        not isinstance(token, str)
-        or len(token.encode("utf-8")) < MIN_GATEWAY_TOKEN_BYTES
-    ):
+        raise SecretBootstrapError(
+            "existing Gateway secret payload is invalid"
+        ) from exc
+    if gateway_token is None:
         raise SecretBootstrapError("existing Gateway token is invalid")
+    if "codex" in payload and codex_token is None:
+        raise SecretBootstrapError("existing Codex app-server token is invalid")
+    return gateway_token, codex_token
+
+
+def _existing_codex_token(path: Path) -> str | None:
+    if not path.exists():
+        return None
+    _regular_file(path, "existing Codex token file")
+    try:
+        token = _valid_token(path.read_text(encoding="utf-8").strip())
+    except OSError as exc:
+        raise SecretBootstrapError("existing Codex token file is invalid") from exc
+    if token is None:
+        raise SecretBootstrapError("existing Codex token file is invalid")
     return token
 
 
@@ -65,60 +93,92 @@ def _validate_output_parent(parent: Path, owner_uid: int) -> None:
         )
 
 
-def write_secret_payload(
-    output: Path,
-    output_uid: int,
-    output_gid: int,
-    parent_owner_uid: int | None = None,
-) -> bool:
-    _validate_output_parent(
-        output.parent,
-        output_uid if parent_owner_uid is None else parent_owner_uid,
-    )
-    gateway_token = _existing_gateway_token(output) or secrets.token_urlsafe(48)
-    payload = {"gateway": {"token": gateway_token}}
-    encoded = (
-        json.dumps(payload, sort_keys=True, separators=(",", ":")) + "\n"
-    ).encode("utf-8")
-
-    if output.exists():
+def _write_atomic(path: Path, content: bytes, uid: int, gid: int) -> bool:
+    if path.exists():
+        _regular_file(path, "existing secret output")
         try:
-            if output.read_bytes() == encoded:
-                os.chown(output, output_uid, output_gid, follow_symlinks=False)
-                os.chmod(output, 0o400, follow_symlinks=False)
+            if path.read_bytes() == content:
+                os.chown(path, uid, gid, follow_symlinks=False)
+                os.chmod(path, 0o400, follow_symlinks=False)
                 return False
         except OSError as exc:
             raise SecretBootstrapError(
-                "existing secret payload could not be checked"
+                "existing secret output could not be checked"
             ) from exc
 
     descriptor, temporary_name = tempfile.mkstemp(
-        dir=output.parent, prefix=f".{output.name}.", suffix=".tmp"
+        dir=path.parent, prefix=f".{path.name}.", suffix=".tmp"
     )
     temporary = Path(temporary_name)
     try:
         os.fchmod(descriptor, 0o400)
-        os.fchown(descriptor, output_uid, output_gid)
+        os.fchown(descriptor, uid, gid)
         with os.fdopen(descriptor, "wb") as handle:
-            handle.write(encoded)
+            handle.write(content)
             handle.flush()
             os.fsync(handle.fileno())
-        os.replace(temporary, output)
-        directory_descriptor = os.open(output.parent, os.O_RDONLY | os.O_DIRECTORY)
+        descriptor = -1
+        os.replace(temporary, path)
+        directory_descriptor = os.open(path.parent, os.O_RDONLY | os.O_DIRECTORY)
         try:
             os.fsync(directory_descriptor)
         finally:
             os.close(directory_descriptor)
     except OSError as exc:
-        try:
-            os.close(descriptor)
-        except OSError:
-            pass
+        if descriptor >= 0:
+            try:
+                os.close(descriptor)
+            except OSError:
+                pass
         temporary.unlink(missing_ok=True)
         raise SecretBootstrapError(
-            "secret payload could not be replaced atomically"
+            "secret output could not be replaced atomically"
         ) from exc
     return True
+
+
+def bootstrap_secrets(
+    gateway_output: Path,
+    gateway_uid: int,
+    gateway_gid: int,
+    codex_token_output: Path,
+    codex_uid: int,
+    codex_gid: int,
+    parent_owner_uid: int | None = None,
+) -> dict[str, bool]:
+    parent_uid = gateway_uid if parent_owner_uid is None else parent_owner_uid
+    _validate_output_parent(gateway_output.parent, parent_uid)
+    _validate_output_parent(codex_token_output.parent, parent_uid)
+
+    gateway_token, gateway_codex_token = _existing_gateway_tokens(gateway_output)
+    file_codex_token = _existing_codex_token(codex_token_output)
+    if (
+        gateway_codex_token is not None
+        and file_codex_token is not None
+        and gateway_codex_token != file_codex_token
+    ):
+        raise SecretBootstrapError("Codex app-server token copies disagree")
+
+    gateway_token = gateway_token or secrets.token_urlsafe(48)
+    codex_token = gateway_codex_token or file_codex_token or secrets.token_urlsafe(48)
+    gateway_payload = {
+        "codex": {"appServerToken": codex_token},
+        "gateway": {"token": gateway_token},
+    }
+    gateway_encoded = (
+        json.dumps(gateway_payload, sort_keys=True, separators=(",", ":")) + "\n"
+    ).encode("utf-8")
+    codex_encoded = f"{codex_token}\n".encode("utf-8")
+
+    # Gateway first makes an interrupted first bootstrap self-healing: a later
+    # run can reconstruct the executor-only token file from the JSON SecretRef.
+    gateway_changed = _write_atomic(
+        gateway_output, gateway_encoded, gateway_uid, gateway_gid
+    )
+    codex_changed = _write_atomic(
+        codex_token_output, codex_encoded, codex_uid, codex_gid
+    )
+    return {"gateway": gateway_changed, "codex": codex_changed}
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -127,6 +187,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--output-parent-owner", default="root")
     parser.add_argument("--output-owner", default="openclaw")
     parser.add_argument("--output-group", default="openclaw")
+    parser.add_argument("--codex-token-output", type=Path, required=True)
+    parser.add_argument("--codex-token-owner", default="openclaw-codex")
+    parser.add_argument("--codex-token-group", default="openclaw-codex")
     return parser
 
 
@@ -136,16 +199,30 @@ def main() -> int:
         output_parent_uid = _identity_id(arguments.output_parent_owner, "user")
         output_uid = _identity_id(arguments.output_owner, "user")
         output_gid = _identity_id(arguments.output_group, "group")
-        changed = write_secret_payload(
+        codex_uid = _identity_id(arguments.codex_token_owner, "user")
+        codex_gid = _identity_id(arguments.codex_token_group, "group")
+        changes = bootstrap_secrets(
             arguments.output,
             output_uid,
             output_gid,
+            arguments.codex_token_output,
+            codex_uid,
+            codex_gid,
             output_parent_uid,
         )
     except SecretBootstrapError as exc:
         print(json.dumps({"status": "error", "message": str(exc)}))
         return 1
-    print(json.dumps({"status": "ok", "changed": changed}))
+    print(
+        json.dumps(
+            {
+                "status": "ok",
+                "changed": any(changes.values()),
+                "changedOutputs": changes,
+            },
+            sort_keys=True,
+        )
+    )
     return 0
 
 

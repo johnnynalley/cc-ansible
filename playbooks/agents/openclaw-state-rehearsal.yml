@@ -14,6 +14,10 @@
   vars:
     openclaw_state_rehearsal_tool: >-
       /usr/local/libexec/openclaw-migration/openclaw-session-relocate.py
+    openclaw_state_rehearsal_workspace_stage_tool: >-
+      /usr/local/libexec/openclaw-migration/openclaw-workspace-stage.py
+    openclaw_state_rehearsal_workspace_policy_tool: >-
+      /usr/local/libexec/openclaw-migration/openclaw-workspace-inventory.py
     openclaw_state_rehearsal_free_space_margin: 1073741824
     openclaw_state_rehearsal_agent_arguments:
       - --agent=main
@@ -52,6 +56,8 @@
           - openclaw_state_rehearsal_state_root == '/var/lib/openclaw-migration-rehearsal'
           - openclaw_state_rehearsal_workspace_root == '/usr/local/share/openclaw-migration-rehearsal'
           - openclaw_state_rehearsal_backup_dir == '/var/backups/openclaw-migration-rehearsal'
+          - openclaw_state_rehearsal_workspace_stage_tool == '/usr/local/libexec/openclaw-migration/openclaw-workspace-stage.py'
+          - openclaw_state_rehearsal_workspace_policy_tool == '/usr/local/libexec/openclaw-migration/openclaw-workspace-inventory.py'
           - openclaw_state_rehearsal_agents | sort == ['antares', 'dubble', 'main', 'rigel', 'vega']
         fail_msg: >-
           The state rehearsal identity, roots, sources, or agent set are
@@ -115,6 +121,8 @@
         - "{{ openclaw_state_rehearsal_tool }}"
         - "{{ openclaw_state_rehearsal_state_root }}/current"
         - "{{ openclaw_state_rehearsal_workspace_root }}/current"
+        - "{{ openclaw_state_rehearsal_workspace_stage_tool }}"
+        - "{{ openclaw_state_rehearsal_workspace_policy_tool }}"
       register: openclaw_state_rehearsal_existing_paths
       check_mode: false
 
@@ -123,7 +131,11 @@
         that:
           - >-
             not item.stat.exists
-            or item.item == openclaw_state_rehearsal_tool
+            or item.item in [
+              openclaw_state_rehearsal_tool,
+              openclaw_state_rehearsal_workspace_stage_tool,
+              openclaw_state_rehearsal_workspace_policy_tool
+            ]
             or item.stat.islnk | default(false)
         fail_msg: >-
           A rehearsal current selector is not a symlink. Refusing to replace
@@ -244,12 +256,17 @@
               'schemaVersion': 1,
               'mode': 'sessions',
               'sessionStores': 'retain-relocate',
-              'referencedWorkspaceDependencies': 'retain-selectively',
-              'fullLegacyWorkspace': 'not-copied',
+              'derivedPromptCaches': 'discard-rebuild',
+              'spawnedWorkspaceDirectories': 'retain-structure-only',
+              'legacyWorkspaceBehavior': 'replace-with-modern-bundle',
+              'retainedWorkspaceData': 'copy-by-reviewed-policy',
+              'modernBehaviorBundle': 'root-owned-overlay',
+              'fullLegacyWorkspace': 'preserved-only-in-source-and-cutover-archive',
               'legacyConfig': 'not-copied',
               'credentials': 'not-copied',
               'plugins': 'not-copied',
               'channels': 'not-activated',
+              'deliveryRecovery': 'quarantine-in-copy-preserve-in-source-evidence',
               'productionGateway': 'untouched'
             }
             | to_nice_json
@@ -321,6 +338,80 @@
         group: root
         mode: "0755"
 
+    - name: Deploy OpenClaw workspace staging helper
+      ansible.builtin.copy:
+        src: "{{ ansible_config_file | dirname }}/scripts/agents/openclaw-workspace-stage.py"
+        dest: "{{ openclaw_state_rehearsal_workspace_stage_tool }}"
+        owner: root
+        group: root
+        mode: "0755"
+
+    - name: Deploy OpenClaw workspace policy helper
+      ansible.builtin.copy:
+        src: "{{ ansible_config_file | dirname }}/scripts/agents/openclaw-workspace-inventory.py"
+        dest: "{{ openclaw_state_rehearsal_workspace_policy_tool }}"
+        owner: root
+        group: root
+        mode: "0755"
+
+    - name: Create OpenClaw state rehearsal workspace input directory
+      ansible.builtin.file:
+        path: "{{ openclaw_state_rehearsal_evidence_dir }}/workspace-input"
+        state: directory
+        owner: root
+        group: root
+        mode: "0700"
+
+    - name: Copy reviewed OpenClaw workspace migration policy
+      ansible.builtin.copy:
+        src: "{{ ansible_config_file | dirname }}/files/openclaw/workspace-migration-policy.json"
+        dest: "{{ openclaw_state_rehearsal_evidence_dir }}/workspace-input/policy.json"
+        owner: root
+        group: root
+        mode: "0600"
+
+    - name: Create OpenClaw modern workspace input directory
+      ansible.builtin.file:
+        path: "{{ openclaw_state_rehearsal_evidence_dir }}/workspace-input/modern"
+        state: directory
+        owner: root
+        group: root
+        mode: "0700"
+
+    - name: Copy reviewed OpenClaw modern workspace input
+      ansible.builtin.copy:
+        src: "{{ ansible_config_file | dirname }}/files/openclaw/workspace/"
+        dest: "{{ openclaw_state_rehearsal_evidence_dir }}/workspace-input/modern/"
+        owner: root
+        group: root
+        mode: preserve
+        directory_mode: "0700"
+
+    - name: Plan OpenClaw workspace staging without copying data
+      ansible.builtin.command:
+        argv:
+          - "{{ openclaw_state_rehearsal_workspace_stage_tool }}"
+          - --source
+          - "{{ openclaw_state_rehearsal_source_workspace_dir }}"
+          - --overlay
+          - "{{ openclaw_state_rehearsal_evidence_dir }}/workspace-input/modern"
+          - --policy
+          - "{{ openclaw_state_rehearsal_evidence_dir }}/workspace-input/policy.json"
+          - --output
+          - "{{ openclaw_state_rehearsal_evidence_dir }}/workspace-plan.json"
+          - --plan-only
+      changed_when: false
+
+    - name: Read OpenClaw workspace staging plan
+      ansible.builtin.slurp:
+        src: "{{ openclaw_state_rehearsal_evidence_dir }}/workspace-plan.json"
+      register: openclaw_state_rehearsal_workspace_plan_raw
+
+    - name: Parse OpenClaw workspace staging plan
+      ansible.builtin.set_fact:
+        openclaw_state_rehearsal_workspace_plan: >-
+          {{ openclaw_state_rehearsal_workspace_plan_raw.content | b64decode | from_json }}
+
     - name: Create OpenClaw state rehearsal generation containers
       ansible.builtin.file:
         path: "{{ item }}"
@@ -371,26 +462,13 @@
 
     - name: Derive OpenClaw state rehearsal dependency sets
       ansible.builtin.set_fact:
-        openclaw_state_rehearsal_reference_details: >-
-          {{ openclaw_state_rehearsal_source_manifest.agents | map(attribute='referenceDetails') | flatten }}
-        openclaw_state_rehearsal_workspace_file_refs: >-
-          {{
-            openclaw_state_rehearsal_source_manifest.agents
-            | map(attribute='referenceDetails')
-            | flatten
-            | selectattr('category', 'equalto', 'workspace')
-            | selectattr('pathKind', 'equalto', 'file')
-            | map(attribute='relativePath')
-            | unique
-            | sort
-            | list
-          }}
         openclaw_state_rehearsal_workspace_directory_refs: >-
           {{
             openclaw_state_rehearsal_source_manifest.agents
             | map(attribute='referenceDetails')
             | flatten
             | selectattr('category', 'equalto', 'workspace')
+            | selectattr('role', 'match', '^spawned-(workspace|cwd)$')
             | selectattr('pathKind', 'equalto', 'directory')
             | map(attribute='relativePath')
             | reject('equalto', '.')
@@ -410,6 +488,7 @@
     - name: Validate OpenClaw state rehearsal state dependencies
       ansible.builtin.assert:
         that:
+          - item.role == 'session-transcript'
           - item.field == 'sessionFile'
           - item.pathKind == 'file'
           - item.relativePath is match('^agents/(antares|dubble|main|rigel|vega)/sessions/')
@@ -420,24 +499,6 @@
       loop_control:
         label: "{{ item.field }}"
       no_log: true
-
-    - name: Record OpenClaw state rehearsal workspace file list
-      ansible.builtin.copy:
-        dest: "{{ openclaw_state_rehearsal_evidence_dir }}/workspace-files-from.txt"
-        owner: root
-        group: root
-        mode: "0600"
-        content: "{{ openclaw_state_rehearsal_workspace_file_refs | join('\n') }}\n"
-
-    - name: Inspect OpenClaw state rehearsal source workspace size
-      ansible.builtin.command:
-        argv:
-          - /usr/bin/du
-          - --summarize
-          - --bytes
-          - "{{ openclaw_state_rehearsal_source_workspace_dir }}"
-      register: openclaw_state_rehearsal_workspace_size
-      changed_when: false
 
     - name: Inspect OpenClaw state rehearsal destination filesystems
       ansible.builtin.command:
@@ -455,7 +516,8 @@
     - name: Derive OpenClaw state rehearsal capacity facts
       ansible.builtin.set_fact:
         openclaw_state_rehearsal_session_bytes: "{{ openclaw_state_rehearsal_source_manifest.summary.bytes | int }}"
-        openclaw_state_rehearsal_workspace_bytes: "{{ openclaw_state_rehearsal_workspace_size.stdout.split()[0] | int }}"
+        openclaw_state_rehearsal_workspace_bytes: >-
+          {{ openclaw_state_rehearsal_workspace_plan.summary.plannedBytes | int }}
         openclaw_state_rehearsal_state_device: "{{ openclaw_state_rehearsal_filesystems.results[0].stdout.split(':')[0] }}"
         openclaw_state_rehearsal_workspace_device: "{{ openclaw_state_rehearsal_filesystems.results[1].stdout.split(':')[0] }}"
         openclaw_state_rehearsal_state_available: >-
@@ -500,27 +562,81 @@
           The rehearsal destinations lack conservative free space for the
           session trees, referenced workspace dependencies, and safety margin.
 
-    - name: Copy session-referenced OpenClaw workspace files
+    - name: Resolve OpenClaw state rehearsal account IDs
       ansible.builtin.command:
         argv:
-          - /usr/bin/rsync
-          - --archive
-          - --hard-links
-          - --xattrs
-          - --relative
-          - --chown=root:root
-          - "--files-from={{ openclaw_state_rehearsal_evidence_dir }}/workspace-files-from.txt"
-          - "{{ openclaw_state_rehearsal_source_workspace_dir }}/"
-          - "{{ openclaw_state_rehearsal_generation_workspace }}/"
-      when: openclaw_state_rehearsal_workspace_file_refs | length > 0
+          - /usr/bin/id
+          - "{{ item }}"
+          - "{{ openclaw_state_rehearsal_user }}"
+      loop:
+        - -u
+        - -g
+      register: openclaw_state_rehearsal_account_ids
+      changed_when: false
+
+    - name: Stage retained data and modern OpenClaw workspace
+      ansible.builtin.command:
+        argv:
+          - "{{ openclaw_state_rehearsal_workspace_stage_tool }}"
+          - --source
+          - "{{ openclaw_state_rehearsal_source_workspace_dir }}"
+          - --overlay
+          - "{{ openclaw_state_rehearsal_evidence_dir }}/workspace-input/modern"
+          - --target
+          - "{{ openclaw_state_rehearsal_generation_workspace }}"
+          - --policy
+          - "{{ openclaw_state_rehearsal_evidence_dir }}/workspace-input/policy.json"
+          - --output
+          - "{{ openclaw_state_rehearsal_evidence_dir }}/workspace-stage.json"
+          - --executor-uid
+          - "{{ openclaw_state_rehearsal_account_ids.results[0].stdout }}"
+          - --workspace-gid
+          - "{{ openclaw_state_rehearsal_account_ids.results[1].stdout }}"
+          - --operator-uid
+          - '0'
+          - --operator-gid
+          - "{{ openclaw_state_rehearsal_account_ids.results[1].stdout }}"
       changed_when: true
+
+    - name: Allow rehearsal account traversal of staged workspace root
+      ansible.builtin.file:
+        path: "{{ openclaw_state_rehearsal_generation_workspace }}"
+        state: directory
+        owner: root
+        group: "{{ openclaw_state_rehearsal_group }}"
+        mode: "0750"
+
+    - name: Inspect staged session-referenced workspace directories
+      ansible.builtin.stat:
+        path: "{{ openclaw_state_rehearsal_generation_workspace }}/{{ item }}"
+        follow: false
+      loop: "{{ openclaw_state_rehearsal_workspace_directory_refs }}"
+      register: openclaw_state_rehearsal_staged_workspace_refs
+
+    - name: Reject session references that cross workspace ownership classes
+      ansible.builtin.assert:
+        that:
+          - >-
+            not item.stat.exists
+            or (
+              item.stat.isdir
+              and not item.stat.islnk | default(false)
+              and item.stat.pw_name == openclaw_state_rehearsal_user
+              and item.stat.gr_name == openclaw_state_rehearsal_group
+            )
+        fail_msg: >-
+          A spawned session directory resolves to a staged path that is not in
+          the Executor-writable ownership class.
+      loop: "{{ openclaw_state_rehearsal_staged_workspace_refs.results }}"
+      loop_control:
+        label: "{{ item.item }}"
 
     - name: Create session-referenced OpenClaw workspace directories
       ansible.builtin.file:
         path: "{{ openclaw_state_rehearsal_generation_workspace }}/{{ item }}"
         state: directory
-        owner: root
-        group: root
+        owner: "{{ openclaw_state_rehearsal_user }}"
+        group: "{{ openclaw_state_rehearsal_group }}"
         mode: "0700"
       loop: "{{ openclaw_state_rehearsal_workspace_directory_refs }}"
 
@@ -603,6 +719,9 @@
               '--source-workspace-root', openclaw_state_rehearsal_source_workspace_dir,
               '--target-state-root', openclaw_state_rehearsal_generation_state,
               '--target-workspace-root', openclaw_state_rehearsal_generation_workspace,
+              '--modernize-derived-snapshots',
+              '--modernize-active-runtime-state',
+              '--quarantine-delivery-recovery',
               '--output', openclaw_state_rehearsal_evidence_dir + '/rewrite.json'
             ]
             + openclaw_state_rehearsal_agent_arguments
@@ -622,6 +741,9 @@
               '--source-index-root', openclaw_state_rehearsal_evidence_dir + '/source-indexes',
               '--target-state-root', openclaw_state_rehearsal_generation_state,
               '--target-workspace-root', openclaw_state_rehearsal_generation_workspace,
+              '--modernize-derived-snapshots',
+              '--modernize-active-runtime-state',
+              '--quarantine-delivery-recovery',
               '--output', openclaw_state_rehearsal_evidence_dir + '/verify.json'
             ]
             + openclaw_state_rehearsal_agent_arguments
@@ -642,6 +764,33 @@
             + openclaw_state_rehearsal_agent_arguments
           }}
       changed_when: false
+
+    - name: Read relocated OpenClaw session manifest
+      ansible.builtin.slurp:
+        src: "{{ openclaw_state_rehearsal_evidence_dir }}/target.json"
+      register: openclaw_state_rehearsal_target_manifest_raw
+
+    - name: Parse relocated OpenClaw session manifest
+      ansible.builtin.set_fact:
+        openclaw_state_rehearsal_target_manifest: >-
+          {{ openclaw_state_rehearsal_target_manifest_raw.content | b64decode | from_json }}
+
+    - name: Reject legacy prompt cache references in relocated sessions
+      ansible.builtin.assert:
+        that:
+          - "'derived-bootstrap-path' not in openclaw_state_rehearsal_target_manifest.summary.referenceRoles"
+          - "'derived-bootstrap-root' not in openclaw_state_rehearsal_target_manifest.summary.referenceRoles"
+        fail_msg: >-
+          Relocated session indexes still reference legacy workspace prompt
+          caches instead of rebuilding them from the modern behavior bundle.
+
+    - name: Reject delivery recovery state in relocated sessions
+      ansible.builtin.assert:
+        that:
+          - openclaw_state_rehearsal_target_manifest.summary.activeDeliveryRecoveryEntries | int == 0
+        fail_msg: >-
+          Relocated active sessions still contain pending or restart recovery
+          delivery state that could replay a production response from rehearsal.
 
     - name: Inspect OpenClaw state rehearsal top-level state
       ansible.builtin.command:
@@ -665,24 +814,20 @@
           The rehearsal state generation contains config, credentials,
           plugins, channels, or another unclassified top-level artifact.
 
-    - name: Assign validated OpenClaw rehearsal reader group
+    - name: Assign validated OpenClaw rehearsal reader group to session state
       ansible.builtin.file:
-        path: "{{ item }}"
+        path: "{{ openclaw_state_rehearsal_generation_state }}"
         owner: root
         group: "{{ openclaw_state_rehearsal_group }}"
         recurse: true
-      loop:
-        - "{{ openclaw_state_rehearsal_generation_state }}"
-        - "{{ openclaw_state_rehearsal_generation_workspace }}"
 
-    - name: Freeze validated OpenClaw rehearsal generation
+    - name: Freeze validated OpenClaw rehearsal session generation
       ansible.builtin.command:
         argv:
           - /usr/bin/chmod
           - --recursive
           - u=rwX,g=rX,o=
           - "{{ openclaw_state_rehearsal_generation_state }}"
-          - "{{ openclaw_state_rehearsal_generation_workspace }}"
       changed_when: true
 
     - name: Inspect OpenClaw rehearsal generation ownership
@@ -694,12 +839,18 @@
           - -xdev
           - '('
           - '!'
-          - -user
-          - root
-          - -o
-          - '!'
           - -group
           - "{{ openclaw_state_rehearsal_group }}"
+          - -o
+          - '('
+          - '!'
+          - -user
+          - root
+          - -a
+          - '!'
+          - -user
+          - "{{ openclaw_state_rehearsal_user }}"
+          - ')'
           - ')'
           - -print
           - -quit

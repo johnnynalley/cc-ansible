@@ -122,6 +122,50 @@
           A Doctor rehearsal source selector resolves outside its reviewed
           immutable generation root.
 
+    - name: Derive selected immutable OpenClaw runtime paths
+      ansible.builtin.set_fact:
+        openclaw_doctor_rehearsal_runtime_release: >-
+          {{ openclaw_doctor_rehearsal_resolved_selectors.results[2].stdout }}
+        openclaw_doctor_rehearsal_runtime_core: >-
+          {{ openclaw_doctor_rehearsal_resolved_selectors.results[2].stdout }}/lib/node_modules/openclaw
+
+    - name: Inspect immutable OpenClaw runtime access boundary
+      ansible.builtin.stat:
+        path: "{{ item }}"
+        follow: false
+      loop:
+        - "{{ openclaw_doctor_rehearsal_runtime_core }}"
+        - "{{ openclaw_doctor_rehearsal_runtime_core }}/openclaw.mjs"
+      register: openclaw_doctor_rehearsal_runtime_access
+      check_mode: false
+
+    - name: Require root-owned service-readable OpenClaw runtime
+      ansible.builtin.assert:
+        that:
+          - item.stat.exists
+          - not (item.stat.islnk | default(false))
+          - item.stat.pw_name == 'root'
+          - item.stat.gr_name == 'root'
+          - item.stat.mode == '0755'
+        fail_msg: >-
+          The immutable OpenClaw runtime drifted from root:root 0755. Stop
+          before a rehearsal can hide or compound a release-access failure.
+      loop: "{{ openclaw_doctor_rehearsal_runtime_access.results }}"
+      loop_control:
+        label: "{{ item.item }}"
+
+    - name: Prove isolated service identity can execute immutable OpenClaw runtime
+      ansible.builtin.command:
+        argv:
+          - /usr/sbin/runuser
+          - -u
+          - "{{ openclaw_isolated_gateway_user }}"
+          - --
+          - "{{ openclaw_doctor_rehearsal_runtime }}/bin/openclaw"
+          - --version
+      changed_when: false
+      check_mode: false
+
     - name: Inspect OpenClaw Doctor rehearsal source files
       ansible.builtin.stat:
         path: "{{ item }}"
@@ -548,6 +592,19 @@
         group: root
         mode: "0755"
 
+    - name: Capture immutable OpenClaw runtime before rehearsal mutation
+      ansible.builtin.command:
+        argv:
+          - "{{ openclaw_doctor_rehearsal_tool }}"
+          - manifest
+          - --root
+          - "{{ openclaw_doctor_rehearsal_runtime_core }}"
+          - --output
+          - "{{ openclaw_doctor_rehearsal_evidence_dir }}/runtime-core-before.json"
+          - --allow-symlink-target-root
+          - "{{ openclaw_doctor_rehearsal_runtime_release }}"
+      changed_when: true
+
     - name: Deploy OpenClaw Doctor rehearsal secret bootstrapper
       ansible.builtin.copy:
         src: "{{ ansible_config_file | dirname }}/scripts/agents/openclaw-isolated-secrets.py"
@@ -916,6 +973,7 @@
         group: "{{ openclaw_doctor_rehearsal_group }}"
         mode: u=rwX,g=rX,o=
         recurse: true
+        follow: false
       loop:
         - "{{ openclaw_doctor_rehearsal_generation_state }}"
         - "{{ openclaw_doctor_rehearsal_generation_workspace }}"
@@ -1532,6 +1590,7 @@
         group: "{{ openclaw_doctor_rehearsal_group }}"
         mode: u=rwX,g=rX,o=
         recurse: true
+        follow: false
 
     - name: Prove migration identity cannot modify managed plugin code
       ansible.builtin.command:
@@ -1933,10 +1992,52 @@
         group: "{{ openclaw_doctor_rehearsal_group }}"
         mode: u=rwX,g=rX,o=
         recurse: true
+        follow: false
       loop:
         - "{{ openclaw_doctor_rehearsal_generation_state }}"
         - "{{ openclaw_doctor_rehearsal_generation_workspace }}"
         - "{{ openclaw_doctor_rehearsal_generation_config_dir }}"
+
+    - name: Capture immutable OpenClaw runtime after rehearsal mutation
+      ansible.builtin.command:
+        argv:
+          - "{{ openclaw_doctor_rehearsal_tool }}"
+          - manifest
+          - --root
+          - "{{ openclaw_doctor_rehearsal_runtime_core }}"
+          - --output
+          - "{{ openclaw_doctor_rehearsal_evidence_dir }}/runtime-core-after.json"
+          - --allow-symlink-target-root
+          - "{{ openclaw_doctor_rehearsal_runtime_release }}"
+      changed_when: true
+
+    - name: Compare immutable OpenClaw runtime boundary
+      ansible.builtin.command:
+        argv:
+          - "{{ openclaw_doctor_rehearsal_tool }}"
+          - diff
+          - --before
+          - "{{ openclaw_doctor_rehearsal_evidence_dir }}/runtime-core-before.json"
+          - --after
+          - "{{ openclaw_doctor_rehearsal_evidence_dir }}/runtime-core-after.json"
+          - --output
+          - "{{ openclaw_doctor_rehearsal_evidence_dir }}/runtime-core-diff.json"
+      changed_when: false
+
+    - name: Read immutable OpenClaw runtime boundary comparison
+      ansible.builtin.slurp:
+        src: "{{ openclaw_doctor_rehearsal_evidence_dir }}/runtime-core-diff.json"
+      register: openclaw_doctor_rehearsal_runtime_diff
+
+    - name: Require rehearsal confinement to copied OpenClaw state
+      ansible.builtin.assert:
+        that:
+          - (openclaw_doctor_rehearsal_runtime_diff.content | b64decode | from_json).summary.added == 0
+          - (openclaw_doctor_rehearsal_runtime_diff.content | b64decode | from_json).summary.removed == 0
+          - (openclaw_doctor_rehearsal_runtime_diff.content | b64decode | from_json).summary.modified == 0
+        fail_msg: >-
+          The Doctor rehearsal changed immutable runtime content or metadata.
+          Refusing selector promotion until the mutation escaped-path is fixed.
 
     - name: Promote validated OpenClaw Doctor generation selectors
       block:

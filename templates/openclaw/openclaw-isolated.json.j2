@@ -26,16 +26,46 @@
       },
       "thinkingDefault": "low",
       "timeoutSeconds": 180,
-      "maxConcurrent": 1
+      "maxConcurrent": 1,
+      "heartbeat": {
+        "every": "0m",
+        "target": "none",
+        "includeReasoning": false,
+        "suppressToolErrorWarnings": true,
+        "lightContext": true,
+        "isolatedSession": true
+      }
     },
     "list": [
       {
-        "id": "canary",
-        "name": "OpenClaw Isolation Canary",
-        "skills": [],
-        "tools": {
-          "profile": "minimal"
-        }
+        "id": "main",
+        "default": true,
+        "name": "Astra Canary",
+        "skills": []
+      },
+      {
+        "id": "dubble",
+        "name": "Dubble Canary",
+        "workspace": {{ (openclaw_isolated_gateway_workspace_dir ~ '/dubble') | to_json }},
+        "skills": []
+      },
+      {
+        "id": "vega",
+        "name": "Vega Canary",
+        "workspace": {{ (openclaw_isolated_gateway_workspace_dir ~ '/vega') | to_json }},
+        "skills": []
+      },
+      {
+        "id": "antares",
+        "name": "Antares Canary",
+        "workspace": {{ (openclaw_isolated_gateway_workspace_dir ~ '/antares') | to_json }},
+        "skills": []
+      },
+      {
+        "id": "rigel",
+        "name": "Rigel Canary",
+        "workspace": {{ (openclaw_isolated_gateway_workspace_dir ~ '/rigel') | to_json }},
+        "skills": []
       }
     ]
   },
@@ -57,8 +87,9 @@
     ],
     "exec": {
       "host": "gateway",
-      "security": "deny",
-      "ask": "always",
+      "mode": "auto",
+      "strictInlineEval": true,
+      "commandHighlighting": true,
       "notifyOnExit": false
     },
     "elevated": {
@@ -140,11 +171,6 @@
     "allow": [
       "codex"
     ],
-    "load": {
-      "paths": [
-        {{ openclaw_isolated_gateway_codex_plugin_dir | to_json }}
-      ]
-    },
     "entries": {
       "codex": {
         "enabled": true,
@@ -166,9 +192,19 @@
             "allow_destructive_actions": false
           },
           "appServer": {
+            "mode": "guardian",
+            "transport": "websocket",
             "homeScope": "agent",
-            "approvalPolicy": "never",
-            "sandbox": "read-only",
+            "url": {{ ('ws://127.0.0.1:' ~ (openclaw_isolated_codex_port | string)) | to_json }},
+            "authToken": {
+              "source": "file",
+              "provider": "isolated",
+              "id": "/codex/appServerToken"
+            },
+            "remoteWorkspaceRoot": {{ openclaw_isolated_gateway_workspace_dir | to_json }},
+            "approvalPolicy": "on-request",
+            "sandbox": "workspace-write",
+            "approvalsReviewer": "auto_review",
             "codeModeOnly": true
           }
         }
