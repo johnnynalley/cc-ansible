@@ -445,6 +445,19 @@
           Insufficient local transactional rollback or build capacity. No
           service was stopped and no archive or package build was started.
 
+    - name: Report isolated Gateway check-mode validation boundary
+      ansible.builtin.debug:
+        msg: >-
+          Check mode validated approval, isolation policy, existing identity
+          provenance, rollback locality, rollback size, and build capacity.
+          It did not create accounts, groups, backups, runtimes, configs,
+          services, or listeners.
+      when: ansible_check_mode
+
+    - name: End isolated Gateway check-mode validation before mutation
+      ansible.builtin.meta: end_host
+      when: ansible_check_mode
+
     - name: Set isolated Gateway backup timestamp
       ansible.builtin.set_fact:
         openclaw_isolated_gateway_backup_stamp: "{{ lookup('pipe', 'date -u +%Y%m%dT%H%M%SZ') }}"

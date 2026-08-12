@@ -106,6 +106,24 @@ class IsolatedGatewayPlaybookTests(unittest.TestCase):
         release_cleanup = self.task("Remove unverified newly built isolated release")
         self.assertIn("openclaw_isolated_gateway_release_verified", release_cleanup)
 
+    def test_check_mode_stops_after_preflight_and_before_mutation(self) -> None:
+        capacity = self.playbook.index(
+            "- name: Require rollback and build capacity before mutation"
+        )
+        boundary = self.playbook.index(
+            "- name: End isolated Gateway check-mode validation before mutation"
+        )
+        timestamp = self.playbook.index("- name: Set isolated Gateway backup timestamp")
+        accounts = self.playbook.index("- name: Create isolated Gateway group")
+        self.assertLess(capacity, boundary)
+        self.assertLess(boundary, timestamp)
+        self.assertLess(boundary, accounts)
+        boundary_task = self.playbook[
+            boundary : self.playbook.index("\n    - name:", boundary + 1)
+        ]
+        self.assertIn("ansible.builtin.meta: end_host", boundary_task)
+        self.assertIn("when: ansible_check_mode", boundary_task)
+
     def test_plugins_use_native_install_records_not_path_injection(self) -> None:
         self.assertNotIn('"load": {', self.config_template)
         self.assertNotIn("Create read-only managed-plugin sentinel", self.playbook)
