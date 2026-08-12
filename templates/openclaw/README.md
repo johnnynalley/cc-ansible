@@ -38,7 +38,10 @@
   service under the separate `openclaw-codex` identity. It owns only Codex
   auth/state and mutable workspace data, consumes the reviewed Codex package
   through a read-only bind, and cannot read Gateway config/state/secrets,
-  Docker, human-home, controller, Ansible, or bulk-data paths.
+  Docker, human-home, controller, Ansible, or bulk-data paths. Both isolated
+  units use the managed `openclaw-access-check` helper for access preflights so
+  supplementary-group permissions are evaluated by Bash rather than the
+  host's incompatible uutils `test` implementation.
 
 ## Consumers
 

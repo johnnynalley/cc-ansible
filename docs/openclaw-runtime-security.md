@@ -1338,25 +1338,34 @@ require separate removal or redesign.
 
 ### 2026-08-12 live isolation checkpoint
 
-An attended `canary-bootstrap` completed with `175` successful tasks and no
-failure or rescue. The transaction created and verified the protected rollback
-artifact `/var/backups/openclaw-isolated/20260812T171158Z/state.tar.gz` plus its
-manifest before changing canary state. The native CLI bootstrap produced one
-owner-only identity and an exact `operator.read` cached device scope; deep
-audit then reported zero critical findings, zero SecretRef diagnostics, no
-suppressed findings, and only the accepted
-`fs.config.perms_group_readable` warning.
+The current attended `canary-bootstrap` completed with `176` successful tasks
+and no failure or rescue. The transaction created and verified the protected
+rollback artifact
+`/var/backups/openclaw-isolated/20260812T185347Z/state.tar.gz` plus its manifest
+before changing canary state. The native CLI bootstrap produced one owner-only
+identity and an exact `operator.read` cached device scope; deep audit then
+reported zero critical findings, zero SecretRef diagnostics, no suppressed
+findings, and only the accepted `fs.config.perms_group_readable` warning.
+
+Two earlier convergence attempts correctly entered rescue and restored the
+prior canary without touching production. Their common permission symptom was
+not stale NSS membership: this host's uutils `/usr/bin/test` returned false for
+access granted through a supplementary group even though real directory
+traversal succeeded. The root-owned `openclaw-access-check` now accepts only
+`[!] -r|-w|-x PATH`, evaluates access with Bash's effective supplementary-group
+semantics, and owns every isolated service preflight and host-namespace access
+gate. The exact `openclaw-codex` live regression now proves read/traverse access
+through `openclaw-workspace` and denies writes to the workspace root.
 
 Post-run host evidence shows production still listening on the Tailscale
 address at `18789`, Health on `18791`, the isolated Gateway only on loopback
 `19789`, and the isolated Codex executor only on loopback `19790`. Both canary
-units are active but disabled at boot. That checkpoint predated the dedicated
-workspace-sharing group now required by the data handoff; account membership
-and immutable workspace ownership must be reconverged and reproven before the
-checkpoint is current. The transient pairing proxy unit is absent and port
-`19788` is closed. The canary config has no channels, bindings, cron block,
-owner route, configured heartbeat, or Control UI, while the service environment
-independently sets
+units are active but disabled at boot. Both service identities have only their
+private primary group plus `openclaw-workspace`; the shared workspace root is
+`root:openclaw-workspace 0750` and remains non-writable to both services. The
+transient pairing proxy unit is absent and port `19788` is closed. The canary
+config has no channels, bindings, cron block, owner route, configured heartbeat,
+or Control UI, while the service environment independently sets
 `OPENCLAW_SKIP_CHANNELS=1` and `OPENCLAW_SKIP_CRON=1`. Infrastructure isolation
 is therefore proven; fresh executor OAuth, a real model canary, behavior/data
 parity, hostile-prompt rehearsal, and channel handoff remain open gates.
@@ -1367,6 +1376,7 @@ parity, hostile-prompt rehearsal, and channel handoff remain open gates.
 PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts/agents -p 'test_health_*.py' -v
 PYTHONDONTWRITEBYTECODE=1 python3 -m unittest scripts/agents/test_openclaw_control_plane_inventory.py -v
 PYTHONDONTWRITEBYTECODE=1 python3 -m unittest scripts/agents/test_openclaw_isolated_secrets.py -v
+PYTHONDONTWRITEBYTECODE=1 python3 -m unittest scripts/agents/test_openclaw_access_check.py -v
 PYTHONDONTWRITEBYTECODE=1 python3 -m unittest scripts/agents/test_openclaw_isolated_gateway_playbook.py -v
 PYTHONDONTWRITEBYTECODE=1 python3 -m unittest scripts/agents/test_openclaw_session_relocate.py -v
 PYTHONDONTWRITEBYTECODE=1 python3 -m unittest scripts/agents/test_openclaw_native_session_transition.py -v

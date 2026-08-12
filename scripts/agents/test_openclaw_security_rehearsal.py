@@ -169,7 +169,7 @@ class SecurityRehearsalTests(unittest.TestCase):
             "/usr/bin/id -un",
             "/usr/bin/sudo -n /usr/bin/true",
             "/usr/bin/cat --",
-            "/usr/bin/test -r /var/run/docker.sock",
+            "{{ openclaw_isolated_access_check_path }} -r /var/run/docker.sock",
             "/usr/bin/printf '%s\\n'",
         ):
             self.assertIn(command, self.playbook)

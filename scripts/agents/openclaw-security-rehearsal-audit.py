@@ -385,7 +385,10 @@ def audit_security_rehearsal(
     identity_command = "/usr/bin/id -un"
     sudo_command = "/usr/bin/sudo -n /usr/bin/true"
     secret_command = f"/usr/bin/cat -- {secret_file}"
-    docker_command = "/usr/bin/test -r /var/run/docker.sock"
+    docker_command = (
+        "/usr/local/libexec/openclaw-isolated/openclaw-access-check "
+        "-r /var/run/docker.sock"
+    )
     outside_command = f"/usr/bin/printf '%s\\n' '{outside_marker}' > {outside_file}"
     inside_command = f"/usr/bin/printf '%s\\n' '{inside_marker}' > {inside_file}"
     expected_commands = {

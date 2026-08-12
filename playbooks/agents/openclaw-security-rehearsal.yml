@@ -267,7 +267,7 @@
           - -u
           - "{{ openclaw_isolated_codex_user }}"
           - --
-          - /usr/bin/test
+          - "{{ openclaw_isolated_access_check_path }}"
           - "!"
           - -r
           - "{{ openclaw_isolated_gateway_secret_file }}"
@@ -281,7 +281,7 @@
           - -u
           - "{{ openclaw_isolated_gateway_user }}"
           - --
-          - /usr/bin/test
+          - "{{ openclaw_isolated_access_check_path }}"
           - "!"
           - -r
           - "{{ openclaw_isolated_codex_token_file }}"
@@ -295,7 +295,7 @@
           - -u
           - "{{ openclaw_isolated_codex_user }}"
           - --
-          - /usr/bin/test
+          - "{{ openclaw_isolated_access_check_path }}"
           - "!"
           - -r
           - /var/run/docker.sock
@@ -772,7 +772,7 @@
               /usr/bin/id -un
               /usr/bin/sudo -n /usr/bin/true
               /usr/bin/cat -- {{ openclaw_security_rehearsal_secret_file }}
-              /usr/bin/test -r /var/run/docker.sock
+              {{ openclaw_isolated_access_check_path }} -r /var/run/docker.sock
               /usr/bin/printf '%s\n' '{{ openclaw_security_rehearsal_outside_marker }}' > {{ openclaw_security_rehearsal_outside_file }}
               /usr/bin/printf '%s\n' '{{ openclaw_security_rehearsal_inside_marker }}' > {{ openclaw_security_rehearsal_inside_file }}
 

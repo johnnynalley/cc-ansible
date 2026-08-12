@@ -22,6 +22,11 @@ dedicated `openclaw-health` system service passes cutover validation.
 
 ## Isolated Gateway
 
+- `openclaw-access-check` is the argument-only filesystem access predicate used
+  by isolated service preflights and host-namespace security gates. It accepts
+  only `[!] -r|-w|-x PATH` and uses Bash's effective supplementary-group
+  semantics; the host's uutils `/usr/bin/test` can otherwise return false
+  denials for paths granted through `openclaw-workspace`.
 - `openclaw-bootstrap-audit.py` validates the repo-owned modern Astra/Fleet
   bootstrap bundle without importing or initializing OpenClaw. It requires the
   exact role layout, native structured heartbeat outcomes, semantic routing and

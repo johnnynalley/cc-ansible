@@ -62,7 +62,10 @@ class SecurityAuditFixture:
             "identity": "/usr/bin/id -un",
             "sudo": "/usr/bin/sudo -n /usr/bin/true",
             "secret": f"/usr/bin/cat -- {self.secret_file}",
-            "docker": "/usr/bin/test -r /var/run/docker.sock",
+            "docker": (
+                "/usr/local/libexec/openclaw-isolated/openclaw-access-check "
+                "-r /var/run/docker.sock"
+            ),
             "outside": (
                 f"/usr/bin/printf '%s\\n' '{self.outside_marker}' > "
                 f"{self.outside_file}"

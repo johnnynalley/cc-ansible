@@ -1054,7 +1054,7 @@
           {{
             openclaw_doctor_rehearsal_transient_prefix
             + ['--unit=openclaw-doctor-source-proof-' + openclaw_doctor_rehearsal_stamp]
-            + ['/usr/bin/test', '!', '-r', openclaw_doctor_rehearsal_source_config]
+            + [openclaw_isolated_access_check_path, '!', '-r', openclaw_doctor_rehearsal_source_config]
           }}
       changed_when: false
 
@@ -1599,7 +1599,7 @@
             openclaw_doctor_rehearsal_transient_prefix
             + ['--unit=openclaw-doctor-plugin-write-proof-' + openclaw_doctor_rehearsal_stamp]
             + [
-                '/usr/bin/test', '!', '-w',
+                openclaw_isolated_access_check_path, '!', '-w',
                 openclaw_doctor_rehearsal_generation_state + '/npm'
               ]
           }}

@@ -27,6 +27,7 @@ CODEX_SERVICE_TEMPLATE_PATH = (
 INVENTORY_PATH = (
     Path(__file__).parents[2] / "inventory/host_vars/jn-t14s-lin/openclaw.yml"
 )
+ACCESS_CHECK_PATH = Path(__file__).parent / "openclaw-access-check"
 
 
 class IsolatedGatewayPlaybookTests(unittest.TestCase):
@@ -39,6 +40,7 @@ class IsolatedGatewayPlaybookTests(unittest.TestCase):
             encoding="utf-8"
         )
         cls.inventory = yaml.safe_load(INVENTORY_PATH.read_text(encoding="utf-8"))
+        cls.access_check = ACCESS_CHECK_PATH.read_text(encoding="utf-8")
 
     def task(self, name: str) -> str:
         start = self.playbook.index(f"- name: {name}")
@@ -422,15 +424,17 @@ class IsolatedGatewayPlaybookTests(unittest.TestCase):
         )
         self.assertIn("UMask=0027", self.codex_service_template)
         self.assertIn(
-            "ExecStartPre=/usr/bin/test -x "
+            "ExecStartPre={{ openclaw_isolated_access_check_path }} -x "
             "{{ openclaw_isolated_gateway_workspace_dir }}",
             self.codex_service_template,
         )
         self.assertIn(
-            "ExecStartPre=/usr/bin/test ! -w "
+            "ExecStartPre={{ openclaw_isolated_access_check_path }} ! -w "
             "{{ openclaw_isolated_gateway_workspace_dir }}",
             self.codex_service_template,
         )
+        self.assertNotIn("/usr/bin/test", self.codex_service_template)
+        self.assertNotIn("/usr/bin/test", self.service_template)
 
         membership_gate = self.task("Wait for isolated service group memberships")
         self.assertIn("until:", membership_gate)
@@ -443,6 +447,7 @@ class IsolatedGatewayPlaybookTests(unittest.TestCase):
         task = self.task("Prove isolated Codex executor filesystem boundaries")
         self.assertNotIn("/usr/bin/bash", task)
         self.assertNotIn("&&", task)
+        self.assertIn("openclaw_isolated_access_check_path", task)
         for label in (
             "Gateway-owned Codex runtime source is unreadable",
             "Gateway-owned provider source is immutable",
@@ -460,6 +465,26 @@ class IsolatedGatewayPlaybookTests(unittest.TestCase):
         self.assertIn(
             'label: Gateway-owned Codex runtime source is unreadable\n              argv:\n                - "!"\n                - -r',
             task,
+        )
+
+    def test_access_checker_is_constrained_and_deployed_before_boundaries(self) -> None:
+        self.assertIn('builtin test "$@"', self.access_check)
+        self.assertIn('[[ "$1" == "-r"', self.access_check)
+        self.assertNotIn("eval", self.access_check)
+        install = self.playbook.index(
+            "- name: Install supplementary-group-aware access checker"
+        )
+        boundary = self.playbook.index(
+            "- name: Prove isolated Codex executor filesystem boundaries"
+        )
+        service = self.playbook.index(
+            "- name: Restart isolated Codex executor from frozen provider package"
+        )
+        self.assertLess(install, boundary)
+        self.assertLess(install, service)
+        self.assertEqual(
+            self.inventory["openclaw_isolated_access_check_path"],
+            "/usr/local/libexec/openclaw-isolated/openclaw-access-check",
         )
 
     def test_codex_runtime_mirror_is_atomic_and_content_verified(self) -> None:
@@ -537,6 +562,9 @@ class IsolatedGatewayPlaybookTests(unittest.TestCase):
             openclaw_isolated_gateway_user="openclaw",
             openclaw_isolated_gateway_group="openclaw",
             openclaw_isolated_gateway_supplementary_groups=["openclaw-workspace"],
+            openclaw_isolated_access_check_path=(
+                "/usr/local/libexec/openclaw-isolated/openclaw-access-check"
+            ),
             openclaw_isolated_gateway_state_dir="/var/lib/openclaw-isolated",
             openclaw_isolated_gateway_config_file=(
                 "/etc/openclaw-isolated/openclaw.json"
@@ -565,6 +593,9 @@ class IsolatedGatewayPlaybookTests(unittest.TestCase):
             openclaw_isolated_codex_user="openclaw-codex",
             openclaw_isolated_codex_group="openclaw-codex",
             openclaw_isolated_codex_supplementary_groups=["openclaw-workspace"],
+            openclaw_isolated_access_check_path=(
+                "/usr/local/libexec/openclaw-isolated/openclaw-access-check"
+            ),
             openclaw_isolated_codex_state_dir="/var/lib/openclaw-codex",
             openclaw_isolated_codex_config_dir="/etc/openclaw-codex",
             openclaw_isolated_codex_token_file=("/etc/openclaw-codex/app-server.token"),
@@ -629,6 +660,9 @@ class IsolatedGatewayPlaybookTests(unittest.TestCase):
             openclaw_isolated_codex_user="openclaw-codex",
             openclaw_isolated_codex_group="openclaw-codex",
             openclaw_isolated_codex_supplementary_groups=["openclaw-workspace"],
+            openclaw_isolated_access_check_path=(
+                "/usr/local/libexec/openclaw-isolated/openclaw-access-check"
+            ),
             openclaw_isolated_codex_state_dir="/var/lib/openclaw-codex",
             openclaw_isolated_codex_config_dir="/etc/openclaw-codex",
             openclaw_isolated_codex_token_file=("/etc/openclaw-codex/app-server.token"),

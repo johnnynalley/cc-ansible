@@ -12,19 +12,19 @@ WorkingDirectory={{ openclaw_isolated_gateway_workspace_dir }}
 Environment=HOME={{ openclaw_isolated_codex_state_dir }}
 Environment=CODEX_HOME={{ openclaw_isolated_codex_state_dir }}/codex-home
 Environment=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin
-ExecStartPre=/usr/bin/test -r {{ openclaw_isolated_codex_token_file }}
-ExecStartPre=/usr/bin/test ! -w {{ openclaw_isolated_codex_token_file }}
-ExecStartPre=/usr/bin/test -r {{ openclaw_isolated_codex_runtime_dir }}/node_modules/@openai/codex/bin/codex.js
-ExecStartPre=/usr/bin/test ! -w {{ openclaw_isolated_codex_runtime_dir }}
-ExecStartPre=/usr/bin/test -w {{ openclaw_isolated_codex_state_dir }}
-ExecStartPre=/usr/bin/test -x {{ openclaw_isolated_gateway_workspace_dir }}
-ExecStartPre=/usr/bin/test ! -w {{ openclaw_isolated_gateway_workspace_dir }}
-ExecStartPre=/usr/bin/test ! -r {{ openclaw_isolated_gateway_secret_file }}
-ExecStartPre=/usr/bin/test ! -r {{ openclaw_isolated_gateway_config_file }}
-ExecStartPre=/usr/bin/test ! -x /home/{{ openclaw_isolated_gateway_legacy_user }}
-ExecStartPre=/usr/bin/test ! -r /var/run/docker.sock
-ExecStartPre=/usr/bin/test ! -r /home/{{ openclaw_isolated_gateway_legacy_user }}/.ansible/vault_pass.txt
-ExecStartPre=/usr/bin/test ! -r {{ openclaw_workspace }}/AGENTS.md
+ExecStartPre={{ openclaw_isolated_access_check_path }} -r {{ openclaw_isolated_codex_token_file }}
+ExecStartPre={{ openclaw_isolated_access_check_path }} ! -w {{ openclaw_isolated_codex_token_file }}
+ExecStartPre={{ openclaw_isolated_access_check_path }} -r {{ openclaw_isolated_codex_runtime_dir }}/node_modules/@openai/codex/bin/codex.js
+ExecStartPre={{ openclaw_isolated_access_check_path }} ! -w {{ openclaw_isolated_codex_runtime_dir }}
+ExecStartPre={{ openclaw_isolated_access_check_path }} -w {{ openclaw_isolated_codex_state_dir }}
+ExecStartPre={{ openclaw_isolated_access_check_path }} -x {{ openclaw_isolated_gateway_workspace_dir }}
+ExecStartPre={{ openclaw_isolated_access_check_path }} ! -w {{ openclaw_isolated_gateway_workspace_dir }}
+ExecStartPre={{ openclaw_isolated_access_check_path }} ! -r {{ openclaw_isolated_gateway_secret_file }}
+ExecStartPre={{ openclaw_isolated_access_check_path }} ! -r {{ openclaw_isolated_gateway_config_file }}
+ExecStartPre={{ openclaw_isolated_access_check_path }} ! -x /home/{{ openclaw_isolated_gateway_legacy_user }}
+ExecStartPre={{ openclaw_isolated_access_check_path }} ! -r /var/run/docker.sock
+ExecStartPre={{ openclaw_isolated_access_check_path }} ! -r /home/{{ openclaw_isolated_gateway_legacy_user }}/.ansible/vault_pass.txt
+ExecStartPre={{ openclaw_isolated_access_check_path }} ! -r {{ openclaw_workspace }}/AGENTS.md
 ExecStart=/usr/bin/node {{ openclaw_isolated_codex_runtime_dir }}/node_modules/@openai/codex/bin/codex.js app-server --listen ws://127.0.0.1:{{ openclaw_isolated_codex_port }} --ws-auth capability-token --ws-token-file {{ openclaw_isolated_codex_token_file }}
 Restart=on-failure
 RestartSec=5

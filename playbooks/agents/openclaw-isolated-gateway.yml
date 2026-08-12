@@ -89,6 +89,7 @@
           - openclaw_isolated_codex_state_dir == '/var/lib/openclaw-codex'
           - openclaw_isolated_codex_runtime_dir == '/opt/openclaw-codex/runtime'
           - openclaw_isolated_gateway_state_dir is match('^/var/lib/openclaw-isolated$')
+          - openclaw_isolated_access_check_path == '/usr/local/libexec/openclaw-isolated/openclaw-access-check'
           - openclaw_isolated_gateway_runtime_root == '/opt/openclaw-isolated'
           - openclaw_isolated_gateway_releases_dir == openclaw_isolated_gateway_runtime_root + '/releases'
           - openclaw_isolated_gateway_runtime_dir == openclaw_isolated_gateway_runtime_root + '/current'
@@ -839,6 +840,15 @@
             state: absent
           when: not ansible_check_mode
 
+        - name: Install supplementary-group-aware access checker
+          ansible.builtin.copy:
+            src: "{{ ansible_config_file | dirname }}/scripts/agents/openclaw-access-check"
+            dest: "{{ openclaw_isolated_access_check_path }}"
+            owner: root
+            group: root
+            mode: "0755"
+          when: not ansible_check_mode
+
         - name: Create isolated release staging directory
           ansible.builtin.file:
             path: "{{ item.path }}"
@@ -919,7 +929,7 @@
             argv: >-
               {{
                 openclaw_isolated_gateway_build_sandbox_argv
-                + ['/usr/bin/test', '!', '-r', item]
+                + [openclaw_isolated_access_check_path, '!', '-r', item]
               }}
           loop:
             - "{{ openclaw_isolated_gateway_secret_file }}"
@@ -1694,7 +1704,7 @@
               - -u
               - "{{ openclaw_isolated_gateway_user }}"
               - --
-              - /usr/bin/test
+              - "{{ openclaw_isolated_access_check_path }}"
               - "!"
               - -w
               - "{{ item }}"
@@ -1721,7 +1731,7 @@
               - -u
               - "{{ openclaw_isolated_gateway_user }}"
               - --
-              - /usr/bin/test
+              - "{{ openclaw_isolated_access_check_path }}"
               - -r
               - "{{ openclaw_isolated_gateway_codex_plugin_dir }}/openclaw.plugin.json"
           changed_when: false
@@ -2147,7 +2157,7 @@
               - -u
               - "{{ openclaw_isolated_gateway_user }}"
               - --
-              - /usr/bin/test
+              - "{{ openclaw_isolated_access_check_path }}"
               - "!"
               - -w
               - "{{ openclaw_isolated_gateway_codex_plugin_dir }}"
@@ -2157,7 +2167,7 @@
         - name: Prove root-managed Codex runtime source exists
           ansible.builtin.command:
             argv:
-              - /usr/bin/test
+              - "{{ openclaw_isolated_access_check_path }}"
               - -r
               - "{{ openclaw_isolated_gateway_codex_plugin_dir }}/node_modules/@openai/codex/bin/codex.js"
           changed_when: false
@@ -2256,7 +2266,7 @@
                   '-u',
                   openclaw_isolated_codex_user,
                   '--',
-                  '/usr/bin/test'
+                  openclaw_isolated_access_check_path
                 ]
                 + item.argv
               }}

@@ -19,21 +19,21 @@ Environment=OPENCLAW_SKIP_CHANNELS=1
 Environment=OPENCLAW_SKIP_CRON=1
 Environment=NODE_COMPILE_CACHE={{ openclaw_isolated_gateway_state_dir }}/compile-cache
 Environment=PATH={{ openclaw_isolated_gateway_runtime_dir }}/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin
-ExecStartPre=/usr/bin/test -r {{ openclaw_isolated_gateway_config_file }}
-ExecStartPre=/usr/bin/test ! -w {{ openclaw_isolated_gateway_config_file }}
-ExecStartPre=/usr/bin/test -w {{ openclaw_isolated_gateway_config_file }}.last-good
-ExecStartPre=/usr/bin/test -r {{ openclaw_isolated_gateway_secret_file }}
-ExecStartPre=/usr/bin/test ! -w {{ openclaw_isolated_gateway_secret_file }}
-ExecStartPre=/usr/bin/test -w {{ openclaw_isolated_gateway_state_dir }}
-ExecStartPre=/usr/bin/test -r {{ openclaw_isolated_gateway_codex_plugin_dir }}/openclaw.plugin.json
-ExecStartPre=/usr/bin/test ! -w {{ openclaw_isolated_gateway_codex_plugin_dir }}
-ExecStartPre=/usr/bin/test ! -w {{ openclaw_isolated_gateway_state_dir }}/state/npm
-ExecStartPre=/usr/bin/test ! -w {{ openclaw_isolated_gateway_workspace_dir }}
-ExecStartPre=/usr/bin/test -x {{ openclaw_isolated_gateway_workspace_dir }}
-ExecStartPre=/usr/bin/test ! -x /home/{{ openclaw_isolated_gateway_legacy_user }}
-ExecStartPre=/usr/bin/test ! -r /var/run/docker.sock
-ExecStartPre=/usr/bin/test ! -r /home/{{ openclaw_isolated_gateway_legacy_user }}/.ansible/vault_pass.txt
-ExecStartPre=/usr/bin/test ! -r {{ openclaw_workspace }}/AGENTS.md
+ExecStartPre={{ openclaw_isolated_access_check_path }} -r {{ openclaw_isolated_gateway_config_file }}
+ExecStartPre={{ openclaw_isolated_access_check_path }} ! -w {{ openclaw_isolated_gateway_config_file }}
+ExecStartPre={{ openclaw_isolated_access_check_path }} -w {{ openclaw_isolated_gateway_config_file }}.last-good
+ExecStartPre={{ openclaw_isolated_access_check_path }} -r {{ openclaw_isolated_gateway_secret_file }}
+ExecStartPre={{ openclaw_isolated_access_check_path }} ! -w {{ openclaw_isolated_gateway_secret_file }}
+ExecStartPre={{ openclaw_isolated_access_check_path }} -w {{ openclaw_isolated_gateway_state_dir }}
+ExecStartPre={{ openclaw_isolated_access_check_path }} -r {{ openclaw_isolated_gateway_codex_plugin_dir }}/openclaw.plugin.json
+ExecStartPre={{ openclaw_isolated_access_check_path }} ! -w {{ openclaw_isolated_gateway_codex_plugin_dir }}
+ExecStartPre={{ openclaw_isolated_access_check_path }} ! -w {{ openclaw_isolated_gateway_state_dir }}/state/npm
+ExecStartPre={{ openclaw_isolated_access_check_path }} ! -w {{ openclaw_isolated_gateway_workspace_dir }}
+ExecStartPre={{ openclaw_isolated_access_check_path }} -x {{ openclaw_isolated_gateway_workspace_dir }}
+ExecStartPre={{ openclaw_isolated_access_check_path }} ! -x /home/{{ openclaw_isolated_gateway_legacy_user }}
+ExecStartPre={{ openclaw_isolated_access_check_path }} ! -r /var/run/docker.sock
+ExecStartPre={{ openclaw_isolated_access_check_path }} ! -r /home/{{ openclaw_isolated_gateway_legacy_user }}/.ansible/vault_pass.txt
+ExecStartPre={{ openclaw_isolated_access_check_path }} ! -r {{ openclaw_workspace }}/AGENTS.md
 ExecStart={{ openclaw_isolated_gateway_runtime_dir }}/bin/openclaw gateway run --port {{ openclaw_isolated_gateway_port }} --ws-log compact
 Restart=on-failure
 RestartSec=5

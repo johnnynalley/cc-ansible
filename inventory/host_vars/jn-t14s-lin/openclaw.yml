@@ -82,6 +82,8 @@ openclaw_isolated_codex_token_file: /etc/openclaw-codex/app-server.token
 openclaw_isolated_codex_state_dir: /var/lib/openclaw-codex
 openclaw_isolated_codex_runtime_dir: /opt/openclaw-codex/runtime
 openclaw_isolated_gateway_state_dir: /var/lib/openclaw-isolated
+openclaw_isolated_access_check_path: >-
+  /usr/local/libexec/openclaw-isolated/openclaw-access-check
 openclaw_isolated_gateway_workspace_dir: >-
   /usr/local/share/openclaw-isolated/workspace
 # Transactional rollback stays local so migration safety does not depend on a
