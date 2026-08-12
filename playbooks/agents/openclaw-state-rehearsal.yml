@@ -3,7 +3,8 @@
 # Purpose: Rehearse OpenClaw file-backed session relocation without touching production.
 # Hosts: openclaw_hosts.
 # Key vars: openclaw_state_rehearsal_*.
-# Scripts: scripts/agents/openclaw-session-relocate.py.
+# Scripts: scripts/agents/openclaw-session-relocate.py and
+# scripts/agents/openclaw-rehearsal-retention.py.
 # Validation: ansible-playbook playbooks/agents/openclaw-state-rehearsal.yml --syntax-check.
 
 - name: Rehearse OpenClaw state relocation
@@ -18,6 +19,8 @@
       /usr/local/libexec/openclaw-migration/openclaw-workspace-stage.py
     openclaw_state_rehearsal_workspace_policy_tool: >-
       /usr/local/libexec/openclaw-migration/openclaw-workspace-inventory.py
+    openclaw_state_rehearsal_retention_tool: >-
+      /usr/local/libexec/openclaw-migration/openclaw-rehearsal-retention.py
     openclaw_state_rehearsal_free_space_margin: 1073741824
     openclaw_state_rehearsal_agent_arguments:
       - --agent=main
@@ -58,6 +61,7 @@
           - openclaw_state_rehearsal_backup_dir == '/var/backups/openclaw-migration-rehearsal'
           - openclaw_state_rehearsal_workspace_stage_tool == '/usr/local/libexec/openclaw-migration/openclaw-workspace-stage.py'
           - openclaw_state_rehearsal_workspace_policy_tool == '/usr/local/libexec/openclaw-migration/openclaw-workspace-inventory.py'
+          - openclaw_state_rehearsal_retention_tool == '/usr/local/libexec/openclaw-migration/openclaw-rehearsal-retention.py'
           - openclaw_state_rehearsal_agents | sort == ['antares', 'dubble', 'main', 'rigel', 'vega']
         fail_msg: >-
           The state rehearsal identity, roots, sources, or agent set are
@@ -123,6 +127,7 @@
         - "{{ openclaw_state_rehearsal_workspace_root }}/current"
         - "{{ openclaw_state_rehearsal_workspace_stage_tool }}"
         - "{{ openclaw_state_rehearsal_workspace_policy_tool }}"
+        - "{{ openclaw_state_rehearsal_retention_tool }}"
       register: openclaw_state_rehearsal_existing_paths
       check_mode: false
 
@@ -134,7 +139,8 @@
             or item.item in [
               openclaw_state_rehearsal_tool,
               openclaw_state_rehearsal_workspace_stage_tool,
-              openclaw_state_rehearsal_workspace_policy_tool
+              openclaw_state_rehearsal_workspace_policy_tool,
+              openclaw_state_rehearsal_retention_tool
             ]
             or item.stat.islnk | default(false)
         fail_msg: >-
@@ -353,6 +359,74 @@
         owner: root
         group: root
         mode: "0755"
+
+    - name: Deploy OpenClaw rehearsal generation retention helper
+      ansible.builtin.copy:
+        src: "{{ ansible_config_file | dirname }}/scripts/agents/openclaw-rehearsal-retention.py"
+        dest: "{{ openclaw_state_rehearsal_retention_tool }}"
+        owner: root
+        group: root
+        mode: "0755"
+
+    - name: Detect an existing OpenClaw state rehearsal selector set
+      ansible.builtin.set_fact:
+        openclaw_state_rehearsal_has_current_generation: >-
+          {{
+            openclaw_state_rehearsal_existing_paths.results[1].stat.exists
+            and openclaw_state_rehearsal_existing_paths.results[2].stat.exists
+          }}
+
+    - name: Reject a partial OpenClaw state rehearsal selector set
+      ansible.builtin.assert:
+        that:
+          - >-
+            openclaw_state_rehearsal_existing_paths.results[1].stat.exists
+            == openclaw_state_rehearsal_existing_paths.results[2].stat.exists
+        fail_msg: >-
+          The state and workspace selectors must either both exist or both be
+          absent before generation retention.
+
+    - name: Plan bounded OpenClaw state rehearsal generation retention
+      ansible.builtin.command:
+        argv:
+          - "{{ openclaw_state_rehearsal_retention_tool }}"
+          - --family
+          - state
+          - --mode
+          - plan
+          - --output
+          - "{{ openclaw_state_rehearsal_evidence_dir }}/retention-plan.json"
+      register: openclaw_state_rehearsal_retention_plan
+      changed_when: true
+      when: openclaw_state_rehearsal_has_current_generation | bool
+
+    - name: Apply bounded OpenClaw state rehearsal generation retention
+      ansible.builtin.command:
+        argv:
+          - "{{ openclaw_state_rehearsal_retention_tool }}"
+          - --family
+          - state
+          - --mode
+          - apply
+          - --plan
+          - "{{ openclaw_state_rehearsal_evidence_dir }}/retention-plan.json"
+          - --output
+          - "{{ openclaw_state_rehearsal_evidence_dir }}/retention-result.json"
+      register: openclaw_state_rehearsal_retention_result
+      changed_when: >-
+        (openclaw_state_rehearsal_retention_result.stdout | from_json).removedGenerationCount
+        | int > 0
+      when: openclaw_state_rehearsal_has_current_generation | bool
+
+    - name: Require successful OpenClaw state rehearsal generation retention
+      ansible.builtin.assert:
+        that:
+          - (openclaw_state_rehearsal_retention_result.stdout | from_json).status == 'ok'
+          - (openclaw_state_rehearsal_retention_result.stdout | from_json).family == 'state'
+        fail_msg: >-
+          State rehearsal retention did not preserve its selected and immediate
+          rollback generations.
+      when: openclaw_state_rehearsal_has_current_generation | bool
 
     - name: Create OpenClaw state rehearsal workspace input directory
       ansible.builtin.file:

@@ -99,7 +99,11 @@ dedicated `openclaw-health` system service passes cutover validation.
   is imported. It rejects symlinks and unsafe output directories, and its
   output contains only status and change state.
 - `test_openclaw_isolated_secrets.py` covers atomic permissions, idempotency,
-  unexpected-field removal, parent ownership, and Gateway-token preservation.
+  unexpected-field removal, parent ownership, Gateway-token preservation, and
+  the required helper CLI contract across every managed playbook consumer.
+- `test_openclaw_doctor_rehearsal.py` rejects the retired embedded-plugin
+  release layout and requires Doctor to source exact package and manifest
+  identities from the frozen native OpenClaw plugin store.
 - `test_openclaw_isolated_gateway_playbook.py` enforces immutable release
   ownership convergence, non-following recursive permission changes, targeted
   local rollback before package work, native integrity-bearing plugin installs
@@ -199,6 +203,25 @@ dedicated `openclaw-health` system service passes cutover validation.
   applied silent-data prerequisite, backup-before-probe ordering, split-service
   and cross-secret boundaries, fixed prompt and trajectory proof, exact native
   session archival, listener/boot parity, and rescue restoration.
+- `openclaw-rehearsal-retention.py` bounds state and Doctor rehearsal copies to
+  the selected generation plus the exact generation referenced by its current
+  rollback archive. Its root-only two-phase plan/apply flow rejects partial
+  retained sets, extra selectors, symlink or mount escapes, unknown owners,
+  unknown groups, world-writable content, active migration-identity processes,
+  unsafe rollback targets, and metadata drift. Trusted group-writable content
+  from failed/pre-hardening generations is recorded and can be removed only
+  while the dedicated migration identity is quiescent; retained generation
+  roots must still be root-owned. Superseded generation payloads are removed
+  only through a platform-confirmed symlink-attack-resistant tree operation,
+  while their separate evidence directories remain available for the migration
+  audit. Doctor runs repeat the gate after successful selector promotion so the
+  payload set ends at current plus immediate rollback rather than waiting for a
+  later run.
+- `test_openclaw_rehearsal_retention.py` covers active and rollback retention,
+  partial failed generations, exact-plan application, selector disagreement,
+  stale selectors, unknown entries, rollback escapes, trusted group-writable
+  failed data, world-writable rejection, writer quiescence, symlink-safe
+  deletion, and metadata drift.
 - `openclaw-doctor-rehearsal.py` creates service-credential-free structured
   config copies, replaces source secret providers with a fresh canary Gateway
   file `SecretRef`, replaces retained external plugin paths with reviewed

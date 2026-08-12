@@ -297,8 +297,8 @@ Packages are merged from multiple sources (all applicable variables combined):
 | `openclaw.yml` | `openclaw_hosts` | OpenClaw AI agent (npm install, gateway service, repo-sync/update-check timers) |
 | `openclaw-health-receiver.yml` | `openclaw_hosts` | Isolated Health receiver and aggregate-only report publisher (disabled by default) |
 | `openclaw-isolated-gateway.yml` | `openclaw_hosts` | Modernized split Gateway/Codex canary with immutable runtime/provider code, separate no-login identities and secrets, isolated executor OAuth, and model proof (disabled by default) |
-| `openclaw-state-rehearsal.yml` | `openclaw_hosts` | Verified relocation rehearsal for active file-backed sessions with derived legacy prompt caches rebuilt (disabled by default) |
-| `openclaw-doctor-rehearsal.yml` | `openclaw_hosts` | Credential-free Doctor and plugin-modernization rehearsal on protected copied state (disabled by default) |
+| `openclaw-state-rehearsal.yml` | `openclaw_hosts` | Verified relocation rehearsal for active file-backed sessions with bounded current/rollback generation retention (disabled by default) |
+| `openclaw-doctor-rehearsal.yml` | `openclaw_hosts` | Credential-free Doctor/plugin-modernization rehearsal with bounded upstream and Doctor generation retention (disabled by default) |
 | `openclaw-canary-data-rehearsal.yml` | `openclaw_hosts` | Transactional modern-workspace/session handoff to the silent loopback canary with native session plan/apply and rollback (disabled by default) |
 | `openclaw-behavior-rehearsal.yml` | `openclaw_hosts` | Channel-less Dubble, native Star delegation, and idle-silent Rigel behavior proof with synthetic-session cleanup (disabled by default) |
 | `openclaw-security-rehearsal.yml` | `openclaw_hosts` | Channel-less hostile-prompt proof of the split executor's sudo, Gateway-secret, Docker, and filesystem boundaries (disabled by default) |

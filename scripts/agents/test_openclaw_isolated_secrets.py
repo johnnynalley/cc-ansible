@@ -9,11 +9,29 @@ import tempfile
 import unittest
 from pathlib import Path
 
+import yaml
+
 MODULE_PATH = Path(__file__).with_name("openclaw-isolated-secrets.py")
 SPEC = importlib.util.spec_from_file_location("openclaw_isolated_secrets", MODULE_PATH)
 MODULE = importlib.util.module_from_spec(SPEC)
 assert SPEC and SPEC.loader
 SPEC.loader.exec_module(MODULE)
+REPOSITORY_ROOT = Path(__file__).parents[2]
+PLAYBOOK_PATHS = (
+    REPOSITORY_ROOT / "playbooks/agents/openclaw-doctor-rehearsal.yml",
+    REPOSITORY_ROOT / "playbooks/agents/openclaw-isolated-gateway.yml",
+)
+
+
+def iter_tasks(tasks: list[object]):
+    for candidate in tasks:
+        if not isinstance(candidate, dict):
+            continue
+        yield candidate
+        for section in ("block", "rescue", "always"):
+            nested = candidate.get(section)
+            if isinstance(nested, list):
+                yield from iter_tasks(nested)
 
 
 class SecretPayloadTests(unittest.TestCase):
@@ -121,6 +139,50 @@ class SecretPayloadTests(unittest.TestCase):
                     os.getgid(),
                     os.getuid() + 1,
                 )
+
+    def test_every_playbook_consumer_satisfies_required_cli_contract(self) -> None:
+        required_options = {
+            action.option_strings[0]
+            for action in MODULE.build_parser()._actions
+            if action.required and action.option_strings
+        }
+        consumers: list[tuple[Path, str, list[object]]] = []
+        for playbook_path in PLAYBOOK_PATHS:
+            plays = yaml.safe_load(playbook_path.read_text(encoding="utf-8"))
+            for play in plays:
+                for task in iter_tasks(play.get("tasks", [])):
+                    command = task.get("ansible.builtin.command")
+                    if not isinstance(command, dict):
+                        continue
+                    argv = command.get("argv")
+                    if not isinstance(argv, list) or not argv:
+                        continue
+                    executable = str(argv[0])
+                    if (
+                        "openclaw-isolated-secrets.py" not in executable
+                        and "secret_tool" not in executable
+                    ):
+                        continue
+                    consumers.append(
+                        (playbook_path, str(task.get("name", "unnamed")), argv)
+                    )
+
+        self.assertTrue(consumers)
+        for playbook_path, task_name, argv in consumers:
+            with self.subTest(playbook=playbook_path.name, task=task_name):
+                self.assertTrue(
+                    required_options.issubset({str(argument) for argument in argv})
+                )
+
+    def test_doctor_discards_standalone_codex_token_after_bootstrap(self) -> None:
+        playbook = PLAYBOOK_PATHS[0].read_text(encoding="utf-8")
+        self.assertIn("--codex-token-owner", playbook)
+        self.assertIn("--codex-token-group", playbook)
+        self.assertIn("Remove ephemeral OpenClaw Doctor Codex token copy", playbook)
+        self.assertIn(
+            "Require no standalone Codex token in OpenClaw Doctor generation",
+            playbook,
+        )
 
 
 if __name__ == "__main__":

@@ -17,6 +17,8 @@
       /usr/local/libexec/openclaw-migration/openclaw-doctor-rehearsal.py
     openclaw_doctor_rehearsal_secret_tool: >-
       /usr/local/libexec/openclaw-migration/openclaw-isolated-secrets.py
+    openclaw_doctor_rehearsal_retention_tool: >-
+      /usr/local/libexec/openclaw-migration/openclaw-rehearsal-retention.py
     openclaw_doctor_rehearsal_free_space_margin: 5368709120
 
   tasks:
@@ -53,6 +55,8 @@
           - openclaw_doctor_rehearsal_config_root == '/etc/openclaw-doctor-rehearsal'
           - openclaw_doctor_rehearsal_backup_dir == '/var/backups/openclaw-doctor-rehearsal'
           - openclaw_doctor_rehearsal_runtime == '/opt/openclaw-isolated/current'
+          - openclaw_doctor_rehearsal_retention_tool == '/usr/local/libexec/openclaw-migration/openclaw-rehearsal-retention.py'
+          - openclaw_isolated_gateway_plugin_state_root == '/var/lib/openclaw-isolated/state/npm'
           - openclaw_doctor_rehearsal_agents | sort == ['antares', 'dubble', 'main', 'rigel', 'vega']
           - openclaw_doctor_rehearsal_install_records | sort == ['brave', 'codex', 'discord', 'lossless-claw', 'nextcloud-talk', 'openclaw-mem0', 'perplexity', 'self-evolution-gate']
           - openclaw_isolated_gateway_managed_plugins | map(attribute='id') | sort == ['codex', 'discord', 'lossless-claw', 'openclaw-mem0']
@@ -250,8 +254,36 @@
         - "{{ openclaw_doctor_rehearsal_state_root }}/current"
         - "{{ openclaw_doctor_rehearsal_workspace_root }}/current"
         - "{{ openclaw_doctor_rehearsal_config_root }}/current"
+        - "{{ openclaw_doctor_rehearsal_retention_tool }}"
       register: openclaw_doctor_rehearsal_existing_paths
       check_mode: false
+
+    - name: Index prior OpenClaw Doctor selectors by role
+      ansible.builtin.set_fact:
+        openclaw_doctor_rehearsal_prior_state_selector: >-
+          {{
+            (
+              openclaw_doctor_rehearsal_existing_paths.results
+              | selectattr('item', 'equalto', openclaw_doctor_rehearsal_state_root + '/current')
+              | first
+            ).stat
+          }}
+        openclaw_doctor_rehearsal_prior_workspace_selector: >-
+          {{
+            (
+              openclaw_doctor_rehearsal_existing_paths.results
+              | selectattr('item', 'equalto', openclaw_doctor_rehearsal_workspace_root + '/current')
+              | first
+            ).stat
+          }}
+        openclaw_doctor_rehearsal_prior_config_selector: >-
+          {{
+            (
+              openclaw_doctor_rehearsal_existing_paths.results
+              | selectattr('item', 'equalto', openclaw_doctor_rehearsal_config_root + '/current')
+              | first
+            ).stat
+          }}
 
     - name: Reject non-symlink OpenClaw Doctor selectors
       ansible.builtin.assert:
@@ -260,6 +292,7 @@
             not item.stat.exists
             or item.item == openclaw_doctor_rehearsal_tool
             or item.item == openclaw_doctor_rehearsal_secret_tool
+            or item.item == openclaw_doctor_rehearsal_retention_tool
             or item.stat.islnk | default(false)
         fail_msg: >-
           A Doctor rehearsal current selector is not a symlink. Refusing to
@@ -293,12 +326,16 @@
       failed_when: false
       check_mode: false
 
+    - name: Validate frozen native plugin source before rehearsal mutation
+      ansible.builtin.include_tasks: ../../tasks/openclaw-doctor-plugin-source.yml
+
     - name: Report OpenClaw Doctor rehearsal check-mode boundary
       ansible.builtin.debug:
         msg: >-
           Check mode validated the fixed source, immutable input generations,
-          service identity, database set, and plugin disposition. It does not
-          copy or transform protected state.
+          service identity, database set, plugin disposition, and frozen native
+          plugin source identities. It does not copy or transform protected
+          state.
       when: ansible_check_mode
 
     - name: Stop OpenClaw Doctor rehearsal before mutation in check mode
@@ -321,6 +358,8 @@
           {{ openclaw_doctor_rehearsal_config_root }}/generations/{{ openclaw_doctor_rehearsal_stamp }}/openclaw.json
         openclaw_doctor_rehearsal_generation_secret: >-
           {{ openclaw_doctor_rehearsal_config_root }}/generations/{{ openclaw_doctor_rehearsal_stamp }}/secrets.json
+        openclaw_doctor_rehearsal_generation_codex_token_bootstrap: >-
+          {{ openclaw_doctor_rehearsal_config_root }}/generations/{{ openclaw_doctor_rehearsal_stamp }}/.codex-app-server.token.bootstrap
         openclaw_doctor_rehearsal_plugin_build_cache: >-
           {{ openclaw_doctor_rehearsal_config_root }}/generations/{{ openclaw_doctor_rehearsal_stamp }}/npm-cache
         openclaw_doctor_rehearsal_evidence_dir: >-
@@ -613,6 +652,164 @@
         group: root
         mode: "0755"
 
+    - name: Deploy OpenClaw rehearsal generation retention helper
+      ansible.builtin.copy:
+        src: "{{ ansible_config_file | dirname }}/scripts/agents/openclaw-rehearsal-retention.py"
+        dest: "{{ openclaw_doctor_rehearsal_retention_tool }}"
+        owner: root
+        group: root
+        mode: "0755"
+
+    - name: Plan bounded upstream state rehearsal generation retention
+      ansible.builtin.command:
+        argv:
+          - "{{ openclaw_doctor_rehearsal_retention_tool }}"
+          - --family
+          - state
+          - --mode
+          - plan
+          - --output
+          - "{{ openclaw_doctor_rehearsal_evidence_dir }}/state-retention-plan.json"
+      register: openclaw_doctor_rehearsal_state_retention_plan
+      changed_when: true
+
+    - name: Require bounded upstream state rehearsal retention plan
+      ansible.builtin.assert:
+        that:
+          - (openclaw_doctor_rehearsal_state_retention_plan.stdout | from_json).status == 'ok'
+          - (openclaw_doctor_rehearsal_state_retention_plan.stdout | from_json).family == 'state'
+          - >-
+            (openclaw_doctor_rehearsal_state_retention_plan.stdout | from_json).selectedStamp
+            == openclaw_doctor_rehearsal_resolved_selectors.results[0].stdout.split('/')[-2]
+        fail_msg: >-
+          The upstream session-generation retention plan does not preserve the
+          exact Doctor input selector.
+
+    - name: Apply bounded upstream state rehearsal generation retention
+      ansible.builtin.command:
+        argv:
+          - "{{ openclaw_doctor_rehearsal_retention_tool }}"
+          - --family
+          - state
+          - --mode
+          - apply
+          - --plan
+          - "{{ openclaw_doctor_rehearsal_evidence_dir }}/state-retention-plan.json"
+          - --output
+          - "{{ openclaw_doctor_rehearsal_evidence_dir }}/state-retention-result.json"
+      register: openclaw_doctor_rehearsal_state_retention_result
+      changed_when: >-
+        (openclaw_doctor_rehearsal_state_retention_result.stdout | from_json).removedGenerationCount
+        | int > 0
+
+    - name: Require successful upstream state rehearsal retention
+      ansible.builtin.assert:
+        that:
+          - (openclaw_doctor_rehearsal_state_retention_result.stdout | from_json).status == 'ok'
+          - (openclaw_doctor_rehearsal_state_retention_result.stdout | from_json).family == 'state'
+          - >-
+            (openclaw_doctor_rehearsal_state_retention_result.stdout | from_json).selectedStamp
+            == openclaw_doctor_rehearsal_resolved_selectors.results[0].stdout.split('/')[-2]
+        fail_msg: >-
+          Upstream session-generation retention did not preserve its selected
+          and immediate rollback generations.
+
+    - name: Detect an existing OpenClaw Doctor generation selector set
+      ansible.builtin.set_fact:
+        openclaw_doctor_rehearsal_has_current_generation: >-
+          {{
+            (
+              openclaw_doctor_rehearsal_existing_paths.results
+              | selectattr('item', 'equalto', openclaw_doctor_rehearsal_state_root + '/current')
+              | map(attribute='stat.exists')
+              | first
+              | default(false)
+            )
+            and
+            (
+              openclaw_doctor_rehearsal_existing_paths.results
+              | selectattr('item', 'equalto', openclaw_doctor_rehearsal_workspace_root + '/current')
+              | map(attribute='stat.exists')
+              | first
+              | default(false)
+            )
+            and
+            (
+              openclaw_doctor_rehearsal_existing_paths.results
+              | selectattr('item', 'equalto', openclaw_doctor_rehearsal_config_root + '/current')
+              | map(attribute='stat.exists')
+              | first
+              | default(false)
+            )
+          }}
+
+    - name: Reject a partial OpenClaw Doctor generation selector set
+      ansible.builtin.assert:
+        that:
+          - >-
+            [
+              openclaw_doctor_rehearsal_prior_state_selector.exists,
+              openclaw_doctor_rehearsal_prior_workspace_selector.exists,
+              openclaw_doctor_rehearsal_prior_config_selector.exists
+            ]
+            | unique
+            | length == 1
+        fail_msg: >-
+          Doctor state, workspace, and config selectors must either all exist
+          or all be absent before generation retention.
+
+    - name: Plan bounded OpenClaw Doctor generation retention
+      ansible.builtin.command:
+        argv:
+          - "{{ openclaw_doctor_rehearsal_retention_tool }}"
+          - --family
+          - doctor
+          - --mode
+          - plan
+          - --output
+          - "{{ openclaw_doctor_rehearsal_evidence_dir }}/doctor-retention-plan.json"
+      register: openclaw_doctor_rehearsal_generation_retention_plan
+      changed_when: true
+      when: openclaw_doctor_rehearsal_has_current_generation | bool
+
+    - name: Require bounded OpenClaw Doctor generation retention plan
+      ansible.builtin.assert:
+        that:
+          - (openclaw_doctor_rehearsal_generation_retention_plan.stdout | from_json).status == 'ok'
+          - (openclaw_doctor_rehearsal_generation_retention_plan.stdout | from_json).family == 'doctor'
+        fail_msg: >-
+          The Doctor-generation retention plan did not preserve the selected
+          and immediate rollback generations.
+      when: openclaw_doctor_rehearsal_has_current_generation | bool
+
+    - name: Apply bounded OpenClaw Doctor generation retention
+      ansible.builtin.command:
+        argv:
+          - "{{ openclaw_doctor_rehearsal_retention_tool }}"
+          - --family
+          - doctor
+          - --mode
+          - apply
+          - --plan
+          - "{{ openclaw_doctor_rehearsal_evidence_dir }}/doctor-retention-plan.json"
+          - --output
+          - "{{ openclaw_doctor_rehearsal_evidence_dir }}/doctor-retention-result.json"
+      register: openclaw_doctor_rehearsal_generation_retention_result
+      changed_when: >-
+        (openclaw_doctor_rehearsal_generation_retention_result.stdout | from_json).removedGenerationCount
+        | int > 0
+      when: openclaw_doctor_rehearsal_has_current_generation | bool
+
+    - name: Require successful OpenClaw Doctor generation retention
+      ansible.builtin.assert:
+        that:
+          - (openclaw_doctor_rehearsal_generation_retention_result.stdout | from_json).status == 'ok'
+          - (openclaw_doctor_rehearsal_generation_retention_result.stdout | from_json).family == 'doctor'
+        fail_msg: >-
+          Doctor-generation retention did not preserve its selected and
+          immediate rollback generations.
+      when: openclaw_doctor_rehearsal_has_current_generation | bool
+
     - name: Create OpenClaw Doctor generation directories
       ansible.builtin.file:
         path: "{{ item }}"
@@ -660,6 +857,12 @@
           - "{{ openclaw_doctor_rehearsal_user }}"
           - --output-group
           - "{{ openclaw_doctor_rehearsal_group }}"
+          - --codex-token-output
+          - "{{ openclaw_doctor_rehearsal_generation_codex_token_bootstrap }}"
+          - --codex-token-owner
+          - "{{ openclaw_doctor_rehearsal_user }}"
+          - --codex-token-group
+          - "{{ openclaw_doctor_rehearsal_group }}"
       register: openclaw_doctor_rehearsal_secret_bootstrap
       changed_when: >-
         (openclaw_doctor_rehearsal_secret_bootstrap.stdout | from_json).changed
@@ -685,65 +888,64 @@
           owner-readable-only regular file.
       no_log: true
 
-    - name: Read immutable managed plugin package metadata
-      ansible.builtin.slurp:
-        src: >-
-          {{ openclaw_doctor_rehearsal_runtime }}/plugins/{{ item.id }}/node_modules/{{ item.package }}/package.json
-      loop: "{{ openclaw_isolated_gateway_managed_plugins }}"
-      loop_control:
-        label: "{{ item.id }}"
-      register: openclaw_doctor_rehearsal_plugin_packages
+    - name: Inspect ephemeral OpenClaw Doctor Codex token copy
+      ansible.builtin.stat:
+        path: "{{ openclaw_doctor_rehearsal_generation_codex_token_bootstrap }}"
+        follow: false
+      register: openclaw_doctor_rehearsal_codex_token_bootstrap_stat
+      no_log: true
 
-    - name: Read immutable managed plugin manifests
-      ansible.builtin.slurp:
-        src: >-
-          {{ openclaw_doctor_rehearsal_runtime }}/plugins/{{ item.id }}/node_modules/{{ item.package }}/openclaw.plugin.json
-      loop: "{{ openclaw_isolated_gateway_managed_plugins }}"
-      loop_control:
-        label: "{{ item.id }}"
-      register: openclaw_doctor_rehearsal_plugin_manifests
-
-    - name: Initialize managed plugin build metadata
-      ansible.builtin.set_fact:
-        openclaw_doctor_rehearsal_plugin_metadata: []
-
-    - name: Decode managed plugin build metadata
-      ansible.builtin.set_fact:
-        openclaw_doctor_rehearsal_plugin_metadata: >-
-          {{
-            openclaw_doctor_rehearsal_plugin_metadata
-            + [
-                {
-                  'definition': openclaw_isolated_gateway_managed_plugins[item],
-                  'package': (
-                    openclaw_doctor_rehearsal_plugin_packages.results[item].content
-                    | b64decode
-                    | from_json
-                  ),
-                  'manifest': (
-                    openclaw_doctor_rehearsal_plugin_manifests.results[item].content
-                    | b64decode
-                    | from_json
-                  )
-                }
-              ]
-          }}
-      loop: "{{ range(0, openclaw_isolated_gateway_managed_plugins | length) | list }}"
-      loop_control:
-        label: "{{ openclaw_isolated_gateway_managed_plugins[item].id }}"
-
-    - name: Require exact managed plugin build inputs
+    - name: Require owner-only ephemeral OpenClaw Doctor Codex token copy
       ansible.builtin.assert:
         that:
-          - item.package.name == item.definition.package
-          - item.package.version is match('^[0-9A-Za-z][0-9A-Za-z.+_-]*$')
-          - item.manifest.id == item.definition.id
+          - openclaw_doctor_rehearsal_codex_token_bootstrap_stat.stat.exists
+          - openclaw_doctor_rehearsal_codex_token_bootstrap_stat.stat.isreg
+          - not openclaw_doctor_rehearsal_codex_token_bootstrap_stat.stat.islnk
+          - openclaw_doctor_rehearsal_codex_token_bootstrap_stat.stat.mode == '0400'
+          - openclaw_doctor_rehearsal_codex_token_bootstrap_stat.stat.pw_name == openclaw_doctor_rehearsal_user
+          - openclaw_doctor_rehearsal_codex_token_bootstrap_stat.stat.gr_name == openclaw_doctor_rehearsal_group
         fail_msg: >-
-          An immutable runtime plugin has the wrong package, version, or plugin
-          identity for the npm-provenance build.
-      loop: "{{ openclaw_doctor_rehearsal_plugin_metadata }}"
-      loop_control:
-        label: "{{ item.definition.id }}"
+          The Doctor-only Codex transport-token copy is not a fresh,
+          migration-owned, owner-readable-only regular file.
+      no_log: true
+
+    - name: Remove ephemeral OpenClaw Doctor Codex token copy
+      ansible.builtin.file:
+        path: "{{ openclaw_doctor_rehearsal_generation_codex_token_bootstrap }}"
+        state: absent
+      no_log: true
+
+    - name: Confirm ephemeral OpenClaw Doctor Codex token copy is absent
+      ansible.builtin.stat:
+        path: "{{ openclaw_doctor_rehearsal_generation_codex_token_bootstrap }}"
+        follow: false
+      register: openclaw_doctor_rehearsal_removed_codex_token_bootstrap_stat
+      no_log: true
+
+    - name: Require no standalone Codex token in OpenClaw Doctor generation
+      ansible.builtin.assert:
+        that:
+          - not openclaw_doctor_rehearsal_removed_codex_token_bootstrap_stat.stat.exists
+        fail_msg: >-
+          The credential-free Doctor generation retained an unnecessary
+          standalone Codex transport-token copy.
+      no_log: true
+
+    - name: Preserve frozen native managed plugin source evidence
+      ansible.builtin.copy:
+        dest: "{{ openclaw_doctor_rehearsal_evidence_dir }}/plugin-source-evidence.json"
+        owner: root
+        group: root
+        mode: "0600"
+        content: >-
+          {{
+            {
+              'schemaVersion': 1,
+              'sourceRoot': openclaw_isolated_gateway_plugin_state_root + '/projects',
+              'plugins': openclaw_doctor_rehearsal_plugin_source_evidence
+            }
+            | to_nice_json
+          }}
 
     - name: Initialize managed plugin transform arguments
       ansible.builtin.set_fact:
@@ -2118,15 +2320,15 @@
             state: link
             force: true
           loop:
-            - source: "{{ openclaw_doctor_rehearsal_existing_paths.results[1].stat.lnk_source | default('') }}"
+            - source: "{{ openclaw_doctor_rehearsal_prior_state_selector.lnk_source | default('') }}"
               dest: "{{ openclaw_doctor_rehearsal_state_root }}/current"
-              existed: "{{ openclaw_doctor_rehearsal_existing_paths.results[1].stat.exists }}"
-            - source: "{{ openclaw_doctor_rehearsal_existing_paths.results[2].stat.lnk_source | default('') }}"
+              existed: "{{ openclaw_doctor_rehearsal_prior_state_selector.exists }}"
+            - source: "{{ openclaw_doctor_rehearsal_prior_workspace_selector.lnk_source | default('') }}"
               dest: "{{ openclaw_doctor_rehearsal_workspace_root }}/current"
-              existed: "{{ openclaw_doctor_rehearsal_existing_paths.results[2].stat.exists }}"
-            - source: "{{ openclaw_doctor_rehearsal_existing_paths.results[3].stat.lnk_source | default('') }}"
+              existed: "{{ openclaw_doctor_rehearsal_prior_workspace_selector.exists }}"
+            - source: "{{ openclaw_doctor_rehearsal_prior_config_selector.lnk_source | default('') }}"
               dest: "{{ openclaw_doctor_rehearsal_config_root }}/current"
-              existed: "{{ openclaw_doctor_rehearsal_existing_paths.results[3].stat.exists }}"
+              existed: "{{ openclaw_doctor_rehearsal_prior_config_selector.exists }}"
           loop_control:
             label: "{{ item.dest }}"
           when: item.existed | bool
@@ -2191,3 +2393,57 @@
             }
             | to_nice_json
           }}
+
+    - name: Plan bounded post-promotion OpenClaw Doctor generation retention
+      ansible.builtin.command:
+        argv:
+          - "{{ openclaw_doctor_rehearsal_retention_tool }}"
+          - --family
+          - doctor
+          - --mode
+          - plan
+          - --output
+          - "{{ openclaw_doctor_rehearsal_evidence_dir }}/doctor-retention-post-plan.json"
+      register: openclaw_doctor_rehearsal_post_retention_plan
+      changed_when: true
+
+    - name: Require bounded post-promotion OpenClaw Doctor retention plan
+      ansible.builtin.assert:
+        that:
+          - (openclaw_doctor_rehearsal_post_retention_plan.stdout | from_json).status == 'ok'
+          - (openclaw_doctor_rehearsal_post_retention_plan.stdout | from_json).family == 'doctor'
+          - >-
+            (openclaw_doctor_rehearsal_post_retention_plan.stdout | from_json).selectedStamp
+            == openclaw_doctor_rehearsal_stamp
+        fail_msg: >-
+          Post-promotion Doctor retention does not preserve the newly selected
+          generation and its immediate rollback target.
+
+    - name: Apply bounded post-promotion OpenClaw Doctor generation retention
+      ansible.builtin.command:
+        argv:
+          - "{{ openclaw_doctor_rehearsal_retention_tool }}"
+          - --family
+          - doctor
+          - --mode
+          - apply
+          - --plan
+          - "{{ openclaw_doctor_rehearsal_evidence_dir }}/doctor-retention-post-plan.json"
+          - --output
+          - "{{ openclaw_doctor_rehearsal_evidence_dir }}/doctor-retention-post-result.json"
+      register: openclaw_doctor_rehearsal_post_retention_result
+      changed_when: >-
+        (openclaw_doctor_rehearsal_post_retention_result.stdout | from_json).removedGenerationCount
+        | int > 0
+
+    - name: Require successful post-promotion OpenClaw Doctor retention
+      ansible.builtin.assert:
+        that:
+          - (openclaw_doctor_rehearsal_post_retention_result.stdout | from_json).status == 'ok'
+          - (openclaw_doctor_rehearsal_post_retention_result.stdout | from_json).family == 'doctor'
+          - >-
+            (openclaw_doctor_rehearsal_post_retention_result.stdout | from_json).selectedStamp
+            == openclaw_doctor_rehearsal_stamp
+        fail_msg: >-
+          Post-promotion Doctor retention failed to leave only the selected
+          generation and its immediate rollback target.

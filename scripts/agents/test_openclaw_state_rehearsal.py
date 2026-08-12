@@ -135,6 +135,29 @@ class StateRehearsalPlaybookTests(unittest.TestCase):
         )
         self.assertIn("item.stat.mode == '0750'", assertions[0])
 
+    def test_generation_retention_precedes_new_generation_allocation(self) -> None:
+        names = [task.get("name") for task in self.tasks]
+        deploy = names.index("Deploy OpenClaw rehearsal generation retention helper")
+        plan = names.index("Plan bounded OpenClaw state rehearsal generation retention")
+        apply = names.index(
+            "Apply bounded OpenClaw state rehearsal generation retention"
+        )
+        generation = names.index(
+            "Create OpenClaw state rehearsal generation containers"
+        )
+        self.assertLess(deploy, plan)
+        self.assertLess(plan, apply)
+        self.assertLess(apply, generation)
+
+        existing = self._task("Inspect existing OpenClaw state rehearsal managed paths")
+        self.assertEqual(
+            existing["loop"][-1], "{{ openclaw_state_rehearsal_retention_tool }}"
+        )
+        source = PLAYBOOK_PATH.read_text(encoding="utf-8")
+        self.assertIn("openclaw-rehearsal-retention.py", source)
+        self.assertIn("retention-plan.json", source)
+        self.assertIn("retention-result.json", source)
+
     def test_only_session_state_is_recursively_frozen(self) -> None:
         freeze = self._task("Freeze validated OpenClaw rehearsal session generation")
         argv = freeze["ansible.builtin.command"]["argv"]

@@ -15,6 +15,9 @@ PLAYBOOK_PATH = (
     Path(__file__).parents[2] / "playbooks/agents/openclaw-doctor-rehearsal.yml"
 )
 SNAPSHOT_TASK_PATH = Path(__file__).parents[2] / "tasks/openclaw-doctor-snapshot.yml"
+PLUGIN_SOURCE_TASK_PATH = (
+    Path(__file__).parents[2] / "tasks/openclaw-doctor-plugin-source.yml"
+)
 SPEC = importlib.util.spec_from_file_location("openclaw_doctor_rehearsal", MODULE_PATH)
 MODULE = importlib.util.module_from_spec(SPEC)
 assert SPEC and SPEC.loader
@@ -35,6 +38,8 @@ class DoctorRehearsalTests(unittest.TestCase):
     def test_playbook_builds_agent_paths_without_capture_replacements(self) -> None:
         playbook = PLAYBOOK_PATH.read_text(encoding="utf-8")
         snapshot_tasks = SNAPSHOT_TASK_PATH.read_text(encoding="utf-8")
+        plugin_source_tasks = PLUGIN_SOURCE_TASK_PATH.read_text(encoding="utf-8")
+        doctor_sources = playbook + plugin_source_tasks
         self.assertNotIn(r"\\1", playbook)
         self.assertIn("Add per-agent OpenClaw Doctor source paths", playbook)
         self.assertIn(
@@ -64,6 +69,31 @@ class DoctorRehearsalTests(unittest.TestCase):
         self.assertEqual(playbook.count("'plugins', 'inspect'"), 3)
         self.assertNotIn("'--link'", playbook)
         self.assertNotIn("--install-records-source", playbook)
+        self.assertNotIn(
+            "openclaw_doctor_rehearsal_runtime }}/plugins/", doctor_sources
+        )
+        self.assertIn(
+            "openclaw_isolated_gateway_plugin_state_root == '/var/lib/openclaw-isolated/state/npm'",
+            playbook,
+        )
+        self.assertIn(
+            "Find direct native managed plugin package roots", plugin_source_tasks
+        )
+        self.assertIn("depth: 2", plugin_source_tasks)
+        self.assertIn(
+            "Require immutable direct native managed plugin project directories",
+            plugin_source_tasks,
+        )
+        self.assertIn(
+            "Require exact native managed plugin source identities",
+            plugin_source_tasks,
+        )
+        self.assertIn("plugin-source-evidence.json", playbook)
+        self.assertIn("openclaw-rehearsal-retention.py", playbook)
+        self.assertIn("state-retention-plan.json", playbook)
+        self.assertIn("doctor-retention-plan.json", playbook)
+        self.assertIn("doctor-retention-post-plan.json", playbook)
+        self.assertIn("doctor-retention-post-result.json", playbook)
         self.assertIn("--suspend-managed-plugin-slots", playbook)
         self.assertIn("--gateway-secret-file", playbook)
         self.assertIn("fresh OpenClaw Doctor rehearsal Gateway secret", playbook)
@@ -101,10 +131,41 @@ class DoctorRehearsalTests(unittest.TestCase):
         supported_install = playbook.index(
             "- name: Install exact managed plugins into copied modern state"
         )
+        native_source_validation = playbook.index(
+            "- name: Validate frozen native plugin source before rehearsal mutation"
+        )
+        check_mode_stop = playbook.index(
+            "- name: Stop OpenClaw Doctor rehearsal before mutation in check mode"
+        )
         plugin_freeze = playbook.index(
             "- name: Freeze npm-managed plugin code before Doctor"
         )
+        state_retention = playbook.index(
+            "- name: Apply bounded upstream state rehearsal generation retention"
+        )
+        doctor_retention = playbook.index(
+            "- name: Apply bounded OpenClaw Doctor generation retention"
+        )
+        generation_allocation = playbook.index(
+            "- name: Create OpenClaw Doctor generation directories"
+        )
+        capacity_gate = playbook.index(
+            "- name: Require one capacious OpenClaw Doctor destination filesystem"
+        )
+        promotion = playbook.index(
+            "- name: Record successful OpenClaw Doctor rehearsal promotion"
+        )
+        post_retention = playbook.index(
+            "- name: Apply bounded post-promotion OpenClaw Doctor generation retention"
+        )
         self.assertLess(legacy_inspect, legacy_uninstall)
+        self.assertLess(native_source_validation, check_mode_stop)
+        self.assertLess(native_source_validation, supported_install)
+        self.assertLess(native_source_validation, state_retention)
+        self.assertLess(state_retention, doctor_retention)
+        self.assertLess(doctor_retention, generation_allocation)
+        self.assertLess(generation_allocation, capacity_gate)
+        self.assertLess(promotion, post_retention)
         self.assertLess(legacy_uninstall, supported_install)
         self.assertLess(supported_install, final_config)
         self.assertLess(final_config, plugin_freeze)
@@ -133,6 +194,9 @@ class DoctorRehearsalTests(unittest.TestCase):
         self.assertIn(
             "Require rehearsal confinement to copied OpenClaw state", playbook
         )
+        self.assertNotIn("existing_paths.results[1].stat.lnk_source", playbook)
+        self.assertNotIn("existing_paths.results[2].stat.lnk_source", playbook)
+        self.assertNotIn("existing_paths.results[3].stat.lnk_source", playbook)
 
     def test_transform_rewrites_paths_and_removes_secret_values(self) -> None:
         with tempfile.TemporaryDirectory() as directory_name:

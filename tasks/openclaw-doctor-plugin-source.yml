@@ -1,0 +1,375 @@
+---
+# yamllint disable rule:line-length
+# Validate and decode the root-owned native plugin store before Doctor uses it.
+
+- name: Inspect frozen native managed plugin source roots
+  ansible.builtin.stat:
+    path: "{{ item }}"
+    follow: false
+  loop:
+    - "{{ openclaw_isolated_gateway_plugin_state_root }}"
+    - "{{ openclaw_isolated_gateway_plugin_state_root }}/projects"
+  register: openclaw_doctor_rehearsal_plugin_source_root_stats
+
+- name: Require frozen native managed plugin source roots
+  ansible.builtin.assert:
+    that:
+      - item.stat.exists
+      - item.stat.isdir
+      - not item.stat.islnk
+      - item.stat.pw_name == 'root'
+      - item.stat.mode == '0750'
+      - not item.stat.wgrp
+      - not item.stat.woth
+    fail_msg: >-
+      The Doctor plugin source is missing, mutable by a service group, or
+      outside the reviewed root-owned native state boundary.
+  loop: "{{ openclaw_doctor_rehearsal_plugin_source_root_stats.results }}"
+  loop_control:
+    label: "{{ item.item }}"
+
+- name: Find direct native managed plugin package roots
+  ansible.builtin.find:
+    paths: "{{ openclaw_isolated_gateway_plugin_state_root }}/projects"
+    patterns: package.json
+    file_type: file
+    recurse: true
+    depth: 2
+    follow: false
+    hidden: true
+  register: openclaw_doctor_rehearsal_plugin_source_packages
+
+- name: Derive direct native managed plugin project roots
+  ansible.builtin.set_fact:
+    openclaw_doctor_rehearsal_plugin_source_roots: >-
+      {{
+        openclaw_doctor_rehearsal_plugin_source_packages.files
+        | map(attribute='path')
+        | map('dirname')
+        | unique
+        | sort
+      }}
+
+- name: Require exact direct native managed plugin project count
+  ansible.builtin.assert:
+    that:
+      - openclaw_doctor_rehearsal_plugin_source_packages.matched | int == openclaw_isolated_gateway_managed_plugins | length
+      - openclaw_doctor_rehearsal_plugin_source_roots | length == openclaw_isolated_gateway_managed_plugins | length
+      - >-
+        openclaw_doctor_rehearsal_plugin_source_roots
+        | select('match', '^' + (openclaw_isolated_gateway_plugin_state_root | regex_escape) + '/projects/[^/]+$')
+        | list
+        | length
+        == openclaw_isolated_gateway_managed_plugins | length
+    fail_msg: >-
+      The frozen native plugin store does not contain exactly one direct
+      project root for each classified managed plugin.
+
+- name: Inspect direct native managed plugin project directories
+  ansible.builtin.stat:
+    path: "{{ item }}"
+    follow: false
+  loop: "{{ openclaw_doctor_rehearsal_plugin_source_roots }}"
+  register: openclaw_doctor_rehearsal_plugin_project_stats
+
+- name: Require immutable direct native managed plugin project directories
+  ansible.builtin.assert:
+    that:
+      - item.stat.exists
+      - item.stat.isdir
+      - not item.stat.islnk
+      - item.stat.pw_name == 'root'
+      - item.stat.gr_name == openclaw_isolated_gateway_group
+      - not item.stat.wgrp
+      - not item.stat.woth
+    fail_msg: >-
+      A native managed plugin project directory is missing, linked, or mutable
+      outside the root-owned convergence boundary.
+  loop: "{{ openclaw_doctor_rehearsal_plugin_project_stats.results }}"
+  loop_control:
+    label: "{{ item.item }}"
+
+- name: Find installed native managed plugin manifests
+  ansible.builtin.find:
+    paths: "{{ openclaw_isolated_gateway_plugin_state_root }}/projects"
+    patterns: openclaw.plugin.json
+    file_type: file
+    recurse: true
+    follow: false
+    hidden: true
+  register: openclaw_doctor_rehearsal_plugin_source_manifests
+
+- name: Derive installed native managed plugin package roots
+  ansible.builtin.set_fact:
+    openclaw_doctor_rehearsal_plugin_package_roots: >-
+      {{
+        openclaw_doctor_rehearsal_plugin_source_manifests.files
+        | map(attribute='path')
+        | map('dirname')
+        | unique
+        | sort
+      }}
+
+- name: Require one installed package per native plugin project
+  ansible.builtin.assert:
+    that:
+      - openclaw_doctor_rehearsal_plugin_source_manifests.matched | int == openclaw_isolated_gateway_managed_plugins | length
+      - openclaw_doctor_rehearsal_plugin_package_roots | length == openclaw_isolated_gateway_managed_plugins | length
+      - >-
+        openclaw_doctor_rehearsal_plugin_package_roots
+        | select('match', '^' + (openclaw_isolated_gateway_plugin_state_root | regex_escape) + '/projects/[^/]+/node_modules/(?:@[^/]+/)?[^/]+$')
+        | list
+        | length
+        == openclaw_isolated_gateway_managed_plugins | length
+    fail_msg: >-
+      The native plugin projects do not contain exactly one installed plugin
+      package and manifest for each classified managed plugin.
+
+- name: Inspect installed native managed plugin package metadata
+  ansible.builtin.stat:
+    path: "{{ item }}/package.json"
+    follow: false
+    get_checksum: true
+    checksum_algorithm: sha256
+  loop: "{{ openclaw_doctor_rehearsal_plugin_package_roots }}"
+  register: openclaw_doctor_rehearsal_plugin_package_stats
+
+- name: Inspect installed native managed plugin manifests
+  ansible.builtin.stat:
+    path: "{{ item }}/openclaw.plugin.json"
+    follow: false
+    get_checksum: true
+    checksum_algorithm: sha256
+  loop: "{{ openclaw_doctor_rehearsal_plugin_package_roots }}"
+  register: openclaw_doctor_rehearsal_plugin_manifest_stats
+
+- name: Require immutable direct native managed plugin metadata
+  ansible.builtin.assert:
+    that:
+      - openclaw_doctor_rehearsal_plugin_package_stats.results[item].stat.exists
+      - openclaw_doctor_rehearsal_plugin_package_stats.results[item].stat.isreg
+      - not openclaw_doctor_rehearsal_plugin_package_stats.results[item].stat.islnk
+      - openclaw_doctor_rehearsal_plugin_package_stats.results[item].stat.pw_name == 'root'
+      - not openclaw_doctor_rehearsal_plugin_package_stats.results[item].stat.wgrp
+      - not openclaw_doctor_rehearsal_plugin_package_stats.results[item].stat.woth
+      - openclaw_doctor_rehearsal_plugin_manifest_stats.results[item].stat.exists
+      - openclaw_doctor_rehearsal_plugin_manifest_stats.results[item].stat.isreg
+      - not openclaw_doctor_rehearsal_plugin_manifest_stats.results[item].stat.islnk
+      - openclaw_doctor_rehearsal_plugin_manifest_stats.results[item].stat.pw_name == 'root'
+      - not openclaw_doctor_rehearsal_plugin_manifest_stats.results[item].stat.wgrp
+      - not openclaw_doctor_rehearsal_plugin_manifest_stats.results[item].stat.woth
+    fail_msg: >-
+      A native managed plugin package or manifest is missing, linked, or
+      mutable outside the root-owned convergence boundary.
+  loop: "{{ range(0, openclaw_doctor_rehearsal_plugin_package_roots | length) | list }}"
+  loop_control:
+    label: "{{ openclaw_doctor_rehearsal_plugin_package_roots[item] }}"
+
+- name: Read installed native managed plugin package metadata
+  ansible.builtin.slurp:
+    src: "{{ item }}/package.json"
+  loop: "{{ openclaw_doctor_rehearsal_plugin_package_roots }}"
+  register: openclaw_doctor_rehearsal_plugin_packages
+  no_log: true
+
+- name: Read installed native managed plugin manifests
+  ansible.builtin.slurp:
+    src: "{{ item }}/openclaw.plugin.json"
+  loop: "{{ openclaw_doctor_rehearsal_plugin_package_roots }}"
+  register: openclaw_doctor_rehearsal_plugin_manifests
+  no_log: true
+
+- name: Initialize native managed plugin source candidates
+  ansible.builtin.set_fact:
+    openclaw_doctor_rehearsal_plugin_source_candidates: []
+
+- name: Decode native managed plugin source candidates
+  ansible.builtin.set_fact:
+    openclaw_doctor_rehearsal_plugin_source_candidates: >-
+      {{
+        openclaw_doctor_rehearsal_plugin_source_candidates
+        + [
+            {
+              'root': openclaw_doctor_rehearsal_plugin_package_roots[item],
+              'projectRoot': (
+                openclaw_doctor_rehearsal_plugin_package_roots[item]
+                .split('/node_modules/', 1)[0]
+              ),
+              'package': (
+                openclaw_doctor_rehearsal_plugin_packages.results[item].content
+                | b64decode
+                | from_json
+              ),
+              'manifest': (
+                openclaw_doctor_rehearsal_plugin_manifests.results[item].content
+                | b64decode
+                | from_json
+              ),
+              'packageSha256': openclaw_doctor_rehearsal_plugin_package_stats.results[item].stat.checksum,
+              'manifestSha256': openclaw_doctor_rehearsal_plugin_manifest_stats.results[item].stat.checksum
+            }
+          ]
+      }}
+  loop: "{{ range(0, openclaw_doctor_rehearsal_plugin_package_roots | length) | list }}"
+  loop_control:
+    label: "{{ openclaw_doctor_rehearsal_plugin_package_roots[item] }}"
+  no_log: true
+
+- name: Require exact native managed plugin source identities
+  ansible.builtin.assert:
+    that:
+      - openclaw_doctor_rehearsal_plugin_source_candidates | map(attribute='package.name') | sort == openclaw_isolated_gateway_managed_plugins | map(attribute='package') | sort
+      - openclaw_doctor_rehearsal_plugin_source_candidates | map(attribute='manifest.id') | sort == openclaw_isolated_gateway_managed_plugins | map(attribute='id') | sort
+      - openclaw_doctor_rehearsal_plugin_source_candidates | map(attribute='package.name') | unique | list | length == openclaw_isolated_gateway_managed_plugins | length
+      - openclaw_doctor_rehearsal_plugin_source_candidates | map(attribute='manifest.id') | unique | list | length == openclaw_isolated_gateway_managed_plugins | length
+      - openclaw_doctor_rehearsal_plugin_source_candidates | map(attribute='projectRoot') | sort == openclaw_doctor_rehearsal_plugin_source_roots | sort
+    fail_msg: >-
+      Native plugin package or manifest identities are missing, duplicated,
+      extra, or inconsistent with the classified managed set.
+
+- name: Require canonical native package placement
+  ansible.builtin.assert:
+    that:
+      - item.package.name is match('^(?:@[^/]+/)?[^/]+$')
+      - item.root == item.projectRoot + '/node_modules/' + item.package.name
+    fail_msg: >-
+      A managed package is not installed at its canonical native project path.
+  loop: "{{ openclaw_doctor_rehearsal_plugin_source_candidates }}"
+  loop_control:
+    label: "{{ item.package.name | default('unknown') }}"
+  no_log: true
+
+- name: Initialize native managed plugin path guards
+  ansible.builtin.set_fact:
+    openclaw_doctor_rehearsal_plugin_path_guards: []
+
+- name: Derive native managed plugin path guards
+  ansible.builtin.set_fact:
+    openclaw_doctor_rehearsal_plugin_path_guards: >-
+      {{
+        openclaw_doctor_rehearsal_plugin_path_guards
+        + [item.projectRoot, item.projectRoot + '/node_modules', item.root]
+        + (
+            [item.projectRoot + '/node_modules/' + item.package.name.split('/')[0]]
+            if item.package.name is match('^@[^/]+/[^/]+$')
+            else []
+          )
+      }}
+  loop: "{{ openclaw_doctor_rehearsal_plugin_source_candidates }}"
+  loop_control:
+    label: "{{ item.package.name }}"
+  no_log: true
+
+- name: Inspect native managed plugin path guards
+  ansible.builtin.stat:
+    path: "{{ item }}"
+    follow: false
+  loop: "{{ openclaw_doctor_rehearsal_plugin_path_guards | unique | sort }}"
+  register: openclaw_doctor_rehearsal_plugin_path_guard_stats
+
+- name: Require immutable native managed plugin path guards
+  ansible.builtin.assert:
+    that:
+      - item.stat.exists
+      - item.stat.isdir
+      - not item.stat.islnk
+      - item.stat.pw_name == 'root'
+      - item.stat.gr_name == openclaw_isolated_gateway_group
+      - not item.stat.wgrp
+      - not item.stat.woth
+    fail_msg: >-
+      A native plugin path component is missing, linked, or mutable outside the
+      root-owned convergence boundary.
+  loop: "{{ openclaw_doctor_rehearsal_plugin_path_guard_stats.results }}"
+  loop_control:
+    label: "{{ item.item }}"
+
+- name: Initialize managed plugin build metadata
+  ansible.builtin.set_fact:
+    openclaw_doctor_rehearsal_plugin_metadata: []
+
+- name: Order managed plugin build metadata by policy definition
+  ansible.builtin.set_fact:
+    openclaw_doctor_rehearsal_plugin_metadata: >-
+      {{
+        openclaw_doctor_rehearsal_plugin_metadata
+        + [
+            {
+              'definition': plugin_definition,
+              'package': (
+                openclaw_doctor_rehearsal_plugin_source_candidates
+                | selectattr('package.name', 'equalto', plugin_definition.package)
+                | map(attribute='package')
+                | first
+              ),
+              'manifest': (
+                openclaw_doctor_rehearsal_plugin_source_candidates
+                | selectattr('package.name', 'equalto', plugin_definition.package)
+                | map(attribute='manifest')
+                | first
+              ),
+              'sourceRoot': (
+                openclaw_doctor_rehearsal_plugin_source_candidates
+                | selectattr('package.name', 'equalto', plugin_definition.package)
+                | map(attribute='root')
+                | first
+              ),
+              'packageSha256': (
+                openclaw_doctor_rehearsal_plugin_source_candidates
+                | selectattr('package.name', 'equalto', plugin_definition.package)
+                | map(attribute='packageSha256')
+                | first
+              ),
+              'manifestSha256': (
+                openclaw_doctor_rehearsal_plugin_source_candidates
+                | selectattr('package.name', 'equalto', plugin_definition.package)
+                | map(attribute='manifestSha256')
+                | first
+              )
+            }
+          ]
+      }}
+  loop: "{{ openclaw_isolated_gateway_managed_plugins }}"
+  loop_control:
+    loop_var: plugin_definition
+    label: "{{ plugin_definition.id }}"
+
+- name: Require exact managed plugin build inputs
+  ansible.builtin.assert:
+    that:
+      - item.package.name == item.definition.package
+      - item.package.version is match('^[0-9A-Za-z][0-9A-Za-z.+_-]*$')
+      - item.manifest.id == item.definition.id
+    fail_msg: >-
+      An immutable runtime plugin has the wrong package, version, or plugin
+      identity for the npm-provenance build.
+  loop: "{{ openclaw_doctor_rehearsal_plugin_metadata }}"
+  loop_control:
+    label: "{{ item.definition.id }}"
+  no_log: true
+
+- name: Initialize native managed plugin source evidence
+  ansible.builtin.set_fact:
+    openclaw_doctor_rehearsal_plugin_source_evidence: []
+
+- name: Build concise native managed plugin source evidence
+  ansible.builtin.set_fact:
+    openclaw_doctor_rehearsal_plugin_source_evidence: >-
+      {{
+        openclaw_doctor_rehearsal_plugin_source_evidence
+        + [
+            {
+              'id': item.definition.id,
+              'package': item.package.name,
+              'version': item.package.version,
+              'manifestId': item.manifest.id,
+              'sourceRoot': item.sourceRoot,
+              'packageSha256': item.packageSha256,
+              'manifestSha256': item.manifestSha256
+            }
+          ]
+      }}
+  loop: "{{ openclaw_doctor_rehearsal_plugin_metadata }}"
+  loop_control:
+    label: "{{ item.definition.id }}"
+  no_log: true

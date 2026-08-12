@@ -13,10 +13,12 @@ The first deterministic boundaries are implemented in repository source.
 Production cutover remains disabled, and those source changes do not reduce the
 authority of the current `johnny` process until they are applied and proven.
 The attended Gateway canary definition is loopback-only and disabled at boot.
-The latest attended run restored the prior canary state after a validation
-failure; the split Gateway/executor source has not yet received its final live
-replay. Verify both units and both loopback listeners before relying on canary
-status:
+The split Gateway/executor deployment now passes its attended bootstrap and
+restart checks; both units are active only for the current test window, remain
+disabled at boot, and listen only on loopback `19789/19790`. Production remains
+the only externally reachable Gateway on the Tailscale address and port
+`18789`. The canary still requires authenticated behavior, data-handoff, and
+security rehearsals before any production cutover:
 
 - `playbooks/agents/openclaw-health-receiver.yml` stages and migrates Apple
   Health ingestion to the no-login `openclaw-health` service account.
@@ -41,7 +43,17 @@ status:
   active file-backed session trees into timestamped rehearsal generations. It
   discards derived prompt/skill snapshots from copied indexes, verifies path
   and hash parity, preserves explicit workspace ownership classes, freezes
-  session state read-only, and promotes only rehearsal selectors.
+  session state read-only, and promotes only rehearsal selectors. Before a new
+  copy is allocated, a root-only two-phase retention gate keeps the selected
+  generation and the exact predecessor named by its rollback archive, while
+  deleting only metadata-stable superseded payloads. Failed or pre-hardening
+  generations may retain group-writable application directories; cleanup
+  accepts those only when every owner and group is one of the root or dedicated
+  migration identities, no entry is world-writable, and the migration identity
+  has no live process. The selected and rollback generations remain stricter:
+  every retained top-level generation directory must be root-owned. Nested
+  symlinks are metadata-bound and may be unlinked only when the host Python
+  runtime confirms descriptor-based symlink-attack-resistant tree removal.
 - `playbooks/agents/openclaw-doctor-rehearsal.yml` consumes that verified
   session generation, takes online SQLite backups of authoritative shared,
   per-agent, Lossless Claw, and Mem0 history stores, and scrubs copied provider
@@ -51,7 +63,13 @@ status:
   replaces path-linked plugins with four integrity-bearing npm ownership
   records produced by OpenClaw's official installer. Plugin code is then frozen
   root-owned and read-only. Two successful, warning-gated, idempotent Doctor
-  passes are required before rehearsal-only selectors can be promoted.
+  passes are required before rehearsal-only selectors can be promoted. The
+  same retention gate runs for the upstream session copy and prior Doctor
+  copies before the free-space check, so failed and superseded generations do
+  not accumulate until the root filesystem is exhausted. A second Doctor-only
+  pass after successful selector promotion immediately reduces payloads to the
+  new current generation and its exact rollback target. Root-only evidence
+  directories remain separate and are not deleted by payload retention.
 - `playbooks/agents/openclaw-canary-data-rehearsal.yml` transactionally hands
   those classified data lanes to the boot-disabled loopback canary. It takes a
   targeted rollback archive, verifies relocated artifact hashes, quarantines
@@ -198,14 +216,13 @@ promotion. The diagnostics were nonfatal warnings caused by intentionally
 disabled credential-dependent memory runtime in this credential-free stage;
 they remain visible without corrupting machine evidence.
 
-Generation `20260810T130113Z` passed the corrected data and lint gates and
-superseded the prior rehearsal selector. Its lint artifact parses independently
-and reports 51 checks, zero skipped, and zero findings; diagnostics remain in
-the separate stderr artifact. Both Doctor passes, stable SQLite summaries,
-zero-diff copied-state manifests, exact four-plugin npm provenance, integrity,
-expected trust classification, root-owned read-only generation freeze, and
-selector promotion passed. Production retained the same service PID and
-activation timestamp.
+Generation `20260810T130113Z` was the prior successful Doctor selector. Its
+lint artifact parsed independently and reported 51 checks, zero skipped, and
+zero findings; both Doctor passes, stable SQLite summaries, zero-diff
+copied-state manifests, and four-plugin provenance passed. A later
+restartability audit found that its surrounding runtime-confinement proof was
+incomplete, so it is now retained only as the immediate rollback target for the
+superseding generation.
 
 A post-promotion restartability audit then found a separate confinement bug.
 The copied npm tree intentionally contains dependency symlinks back to the
@@ -218,9 +235,9 @@ Production was unaffected. The owning repair explicitly sets `follow: false`
 on every recursive rehearsal permission task, records UID/GID and mode in
 before/after immutable-core manifests, rejects any runtime delta, reconverges
 the selected release to root ownership, and requires both a service-identity
-CLI probe and an actual canary restart. Generation `20260810T130113Z` remains
-valid copied-state evidence, but it does not close runtime-confinement proof; a
-clean post-repair Doctor generation is required.
+CLI probe and an actual canary restart. Generation `20260812T195829Z` closes
+that gate with an unchanged immutable-runtime comparison and remains the active
+Doctor selector.
 
 The first attended repair run then exposed a separate rollback-scope defect.
 It archived the complete immutable release tree under `/var/backups`; repeated
@@ -244,14 +261,25 @@ root-only manifest, removes incomplete artifacts on failure, and requires both
 measured rollback headroom and at least 8 GiB free on the build filesystem
 before mutation. Durable production backups remain a separate ZFS-backed lane.
 
-The latest attended native-plugin run passed all four exact npm ownership,
-integrity, path, trust, status, and read-only-code gates. It then failed closed
-because a later duplicate assertion tried to read `trustedOfficialInstall`
-from `plugins registry --json`, which intentionally omits that runtime-only
-field. Rollback restored the previous canary state. The duplicate assertion is
-removed in source; manifest inspection remains the pre-start classification
-gate and `plugins inspect codex --runtime --json` remains the post-start trust
-gate. That source correction still requires a fresh attended live replay.
+An intermediate attended native-plugin run passed all four exact npm ownership,
+integrity, path, trust, status, and read-only-code gates, then failed closed
+because a duplicate assertion read a runtime-only field from the registry
+view. The duplicate assertion was removed without weakening the owning checks:
+manifest inspection remains the pre-start classification gate and runtime
+plugin inspection remains the post-start trust gate. Generation
+`20260812T195829Z` subsequently passed the corrected transaction end to end:
+`213` tasks, `53` controlled changes, zero failures, two idempotent networkless
+Doctor passes, clean error-level lint, frozen plugin code, exact selector
+promotion, and unchanged production config/service state.
+
+Bounded retention also completed. State cleanup removed four superseded
+generations across eight payload roots and reclaimed `8,664,285,184` bytes.
+Doctor cleanup removed fourteen generations across 42 payload roots and
+reclaimed `49,149,673,472` bytes; the post-promotion pass removed the
+prior-prior generation and reclaimed another `7,629,967,360` bytes. The final
+payload sets are state current `20260812T190549Z` plus rollback
+`20260810T083108Z`, and Doctor current `20260812T195829Z` plus rollback
+`20260810T130113Z`. The root filesystem has `65,529,884,672` bytes available.
 
 A credential-free scratch render of the hardened config then passed current
 `config validate` and `secrets audit --check --json`: one SecretRef resolved,
