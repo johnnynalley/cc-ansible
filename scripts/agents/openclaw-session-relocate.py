@@ -919,6 +919,67 @@ def verify_relocation(
     }
 
 
+def verify_artifact_preservation(
+    source_manifest_path: Path,
+    target_state_root: Path,
+    target_workspace_root: Path,
+    agents: list[str],
+) -> dict[str, Any]:
+    """Verify immutable session artifacts while allowing native index updates."""
+
+    source = _read_manifest(source_manifest_path)
+    target = inspect_session_stores(target_state_root, target_workspace_root, agents)
+    if len(source["agents"]) != len(target["agents"]):
+        raise SessionRelocationError("source and target agent counts differ")
+
+    artifact_files = 0
+    artifact_bytes = 0
+    for source_agent, target_agent in zip(
+        source["agents"], target["agents"], strict=True
+    ):
+        if source_agent["agent"] != target_agent["agent"]:
+            raise SessionRelocationError("source and target agent order differs")
+        source_files = {
+            row["relativePath"]: row
+            for row in source_agent["files"]
+            if row["kind"] != "index"
+        }
+        target_files = {
+            row["relativePath"]: row
+            for row in target_agent["files"]
+            if row["kind"] != "index"
+        }
+        if source_files.keys() != target_files.keys():
+            raise SessionRelocationError(
+                "source and target session artifact sets differ"
+            )
+        for relative_path, source_row in source_files.items():
+            target_row = target_files[relative_path]
+            if (
+                source_row["kind"] != target_row["kind"]
+                or source_row["size"] != target_row["size"]
+                or source_row["sha256"] != target_row["sha256"]
+            ):
+                raise SessionRelocationError(
+                    "a target session artifact differs from its source"
+                )
+            artifact_files += 1
+            artifact_bytes += int(target_row["size"])
+
+    if target["summary"]["activeDeliveryRecoveryEntries"] != 0:
+        raise SessionRelocationError(
+            "target session metadata contains active delivery recovery state"
+        )
+    return {
+        "schemaVersion": 1,
+        "status": "ok",
+        "agents": len(agents),
+        "artifactFiles": artifact_files,
+        "artifactBytes": artifact_bytes,
+        "activeDeliveryRecoveryEntries": 0,
+    }
+
+
 def _add_common_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--agent", action="append", dest="agents", required=True)
 
@@ -956,6 +1017,13 @@ def build_parser() -> argparse.ArgumentParser:
     verify_parser.add_argument("--modernize-active-runtime-state", action="store_true")
     verify_parser.add_argument("--quarantine-delivery-recovery", action="store_true")
     _add_common_arguments(verify_parser)
+
+    artifact_parser = subparsers.add_parser("verify-artifacts")
+    artifact_parser.add_argument("--source-manifest", type=Path, required=True)
+    artifact_parser.add_argument("--target-state-root", type=Path, required=True)
+    artifact_parser.add_argument("--target-workspace-root", type=Path, required=True)
+    artifact_parser.add_argument("--output", type=Path, required=True)
+    _add_common_arguments(artifact_parser)
     return parser
 
 
@@ -984,7 +1052,7 @@ def main() -> int:
                 "changedFiles": report["changedFiles"],
                 "rewrittenReferences": report["rewrittenReferences"],
             }
-        else:
+        elif arguments.command == "verify":
             report = verify_relocation(
                 arguments.source_state_root,
                 arguments.source_workspace_root,
@@ -996,6 +1064,14 @@ def main() -> int:
                 arguments.modernize_derived_snapshots,
                 arguments.modernize_active_runtime_state,
                 arguments.quarantine_delivery_recovery,
+            )
+            summary = report
+        else:
+            report = verify_artifact_preservation(
+                arguments.source_manifest,
+                arguments.target_state_root,
+                arguments.target_workspace_root,
+                arguments.agents,
             )
             summary = report
         _write_json_atomic(arguments.output, report)

@@ -865,6 +865,10 @@ OpenClaw AI agent platform (Node.js gateway daemon). Provides a web UI and Disco
 - **Playbook**: `playbooks/agents/openclaw.yml` (opt-in via `openclaw_enabled` variable)
 - **Config**: `host_vars/jn-t14s-lin/openclaw.yml`, `packages.yml`, `backup.yml`, and `docker.yml`
 - **Firewall**: Caddy proxies OpenClaw through the T14s Tailscale address; avoid opening LAN access unless explicitly required.
+- **Modernization/security source of truth**: `docs/openclaw-runtime-security.md`
+  owns the dedicated identities, immutable runtime, typed workspace/session
+  handoff, behavior and hostile-prompt rehearsals, and final single-Gateway
+  cutover gates. Do not infer production cutover from an active loopback canary.
 
 **OpenClaw troubleshooting rule**: Do not assume an OpenClaw symptom is an upstream software bug or regression unless there is an exact documented GitHub issue or release note matching the observed failure. Default to diagnosing local configuration, plugin state, runtime health, gateway load, memory/LCM/mem0 state, and update drift first. Avoid update-fragile local plugin patches unless the user explicitly approves a temporary workaround.
 

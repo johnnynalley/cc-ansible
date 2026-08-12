@@ -164,6 +164,85 @@ class SessionRelocationTests(unittest.TestCase):
             self.assertEqual(second["changedFiles"], 0)
             self.assertEqual(second["rewrittenReferences"], 0)
 
+    def test_artifact_verification_allows_only_session_index_changes(self) -> None:
+        with tempfile.TemporaryDirectory() as directory_name:
+            root = Path(directory_name)
+            source, source_workspace = self._fixture(root, "source")
+            source_manifest = root / "source-manifest.json"
+            MODULE._write_json_atomic(
+                source_manifest,
+                MODULE.inspect_session_stores(source, source_workspace, ["main"]),
+            )
+            target = root / "target"
+            self._copy_fixture(source, target)
+            target_workspace = self._split_target_workspace(root, target)
+            MODULE.rewrite_session_stores(
+                target,
+                source,
+                source_workspace,
+                target_workspace,
+                ["main"],
+            )
+            target_index = target / "agents" / "main" / "sessions" / "sessions.json"
+            payload = json.loads(target_index.read_text(encoding="utf-8"))
+            payload["agent:main:main"]["archivedAt"] = 123
+            target_index.write_text(json.dumps(payload), encoding="utf-8")
+
+            report = MODULE.verify_artifact_preservation(
+                source_manifest,
+                target,
+                target_workspace,
+                ["main"],
+            )
+            self.assertEqual(report["status"], "ok")
+            self.assertEqual(report["artifactFiles"], 3)
+
+            transcript = target / "agents" / "main" / "sessions" / "session-one.jsonl"
+            transcript.write_text("changed\n", encoding="utf-8")
+            with self.assertRaisesRegex(
+                MODULE.SessionRelocationError,
+                "artifact differs",
+            ):
+                MODULE.verify_artifact_preservation(
+                    source_manifest,
+                    target,
+                    target_workspace,
+                    ["main"],
+                )
+
+    def test_artifact_verification_rejects_extra_artifacts(self) -> None:
+        with tempfile.TemporaryDirectory() as directory_name:
+            root = Path(directory_name)
+            source, source_workspace = self._fixture(root, "source")
+            source_manifest = root / "source-manifest.json"
+            MODULE._write_json_atomic(
+                source_manifest,
+                MODULE.inspect_session_stores(source, source_workspace, ["main"]),
+            )
+            target = root / "target"
+            self._copy_fixture(source, target)
+            target_workspace = self._split_target_workspace(root, target)
+            MODULE.rewrite_session_stores(
+                target,
+                source,
+                source_workspace,
+                target_workspace,
+                ["main"],
+            )
+            extra = target / "agents" / "main" / "sessions" / "unexpected.jsonl"
+            extra.write_text("{}\n", encoding="utf-8")
+
+            with self.assertRaisesRegex(
+                MODULE.SessionRelocationError,
+                "artifact sets differ",
+            ):
+                MODULE.verify_artifact_preservation(
+                    source_manifest,
+                    target,
+                    target_workspace,
+                    ["main"],
+                )
+
     def test_rewrite_supports_modern_split_source_roots(self) -> None:
         with tempfile.TemporaryDirectory() as directory_name:
             root = Path(directory_name)

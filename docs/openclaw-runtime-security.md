@@ -1134,11 +1134,15 @@ configuration, and service-level channel/cron suppression.
 
 The handoff is transactional and canary-only:
 
-1. Build a fresh policy-staged workspace, require its deterministic file/hash
-   manifest to match the workspace generation paired with the promoted
-   sessions, and copy the verified five session trees into private candidates
-   while the existing canary remains untouched. Any retained-data or behavior
-   overlay drift requires a fresh source rehearsal.
+1. Build a fresh policy-staged workspace and compare its deterministic
+   file/hash manifest with the workspace generation paired with the promoted
+   sessions. Path sets, source mappings, ownership classes, the modern overlay,
+   operator-read-only content, structural summaries, and the archive contract
+   must match exactly. Content drift is accepted only for files already
+   classified as retained executor-writable data, and the aggregate drift class
+   is recorded without disclosing retained paths. Copy the verified five
+   session trees into private candidates while the existing canary remains
+   untouched.
 2. Re-manifest the frozen source, preserve immutable source indexes, account
    for candidate and rollback bytes on every destination filesystem, and stop
    only `openclaw-isolated-gateway.service`.
@@ -1153,8 +1157,11 @@ The handoff is transactional and canary-only:
    token or password is passed in process arguments.
 5. `plan` performs no session mutation. `apply` calls `sessions.patch` only for
    structurally classified synthetic/completed rows, then re-lists and requires
-   zero remaining archive actions. Durable main and channel routes remain
-   active, while archived transcripts remain preserved.
+   zero remaining archive actions. A final artifact-only hash pass allows the
+   native indexes to change but requires every non-index transcript and
+   trajectory artifact to remain byte-identical with no additions or removals.
+   Durable main and channel routes remain active, while archived transcripts
+   remain preserved.
 6. Keep the listener active only as a boot-disabled attended canary. It still
    has no channel, cron, or heartbeat execution and is not a second production
    Gateway.
@@ -1163,6 +1170,13 @@ Root-only evidence and the pre-handoff archive live under
 `/var/backups/openclaw-isolated/data-handoff/<timestamp>`. This proves the
 file-backed data and native session transition lanes; it does not enable
 production messaging, schedules, heartbeat delivery, or final cutover.
+
+Applied generation `20260812T203904Z` retained 38 durable sessions and natively
+archived 117 completed or synthetic rows, then converged with zero archive
+actions remaining. The post-archive artifact gate verified all 29,822 non-index
+session artifacts across five agents, totaling 2,562,747,054 bytes, remained
+byte-identical with no active delivery-recovery entries. Production remained
+untouched and the canary remained loopback-only and disabled at boot.
 
 ### Channel-Less Behavior Rehearsal
 
@@ -1206,9 +1220,9 @@ The attended apply transaction is canary-only:
 Failure stops the canary, restores the targeted archive and prior activity,
 and leaves private evidence under
 `/var/backups/openclaw-isolated/behavior-rehearsal/<timestamp>`. This rehearsal
-is implemented and statically validated but has not been applied: the required
-applied silent-canary data handoff does not yet exist. It therefore provides no
-runtime behavior-parity claim yet.
+is implemented and statically validated but has not been applied. Its required
+silent-canary data handoff now exists; fresh isolated executor authentication
+and the attended behavior run remain before any runtime behavior-parity claim.
 
 ### Doctor Modernization Rehearsal
 

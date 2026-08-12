@@ -1094,11 +1094,12 @@ OpenClaw AI agent platform — personal homelab admin assistant via web UI and D
   prompts, the hardcoded cognitive-stack hook, hardcoded session routes,
   transcript polling, and text-token heartbeat suppression. It is not deployed
   to production until the attended dedicated-user cutover. A separate
-  disabled-by-default behavior rehearsal now proves concise Dubble output,
-  native Vega-to-Antares review lineage, and a structured idle-silent Rigel
-  heartbeat in the channel-less canary. It restores the heartbeat-disabled
-  baseline and archives only its synthetic sessions; it has not run because an
-  applied silent-canary data handoff is still a prerequisite.
+  disabled-by-default behavior rehearsal is designed to prove concise Dubble
+  output, native Vega-to-Antares review lineage, and a structured idle-silent
+  Rigel heartbeat in the channel-less canary. The applied silent-canary data
+  handoff is complete; behavior execution remains pending fresh isolated
+  executor authentication. The rehearsal restores the heartbeat-disabled
+  baseline and archives only its synthetic sessions.
 - **Mem0 memory**: `@mem0/openclaw-mem0` plugin with Qdrant (localhost:6333), Gemini embeddings, and the configured OpenAI-compatible LLM for fact extraction. Auto-capture + auto-recall across sessions.
 - **dbc ops access**: Narrow host-specific wrappers, including candidate-scoped Immich Media Inbox access on docker-vm. Its isolated vision workers may read pixels/OCR only for admitted candidates; there is no arbitrary Immich, credential, SQLite, or general Docker access. Existing media-stack/Caddy operational paths remain separately scoped.
 - **Docker reporting**: A strict result-only reporter is implemented but remains disabled until the dedicated runtime identity and key are deployed. See `docs/openclaw-docker-access.md`.

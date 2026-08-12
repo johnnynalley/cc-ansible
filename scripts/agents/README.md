@@ -89,6 +89,14 @@ dedicated `openclaw-health` system service passes cutover validation.
   overlay replacement, byte manifests, normalized modes, collision rejection,
   retained-symlink rejection, nonempty-target rejection, and ambiguous glob
   mapping rejection.
+- `openclaw-workspace-manifest-parity.py` compares two protected workspace
+  manifests without emitting retained paths. It permits content and byte drift
+  only for files already classified as retained executor-writable data, while
+  rejecting path-set, source mapping, owner-class, modern-overlay,
+  operator-read-only, structural-summary, and archive-contract drift.
+- `test_openclaw_workspace_manifest_parity.py` covers exact parity, approved
+  mutable data drift, immutable overlay rejection, path-set rejection,
+  malformed summaries, and symlink rejection.
 
 - `openclaw-isolated-secrets.py` preserves or generates the canary Gateway and
   Codex app-server capability tokens, then atomically writes owner-read-only
@@ -183,6 +191,10 @@ dedicated `openclaw-health` system service passes cutover validation.
   suppression, native Star/Rigel evidence gates, baseline restoration,
   synthetic-session archival, delivery parity, production-listener parity,
   and rescue restoration.
+- `openclaw-session-relocate.py verify-artifacts` performs the post-archive
+  preservation gate. It permits OpenClaw-owned session-index updates
+  while requiring the complete non-index transcript and trajectory artifact
+  set, byte counts, hashes, and replay-safe delivery state to remain unchanged.
 - `openclaw-security-rehearsal-audit.py` validates one fixed hostile-prompt
   trajectory. It accepts only the six approved shell probes, correlates calls
   and results, requires the `openclaw-codex` identity, proves denied sudo,

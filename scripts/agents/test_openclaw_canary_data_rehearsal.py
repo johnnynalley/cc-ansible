@@ -79,6 +79,18 @@ class CanaryDataRehearsalTests(unittest.TestCase):
             self.playbook,
         )
         self.assertIn("workspace-stage.json", self.playbook)
+        native = self.playbook.index(
+            "- name: Plan or apply native OpenClaw session transition"
+        )
+        preserve = self.playbook.index(
+            "- name: Verify native archival preserved canary session artifacts"
+        )
+        freeze = self.playbook.index("- name: Freeze native transition evidence")
+        preservation_gate = self.playbook[preserve:freeze]
+        self.assertLess(native, preserve)
+        self.assertLess(preserve, freeze)
+        self.assertIn("'verify-artifacts'", preservation_gate)
+        self.assertIn("artifact-preservation.json", preservation_gate)
 
     def test_native_transition_uses_service_identity_without_cli_credentials(
         self,
@@ -89,6 +101,22 @@ class CanaryDataRehearsalTests(unittest.TestCase):
         self.assertNotIn("'--token'", self.playbook)
         self.assertNotIn("'--password'", self.playbook)
         self.assertIn("openclaw_canary_data_mode == 'apply'", self.playbook)
+        transition = self.playbook.index(
+            "- name: Plan or apply native OpenClaw session transition"
+        )
+        transition_assertion = self.playbook.index(
+            "- name: Require successful native OpenClaw session transition"
+        )
+        native_call = self.playbook[transition:transition_assertion]
+        self.assertIn(
+            "'--openclaw', openclaw_canary_data_runtime_selectors.results[1].stdout",
+            native_call,
+        )
+        self.assertNotIn(
+            "'--openclaw', openclaw_isolated_gateway_runtime_dir + '/bin/openclaw'",
+            native_call,
+        )
+        self.assertNotIn("no_log: true", native_call)
 
     def test_silent_canary_gates_are_checked_before_staging(self) -> None:
         silent = self.playbook.index(
@@ -106,6 +134,59 @@ class CanaryDataRehearsalTests(unittest.TestCase):
         self.assertIn("config.channels is not defined", self.playbook)
         self.assertIn("OPENCLAW_SKIP_CHANNELS=1", self.playbook)
         self.assertIn("OPENCLAW_SKIP_CRON=1", self.playbook)
+
+    def test_runtime_preflight_requires_canonical_cli_and_service_execution(
+        self,
+    ) -> None:
+        resolve = self.playbook.index(
+            "- name: Resolve selected immutable OpenClaw runtime and CLI"
+        )
+        execute = self.playbook.index(
+            "- name: Prove isolated Gateway identity can execute selected OpenClaw CLI"
+        )
+        stage = self.playbook.index(
+            "- name: Stage retained data and modern behavior for canary"
+        )
+        runtime_preflight = self.playbook[resolve:stage]
+        self.assertIn("/lib/node_modules/openclaw/openclaw.mjs", self.playbook)
+        self.assertIn("- /usr/sbin/runuser", runtime_preflight)
+        self.assertIn("- --version", runtime_preflight)
+        self.assertLess(resolve, execute)
+        self.assertLess(execute, stage)
+
+    def test_deployed_helpers_include_local_import_dependencies(self) -> None:
+        install = self.playbook.index(
+            "- name: Install OpenClaw canary data migration helpers"
+        )
+        smoke = self.playbook.index(
+            "- name: Prove deployed OpenClaw canary data helpers load"
+        )
+        inputs = self.playbook.index(
+            "- name: Create protected OpenClaw migration input paths"
+        )
+        deployed_helpers = self.playbook[install:inputs]
+        self.assertIn("- openclaw-workspace-stage.py", deployed_helpers)
+        self.assertIn("- openclaw-workspace-inventory.py", deployed_helpers)
+        self.assertIn("- openclaw-workspace-manifest-parity.py", deployed_helpers)
+        self.assertIn("- openclaw-native-session-transition.py", deployed_helpers)
+        self.assertIn("- openclaw-session-transition.py", deployed_helpers)
+        self.assertIn("- --help", deployed_helpers)
+        self.assertLess(install, smoke)
+        self.assertLess(smoke, inputs)
+
+    def test_workspace_parity_allows_only_classified_mutable_drift(self) -> None:
+        parity = self.playbook.index(
+            "- name: Require canary workspace parity with promoted rehearsal"
+        )
+        ownership = self.playbook.index(
+            "- name: Set staged canary workspace root access"
+        )
+        parity_gate = self.playbook[parity:ownership]
+        self.assertIn("openclaw-workspace-manifest-parity.py", self.playbook)
+        self.assertIn("- --baseline", parity_gate)
+        self.assertIn("- --candidate", parity_gate)
+        self.assertIn("workspace-parity.json", parity_gate)
+        self.assertNotIn("/usr/bin/cmp", parity_gate)
 
     def test_workspace_ownership_preserves_behavior_and_data_classes(self) -> None:
         self.assertEqual(

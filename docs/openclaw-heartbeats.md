@@ -62,8 +62,9 @@ isolated heartbeat transcript containing exactly one `heartbeat_respond` with
 `notify=false`, no visible assistant text or tool errors, and a silent
 structured heartbeat event with no channel or recipient. It then immediately
 restores the all-`0m` baseline and archives the synthetic sessions through
-OpenClaw's native session RPC. This proof has not run yet because it requires a
-successful applied silent-canary data handoff first.
+OpenClaw's native session RPC. The required applied silent-canary data handoff
+is complete; this proof remains pending fresh isolated executor authentication
+and the attended behavior run.
 
 The legacy production sources remain:
 

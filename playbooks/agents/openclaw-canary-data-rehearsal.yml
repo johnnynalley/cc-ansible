@@ -3,7 +3,7 @@
 # Purpose: Hand verified modern workspace/session data to the isolated canary.
 # Hosts: openclaw_hosts.
 # Key vars: openclaw_canary_data_* and openclaw_isolated_gateway_*.
-# Scripts: scripts/agents/openclaw-workspace-stage.py, scripts/agents/openclaw-session-relocate.py, scripts/agents/openclaw-native-session-transition.py, scripts/agents/openclaw-session-transition.py.
+# Scripts: scripts/agents/openclaw-workspace-stage.py, scripts/agents/openclaw-workspace-inventory.py, scripts/agents/openclaw-workspace-manifest-parity.py, scripts/agents/openclaw-session-relocate.py, scripts/agents/openclaw-native-session-transition.py, scripts/agents/openclaw-session-transition.py.
 # Validation: ansible-playbook playbooks/agents/openclaw-canary-data-rehearsal.yml --syntax-check.
 
 - name: Rehearse modern OpenClaw data in the isolated Gateway canary
@@ -15,6 +15,8 @@
     openclaw_canary_data_helper_dir: /usr/local/libexec/openclaw-isolated
     openclaw_canary_data_workspace_stage_tool: >-
       /usr/local/libexec/openclaw-isolated/openclaw-workspace-stage.py
+    openclaw_canary_data_workspace_parity_tool: >-
+      /usr/local/libexec/openclaw-isolated/openclaw-workspace-manifest-parity.py
     openclaw_canary_data_session_tool: >-
       /usr/local/libexec/openclaw-isolated/openclaw-session-relocate.py
     openclaw_canary_data_native_transition_tool: >-
@@ -94,7 +96,7 @@
           - not openclaw_canary_data_prerequisites.results[1].stat.islnk
           - openclaw_canary_data_prerequisites.results[2].stat.isreg
           - not openclaw_canary_data_prerequisites.results[2].stat.islnk
-          - openclaw_canary_data_prerequisites.results[3].stat.isreg
+          - openclaw_canary_data_prerequisites.results[3].stat.islnk
           - openclaw_canary_data_prerequisites.results[4].stat.islnk
           - openclaw_canary_data_prerequisites.results[5].stat.islnk
           - openclaw_canary_data_prerequisites.results[6].stat.isdir
@@ -102,6 +104,44 @@
         fail_msg: >-
           The isolated service/config/runtime, promoted rehearsal selectors,
           or legacy retained-data source is unavailable.
+
+    - name: Resolve selected immutable OpenClaw runtime and CLI
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/readlink
+          - --canonicalize-existing
+          - "{{ item }}"
+      loop:
+        - "{{ openclaw_isolated_gateway_runtime_dir }}"
+        - "{{ openclaw_isolated_gateway_runtime_dir }}/bin/openclaw"
+      register: openclaw_canary_data_runtime_selectors
+      changed_when: false
+      check_mode: false
+
+    - name: Require canonical immutable OpenClaw runtime CLI
+      ansible.builtin.assert:
+        that:
+          - openclaw_canary_data_runtime_selectors.results[0].stdout is match('^/opt/openclaw-isolated/releases/[0-9A-Za-z._+-]+-plugins-[0-9a-f]{16}$')
+          - >-
+            openclaw_canary_data_runtime_selectors.results[1].stdout
+            ==
+            openclaw_canary_data_runtime_selectors.results[0].stdout
+            + '/lib/node_modules/openclaw/openclaw.mjs'
+        fail_msg: >-
+          The selected OpenClaw CLI does not resolve inside the selected
+          immutable runtime release.
+
+    - name: Prove isolated Gateway identity can execute selected OpenClaw CLI
+      ansible.builtin.command:
+        argv:
+          - /usr/sbin/runuser
+          - -u
+          - "{{ openclaw_isolated_gateway_user }}"
+          - --
+          - "{{ openclaw_isolated_gateway_runtime_dir }}/bin/openclaw"
+          - --version
+      changed_when: false
+      check_mode: false
 
     - name: Resolve promoted OpenClaw rehearsal selectors
       ansible.builtin.command:
@@ -246,9 +286,26 @@
         mode: "0755"
       loop:
         - openclaw-workspace-stage.py
+        - openclaw-workspace-inventory.py
+        - openclaw-workspace-manifest-parity.py
         - openclaw-session-relocate.py
         - openclaw-session-transition.py
         - openclaw-native-session-transition.py
+
+    - name: Prove deployed OpenClaw canary data helpers load
+      ansible.builtin.command:
+        argv:
+          - "{{ openclaw_canary_data_helper_dir }}/{{ item }}"
+          - --help
+      loop:
+        - openclaw-workspace-stage.py
+        - openclaw-workspace-inventory.py
+        - openclaw-workspace-manifest-parity.py
+        - openclaw-session-relocate.py
+        - openclaw-session-transition.py
+        - openclaw-native-session-transition.py
+      changed_when: false
+      check_mode: false
 
     - name: Create protected OpenClaw migration input paths
       ansible.builtin.file:
@@ -577,11 +634,14 @@
     - name: Require canary workspace parity with promoted rehearsal
       ansible.builtin.command:
         argv:
-          - /usr/bin/cmp
-          - --silent
+          - "{{ openclaw_canary_data_workspace_parity_tool }}"
+          - --baseline
           - >-
             {{ openclaw_state_rehearsal_backup_dir }}/{{ openclaw_canary_data_source_stamp }}/workspace-stage.json
+          - --candidate
           - "{{ openclaw_canary_data_evidence_dir }}/workspace-stage.json"
+          - --output
+          - "{{ openclaw_canary_data_evidence_dir }}/workspace-parity.json"
       changed_when: false
 
     - name: Set staged canary workspace root access
@@ -876,7 +936,7 @@
                   '--',
                   openclaw_canary_data_native_transition_tool,
                   '--mode', openclaw_canary_data_mode,
-                  '--openclaw', openclaw_isolated_gateway_runtime_dir + '/bin/openclaw',
+                  '--openclaw', openclaw_canary_data_runtime_selectors.results[1].stdout,
                   '--runtime-root', openclaw_isolated_gateway_runtime_root,
                   '--home', openclaw_isolated_gateway_state_dir,
                   '--state-root', openclaw_isolated_gateway_state_dir + '/state',
@@ -888,7 +948,6 @@
               }}
           register: openclaw_canary_data_native_transition
           changed_when: openclaw_canary_data_mode == 'apply'
-          no_log: true
 
         - name: Require successful native OpenClaw session transition
           ansible.builtin.assert:
@@ -904,7 +963,22 @@
                 )
             fail_msg: >-
               Native canary session classification or archival did not converge.
-          no_log: true
+
+        - name: Verify native archival preserved canary session artifacts
+          ansible.builtin.command:
+            argv: >-
+              {{
+                [
+                  openclaw_canary_data_session_tool,
+                  'verify-artifacts',
+                  '--source-manifest', openclaw_canary_data_evidence_dir + '/source-after.json',
+                  '--target-state-root', openclaw_isolated_gateway_state_dir + '/state',
+                  '--target-workspace-root', openclaw_isolated_gateway_workspace_dir,
+                  '--output', openclaw_canary_data_evidence_dir + '/artifact-preservation.json'
+                ]
+                + openclaw_canary_data_agent_arguments
+              }}
+          changed_when: false
 
         - name: Freeze native transition evidence
           ansible.builtin.file:
