@@ -421,6 +421,20 @@ class IsolatedGatewayPlaybookTests(unittest.TestCase):
             self.inventory["openclaw_isolated_codex_group"],
         )
         self.assertIn("UMask=0027", self.codex_service_template)
+        self.assertIn(
+            "ExecStartPre=/usr/bin/test -x "
+            "{{ openclaw_isolated_gateway_workspace_dir }}",
+            self.codex_service_template,
+        )
+        self.assertIn(
+            "ExecStartPre=/usr/bin/test ! -w "
+            "{{ openclaw_isolated_gateway_workspace_dir }}",
+            self.codex_service_template,
+        )
+
+        membership_gate = self.task("Wait for isolated service group memberships")
+        self.assertIn("until:", membership_gate)
+        self.assertIn("item.groups", membership_gate)
 
     def test_codex_filesystem_boundaries_are_independently_diagnosed(self) -> None:
         source_gate = self.task("Prove root-managed Codex runtime source exists")

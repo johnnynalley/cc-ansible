@@ -687,6 +687,30 @@
             comment: "Isolated Codex app-server executor"
             password: "!"
 
+        - name: Wait for isolated service group memberships
+          ansible.builtin.command:
+            argv:
+              - /usr/bin/id
+              - --groups
+              - --name
+              - "{{ item.user }}"
+          loop:
+            - user: "{{ openclaw_isolated_gateway_user }}"
+              groups: >-
+                {{ [openclaw_isolated_gateway_group] + openclaw_isolated_gateway_supplementary_groups }}
+            - user: "{{ openclaw_isolated_codex_user }}"
+              groups: >-
+                {{ [openclaw_isolated_codex_group] + openclaw_isolated_codex_supplementary_groups }}
+          register: openclaw_isolated_service_group_memberships
+          changed_when: false
+          until: >-
+            openclaw_isolated_service_group_memberships.stdout.split() | sort
+            == item.groups | sort
+          retries: 5
+          delay: 1
+          loop_control:
+            label: "{{ item.user }}"
+
         - name: Inspect isolated Gateway config-reading group
           ansible.builtin.command:
             argv:
