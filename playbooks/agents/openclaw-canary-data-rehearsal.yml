@@ -887,6 +887,11 @@
                   '--output', openclaw_canary_data_evidence_dir + '/rewrite.json'
                 ]
                 + openclaw_canary_data_agent_arguments
+                + [
+                  '--restore-native-heartbeat-key=agent:main:main:heartbeat',
+                  '--restore-native-heartbeat-key=agent:dubble:main:heartbeat',
+                  '--restore-native-heartbeat-key=agent:rigel:main:heartbeat'
+                ]
               }}
           changed_when: true
 
@@ -957,9 +962,17 @@
               - >-
                 openclaw_canary_data_mode == 'plan'
                 or (
-                  (openclaw_canary_data_native_transition.stdout | from_json).summary.archived
-                  ==
-                  (openclaw_canary_data_native_transition.stdout | from_json).summary.archivePlanned
+                  (
+                    (openclaw_canary_data_native_transition.stdout | from_json).summary.restored
+                    ==
+                    (openclaw_canary_data_native_transition.stdout | from_json).summary.restorePlanned
+                  )
+                  and
+                  (
+                    (openclaw_canary_data_native_transition.stdout | from_json).summary.archived
+                    ==
+                    (openclaw_canary_data_native_transition.stdout | from_json).summary.archivePlanned
+                  )
                 )
             fail_msg: >-
               Native canary session classification or archival did not converge.

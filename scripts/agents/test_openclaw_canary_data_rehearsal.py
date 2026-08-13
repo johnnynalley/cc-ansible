@@ -96,6 +96,10 @@ class CanaryDataRehearsalTests(unittest.TestCase):
         self,
     ) -> None:
         self.assertIn("openclaw-native-session-transition.py", self.playbook)
+        self.assertIn(
+            "--restore-native-heartbeat-key=agent:rigel:main:heartbeat",
+            self.playbook,
+        )
         self.assertIn("'/usr/sbin/runuser'", self.playbook)
         self.assertIn("'-u', openclaw_isolated_gateway_user", self.playbook)
         self.assertNotIn("'--token'", self.playbook)

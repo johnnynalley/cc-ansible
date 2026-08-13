@@ -27,6 +27,10 @@
       /usr/local/libexec/openclaw-isolated/openclaw-native-session-transition.py
     openclaw_security_rehearsal_transition_root: >-
       /var/lib/openclaw-isolated/security-transitions
+    openclaw_security_rehearsal_validation_root: >-
+      /var/lib/openclaw-isolated/security-validation
+    openclaw_security_rehearsal_input_root: >-
+      /var/lib/openclaw-isolated/security-inputs
     openclaw_security_rehearsal_agents:
       - main
       - dubble
@@ -84,8 +88,9 @@
         that:
           - openclaw_isolated_gateway_user == 'openclaw'
           - openclaw_isolated_gateway_group == 'openclaw'
-          - openclaw_isolated_codex_user == 'openclaw-codex'
+          - openclaw_isolated_codex_user == openclaw_isolated_gateway_user
           - openclaw_isolated_codex_group == 'openclaw-codex'
+          - openclaw_isolated_native_hook_relay_runtime_dir == '/run/openclaw-native-hook-relay'
           - openclaw_isolated_gateway_port | int == 19789
           - openclaw_isolated_codex_port | int == 19790
           - openclaw_isolated_gateway_config_file == '/etc/openclaw-isolated/openclaw.json'
@@ -278,6 +283,9 @@
           - "'ReadOnlyPaths=' + openclaw_isolated_gateway_workspace_dir in (openclaw_security_rehearsal_units_raw.results[0].content | b64decode)"
           - "'InaccessiblePaths=-' + openclaw_isolated_codex_config_dir + ' -' + openclaw_isolated_codex_state_dir in (openclaw_security_rehearsal_units_raw.results[0].content | b64decode)"
           - "'User=' + openclaw_isolated_codex_user in (openclaw_security_rehearsal_units_raw.results[1].content | b64decode)"
+          - "'Group=' + openclaw_isolated_codex_group in (openclaw_security_rehearsal_units_raw.results[1].content | b64decode)"
+          - "'Environment=TMPDIR=' + openclaw_isolated_native_hook_relay_runtime_dir in (openclaw_security_rehearsal_units_raw.results[0].content | b64decode)"
+          - "'Environment=TMPDIR=' + openclaw_isolated_native_hook_relay_runtime_dir in (openclaw_security_rehearsal_units_raw.results[1].content | b64decode)"
           - "'ReadWritePaths=' + openclaw_isolated_gateway_workspace_dir in (openclaw_security_rehearsal_units_raw.results[1].content | b64decode)"
           - "'InaccessiblePaths=-' + openclaw_isolated_gateway_config_dir + ' -' + openclaw_isolated_gateway_state_dir in (openclaw_security_rehearsal_units_raw.results[1].content | b64decode)"
           - "'InaccessiblePaths=-' + openclaw_security_rehearsal_root in (openclaw_security_rehearsal_units_raw.results[1].content | b64decode)"
@@ -288,8 +296,8 @@
           - "'CapabilityBoundingSet=' in (openclaw_security_rehearsal_units_raw.results[1].content | b64decode)"
         fail_msg: >-
           The split services do not enforce channel suppression, separate
-          identities, workspace ownership, secret isolation, or privilege
-          removal.
+          service namespaces, workspace ownership, secret isolation, native
+          hook relay compatibility, or privilege removal.
 
     - name: Inspect isolated Gateway and Codex boot state
       ansible.builtin.command:
@@ -320,7 +328,6 @@
           - "{{ item }}"
       loop:
         - "{{ openclaw_isolated_gateway_user }}"
-        - "{{ openclaw_isolated_codex_user }}"
       register: openclaw_security_rehearsal_account_groups
       changed_when: false
       check_mode: false
@@ -329,41 +336,10 @@
       ansible.builtin.assert:
         that:
           - openclaw_security_rehearsal_account_groups.results[0].stdout.split() | sort == ([openclaw_isolated_gateway_group] + openclaw_isolated_gateway_supplementary_groups) | unique | sort
-          - openclaw_security_rehearsal_account_groups.results[1].stdout.split() | sort == ([openclaw_isolated_codex_group] + openclaw_isolated_codex_supplementary_groups) | unique | sort
           - "'sudo' not in openclaw_security_rehearsal_account_groups.results[0].stdout.split()"
           - "'docker' not in openclaw_security_rehearsal_account_groups.results[0].stdout.split()"
-          - "'sudo' not in openclaw_security_rehearsal_account_groups.results[1].stdout.split()"
-          - "'docker' not in openclaw_security_rehearsal_account_groups.results[1].stdout.split()"
         fail_msg: >-
           A dedicated OpenClaw account has unexpected group-derived privilege.
-
-    - name: Prove Codex cannot read the Gateway secret in the host namespace
-      ansible.builtin.command:
-        argv:
-          - /usr/sbin/runuser
-          - -u
-          - "{{ openclaw_isolated_codex_user }}"
-          - --
-          - "{{ openclaw_isolated_access_check_path }}"
-          - "!"
-          - -r
-          - "{{ openclaw_isolated_gateway_secret_file }}"
-      changed_when: false
-      check_mode: false
-
-    - name: Prove Gateway cannot read the Codex app-server token
-      ansible.builtin.command:
-        argv:
-          - /usr/sbin/runuser
-          - -u
-          - "{{ openclaw_isolated_gateway_user }}"
-          - --
-          - "{{ openclaw_isolated_access_check_path }}"
-          - "!"
-          - -r
-          - "{{ openclaw_isolated_codex_token_file }}"
-      changed_when: false
-      check_mode: false
 
     - name: Prove Codex has no host Docker socket read path
       ansible.builtin.command:
@@ -383,8 +359,9 @@
       ansible.builtin.debug:
         msg: >-
           Check mode validated the applied data handoff, split service units,
-          boot policy, account groups, and cross-account credential denials. It
-          did not render configs, create probes, run a model, or start a service.
+          boot policy, account groups, and static namespace denials. It did not
+          render configs, create probes, run a model, or start a service. Live
+          namespace denials are apply-mode gates.
       when: ansible_check_mode
 
     - name: Stop OpenClaw security rehearsal before mutation in check mode
@@ -439,6 +416,10 @@
           {{ openclaw_security_rehearsal_backup_dir }}/{{ openclaw_security_rehearsal_stamp_raw.stdout }}
         openclaw_security_rehearsal_transition_output: >-
           {{ openclaw_security_rehearsal_transition_root }}/{{ openclaw_security_rehearsal_stamp_raw.stdout }}
+        openclaw_security_rehearsal_validation_dir: >-
+          {{ openclaw_security_rehearsal_validation_root }}/{{ openclaw_security_rehearsal_stamp_raw.stdout }}
+        openclaw_security_rehearsal_input_dir: >-
+          {{ openclaw_security_rehearsal_input_root }}/{{ openclaw_security_rehearsal_stamp_raw.stdout }}
         openclaw_security_rehearsal_backup_ready: false
         openclaw_security_rehearsal_probe_ready: false
 
@@ -658,10 +639,35 @@
             - src: "{{ openclaw_isolated_gateway_runtime_state_dir }}/agents/main/sessions/sessions.json"
               dest: sessions-before.json
 
-        - name: Prepare writable security config for native validation
+        - name: Create protected security validation root
+          ansible.builtin.file:
+            path: "{{ openclaw_security_rehearsal_validation_root }}"
+            state: directory
+            owner: root
+            group: "{{ openclaw_isolated_gateway_group }}"
+            mode: "0750"
+
+        - name: Create service-owned security validation directory
+          ansible.builtin.file:
+            path: "{{ openclaw_security_rehearsal_validation_dir }}"
+            state: directory
+            owner: "{{ openclaw_isolated_gateway_user }}"
+            group: "{{ openclaw_isolated_gateway_group }}"
+            mode: "0700"
+
+        - name: Stage service-readable security config for native validation
           ansible.builtin.copy:
             src: "{{ openclaw_security_rehearsal_evidence_dir }}/config-security.json"
-            dest: "{{ openclaw_security_rehearsal_evidence_dir }}/config-security.json.last-good"
+            dest: "{{ openclaw_security_rehearsal_validation_dir }}/config-security.json"
+            remote_src: true
+            owner: "{{ openclaw_isolated_gateway_user }}"
+            group: "{{ openclaw_isolated_gateway_group }}"
+            mode: "0600"
+
+        - name: Prepare writable security config for native validation
+          ansible.builtin.copy:
+            src: "{{ openclaw_security_rehearsal_validation_dir }}/config-security.json"
+            dest: "{{ openclaw_security_rehearsal_validation_dir }}/config-security.json.last-good"
             remote_src: true
             owner: "{{ openclaw_isolated_gateway_user }}"
             group: "{{ openclaw_isolated_gateway_group }}"
@@ -678,27 +684,32 @@
               - "HOME={{ openclaw_isolated_gateway_state_dir }}"
               - "OPENCLAW_HOME={{ openclaw_isolated_gateway_state_dir }}"
               - "OPENCLAW_STATE_DIR={{ openclaw_isolated_gateway_runtime_state_dir }}"
-              - "OPENCLAW_CONFIG_PATH={{ openclaw_security_rehearsal_evidence_dir }}/config-security.json"
+              - "OPENCLAW_CONFIG_PATH={{ openclaw_security_rehearsal_validation_dir }}/config-security.json"
               - "OPENCLAW_WORKSPACE_DIR={{ openclaw_isolated_gateway_workspace_dir }}"
               - OPENCLAW_SKIP_CHANNELS=1
               - OPENCLAW_SKIP_CRON=1
               - MEM0_TELEMETRY=false
               - NO_COLOR=1
-              - "{{ openclaw_isolated_gateway_runtime_dir }}/bin/openclaw"
+              - "{{ openclaw_security_rehearsal_runtime_selectors.results[1].stdout }}"
               - config
               - validate
               - --json
           register: openclaw_security_rehearsal_native_config_audit
           changed_when: false
-          no_log: true
+          failed_when: false
 
         - name: Require native OpenClaw security config validation
           ansible.builtin.assert:
             that:
+              - openclaw_security_rehearsal_native_config_audit.rc | int == 0
               - (openclaw_security_rehearsal_native_config_audit.stdout | from_json).valid | bool
             fail_msg: >-
               The installed OpenClaw runtime rejected the security canary config.
-          no_log: true
+
+        - name: Remove temporary security validation directory
+          ansible.builtin.file:
+            path: "{{ openclaw_security_rehearsal_validation_dir }}"
+            state: absent
 
         - name: Deploy channel-less OpenClaw security config
           ansible.builtin.copy:
@@ -869,6 +880,31 @@
               /usr/bin/printf '%s\n' '{{ openclaw_security_rehearsal_outside_marker }}' > {{ openclaw_security_rehearsal_outside_file }}
               /usr/bin/printf '%s\n' '{{ openclaw_security_rehearsal_inside_marker }}' > {{ openclaw_security_rehearsal_inside_file }}
 
+        - name: Create protected security input root
+          ansible.builtin.file:
+            path: "{{ openclaw_security_rehearsal_input_root }}"
+            state: directory
+            owner: root
+            group: "{{ openclaw_isolated_gateway_group }}"
+            mode: "0750"
+
+        - name: Create service-owned security input directory
+          ansible.builtin.file:
+            path: "{{ openclaw_security_rehearsal_input_dir }}"
+            state: directory
+            owner: "{{ openclaw_isolated_gateway_user }}"
+            group: "{{ openclaw_isolated_gateway_group }}"
+            mode: "0700"
+
+        - name: Stage service-readable security prompt input
+          ansible.builtin.copy:
+            src: "{{ openclaw_security_rehearsal_evidence_dir }}/security-prompt.txt"
+            dest: "{{ openclaw_security_rehearsal_input_dir }}/security-prompt.txt"
+            remote_src: true
+            owner: "{{ openclaw_isolated_gateway_user }}"
+            group: "{{ openclaw_isolated_gateway_group }}"
+            mode: "0400"
+
         - name: Start isolated Codex security executor
           ansible.builtin.systemd_service:
             name: openclaw-isolated-codex.service
@@ -896,6 +932,89 @@
             state: started
             timeout: 90
 
+        - name: Resolve isolated service namespace leaders
+          ansible.builtin.command:
+            argv:
+              - /usr/bin/systemctl
+              - show
+              - --property=MainPID
+              - --value
+              - "{{ item }}"
+          loop:
+            - openclaw-isolated-gateway.service
+            - openclaw-isolated-codex.service
+          register: openclaw_security_rehearsal_service_pids
+          changed_when: false
+
+        - name: Require live isolated service namespaces
+          ansible.builtin.assert:
+            that:
+              - openclaw_security_rehearsal_service_pids.results[0].stdout | int > 1
+              - openclaw_security_rehearsal_service_pids.results[1].stdout | int > 1
+            fail_msg: >-
+              The isolated Gateway and Codex services must both have live
+              namespace leaders before access-boundary validation.
+
+        - name: Prove Codex service namespace cannot read Gateway secrets
+          ansible.builtin.command:
+            argv:
+              - /usr/bin/nsenter
+              - --target
+              - "{{ openclaw_security_rehearsal_service_pids.results[1].stdout }}"
+              - --mount
+              - --
+              - /usr/sbin/runuser
+              - -u
+              - "{{ openclaw_isolated_codex_user }}"
+              - --
+              - "{{ openclaw_isolated_access_check_path }}"
+              - "!"
+              - -r
+              - "{{ openclaw_isolated_gateway_secret_file }}"
+          changed_when: false
+
+        - name: Prove Gateway service namespace cannot read Codex auth
+          ansible.builtin.command:
+            argv:
+              - /usr/bin/nsenter
+              - --target
+              - "{{ openclaw_security_rehearsal_service_pids.results[0].stdout }}"
+              - --mount
+              - --
+              - /usr/sbin/runuser
+              - -u
+              - "{{ openclaw_isolated_gateway_user }}"
+              - --
+              - "{{ openclaw_isolated_access_check_path }}"
+              - "!"
+              - -r
+              - "{{ openclaw_isolated_codex_token_file }}"
+          changed_when: false
+
+        - name: Prove both services share only the private native hook relay path
+          ansible.builtin.command:
+            argv:
+              - /usr/bin/nsenter
+              - --target
+              - "{{ item.pid }}"
+              - --mount
+              - --
+              - /usr/sbin/runuser
+              - -u
+              - "{{ openclaw_isolated_gateway_user }}"
+              - --
+              - "{{ openclaw_isolated_access_check_path }}"
+              - -w
+              - "{{ openclaw_isolated_native_hook_relay_runtime_dir }}"
+          loop:
+            - role: gateway
+              pid: "{{ openclaw_security_rehearsal_service_pids.results[0].stdout }}"
+            - role: codex
+              pid: "{{ openclaw_security_rehearsal_service_pids.results[1].stdout }}"
+          loop_control:
+            label: "{{ item.role }}"
+          changed_when: false
+
         - name: Run one adversarial OpenClaw security turn
           ansible.builtin.command:
             argv:
@@ -913,7 +1032,7 @@
               - OPENCLAW_SKIP_CRON=1
               - MEM0_TELEMETRY=false
               - NO_COLOR=1
-              - "{{ openclaw_isolated_gateway_runtime_dir }}/bin/openclaw"
+              - "{{ openclaw_security_rehearsal_runtime_selectors.results[1].stdout }}"
               - agent
               - --agent
               - main
@@ -922,7 +1041,7 @@
               - --timeout
               - "600"
               - --message-file
-              - "{{ openclaw_security_rehearsal_evidence_dir }}/security-prompt.txt"
+              - "{{ openclaw_security_rehearsal_input_dir }}/security-prompt.txt"
               - --json
           register: openclaw_security_rehearsal_model_result
           changed_when: false
@@ -936,6 +1055,11 @@
             mode: "0600"
             content: "{{ openclaw_security_rehearsal_model_result.stdout }}"
           no_log: true
+
+        - name: Remove temporary security prompt input
+          ansible.builtin.file:
+            path: "{{ openclaw_security_rehearsal_input_dir }}"
+            state: absent
 
         - name: Stop OpenClaw security canary before evidence audit
           ansible.builtin.systemd_service:
@@ -1256,6 +1380,18 @@
             follow: false
 
       rescue:
+        - name: Remove failed temporary security prompt input
+          ansible.builtin.file:
+            path: "{{ openclaw_security_rehearsal_input_dir }}"
+            state: absent
+          failed_when: false
+
+        - name: Remove failed temporary security validation directory
+          ansible.builtin.file:
+            path: "{{ openclaw_security_rehearsal_validation_dir }}"
+            state: absent
+          failed_when: false
+
         - name: Stop failed OpenClaw security canary
           ansible.builtin.systemd_service:
             name: openclaw-isolated-gateway.service

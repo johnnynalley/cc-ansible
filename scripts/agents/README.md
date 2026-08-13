@@ -82,7 +82,8 @@ dedicated `openclaw-health` system service passes cutover validation.
   targets, file/parent collisions, and source drift; hashes copied bytes and
   normalizes files to non-executable executor-writable or operator-read-only
   ownership classes. The workspace root and behavior remain root-owned;
-  mutable project-data subtrees are owned by `openclaw-codex`. A dedicated
+  mutable project-data subtrees are owned by the no-login `openclaw` runtime
+  UID. A dedicated
   `openclaw-workspace` group gives both services read/traverse access without
   exposing either service's private config, credentials, or state.
 - `test_openclaw_workspace_stage.py` covers retained/remapped data, modern
@@ -97,6 +98,16 @@ dedicated `openclaw-health` system service passes cutover validation.
 - `test_openclaw_workspace_manifest_parity.py` covers exact parity, approved
   mutable data drift, immutable overlay rejection, path-set rejection,
   malformed summaries, and symlink rejection.
+- `openclaw-star-gateway-rehearsal.py` starts the Star canary through the
+  persistent Gateway RPC with one-shot Codex cleanup disabled, requires the
+  initial turn to end only through `sessions_yield`, then waits for the pushed
+  requester follow-up and writes exactly one private final payload only after
+  all canary runs are idle. This exercises the same multi-turn completion
+  topology as a channel request instead of mistaking a yielded CLI turn for a
+  finished answer.
+- `test_openclaw_star_gateway_rehearsal.py` rejects premature visible output,
+  incomplete session inventories, multiple final answers, and missing pushed
+  follow-ups while proving the persistent cleanup boundary.
 
 - `openclaw-isolated-secrets.py` preserves or generates the canary Gateway and
   Codex app-server capability tokens, then atomically writes owner-read-only
@@ -148,7 +159,8 @@ dedicated `openclaw-health` system service passes cutover validation.
   symlink rejection, redaction, private report permissions, and gate exit
   behavior.
 - `openclaw-session-transition.py` consumes a complete native `sessions.list`
-  response, keeps durable main/channel routes, plans archive actions only for
+  response, keeps durable main/channel routes and native
+  `agent:<agent>:main:heartbeat` sessions, plans archive actions only for
   structurally identified synthetic or completed execution rows, retains
   dormant statusless runtime sessions with a real session identity, and fails
   on active work, unknown agents, malformed shapes, pagination, or duplicate
@@ -164,13 +176,14 @@ dedicated `openclaw-health` system service passes cutover validation.
   session keys are persisted only in fresh mode-`0600` evidence and supplied
   transiently to the local native RPC CLI for `sessions.patch`; normal output
   and logs remain aggregate-only. It archives only actions approved by
-  `openclaw-session-transition.py` and re-lists to prove a clean active set
-  after apply mode. An optional exact required-archive-key set makes synthetic
-  cleanup fail before patching if any expected key is missing or any unexpected
-  session would be archived.
+  `openclaw-session-transition.py`, can explicitly restore only exact configured
+  `agent:<agent>:main:heartbeat` keys, and re-lists to prove convergence after
+  restore/apply modes. An optional exact required-archive-key set makes
+  synthetic cleanup fail before patching if any expected key is missing or any
+  unexpected session would be archived.
 - `test_openclaw_native_session_transition.py` covers read-only planning,
-  private evidence, native archive convergence, active-work rejection, and
-  evidence-directory reuse rejection.
+  private evidence, exact native-heartbeat restoration, native archive
+  convergence, active-work rejection, and evidence-directory reuse rejection.
 - `test_openclaw_canary_data_rehearsal.py` enforces candidate-before-stop
   ordering, targeted rollback before promotion, hash-verified relocation,
   delivery-recovery quarantine, native service-identity transition, silent
@@ -180,8 +193,22 @@ dedicated `openclaw-health` system service passes cutover validation.
   agents. It requires exact Dubble output, one Vega and one Antares child with
   native parent/depth/model provenance, verbatim Vega evidence passed to
   Antares, one concise user-facing Star answer, and a new Rigel heartbeat whose
-  transcript and structured event prove `notify=false` with no visible text,
-  tool error, or delivery target. Normal output is aggregate-only.
+  transcript and structured event prove either native `ok-token` with
+  `notify=false` or native `ok-empty`, with no visible text, tool error, or
+  delivery target. Provider-facing tool checks account for Codex-native
+  filesystem access that is not projected as OpenClaw `read`; non-Codex
+  reviewers must still expose the configured OpenClaw read tool. Normal output
+  is aggregate-only, and failures emit fixed non-content reason codes.
+- `openclaw-heartbeat-event-check.py` waits through the immutable native CLI for
+  one fresh scheduled `ok-token` or `ok-empty` event. It rejects delivery routes,
+  visible control/reasoning/error previews, failed/sent outcomes, malformed
+  timing, and non-scheduled events before returning the private event JSON. The
+  live start must be a plausible Unix-millisecond value; timeout output contains
+  only query count and the last event's timestamp/status/reason, never preview
+  text or route metadata.
+- `test_openclaw_heartbeat_event_check.py` covers both native idle-success
+  branches, stale/skipped waits, route and status rejection, preview rejection,
+  and immutable executable selection.
 - `test_openclaw_behavior_audit.py` covers the complete success path plus
   missing reviewer evidence, wrong lineage, internal narration, dangerous tool
   exposure, noisy heartbeat outcomes, visible control tokens, and transcript
@@ -197,10 +224,10 @@ dedicated `openclaw-health` system service passes cutover validation.
   set, byte counts, hashes, and replay-safe delivery state to remain unchanged.
 - `openclaw-security-rehearsal-audit.py` validates one fixed hostile-prompt
   trajectory. It accepts only the six approved shell probes, correlates calls
-  and results, requires the `openclaw-codex` identity, proves denied sudo,
-  Gateway-secret, Docker-socket, and outside-workspace access, verifies the one
-  allowed workspace write, and rejects secret bytes in trajectory or saved
-  model output.
+  and results, requires the `openclaw` identity inside the Codex service,
+  proves denied sudo, Gateway-secret, Docker-socket, and outside-workspace
+  access, verifies the one allowed workspace write, and rejects secret bytes
+  in trajectory or saved model output.
 - `test_openclaw_security_rehearsal_audit.py` covers exact command/result
   correlation, Codex shell-wrapper parsing, path/symlink boundaries, identity
   and denial failures, unexpected tools, and secret leakage.

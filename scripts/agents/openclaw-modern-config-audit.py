@@ -217,6 +217,17 @@ def _audit_agents(
         defaults.get("bootstrapTotalMaxChars") == 10000,
         "bootstrap-total-budget-drift",
     )
+    primary_model = _at(defaults, "model", "primary")
+    _require(
+        isinstance(primary_model, str) and primary_model.startswith("codex/"),
+        "primary-model-bypasses-codex-provider",
+    )
+    model_routes = _at(defaults, "models")
+    _require(
+        model_routes.get("codex/*") == {"agentRuntime": {"id": "codex"}},
+        "codex-model-runtime-route-drift",
+    )
+    _require("openai/*" not in model_routes, "gateway-openai-model-route-present")
     _require(
         _at(defaults, "contextPruning", "mode") == "cache-ttl",
         "context-pruning-not-modernized",
@@ -270,7 +281,7 @@ def _audit_agents(
             "30m"
             if heartbeat_mode == "production"
             else (
-                "24h"
+                "1m"
                 if heartbeat_mode == "controlled-rigel" and agent_id == "rigel"
                 else "0m"
             )
@@ -519,7 +530,12 @@ def _audit_plugins(config: dict[str, Any], deployment_mode: str) -> None:
         )
         _require(sorted(entries) == sorted(EXPECTED_PLUGINS), "plugin-entry-mismatch")
 
-    codex = _at(entries, "codex", "config", "appServer")
+    codex_config = _at(entries, "codex", "config")
+    _require(
+        _at(codex_config, "discovery", "enabled") is True,
+        "codex-model-discovery-disabled",
+    )
+    codex = _at(codex_config, "appServer")
     _require(codex.get("mode") == "guardian", "codex-guardian-disabled")
     _require(codex.get("transport") == "websocket", "codex-not-process-separated")
     _require(codex.get("homeScope") == "agent", "codex-home-not-agent-scoped")
@@ -554,7 +570,7 @@ def _audit_plugins(config: dict[str, Any], deployment_mode: str) -> None:
     lossless = _at(entries, "lossless-claw")
     summary_model = _at(lossless, "config", "summaryModel")
     _require(
-        summary_model.startswith("openai/"), "lossless-summary-provider-not-modernized"
+        summary_model.startswith("codex/"), "lossless-summary-provider-not-modernized"
     )
     _require(
         _at(lossless, "llm", "allowedModels") == [summary_model],

@@ -24,11 +24,18 @@ class SessionTransitionTests(unittest.TestCase):
             "sessions": sessions,
         }
 
-    def test_retains_main_and_external_conversation_routes(self) -> None:
+    def test_retains_main_native_heartbeat_and_external_conversation_routes(
+        self,
+    ) -> None:
         plan = MODULE.build_transition_plan(
             self._payload(
                 [
                     {"key": "agent:main:main", "hasActiveRun": False},
+                    {
+                        "key": "agent:main:main:heartbeat",
+                        "sessionId": "native-heartbeat",
+                        "hasActiveRun": False,
+                    },
                     {
                         "key": "agent:main:discord:channel:123",
                         "channel": "discord",
@@ -38,12 +45,19 @@ class SessionTransitionTests(unittest.TestCase):
             ),
             ["main"],
         )
-        self.assertEqual(plan["summary"]["retain"], 2)
+        self.assertEqual(plan["summary"]["retain"], 3)
         self.assertEqual(plan["summary"]["archive"], 0)
+        self.assertEqual(
+            plan["summary"]["classifications"]["retain:durable-native-heartbeat"],
+            1,
+        )
 
     def test_archives_known_synthetic_and_completed_execution_rows(self) -> None:
         sessions = [
-            {"key": "agent:main:main:heartbeat", "hasActiveRun": False},
+            {
+                "key": "agent:main:explicit:behavior-test:heartbeat",
+                "hasActiveRun": False,
+            },
             {"key": "agent:main:cron:job", "hasActiveRun": False},
             {
                 "key": "agent:main:subagent:child",
@@ -135,7 +149,7 @@ class SessionTransitionTests(unittest.TestCase):
     def test_require_clean_rejects_pending_archive_actions(self) -> None:
         with self.assertRaisesRegex(MODULE.SessionTransitionError, "still contains"):
             MODULE.build_transition_plan(
-                self._payload([{"key": "agent:main:main:heartbeat"}]),
+                self._payload([{"key": "agent:main:explicit:behavior-test:heartbeat"}]),
                 ["main"],
                 require_clean=True,
             )

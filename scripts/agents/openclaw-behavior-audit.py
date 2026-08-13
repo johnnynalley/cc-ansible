@@ -14,7 +14,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 AGENTS = ("main", "dubble", "vega", "antares", "rigel")
 MAX_JSON_BYTES = 32 * 1024 * 1024
 MAX_TRANSCRIPT_BYTES = 16 * 1024 * 1024
@@ -264,6 +264,24 @@ def _split_model(reference: str, label: str) -> tuple[str, str]:
     provider, separator, model = reference.partition("/")
     _require(bool(separator and provider and model), f"{label}-model-invalid")
     return provider, model
+
+
+def _provider_prompt_tools(
+    model_reference: str,
+    *required_tools: str,
+) -> set[str]:
+    """Return tools expected in OpenClaw's provider-facing prompt report.
+
+    The Codex provider supplies filesystem access through Codex's native tool
+    layer. OpenClaw therefore omits its own ``read`` tool from the projected
+    prompt report even when the agent allowlist includes it.
+    """
+
+    provider, _ = _split_model(model_reference, "provider-tools")
+    tools = set(required_tools)
+    if provider == "codex":
+        tools.discard("read")
+    return tools
 
 
 def _audit_prompt_report(
@@ -620,7 +638,7 @@ def _audit_owned_item_decision(text: str) -> None:
 
 
 def _audit_heartbeat_transcript(
-    rows: list[dict[str, Any]], started_at_ms: int
+    rows: list[dict[str, Any]], started_at_ms: int, event_status: str
 ) -> dict[str, int]:
     new_messages: list[dict[str, Any]] = []
     for row in rows:
@@ -665,14 +683,16 @@ def _audit_heartbeat_transcript(
                     or block.get("type") == "tool_result_error"
                 )
             )
-    _require(len(heartbeat_calls) == 1, "rigel-heartbeat-call-count")
-    _require(
-        heartbeat_calls[0].get("notify") is False,
-        "rigel-heartbeat-notify-enabled",
-    )
+    expected_calls = 1 if event_status == "ok-token" else 0
+    _require(len(heartbeat_calls) == expected_calls, "rigel-heartbeat-call-count")
+    if heartbeat_calls:
+        _require(
+            heartbeat_calls[0].get("notify") is False,
+            "rigel-heartbeat-notify-enabled",
+        )
     _require(not visible_texts, "rigel-visible-assistant-text")
     _require(tool_errors == 0, "rigel-tool-error")
-    return {"newMessages": len(new_messages), "heartbeatCalls": 1}
+    return {"newMessages": len(new_messages), "heartbeatCalls": expected_calls}
 
 
 def _audit_heartbeat_event(
@@ -680,7 +700,9 @@ def _audit_heartbeat_event(
 ) -> dict[str, int | str | bool]:
     event = _load_json(path, "heartbeat-event")
     _require(isinstance(event, dict), "heartbeat-event-invalid-shape")
-    _require(event.get("status") == "ok-token", "heartbeat-event-status")
+    status = event.get("status")
+    _require(status in {"ok-empty", "ok-token"}, "heartbeat-event-status")
+    _require(event.get("reason") == "interval", "heartbeat-event-not-scheduled")
     _require(event.get("silent") is True, "heartbeat-event-not-silent")
     _require(
         not {"accountId", "channel", "to"}.intersection(event),
@@ -697,7 +719,9 @@ def _audit_heartbeat_event(
         _require("heartbeat_ok" not in lowered, "heartbeat-control-token-preview")
         _require("thinking process" not in lowered, "heartbeat-reasoning-preview")
         _require("exec failed" not in lowered, "heartbeat-tool-error-preview")
-    return {"status": "ok-token", "silent": True, "ts": timestamp}
+    if status == "ok-empty":
+        _require(preview is None, "heartbeat-empty-preview-present")
+    return {"status": status, "silent": True, "ts": timestamp}
 
 
 def audit_behavior(
@@ -734,7 +758,11 @@ def audit_behavior(
         model_reference=primary_model,
         workspace_root=resolved_workspace,
         required_files={"AGENTS.md", "SOUL.md"},
-        required_tools={"read", "session_status"},
+        required_tools=_provider_prompt_tools(
+            primary_model,
+            "read",
+            "session_status",
+        ),
     )
     dubble_messages = _messages(
         _read_transcript(dubble_entry, resolved_state, "dubble")
@@ -800,7 +828,13 @@ def audit_behavior(
         model_reference=primary_model,
         workspace_root=resolved_workspace,
         required_files={"AGENTS.md", "SOUL.md"},
-        required_tools={"read", "session_status", "sessions_spawn", "sessions_yield"},
+        required_tools=_provider_prompt_tools(
+            primary_model,
+            "read",
+            "session_status",
+            "sessions_spawn",
+            "sessions_yield",
+        ),
     )
     antares_report = _audit_prompt_report(
         antares_entry,
@@ -876,14 +910,20 @@ def audit_behavior(
         model_reference=primary_model,
         workspace_root=resolved_workspace,
         required_files={"HEARTBEAT.md"},
-        required_tools={"heartbeat_respond", "read"},
+        required_tools=_provider_prompt_tools(
+            primary_model,
+            "heartbeat_respond",
+            "read",
+            "session_status",
+        ),
         generated_after_ms=heartbeat_started_at_ms,
     )
+    heartbeat = _audit_heartbeat_event(heartbeat_event, heartbeat_started_at_ms)
     rigel_transcript = _audit_heartbeat_transcript(
         _read_transcript(rigel_entry, resolved_state, "rigel"),
         heartbeat_started_at_ms,
+        heartbeat["status"],
     )
-    heartbeat = _audit_heartbeat_event(heartbeat_event, heartbeat_started_at_ms)
 
     return {
         "schemaVersion": SCHEMA_VERSION,
@@ -1012,8 +1052,11 @@ def main() -> int:
             antares_model=args.antares_model,
         )
         _write_json_atomic(args.output, report)
-    except (BehaviorAuditError, OSError):
-        print(json.dumps({"status": "error", "errorCode": "behavior-audit-failed"}))
+    except BehaviorAuditError as exc:
+        print(json.dumps({"status": "error", "errorCode": str(exc)}))
+        return 1
+    except OSError:
+        print(json.dumps({"status": "error", "errorCode": "behavior-audit-io"}))
         return 1
     print(
         json.dumps(

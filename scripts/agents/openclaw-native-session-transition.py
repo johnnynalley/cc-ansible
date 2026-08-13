@@ -167,21 +167,110 @@ def _list_active_sessions(rpc: RpcRunner) -> dict[str, Any]:
     )
 
 
+def _list_archived_sessions(rpc: RpcRunner) -> dict[str, Any]:
+    return rpc(
+        "sessions.list",
+        {
+            "limit": 1000,
+            "offset": 0,
+            "configuredAgentsOnly": True,
+            "archived": True,
+            "includeDerivedTitles": False,
+            "includeLastMessage": False,
+        },
+    )
+
+
+def _index_session_rows(
+    payload: dict[str, Any], label: str
+) -> dict[str, dict[str, Any]]:
+    sessions = payload.get("sessions")
+    if not isinstance(sessions, list):
+        raise NativeSessionTransitionError(f"{label} has no sessions array")
+    if payload.get("hasMore") is not False:
+        raise NativeSessionTransitionError(f"{label} is incomplete")
+    if payload.get("totalCount") != len(sessions):
+        raise NativeSessionTransitionError(f"{label} count does not match")
+    indexed: dict[str, dict[str, Any]] = {}
+    for row in sessions:
+        if not isinstance(row, dict) or not isinstance(row.get("key"), str):
+            raise NativeSessionTransitionError(f"{label} contains an invalid row")
+        if row["key"] in indexed:
+            raise NativeSessionTransitionError(f"{label} contains duplicate keys")
+        indexed[row["key"]] = row
+    return indexed
+
+
+def _native_heartbeat_agent(key: str, agents: set[str]) -> str:
+    parts = key.split(":")
+    if (
+        len(parts) != 4
+        or parts[0] != "agent"
+        or parts[1] not in agents
+        or parts[2:] != ["main", "heartbeat"]
+    ):
+        raise NativeSessionTransitionError(
+            "native heartbeat restore key has an unsupported shape"
+        )
+    return parts[1]
+
+
+def _plan_input_with_restored_rows(
+    active: dict[str, Any],
+    archived_rows: dict[str, dict[str, Any]],
+    restore_keys: set[str],
+) -> dict[str, Any]:
+    sessions = list(active["sessions"])
+    for key in sorted(restore_keys):
+        restored = dict(archived_rows[key])
+        restored.pop("archived", None)
+        restored.pop("archivedAt", None)
+        sessions.append(restored)
+    return {"sessions": sessions, "totalCount": len(sessions), "hasMore": False}
+
+
 def run_transition(
     mode: str,
     output_dir: Path,
     agents: list[str],
     rpc: RpcRunner,
     required_archive_keys: set[str] | None = None,
+    restore_native_heartbeat_keys: set[str] | None = None,
 ) -> dict[str, Any]:
-    if mode not in {"plan", "apply"}:
+    if mode not in {"plan", "apply", "restore"}:
         raise NativeSessionTransitionError("unsupported transition mode")
     evidence = _directory(output_dir, "transition evidence", create=True)
 
+    agent_set = set(agents)
+    restore_keys = restore_native_heartbeat_keys or set()
+    if mode == "restore" and not restore_keys:
+        raise NativeSessionTransitionError(
+            "restore mode requires a native heartbeat session key"
+        )
+    restore_agents = {
+        key: _native_heartbeat_agent(key, agent_set) for key in restore_keys
+    }
+
     before = _list_active_sessions(rpc)
     _write_private_json(evidence / "sessions-before.json", before)
+    active_rows = _index_session_rows(before, "active session response")
+    archived_rows: dict[str, dict[str, Any]] = {}
+    restore_planned: set[str] = set()
+    if restore_keys:
+        archived_before = _list_archived_sessions(rpc)
+        _write_private_json(evidence / "sessions-archived-before.json", archived_before)
+        archived_rows = _index_session_rows(
+            archived_before, "archived session response"
+        )
+        if set(active_rows).intersection(archived_rows):
+            raise NativeSessionTransitionError(
+                "active and archived session responses overlap"
+            )
+        restore_planned = restore_keys.intersection(archived_rows)
+
+    plan_input = _plan_input_with_restored_rows(before, archived_rows, restore_planned)
     try:
-        plan = PLANNER.build_transition_plan(before, agents)
+        plan = PLANNER.build_transition_plan(plan_input, agents)
     except PLANNER.SessionTransitionError as exc:
         raise NativeSessionTransitionError(
             "session transition classification failed"
@@ -198,48 +287,73 @@ def run_transition(
             "native archive plan does not match the required synthetic sessions"
         )
 
+    restored = 0
     archived = 0
-    if mode == "apply":
-        for action in plan["actions"]:
-            if action["action"] != "archive":
-                continue
+    if mode in {"apply", "restore"}:
+        for key in sorted(restore_planned):
             response = rpc(
                 "sessions.patch",
                 {
-                    "key": action["key"],
-                    "agentId": action["agentId"],
-                    "archived": True,
+                    "key": key,
+                    "agentId": restore_agents[key],
+                    "archived": False,
                 },
             )
             if response.get("ok") is not True:
                 raise NativeSessionTransitionError(
-                    "OpenClaw rejected a native session archive"
+                    "OpenClaw rejected a native heartbeat session restore"
                 )
-            archived += 1
+            restored += 1
+
+        if mode == "apply":
+            for action in plan["actions"]:
+                if action["action"] != "archive":
+                    continue
+                response = rpc(
+                    "sessions.patch",
+                    {
+                        "key": action["key"],
+                        "agentId": action["agentId"],
+                        "archived": True,
+                    },
+                )
+                if response.get("ok") is not True:
+                    raise NativeSessionTransitionError(
+                        "OpenClaw rejected a native session archive"
+                    )
+                archived += 1
 
         after = _list_active_sessions(rpc)
         _write_private_json(evidence / "sessions-after.json", after)
-        try:
-            clean = PLANNER.build_transition_plan(
-                after,
-                agents,
-                require_clean=True,
-            )
-        except PLANNER.SessionTransitionError as exc:
+        after_rows = _index_session_rows(after, "post-transition active response")
+        if not restore_planned.issubset(after_rows):
             raise NativeSessionTransitionError(
-                "native session transition did not converge"
-            ) from exc
-        _write_private_json(evidence / "transition-clean.json", clean)
-        if archived != plan["summary"]["archive"]:
-            raise NativeSessionTransitionError(
-                "native archive count changed during apply"
+                "native heartbeat session restore did not converge"
             )
+        if mode == "apply":
+            try:
+                clean = PLANNER.build_transition_plan(
+                    after,
+                    agents,
+                    require_clean=True,
+                )
+            except PLANNER.SessionTransitionError as exc:
+                raise NativeSessionTransitionError(
+                    "native session transition did not converge"
+                ) from exc
+            _write_private_json(evidence / "transition-clean.json", clean)
+            if archived != plan["summary"]["archive"]:
+                raise NativeSessionTransitionError(
+                    "native archive count changed during apply"
+                )
 
     return {
         "status": "ok",
         "mode": mode,
         "summary": {
             "retain": plan["summary"]["retain"],
+            "restorePlanned": len(restore_planned),
+            "restored": restored,
             "archivePlanned": plan["summary"]["archive"],
             "archived": archived,
         },
@@ -248,7 +362,7 @@ def run_transition(
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--mode", choices=("plan", "apply"), required=True)
+    parser.add_argument("--mode", choices=("plan", "apply", "restore"), required=True)
     parser.add_argument("--openclaw", type=Path, required=True)
     parser.add_argument("--runtime-root", type=Path, required=True)
     parser.add_argument("--home", type=Path, required=True)
@@ -261,6 +375,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--required-archive-key",
         action="append",
         dest="required_archive_keys",
+    )
+    parser.add_argument(
+        "--restore-native-heartbeat-key",
+        action="append",
+        dest="restore_native_heartbeat_keys",
     )
     parser.add_argument("--timeout-seconds", type=int, default=20)
     return parser
@@ -286,6 +405,11 @@ def main() -> int:
             (
                 set(arguments.required_archive_keys)
                 if arguments.required_archive_keys is not None
+                else None
+            ),
+            (
+                set(arguments.restore_native_heartbeat_keys)
+                if arguments.restore_native_heartbeat_keys is not None
                 else None
             ),
         )

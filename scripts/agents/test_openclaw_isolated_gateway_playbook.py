@@ -440,32 +440,79 @@ class IsolatedGatewayPlaybookTests(unittest.TestCase):
         self.assertIn("until:", membership_gate)
         self.assertIn("item.groups", membership_gate)
 
-    def test_codex_filesystem_boundaries_are_independently_diagnosed(self) -> None:
+    def test_shared_runtime_account_host_boundaries_are_independently_diagnosed(
+        self,
+    ) -> None:
         source_gate = self.task("Prove root-managed Codex runtime source exists")
         self.assertIn("@openai/codex/bin/codex.js", source_gate)
         self.assertNotIn("runuser", source_gate)
-        task = self.task("Prove isolated Codex executor filesystem boundaries")
+        task = self.task("Prove shared runtime account host boundaries")
         self.assertNotIn("/usr/bin/bash", task)
         self.assertNotIn("&&", task)
         self.assertIn("openclaw_isolated_access_check_path", task)
         for label in (
-            "Gateway-owned Codex runtime source is unreadable",
             "Gateway-owned provider source is immutable",
-            "isolated Codex runtime mirror is readable",
             "isolated Codex runtime mirror is immutable",
             "shared workspace is readable",
             "shared workspace root is immutable",
-            "Gateway secrets are unreadable",
-            "Gateway config is unreadable",
             "Docker socket is unreadable",
             "legacy human home is not traversable",
         ):
             self.assertIn(f"label: {label}", task)
         self.assertIn('label: "{{ item.label }}"', task)
-        self.assertIn(
-            'label: Gateway-owned Codex runtime source is unreadable\n              argv:\n                - "!"\n                - -r',
-            task,
+        self.assertNotIn("Gateway secrets are unreadable", task)
+        self.assertNotIn("Gateway config is unreadable", task)
+
+    def test_service_namespace_boundaries_replace_cross_uid_assumptions(
+        self,
+    ) -> None:
+        resolve = self.task("Resolve isolated service namespace leaders")
+        codex = self.task("Prove Codex service namespace filesystem boundaries")
+        gateway = self.task("Prove Gateway service namespace cannot read Codex auth")
+        relay = self.task(
+            "Prove both services share the private native hook relay path"
         )
+        for task in (codex, gateway, relay):
+            self.assertIn("/usr/bin/nsenter", task)
+            self.assertIn("--mount", task)
+            self.assertIn("-g", task)
+            self.assertIn("openclaw_isolated_access_check_path", task)
+        self.assertIn("--property=MainPID", resolve)
+        for label in (
+            "Gateway secrets are unreadable",
+            "Gateway config is unreadable",
+            "Gateway-owned Codex runtime source is unreadable",
+            "isolated Codex runtime mirror is readable",
+            "isolated Codex runtime mirror is immutable",
+        ):
+            self.assertIn(f"label: {label}", codex)
+        self.assertIn("Codex capability token is unreadable", gateway)
+        self.assertIn("Codex state is not traversable", gateway)
+        self.assertIn("openclaw_isolated_native_hook_relay_runtime_dir", relay)
+        restart = self.playbook.index(
+            "- name: Restart isolated Gateway from converged immutable release"
+        )
+        namespace = self.playbook.index(
+            "- name: Resolve isolated service namespace leaders"
+        )
+        self.assertLess(restart, namespace)
+
+    def test_codex_state_ownership_migrates_without_following_symlinks(self) -> None:
+        task = self.task("Migrate isolated Codex state to shared runtime UID")
+        self.assertIn('path: "{{ openclaw_isolated_codex_state_dir }}"', task)
+        self.assertIn('owner: "{{ openclaw_isolated_codex_user }}"', task)
+        self.assertIn('group: "{{ openclaw_isolated_codex_group }}"', task)
+        self.assertIn("recurse: true", task)
+        self.assertIn("follow: false", task)
+        backup = self.playbook.index("- name: Back up existing isolated Gateway state")
+        migrate = self.playbook.index(
+            "- name: Migrate isolated Codex state to shared runtime UID"
+        )
+        start = self.playbook.index(
+            "- name: Restart isolated Codex executor from frozen provider package"
+        )
+        self.assertLess(backup, migrate)
+        self.assertLess(migrate, start)
 
     def test_access_checker_is_constrained_and_deployed_before_boundaries(self) -> None:
         self.assertIn('builtin test "$@"', self.access_check)
@@ -475,7 +522,7 @@ class IsolatedGatewayPlaybookTests(unittest.TestCase):
             "- name: Install supplementary-group-aware access checker"
         )
         boundary = self.playbook.index(
-            "- name: Prove isolated Codex executor filesystem boundaries"
+            "- name: Prove shared runtime account host boundaries"
         )
         service = self.playbook.index(
             "- name: Restart isolated Codex executor from frozen provider package"
@@ -486,6 +533,27 @@ class IsolatedGatewayPlaybookTests(unittest.TestCase):
             self.inventory["openclaw_isolated_access_check_path"],
             "/usr/local/libexec/openclaw-isolated/openclaw-access-check",
         )
+
+    def test_rescue_skips_absent_legacy_codex_account_probe(self) -> None:
+        task = self.task("Remove isolated Codex executor account created by failed run")
+        self.assertIn(
+            "openclaw_isolated_codex_user != openclaw_isolated_gateway_user", task
+        )
+        self.assertIn("openclaw_isolated_codex_existing_account.rc | default(0)", task)
+
+    def test_rescue_preserves_bounded_startup_journal_privately(self) -> None:
+        capture = self.task("Capture failed isolated service startup journals")
+        preserve = self.task(
+            "Preserve failed isolated service startup journal privately"
+        )
+        self.assertIn("openclaw-isolated-gateway.service", capture)
+        self.assertIn("openclaw-isolated-codex.service", capture)
+        self.assertIn("openclaw_isolated_gateway_boot_check_started.stdout", capture)
+        self.assertIn("no_log: true", capture)
+        self.assertIn("startup-failure-journal.log", preserve)
+        self.assertIn('mode: "0600"', preserve)
+        self.assertIn("owner: root", preserve)
+        self.assertIn("no_log: true", preserve)
 
     def test_codex_runtime_mirror_is_atomic_and_content_verified(self) -> None:
         stage = self.playbook.index(
@@ -547,13 +615,44 @@ class IsolatedGatewayPlaybookTests(unittest.TestCase):
         self.assertIn("data-only workspace group", gate)
 
     def test_service_denies_privileged_syscall_classes(self) -> None:
+        self.assertIn(
+            "SystemCallFilter=~@clock @cpu-emulation @debug @module @mount "
+            "@obsolete @privileged @raw-io @reboot @swap",
+            self.service_template,
+        )
+        self.assertIn("RestrictNamespaces=yes", self.service_template)
+        self.assertIn(
+            "SystemCallFilter=~@clock @cpu-emulation @debug @module @obsolete "
+            "@raw-io @reboot @swap",
+            self.codex_service_template,
+        )
+        self.assertIn(
+            "RestrictNamespaces=user mnt pid net", self.codex_service_template
+        )
+        self.assertIn("ProtectProc=invisible", self.codex_service_template)
+        self.assertIn("ProcSubset=all", self.codex_service_template)
+        self.assertNotIn("ProcSubset=pid", self.codex_service_template)
+        self.assertIn(
+            "RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX AF_NETLINK",
+            self.codex_service_template,
+        )
+        self.assertNotIn("AF_NETLINK", self.service_template)
+        self.assertNotIn("@mount", self.codex_service_template)
+        self.assertNotIn("@privileged", self.codex_service_template)
         for template in (self.service_template, self.codex_service_template):
-            self.assertIn(
-                "SystemCallFilter=~@clock @cpu-emulation @debug @module @mount "
-                "@obsolete @privileged @raw-io @reboot @swap",
-                template,
-            )
             self.assertIn("SystemCallErrorNumber=EPERM", template)
+            self.assertIn("CapabilityBoundingSet=", template)
+            self.assertIn("NoNewPrivileges=yes", template)
+
+    def test_live_boundary_inspections_capture_proc_policy(self) -> None:
+        for task_name in (
+            "Inspect isolated Gateway service security properties",
+            "Inspect isolated Codex executor service security properties",
+        ):
+            task = self.task(task_name)
+            self.assertIn("--property=ProtectProc", task)
+            self.assertIn("--property=ProcSubset", task)
+            self.assertIn("--property=RestrictAddressFamilies", task)
 
     def test_service_template_passes_systemd_verify(self) -> None:
         environment = Environment(undefined=StrictUndefined, autoescape=False)
@@ -584,13 +683,16 @@ class IsolatedGatewayPlaybookTests(unittest.TestCase):
             openclaw_isolated_gateway_port=19789,
             openclaw_isolated_codex_config_dir="/etc/openclaw-codex",
             openclaw_isolated_codex_state_dir="/var/lib/openclaw-codex",
+            openclaw_isolated_native_hook_relay_runtime_dir=(
+                "/run/openclaw-native-hook-relay"
+            ),
             openclaw_isolated_gateway_legacy_user="johnny",
             openclaw_workspace="/opt/cc-ansible",
             openclaw_security_rehearsal_root=("/var/lib/openclaw-security-rehearsal"),
         )
         codex_template = environment.from_string(self.codex_service_template)
         codex_rendered = codex_template.render(
-            openclaw_isolated_codex_user="openclaw-codex",
+            openclaw_isolated_codex_user="openclaw",
             openclaw_isolated_codex_group="openclaw-codex",
             openclaw_isolated_codex_supplementary_groups=["openclaw-workspace"],
             openclaw_isolated_access_check_path=(
@@ -600,6 +702,12 @@ class IsolatedGatewayPlaybookTests(unittest.TestCase):
             openclaw_isolated_codex_config_dir="/etc/openclaw-codex",
             openclaw_isolated_codex_token_file=("/etc/openclaw-codex/app-server.token"),
             openclaw_isolated_codex_runtime_dir="/opt/openclaw-codex/runtime",
+            openclaw_isolated_native_hook_relay_runtime_name=(
+                "openclaw-native-hook-relay"
+            ),
+            openclaw_isolated_native_hook_relay_runtime_dir=(
+                "/run/openclaw-native-hook-relay"
+            ),
             openclaw_isolated_codex_port=19790,
             openclaw_isolated_gateway_codex_plugin_dir=(
                 "/var/lib/openclaw-isolated/state/npm/projects/codex"
@@ -657,7 +765,7 @@ class IsolatedGatewayPlaybookTests(unittest.TestCase):
         environment = Environment(undefined=StrictUndefined, autoescape=False)
         template = environment.from_string(self.codex_service_template)
         rendered = template.render(
-            openclaw_isolated_codex_user="openclaw-codex",
+            openclaw_isolated_codex_user="openclaw",
             openclaw_isolated_codex_group="openclaw-codex",
             openclaw_isolated_codex_supplementary_groups=["openclaw-workspace"],
             openclaw_isolated_access_check_path=(
@@ -667,6 +775,12 @@ class IsolatedGatewayPlaybookTests(unittest.TestCase):
             openclaw_isolated_codex_config_dir="/etc/openclaw-codex",
             openclaw_isolated_codex_token_file=("/etc/openclaw-codex/app-server.token"),
             openclaw_isolated_codex_runtime_dir="/opt/openclaw-codex/runtime",
+            openclaw_isolated_native_hook_relay_runtime_name=(
+                "openclaw-native-hook-relay"
+            ),
+            openclaw_isolated_native_hook_relay_runtime_dir=(
+                "/run/openclaw-native-hook-relay"
+            ),
             openclaw_isolated_codex_port=19790,
             openclaw_isolated_gateway_codex_plugin_dir=(
                 "/var/lib/openclaw-isolated/state/npm/projects/codex"
@@ -713,9 +827,29 @@ class IsolatedGatewayPlaybookTests(unittest.TestCase):
             msg=f"stdout={result.stdout}\nstderr={result.stderr}",
         )
 
-    def test_codex_is_a_separate_authenticated_loopback_executor(self) -> None:
+    def test_codex_is_an_authenticated_confined_loopback_executor(self) -> None:
         self.assertIn(
             "User={{ openclaw_isolated_codex_user }}", self.codex_service_template
+        )
+        self.assertEqual(
+            self.inventory["openclaw_isolated_codex_user"],
+            self.inventory["openclaw_isolated_gateway_user"],
+        )
+        self.assertIn(
+            "Environment=TMPDIR={{ openclaw_isolated_native_hook_relay_runtime_dir }}",
+            self.codex_service_template,
+        )
+        self.assertIn(
+            "RuntimeDirectory={{ openclaw_isolated_native_hook_relay_runtime_name }}",
+            self.codex_service_template,
+        )
+        self.assertIn(
+            "Environment=TMPDIR={{ openclaw_isolated_native_hook_relay_runtime_dir }}",
+            self.service_template,
+        )
+        self.assertIn(
+            "ReadWritePaths={{ openclaw_isolated_native_hook_relay_runtime_dir }}",
+            self.service_template,
         )
         self.assertIn("--listen ws://127.0.0.1:", self.codex_service_template)
         self.assertIn("--ws-auth capability-token", self.codex_service_template)
@@ -756,7 +890,7 @@ class IsolatedGatewayPlaybookTests(unittest.TestCase):
         )
         rendered = rendered.replace(
             "{{ openclaw_isolated_gateway_model | to_json }}",
-            '"openai/gpt-5.6-sol"',
+            '"codex/gpt-5.6-sol"',
         )
         rendered = rendered.replace(
             "{{ openclaw_isolated_gateway_port | int }}", "19789"
@@ -778,6 +912,13 @@ class IsolatedGatewayPlaybookTests(unittest.TestCase):
             ["main", "dubble", "vega", "antares", "rigel"],
         )
         self.assertTrue(config["agents"]["list"][0]["default"])
+        self.assertEqual(
+            config["agents"]["defaults"]["model"]["primary"],
+            "codex/gpt-5.6-sol",
+        )
+        self.assertTrue(
+            config["plugins"]["entries"]["codex"]["config"]["discovery"]["enabled"]
+        )
         self.assertNotIn("channels", config)
         self.assertNotIn("bindings", config)
         self.assertNotIn("cron", config)

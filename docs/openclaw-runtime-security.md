@@ -26,8 +26,11 @@ security rehearsals before any production cutover:
   stores raw records in an isolated SQLite database.
 - `scripts/agents/health-summary.py` publishes only fixed daily aggregates.
 - `playbooks/agents/openclaw-isolated-gateway.yml` stages a parallel split
-  canary under the no-login `openclaw` Gateway account and the separate
-  no-login `openclaw-codex` executor account without stopping production.
+  canary under one no-login `openclaw` runtime UID without stopping production.
+  Gateway and Codex remain separate systemd services with different primary
+  groups, state trees, credential paths, and filesystem namespaces. They share
+  only one private runtime directory required by OpenClaw's UID-scoped native
+  hook relay.
   A credential-less ephemeral build account resolves the current stable core
   and reviewed plugin versions inside a transient systemd sandbox with package
   lifecycle scripts disabled, sensitive paths inaccessible, and
@@ -91,11 +94,12 @@ security rehearsals before any production cutover:
   configuration and OAuth state are inaccessible, as are Docker, the human
   home, the controller checkout, Ansible, and bulk data paths.
 - `templates/openclaw/openclaw-isolated-codex.service.j2` runs the Codex app
-  server as `openclaw-codex` on loopback port `19790`. It owns only its Codex
-  state and classified mutable project-data subtrees, sees the reviewed Codex
-  package through a read-only bind, and cannot read Gateway
-  config/state/SecretRefs, Docker, the human home, the controller checkout,
-  Ansible, or bulk data paths.
+  server as UID `openclaw`, primary group `openclaw-codex`, on loopback port
+  `19790`. Its systemd namespace exposes only its Codex state, classified
+  mutable project-data subtrees, the reviewed read-only Codex package, and the
+  private native-hook relay directory. Gateway config/state/SecretRefs, Docker,
+  the human home, the controller checkout, Ansible, and bulk data paths remain
+  inaccessible inside that service.
 - `scripts/agents/openclaw-isolated-secrets.py` maintains two owner-only token
   copies instead of one shared secret file: the Gateway JSON contains only the
   Gateway token and Codex app-server capability token, while the executor sees
@@ -491,7 +495,7 @@ Provider dispositions are evidence-based:
 
 | Provider surface | Disposition | Evidence and target proof |
 | --- | --- | --- |
-| OpenAI OAuth and native Codex runtime | **Retain; re-authorize** | Current primary and successful Antares child runtime; perform fresh device authorization under `openclaw-codex`, keep every Gateway auth store empty, and prove non-fallback tool use |
+| OpenAI OAuth and native Codex runtime | **Retain; re-authorize** | Current primary and successful Antares child runtime; perform fresh device authorization in the dedicated Codex service state, keep every Gateway auth store empty, and prove non-fallback tool use |
 | Ollama Cloud | **Retain with scoped credential** | Recent successful `glm-5.2` cron fallbacks prove a live reliability role; separately smoke-test Antares' DeepSeek route and tool contract |
 | OpenRouter | **Retire** | Current fallback returns payment-required and its plaintext environment credential has no healthy production role; remove fallback, plugin, auth profile, and environment secret |
 | GitHub Copilot provider/plugin | **Retire from production** | No current agent or cron route consumes it and the last isolated tool-use test failed; retain only historical evidence until a future explicit requalification |
@@ -726,12 +730,15 @@ both values because OpenClaw must authenticate its local provider connection.
 The executor receives only a separate mode-`0400` copy of the capability token;
 it cannot read the Gateway JSON. SecretRefs prevent accidental config and log
 exposure but are not process isolation: a compromised process can read every
-secret intentionally available to that process. The distinct UIDs and path
-namespaces are therefore the owning boundary.
+secret intentionally available to that process. Separate systemd mount
+namespaces and service-specific paths are therefore the owning boundary. The
+services deliberately share a UID because OpenClaw's native hook relay records
+are keyed by effective UID; a distinct executor UID makes every native tool
+fail closed before execution.
 
 Production uses a current OpenAI OAuth profile whose refresh material is
-intentionally nonportable. The `openclaw-codex` identity must receive a fresh,
-attended OpenAI login into its own Codex state rather than a copy of the human
+intentionally nonportable. The Codex service must receive a fresh, attended
+OpenAI login into its dedicated Codex state rather than a copy of the human
 credential store. The unfunded OpenRouter fallback is not carried into the
 canary. The Gateway config contains no OpenAI auth profile or provider order,
 and its per-agent auth tables remain empty; otherwise the Codex provider could
@@ -743,30 +750,36 @@ reload path rather than restarting with a broad inherited environment.
 
 The two system services add the effective boundary:
 
-- `openclaw` is the no-login Gateway identity. It owns Gateway state and
+- `openclaw` is the no-login runtime identity used by both services. The Gateway
+  unit uses primary group `openclaw`, owns Gateway state and
   channel/provider SecretRefs, reads immutable behavior and project data, and
-  cannot write the workspace or access Codex OAuth/config state. Native plugin
-  code is `root:openclaw` and group-read-only. The separate
+  cannot write the workspace or access Codex OAuth/config state from its
+  systemd namespace. Native plugin code is `root:openclaw` and group-read-only.
+  The separate
   `openclaw-workspace` group grants read/traverse access only to classified
   workspace content; it grants no access to Gateway or executor secrets,
   config, runtime, or state.
-- `openclaw-codex` is the no-login model executor. It owns its OpenAI auth and
-  app-server state, may write only explicitly classified project-data
-  subtrees, and cannot read Gateway config, channel/provider SecretRefs, or
-  Gateway state. The workspace root and behavior-bearing directories are
-  `root:openclaw-workspace` without group write; mutable data directories are
-  `openclaw-codex:openclaw-workspace`.
+- The Codex unit uses the same UID with primary group `openclaw-codex`. Its
+  namespace exposes its OpenAI auth and app-server state plus explicitly
+  classified mutable project-data subtrees, while masking Gateway config,
+  channel/provider SecretRefs, and Gateway state. The workspace root and
+  behavior-bearing directories are `root:openclaw-workspace` without group
+  write; mutable data directories are `openclaw:openclaw-workspace`.
 - Each service has exactly one supplementary group, `openclaw-workspace`. It is
   a data-only sharing boundary and is never used on config, credentials,
   service state, plugin code, Docker, journal, or human-owned paths.
+- Both services use `/run/openclaw-native-hook-relay` as `TMPDIR`. The Codex
+  unit creates it mode `0700`; the Gateway receives only that additional
+  writable path. No other mutable cross-service path is intentional.
 - The Gateway listens only on loopback port `19789`; the authenticated Codex
   app server listens only on loopback port `19790`. Both units stay disabled at
   boot during rehearsal, and the canary has disabled Control UI, HTTP
   compatibility APIs, Tailscale, discovery, channels, and scheduler.
 - The Gateway's native tool profile denies local filesystem mutation,
   execution, process control, messaging, cron, nodes, and Gateway mutation.
-  Codex commands execute as `openclaw-codex` under Guardian review and the
-  Codex `workspace-write` sandbox, not as the Gateway UID.
+  Codex commands execute in the separately confined Codex unit under Guardian
+  review and the Codex `workspace-write` sandbox. UID equality is required for
+  native hook relay compatibility and is not treated as the isolation control.
 - Both units use `ProtectHome`, `ProtectSystem=strict`, private
   devices/temp/IPC, empty capability sets, no privilege gain, namespace
   restrictions, and explicit inaccessibility for Docker, the controller repo,
@@ -774,11 +787,12 @@ The two system services add the effective boundary:
   blocks Codex state/config; the executor masks Gateway state with an empty
   read-only temporary filesystem, blocks Gateway config, and blocks the
   root-owned hostile-test secret lane.
-- Pre-start and playbook assertions prove exact account/group membership,
-  cross-account secret denial, runtime immutability, workspace read/write
-  asymmetry, sudo denial, Docker denial, and service-specific writable paths.
+- Pre-start and playbook assertions prove exact UID/group configuration,
+  cross-service namespace secret denial, runtime immutability, workspace
+  read/write asymmetry, sudo denial, Docker denial, the private relay path, and
+  service-specific writable paths.
 - The provider package source remains below the Gateway's owner-only state
-  directory and is unreadable to the raw executor account. The playbook copies
+  directory and is absent from the executor service namespace. The playbook copies
   only its installed `@openai` dependency subtree into a staged root-owned
   mirror, compares source and mirror without dereferencing links, and atomically
   promotes it at `/opt/openclaw-codex/runtime`. The service sees that immutable
@@ -842,7 +856,7 @@ equal `operator.read` before deep audit runs.
 
 Only after those checks pass does the playbook write
 `.infrastructure-validated`. It leaves the loopback-only, boot-disabled split
-services ready for a fresh OpenAI device-code login owned by `openclaw-codex`.
+services ready for a fresh OpenAI device-code login in the Codex service state.
 It does not claim model parity.
 After authentication, `canary` repeats every infrastructure check, requires
 the fixed-response model probe, and only then writes `.canary-validated`.
@@ -865,7 +879,7 @@ workspace, and write one marker inside the workspace. A separate root-run audit
 accepts only those exact shell calls, correlates each call with its result in
 the OpenClaw trajectory, and requires this outcome:
 
-- identity is exactly `openclaw-codex`;
+- identity is exactly `openclaw`, reached through the Codex service namespace;
 - sudo, synthetic-secret, Docker-socket, and outside-workspace operations fail;
 - the inside-workspace write succeeds with exact expected bytes;
 - neither trajectory nor saved model output contains the random secret;
@@ -890,8 +904,8 @@ The final deployment must keep these principals separate:
 
 | Principal | May access | Must not access |
 | --- | --- | --- |
-| `openclaw` | Root-deployed immutable runtime/provider/behavior, its own writable Gateway state, read-only project data, channel/provider SecretRefs, aggregate Health and Docker reports, explicitly scoped non-execution tools | sudo, Docker socket/group, human home, Ansible vault/SSH/Git credentials, raw Health data, Codex OAuth/config state, workspace or executable-code writes, active source writes |
-| `openclaw-codex` | Its own OpenAI auth/app-server state, read-only reviewed Codex runtime, and classified mutable project-data workspace | Gateway config/state/SecretRefs, Discord/provider tokens, sudo, Docker socket/group, human home, controller repo, Ansible vault/SSH/Git credentials, raw Health data, bulk host data |
+| Gateway service (`openclaw:openclaw`) | Root-deployed immutable runtime/provider/behavior, its own writable Gateway state, read-only project data, channel/provider SecretRefs, aggregate Health and Docker reports, the capability-token copy, and explicitly scoped non-execution tools | sudo, Docker socket/group, human home, Ansible vault/SSH/Git credentials, raw Health data, Codex OAuth/config state, workspace or executable-code writes, active source writes |
+| Codex service (`openclaw:openclaw-codex`) | Its own OpenAI auth/app-server state, read-only reviewed Codex runtime, classified mutable project-data workspace, its capability-token copy, and the private native-hook relay directory | Gateway config/state/SecretRefs, Discord/provider tokens, sudo, Docker socket/group, human home, controller repo, Ansible vault/SSH/Git credentials, raw Health data, bulk host data |
 | `openclaw-health` | Health token, receiver configuration, raw Health SQLite database, aggregate report output | OpenClaw sessions/tools, Docker, sudo, controller credentials, network destinations other than its listener |
 | `openclaw-health-report` | Generated `yesterday.json` and `yesterday.md` only | Token, database, row-level records, source-device names, write access |
 | Docker reporter accounts | One fresh, redacted report through a forced SSH command | Docker socket, arbitrary SSH commands, environment/mount/log data, updates |
@@ -906,8 +920,8 @@ controls.
 | Severity | State | Risk and required closure |
 | --- | --- | --- |
 | Critical | Open in production | The live Gateway still runs as `johnny`, whose sudo and Docker access are root-equivalent. A prompt injection or process compromise can reach controller and homelab authority. Complete the dedicated-user cutover before describing the runtime as contained. |
-| High | Source-ready, not live | The split Gateway/executor units, owner-separated secrets, Gateway OpenAI-auth rejection, and metadata-only auth-state audit exist in source but have not passed the live hostile-prompt rehearsal. Apply the isolated source, enroll fresh executor OAuth, and pass the channel-less behavior and security gates. |
-| High | Inherent residual | The Gateway must read its own Discord/provider credentials and the executor capability token. A Gateway process compromise can steal those values and request work from the executor, but the executor's UID/path/sandbox restrictions must cap resulting host access. Rotate affected credentials after any compromise. |
+| High | Source-ready, not live | The split Gateway/executor units, service-namespace secret separation, Gateway OpenAI-auth rejection, and metadata-only auth-state audit exist in source but have not passed the live hostile-prompt rehearsal. Apply the isolated source, preserve fresh executor OAuth, and pass the channel-less behavior and security gates. |
+| High | Inherent residual | The Gateway must read its own Discord/provider credentials and the executor capability token. Both services deliberately share one unprivileged UID for native hook relay compatibility, so DAC ownership alone does not separate their files. A service escape into the host namespace could cross that boundary. Systemd mount namespaces, inaccessible paths, no privilege gain, no sudo/Docker access, and hostile-prompt rehearsal must cap host impact. Rotate affected credentials after any compromise. |
 | High | Cutover blocker | Three production file-backed recovery entries remain active, including two pending final replies. Reconcile or preserve them explicitly before stopped-state handoff so migration cannot replay or erase user-visible intent. |
 | Medium | Open | The executor needs outbound access for OpenAI and may read classified workspace data. Minimize that data, keep credentials out of the workspace, audit provider/plugin updates, and treat model/network isolation as incomplete rather than absolute. |
 | Medium | Compatibility debt | Lossless Claw and Mem0 remain reviewed compatibility components until native compaction and memory parity prove they can be replaced. Their code executes in the Gateway trust domain and must retain exact provenance and immutable deployment. |
@@ -1229,10 +1243,25 @@ The attended apply transaction is canary-only:
 
 Failure stops the canary, restores the targeted archive and prior activity,
 and leaves private evidence under
-`/var/backups/openclaw-isolated/behavior-rehearsal/<timestamp>`. This rehearsal
-is implemented and statically validated but has not been applied. Its required
-silent-canary data handoff now exists; fresh isolated executor authentication
-and the attended behavior run remain before any runtime behavior-parity claim.
+`/var/backups/openclaw-isolated/behavior-rehearsal/<timestamp>`. The silent data
+handoff, dedicated executor authentication, Dubble path, both semantic Astra
+cases, real nested Star delegation, and one native idle-silent Rigel interval
+have each passed in the isolated runtime.
+
+Final integrated transaction `20260813T033633Z` completed those model and
+heartbeat cases together, then rolled back at the private evidence audit. The
+audit had incorrectly required OpenClaw's `read` tool in Codex-provider prompt
+reports. Codex projects filesystem access through its native tool layer, so the
+live report correctly contained OpenClaw session tools but no OpenClaw `read`.
+The audit now applies that provider boundary while retaining the `read`
+requirement for the Ollama-backed Antares reviewer and emits a fixed
+non-content reason code on future failures.
+
+The owner redirected the active project to a parallel Nous Research Hermes
+Agent replacement. OpenClaw remains the production system and is retained as
+the rollback implementation until Hermes passes explicit parity and security
+gates. The OpenClaw canary remains loopback-only and disabled at boot; do not
+connect it to production channels during the Hermes migration.
 
 ### Doctor Modernization Rehearsal
 
@@ -1406,8 +1435,9 @@ access granted through a supplementary group even though real directory
 traversal succeeded. The root-owned `openclaw-access-check` now accepts only
 `[!] -r|-w|-x PATH`, evaluates access with Bash's effective supplementary-group
 semantics, and owns every isolated service preflight and host-namespace access
-gate. The exact `openclaw-codex` live regression now proves read/traverse access
-through `openclaw-workspace` and denies writes to the workspace root.
+gate. The earlier legacy-account regression proved read/traverse access through
+`openclaw-workspace` and denied writes to the workspace root; the current gate
+must repeat that proof inside each actual service namespace.
 
 Post-run host evidence shows production still listening on the Tailscale
 address at `18789`, Health on `18791`, the isolated Gateway only on loopback
@@ -1421,6 +1451,173 @@ or Control UI, while the service environment independently sets
 `OPENCLAW_SKIP_CHANNELS=1` and `OPENCLAW_SKIP_CRON=1`. Infrastructure isolation
 is therefore proven; fresh executor OAuth, a real model canary, behavior/data
 parity, hostile-prompt rehearsal, and channel handoff remain open gates.
+
+### 2026-08-12 native-hook identity correction attempt
+
+Transaction `20260812T235701Z` verified and protected a stopped-state rollback
+archive before changing canary ownership. It then failed closed before either
+service started because a pre-service `runuser` gate still expected the Codex
+process to have a distinct UID. Under the required shared `openclaw` UID, host
+DAC correctly allowed Gateway-owned files and could not model either service's
+mount namespace.
+
+The archive restored the prior units, state, OAuth data, and numeric ownership.
+The rescue tail then exposed a second policy bug: it dereferenced `.rc` from the
+intentionally skipped legacy Codex-account probe and stopped before systemd
+reload and service restart. After confirming production `18789` and Health
+`18791` were unchanged, the restored boot-disabled canary units were reloaded
+and started individually; loopback listeners `19789` and `19790` returned.
+
+The source now keeps only meaningful shared-account checks before service
+start, validates secret/runtime separation inside each live service's mount
+namespace with its configured primary group, proves both can write only the
+private native-hook relay path, skips duplicate host-account group checks, and
+makes rescue cleanup tolerate the skipped legacy-account probe. No second live
+attempt is valid until the corrected static and check-mode gates pass.
+
+The second transaction, `20260813T001110Z`, passed those corrected pre-service
+checks and again verified a fresh rollback archive. The Codex unit passed every
+`ExecStartPre` but restart-looped before binding `19790`. Its bounded journal
+showed SQLite state initialization failing under `/var/lib/openclaw-codex/codex-home`.
+Post-rollback metadata found all `8,451` state entries still owned by legacy UID
+`992`, while the target runtime UID is `994`; only the two top-level directories
+had changed ownership. The archive restored and restarted both canary services,
+which remained boot-disabled and returned to loopback listeners `19789` and
+`19790`; production and Health remained unchanged.
+
+The migration now recursively changes only owner/group on the Codex state tree
+after backup, explicitly does not follow its four runtime symlinks, and captures
+future post-start failure journals as a private mode-`0600` rollback artifact.
+
+Transaction `20260813T002402Z` then passed all `177` canary-bootstrap tasks with
+no failure or rescue. The state migration changed all `8,451` entries to target
+UID `994` and retained group `openclaw-codex`. Codex bound loopback `19790`, the
+Gateway bound loopback `19789`, both units remained disabled at boot, and each
+live mount namespace denied the other service's credential/state paths. Both
+services proved write access to the sole shared mode-`0700` relay directory.
+Native plugin provenance, immutable runtime, health, and deep security audits
+passed with only the expected group-readable root-managed config warning.
+Production `100.73.46.86:18789` and Health `18791` remained unchanged. This
+closes infrastructure convergence only; authenticated native-tool behavior and
+idle-silent Rigel still require the separate behavior rehearsal.
+
+Authenticated behavior transaction `20260813T003321Z` then proved Dubble and
+both semantic decision cases, and it reached Astra's real `sessions_spawn` plus
+`sessions_yield` Star path. It did not prove Star completion. The initial
+Gateway reply had `status=ok` but zero payloads, `yielded=true`, and
+`livenessState=paused`; Vega remained active and Antares had not completed.
+The rehearsal incorrectly treated transport acceptance as a final answer and
+advanced into Rigel session restoration, where the native transition planner
+correctly rejected the still-active synthetic delegation state. Rescue restored
+the prior canary config, database, session indexes, service activity, and
+boot-disabled policy. Production `18789` and Health `18791` were unchanged.
+
+This is a test-topology bug rather than a reason to poll from Astra. OpenClaw's
+documented `sessions_yield` contract ends the current model turn and delivers
+the child completion as a later requester-agent turn. The one-shot `openclaw
+agent` command also sets `cleanupBundleMcpOnRunEnd=true`, which is not the
+long-lived channel path being qualified. The behavior rehearsal now starts Star
+through direct Gateway RPC with that one-shot cleanup disabled, requires the
+initial paused/yielded response to contain no visible payload, and waits outside
+the model for the pushed requester follow-up. It accepts exactly one visible
+assistant result only after the channel-less canary has zero active runs. Failed
+native heartbeat-transition evidence is preserved inside the root-only rollback
+record instead of being deleted during rescue.
+
+Authenticated behavior transaction `20260813T004910Z` proved the corrected
+persistent-Gateway Star path end to end: the initial parent turn yielded with no
+visible payload, Vega and nested Antares completed, Astra resumed, and exactly
+one concise final answer was accepted after active-run count reached zero. The
+subsequent controlled Rigel gate timed out and rolled back cleanly. Production
+`18789`, Health `18791`, the loopback canary listeners, and boot-disabled canary
+policy remained intact.
+
+The Rigel timeout was an executor-sandbox compatibility failure, not an idle
+delivery leak. The native scheduler started and invoked Rigel every minute, but
+each turn tried to read `HEARTBEAT.md` and canonical course state through Codex.
+The executor unit's blanket `RestrictNamespaces=yes` prevented Codex 0.144.3's
+Bubblewrap backend from creating its user, mount, PID, and restricted-network
+namespaces. Its syscall filter also denied the `@mount` and `@privileged`
+classes Bubblewrap needs while constructing and dropping privileges inside that
+unprivileged user namespace. Codex therefore represented the ordinary read as
+an unsandboxed escalation; the unattended approval boundary correctly rejected
+it, and overlapping heartbeat turns never reached `heartbeat_respond` or a
+persisted completion event.
+
+Transient host probes reproduced the failure under the old unit policy and
+proved the current Bubblewrap backend can read the root-managed Rigel workspace
+with only `user`, `mnt`, `pid`, and `net` namespaces enabled and only
+`@mount`/`@privileged` removed from the denied syscall groups. The executor
+still has no capabilities, `NoNewPrivileges=yes`, strict path isolation, closed
+devices, restricted address families, and the remaining syscall denials. The
+deprecated `use_legacy_landlock` backend also passed but was rejected as the
+modernization target. The Gateway unit retains full namespace denial and its
+stricter syscall filter.
+
+Transaction `20260813T013118Z` proved that namespace and syscall compatibility
+was necessary but not sufficient. Persisted Codex rollout metadata showed the
+first ordinary workspace read failed before policy review because Bubblewrap
+could not read `/proc/sys/kernel/overflowuid`. The model then retried the same
+read with unnecessary escalation; auto-review rejected that secondary request,
+and Rigel reported a visible blocker instead of completing silently. The turn
+itself had a managed read-only profile covering the root namespace, so the
+escalation was not required by its permission policy.
+
+The remaining conflict was `ProcSubset=pid` on the Codex executor. It removes
+non-process `/proc` entries that Bubblewrap needs while constructing the inner
+sandbox. An ephemeral systemd probe with the same unprivileged service identity,
+`ProtectProc=invisible`, and `ProtectKernelTunables=yes` proved that changing
+only the subset to `all` exposes the required read-only value. The Codex unit
+therefore uses `ProcSubset=all` explicitly while retaining hidden foreign
+processes, read-only kernel tunables, empty capabilities, no privilege gain,
+and all path/device/network restrictions. The Gateway has no Bubblewrap role
+and retains `ProcSubset=pid`.
+
+The next authenticated transaction, `20260813T021254Z`, confirmed the `/proc`
+fix but exposed a second outer-sandbox conflict. Bubblewrap reached network
+namespace setup and then failed to create its `NETLINK_ROUTE` socket because
+the Codex unit allowed only `AF_INET`, `AF_INET6`, and `AF_UNIX`. The model again
+retried with unnecessary escalation. Auto-review allowed the narrow read, and
+the turn correctly called `heartbeat_respond` with `notify=false`, but this was
+not an acceptable steady-state path and the bounded event gate timed out.
+
+An ephemeral unprivileged Codex sandbox probe with the same UID, groups,
+`ProcSubset=all`, and namespace policy succeeded when only `AF_NETLINK` was
+added. The Codex unit now permits that address family solely for Bubblewrap's
+route setup inside its unprivileged network namespace. It still has no network
+capabilities and retains Codex's inner network restriction plus the outer path,
+device, syscall, and no-privilege-gain controls. The Gateway never constructs a
+Bubblewrap sandbox and continues to deny `AF_NETLINK`.
+
+Authenticated behavior transaction `20260813T023945Z` then passed Dubble, both
+semantic Astra decisions, persistent nested Star review, native Rigel session
+restoration, and the actual Rigel model turn. The Codex rollout completed with
+no final assistant message after one successful
+`heartbeat_respond(notify=false)`. OpenClaw emitted the expected silent native
+event, but the rehearsal observer could never accept it because the host ships
+uutils `date` 0.8.0: its `date +%s%3N` ignores the width modifier and returns
+seconds plus nine-digit nanoseconds. The 19-digit start value was compared to
+OpenClaw's 13-digit millisecond event timestamp, making every valid event look
+stale until the bounded waiter timed out and rollback ran.
+
+The playbook now generates epoch milliseconds with
+`time.time_ns() // 1_000_000`. The observer rejects nanosecond-shaped or stale
+start values immediately and reports only query count plus the last event's
+timestamp, status, and reason on timeout; preview and route content are never
+included. Two initial focused replays returned `last=null` because they omitted
+the transaction's native session-restore prerequisite. The Gateway journal
+identified that exact cause as an archived `agent:rigel:main:heartbeat` session,
+so those runs were not misclassified as model or delivery failures.
+
+A managed plan then proved exactly one restore and zero archives. After the
+stopped-state rollback archive at
+`/var/backups/openclaw-isolated/rigel-native-restore/20260813T033006Z/rollback.tar`,
+the native RPC restored that one session. The valid focused interval completed
+in 21,019 ms with `status=ok-token`, `reason=interval`, `silent=true`, no route,
+and the concise summary "No active dated event or unfinished confirmed calendar
+entry." The canary returned to its all-`0m`, boot-disabled baseline while the
+durable native Rigel session remained active. Production `18789` and Health
+`18791` were not changed.
 
 ## Validation
 

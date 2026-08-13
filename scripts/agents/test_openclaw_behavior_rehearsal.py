@@ -24,6 +24,16 @@ class BehaviorRehearsalTests(unittest.TestCase):
         self.assertIn("openclaw_behavior_rehearsal_mode == 'disabled'", self.playbook)
         self.assertIn("openclaw_behavior_rehearsal_approved", self.playbook)
 
+    def test_primary_model_routes_through_the_codex_provider(self) -> None:
+        self.assertEqual(
+            self.inventory["openclaw_isolated_gateway_model"],
+            "codex/gpt-5.6-sol",
+        )
+        self.assertIn(
+            "openclaw_behavior_rehearsal_primary_model is match('^codex/')",
+            self.playbook,
+        )
+
     def test_applied_silent_data_handoff_is_a_hard_prerequisite(self) -> None:
         prerequisite = self.playbook.index(
             "- name: Require replay-safe applied OpenClaw data handoff"
@@ -62,7 +72,7 @@ class BehaviorRehearsalTests(unittest.TestCase):
         gate = self.playbook[inspect:handoff]
         self.assertNotIn("map(attribute='stat.isreg')", gate)
         self.assertNotIn("map(attribute='stat.islnk')", gate)
-        self.assertEqual(gate.count("expected_kind: regular"), 16)
+        self.assertEqual(gate.count("expected_kind: regular"), 20)
         self.assertEqual(gate.count("expected_kind: symlink"), 1)
         self.assertNotIn(".canary-validated", gate)
         self.assertIn("openclaw_isolated_gateway_database_file", gate)
@@ -87,6 +97,8 @@ class BehaviorRehearsalTests(unittest.TestCase):
             gate,
         )
         self.assertIn("- --version", gate)
+        self.assertIn("codex-home/auth.json", gate)
+        self.assertIn("stat.mode == '0600'", gate)
 
     def test_helper_bundle_loads_before_transaction_state(self) -> None:
         install = self.playbook.index(
@@ -103,6 +115,8 @@ class BehaviorRehearsalTests(unittest.TestCase):
         self.assertLess(smoke, timestamp)
         self.assertIn("- openclaw-native-session-transition.py", bundle)
         self.assertIn("- openclaw-session-transition.py", bundle)
+        self.assertIn("- openclaw-heartbeat-event-check.py", bundle)
+        self.assertIn("- openclaw-star-gateway-rehearsal.py", bundle)
         self.assertIn("- --help", bundle)
 
     def test_native_archive_uses_resolved_cli_and_exposes_sanitized_failure(
@@ -129,7 +143,7 @@ class BehaviorRehearsalTests(unittest.TestCase):
             "- name: Stop after non-mutating OpenClaw behavior plan"
         )
         prior_activity = self.playbook.index(
-            "- name: Inspect prior isolated Gateway activity"
+            "- name: Inspect prior isolated service activity"
         )
         dubble = self.playbook.index("- name: Run Dubble behavior probe")
         self.assertLess(plan_exit, prior_activity)
@@ -154,6 +168,56 @@ class BehaviorRehearsalTests(unittest.TestCase):
         self.assertLess(native_validation, start)
         self.assertLess(start, dubble)
         self.assertIn("rollback.tar", self.playbook)
+        self.assertIn("codex-state.tar", self.playbook)
+
+    def test_executor_restarts_after_oauth_before_gateway_and_is_restored(self) -> None:
+        stop_executor = self.playbook.index(
+            "- name: Stop isolated Codex executor before behavior backup"
+        )
+        backup_executor = self.playbook.index(
+            "- name: Back up current executor state before restart"
+        )
+        start_executor = self.playbook.index(
+            "- name: Start freshly authorized isolated Codex executor"
+        )
+        start_gateway = self.playbook.index(
+            "- name: Start baseline OpenClaw behavior canary"
+        )
+        self.assertLess(stop_executor, backup_executor)
+        self.assertLess(backup_executor, start_executor)
+        self.assertLess(start_executor, start_gateway)
+        self.assertIn(
+            "Restore prior isolated Codex executor activity after failure",
+            self.playbook,
+        )
+
+    def test_native_validation_uses_service_state_not_private_backup_tree(
+        self,
+    ) -> None:
+        stage = self.playbook.index(
+            "- name: Stage service-readable behavior configs for native validation"
+        )
+        validate = self.playbook.index(
+            "- name: Validate behavior configs with the installed OpenClaw schema"
+        )
+        cleanup = self.playbook.index(
+            "- name: Remove temporary behavior validation directory"
+        )
+        block = self.playbook[stage:cleanup]
+        self.assertLess(stage, validate)
+        self.assertIn("openclaw_behavior_rehearsal_validation_dir", block)
+        self.assertNotIn(
+            "OPENCLAW_CONFIG_PATH={{ openclaw_behavior_rehearsal_evidence_dir }}",
+            block,
+        )
+        self.assertIn(
+            "openclaw_behavior_rehearsal_runtime_selectors.results[1].stdout",
+            block,
+        )
+        self.assertIn("failed_when: false", block)
+        self.assertIn(
+            "Remove failed temporary behavior validation directory", self.playbook
+        )
 
     def test_channel_and_schedule_suppression_is_enforced(self) -> None:
         self.assertIn("Environment=OPENCLAW_SKIP_CHANNELS=1", self.playbook)
@@ -162,18 +226,31 @@ class BehaviorRehearsalTests(unittest.TestCase):
             "InaccessiblePaths=-/run/docker.sock -/var/run/docker.sock", self.playbook
         )
         self.assertIn("cadence: 0m", self.playbook)
-        self.assertIn("cadence: 24h", self.playbook)
+        self.assertIn("cadence: 1m", self.playbook)
         self.assertIn("audit_mode: controlled-rigel", self.playbook)
         self.assertIn("enabled: false", self.playbook)
 
     def test_behavior_probes_and_native_evidence_gate_are_ordered(self) -> None:
         dubble = self.playbook.index("- name: Run Dubble behavior probe")
         reasoning = self.playbook.index("- name: Run semantic reasoning probes")
-        star = self.playbook.index("- name: Run real Star delegation behavior probe")
+        star = self.playbook.index(
+            "- name: Run persistent-Gateway Star delegation behavior probe"
+        )
+        star_gate = self.playbook.index(
+            "- name: Require complete persistent-Gateway Star follow-up"
+        )
+        restore = self.playbook.index(
+            "- name: Restore durable native Rigel heartbeat session"
+        )
         controlled = self.playbook.index(
             "- name: Deploy controlled Rigel heartbeat config"
         )
-        heartbeat = self.playbook.index("- name: Trigger one targeted Rigel heartbeat")
+        heartbeat_start = self.playbook.index(
+            "- name: Record controlled Rigel heartbeat start time"
+        )
+        heartbeat = self.playbook.index(
+            "- name: Restart canary for native controlled Rigel heartbeat"
+        )
         audit = self.playbook.index(
             "- name: Audit persisted OpenClaw behavior evidence"
         )
@@ -185,7 +262,13 @@ class BehaviorRehearsalTests(unittest.TestCase):
         )
         self.assertLess(dubble, reasoning)
         self.assertLess(reasoning, star)
+        self.assertLess(star, star_gate)
+        self.assertLess(star_gate, restore)
+        self.assertLess(star, restore)
+        self.assertLess(restore, controlled)
         self.assertLess(star, controlled)
+        self.assertLess(controlled, heartbeat_start)
+        self.assertLess(heartbeat_start, heartbeat)
         self.assertLess(controlled, heartbeat)
         self.assertLess(heartbeat, audit)
         self.assertLess(audit, baseline)
@@ -197,6 +280,38 @@ class BehaviorRehearsalTests(unittest.TestCase):
         self.assertIn("--infeasible-result", self.playbook)
         self.assertIn("--owned-result", self.playbook)
         self.assertIn("reasoningCaseCount", self.playbook)
+        self.assertIn("agent:rigel:main:heartbeat", self.playbook)
+        self.assertIn(
+            "--restore-native-heartbeat-key=agent:rigel:main:heartbeat",
+            self.playbook,
+        )
+        self.assertIn(
+            "Preserve failed native Rigel heartbeat restoration evidence",
+            self.playbook,
+        )
+        star_block = self.playbook[star:restore]
+        self.assertIn("openclaw_behavior_rehearsal_star_tool", star_block)
+        self.assertIn("--wait-seconds", star_block)
+        self.assertIn("initialYielded", star_block)
+        self.assertIn("payloadCount", star_block)
+        self.assertIn("activeRunCount", star_block)
+        self.assertIn(
+            '"{{ openclaw_behavior_rehearsal_input_dir }}/star-result.json"',
+            star_block,
+        )
+        self.assertIn("Preserve private completed Star behavior result", star_block)
+        self.assertNotIn(
+            '--output\n              - "{{ openclaw_behavior_rehearsal_evidence_dir }}',
+            star_block,
+        )
+        self.assertNotIn("- agent\n", star_block)
+        self.assertNotIn("system\n              - event", self.playbook)
+        self.assertIn(
+            "- name: Wait for validated native silent Rigel heartbeat evidence",
+            self.playbook,
+        )
+        self.assertIn("openclaw_behavior_rehearsal_heartbeat_event_tool", self.playbook)
+        self.assertNotIn("retries: 90", self.playbook)
 
     def test_semantic_cases_cover_full_intersection_and_owned_state(self) -> None:
         self.assertIn("Lumen costs $18", self.playbook)
@@ -207,7 +322,28 @@ class BehaviorRehearsalTests(unittest.TestCase):
         self.assertIn("Mica now appears for $39", self.playbook)
         self.assertIn("Preserve the valid prior purchase", self.playbook)
         self.assertIn("reasoningCasesValidated': 2", self.playbook)
-        self.assertIn("summary.archivePlanned | int >= 7", self.playbook)
+        self.assertIn("summary.archivePlanned | int >= 6", self.playbook)
+
+    def test_model_inputs_are_staged_outside_private_backup_tree(self) -> None:
+        stage = self.playbook.index(
+            "- name: Stage service-readable behavior prompt inputs"
+        )
+        dubble = self.playbook.index("- name: Run Dubble behavior probe")
+        cleanup = self.playbook.index("- name: Remove temporary behavior prompt inputs")
+        block = self.playbook[stage:cleanup]
+        self.assertLess(stage, dubble)
+        self.assertIn("openclaw_behavior_rehearsal_input_dir", block)
+        self.assertNotIn(
+            '--message-file\n              - "{{ openclaw_behavior_rehearsal_evidence_dir }}',
+            block,
+        )
+        self.assertEqual(
+            block.count(
+                "openclaw_behavior_rehearsal_runtime_selectors.results[1].stdout"
+            ),
+            3,
+        )
+        self.assertIn("Remove failed temporary behavior prompt inputs", self.playbook)
 
     def test_delivery_and_production_gateway_are_compared_before_and_after(
         self,

@@ -110,6 +110,8 @@ def _classify_row(
 
     if rest == ["main"]:
         return "retain", "durable-main", agent_id
+    if rest == ["main", "heartbeat"]:
+        return "retain", "durable-native-heartbeat", agent_id
     if "heartbeat" in rest:
         return "archive", "synthetic-heartbeat", agent_id
     if rest[0] == "cron" or "cron" in rest:

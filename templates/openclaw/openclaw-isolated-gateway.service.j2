@@ -18,6 +18,7 @@ Environment=OPENCLAW_WORKSPACE_DIR={{ openclaw_isolated_gateway_workspace_dir }}
 Environment=OPENCLAW_SKIP_CHANNELS=1
 Environment=OPENCLAW_SKIP_CRON=1
 Environment=NODE_COMPILE_CACHE={{ openclaw_isolated_gateway_state_dir }}/compile-cache
+Environment=TMPDIR={{ openclaw_isolated_native_hook_relay_runtime_dir }}
 Environment=PATH={{ openclaw_isolated_gateway_runtime_dir }}/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin
 ExecStartPre={{ openclaw_isolated_access_check_path }} -r {{ openclaw_isolated_gateway_config_file }}
 ExecStartPre={{ openclaw_isolated_access_check_path }} ! -w {{ openclaw_isolated_gateway_config_file }}
@@ -76,6 +77,7 @@ DevicePolicy=closed
 StateDirectory=openclaw-isolated
 StateDirectoryMode=0700
 ReadWritePaths={{ openclaw_isolated_gateway_state_dir }}
+ReadWritePaths={{ openclaw_isolated_native_hook_relay_runtime_dir }}
 ReadOnlyPaths={{ openclaw_isolated_gateway_runtime_root }}
 ReadOnlyPaths={{ openclaw_isolated_gateway_state_dir }}/state/npm
 ReadOnlyPaths={{ openclaw_isolated_gateway_config_dir }}

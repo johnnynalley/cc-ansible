@@ -28,7 +28,7 @@ class BehaviorAuditFixture:
         self.workspace.mkdir()
         self.started_at_ms = 1_700_000_000_000
         self.nonce = "lineage-123456"
-        self.primary_model = "openai/gpt-5.6-sol"
+        self.primary_model = "codex/gpt-5.6-sol"
         self.antares_model = "ollama-cloud/deepseek-v4-pro"
         self.dubble_key = "agent:dubble:explicit:behavior-dubble-1"
         self.star_key = "agent:main:explicit:behavior-star-1"
@@ -433,7 +433,7 @@ class BehaviorAuditFixture:
             "dubble-session",
             self.primary_model,
             ["AGENTS.md", "SOUL.md"],
-            ["read", "session_status"],
+            ["session_status"],
             transcript=dubble_transcript,
         )
         self.entries["vega"][self.vega_key] = self._entry(
@@ -443,7 +443,6 @@ class BehaviorAuditFixture:
             self.primary_model,
             ["AGENTS.md", "SOUL.md"],
             [
-                "read",
                 "session_status",
                 "sessions_spawn",
                 "sessions_yield",
@@ -470,7 +469,7 @@ class BehaviorAuditFixture:
             "rigel-session",
             self.primary_model,
             ["HEARTBEAT.md"],
-            ["heartbeat_respond", "read", "session_status"],
+            ["heartbeat_respond", "session_status"],
             transcript=rigel_transcript,
         )
         self._write_stores()
@@ -483,7 +482,7 @@ class BehaviorAuditFixture:
                 {
                     "ts": self.started_at_ms + 2000,
                     "status": "ok-token",
-                    "reason": "manual",
+                    "reason": "interval",
                     "preview": "No sourced academic event is due.",
                     "silent": True,
                 }
@@ -532,6 +531,32 @@ class BehaviorAuditTests(unittest.TestCase):
             report["checks"]["reasoning"]["owned"]["existingPurchasePreserved"]
         )
         self.assertTrue(report["checks"]["rigel"]["event"]["silent"])
+
+    def test_non_codex_reviewer_still_requires_openclaw_read_tool(self) -> None:
+        report = self.fixture.entries["antares"][self.fixture.antares_key][
+            "systemPromptReport"
+        ]
+        report["tools"]["entries"] = [
+            entry for entry in report["tools"]["entries"] if entry["name"] != "read"
+        ]
+        self.fixture._write_stores()
+        with self.assertRaisesRegex(
+            audit_module.BehaviorAuditError,
+            "antares-required-tool-missing",
+        ):
+            self.fixture.audit()
+
+    def test_codex_session_status_requirement_is_preserved(self) -> None:
+        report = self.fixture.entries["dubble"][self.fixture.dubble_key][
+            "systemPromptReport"
+        ]
+        report["tools"]["entries"] = []
+        self.fixture._write_stores()
+        with self.assertRaisesRegex(
+            audit_module.BehaviorAuditError,
+            "dubble-required-tool-missing",
+        ):
+            self.fixture.audit()
 
     def test_infeasible_case_rejects_setup_instructions(self) -> None:
         self.fixture._write_agent_result(
@@ -699,6 +724,40 @@ class BehaviorAuditTests(unittest.TestCase):
         )
         with self.assertRaisesRegex(
             audit_module.BehaviorAuditError, "rigel-heartbeat-notify-enabled"
+        ):
+            self.fixture.audit()
+
+    def test_rigel_native_ok_empty_without_tool_call_passes(self) -> None:
+        transcript = Path(
+            self.fixture.entries["rigel"][self.fixture.rigel_key]["sessionFile"]
+        )
+        rows = [json.loads(line) for line in transcript.read_text().splitlines()]
+        rows = [row for row in rows if row.get("message", {}).get("role") == "user"]
+        transcript.write_text(
+            "".join(json.dumps(row) + "\n" for row in rows), encoding="utf-8"
+        )
+        self.fixture.heartbeat_event.write_text(
+            json.dumps(
+                {
+                    "ts": self.fixture.started_at_ms + 2000,
+                    "status": "ok-empty",
+                    "reason": "interval",
+                    "durationMs": 100,
+                    "silent": True,
+                }
+            ),
+            encoding="utf-8",
+        )
+        report = self.fixture.audit()
+        self.assertEqual(report["checks"]["rigel"]["event"]["status"], "ok-empty")
+        self.assertEqual(report["checks"]["rigel"]["heartbeatCalls"], 0)
+
+    def test_rigel_unknown_native_event_status_is_rejected(self) -> None:
+        event = json.loads(self.fixture.heartbeat_event.read_text(encoding="utf-8"))
+        event["status"] = "sent"
+        self.fixture.heartbeat_event.write_text(json.dumps(event), encoding="utf-8")
+        with self.assertRaisesRegex(
+            audit_module.BehaviorAuditError, "heartbeat-event-status"
         ):
             self.fixture.audit()
 

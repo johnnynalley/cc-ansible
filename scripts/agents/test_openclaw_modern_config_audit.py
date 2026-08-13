@@ -80,7 +80,7 @@ def render_config(
     values = {
         "openclaw_modern_secret_file": "/etc/openclaw/secrets.json",
         "openclaw_modern_workspace_dir": "/var/lib/openclaw/workspace",
-        "openclaw_modern_primary_model": "openai/gpt-5.6-sol",
+        "openclaw_modern_primary_model": "codex/gpt-5.6-sol",
         "openclaw_modern_default_fallbacks": [
             "ollama-cloud/deepseek-v4-pro",
             "ollama-cloud/glm-5.2",
@@ -93,7 +93,7 @@ def render_config(
         "openclaw_modern_antares_fallbacks": [
             "ollama-cloud/glm-5.2",
             "ollama-cloud/kimi-k2.7-code",
-            "openai/gpt-5.6-sol",
+            "codex/gpt-5.6-sol",
         ],
         "openclaw_modern_timezone": "America/Chicago",
         "openclaw_modern_heartbeats_enabled": heartbeats_enabled,
@@ -168,6 +168,20 @@ class ModernConfigAuditTests(unittest.TestCase):
                 for profile in self.config["auth"]["profiles"].values()
             )
         )
+        self.assertEqual(
+            self.config["agents"]["defaults"]["model"]["primary"],
+            "codex/gpt-5.6-sol",
+        )
+
+    def test_gateway_openai_primary_model_is_rejected(self) -> None:
+        config = copy.deepcopy(self.config)
+        config["agents"]["defaults"]["model"]["primary"] = "openai/gpt-5.6-sol"
+        self.assert_rejected(config, "primary-model-bypasses-codex-provider")
+
+    def test_disabled_codex_model_discovery_is_rejected(self) -> None:
+        config = copy.deepcopy(self.config)
+        config["plugins"]["entries"]["codex"]["config"]["discovery"]["enabled"] = False
+        self.assert_rejected(config, "codex-model-discovery-disabled")
 
     def test_gateway_openai_auth_profile_is_rejected(self) -> None:
         config = copy.deepcopy(self.config)
@@ -245,7 +259,7 @@ class ModernConfigAuditTests(unittest.TestCase):
         config = render_config(
             heartbeats_enabled=False,
             deployment_mode="behavior-canary",
-            behavior_rigel_heartbeat_every="24h",
+            behavior_rigel_heartbeat_every="1m",
         )
         result = audit_module.audit_config(
             config,
@@ -260,7 +274,7 @@ class ModernConfigAuditTests(unittest.TestCase):
         }
         self.assertEqual(heartbeats["main"]["every"], "0m")
         self.assertEqual(heartbeats["dubble"]["every"], "0m")
-        self.assertEqual(heartbeats["rigel"]["every"], "24h")
+        self.assertEqual(heartbeats["rigel"]["every"], "1m")
         self.assertEqual(heartbeats["rigel"]["target"], "none")
         with self.assertRaisesRegex(
             audit_module.AuditError, "controlled-rigel-outside-behavior-canary"
@@ -513,7 +527,7 @@ class ModernConfigAuditTests(unittest.TestCase):
     def test_global_subagent_model_override_is_rejected(self) -> None:
         config = copy.deepcopy(self.config)
         config["agents"]["defaults"]["subagents"]["model"] = {
-            "primary": "openai/gpt-5.6-sol"
+            "primary": "codex/gpt-5.6-sol"
         }
         self.assert_rejected(config, "global-subagent-model-override")
 

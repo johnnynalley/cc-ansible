@@ -158,6 +158,34 @@ class SecurityRehearsalTests(unittest.TestCase):
         self.assertLess(secret, model)
         self.assertIn("rollback.tar", self.playbook)
 
+    def test_native_validation_uses_service_state_not_private_backup_tree(
+        self,
+    ) -> None:
+        stage = self.playbook.index(
+            "- name: Stage service-readable security config for native validation"
+        )
+        validate = self.playbook.index(
+            "- name: Validate security config with installed OpenClaw schema"
+        )
+        cleanup = self.playbook.index(
+            "- name: Remove temporary security validation directory"
+        )
+        block = self.playbook[stage:cleanup]
+        self.assertLess(stage, validate)
+        self.assertIn("openclaw_security_rehearsal_validation_dir", block)
+        self.assertNotIn(
+            "OPENCLAW_CONFIG_PATH={{ openclaw_security_rehearsal_evidence_dir }}",
+            block,
+        )
+        self.assertIn(
+            "openclaw_security_rehearsal_runtime_selectors.results[1].stdout",
+            block,
+        )
+        self.assertIn("failed_when: false", block)
+        self.assertIn(
+            "Remove failed temporary security validation directory", self.playbook
+        )
+
     def test_split_service_and_secret_boundaries_are_explicit(self) -> None:
         self.assertIn("User={{ openclaw_isolated_codex_user }}", self.codex_unit)
         self.assertIn("NoNewPrivileges=yes", self.codex_unit)
@@ -192,9 +220,17 @@ class SecurityRehearsalTests(unittest.TestCase):
             "ReadOnlyPaths={{ openclaw_isolated_gateway_workspace_dir }}",
             self.gateway_unit,
         )
-        self.assertIn("Prove Codex cannot read the Gateway secret", self.playbook)
         self.assertIn(
-            "Prove Gateway cannot read the Codex app-server token", self.playbook
+            "Prove Codex service namespace cannot read Gateway secrets",
+            self.playbook,
+        )
+        self.assertIn(
+            "Prove Gateway service namespace cannot read Codex auth", self.playbook
+        )
+        self.assertIn("/usr/bin/nsenter", self.playbook)
+        self.assertIn(
+            "Prove both services share only the private native hook relay path",
+            self.playbook,
         )
         self.assertIn("'sudo' not in", self.playbook)
         self.assertIn("'docker' not in", self.playbook)
@@ -246,6 +282,27 @@ class SecurityRehearsalTests(unittest.TestCase):
         ):
             self.assertIn(command, self.playbook)
         self.assertIn("--required-archive-key", self.playbook)
+
+    def test_model_input_is_staged_outside_private_backup_tree(self) -> None:
+        stage = self.playbook.index(
+            "- name: Stage service-readable security prompt input"
+        )
+        model = self.playbook.index(
+            "- name: Run one adversarial OpenClaw security turn"
+        )
+        cleanup = self.playbook.index("- name: Remove temporary security prompt input")
+        block = self.playbook[stage:cleanup]
+        self.assertLess(stage, model)
+        self.assertIn("openclaw_security_rehearsal_input_dir", block)
+        self.assertNotIn(
+            '--message-file\n              - "{{ openclaw_security_rehearsal_evidence_dir }}',
+            block,
+        )
+        self.assertIn(
+            "openclaw_security_rehearsal_runtime_selectors.results[1].stdout",
+            block,
+        )
+        self.assertIn("Remove failed temporary security prompt input", self.playbook)
 
     def test_delivery_listener_and_boot_state_are_compared(self) -> None:
         listener_before = self.playbook.index(

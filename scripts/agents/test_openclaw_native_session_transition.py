@@ -21,15 +21,27 @@ SPEC.loader.exec_module(MODULE)
 
 
 class FakeGateway:
-    def __init__(self, rows: list[dict[str, object]]) -> None:
+    def __init__(
+        self,
+        rows: list[dict[str, object]],
+        initially_archived: set[str] | None = None,
+    ) -> None:
         self.rows = rows
-        self.archived: set[str] = set()
+        self.archived: set[str] = set(initially_archived or set())
         self.calls: list[tuple[str, dict[str, object]]] = []
 
     def __call__(self, method: str, params: dict[str, object]) -> dict[str, object]:
         self.calls.append((method, params))
         if method == "sessions.list":
-            active = [row for row in self.rows if row["key"] not in self.archived]
+            archived = params.get("archived") is True
+            active = [
+                {
+                    **row,
+                    **({"archived": True, "archivedAt": 1} if archived else {}),
+                }
+                for row in self.rows
+                if (row["key"] in self.archived) is archived
+            ]
             return {
                 "sessions": active,
                 "totalCount": len(active),
@@ -37,7 +49,10 @@ class FakeGateway:
                 "nextOffset": None,
             }
         if method == "sessions.patch":
-            self.archived.add(str(params["key"]))
+            if params.get("archived") is False:
+                self.archived.discard(str(params["key"]))
+            else:
+                self.archived.add(str(params["key"]))
             return {"ok": True}
         raise AssertionError(method)
 
@@ -46,6 +61,10 @@ class NativeSessionTransitionTests(unittest.TestCase):
     def rows(self) -> list[dict[str, object]]:
         return [
             {"key": "agent:main:main", "sessionId": "main"},
+            {
+                "key": "agent:rigel:main:heartbeat",
+                "sessionId": "native-heartbeat",
+            },
             {
                 "key": "agent:rigel:heartbeat:one",
                 "sessionId": "heartbeat",
@@ -79,7 +98,7 @@ class NativeSessionTransitionTests(unittest.TestCase):
             output = Path(directory_name) / "evidence"
             gateway = FakeGateway(self.rows())
             report = MODULE.run_transition("apply", output, ["main", "rigel"], gateway)
-            self.assertEqual(report["summary"]["retain"], 2)
+            self.assertEqual(report["summary"]["retain"], 3)
             self.assertEqual(report["summary"]["archived"], 1)
             self.assertEqual(
                 [call[0] for call in gateway.calls],
@@ -128,6 +147,72 @@ class NativeSessionTransitionTests(unittest.TestCase):
             )
             self.assertEqual(report["summary"]["archived"], 1)
             self.assertEqual(gateway.archived, {"agent:main:explicit:security-one"})
+
+    def test_apply_restores_only_requested_native_heartbeat_before_cleanup(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as directory_name:
+            native_key = "agent:rigel:main:heartbeat"
+            gateway = FakeGateway(self.rows(), {native_key})
+            report = MODULE.run_transition(
+                "apply",
+                Path(directory_name) / "evidence",
+                ["main", "rigel"],
+                gateway,
+                restore_native_heartbeat_keys={native_key},
+            )
+            self.assertEqual(report["summary"]["restorePlanned"], 1)
+            self.assertEqual(report["summary"]["restored"], 1)
+            self.assertNotIn(native_key, gateway.archived)
+            self.assertIn("agent:rigel:heartbeat:one", gateway.archived)
+
+    def test_restore_mode_does_not_archive_other_synthetic_sessions(self) -> None:
+        with tempfile.TemporaryDirectory() as directory_name:
+            native_key = "agent:rigel:main:heartbeat"
+            gateway = FakeGateway(self.rows(), {native_key})
+            report = MODULE.run_transition(
+                "restore",
+                Path(directory_name) / "evidence",
+                ["main", "rigel"],
+                gateway,
+                restore_native_heartbeat_keys={native_key},
+            )
+            self.assertEqual(report["mode"], "restore")
+            self.assertEqual(report["summary"]["restored"], 1)
+            self.assertEqual(report["summary"]["archived"], 0)
+            self.assertEqual(gateway.archived, set())
+
+    def test_restore_mode_requires_an_explicit_native_key(self) -> None:
+        with tempfile.TemporaryDirectory() as directory_name:
+            with self.assertRaisesRegex(
+                MODULE.NativeSessionTransitionError,
+                "requires a native heartbeat",
+            ):
+                MODULE.run_transition(
+                    "restore",
+                    Path(directory_name) / "evidence",
+                    ["main", "rigel"],
+                    FakeGateway(self.rows()),
+                )
+
+    def test_restore_rejects_non_native_or_unknown_agent_key(self) -> None:
+        with tempfile.TemporaryDirectory() as directory_name:
+            for key in (
+                "agent:rigel:explicit:test:heartbeat",
+                "agent:unknown:main:heartbeat",
+            ):
+                with self.subTest(key=key):
+                    with self.assertRaisesRegex(
+                        MODULE.NativeSessionTransitionError,
+                        "unsupported shape",
+                    ):
+                        MODULE.run_transition(
+                            "plan",
+                            Path(directory_name) / key.replace(":", "-"),
+                            ["main", "rigel"],
+                            FakeGateway(self.rows()),
+                            restore_native_heartbeat_keys={key},
+                        )
 
     def test_active_work_fails_before_any_patch(self) -> None:
         with tempfile.TemporaryDirectory() as directory_name:
