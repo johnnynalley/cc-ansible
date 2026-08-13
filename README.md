@@ -1058,6 +1058,9 @@ not imported by `site.yml`.
 
 - **Playbook**: `playbooks/agents/hermes-shadow.yml`
 - **Architecture and gates**: `docs/hermes-replacement.md`
+- **Discord handoff**: three credential-free profile declarations, silent
+  unknown DMs, fail-closed allowlists, no replay/backfill, and an attended
+  stopped-source-before-target cutover/rollback contract
 - **Validation**: `ansible-playbook playbooks/agents/hermes-shadow.yml --syntax-check`
 - **Do not run bootstrap** until a new VM placement passes and the official
   installer hash, immutable release tag/commit, and attended approvals are

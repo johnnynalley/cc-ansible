@@ -7,9 +7,13 @@
   suppressed background-learning chat notices, role-specific toolsets, and an
   air-gapped rootless Podman backend. Delegation is flat, capped at two
   concurrent children and 12 iterations, with child orchestration disabled.
+  Discord fails closed with no shadow allowlists, silent unknown DMs, no bot
+  input, no history or missed-message backfill, per-user sessions, explicit
+  thread mentions, bounded attachments, and no slash registration.
 - `hermes-gateway.service.j2`: one hardened system service per OS identity. It
-  fixes `HERMES_HOME`, managed scope, and Podman paths; requires a shadow-ready
-  marker; and runs no dashboard or API listener.
+  fixes `HERMES_HOME`, root-writable profile-scoped managed credentials, and
+  Podman paths; requires a root-owned shadow-ready marker; runs both structured
+  contract audits before startup; and exposes no dashboard or API listener.
 
 ## Consumer
 
@@ -22,4 +26,4 @@
 - Managed scope is not a sandbox. The OS identity, systemd boundary, and
   rootless Podman backend remain required.
 - The shadow services are boot-disabled and cannot start until an attended
-  playbook run creates the per-profile readiness marker.
+  playbook run creates the per-profile root-owned readiness marker.

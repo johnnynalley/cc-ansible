@@ -2,7 +2,7 @@
 Description=Hermes shadow gateway ({{ hermes_profile.name }})
 After=network-online.target
 Wants=network-online.target
-ConditionPathExists={{ hermes_profile.home }}/.shadow-ready
+ConditionPathExists=/etc/hermes/{{ hermes_profile.name }}/.shadow-ready
 
 [Service]
 Type=notify
@@ -15,7 +15,9 @@ Environment=HERMES_HOME={{ hermes_profile.home }}
 Environment=HERMES_MANAGED_DIR=/etc/hermes/{{ hermes_profile.name }}
 Environment=HERMES_DOCKER_BINARY=/usr/bin/podman
 Environment=XDG_RUNTIME_DIR=/run/hermes-{{ hermes_profile.name }}
+EnvironmentFile=/etc/hermes/{{ hermes_profile.name }}/.env
 ExecStartPre={{ hermes_shadow_audit_live }} {{ hermes_shadow_contract_live }}
+ExecStartPre={{ hermes_discord_audit_live }} {{ hermes_discord_contract_live }} --repository-root /usr/local/share/hermes-shadow/repository
 ExecStartPre={{ hermes_shadow_runtime_binary }} config check
 ExecStart={{ hermes_shadow_runtime_binary }} gateway run --external-supervisor
 Restart=on-failure

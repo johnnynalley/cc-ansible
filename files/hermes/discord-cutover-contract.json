@@ -1,0 +1,217 @@
+{
+  "schemaVersion": 1,
+  "mode": "design-only",
+  "sourcePins": {
+    "shadowTarget": {
+      "path": "files/hermes/shadow-target.json",
+      "sha256": "9e03e935ecc7b42ef708f905c0c7904f808320d17c86e7a9274703394d6381cd"
+    },
+    "stateMigration": {
+      "path": "files/hermes/openclaw-state-migration-contract.json",
+      "sha256": "dc9887db3fafe562812b6781a14bd56582cd103a7ff94b851e49d72ffa4ddcae"
+    },
+    "sourceDeliveryAudit": {
+      "path": "scripts/agents/openclaw-delivery-cutover-audit.py",
+      "sha256": "f841fddf1bbbe9737817845f03dbaf8ec50b05b755ccde7c4e595aab2f8fcb44"
+    }
+  },
+  "authority": {
+    "liveChangeAuthorized": false,
+    "credentialEnrollmentAuthorized": false,
+    "gatewayStartAuthorized": false,
+    "schedulerActivationAuthorized": false,
+    "openclawStopAuthorized": false,
+    "openclawCleanupAuthorized": false,
+    "messageReplayAuthorized": false,
+    "shadowDiscordCredentialAuthorized": false
+  },
+  "invariants": {
+    "oneActiveConsumerPerDiscordIdentity": true,
+    "threeDistinctHermesProfiles": true,
+    "threeDistinctDiscordApplications": true,
+    "threeDistinctDiscordBotTokens": true,
+    "nativeHermesTokenLocksRequired": true,
+    "noSharedProfileHome": true,
+    "noSharedCredentialFile": true,
+    "rootOwnedCredentialFiles": true,
+    "credentialFilesAgentWritable": false,
+    "credentialFilesServiceReadable": true,
+    "credentialValuesInRepository": false,
+    "credentialValuesInCommandLine": false,
+    "credentialValuesInLogsOrEvidence": false,
+    "allowAllUsers": false,
+    "allowBots": "none",
+    "unknownDirectMessages": "ignore",
+    "historyBackfill": false,
+    "missedMessageBackfill": false,
+    "groupSessionsPerUser": true,
+    "threadRequireMention": true,
+    "toolProgress": "off",
+    "reasoningVisible": false,
+    "controlTokensVisible": false
+  },
+  "profiles": [
+    {
+      "name": "astra",
+      "service": "hermes-gateway-astra.service",
+      "home": "/var/lib/hermes/astra",
+      "managedDir": "/etc/hermes/astra",
+      "credentialFile": "/etc/hermes/astra/.env",
+      "applicationIdentityRef": "private-enrollment:discord/astra/application",
+      "botTokenRef": "private-enrollment:discord/astra/token",
+      "authorizationMode": "user-and-channel",
+      "allowedUsersRef": "private-enrollment:discord/astra/allowed-users",
+      "allowedRolesRef": null,
+      "allowedChannelsRef": "private-enrollment:discord/astra/allowed-channels",
+      "freeResponseChannelsRef": "private-enrollment:discord/astra/free-response-channels",
+      "homeChannelRef": "private-enrollment:discord/astra/home-channel",
+      "adminUsersRef": "private-enrollment:discord/astra/admin-users",
+      "regularUserCommands": [],
+      "proactiveDelivery": true
+    },
+    {
+      "name": "dubble",
+      "service": "hermes-gateway-dubble.service",
+      "home": "/var/lib/hermes/dubble",
+      "managedDir": "/etc/hermes/dubble",
+      "credentialFile": "/etc/hermes/dubble/.env",
+      "applicationIdentityRef": "private-enrollment:discord/dubble/application",
+      "botTokenRef": "private-enrollment:discord/dubble/token",
+      "authorizationMode": "channel-scope-plus-admin-user",
+      "allowedUsersRef": null,
+      "allowedRolesRef": null,
+      "allowedChannelsRef": "private-enrollment:discord/dubble/allowed-channels",
+      "freeResponseChannelsRef": "private-enrollment:discord/dubble/free-response-channels",
+      "homeChannelRef": null,
+      "adminUsersRef": "private-enrollment:discord/dubble/admin-users",
+      "regularUserCommands": [],
+      "proactiveDelivery": false
+    },
+    {
+      "name": "rigel",
+      "service": "hermes-gateway-rigel.service",
+      "home": "/var/lib/hermes/rigel",
+      "managedDir": "/etc/hermes/rigel",
+      "credentialFile": "/etc/hermes/rigel/.env",
+      "applicationIdentityRef": "private-enrollment:discord/rigel/application",
+      "botTokenRef": "private-enrollment:discord/rigel/token",
+      "authorizationMode": "user-and-channel",
+      "allowedUsersRef": "private-enrollment:discord/rigel/allowed-users",
+      "allowedRolesRef": null,
+      "allowedChannelsRef": "private-enrollment:discord/rigel/allowed-channels",
+      "freeResponseChannelsRef": "private-enrollment:discord/rigel/free-response-channels",
+      "homeChannelRef": "private-enrollment:discord/rigel/home-channel",
+      "adminUsersRef": "private-enrollment:discord/rigel/admin-users",
+      "regularUserCommands": [],
+      "proactiveDelivery": true
+    }
+  ],
+  "shadow": {
+    "openclawProductionDelivery": true,
+    "hermesGatewayState": "stopped-and-disabled",
+    "hermesCredentialFiles": "present-empty-or-provider-only",
+    "discordTokenCount": 0,
+    "discordApplicationEnrollmentCount": 0,
+    "discordRouteCount": 0,
+    "slashCommandRegistration": false,
+    "productionSchedules": false
+  },
+  "cutover": {
+    "attended": true,
+    "maintenanceWindowRequired": true,
+    "preconditions": [
+      "complete-openclaw-backup",
+      "complete-hermes-profile-backup",
+      "openclaw-sessions-idle",
+      "openclaw-schedules-idle",
+      "hermes-regressions-passed",
+      "private-discord-enrollment-reviewed",
+      "rollback-command-reviewed"
+    ],
+    "sourceStopOrder": [
+      "stop-and-disable-openclaw-user-gateway",
+      "stop-and-disable-openclaw-isolated-gateway",
+      "stop-and-disable-openclaw-isolated-codex",
+      "prove-openclaw-processes-and-discord-consumers-absent",
+      "run-source-delivery-cutover-audit",
+      "archive-source-delivery-evidence-without-replay"
+    ],
+    "healthReceiverDisposition": "keep-running",
+    "credentialEnrollment": {
+      "when": "after-source-stop-proof",
+      "method": "owner-attended-root-only-enrollment",
+      "reuseExistingBotIdentity": "preferred-when-uncompromised",
+      "rotation": "required-if-exposed-or-compromised",
+      "tokenComparison": "private-keyed-distinctness-only",
+      "valuesInEvidence": false,
+      "singleSurvivingCredentialPerBot": true,
+      "slashCommandRegistration": "enable-only-after-distinct-application-proof"
+    },
+    "targetStartOrder": [
+      "start-astra-only",
+      "prove-astra-routing-and-single-delivery",
+      "start-dubble-only",
+      "prove-dubble-routing-and-single-delivery",
+      "start-rigel-only",
+      "prove-rigel-routing-and-single-delivery",
+      "enable-reviewed-hermes-schedules",
+      "prove-rigel-idle-silence"
+    ],
+    "productionSuccessState": {
+      "openclawGateways": "stopped-and-disabled",
+      "openclawScheduler": "stopped",
+      "openclawState": "preserved-restorable",
+      "hermesGateways": "three-active-distinct-identities",
+      "hermesSchedules": "reviewed-only",
+      "healthReceiver": "active-external",
+      "activeConsumerCountPerDiscordIdentity": 1
+    }
+  },
+  "rollback": {
+    "attended": true,
+    "triggerOnAnyPromotionFailure": true,
+    "order": [
+      "pause-hermes-schedules",
+      "wait-for-hermes-sessions-idle",
+      "stop-and-disable-all-hermes-gateways",
+      "prove-hermes-processes-and-discord-consumers-absent",
+      "quarantine-hermes-discord-credential-files",
+      "restore-openclaw-state-if-required",
+      "start-openclaw-user-gateway",
+      "prove-one-openclaw-delivery",
+      "prove-no-hermes-delivery",
+      "restore-openclaw-schedule-state"
+    ],
+    "hermesMessageReplay": false,
+    "openclawCleanup": false,
+    "hermesCleanup": false,
+    "healthReceiverDisposition": "keep-running"
+  },
+  "runtimeEvidence": {
+    "privateMode": "0600",
+    "contentFreeNormalOutput": true,
+    "required": [
+      "service-state-before-and-after",
+      "process-and-listener-inventory",
+      "discord-consumer-distinctness",
+      "source-delivery-audit-result",
+      "per-profile-route-tests",
+      "unauthorized-user-and-channel-tests",
+      "unknown-dm-silence-test",
+      "attachment-containment-test",
+      "restart-single-delivery-test",
+      "rollback-single-delivery-test"
+    ],
+    "forbidden": [
+      "bot-token",
+      "user-id",
+      "role-id",
+      "guild-id",
+      "channel-id",
+      "message-content",
+      "attachment-content",
+      "session-content"
+    ]
+  },
+  "promotionCases": "files/hermes/discord-regressions.json"
+}

@@ -47,6 +47,16 @@
   authority, no exact model pin, complete-review requirements, one normal
   private synthesis, MoA's documented role-prompt gap, and six sanitized
   promotion cases.
+- `hermes-discord-cutover-audit.py` validates the credential-free Discord
+  handoff contract. It pins the source shadow, migration, and delivery-audit
+  assets; requires three distinct profile/application/token references; keeps
+  unknown DMs, bot input, backfill, replay, and allow-all access disabled; and
+  enforces stopped-source-before-target and stopped-target-before-rollback
+  ordering while the Health receiver remains online.
+- `test_hermes_discord_cutover_audit.py` covers authority drift, shared
+  identities or homes, pairing and bot loops, replay/backfill, source ordering,
+  Health continuity, rollback ordering, source-hash drift, redacted output,
+  and all 12 sanitized Discord promotion cases.
 
 ## Health Receiver
 

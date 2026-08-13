@@ -102,6 +102,17 @@ class HermesShadowPlaybookTests(unittest.TestCase):
             self.assertFalse(config["display"]["busy_ack_enabled"])
             self.assertEqual(config["display"]["memory_notifications"], "off")
             self.assertEqual(config["onboarding"]["profile_build"], "off")
+            self.assertEqual(config["unauthorized_dm_behavior"], "ignore")
+            self.assertTrue(config["group_sessions_per_user"])
+            self.assertTrue(config["discord"]["require_mention"])
+            self.assertTrue(config["discord"]["thread_require_mention"])
+            self.assertEqual(config["discord"]["allow_bots"], "none")
+            self.assertFalse(config["discord"]["history_backfill"])
+            self.assertFalse(config["discord"]["missed_message_backfill"]["enabled"])
+            self.assertFalse(config["discord"]["reactions"])
+            self.assertFalse(
+                config["gateway"]["platforms"]["discord"]["extra"]["slash_commands"]
+            )
 
     def test_every_service_is_scoped_and_boot_disabled(self) -> None:
         template = self.environment.from_string(self.service_template)
@@ -113,6 +124,10 @@ class HermesShadowPlaybookTests(unittest.TestCase):
             "hermes_shadow_runtime_binary": self.variables[
                 "hermes_shadow_runtime_binary"
             ],
+            "hermes_discord_audit_live": self.variables["hermes_discord_audit_live"],
+            "hermes_discord_contract_live": self.variables[
+                "hermes_discord_contract_live"
+            ],
         }
         for profile in self.variables["hermes_shadow_profiles"]:
             rendered = template.render(hermes_profile=profile, **common)
@@ -123,7 +138,15 @@ class HermesShadowPlaybookTests(unittest.TestCase):
             self.assertIn("NoNewPrivileges=true", rendered)
             self.assertIn("ProtectSystem=strict", rendered)
             self.assertIn("CapabilityBoundingSet=", rendered)
-            self.assertIn("ConditionPathExists=", rendered)
+            self.assertIn(
+                f"ConditionPathExists=/etc/hermes/{profile['name']}/.shadow-ready",
+                rendered,
+            )
+            self.assertIn(
+                f"EnvironmentFile=/etc/hermes/{profile['name']}/.env",
+                rendered,
+            )
+            self.assertIn("hermes-discord-cutover-audit", rendered)
             self.assertNotIn("docker.sock", rendered)
             self.assertNotIn("sudo", rendered)
             self.assertNotIn("ListenStream", rendered)
@@ -163,14 +186,47 @@ class HermesShadowPlaybookTests(unittest.TestCase):
         self.assertNotIn("DISCORD_BOT_TOKEN", self.playbook)
         self.assertNotIn("GATEWAY_ALLOW_ALL_USERS", self.playbook)
         self.assertNotIn("docker_group", self.playbook)
+        self.assertIn(
+            "Reject Discord enrollment in Hermes shadow environments",
+            self.playbook,
+        )
+        self.assertIn("is search('(?m)^DISCORD_')", self.playbook)
 
     def test_bootstrap_removes_markers_and_stops_all_units(self) -> None:
         markers = self.task("Remove Hermes readiness markers during bootstrap")
         stopped = self.task("Keep Hermes gateways stopped during bootstrap")
         self.assertIn("state: absent", markers)
         self.assertIn("hermes_shadow_mode == 'bootstrap'", markers)
+        self.assertIn("/etc/hermes/{{ item.name }}/.shadow-ready", markers)
         self.assertIn("enabled: false", stopped)
         self.assertIn("state: stopped", stopped)
+        create = self.task("Create Hermes shadow readiness markers")
+        self.assertIn("/etc/hermes/{{ item.name }}/.shadow-ready", create)
+        self.assertIn("owner: root", create)
+        legacy = self.task("Remove legacy profile-writable Hermes readiness markers")
+        self.assertIn("{{ item.home }}/.shadow-ready", legacy)
+        self.assertIn("state: absent", legacy)
+
+    def test_discord_contract_is_deployed_and_validated_without_secrets(self) -> None:
+        contract = self.task("Deploy Hermes Discord cutover contract")
+        audit = self.task("Deploy Hermes Discord contract audit")
+        sources = self.task("Deploy pinned Hermes Discord audit sources")
+        validation = self.task("Validate deployed Hermes Discord cutover contract")
+        environment = self.task("Seed root-managed Hermes service environment once")
+        local_environment = self.task(
+            "Remove profile-local environment files from Hermes shadow"
+        )
+        self.assertIn("hermes_discord_contract_source", contract)
+        self.assertIn("hermes_discord_audit_source", audit)
+        self.assertIn("discord-regressions.json", sources)
+        self.assertIn("openclaw-delivery-cutover-audit.py", sources)
+        self.assertIn("--repository-root", validation)
+        self.assertIn("/etc/hermes/{{ item.name }}/.env", environment)
+        self.assertIn("owner: root", environment)
+        self.assertIn('group: "{{ item.group }}"', environment)
+        self.assertIn('mode: "0440"', environment)
+        self.assertIn("{{ item.home }}/.env", local_environment)
+        self.assertIn("state: absent", local_environment)
 
     def test_rigel_schedule_is_root_owned_and_not_activated(self) -> None:
         script = self.task("Deploy deterministic Rigel academic schedule")
@@ -202,7 +258,9 @@ class HermesShadowPlaybookTests(unittest.TestCase):
         self.assertIn("owner: root", task)
         self.assertIn('mode: "0440"', task)
         for profile in self.variables["hermes_shadow_profiles"]:
-            source = ROOT / "files" / "hermes" / "profiles" / profile["name"] / "AGENTS.md"
+            source = (
+                ROOT / "files" / "hermes" / "profiles" / profile["name"] / "AGENTS.md"
+            )
             self.assertTrue(source.is_file())
             self.assertFalse(source.is_symlink())
 

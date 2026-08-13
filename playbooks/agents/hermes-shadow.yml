@@ -93,6 +93,11 @@
           - item.uid | int >= 62010
           - item.uid | int <= 62012
           - item.subid_start | int >= 200000
+          - item.discord_allowed_users | length == 0
+          - item.discord_allowed_channels | length == 0
+          - item.discord_free_response_channels | length == 0
+          - item.discord_admin_users | length == 0
+          - not item.discord_slash_commands | bool
           - item.toolsets | length > 0
           - "'terminal' in item.disabled_toolsets"
           - "'file' in item.disabled_toolsets"
@@ -212,6 +217,11 @@
       loop:
         - /etc/hermes
         - /usr/local/share/hermes-shadow
+        - /usr/local/share/hermes-shadow/repository
+        - /usr/local/share/hermes-shadow/repository/files
+        - /usr/local/share/hermes-shadow/repository/files/hermes
+        - /usr/local/share/hermes-shadow/repository/scripts
+        - /usr/local/share/hermes-shadow/repository/scripts/agents
         - /usr/local/libexec
         - /var/cache/hermes
 
@@ -220,8 +230,8 @@
         path: "/etc/hermes/{{ item.name }}"
         state: directory
         owner: root
-        group: root
-        mode: "0755"
+        group: "{{ item.group }}"
+        mode: "0750"
       loop: "{{ hermes_shadow_profiles }}"
       loop_control:
         label: "{{ item.name }}"
@@ -383,11 +393,52 @@
         mode: "0755"
         backup: true
 
+    - name: Deploy Hermes Discord cutover contract
+      ansible.builtin.copy:
+        src: "{{ playbook_dir }}/../../{{ hermes_discord_contract_source }}"
+        dest: "{{ hermes_discord_contract_live }}"
+        owner: root
+        group: root
+        mode: "0644"
+        backup: true
+
+    - name: Deploy Hermes Discord contract audit
+      ansible.builtin.copy:
+        src: "{{ playbook_dir }}/../../{{ hermes_discord_audit_source }}"
+        dest: "{{ hermes_discord_audit_live }}"
+        owner: root
+        group: root
+        mode: "0755"
+        backup: true
+
+    - name: Deploy pinned Hermes Discord audit sources
+      ansible.builtin.copy:
+        src: "{{ playbook_dir }}/../../{{ item }}"
+        dest: "/usr/local/share/hermes-shadow/repository/{{ item }}"
+        owner: root
+        group: root
+        mode: "0644"
+        backup: true
+      loop:
+        - files/hermes/shadow-target.json
+        - files/hermes/openclaw-state-migration-contract.json
+        - files/hermes/discord-regressions.json
+        - scripts/agents/openclaw-delivery-cutover-audit.py
+
     - name: Validate deployed Hermes shadow contract
       ansible.builtin.command:
         argv:
           - "{{ hermes_shadow_audit_live }}"
           - "{{ hermes_shadow_contract_live }}"
+      changed_when: false
+
+    - name: Validate deployed Hermes Discord cutover contract
+      ansible.builtin.command:
+        argv:
+          - "{{ hermes_discord_audit_live }}"
+          - "{{ hermes_discord_contract_live }}"
+          - --repository-root
+          - /usr/local/share/hermes-shadow/repository
       changed_when: false
 
     - name: Deploy per-profile Hermes managed policy
@@ -397,8 +448,8 @@
              }}/../../templates/hermes/hermes-managed-config.yaml.j2
         dest: "/etc/hermes/{{ hermes_profile.name }}/config.yaml"
         owner: root
-        group: root
-        mode: "0644"
+        group: "{{ hermes_profile.group }}"
+        mode: "0440"
         backup: true
       loop: "{{ hermes_shadow_profiles }}"
       loop_control:
@@ -417,19 +468,51 @@
       loop_control:
         label: "{{ item.name }}"
 
-    - name: Seed private Hermes environment file once
+    - name: Seed root-managed Hermes service environment once
       ansible.builtin.copy:
         content: |
           # Provider credentials are enrolled during an attended gate.
-        dest: "{{ item.home }}/.env"
-        owner: "{{ item.user }}"
+        dest: "/etc/hermes/{{ item.name }}/.env"
+        owner: root
         group: "{{ item.group }}"
-        mode: "0600"
+        mode: "0440"
         force: false
       loop: "{{ hermes_shadow_profiles }}"
       loop_control:
         label: "{{ item.name }}"
       no_log: true
+
+    - name: Read Hermes shadow service environments privately
+      ansible.builtin.slurp:
+        src: "/etc/hermes/{{ item.name }}/.env"
+      loop: "{{ hermes_shadow_profiles }}"
+      loop_control:
+        label: "{{ item.name }}"
+      register: hermes_shadow_service_environments
+      no_log: true
+
+    - name: Reject Discord enrollment in Hermes shadow environments
+      ansible.builtin.assert:
+        that:
+          - >-
+            not (
+              item.content | b64decode
+              is search('(?m)^DISCORD_')
+            )
+        fail_msg: >-
+          Hermes shadow service environments cannot contain Discord settings.
+      loop: "{{ hermes_shadow_service_environments.results }}"
+      loop_control:
+        label: "{{ item.item.name }}"
+      no_log: true
+
+    - name: Remove profile-local environment files from Hermes shadow
+      ansible.builtin.file:
+        path: "{{ item.home }}/.env"
+        state: absent
+      loop: "{{ hermes_shadow_profiles }}"
+      loop_control:
+        label: "{{ item.name }}"
 
     - name: Deploy root-owned Hermes identities
       ansible.builtin.copy:
@@ -504,12 +587,20 @@
 
     - name: Remove Hermes readiness markers during bootstrap
       ansible.builtin.file:
-        path: "{{ item.home }}/.shadow-ready"
+        path: "/etc/hermes/{{ item.name }}/.shadow-ready"
         state: absent
       loop: "{{ hermes_shadow_profiles }}"
       loop_control:
         label: "{{ item.name }}"
       when: hermes_shadow_mode == 'bootstrap'
+
+    - name: Remove legacy profile-writable Hermes readiness markers
+      ansible.builtin.file:
+        path: "{{ item.home }}/.shadow-ready"
+        state: absent
+      loop: "{{ hermes_shadow_profiles }}"
+      loop_control:
+        label: "{{ item.name }}"
 
     - name: Keep Hermes gateways stopped during bootstrap
       ansible.builtin.systemd_service:
@@ -531,10 +622,10 @@
 
     - name: Create Hermes shadow readiness markers
       ansible.builtin.file:
-        path: "{{ item.home }}/.shadow-ready"
+        path: "/etc/hermes/{{ item.name }}/.shadow-ready"
         state: touch
-        owner: "{{ item.user }}"
-        group: "{{ item.group }}"
+        owner: root
+        group: root
         mode: "0600"
       loop: "{{ hermes_shadow_profiles }}"
       loop_control:

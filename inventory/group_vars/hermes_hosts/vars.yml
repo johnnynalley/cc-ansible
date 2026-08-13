@@ -18,6 +18,12 @@ hermes_shadow_runtime_root: /usr/local/lib/hermes-agent
 hermes_shadow_contract_source: files/hermes/shadow-target.json
 hermes_shadow_contract_live: /usr/local/share/hermes-shadow/shadow-target.json
 hermes_shadow_audit_live: /usr/local/libexec/hermes-shadow-target-audit
+hermes_discord_contract_source: files/hermes/discord-cutover-contract.json
+hermes_discord_contract_live: >-
+  /usr/local/share/hermes-shadow/discord-cutover-contract.json
+hermes_discord_audit_source: >-
+  scripts/agents/hermes-discord-cutover-audit.py
+hermes_discord_audit_live: /usr/local/libexec/hermes-discord-cutover-audit
 hermes_rigel_schedule_source: scripts/agents/hermes-rigel-schedule.py
 hermes_rigel_schedule_manifest_source: >-
   files/hermes/jobs/rigel-academic-alerts.json
@@ -29,6 +35,11 @@ hermes_shadow_profiles:
     uid: 62010
     home: /var/lib/hermes/astra
     subid_start: 200000
+    discord_allowed_users: []
+    discord_allowed_channels: []
+    discord_free_response_channels: []
+    discord_admin_users: []
+    discord_slash_commands: false
     toolsets:
       - safe
       - skills
@@ -50,6 +61,11 @@ hermes_shadow_profiles:
     uid: 62011
     home: /var/lib/hermes/dubble
     subid_start: 265536
+    discord_allowed_users: []
+    discord_allowed_channels: []
+    discord_free_response_channels: []
+    discord_admin_users: []
+    discord_slash_commands: false
     toolsets:
       - safe
       - skills
@@ -71,6 +87,11 @@ hermes_shadow_profiles:
     uid: 62012
     home: /var/lib/hermes/rigel
     subid_start: 331072
+    discord_allowed_users: []
+    discord_allowed_channels: []
+    discord_free_response_channels: []
+    discord_admin_users: []
+    discord_slash_commands: false
     toolsets:
       - safe
       - skills

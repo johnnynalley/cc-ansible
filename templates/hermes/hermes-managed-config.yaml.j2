@@ -1,3 +1,4 @@
+---
 # Managed by Ansible. Root-owned policy for {{ hermes_profile.name }}.
 timezone: America/Chicago
 max_concurrent_sessions: 4
@@ -12,6 +13,24 @@ runtime:
 gateway:
   delivery_ledger: true
   systemd_watchdog_seconds: 120
+  platforms:
+    discord:
+      extra:
+        allow_from:
+{% for value in hermes_profile.discord_allowed_users %}
+          - "{{ value }}"
+{% endfor %}
+        allow_admin_from:
+{% for value in hermes_profile.discord_admin_users %}
+          - "{{ value }}"
+{% endfor %}
+        group_allow_admin_from:
+{% for value in hermes_profile.discord_admin_users %}
+          - "{{ value }}"
+{% endfor %}
+        user_allowed_commands: []
+        group_user_allowed_commands: []
+        slash_commands: {{ 'true' if hermes_profile.discord_slash_commands else 'false' }}
 
 cron:
   script_timeout_seconds: 30
@@ -103,8 +122,35 @@ streaming:
 
 discord:
   require_mention: true
-  free_response_channels: ''
+  thread_require_mention: true
+  ignore_no_mention: true
+  free_response_channels:
+{% for value in hermes_profile.discord_free_response_channels %}
+    - "{{ value }}"
+{% endfor %}
+  allowed_channels:
+{% for value in hermes_profile.discord_allowed_channels %}
+    - "{{ value }}"
+{% endfor %}
+  ignored_channels: []
   auto_thread: false
+  allow_bots: "none"
+  reactions: false
+  history_backfill: false
+  history_backfill_limit: 0
+  missed_message_backfill:
+    enabled: false
+    channels: []
+    window_seconds: 0
+    limit: 0
+    max_dispatches: 0
+  allow_any_attachment: false
+  max_attachment_bytes: 16777216
+  allow_mentions:
+    everyone: false
+    roles: false
+    users: true
+    replied_user: false
 
 onboarding:
   profile_build: "off"

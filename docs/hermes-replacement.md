@@ -163,6 +163,64 @@ policy tests do not establish model behavior. Gate 7 must prove two actual
 child calls, Antares's adversarial value, concise Discord output, and failure
 handling before Star parity is accepted.
 
+## Discord Routing And Cutover
+
+Hermes uses one profile, service, home, Discord application identity, and bot
+token for each of Astra, Dubble, and Rigel. Native Hermes token locks are a
+last defensive check, not permission to overlap consumers: OpenClaw and Hermes
+must never use the same Discord identity concurrently. Bot-authored input is
+disabled so the profiles cannot trigger each other.
+
+The managed shadow config is deliberately inert. It has no Discord token,
+user, role, channel, home-channel, or free-response enrollment; unknown DMs
+are ignored rather than paired; slash registration, reactions, history
+backfill, and missed-message backfill are off. Server threads still require an
+explicit mention and shared-channel sessions remain per user. Attachments are
+bounded and remain untrusted input subject to the same policy and sandbox.
+
+Private production enrollment happens through one root-owned, mode-`0440`
+managed-scope `.env` per profile after OpenClaw has stopped. Only root can
+write it and only the matching service group can read it. Managed-scope
+precedence prevents a profile-local `.env` or inherited shell value from
+overriding pinned Discord authority. Values never enter Git, shell arguments,
+normal logs, or cutover evidence. Astra and Rigel require explicit user and
+channel scope. Dubble uses approved channel scope for public support plus a
+private admin-user set; its profile still has no terminal or infrastructure
+authority. Slash-command registration is enabled only after each profile's
+distinct Discord application has been proven.
+
+The attended handoff is break-before-make:
+
+1. Back up OpenClaw and every Hermes profile; prove both schedulers and all
+   sessions idle.
+2. Stop and disable the production OpenClaw user Gateway, isolated Gateway,
+   and isolated Codex service. Prove no OpenClaw Discord consumer remains.
+3. Run the existing metadata-only
+   `openclaw-delivery-cutover-audit.py`. Pending queue rows or active session
+   recovery fields block cutover; failed history may be archived but is never
+   replayed.
+4. Enroll the three private Hermes identities. Start Astra, Dubble, and Rigel
+   one at a time, proving authorized routing, unauthorized silence, and exactly
+   one response before starting the next.
+5. Enable only reviewed schedules and prove Rigel's idle tick remains empty.
+
+History and missed-message backfill remain disabled, so a message sent during
+the maintenance gap is not reconstructed later. This is an explicit short
+availability tradeoff for duplicate-delivery safety. Rollback reverses the
+boundary: pause Hermes schedules, wait for idle, stop every Hermes consumer,
+quarantine its credential files, prove absence, then restart OpenClaw and prove
+one new response. Neither runtime is cleaned up, and the external Health
+receiver stays running during cutover and rollback.
+
+The machine-readable source is
+`files/hermes/discord-cutover-contract.json`; its validator is
+`scripts/agents/hermes-discord-cutover-audit.py`. Twelve sanitized runtime
+cases in `files/hermes/discord-regressions.json` block promotion until the
+isolated deployment proves route isolation, unauthorized user/channel and DM
+silence, token-lock behavior, bot-loop prevention, no restart replay, hostile
+attachment containment, source queue drain, maintenance-gap handling,
+rollback, and post-cutover Rigel silence.
+
 ## Transcript-Derived Behavior Tests
 
 The saved transcripts are regression inputs, not just incident notes. Hermes

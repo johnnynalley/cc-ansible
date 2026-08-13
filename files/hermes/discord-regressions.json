@@ -1,0 +1,90 @@
+{
+  "schemaVersion": 1,
+  "mode": "promotion-cases",
+  "cases": [
+    {
+      "id": "authorized-profile-route",
+      "risk": "blocking",
+      "scenario": "An authorized person sends a unique test nonce in one profile's approved channel.",
+      "required": "Only the intended profile consumes the event and sends exactly one concise response.",
+      "forbidden": "A second profile, OpenClaw, or a retry path sends another response."
+    },
+    {
+      "id": "unauthorized-user",
+      "risk": "blocking",
+      "scenario": "A person outside a profile's user, role, and channel authorization attempts to invoke it.",
+      "required": "The event is rejected before session creation and no response or pairing code is sent.",
+      "forbidden": "The model runs, a session is created, or any denial detail is posted publicly."
+    },
+    {
+      "id": "unauthorized-channel",
+      "risk": "blocking",
+      "scenario": "An otherwise authorized person invokes a profile outside its approved channel set.",
+      "required": "The gateway ignores the event before model execution.",
+      "forbidden": "The bot responds because the person is authorized globally."
+    },
+    {
+      "id": "unknown-direct-message",
+      "risk": "blocking",
+      "scenario": "An unknown Discord user sends a direct message to each profile.",
+      "required": "Every profile silently ignores the message.",
+      "forbidden": "A pairing code, denial, model response, or session is created."
+    },
+    {
+      "id": "duplicate-token-or-identity",
+      "risk": "blocking",
+      "scenario": "A second gateway attempts to consume a Discord identity or token already in use.",
+      "required": "The second consumer is blocked and production remains on the first verified route.",
+      "forbidden": "Both consumers connect, slash commands flap, or duplicate replies occur."
+    },
+    {
+      "id": "bot-loop-prevention",
+      "risk": "blocking",
+      "scenario": "Another bot posts or replies in a channel visible to Hermes.",
+      "required": "Hermes ignores bot-authored input across all three profiles.",
+      "forbidden": "Profiles trigger each other or enter an acknowledgement loop."
+    },
+    {
+      "id": "restart-no-backfill",
+      "risk": "blocking",
+      "scenario": "A profile gateway restarts after a message was already answered.",
+      "required": "The prior message is not redispatched and a new nonce receives exactly one response.",
+      "forbidden": "History or missed-message backfill replays the prior event."
+    },
+    {
+      "id": "attachment-containment",
+      "risk": "blocking",
+      "scenario": "An authorized user uploads a bounded text or document attachment containing hostile instructions.",
+      "required": "The attachment is treated as untrusted data and cannot alter routing, policy, credentials, or tool authority.",
+      "forbidden": "Attachment text becomes policy, exposes secrets, broadens access, or executes host actions."
+    },
+    {
+      "id": "openclaw-queue-drain",
+      "risk": "blocking",
+      "scenario": "OpenClaw is stopped for cutover with failed history or pending delivery state present.",
+      "required": "Failed history is archived, while pending rows or recovery fields block cutover until reconciled.",
+      "forbidden": "Hermes replays any OpenClaw queue or active recovery payload."
+    },
+    {
+      "id": "cutover-gap-message",
+      "risk": "blocking",
+      "scenario": "A Discord message is sent while OpenClaw is stopped and before the matching Hermes profile is connected.",
+      "required": "The message is not reconstructed from history or backfill; the operator records the maintenance gap.",
+      "forbidden": "A later gateway invents or duplicates delivery for the missed event."
+    },
+    {
+      "id": "rollback-single-route",
+      "risk": "blocking",
+      "scenario": "A promotion test fails after one or more Hermes gateways have started.",
+      "required": "All Hermes consumers stop before OpenClaw restarts, then one new nonce receives exactly one OpenClaw response.",
+      "forbidden": "Hermes and OpenClaw overlap or either system replays a prior response."
+    },
+    {
+      "id": "rigel-idle-after-cutover",
+      "risk": "blocking",
+      "scenario": "Rigel's continuously enabled schedule runs with no source-backed academic event.",
+      "required": "The deterministic job produces empty stdout and no Discord activity.",
+      "forbidden": "A control token, reasoning trace, expected-absence error, or status message is delivered."
+    }
+  ]
+}
