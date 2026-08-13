@@ -193,9 +193,9 @@
   ansible.builtin.import_playbook: playbooks/docker/agent-docker-report.yml
   tags: [docker, agents, agent-docker-report]
 
-- name: Configure approval-gated OpenClaw Docker updates
-  ansible.builtin.import_playbook: playbooks/docker/openclaw-docker-update-broker.yml
-  tags: [docker, openclaw, openclaw-docker-update]
+- name: Configure approval-gated Agent Docker updates
+  ansible.builtin.import_playbook: playbooks/docker/agent-docker-update-broker.yml
+  tags: [docker, agents, agent-docker-update]
 
 - name: Configure isolated OpenClaw Health receiver
   ansible.builtin.import_playbook: playbooks/agents/openclaw-health-receiver.yml

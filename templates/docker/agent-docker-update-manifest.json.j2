@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 2,
+  "host": {{ inventory_hostname | to_json }},
+  "stateDir": "/var/lib/agent-docker-update",
+  "dockerBinary": "/usr/bin/docker",
+  "planTtlSeconds": {{ agent_docker_update_broker_plan_ttl_seconds }},
+  "approvalTtlSeconds": {{ agent_docker_update_broker_approval_ttl_seconds }},
+  "proposalCooldownSeconds": {{ agent_docker_update_broker_proposal_cooldown_seconds }},
+  "commandTimeoutSeconds": {{ agent_docker_update_broker_command_timeout_seconds }},
+  "healthPollSeconds": {{ agent_docker_update_broker_health_poll_seconds }},
+  "targets": {{ agent_docker_update_broker_targets | to_nice_json }}
+}

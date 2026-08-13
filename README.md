@@ -43,7 +43,7 @@ Source-of-truth docs currently include:
 - [docs/hermes-replacement.md](docs/hermes-replacement.md)
 - [docs/immich-media-inbox.md](docs/immich-media-inbox.md)
 - [docs/media-release-policy.md](docs/media-release-policy.md)
-- [docs/openclaw-docker-access.md](docs/openclaw-docker-access.md)
+- [docs/agent-docker-access.md](docs/agent-docker-access.md)
 - [docs/openclaw-heartbeats.md](docs/openclaw-heartbeats.md)
 - [docs/openclaw-runtime-security.md](docs/openclaw-runtime-security.md)
 - [docs/plex-appliance-operations.md](docs/plex-appliance-operations.md)
@@ -281,7 +281,7 @@ Packages are merged from multiple sources (all applicable variables combined):
 | `plex-server-health.yml` | media-vm, `nas_server` | Plex identity, guest VirtioFS, host virtiofsd, VM 100, and scrub-window sentinel |
 | `docker-auto-update.yml` | `docker_hosts` | Auto-update selected containers every 6h with major version guard |
 | `agent-docker-report.yml` | `docker_hosts` | Publish a schema-v2 result-only Docker inventory for dedicated agent identities such as Hermes (disabled by default) |
-| `openclaw-docker-update-broker.yml` | `docker_hosts` | Install a digest-bound, separately approved service update broker for the isolated OpenClaw identity (disabled by default) |
+| `agent-docker-update-broker.yml` | `docker_hosts` | Install a token-safe, digest-bound service update broker with approval outside the agent boundary (disabled by default) |
 | `virtiofs.yml` | `proxmox_nodes`, `vms` | Configure VirtioFS shares between Proxmox hosts and VMs |
 | `proxmox-vm-hardware.yml` | `proxmox_nodes` | Apply durable Proxmox VM hardware settings such as CPU model overrides |
 | `proxmox-boot-order.yml` | `proxmox_nodes` | Configure Proxmox boot ordering guardrails so `pve-cluster` waits for local filesystems and guest autostart waits for `pve-cluster` |
@@ -399,13 +399,15 @@ Selected containers are auto-updated every 6 hours via systemd timer (`docker-au
 
 Check status: `journalctl -u docker-auto-update`, `systemctl list-timers docker-auto-update*`
 
-## OpenClaw Docker Reporting
+## Agent Docker Access
 
 The result-only Docker reporter is implemented but disabled pending the
-dedicated OpenClaw service-account migration and an approved canary rollout. It
-does not grant Astra Docker socket, Docker group, sudo, or arbitrary SSH access.
-See [docs/openclaw-docker-access.md](docs/openclaw-docker-access.md) for the
-schema, threat model, rollout gates, and separate update-broker design.
+dedicated Hermes identity and an approved canary rollout. The independently
+approved update broker is also implemented but disabled. Neither path grants
+Astra Docker socket or Docker group access, and the broker's narrow sudo rule
+exposes only its fixed request parser. See
+[docs/agent-docker-access.md](docs/agent-docker-access.md) for the schema,
+threat model, migration handling, and rollout gates.
 
 ## ZFS Configuration
 
@@ -1126,8 +1128,8 @@ OpenClaw AI agent platform — personal homelab admin assistant via web UI and D
   baseline and archives only its synthetic sessions.
 - **Mem0 memory**: `@mem0/openclaw-mem0` plugin with Qdrant (localhost:6333), Gemini embeddings, and the configured OpenAI-compatible LLM for fact extraction. Auto-capture + auto-recall across sessions.
 - **dbc ops access**: Narrow host-specific wrappers, including candidate-scoped Immich Media Inbox access on docker-vm. Its isolated vision workers may read pixels/OCR only for admitted candidates; there is no arbitrary Immich, credential, SQLite, or general Docker access. Existing media-stack/Caddy operational paths remain separately scoped.
-- **Docker reporting**: A strict result-only reporter is implemented but remains disabled until the dedicated runtime identity and key are deployed. See `docs/openclaw-docker-access.md`.
-- **Docker updates**: A separate target-allowlisted, digest-bound broker is implemented but remains disabled. Astra can propose or execute an independently approved one-use plan; it cannot approve plans, choose paths/commands, or access Docker directly. See `docs/openclaw-docker-access.md`.
+- **Docker reporting**: A strict result-only reporter is implemented but remains disabled until the dedicated runtime identity and key are deployed. See `docs/agent-docker-access.md`.
+- **Docker updates**: A separate target-allowlisted, digest-bound broker is implemented but remains disabled. Astra can propose or execute an independently approved one-use plan; it cannot approve plans, choose paths/commands, or access Docker directly. See `docs/agent-docker-access.md`.
 - **Health isolation**: The dedicated receiver and aggregate report boundary are implemented but disabled pending an approved canary/cutover. See `docs/openclaw-runtime-security.md`.
 
 ```bash

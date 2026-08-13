@@ -22,7 +22,9 @@ attachment, skill, and tool result as potentially prompt-injected. Compromise
 of that boundary must not grant any of the following:
 
 - membership in the `docker` group or direct access to `docker.sock`;
-- sudo, a human login shell, controller credentials, or Ansible vault access;
+- general sudo, a human login shell, controller credentials, or Ansible vault
+  access; the update identity may elevate only the broker's exact `request`
+  command;
 - arbitrary commands, Docker Engine API calls, compose edits, or container logs;
 - environment variables, mounts, ports, networks, commands, or arbitrary labels;
 - approval of an action proposed by the same compromised Gateway.
@@ -71,11 +73,11 @@ remains owned by the existing auto-update and Diun workflows.
 
 ## Update Boundary
 
-The read-only reporter does not update containers. The separately managed,
-legacy-named `playbooks/docker/openclaw-docker-update-broker.yml`
-implementation is also disabled by default and will be modernized in its own
-gate. It gives an isolated agent only a forced-command SSH request interface;
-it does not give the agent Docker, sudo, shell, or Compose access.
+The read-only reporter does not update containers. The separately managed
+`playbooks/docker/agent-docker-update-broker.yml` implementation is also
+disabled by default. It gives an isolated agent only a forced-command SSH
+request interface; it does not give the agent Docker, general sudo, shell, or
+Compose access.
 
 The broker enforces these properties:
 
@@ -118,20 +120,33 @@ The broker enforces these properties:
   image on failure.
 - Plans are one-use. A process interruption after execution starts leaves the
   transaction in `executing` for operator recovery rather than replaying it.
-- It returns a bounded result document and never returns secrets or raw logs.
+- It returns a bounded token-only result document and never returns secrets,
+  raw logs, Docker status prose, or arbitrary external strings. An output guard
+  replaces any response outside that grammar with a fixed error.
+- Deployment validates the replacement binary and manifest before installing
+  its sudo rule or SSH key. Legacy OpenClaw plans, approvals, results, and audit
+  records are archived under the new root-only state directory, but are never
+  activated as current plans; old pending approvals therefore cannot survive
+  the namespace migration.
 
 Image-and-config rollback is not application-data rollback. A stateful service
 may be added only after its target has a separately reviewed, application-native
 backup and restore transaction with a proved recovery test. Merely retaining the
 old image or copying Compose files is not sufficient for a database migration.
 
+For namespace rollback, revoke the new key and sudo rule first, restore the
+legacy binaries/config/access artifacts from the recorded live-rollback
+backup, then move `legacy-openclaw` back to
+`/var/lib/openclaw-docker-update`. Never expose both request identities at the
+same time or move archived approvals into the active agent state directory.
+
 The operator flow, after a broker proposal is independently reviewed, is:
 
 ```bash
-sudo openclaw-docker-update-broker show PLAN_ID
-sudo openclaw-docker-update-broker approve PLAN_ID
+sudo agent-docker-update-broker show PLAN_ID
+sudo agent-docker-update-broker approve PLAN_ID
 # Astra may now send the one-use execute request before approval expires.
-sudo openclaw-docker-update-broker reject PLAN_ID
+sudo agent-docker-update-broker reject PLAN_ID
 ```
 
 Approval must compare the exact target, current image, candidate digest,
@@ -158,7 +173,7 @@ or the existing broad `dbc` helpers directly to Astra as an update mechanism.
 5. Populate one reviewed, health-checked, stateless service target and a
    separate update-request key, then canary the broker only after a distinct
    owner approval. Its enabled playbook applies the same pre-existing-artifact
-   backup gate.
+   backup gate and archives legacy history without reusing pending approvals.
 6. Verify proposal redaction, approval separation, digest/config drift
    rejection, health failure rollback, replay rejection, and root-only audit
    artifacts before adding another target or host.
@@ -167,13 +182,13 @@ or the existing broad `dbc` helpers directly to Astra as an update mechanism.
 
 ```bash
 python3 scripts/docker/test_agent_docker_report.py
-python3 scripts/docker/test_openclaw_docker_update_broker.py
-python3 scripts/docker/test_openclaw_docker_playbooks.py
+python3 scripts/docker/test_agent_docker_update_broker.py
+python3 scripts/docker/test_agent_docker_playbooks.py
 shellcheck scripts/docker/agent-docker-report-cat
 ansible-playbook playbooks/docker/agent-docker-report.yml --syntax-check
 ansible-playbook playbooks/docker/agent-docker-report.yml --check --diff
-ansible-playbook playbooks/docker/openclaw-docker-update-broker.yml --syntax-check
-ansible-playbook playbooks/docker/openclaw-docker-update-broker.yml --check --diff
+ansible-playbook playbooks/docker/agent-docker-update-broker.yml --syntax-check
+ansible-playbook playbooks/docker/agent-docker-update-broker.yml --check --diff
 ```
 
 The default check runs must leave all hosts disabled and must not provision a

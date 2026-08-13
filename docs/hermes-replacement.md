@@ -517,11 +517,13 @@ The Docker inventory reporter is now platform-neutral under `agent-report`,
 uses a prompt-resistant schema-v2 result, and includes backed, validation-gated
 cleanup for the old OpenClaw reporter artifacts. It remains disabled until the
 Hermes identity, source CIDR, and dedicated key are approved for live rollout.
-The Docker update broker remains separately approved and digest-bound under
-its legacy name until its own gate. Astra may submit a fixed-schema proposal
-and later invoke only an already-approved, unexpired plan. It cannot approve a
-plan, select arbitrary compose paths or commands, broaden targets, or reach a
-Docker daemon.
+The Docker update broker is also platform-neutral under `agent-update`. It
+validates before exposing access, emits only token-safe results, preserves old
+history without activating old approvals, and remains disabled until a target
+and dedicated key are explicitly approved. Astra may submit a fixed-schema
+proposal and later invoke only an already-approved, unexpired plan. It cannot
+approve a plan, select arbitrary compose paths or commands, broaden targets,
+or reach a Docker daemon.
 
 ### Backups And Recovery
 

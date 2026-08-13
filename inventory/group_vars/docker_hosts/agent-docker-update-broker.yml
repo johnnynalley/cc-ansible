@@ -1,26 +1,21 @@
 ---
-# Approval-gated Docker updates for the future dedicated OpenClaw runtime.
-# This remains disabled until the isolated Gateway and report-reader key are
-# live, a separate update key exists, and the owner approves a host canary.
+# Approval-gated Docker updates for isolated agent runtimes, including Hermes.
+# This remains disabled until the read-only reporter is live, a separate update
+# key exists, and the owner approves a host canary and at least one target.
 
-openclaw_docker_update_broker_enabled: false
-openclaw_docker_update_broker_rollout_approved: false
-openclaw_docker_update_broker_user: openclaw-update
-openclaw_docker_update_broker_group: openclaw-update
-openclaw_docker_update_broker_home: /var/lib/openclaw-docker-update-request
-openclaw_docker_update_broker_state_dir: /var/lib/openclaw-docker-update
-openclaw_docker_update_broker_config_dir: /etc/openclaw-docker-update
-openclaw_docker_update_broker_plan_ttl_seconds: 1800
-openclaw_docker_update_broker_approval_ttl_seconds: 900
-openclaw_docker_update_broker_proposal_cooldown_seconds: 300
-openclaw_docker_update_broker_command_timeout_seconds: 900
-openclaw_docker_update_broker_health_poll_seconds: 5
+agent_docker_update_broker_enabled: false
+agent_docker_update_broker_rollout_approved: false
+agent_docker_update_broker_plan_ttl_seconds: 1800
+agent_docker_update_broker_approval_ttl_seconds: 900
+agent_docker_update_broker_proposal_cooldown_seconds: 300
+agent_docker_update_broker_command_timeout_seconds: 900
+agent_docker_update_broker_health_poll_seconds: 5
 
 # Populate only with a dedicated update-request key and the exact Tailscale
 # source CIDR of the isolated Gateway. Never reuse the report-reader, human,
 # controller, or Ansible key.
-openclaw_docker_update_broker_authorized_keys: []
-openclaw_docker_update_broker_source_cidrs: []
+agent_docker_update_broker_authorized_keys: []
+agent_docker_update_broker_source_cidrs: []
 
 # Targets are explicit single-service stateless transactions. The broker
 # requires numeric non-root execution, a read-only root filesystem, all
@@ -31,7 +26,7 @@ openclaw_docker_update_broker_source_cidrs: []
 # Paths, Compose files, dependent recreates, and health checks are selected
 # here by the operator, never by Astra. Example shape (do not enable without a
 # reviewed host-specific entry):
-# openclaw_docker_update_broker_targets:
+# agent_docker_update_broker_targets:
 #   example.stateless-service:
 #     projectDir: /opt/example-stack
 #     composeFiles: [docker-compose.yml]
@@ -42,4 +37,4 @@ openclaw_docker_update_broker_source_cidrs: []
 #     requiredPaths: []
 #     healthTimeoutSeconds: 180
 #     updateClass: stateless-image
-openclaw_docker_update_broker_targets: {}
+agent_docker_update_broker_targets: {}

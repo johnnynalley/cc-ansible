@@ -36,16 +36,19 @@ MAX_BACKUP_FILE_BYTES = 8 * 1024 * 1024
 MAX_BACKUP_TOTAL_BYTES = 32 * 1024 * 1024
 MAX_PLAN_FILES = 2048
 MAX_PROJECT_ENTRIES = 10_000
+MAX_PUBLIC_STRING_BYTES = 512
 REQUEST_READ_TIMEOUT_SECONDS = 10
 LOCK_WAIT_SECONDS = 5
 ID_RE = re.compile(r"^[a-z0-9][a-z0-9_.-]{0,127}$")
 PLAN_ID_RE = re.compile(r"^[a-f0-9]{64}$")
 IMAGE_ID_RE = re.compile(r"^sha256:[a-f0-9]{64}$")
-DIGEST_RE = re.compile(r"^[^\s@]+@sha256:[a-f0-9]{64}$")
+DIGEST_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._+:/-]{0,439}@sha256:[a-f0-9]{64}$")
+IMAGE_REF_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._+:/@-]{0,511}$")
 OPERATOR_RE = re.compile(r"^[a-z_][a-z0-9_-]{0,31}$")
+PUBLIC_KEY_RE = re.compile(r"^[A-Za-z][A-Za-z0-9]{0,63}$")
 STATELESS_UPDATE_CLASS = "stateless-image"
 SAFE_ENV = {
-    "DOCKER_CONFIG": "/etc/openclaw-docker-update/docker-client",
+    "DOCKER_CONFIG": "/etc/agent-docker-update/docker-client",
     "HOME": "/root",
     "LANG": "C.UTF-8",
     "LC_ALL": "C.UTF-8",
@@ -97,6 +100,29 @@ def bounded_token(value: Any, limit: int = 160) -> str | None:
     if len(clean) > limit or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._+:/@-]*", clean):
         return None
     return clean
+
+
+def public_payload_is_safe(value: Any, depth: int = 0) -> bool:
+    if depth > 6:
+        return False
+    if value is None or isinstance(value, bool):
+        return True
+    if isinstance(value, int):
+        return not isinstance(value, bool)
+    if isinstance(value, str):
+        return bounded_token(value, MAX_PUBLIC_STRING_BYTES) is not None
+    if isinstance(value, list):
+        return len(value) <= 32 and all(
+            public_payload_is_safe(item, depth + 1) for item in value
+        )
+    if isinstance(value, dict):
+        return len(value) <= 64 and all(
+            isinstance(key, str)
+            and PUBLIC_KEY_RE.fullmatch(key) is not None
+            and public_payload_is_safe(item, depth + 1)
+            for key, item in value.items()
+        )
+    return False
 
 
 def atomic_write_json(path: Path, value: Any, mode: int = 0o600) -> None:
@@ -563,9 +589,7 @@ class Broker:
         if not isinstance(service, dict):
             raise BrokerError("service-not-configured")
         image = service.get("image")
-        if not isinstance(image, str) or not image or len(image) > 512:
-            raise BrokerError("service-image-not-pullable")
-        if any(ord(ch) < 33 or ord(ch) > 126 for ch in image):
+        if not isinstance(image, str) or not IMAGE_REF_RE.fullmatch(image):
             raise BrokerError("service-image-not-pullable")
         return image
 
@@ -670,7 +694,9 @@ class Broker:
         valid_digests = sorted(
             digest
             for digest in repo_digests or []
-            if isinstance(digest, str) and DIGEST_RE.fullmatch(digest)
+            if isinstance(digest, str)
+            and len(digest) <= MAX_PUBLIC_STRING_BYTES
+            and DIGEST_RE.fullmatch(digest)
         )
         digest = self.select_digest(valid_digests, repository_hint)
         config = inspected.get("Config")
@@ -1155,7 +1181,7 @@ class Broker:
             candidate_apply_started = False
             rollback_override: Path | None = None
             rollback_tag = (
-                f"openclaw-rollback/{target.target_id.replace('.', '-')}:"
+                f"agent-rollback/{target.target_id.replace('.', '-')}:"
                 f"{plan_id[:16]}"
             )
             try:
@@ -1279,6 +1305,12 @@ def read_request() -> Any:
 
 
 def emit(value: dict[str, Any]) -> None:
+    if not public_payload_is_safe(value):
+        value = {
+            "schemaVersion": SCHEMA_VERSION,
+            "status": "error",
+            "errorCode": "unsafe-response",
+        }
     encoded = canonical_bytes(value)
     if len(encoded) > 16384:
         encoded = canonical_bytes(
@@ -1305,7 +1337,7 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "--manifest",
-        default="/etc/openclaw-docker-update/manifest.json",
+        default="/etc/agent-docker-update/manifest.json",
         type=Path,
     )
     parser.add_argument(

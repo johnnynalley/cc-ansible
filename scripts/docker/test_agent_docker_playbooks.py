@@ -11,11 +11,9 @@ import yaml
 
 ROOT = Path(__file__).resolve().parents[2]
 REPORT_PLAYBOOK = ROOT / "playbooks/docker/agent-docker-report.yml"
-BROKER_PLAYBOOK = ROOT / "playbooks/docker/openclaw-docker-update-broker.yml"
-BROKER_VARS = (
-    ROOT / "inventory/group_vars/docker_hosts/openclaw-docker-update-broker.yml"
-)
-BROKER_MANIFEST = ROOT / "templates/docker/openclaw-docker-update-manifest.json.j2"
+BROKER_PLAYBOOK = ROOT / "playbooks/docker/agent-docker-update-broker.yml"
+BROKER_VARS = ROOT / "inventory/group_vars/docker_hosts/agent-docker-update-broker.yml"
+BROKER_MANIFEST = ROOT / "templates/docker/agent-docker-update-manifest.json.j2"
 REPORT_VARS = ROOT / "inventory/group_vars/docker_hosts/agent-docker-report.yml"
 
 
@@ -43,7 +41,7 @@ class DockerAccessPlaybookTests(unittest.TestCase):
         template = BROKER_MANIFEST.read_text(encoding="utf-8")
         self.assertIn('"schemaVersion": 2', template)
         self.assertNotIn('"schemaVersion": 1', template)
-        runtime = (ROOT / "scripts/docker/openclaw-docker-update-broker.py").read_text(
+        runtime = (ROOT / "scripts/docker/agent-docker-update-broker.py").read_text(
             encoding="utf-8"
         )
         self.assertIn("SCHEMA_VERSION = 2", runtime)
@@ -66,7 +64,7 @@ class DockerAccessPlaybookTests(unittest.TestCase):
             (REPORT_PLAYBOOK, "Create Agent Docker report account"),
             (
                 BROKER_PLAYBOOK,
-                "Create OpenClaw Docker update request account",
+                "Create Agent Docker update request account",
             ),
         )
         for path, task_name in cases:
@@ -81,9 +79,9 @@ class DockerAccessPlaybookTests(unittest.TestCase):
         broker_inventory = yaml.safe_load(BROKER_VARS.read_text(encoding="utf-8"))
         self.assertIs(report_inventory["agent_docker_report_enabled"], False)
         self.assertIs(report_inventory["agent_docker_report_rollout_approved"], False)
-        self.assertIs(broker_inventory["openclaw_docker_update_broker_enabled"], False)
+        self.assertIs(broker_inventory["agent_docker_update_broker_enabled"], False)
         self.assertIs(
-            broker_inventory["openclaw_docker_update_broker_rollout_approved"],
+            broker_inventory["agent_docker_update_broker_rollout_approved"],
             False,
         )
 
@@ -97,7 +95,7 @@ class DockerAccessPlaybookTests(unittest.TestCase):
             ),
             (
                 BROKER_PLAYBOOK,
-                "Require isolated OpenClaw Docker update request account groups",
+                "Require isolated Agent Docker update request account groups",
             ),
         )
         for path, task_name in cases:
@@ -114,7 +112,7 @@ class DockerAccessPlaybookTests(unittest.TestCase):
             ),
             (
                 BROKER_PLAYBOOK,
-                "Parse OpenClaw Docker update source CIDRs exactly",
+                "Parse Agent Docker update source CIDRs exactly",
             ),
         )
         for path, task_name in cases:
@@ -129,7 +127,7 @@ class DockerAccessPlaybookTests(unittest.TestCase):
     def test_update_targets_are_stateless_only(self) -> None:
         task = task_named(
             load_tasks(BROKER_PLAYBOOK),
-            "Validate OpenClaw Docker update target IDs",
+            "Validate Agent Docker update target IDs",
         )
         assertions = "\n".join(task["ansible.builtin.assert"]["that"])
         self.assertIn("item.value.updateClass == 'stateless-image'", assertions)
@@ -140,16 +138,26 @@ class DockerAccessPlaybookTests(unittest.TestCase):
         self.assertIn("Stateful services require", inventory)
 
     def test_broker_uses_isolated_docker_client_configuration(self) -> None:
-        source = (ROOT / "scripts/docker/openclaw-docker-update-broker.py").read_text(
+        source = (ROOT / "scripts/docker/agent-docker-update-broker.py").read_text(
             encoding="utf-8"
         )
         self.assertIn(
-            '"DOCKER_CONFIG": "/etc/openclaw-docker-update/docker-client"', source
+            '"DOCKER_CONFIG": "/etc/agent-docker-update/docker-client"', source
         )
         playbook = BROKER_PLAYBOOK.read_text(encoding="utf-8")
         self.assertIn(
-            "openclaw_docker_update_broker_config_dir }}/docker-client", playbook
+            "agent_docker_update_broker_config_dir }}/docker-client", playbook
         )
+
+    def test_disabled_broker_revokes_current_and_legacy_access(self) -> None:
+        tasks = load_tasks(BROKER_PLAYBOOK)
+        ssh = task_named(tasks, "Revoke Agent Docker update SSH access when disabled")
+        sudo = task_named(tasks, "Revoke Agent Docker update sudo access when disabled")
+        self.assertIn(
+            "/var/lib/openclaw-docker-update-request/.ssh/authorized_keys",
+            ssh["loop"],
+        )
+        self.assertIn("/etc/sudoers.d/openclaw-docker-update-broker", sudo["loop"])
 
     def test_disabled_reporter_stops_both_units_without_timer_probe(self) -> None:
         tasks = load_tasks(REPORT_PLAYBOOK)
@@ -182,8 +190,8 @@ class DockerAccessPlaybookTests(unittest.TestCase):
             ),
             (
                 BROKER_PLAYBOOK,
-                "Back up prior OpenClaw Docker update broker artifacts",
-                "Create OpenClaw Docker update group",
+                "Back up prior Agent Docker update broker artifacts",
+                "Create Agent Docker update group",
             ),
         )
         for path, backup_name, first_mutation_name in cases:
@@ -213,7 +221,7 @@ class DockerAccessPlaybookTests(unittest.TestCase):
             ),
             (
                 BROKER_PLAYBOOK,
-                "Reject symlinked OpenClaw Docker update broker artifacts",
+                "Reject symlinked Agent Docker update broker artifacts",
             ),
         )
         for path, task_name in cases:
@@ -254,6 +262,45 @@ class DockerAccessPlaybookTests(unittest.TestCase):
         self.assertEqual(account["groups"], "")
         self.assertIs(account["append"], False)
         self.assertNotEqual(account["group"], "docker")
+
+    def test_update_account_never_joins_docker_group(self) -> None:
+        task = task_named(
+            load_tasks(BROKER_PLAYBOOK),
+            "Create Agent Docker update request account",
+        )
+        account = task["ansible.builtin.user"]
+        self.assertEqual(account["groups"], "")
+        self.assertIs(account["append"], False)
+        self.assertNotEqual(account["group"], "docker")
+
+    def test_broker_validates_before_activation_and_legacy_cleanup(self) -> None:
+        tasks = load_tasks(BROKER_PLAYBOOK)
+
+        def index(name: str) -> int:
+            return next(
+                offset for offset, task in enumerate(tasks) if task.get("name") == name
+            )
+
+        validate = index("Validate installed Agent Docker update broker")
+        archive = index("Archive legacy Agent Docker update transaction state")
+        sudo = index("Install exact Agent Docker update sudo rule")
+        keys = index("Install root-owned forced-command update keys")
+        cleanup = index("Remove validated legacy Agent Docker update artifacts")
+        self.assertLess(validate, archive)
+        self.assertLess(archive, sudo)
+        self.assertLess(sudo, keys)
+        self.assertLess(keys, cleanup)
+
+    def test_legacy_transaction_state_is_archived_not_activated(self) -> None:
+        tasks = load_tasks(BROKER_PLAYBOOK)
+        archive = task_named(
+            tasks, "Archive legacy Agent Docker update transaction state"
+        )
+        argv = archive["ansible.builtin.command"]["argv"]
+        self.assertEqual(argv[0:2], ["/usr/bin/mv", "--"])
+        self.assertIn("legacy_state_dir", argv[2])
+        self.assertIn("legacy_archive_dir", argv[3])
+        self.assertIn("not ansible_check_mode", archive["when"])
 
 
 if __name__ == "__main__":

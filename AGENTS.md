@@ -34,7 +34,7 @@ When moving, renaming, deleting, or replacing a template, update every playbook,
 
 ### Documentation Cross-References
 
-When creating or materially updating operator docs, policy docs, runbooks, or troubleshooting guides under `docs/`, update `docs/README.md` and add or update the matching pointer in `AGENTS.md` in the relevant operational section. The point is discoverability: future agents should know where to find the source of truth without guessing filenames or relying on memory. Current source-of-truth docs include `docs/capture-card-streaming-plan.md`, `docs/fortnite-performance-investigation.md`, `docs/gaming-benchmark.md`, `docs/hermes-replacement.md`, `docs/immich-media-inbox.md`, `docs/media-release-policy.md`, `docs/openclaw-docker-access.md`, `docs/openclaw-heartbeats.md`, `docs/openclaw-runtime-security.md`, `docs/plex-appliance-operations.md`, and `docs/streaming-runbook.md`. If a new doc captures behavior that should persist across sessions, also add a concise Codex memory note when the user explicitly asks for memory persistence.
+When creating or materially updating operator docs, policy docs, runbooks, or troubleshooting guides under `docs/`, update `docs/README.md` and add or update the matching pointer in `AGENTS.md` in the relevant operational section. The point is discoverability: future agents should know where to find the source of truth without guessing filenames or relying on memory. Current source-of-truth docs include `docs/capture-card-streaming-plan.md`, `docs/fortnite-performance-investigation.md`, `docs/gaming-benchmark.md`, `docs/hermes-replacement.md`, `docs/immich-media-inbox.md`, `docs/media-release-policy.md`, `docs/agent-docker-access.md`, `docs/openclaw-heartbeats.md`, `docs/openclaw-runtime-security.md`, `docs/plex-appliance-operations.md`, and `docs/streaming-runbook.md`. If a new doc captures behavior that should persist across sessions, also add a concise Codex memory note when the user explicitly asks for memory persistence.
 
 When a change affects repository layout, operator entrypoints, common commands, source-of-truth document locations, or human-facing workflow guidance, update `README.md` in the same scoped change. Do not leave `README.md` pointing at old paths, stale command examples, or outdated directory structure after moving files, scripts, templates, playbooks, or docs. Also update the relevant catalog README (`docs/README.md`, `playbooks/README.md`, `templates/README.md`, `scripts/README.md`, `inventory/README.md`, or `files/README.md`) and run or extend `scripts/repo/repo-audit` when the change affects paths or references. Docs, README files, AGENTS guidance, and cross-references must not go stale; keeping them current is part of the implementation, not a follow-up.
 
@@ -631,19 +631,20 @@ docker_stacks:
 
 **Troubleshooting**: `journalctl -u docker-auto-update`, `systemctl list-timers docker-auto-update*`, manual trigger: `systemctl start docker-auto-update.service`.
 
-#### OpenClaw Docker Reporting
+#### Agent Docker Access
 
-`docs/openclaw-docker-access.md` is the source of truth for Astra's Docker
+`docs/agent-docker-access.md` is the source of truth for Astra's Docker
 inventory and future update path. Never grant the Gateway, its runtime user, or
 an agent SSH account membership in the `docker` group or direct access to a
 Docker socket; both are root-equivalent. The only approved read architecture is
 a root-owned allowlist reporter that writes a bounded redacted result for a
-root-owned forced-command account. The reporter feature is disabled until the
-dedicated OpenClaw service identity, dedicated key, source CIDR, backup, and
-canary are explicitly approved. Container updates require a separate immutable
-plan/approve/apply broker whose approval occurs outside the Gateway trust
-boundary; do not expose the existing auto-update script or broad `dbc` helpers
-as Astra tools.
+root-owned forced-command account. The reporter feature is disabled until a
+dedicated Hermes identity, key, source CIDR, backup, and canary are explicitly
+approved. Container updates require the separate immutable plan/approve/apply
+broker whose approval occurs outside the agent trust boundary; do not expose
+the existing auto-update script or broad `dbc` helpers as Astra tools. Broker
+migrations must validate the replacement before activating its key, preserve
+prior history as inert root-only data, and invalidate prior pending approvals.
 
 #### Gluetun VPN Watchdog
 
