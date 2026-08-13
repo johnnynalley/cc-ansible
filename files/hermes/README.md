@@ -43,6 +43,13 @@ transcripts.
   `discord-regressions.json` contains 12 sanitized promotion cases for route
   isolation, authorization, DM silence, duplicate consumers, replay, hostile
   attachments, restart, rollback, and Rigel idle silence.
+- `automation-contract.json` inventories all 28 live cron jobs and the three
+  active profile heartbeats, assigns each one an agent-backed, external, or
+  deterministic-script-only target, preserves the Health receiver as an
+  external service, and keeps the absent Siri relay retired.
+  `automation-regressions.json` contains 14 sanitized promotion cases for
+  inventory drift, one-shot handling, ownership, delivery isolation, Health,
+  Siri, scheduler overlap, and rollback.
 - `profiles/*/AGENTS.md` contains each profile's root-owned operating contract.
   These files are always-on behavior policy, not keyword-triggered skills.
 - `scripts/agents/hermes-shadow-target-audit.py` is the fail-closed validator.
@@ -54,6 +61,10 @@ transcripts.
   distinct profile and Discord identities, inert authority, ordered source
   drain and target activation, rollback, Health continuity, and the complete
   sanitized promotion corpus.
+- `scripts/agents/hermes-automation-contract-audit.py` validates the complete
+  31-lane schedule inventory, target owner/mode/output boundaries, current
+  Health and Siri dispositions, handoff order, source pins, and optionally a
+  fresh redacted OpenClaw SQLite inventory.
 
 The target declaration is deliberately structured. Do not replace it with
 natural-language phrase matching. Update the schema, validator, tests, and

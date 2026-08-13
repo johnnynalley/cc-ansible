@@ -61,6 +61,12 @@ class ControlPlaneInventoryTests(unittest.TestCase):
                 );
                 """)
             job = {
+                "deleteAfterRun": False,
+                "schedule": {
+                    "kind": "cron",
+                    "expr": "0 1 * * *",
+                    "tz": "America/Chicago",
+                },
                 "payload": {
                     "kind": "command",
                     "argv": [
@@ -70,7 +76,7 @@ class ControlPlaneInventoryTests(unittest.TestCase):
                     ],
                     "cwd": "/home/johnny/.openclaw/workspace",
                     "timeoutSeconds": 30,
-                }
+                },
             }
             database.execute(
                 """
@@ -110,6 +116,40 @@ class ControlPlaneInventoryTests(unittest.TestCase):
         )
         self.assertTrue(job["delivery"]["hasRecipient"])
         self.assertTrue(job["delivery"]["hasAccount"])
+        self.assertFalse(job["deleteAfterRun"])
+        self.assertIsNone(job["schedule"]["at"])
+
+    def test_one_shot_lifecycle_is_preserved_without_payload_content(self) -> None:
+        one_shot = {
+            "deleteAfterRun": True,
+            "schedule": {
+                "kind": "at",
+                "at": "2026-08-17T00:00:00.000Z",
+            },
+            "payload": {
+                "kind": "agentTurn",
+                "message": REDACTION_SENTINEL,
+            },
+        }
+        with closing(sqlite3.connect(self.database_path)) as database:
+            database.execute(
+                """
+                UPDATE cron_jobs
+                   SET schedule_kind = 'at', schedule_expr = NULL,
+                       schedule_tz = NULL, payload_kind = 'agentTurn',
+                       job_json = ?
+                """,
+                (json.dumps(one_shot),),
+            )
+            database.commit()
+
+        result = inventory_module.inventory_database(self.database_path)
+        encoded = json.dumps(result, sort_keys=True)
+        self.assertNotIn(REDACTION_SENTINEL, encoded)
+        job = result["jobs"][0]
+        self.assertTrue(job["deleteAfterRun"])
+        self.assertEqual(job["schedule"]["kind"], "at")
+        self.assertEqual(job["schedule"]["at"], "2026-08-17T00:00:00.000Z")
 
     def test_unknown_schema_fails_closed(self) -> None:
         with closing(sqlite3.connect(self.database_path)) as database:

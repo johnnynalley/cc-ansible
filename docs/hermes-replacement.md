@@ -221,6 +221,53 @@ silence, token-lock behavior, bot-loop prevention, no restart replay, hostile
 attachment containment, source queue drain, maintenance-gap handling,
 rollback, and post-cutover Rigel silence.
 
+## Scheduled Automation And Health
+
+The live metadata-only inventory on 2026-08-13 found 28 enabled OpenClaw cron
+jobs: 18 agent turns and 10 command jobs. The current agent configuration also
+has three enabled 30-minute heartbeats for Astra, Dubble, and Rigel. All 31
+lanes are represented explicitly in `files/hermes/automation-contract.json`;
+none is dropped merely because its implementation changes.
+
+The target classification is:
+
+- 16 agent-backed lanes produce local structured proposals under a future
+  non-messaging `hermes-automation` owner. They do not inherit a Discord token
+  and cannot post directly. A separately scoped publisher must validate the
+  destination, evidence, dedupe state, and output size before delivery.
+- 10 command lanes move to explicit unprivileged systemd service/timer owners.
+  OpenClaw self-maintenance becomes Hermes proposal/diagnostic maintenance;
+  Daily Summary collection and assembly, backup, repo drift, memory proposal,
+  and thread archival do not run inside a messaging Gateway.
+- Five deterministic lanes use Hermes no-agent semantics: Rigel plus the four
+  pending source-backed Warframe reminders observed on August 13. Empty stdout
+  is the only idle result, so no model, control token, or status explanation is
+  involved.
+
+Hermes cron jobs cannot recursively create more cron jobs. The Warframe sync
+therefore becomes an agent-reviewed local plan; an external reconciler creates
+validated no-agent one-shots. Completed source one-shots are not replayed.
+Before cutover, the query-only OpenClaw SQLite inventory must be rerun and
+compared with the contract. A new job, changed schedule, or missing recurring
+lane blocks promotion; an absent delete-after-run reminder is allowed only as
+expired source history.
+
+The current `health-receiver.service` remains an active user service while the
+Hermes runtime is designed and tested. It stays running through messaging and
+scheduler handoff. Its separate attended modernization uses
+`playbooks/agents/openclaw-health-receiver.yml` to move ingestion to a dedicated
+system identity while exposing only aggregate reports to models; raw Health
+rows and the upload token remain outside Hermes. No Siri relay unit is active,
+and migration is forbidden from recreating one.
+
+The shadow deployment installs only the root-owned contract and audit. It does
+not create `hermes-automation`, systemd timers, publishers, one-shot jobs, or
+live schedules. Fourteen sanitized promotion cases in
+`files/hermes/automation-regressions.json` cover source drift, one-shot expiry,
+command isolation, direct-message prevention, recursive scheduling, idle
+silence, scheduler overlap, Health continuity/data containment, Siri
+retirement, and rollback ordering.
+
 ## Transcript-Derived Behavior Tests
 
 The saved transcripts are regression inputs, not just incident notes. Hermes

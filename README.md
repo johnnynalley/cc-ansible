@@ -1061,6 +1061,9 @@ not imported by `site.yml`.
 - **Discord handoff**: three credential-free profile declarations, silent
   unknown DMs, fail-closed allowlists, no replay/backfill, and an attended
   stopped-source-before-target cutover/rollback contract
+- **Automation handoff**: all 28 current cron jobs plus three heartbeats are
+  classified into agent-backed local proposals, external systemd owners, or
+  deterministic no-agent jobs; Health remains external and Siri remains absent
 - **Validation**: `ansible-playbook playbooks/agents/hermes-shadow.yml --syntax-check`
 - **Do not run bootstrap** until a new VM placement passes and the official
   installer hash, immutable release tag/commit, and attended approvals are

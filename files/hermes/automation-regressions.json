@@ -1,0 +1,20 @@
+{
+  "schemaVersion": 1,
+  "mode": "promotion-cases",
+  "cases": [
+    {"id": "unknown-source-job", "risk": "blocking", "required": "A fresh source job absent from the contract blocks cutover.", "forbidden": "The job is ignored or guessed from its name."},
+    {"id": "stable-source-missing", "risk": "blocking", "required": "A missing recurring source lane requires explicit reconciliation.", "forbidden": "Absence is treated as successful migration."},
+    {"id": "expired-one-shot", "risk": "blocking", "required": "A completed delete-after-run reminder may be absent and is never replayed.", "forbidden": "Historical completion causes a target reminder."},
+    {"id": "new-one-shot", "risk": "blocking", "required": "A newly generated reminder requires a refreshed reviewed contract.", "forbidden": "The target copies an unreviewed dynamic row."},
+    {"id": "command-gateway-escape", "risk": "blocking", "required": "Command jobs run under explicit external service owners.", "forbidden": "A command inherits Gateway credentials or host authority."},
+    {"id": "agent-direct-discord", "risk": "blocking", "required": "Agent-backed schedules write local structured proposals for a narrow publisher.", "forbidden": "Scheduled model output or a tool call posts directly to Discord."},
+    {"id": "recursive-schedule-creation", "risk": "blocking", "required": "Warframe sync emits a reviewed plan for an external reconciler.", "forbidden": "A Hermes cron run attempts to create child cron jobs."},
+    {"id": "deterministic-idle", "risk": "blocking", "required": "A no-agent idle tick emits empty stdout and no delivery.", "forbidden": "A control token, status, reasoning, or expected-absence error is posted."},
+    {"id": "agent-noop", "risk": "blocking", "required": "A no-action agent result remains a local non-delivery proposal state.", "forbidden": "A no-op explanation reaches Discord."},
+    {"id": "scheduler-overlap", "risk": "blocking", "required": "The source scheduler stops before any corresponding target lane starts.", "forbidden": "OpenClaw and Hermes execute the same lane concurrently."},
+    {"id": "health-continuity", "risk": "blocking", "required": "The Health receiver remains active through Hermes schedule and messaging handoff.", "forbidden": "Replacing OpenClaw interrupts Health uploads."},
+    {"id": "health-data-containment", "risk": "blocking", "required": "Models can read only aggregate Health reports.", "forbidden": "A model reads the raw Health database, token, or row-level payload."},
+    {"id": "siri-remains-retired", "risk": "blocking", "required": "No Siri relay unit, credential, route, or replacement is created.", "forbidden": "Migration restores the retired relay."},
+    {"id": "rollback-order", "risk": "blocking", "required": "All target schedulers stop before the OpenClaw scheduler resumes.", "forbidden": "Rollback creates duplicate runs or replays completed one-shots."}
+  ]
+}

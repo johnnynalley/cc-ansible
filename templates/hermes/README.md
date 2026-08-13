@@ -12,8 +12,9 @@
   thread mentions, bounded attachments, and no slash registration.
 - `hermes-gateway.service.j2`: one hardened system service per OS identity. It
   fixes `HERMES_HOME`, root-writable profile-scoped managed credentials, and
-  Podman paths; requires a root-owned shadow-ready marker; runs both structured
-  contract audits before startup; and exposes no dashboard or API listener.
+  Podman paths; requires a root-owned shadow-ready marker; runs the shadow,
+  Discord, and automation/Health contract audits before startup; and exposes
+  no dashboard or API listener.
 
 ## Consumer
 

@@ -1,0 +1,315 @@
+{
+  "schemaVersion": 1,
+  "mode": "design-only",
+  "observedDate": "2026-08-13",
+  "sourcePins": {
+    "stateMigration": {
+      "path": "files/hermes/openclaw-state-migration-contract.json",
+      "sha256": "dc9887db3fafe562812b6781a14bd56582cd103a7ff94b851e49d72ffa4ddcae"
+    },
+    "discordCutover": {
+      "path": "files/hermes/discord-cutover-contract.json",
+      "sha256": "964cf46ea96518f021c51645fd9b065e79657561218819a025f54c78a067f83d"
+    },
+    "rigelJob": {
+      "path": "files/hermes/jobs/rigel-academic-alerts.json",
+      "sha256": "192aadbc53cb954cf92a1e86f551a7d08260a43ceabf69de0dddcacf3a756070"
+    },
+    "healthReceiverPlaybook": {
+      "path": "playbooks/agents/openclaw-health-receiver.yml",
+      "sha256": "eb338fb3bc4b615ebb3f7ab453b2e4830cbede85073e555a8bcf9fc7da360898"
+    },
+    "controlPlaneInventory": {
+      "path": "scripts/agents/openclaw-control-plane-inventory.py",
+      "sha256": "90993d045c25c992fc6e6a4abe137d77ab170ec9a55b433b8545ad3c2a16be79"
+    }
+  },
+  "authority": {
+    "liveChangeAuthorized": false,
+    "schedulerActivationAuthorized": false,
+    "openclawStopAuthorized": false,
+    "healthReceiverChangeAuthorized": false,
+    "siriRelayCreationAuthorized": false,
+    "messageDeliveryAuthorized": false,
+    "sourceMutationAuthorized": false,
+    "sourceCleanupAuthorized": false
+  },
+  "invariants": {
+    "freshSourceInventoryRequiredAtCutover": true,
+    "unknownSourceScheduleBlocksCutover": true,
+    "oneActiveSchedulerPerLane": true,
+    "legacyPromptsCopiedVerbatim": false,
+    "commandJobsRunInsideMessagingGateway": false,
+    "agentJobsCreateNestedCronJobs": false,
+    "agentJobsDeliverDirectlyToDiscord": false,
+    "agentJobsWriteLocalStructuredProposals": true,
+    "deterministicJobsUseNoAgentMode": true,
+    "deterministicIdleStdout": "empty",
+    "deterministicJobsUseModelTokens": false,
+    "pendingOneShotsRebuiltFromReviewedPlans": true,
+    "completedOneShotsReplayed": false,
+    "healthReceiverExternallyOwned": true,
+    "healthRawDataAvailableToModels": false,
+    "healthAggregateOnly": true,
+    "siriRelayRetired": true
+  },
+  "sourceSummary": {
+    "cronJobs": 28,
+    "heartbeatSchedules": 3,
+    "totalSchedules": 31,
+    "cronPayloadKinds": {
+      "agentTurn": 18,
+      "command": 10
+    },
+    "dispositions": {
+      "agent-backed": 16,
+      "external": 10,
+      "deterministic-script-only": 5,
+      "retire": 0
+    }
+  },
+  "schedules": [
+    {
+      "id": "cron-self-evolution-maintenance",
+      "source": {"type": "cron", "name": "OpenClaw Self-Evolution Maintenance", "payload": "command", "enabled": true, "deleteAfterRun": false, "schedule": {"kind": "every", "value": "1800000", "timezone": null}},
+      "disposition": "external",
+      "target": {"owner": "systemd:hermes-policy-maintenance", "mode": "systemd-service-timer", "name": "hermes-policy-maintenance", "output": "local-artifact-or-proposal", "activation": "disabled-until-cutover"}
+    },
+    {
+      "id": "cron-reddit-hdd-deal-watch",
+      "source": {"type": "cron", "name": "Reddit HDD Deal Watch", "payload": "agentTurn", "enabled": true, "deleteAfterRun": false, "schedule": {"kind": "every", "value": "3600000", "timezone": null}},
+      "disposition": "agent-backed",
+      "target": {"owner": "hermes-automation", "mode": "agent-plan", "name": "reddit-hdd-deal-watch", "output": "local-structured-proposal", "activation": "disabled-until-cutover"}
+    },
+    {
+      "id": "cron-release-advisor",
+      "source": {"type": "cron", "name": "OpenClaw release advisor", "payload": "agentTurn", "enabled": true, "deleteAfterRun": false, "schedule": {"kind": "every", "value": "21600000", "timezone": null}},
+      "disposition": "agent-backed",
+      "target": {"owner": "hermes-automation", "mode": "agent-plan", "name": "hermes-release-advisor", "output": "local-structured-proposal", "activation": "disabled-until-cutover"}
+    },
+    {
+      "id": "cron-archive-astra-logs",
+      "source": {"type": "cron", "name": "Archive old #astra-logs threads", "payload": "command", "enabled": true, "deleteAfterRun": false, "schedule": {"kind": "cron", "value": "0 3 * * *", "timezone": "America/Chicago"}},
+      "disposition": "external",
+      "target": {"owner": "systemd:discord-thread-archive-broker", "mode": "systemd-service-timer", "name": "discord-thread-archive", "output": "local-artifact-or-proposal", "activation": "disabled-until-cutover"}
+    },
+    {
+      "id": "cron-self-evolution-daily",
+      "source": {"type": "cron", "name": "OpenClaw Self-Evolution Daily", "payload": "command", "enabled": true, "deleteAfterRun": false, "schedule": {"kind": "cron", "value": "20 4 * * *", "timezone": "America/Chicago"}},
+      "disposition": "external",
+      "target": {"owner": "systemd:hermes-policy-maintenance", "mode": "systemd-service-timer", "name": "hermes-policy-daily", "output": "local-artifact-or-proposal", "activation": "disabled-until-cutover"}
+    },
+    {
+      "id": "cron-warframe-drops-sync",
+      "source": {"type": "cron", "name": "Warframe drops sync", "payload": "agentTurn", "enabled": true, "deleteAfterRun": false, "schedule": {"kind": "cron", "value": "35 5,13 * * *", "timezone": "America/Chicago"}},
+      "disposition": "agent-backed",
+      "target": {"owner": "hermes-automation", "mode": "agent-plan", "name": "warframe-drops-sync", "output": "local-structured-proposal", "activation": "disabled-until-cutover"}
+    },
+    {
+      "id": "cron-daily-summary-updates",
+      "source": {"type": "cron", "name": "Daily Summary Collect - Updates + Homelab + RSS", "payload": "command", "enabled": true, "deleteAfterRun": false, "schedule": {"kind": "cron", "value": "15 6 * * *", "timezone": "America/Chicago"}},
+      "disposition": "external",
+      "target": {"owner": "systemd:daily-summary-pipeline", "mode": "systemd-service-timer", "name": "daily-summary-updates", "output": "local-artifact-or-proposal", "activation": "disabled-until-cutover"}
+    },
+    {
+      "id": "cron-fortnite-calendar-sync",
+      "source": {"type": "cron", "name": "Fortnite Tournament Calendar Sync", "payload": "agentTurn", "enabled": true, "deleteAfterRun": false, "schedule": {"kind": "cron", "value": "15 */6 * * *", "timezone": "America/Chicago"}},
+      "disposition": "agent-backed",
+      "target": {"owner": "hermes-automation", "mode": "agent-plan", "name": "fortnite-calendar-sync", "output": "local-structured-proposal", "activation": "disabled-until-cutover"}
+    },
+    {
+      "id": "cron-daily-summary-media",
+      "source": {"type": "cron", "name": "Daily Summary Collect - Media", "payload": "command", "enabled": true, "deleteAfterRun": false, "schedule": {"kind": "cron", "value": "30 6 * * *", "timezone": "America/Chicago"}},
+      "disposition": "external",
+      "target": {"owner": "systemd:daily-summary-pipeline", "mode": "systemd-service-timer", "name": "daily-summary-media", "output": "local-artifact-or-proposal", "activation": "disabled-until-cutover"}
+    },
+    {
+      "id": "cron-fortnite-progress",
+      "source": {"type": "cron", "name": "Fortnite Progress Snapshot", "payload": "agentTurn", "enabled": true, "deleteAfterRun": false, "schedule": {"kind": "cron", "value": "40 6 * * *", "timezone": "America/Chicago"}},
+      "disposition": "agent-backed",
+      "target": {"owner": "hermes-automation", "mode": "agent-plan", "name": "fortnite-progress-snapshot", "output": "local-structured-proposal", "activation": "disabled-until-cutover"}
+    },
+    {
+      "id": "cron-daily-summary-personal",
+      "source": {"type": "cron", "name": "Daily Summary Collect - Personal", "payload": "command", "enabled": true, "deleteAfterRun": false, "schedule": {"kind": "cron", "value": "45 6 * * *", "timezone": "America/Chicago"}},
+      "disposition": "external",
+      "target": {"owner": "systemd:daily-summary-pipeline", "mode": "systemd-service-timer", "name": "daily-summary-personal", "output": "local-artifact-or-proposal", "activation": "disabled-until-cutover"}
+    },
+    {
+      "id": "cron-daily-summary-scratch",
+      "source": {"type": "cron", "name": "Daily Summary Scratch Assemble", "payload": "command", "enabled": true, "deleteAfterRun": false, "schedule": {"kind": "cron", "value": "0 7 * * *", "timezone": "America/Chicago"}},
+      "disposition": "external",
+      "target": {"owner": "systemd:daily-summary-pipeline", "mode": "systemd-service-timer", "name": "daily-summary-assemble", "output": "local-artifact-or-proposal", "activation": "disabled-until-cutover"}
+    },
+    {
+      "id": "cron-daily-summary-compose",
+      "source": {"type": "cron", "name": "Daily Summary Morning Compose", "payload": "agentTurn", "enabled": true, "deleteAfterRun": false, "schedule": {"kind": "cron", "value": "8 7 * * *", "timezone": "America/Chicago"}},
+      "disposition": "agent-backed",
+      "target": {"owner": "hermes-automation", "mode": "agent-plan", "name": "daily-summary-compose", "output": "local-structured-proposal", "activation": "disabled-until-cutover"}
+    },
+    {
+      "id": "cron-daily-summary-watchdog",
+      "source": {"type": "cron", "name": "Daily Summary Delivery Watchdog", "payload": "agentTurn", "enabled": true, "deleteAfterRun": false, "schedule": {"kind": "cron", "value": "30 7 * * *", "timezone": "America/Chicago"}},
+      "disposition": "agent-backed",
+      "target": {"owner": "hermes-automation", "mode": "agent-plan", "name": "daily-summary-watchdog", "output": "local-structured-proposal", "activation": "disabled-until-cutover"}
+    },
+    {
+      "id": "cron-session-janitor-scorecard",
+      "source": {"type": "cron", "name": "Session Janitor Scorecard", "payload": "agentTurn", "enabled": true, "deleteAfterRun": false, "schedule": {"kind": "cron", "value": "0 10 * * *", "timezone": "America/Chicago"}},
+      "disposition": "agent-backed",
+      "target": {"owner": "hermes-automation", "mode": "agent-plan", "name": "session-janitor-scorecard", "output": "local-structured-proposal", "activation": "disabled-until-cutover"}
+    },
+    {
+      "id": "cron-warframe-reminder-prime-time-493",
+      "source": {"type": "cron", "name": "Warframe Twitch Drop reminder - Warframe Prime Time #493 (Drops) - 2026-08-13 16:00 CT", "payload": "agentTurn", "enabled": true, "deleteAfterRun": true, "schedule": {"kind": "at", "value": "2026-08-13T21:00:00.000Z", "timezone": null}},
+      "disposition": "deterministic-script-only",
+      "target": {"owner": "hermes-automation", "mode": "no-agent-script", "name": "warframe-reminder-prime-time-493", "output": "local-event-queue", "activation": "disabled-until-cutover"}
+    },
+    {
+      "id": "cron-warframe-reminder-prime-time-raid",
+      "source": {"type": "cron", "name": "Warframe Twitch Drop reminder - Warframe Prime Time Raid - JamieVoiceOver - 2026-08-13 18:00 CT", "payload": "agentTurn", "enabled": true, "deleteAfterRun": true, "schedule": {"kind": "at", "value": "2026-08-13T23:00:00.000Z", "timezone": null}},
+      "disposition": "deterministic-script-only",
+      "target": {"owner": "hermes-automation", "mode": "no-agent-script", "name": "warframe-reminder-prime-time-raid", "output": "local-event-queue", "activation": "disabled-until-cutover"}
+    },
+    {
+      "id": "cron-stw-0010",
+      "source": {"type": "cron", "name": "STW V-Bucks Check 00:10 UTC", "payload": "agentTurn", "enabled": true, "deleteAfterRun": false, "schedule": {"kind": "cron", "value": "10 0 * * *", "timezone": "UTC"}},
+      "disposition": "agent-backed",
+      "target": {"owner": "hermes-automation", "mode": "agent-plan", "name": "stw-vbucks-0010", "output": "local-structured-proposal", "activation": "disabled-until-cutover"}
+    },
+    {
+      "id": "cron-stw-0035",
+      "source": {"type": "cron", "name": "STW V-Bucks Check 00:35 UTC", "payload": "agentTurn", "enabled": true, "deleteAfterRun": false, "schedule": {"kind": "cron", "value": "35 0 * * *", "timezone": "UTC"}},
+      "disposition": "agent-backed",
+      "target": {"owner": "hermes-automation", "mode": "agent-plan", "name": "stw-vbucks-0035", "output": "local-structured-proposal", "activation": "disabled-until-cutover"}
+    },
+    {
+      "id": "cron-stw-0100",
+      "source": {"type": "cron", "name": "STW V-Bucks Check 01:00 UTC", "payload": "agentTurn", "enabled": true, "deleteAfterRun": false, "schedule": {"kind": "cron", "value": "0 1 * * *", "timezone": "UTC"}},
+      "disposition": "agent-backed",
+      "target": {"owner": "hermes-automation", "mode": "agent-plan", "name": "stw-vbucks-0100", "output": "local-structured-proposal", "activation": "disabled-until-cutover"}
+    },
+    {
+      "id": "cron-nightly-memory-summary",
+      "source": {"type": "cron", "name": "Nightly memory summarization", "payload": "command", "enabled": true, "deleteAfterRun": false, "schedule": {"kind": "cron", "value": "0 23 * * *", "timezone": "America/Chicago"}},
+      "disposition": "external",
+      "target": {"owner": "systemd:hermes-memory-proposal", "mode": "systemd-service-timer", "name": "hermes-memory-proposal", "output": "local-artifact-or-proposal", "activation": "disabled-until-cutover"}
+    },
+    {
+      "id": "cron-nightly-workspace-snapshot",
+      "source": {"type": "cron", "name": "Nightly workspace snapshot", "payload": "command", "enabled": true, "deleteAfterRun": false, "schedule": {"kind": "cron", "value": "55 23 * * *", "timezone": "America/Chicago"}},
+      "disposition": "external",
+      "target": {"owner": "systemd:hermes-backup", "mode": "systemd-service-timer", "name": "hermes-profile-backup", "output": "local-artifact-or-proposal", "activation": "disabled-until-cutover"}
+    },
+    {
+      "id": "cron-warframe-reminder-lunethae",
+      "source": {"type": "cron", "name": "Warframe Twitch Drop reminder - Lunethae (Italian) - 2026-08-14 09:00 CT", "payload": "agentTurn", "enabled": true, "deleteAfterRun": true, "schedule": {"kind": "at", "value": "2026-08-14T14:00:00.000Z", "timezone": null}},
+      "disposition": "deterministic-script-only",
+      "target": {"owner": "hermes-automation", "mode": "no-agent-script", "name": "warframe-reminder-lunethae", "output": "local-event-queue", "activation": "disabled-until-cutover"}
+    },
+    {
+      "id": "cron-weekly-memory-promotion",
+      "source": {"type": "cron", "name": "Weekly memory promotion", "payload": "agentTurn", "enabled": true, "deleteAfterRun": false, "schedule": {"kind": "cron", "value": "0 8 * * 0", "timezone": "America/Chicago"}},
+      "disposition": "agent-backed",
+      "target": {"owner": "hermes-automation", "mode": "agent-plan", "name": "weekly-memory-proposal-review", "output": "local-structured-proposal", "activation": "disabled-until-cutover"}
+    },
+    {
+      "id": "cron-weekly-social-seeds",
+      "source": {"type": "cron", "name": "Weekly social media seeds", "payload": "agentTurn", "enabled": true, "deleteAfterRun": false, "schedule": {"kind": "cron", "value": "0 9 * * 0", "timezone": "America/Chicago"}},
+      "disposition": "agent-backed",
+      "target": {"owner": "hermes-automation", "mode": "agent-plan", "name": "weekly-social-seeds", "output": "local-structured-proposal", "activation": "disabled-until-cutover"}
+    },
+    {
+      "id": "cron-warframe-reminder-snootydeath",
+      "source": {"type": "cron", "name": "Warframe Twitch Drop reminder - SnootyDeath (English) - 2026-08-16 19:00 CT", "payload": "agentTurn", "enabled": true, "deleteAfterRun": true, "schedule": {"kind": "at", "value": "2026-08-17T00:00:00.000Z", "timezone": null}},
+      "disposition": "deterministic-script-only",
+      "target": {"owner": "hermes-automation", "mode": "no-agent-script", "name": "warframe-reminder-snootydeath", "output": "local-event-queue", "activation": "disabled-until-cutover"}
+    },
+    {
+      "id": "cron-ops-repo-drift",
+      "source": {"type": "cron", "name": "Ops Repo Context Drift Check", "payload": "command", "enabled": true, "deleteAfterRun": false, "schedule": {"kind": "cron", "value": "0 22 * * 0", "timezone": "America/Chicago"}},
+      "disposition": "external",
+      "target": {"owner": "systemd:repo-context-audit", "mode": "systemd-service-timer", "name": "repo-context-audit", "output": "local-artifact-or-proposal", "activation": "disabled-until-cutover"}
+    },
+    {
+      "id": "cron-session-janitor-stale",
+      "source": {"type": "cron", "name": "Session Janitor Stale-Running Weekly Review", "payload": "agentTurn", "enabled": true, "deleteAfterRun": false, "schedule": {"kind": "cron", "value": "30 10 * * 1", "timezone": "America/Chicago"}},
+      "disposition": "agent-backed",
+      "target": {"owner": "hermes-automation", "mode": "agent-plan", "name": "session-janitor-stale-review", "output": "local-structured-proposal", "activation": "disabled-until-cutover"}
+    },
+    {
+      "id": "heartbeat-astra",
+      "source": {"type": "heartbeat", "name": "Astra heartbeat", "payload": "heartbeat", "enabled": true, "deleteAfterRun": false, "schedule": {"kind": "every", "value": "30m", "timezone": "America/Chicago"}},
+      "disposition": "agent-backed",
+      "target": {"owner": "hermes-automation", "mode": "agent-plan", "name": "astra-operational-watch", "output": "local-structured-proposal", "activation": "disabled-until-cutover"}
+    },
+    {
+      "id": "heartbeat-dubble",
+      "source": {"type": "heartbeat", "name": "Dubble heartbeat", "payload": "heartbeat", "enabled": true, "deleteAfterRun": false, "schedule": {"kind": "every", "value": "30m", "timezone": "America/Chicago"}},
+      "disposition": "agent-backed",
+      "target": {"owner": "hermes-automation", "mode": "agent-plan", "name": "dubble-thread-followup", "output": "local-structured-proposal", "activation": "disabled-until-cutover"}
+    },
+    {
+      "id": "heartbeat-rigel",
+      "source": {"type": "heartbeat", "name": "Rigel heartbeat", "payload": "heartbeat", "enabled": true, "deleteAfterRun": false, "schedule": {"kind": "every", "value": "30m", "timezone": "America/Chicago"}},
+      "disposition": "deterministic-script-only",
+      "target": {"owner": "hermes-rigel", "mode": "no-agent-script", "name": "rigel-academic-alerts", "output": "local-event-queue", "activation": "disabled-until-cutover"}
+    }
+  ],
+  "integrations": {
+    "healthReceiver": {
+      "disposition": "external",
+      "currentState": "legacy-user-service-active",
+      "cutoverState": "dedicated-system-service-active",
+      "targetPlaybook": "playbooks/agents/openclaw-health-receiver.yml",
+      "continuity": "keep-running-through-hermes-cutover",
+      "rawDatabaseOwner": "health-receiver-only",
+      "modelAccess": "aggregate-report-only",
+      "separateAttendedCutover": true
+    },
+    "siriRelay": {
+      "disposition": "retire",
+      "currentState": "no-active-unit",
+      "targetState": "absent",
+      "recreationAuthorized": false
+    }
+  },
+  "handoff": {
+    "preconditions": [
+      "fresh-redacted-source-inventory",
+      "every-source-lane-reconciled",
+      "all-target-schedules-disabled",
+      "automation-worker-has-no-messaging-token",
+      "external-publisher-scope-proven",
+      "health-receiver-continuity-proven",
+      "rollback-reviewed"
+    ],
+    "order": [
+      "wait-for-openclaw-schedules-and-heartbeats-idle",
+      "stop-openclaw-scheduler-with-gateway-handoff",
+      "prove-no-openclaw-scheduled-worker-remains",
+      "activate-external-systemd-lanes",
+      "activate-hermes-automation-lanes-disabled-to-enabled",
+      "activate-rigel-deterministic-lane",
+      "prove-single-run-and-single-delivery-per-lane",
+      "prove-idle-lanes-produce-no-discord-output"
+    ],
+    "healthReceiverDisposition": "keep-running",
+    "sourceHistoryReplay": false,
+    "completedOneShotReplay": false
+  },
+  "rollback": {
+    "order": [
+      "pause-all-hermes-and-external-target-schedules",
+      "wait-for-target-workers-idle",
+      "prove-target-scheduled-workers-absent",
+      "restore-openclaw-gateway-and-scheduler",
+      "reconcile-pending-one-shots-without-replay",
+      "prove-one-source-scheduler-per-lane",
+      "prove-health-receiver-still-active"
+    ],
+    "healthReceiverDisposition": "keep-running",
+    "siriRelayDisposition": "remain-absent"
+  },
+  "promotionCases": "files/hermes/automation-regressions.json"
+}

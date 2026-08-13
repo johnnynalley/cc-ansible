@@ -57,6 +57,15 @@
   identities or homes, pairing and bot loops, replay/backfill, source ordering,
   Health continuity, rollback ordering, source-hash drift, redacted output,
   and all 12 sanitized Discord promotion cases.
+- `hermes-automation-contract-audit.py` validates all 28 current cron jobs and
+  three heartbeat lanes against their agent-backed, external, or no-agent
+  owners. With `--source-inventory`, it fails on new jobs, recurring-job
+  absence, schedule drift, or unsafe one-shot state while allowing already
+  expired delete-after-run reminders to remain absent.
+- `test_hermes_automation_contract_audit.py` covers schedule-set and authority
+  drift, command/Gateway separation, no direct scheduled Discord delivery,
+  fresh source reconciliation, one-shot expiry, Health/Siri boundaries, and
+  aggregate-only audit output.
 
 ## Health Receiver
 
@@ -97,11 +106,13 @@ dedicated `openclaw-health` system service passes cutover validation.
   polling, missing native heartbeat outcomes, and unknown links.
 - `openclaw-control-plane-inventory.py` reads the live SQLite control plane in
   query-only mode and emits a migration inventory for cron ownership, schedule,
-  execution class, and delivery shape. It fingerprints job IDs and omits
-  prompts, raw arguments, recipient/account IDs, and error text.
+  one-shot timing, delete-after-run state, execution class, and delivery shape.
+  It fingerprints job IDs and omits prompts, raw arguments,
+  recipient/account IDs, and error text.
 - `test_openclaw_control_plane_inventory.py` proves secret-like arguments,
-  recipient/account IDs, and raw job IDs cannot enter the inventory output and
-  that unknown schemas fail closed.
+  recipient/account IDs, raw job IDs, and one-shot payload text cannot enter
+  the inventory output; it also verifies lifecycle metadata and unknown-schema
+  rejection.
 - `openclaw-config-inventory.py` inventories agent, heartbeat, binding,
   Discord-account, plugin-slot, hook, model-runtime, global/per-agent subagent
   routing, and Gateway policy shape without emitting credentials, identity

@@ -44,6 +44,7 @@ EXPECTED_COLUMNS = {
 }
 SAFE_AGENT_RE = re.compile(r"^[a-z0-9][a-z0-9_.-]{0,63}$")
 SAFE_MODEL_RE = re.compile(r"^[a-z0-9][a-z0-9._/-]{0,127}$")
+SAFE_AT_RE = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?Z$")
 PAYLOAD_KINDS = {"agentTurn", "command", "systemEvent"}
 SECRET_HINT_RE = re.compile(
     r"(?:authorization|bearer|cookie|credential|password|secret|token)",
@@ -143,6 +144,33 @@ def command_shape(job_json: Any) -> dict[str, Any] | None:
     }
 
 
+def lifecycle_shape(job_json: Any, schedule_kind: str) -> dict[str, Any]:
+    if not isinstance(job_json, str):
+        raise InventoryError("invalid-job-json")
+    try:
+        job = json.loads(job_json)
+    except json.JSONDecodeError as exc:
+        raise InventoryError("invalid-job-json") from exc
+    if not isinstance(job, dict):
+        raise InventoryError("invalid-job-json")
+    delete_after_run = job.get("deleteAfterRun", False)
+    if not isinstance(delete_after_run, bool):
+        raise InventoryError("invalid-delete-after-run")
+    schedule = job.get("schedule")
+    if not isinstance(schedule, dict) or schedule.get("kind") != schedule_kind:
+        raise InventoryError("schedule-kind-drift")
+    at = schedule.get("at")
+    if schedule_kind == "at":
+        if not isinstance(at, str) or not SAFE_AT_RE.fullmatch(at):
+            raise InventoryError("invalid-at-schedule")
+    elif at is not None:
+        raise InventoryError("unexpected-at-schedule")
+    return {
+        "deleteAfterRun": delete_after_run,
+        "at": at,
+    }
+
+
 def open_database(path: Path) -> sqlite3.Connection:
     resolved = path.resolve(strict=True)
     database = sqlite3.connect(
@@ -189,6 +217,7 @@ def inventory_database(path: Path) -> dict[str, Any]:
         )
         payload_counts[payload_kind] += 1
         owner_counts[owner or "unowned"] += 1
+        lifecycle = lifecycle_shape(row["job_json"], row["schedule_kind"])
         job = {
             "fingerprint": fingerprint(f"{row['store_key']}\0{row['job_id']}"),
             "name": row["name"] if isinstance(row["name"], str) else None,
@@ -199,7 +228,9 @@ def inventory_database(path: Path) -> dict[str, Any]:
                 "expression": row["schedule_expr"],
                 "timezone": row["schedule_tz"],
                 "everyMs": row["every_ms"],
+                "at": lifecycle["at"],
             },
+            "deleteAfterRun": lifecycle["deleteAfterRun"],
             "payload": {
                 "kind": payload_kind,
                 "model": safe_enum(row["payload_model"], SAFE_MODEL_RE),

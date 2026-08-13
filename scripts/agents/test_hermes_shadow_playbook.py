@@ -128,6 +128,12 @@ class HermesShadowPlaybookTests(unittest.TestCase):
             "hermes_discord_contract_live": self.variables[
                 "hermes_discord_contract_live"
             ],
+            "hermes_automation_audit_live": self.variables[
+                "hermes_automation_audit_live"
+            ],
+            "hermes_automation_contract_live": self.variables[
+                "hermes_automation_contract_live"
+            ],
         }
         for profile in self.variables["hermes_shadow_profiles"]:
             rendered = template.render(hermes_profile=profile, **common)
@@ -147,6 +153,7 @@ class HermesShadowPlaybookTests(unittest.TestCase):
                 rendered,
             )
             self.assertIn("hermes-discord-cutover-audit", rendered)
+            self.assertIn("hermes-automation-contract-audit", rendered)
             self.assertNotIn("docker.sock", rendered)
             self.assertNotIn("sudo", rendered)
             self.assertNotIn("ListenStream", rendered)
@@ -251,6 +258,20 @@ class HermesShadowPlaybookTests(unittest.TestCase):
         self.assertNotIn("subprocess", self.rigel_script)
         self.assertNotIn("provider", self.rigel_job)
         self.assertNotIn("model", self.rigel_job)
+
+    def test_automation_contract_is_deployed_without_activation(self) -> None:
+        contract = self.task("Deploy Hermes automation contract")
+        audit = self.task("Deploy Hermes automation contract audit")
+        sources = self.task("Deploy pinned Hermes automation audit sources")
+        validation = self.task("Validate deployed Hermes automation contract")
+        self.assertIn("hermes_automation_contract_source", contract)
+        self.assertIn("hermes_automation_audit_source", audit)
+        self.assertIn("automation-regressions.json", sources)
+        self.assertIn("openclaw-control-plane-inventory.py", sources)
+        self.assertIn("openclaw-health-receiver.yml", sources)
+        self.assertIn("--repository-root", validation)
+        self.assertNotIn("hermes cron create", self.playbook)
+        self.assertNotIn("systemd_service:\n        name: hermes-automation", self.playbook)
 
     def test_operating_contracts_are_root_owned(self) -> None:
         task = self.task("Deploy root-owned Hermes operating contracts")

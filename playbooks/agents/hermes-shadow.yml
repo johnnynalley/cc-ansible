@@ -220,6 +220,9 @@
         - /usr/local/share/hermes-shadow/repository
         - /usr/local/share/hermes-shadow/repository/files
         - /usr/local/share/hermes-shadow/repository/files/hermes
+        - /usr/local/share/hermes-shadow/repository/files/hermes/jobs
+        - /usr/local/share/hermes-shadow/repository/playbooks
+        - /usr/local/share/hermes-shadow/repository/playbooks/agents
         - /usr/local/share/hermes-shadow/repository/scripts
         - /usr/local/share/hermes-shadow/repository/scripts/agents
         - /usr/local/libexec
@@ -411,6 +414,24 @@
         mode: "0755"
         backup: true
 
+    - name: Deploy Hermes automation contract
+      ansible.builtin.copy:
+        src: "{{ playbook_dir }}/../../{{ hermes_automation_contract_source }}"
+        dest: "{{ hermes_automation_contract_live }}"
+        owner: root
+        group: root
+        mode: "0644"
+        backup: true
+
+    - name: Deploy Hermes automation contract audit
+      ansible.builtin.copy:
+        src: "{{ playbook_dir }}/../../{{ hermes_automation_audit_source }}"
+        dest: "{{ hermes_automation_audit_live }}"
+        owner: root
+        group: root
+        mode: "0755"
+        backup: true
+
     - name: Deploy pinned Hermes Discord audit sources
       ansible.builtin.copy:
         src: "{{ playbook_dir }}/../../{{ item }}"
@@ -425,6 +446,22 @@
         - files/hermes/discord-regressions.json
         - scripts/agents/openclaw-delivery-cutover-audit.py
 
+    - name: Deploy pinned Hermes automation audit sources
+      ansible.builtin.copy:
+        src: "{{ playbook_dir }}/../../{{ item }}"
+        dest: "/usr/local/share/hermes-shadow/repository/{{ item }}"
+        owner: root
+        group: root
+        mode: "0644"
+        backup: true
+      loop:
+        - files/hermes/openclaw-state-migration-contract.json
+        - files/hermes/discord-cutover-contract.json
+        - files/hermes/jobs/rigel-academic-alerts.json
+        - files/hermes/automation-regressions.json
+        - playbooks/agents/openclaw-health-receiver.yml
+        - scripts/agents/openclaw-control-plane-inventory.py
+
     - name: Validate deployed Hermes shadow contract
       ansible.builtin.command:
         argv:
@@ -437,6 +474,15 @@
         argv:
           - "{{ hermes_discord_audit_live }}"
           - "{{ hermes_discord_contract_live }}"
+          - --repository-root
+          - /usr/local/share/hermes-shadow/repository
+      changed_when: false
+
+    - name: Validate deployed Hermes automation contract
+      ansible.builtin.command:
+        argv:
+          - "{{ hermes_automation_audit_live }}"
+          - "{{ hermes_automation_contract_live }}"
           - --repository-root
           - /usr/local/share/hermes-shadow/repository
       changed_when: false
