@@ -7,7 +7,7 @@ Jinja rendering. Use `templates/` when a file needs variable substitution.
 
 | File | Owner area | Consumers | Notes |
 | --- | --- | --- | --- |
-| `hermes/` | Hermes replacement target policy and profile identities | Future isolated Hermes VM/profile deployment | Credential-free structured shadow contract plus root-owned Astra, Dubble, and Rigel behavior baselines. It keeps delivery, scheduling, listeners, host authority, and source cleanup disabled until later gates pass. |
+| `hermes/` | Hermes replacement, migration policy, and profile identities | Future isolated Hermes VM/profile deployment | Credential-free structured shadow and OpenClaw migration contracts plus root-owned Astra, Dubble, and Rigel behavior baselines. They keep delivery, scheduling, listeners, host authority, source mutation, secret copying, and cleanup disabled until later gates pass. |
 | `openclaw/` | OpenClaw behavior modernization | Future dedicated-service production workspace deployment | Compact credential-free Astra/Fleet bootstrap sources plus an explicit legacy-workspace disposition policy. Mutable memories and retained project data are staged separately by ownership class. |
 | `qbit-release-stamper.py` | Media release stamping | Legacy/static source for qBittorrent post-download stamping | Prefer repo-managed script/template paths for new work. |
 | `sab-release-stamper.py` | Media release stamping | Legacy/static source for SABnzbd post-download stamping | Prefer repo-managed script/template paths for new work. |

@@ -479,6 +479,45 @@ playbook because the controller currently exposes an Ansible CLI 2.20.1/Python
 module 2.21.0 mismatch; that validator-environment failure is not a Hermes
 runtime result. No live host was changed and no Hermes runtime was installed.
 
+## Source Migration Contract
+
+`files/hermes/openclaw-state-migration-contract.json` is the source-wide Gate 5
+classifier. It does not duplicate the existing path-level workspace policy.
+Instead, it pins that policy by SHA-256, requires a handler for every legacy
+disposition, and gives every top-level object outside the workspace one of
+these explicit treatments:
+
+- curated profile data import after review and parity;
+- reconstruction as a disabled Hermes job, root-owned policy, or external
+  service;
+- cutover-only credential and identity re-enrollment without copying the
+  source secret;
+- queue drain and sealed archive without delivery replay;
+- root-only offline archive for sessions, databases, logs, attachments,
+  retired integrations, alternate workspaces, and runtime evidence; or
+- discard only after a complete archive, parity, sampled restore, and separate
+  retention approval.
+
+The contract keeps all source mutation, source archival, source cleanup, live
+migration, secret copying, messaging activation, and scheduler activation
+unauthorized in this gate. OpenClaw session databases and trajectories do not
+become Hermes sessions. Cron declarations are rebuilt disabled. The production
+delivery queue must be reconciled and archived rather than replayed. Current
+Discord, device, identity, provider, and Gateway credentials are re-enrolled
+only at cutover. The Health database is the sole workspace rule override: it
+remains owned by the dedicated receiver and requires a consistent SQLite
+backup after the receiver is stopped. The retired Nextcloud Talk relay is
+archive-only and is not migrated.
+
+On 2026-08-13 the metadata-only state audit classified all 102 current
+top-level entries: 45 directories and 57 files. The existing recursive
+workspace auditor independently classified all 7,744 current workspace
+objects under its 107 rules. Neither audit read file contents, followed a
+symlink, changed the source, invoked the Hermes importer, copied a credential,
+or activated a job or messaging route. Any future unknown top-level category,
+workspace policy hash change, filesystem-kind drift, or top-level symlink
+fails closed and requires an explicit review.
+
 ## Migration Gates
 
 1. **Source checkpoint:** freeze and verify OpenClaw state, runtime, listeners,

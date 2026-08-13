@@ -16,7 +16,15 @@ transcripts.
   for Rigel's always-enabled 30-minute script-only schedule. It is activated
   through the Hermes CLI only after cutover approval; Ansible never edits
   Hermes `jobs.json` directly.
+- `openclaw-state-migration-contract.json` maps every current OpenClaw
+  state-root category to a curated import, disabled rebuild, cutover-only
+  credential re-enrollment, external owner, or sealed archive. It delegates
+  workspace paths to the existing hashed workspace migration policy and grants
+  no source mutation, archive, cleanup, live migration, delivery, or scheduler
+  activation authority.
 - `scripts/agents/hermes-shadow-target-audit.py` is the fail-closed validator.
+- `scripts/agents/hermes-openclaw-migration-audit.py` validates the migration
+  contract and inventories top-level source metadata without reading contents.
 
 The target declaration is deliberately structured. Do not replace it with
 natural-language phrase matching. Update the schema, validator, tests, and

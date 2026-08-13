@@ -1,0 +1,670 @@
+{
+  "schemaVersion": 1,
+  "mode": "audit-only",
+  "sourceProtection": {
+    "sourceMutationAuthorized": false,
+    "sourceArchiveAuthorized": false,
+    "sourceCleanupAuthorized": false,
+    "liveMigrationAuthorized": false,
+    "secretCopyAuthorized": false,
+    "messagingActivationAuthorized": false,
+    "schedulerActivationAuthorized": false
+  },
+  "workspace": {
+    "policy": "files/openclaw/workspace-migration-policy.json",
+    "policySha256": "08e30aa55c72a54a6ac0e7c67e6d99b5557bd0fed75e8b16a19af556ee20e211",
+    "dispositionHandlers": {
+      "retain": {
+        "action": "curated-import",
+        "destination": "profile-specific staged data with the policy owner class",
+        "activation": "post-parity"
+      },
+      "archive": {
+        "action": "sealed-archive",
+        "destination": "root-only offline OpenClaw archive",
+        "activation": "offline-only"
+      },
+      "replace": {
+        "action": "review-rebuild",
+        "destination": "Hermes-native or external owner-specific replacement",
+        "activation": "post-parity"
+      },
+      "retire": {
+        "action": "sealed-archive",
+        "destination": "root-only retired-component archive",
+        "activation": "offline-only"
+      },
+      "discard": {
+        "action": "discard-after-proof",
+        "destination": "none after archive, parity, restore, and retention approval",
+        "activation": "post-parity"
+      }
+    },
+    "ruleOverrides": {
+      "health-database": {
+        "action": "retain-external",
+        "destination": "dedicated Health receiver",
+        "activation": "post-parity",
+        "backupMethod": "sqlite-consistent-backup-after-receiver-stop"
+      }
+    }
+  },
+  "stateRoot": {
+    "rules": [
+      {
+        "id": "state-git",
+        "scope": "exact",
+        "pattern": ".git",
+        "expectedKind": "directory",
+        "action": "sealed-archive",
+        "destination": "root-only source-control evidence archive",
+        "activation": "offline-only",
+        "reason": "Damaged or historical OpenClaw Git state is rollback evidence, not a Hermes runtime source."
+      },
+      {
+        "id": "state-gitignore",
+        "scope": "exact",
+        "pattern": ".gitignore",
+        "expectedKind": "file",
+        "action": "sealed-archive",
+        "destination": "root-only source-control evidence archive",
+        "activation": "offline-only",
+        "reason": "The legacy ignore policy remains evidence only."
+      },
+      {
+        "id": "active-environment",
+        "scope": "exact",
+        "pattern": ".env",
+        "expectedKind": "file",
+        "action": "re-enroll-secret",
+        "destination": "profile-scoped root-managed Hermes credentials at cutover",
+        "activation": "cutover-only",
+        "sensitivity": "secret",
+        "reason": "Current environment secrets are re-enrolled by owner and are never copied."
+      },
+      {
+        "id": "environment-history",
+        "scope": "glob",
+        "pattern": ".env.*",
+        "expectedKind": "file",
+        "action": "sealed-archive",
+        "destination": "root-only secret-bearing legacy archive",
+        "activation": "offline-only",
+        "sensitivity": "secret",
+        "reason": "Historical environment files are preserved offline and never become active credentials."
+      },
+      {
+        "id": "root-behavior-guidance",
+        "scope": "exact",
+        "pattern": "AGENTS.md",
+        "expectedKind": "file",
+        "action": "review-rebuild",
+        "destination": "root-owned Hermes behavior policy after transcript regression review",
+        "activation": "post-parity",
+        "reason": "Legacy root guidance is reviewed for general behavior rules, not copied wholesale."
+      },
+      {
+        "id": "agents-runtime-state",
+        "scope": "exact",
+        "pattern": "agents",
+        "expectedKind": "directory",
+        "action": "sealed-archive",
+        "destination": "root-only sessions and agent-state archive",
+        "activation": "offline-only",
+        "reason": "OpenClaw agent sessions and runtime state are not imported into Hermes session databases."
+      },
+      {
+        "id": "legacy-backups",
+        "scope": "exact",
+        "pattern": "backups",
+        "expectedKind": "directory",
+        "action": "sealed-archive",
+        "destination": "root-only nested legacy backup archive",
+        "activation": "offline-only",
+        "sensitivity": "secret",
+        "reason": "Nested backups may contain credentials and remain sealed offline."
+      },
+      {
+        "id": "browser-state",
+        "scope": "exact",
+        "pattern": "browser",
+        "expectedKind": "directory",
+        "action": "sealed-archive",
+        "destination": "root-only browser-state archive",
+        "activation": "offline-only",
+        "sensitivity": "secret",
+        "reason": "Browser profiles may contain cookies or authenticated state and are never copied."
+      },
+      {
+        "id": "generated-cache",
+        "scope": "exact",
+        "pattern": "cache",
+        "expectedKind": "directory",
+        "action": "discard-after-proof",
+        "destination": "none after full source archive and retention approval",
+        "activation": "post-parity",
+        "reason": "Generated caches are rebuilt by the new runtime."
+      },
+      {
+        "id": "canvas-state",
+        "scope": "exact",
+        "pattern": "canvas",
+        "expectedKind": "directory",
+        "action": "sealed-archive",
+        "destination": "root-only user-artifact archive",
+        "activation": "offline-only",
+        "reason": "Canvas outputs are preserved as user evidence but not injected into Hermes."
+      },
+      {
+        "id": "generated-completions",
+        "scope": "exact",
+        "pattern": "completions",
+        "expectedKind": "directory",
+        "action": "discard-after-proof",
+        "destination": "none after full source archive and retention approval",
+        "activation": "post-parity",
+        "reason": "Shell completions are generated from the installed runtime."
+      },
+      {
+        "id": "credential-store",
+        "scope": "exact",
+        "pattern": "credentials",
+        "expectedKind": "directory",
+        "action": "re-enroll-secret",
+        "destination": "profile-scoped root-managed Hermes credentials at cutover",
+        "activation": "cutover-only",
+        "sensitivity": "secret",
+        "reason": "Provider and integration credentials are re-enrolled with least privilege."
+      },
+      {
+        "id": "cron-state",
+        "scope": "exact",
+        "pattern": "cron",
+        "expectedKind": "directory",
+        "action": "rebuild-disabled",
+        "destination": "reviewed Hermes declarations or unprivileged systemd jobs",
+        "activation": "post-parity",
+        "reason": "Legacy schedules are reconciled individually and remain disabled until attended cutover."
+      },
+      {
+        "id": "device-enrollment",
+        "scope": "exact",
+        "pattern": "devices",
+        "expectedKind": "directory",
+        "action": "re-enroll-secret",
+        "destination": "new Hermes device enrollment at cutover",
+        "activation": "cutover-only",
+        "sensitivity": "secret",
+        "reason": "Device trust records are not transferable runtime authority."
+      },
+      {
+        "id": "disabled-agents",
+        "scope": "exact",
+        "pattern": "disabled-agents",
+        "expectedKind": "directory",
+        "action": "sealed-archive",
+        "destination": "root-only retired-agent archive",
+        "activation": "offline-only",
+        "reason": "Disabled agent definitions remain historical evidence."
+      },
+      {
+        "id": "disabled-extensions",
+        "scope": "exact",
+        "pattern": "disabled-extensions",
+        "expectedKind": "directory",
+        "action": "sealed-archive",
+        "destination": "root-only retired-extension archive",
+        "activation": "offline-only",
+        "reason": "Disabled extensions remain historical evidence."
+      },
+      {
+        "id": "discord-enrollment",
+        "scope": "exact",
+        "pattern": "discord",
+        "expectedKind": "directory",
+        "action": "re-enroll-secret",
+        "destination": "profile-scoped Hermes Discord credentials and allowlists at cutover",
+        "activation": "cutover-only",
+        "sensitivity": "secret",
+        "reason": "Discord tokens and trust state are newly enrolled only after duplicate-delivery gates pass."
+      },
+      {
+        "id": "dream-state",
+        "scope": "exact",
+        "pattern": "dream-state.json",
+        "expectedKind": "file",
+        "action": "sealed-archive",
+        "destination": "root-only legacy automation archive",
+        "activation": "offline-only",
+        "reason": "Legacy dream-cycle state is not a Hermes authority source."
+      },
+      {
+        "id": "exec-approval-policy",
+        "scope": "exact",
+        "pattern": "exec-approvals.json",
+        "expectedKind": "file",
+        "action": "review-rebuild",
+        "destination": "root-owned Hermes approval and broker policy",
+        "activation": "post-parity",
+        "reason": "OpenClaw approvals are reviewed against the Hermes sandbox instead of copied."
+      },
+      {
+        "id": "exec-approval-history",
+        "scope": "glob",
+        "pattern": "exec-approvals.json.*",
+        "expectedKind": "file",
+        "action": "sealed-archive",
+        "destination": "root-only approval-history archive",
+        "activation": "offline-only",
+        "reason": "Historical approval files remain evidence only."
+      },
+      {
+        "id": "extensions",
+        "scope": "exact",
+        "pattern": "extensions",
+        "expectedKind": "directory",
+        "action": "review-rebuild",
+        "destination": "minimal provenance-pinned Hermes extension set",
+        "activation": "post-parity",
+        "reason": "Extensions are admitted only for a proven parity gap."
+      },
+      {
+        "id": "flows",
+        "scope": "exact",
+        "pattern": "flows",
+        "expectedKind": "directory",
+        "action": "review-rebuild",
+        "destination": "Hermes-native durable task workflows",
+        "activation": "post-parity",
+        "reason": "Legacy flow definitions require behavior-level reconciliation."
+      },
+      {
+        "id": "gateway-environment",
+        "scope": "exact",
+        "pattern": "gateway.systemd.env",
+        "expectedKind": "file",
+        "action": "re-enroll-secret",
+        "destination": "profile-scoped root-managed Hermes service credentials at cutover",
+        "activation": "cutover-only",
+        "sensitivity": "secret",
+        "reason": "Gateway environment values are reconstructed per profile without copying the file."
+      },
+      {
+        "id": "hooks",
+        "scope": "exact",
+        "pattern": "hooks",
+        "expectedKind": "directory",
+        "action": "review-rebuild",
+        "destination": "minimal provenance-pinned Hermes hooks",
+        "activation": "post-parity",
+        "reason": "Hooks are code-bearing and require individual scope and failure-mode review."
+      },
+      {
+        "id": "identity-state",
+        "scope": "exact",
+        "pattern": "identity",
+        "expectedKind": "directory",
+        "action": "re-enroll-secret",
+        "destination": "separate Astra, Dubble, and Rigel Hermes identities at cutover",
+        "activation": "cutover-only",
+        "sensitivity": "secret",
+        "reason": "Runtime identity and authentication state are newly established per profile."
+      },
+      {
+        "id": "internal-agent-runs",
+        "scope": "exact",
+        "pattern": "internal-agent-runs",
+        "expectedKind": "directory",
+        "action": "sealed-archive",
+        "destination": "root-only execution-evidence archive",
+        "activation": "offline-only",
+        "reason": "Internal run records are evidence and never become live Hermes sessions."
+      },
+      {
+        "id": "lcm-database",
+        "scope": "exact",
+        "pattern": "lcm.db",
+        "expectedKind": "file",
+        "action": "sealed-archive",
+        "destination": "root-only OpenClaw database archive",
+        "activation": "offline-only",
+        "backupMethod": "sqlite-consistent-backup-after-openclaw-stop",
+        "reason": "Lossless-context state is preserved for rollback and offline search only."
+      },
+      {
+        "id": "lcm-database-sidecars",
+        "scope": "glob",
+        "pattern": "lcm.db-*",
+        "expectedKind": "file",
+        "action": "sealed-archive",
+        "destination": "root-only OpenClaw database archive",
+        "activation": "offline-only",
+        "reason": "SQLite sidecars are preserved with the stopped database archive."
+      },
+      {
+        "id": "lcm-database-history",
+        "scope": "glob",
+        "pattern": "lcm.db.*",
+        "expectedKind": "file",
+        "action": "sealed-archive",
+        "destination": "root-only OpenClaw database-history archive",
+        "activation": "offline-only",
+        "reason": "Historical lossless-context databases remain offline evidence."
+      },
+      {
+        "id": "lcm-files",
+        "scope": "exact",
+        "pattern": "lcm-files",
+        "expectedKind": "directory",
+        "action": "sealed-archive",
+        "destination": "root-only lossless-context archive",
+        "activation": "offline-only",
+        "sensitivity": "private-content",
+        "reason": "Prompt and context artifacts remain offline and are never injected into Hermes."
+      },
+      {
+        "id": "runtime-locks",
+        "scope": "exact",
+        "pattern": "locks",
+        "expectedKind": "directory",
+        "action": "discard-after-proof",
+        "destination": "none after full source archive and retention approval",
+        "activation": "post-parity",
+        "reason": "Runtime locks are not portable state."
+      },
+      {
+        "id": "logs",
+        "scope": "exact",
+        "pattern": "logs",
+        "expectedKind": "directory",
+        "action": "sealed-archive",
+        "destination": "root-only diagnostic archive",
+        "activation": "offline-only",
+        "sensitivity": "private-content",
+        "reason": "Logs remain searchable evidence outside active agent context."
+      },
+      {
+        "id": "media",
+        "scope": "exact",
+        "pattern": "media",
+        "expectedKind": "directory",
+        "action": "sealed-archive",
+        "destination": "root-only attachment archive",
+        "activation": "offline-only",
+        "sensitivity": "private-content",
+        "reason": "Legacy attachments are preserved offline and imported only by explicit user request."
+      },
+      {
+        "id": "memory-state",
+        "scope": "exact",
+        "pattern": "memory",
+        "expectedKind": "directory",
+        "action": "curated-import",
+        "destination": "profile-specific Hermes memory staging",
+        "activation": "post-parity",
+        "sensitivity": "private-content",
+        "reason": "Durable facts are curated by profile; raw provider state and transcripts are excluded."
+      },
+      {
+        "id": "retired-nextcloud-talk",
+        "scope": "exact",
+        "pattern": "nextcloud-talk",
+        "expectedKind": "directory",
+        "action": "sealed-archive",
+        "destination": "root-only retired-integration archive",
+        "activation": "offline-only",
+        "sensitivity": "secret",
+        "reason": "The retired relay is not migrated or reactivated."
+      },
+      {
+        "id": "nodes",
+        "scope": "exact",
+        "pattern": "nodes",
+        "expectedKind": "directory",
+        "action": "review-rebuild",
+        "destination": "explicit Hermes integrations after security review",
+        "activation": "post-parity",
+        "reason": "Node integrations are reconstructed with new trust boundaries."
+      },
+      {
+        "id": "npm-runtime",
+        "scope": "exact",
+        "pattern": "npm",
+        "expectedKind": "directory",
+        "action": "discard-after-proof",
+        "destination": "none after official Hermes runtime provenance passes",
+        "activation": "post-parity",
+        "reason": "OpenClaw package artifacts are not a Hermes dependency source."
+      },
+      {
+        "id": "openclaw-config",
+        "scope": "exact",
+        "pattern": "openclaw.json",
+        "expectedKind": "file",
+        "action": "re-enroll-secret",
+        "destination": "reviewed per-profile Hermes config plus root-managed credentials",
+        "activation": "cutover-only",
+        "sensitivity": "secret",
+        "reason": "Configuration and embedded authority are reconciled field by field, never copied as a live config."
+      },
+      {
+        "id": "openclaw-config-history",
+        "scope": "glob",
+        "pattern": "openclaw.json.*",
+        "expectedKind": "file",
+        "action": "sealed-archive",
+        "destination": "root-only secret-bearing config archive",
+        "activation": "offline-only",
+        "sensitivity": "secret",
+        "reason": "Historical configs remain sealed rollback evidence."
+      },
+      {
+        "id": "openclaw-database",
+        "scope": "exact",
+        "pattern": "openclaw.sqlite",
+        "expectedKind": "file",
+        "action": "sealed-archive",
+        "destination": "root-only OpenClaw database archive",
+        "activation": "offline-only",
+        "backupMethod": "sqlite-consistent-backup-after-openclaw-stop",
+        "reason": "OpenClaw runtime data remains available for rollback and offline evidence only."
+      },
+      {
+        "id": "plugin-skills",
+        "scope": "exact",
+        "pattern": "plugin-skills",
+        "expectedKind": "directory",
+        "action": "review-rebuild",
+        "destination": "minimal root-reviewed Hermes skills",
+        "activation": "post-parity",
+        "reason": "Plugin-provided skills are code-bearing and require provenance and behavior review."
+      },
+      {
+        "id": "plugins",
+        "scope": "exact",
+        "pattern": "plugins",
+        "expectedKind": "directory",
+        "action": "review-rebuild",
+        "destination": "minimal provenance-pinned Hermes extensions",
+        "activation": "post-parity",
+        "reason": "Legacy plugins are not copied; only proven parity gaps may justify replacements."
+      },
+      {
+        "id": "retained-qq-integration",
+        "scope": "exact",
+        "pattern": "qqbot",
+        "expectedKind": "directory",
+        "action": "sealed-archive",
+        "destination": "root-only non-target integration archive",
+        "activation": "offline-only",
+        "sensitivity": "secret",
+        "reason": "QQ is outside the accepted Hermes target and is preserved without activation."
+      },
+      {
+        "id": "release-history",
+        "scope": "exact",
+        "pattern": "releases",
+        "expectedKind": "directory",
+        "action": "sealed-archive",
+        "destination": "root-only OpenClaw release-evidence archive",
+        "activation": "offline-only",
+        "reason": "Legacy release artifacts remain evidence; Hermes uses independently verified provenance."
+      },
+      {
+        "id": "secret-store",
+        "scope": "exact",
+        "pattern": "secrets",
+        "expectedKind": "directory",
+        "action": "re-enroll-secret",
+        "destination": "profile-scoped root-managed Hermes credentials at cutover",
+        "activation": "cutover-only",
+        "sensitivity": "secret",
+        "reason": "Secrets are newly issued or re-enrolled with the smallest target scope."
+      },
+      {
+        "id": "delivery-queue",
+        "scope": "exact",
+        "pattern": "session-delivery-queue",
+        "expectedKind": "directory",
+        "action": "drain-and-archive",
+        "destination": "verified-empty queue plus root-only delivery evidence archive",
+        "activation": "cutover-only",
+        "reason": "Queued OpenClaw deliveries must be reconciled without replay into Hermes."
+      },
+      {
+        "id": "orphan-sessions",
+        "scope": "exact",
+        "pattern": "session-orphan-archive",
+        "expectedKind": "directory",
+        "action": "sealed-archive",
+        "destination": "root-only session archive",
+        "activation": "offline-only",
+        "sensitivity": "private-content",
+        "reason": "Orphan session artifacts remain offline evidence."
+      },
+      {
+        "id": "skill-workshop",
+        "scope": "exact",
+        "pattern": "skill-workshop",
+        "expectedKind": "directory",
+        "action": "sealed-archive",
+        "destination": "root-only skill-proposal archive",
+        "activation": "offline-only",
+        "reason": "Workshop drafts require fresh review before any Hermes implementation."
+      },
+      {
+        "id": "skills",
+        "scope": "exact",
+        "pattern": "skills",
+        "expectedKind": "directory",
+        "action": "review-rebuild",
+        "destination": "minimal root-reviewed Hermes skills",
+        "activation": "post-parity",
+        "reason": "Skills are ported by capability and regression proof, not by directory copy."
+      },
+      {
+        "id": "runtime-state",
+        "scope": "exact",
+        "pattern": "state",
+        "expectedKind": "directory",
+        "action": "sealed-archive",
+        "destination": "root-only OpenClaw runtime-state archive",
+        "activation": "offline-only",
+        "reason": "Runtime-specific state does not become Hermes mutable state."
+      },
+      {
+        "id": "state-database",
+        "scope": "exact",
+        "pattern": "state.db",
+        "expectedKind": "file",
+        "action": "sealed-archive",
+        "destination": "root-only OpenClaw database archive",
+        "activation": "offline-only",
+        "backupMethod": "sqlite-consistent-backup-after-openclaw-stop",
+        "reason": "State database rows remain offline evidence and rollback material."
+      },
+      {
+        "id": "subagent-state",
+        "scope": "exact",
+        "pattern": "subagents",
+        "expectedKind": "directory",
+        "action": "sealed-archive",
+        "destination": "root-only delegation-state archive",
+        "activation": "offline-only",
+        "reason": "Legacy subagent runs are not imported into Hermes delegation state."
+      },
+      {
+        "id": "task-state",
+        "scope": "exact",
+        "pattern": "tasks",
+        "expectedKind": "directory",
+        "action": "curated-import",
+        "destination": "reviewed Hermes durable-task staging",
+        "activation": "post-parity",
+        "sensitivity": "private-content",
+        "reason": "Only current user-owned task facts are reconstructed; runtime queue state is excluded."
+      },
+      {
+        "id": "temporary-directory",
+        "scope": "exact",
+        "pattern": "tmp",
+        "expectedKind": "directory",
+        "action": "discard-after-proof",
+        "destination": "none after full source archive and retention approval",
+        "activation": "post-parity",
+        "reason": "Temporary runtime artifacts are not portable."
+      },
+      {
+        "id": "temporary-files",
+        "scope": "glob",
+        "pattern": "tmp-*",
+        "expectedKind": "file",
+        "action": "discard-after-proof",
+        "destination": "none after full source archive and retention approval",
+        "activation": "post-parity",
+        "reason": "Temporary diagnostics are retained only through the source archive proof window."
+      },
+      {
+        "id": "update-check-state",
+        "scope": "glob",
+        "pattern": "update-check*",
+        "expectedKind": "file",
+        "action": "discard-after-proof",
+        "destination": "none after full source archive and retention approval",
+        "activation": "post-parity",
+        "reason": "Legacy update-check state is regenerated independently."
+      },
+      {
+        "id": "primary-workspace",
+        "scope": "exact",
+        "pattern": "workspace",
+        "expectedKind": "directory",
+        "action": "delegate-workspace-policy",
+        "destination": "files/openclaw/workspace-migration-policy.json",
+        "activation": "post-parity",
+        "reason": "The existing path-level workspace policy remains the sole workspace classifier."
+      },
+      {
+        "id": "workspace-attestations",
+        "scope": "exact",
+        "pattern": "workspace-attestations",
+        "expectedKind": "directory",
+        "action": "sealed-archive",
+        "destination": "root-only migration-evidence archive",
+        "activation": "offline-only",
+        "reason": "Attestations remain evidence and are regenerated for Hermes generations."
+      },
+      {
+        "id": "alternate-workspaces",
+        "scope": "glob",
+        "pattern": "workspace-*",
+        "expectedKind": "directory",
+        "action": "sealed-archive",
+        "destination": "root-only legacy workspace archive",
+        "activation": "offline-only",
+        "sensitivity": "private-content",
+        "reason": "Historical model and cron workspaces are preserved but never activated in Hermes."
+      }
+    ]
+  }
+}

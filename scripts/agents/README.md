@@ -18,6 +18,16 @@
   no stdout; exact source-backed alerts are deduplicated in profile-local state.
 - `test_hermes_rigel_schedule.py` covers empty/missing semesters, source-backed
   alerts, duplicates, malformed state, and restart persistence.
+- `hermes-openclaw-migration-audit.py` validates the hashed path-level
+  workspace policy and the top-level OpenClaw state contract, then inventories
+  only entry names and filesystem kinds. It fails closed on unknown or
+  ambiguous categories, kind drift, symlinks, source mutation authority,
+  secret copying, active legacy jobs, delivery-queue replay, or an unsafe
+  database backup method.
+- `test_hermes_openclaw_migration_audit.py` covers policy-hash drift, every
+  workspace disposition, Health's external ownership, secret re-enrollment,
+  disabled cron reconstruction, queue draining, stopped SQLite backup, unknown
+  entries, kind drift, and symlink rejection.
 
 ## Health Receiver
 
