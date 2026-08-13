@@ -40,6 +40,7 @@ Source-of-truth docs currently include:
 - [docs/capture-card-streaming-plan.md](docs/capture-card-streaming-plan.md)
 - [docs/fortnite-performance-investigation.md](docs/fortnite-performance-investigation.md)
 - [docs/gaming-benchmark.md](docs/gaming-benchmark.md)
+- [docs/hermes-replacement.md](docs/hermes-replacement.md)
 - [docs/immich-media-inbox.md](docs/immich-media-inbox.md)
 - [docs/media-release-policy.md](docs/media-release-policy.md)
 - [docs/openclaw-docker-access.md](docs/openclaw-docker-access.md)
