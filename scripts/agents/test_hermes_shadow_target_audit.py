@@ -46,15 +46,25 @@ class HermesShadowTargetAuditTests(unittest.TestCase):
         data["deployment"]["productionDeliveryEnabled"] = True
         self.assert_rejected(data, "unsafe-deployment-productionDeliveryEnabled")
 
-    def test_vmid_before_live_gate_is_rejected(self) -> None:
+    def test_source_runtime_concurrency_is_rejected(self) -> None:
         data = copy.deepcopy(self.base)
-        data["deployment"]["vmid"] = 160
-        self.assert_rejected(data, "vmid-selected-before-live-gate")
+        data["deployment"]["sourceRuntimeConcurrentEnabled"] = True
+        self.assert_rejected(data, "source-runtime-concurrency-enabled")
 
-    def test_preferred_node_before_live_gate_is_rejected(self) -> None:
+    def test_direct_source_read_is_rejected(self) -> None:
         data = copy.deepcopy(self.base)
-        data["deployment"]["preferredNode"] = "pve-alto"
-        self.assert_rejected(data, "preferred-node-selected-before-live-gate")
+        data["deployment"]["sourceFilesDirectlyReadableByHermes"] = True
+        self.assert_rejected(data, "source-files-directly-readable")
+
+    def test_source_files_must_be_retained(self) -> None:
+        data = copy.deepcopy(self.base)
+        data["deployment"]["sourceFilesRetained"] = False
+        self.assert_rejected(data, "source-files-not-retained")
+
+    def test_same_host_disk_floor_is_enforced(self) -> None:
+        data = copy.deepcopy(self.base)
+        data["host"]["minimumFreeDiskGiB"] = 8
+        self.assert_rejected(data, "host-disk-too-small")
 
     def test_docker_group_is_rejected(self) -> None:
         data = copy.deepcopy(self.base)

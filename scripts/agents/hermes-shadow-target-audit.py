@@ -18,7 +18,7 @@ class AuditError(ValueError):
 TOP_LEVEL_KEYS = {
     "schemaVersion",
     "deployment",
-    "vm",
+    "host",
     "runtime",
     "sandbox",
     "commonPolicy",
@@ -55,16 +55,20 @@ def validate_deployment(data: dict[str, Any]) -> None:
     deployment = data["deployment"]
     require(isinstance(deployment, dict), "deployment-not-object")
     require(deployment.get("mode") == "shadow", "deployment-not-shadow")
-    require(deployment.get("targetHost") == "hermes-vm", "target-host")
+    require(deployment.get("targetHost") == "jn-t14s-lin", "target-host")
     require(
-        deployment.get("preferredNode") is None,
-        "preferred-node-selected-before-live-gate",
+        deployment.get("sameHostReplacement") is True,
+        "same-host-replacement-disabled",
     )
     require(
-        deployment.get("placementRequiresLiveGate") is True,
-        "placement-live-gate-disabled",
+        deployment.get("sourceRuntimeConcurrentEnabled") is False,
+        "source-runtime-concurrency-enabled",
     )
-    require(deployment.get("vmid") is None, "vmid-selected-before-live-gate")
+    require(deployment.get("sourceFilesRetained") is True, "source-files-not-retained")
+    require(
+        deployment.get("sourceFilesDirectlyReadableByHermes") is False,
+        "source-files-directly-readable",
+    )
     for key in (
         "productionDeliveryEnabled",
         "productionSchedulerEnabled",
@@ -79,20 +83,27 @@ def validate_deployment(data: dict[str, Any]) -> None:
         require(deployment.get(key) is False, f"unsafe-deployment-{key}")
 
 
-def validate_vm(data: dict[str, Any]) -> None:
-    vm = data["vm"]
-    require(isinstance(vm, dict), "vm-not-object")
-    require(vm.get("osTrack") == "current-tier1-ubuntu-lts", "vm-os-track")
-    require(vm.get("vcpus", 0) >= 4, "vm-cpu-too-small")
-    require(vm.get("memoryMiB", 0) >= 8192, "vm-memory-too-small")
-    require(vm.get("diskGiB", 0) >= 64, "vm-disk-too-small")
+def validate_host(data: dict[str, Any]) -> None:
+    host = data["host"]
+    require(isinstance(host, dict), "host-not-object")
+    require(host.get("osTrack") == "managed-jn-t14s-lin", "host-os-track")
+    require(host.get("minimumLogicalCpus", 0) >= 8, "host-cpu-too-small")
+    require(
+        host.get("minimumAvailableMemoryMiB", 0) >= 8192,
+        "host-memory-too-small",
+    )
+    require(host.get("minimumFreeDiskGiB", 0) >= 24, "host-disk-too-small")
+    for key in ("separateServiceUsers",):
+        require(host.get(key) is True, f"host-required-{key}")
     for key in (
-        "nasPassthrough",
-        "controllerHomePassthrough",
-        "dockerSocketPassthrough",
-        "usbPassthrough",
+        "sharedProfileHomes",
+        "sourceStateCopiedWholesale",
+        "sourceStateDirectlyMounted",
+        "controllerHomeReadable",
+        "dockerSocketReadable",
+        "usbDeviceAccess",
     ):
-        require(vm.get(key) is False, f"unsafe-vm-{key}")
+        require(host.get(key) is False, f"unsafe-host-{key}")
 
 
 def validate_runtime(data: dict[str, Any]) -> None:
@@ -243,18 +254,18 @@ def validate_brokers_and_backup(data: dict[str, Any]) -> None:
         "sqliteSafeHermesBackup",
         "preUpdateFullBackup",
         "encryptedRestic",
-        "proxmoxBackup",
+        "hostFilesystemBackup",
         "restoreTestRequired",
-        "openclawRollbackPreserved",
+        "openclawReferencePreserved",
     ):
         require(backup.get(key) is True, f"backup-required-{key}")
 
 
 def validate(path: Path) -> None:
     data = read_policy(path)
-    require(data["schemaVersion"] == 1, "schema-version")
+    require(data["schemaVersion"] == 2, "schema-version")
     validate_deployment(data)
-    validate_vm(data)
+    validate_host(data)
     validate_runtime(data)
     validate_sandbox(data)
     validate_common_policy(data)
@@ -275,7 +286,7 @@ def main() -> int:
     except AuditError as exc:
         print(f"status=failed reason={exc}", file=sys.stderr)
         return 1
-    print("status=ok schema=1 profiles=3 mode=shadow")
+    print("status=ok schema=2 profiles=3 mode=shadow")
     return 0
 
 

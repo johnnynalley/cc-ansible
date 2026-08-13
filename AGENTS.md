@@ -888,10 +888,13 @@ OpenClaw AI agent platform (Node.js gateway daemon). Provides a web UI and Disco
   handoff, behavior and hostile-prompt rehearsals, and final single-Gateway
   cutover gates. Do not infer production cutover from an active loopback canary.
 - **Hermes replacement source of truth**: `docs/hermes-replacement.md` owns the
-  target parity matrix, transcript-derived behavior tests, isolated Hermes
-  security boundary, migration gates, single-path cutover, and retained
-  OpenClaw rollback contract. OpenClaw remains production until those gates
-  pass; do not run Hermes migration cleanup or connect a shadow profile to a
+  target parity matrix, transcript-derived behavior tests, same-host isolated
+  Hermes identities, migration gates, single-path cutover, attended immediate
+  rollback, and retained offline OpenClaw reference files. Hermes replaces
+  OpenClaw on `jn-t14s-lin`; do not require a second VM or preserve a running
+  OpenClaw service after acceptance. OpenClaw remains production until those
+  gates pass; do not run Hermes migration cleanup, expose raw OpenClaw files to
+  Hermes, run both gateways concurrently, or connect a shadow profile to a
   production bot token.
 
 **OpenClaw troubleshooting rule**: Do not assume an OpenClaw symptom is an upstream software bug or regression unless there is an exact documented GitHub issue or release note matching the observed failure. Default to diagnosing local configuration, plugin state, runtime health, gateway load, memory/LCM/mem0 state, and update drift first. Avoid update-fragile local plugin patches unless the user explicitly approves a temporary workaround.

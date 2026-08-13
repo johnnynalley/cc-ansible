@@ -50,7 +50,7 @@ class HermesShadowPlaybookTests(unittest.TestCase):
         self.assertIn("state: stopped", stop)
         self.assertIn("ansible.builtin.meta: end_host", self.playbook)
 
-    def test_shadow_is_not_in_normal_convergence_or_inventory(self) -> None:
+    def test_shadow_targets_existing_host_but_not_normal_convergence(self) -> None:
         lines = INVENTORY.read_text(encoding="utf-8").splitlines()
         start = lines.index("[hermes_hosts]") + 1
         members = []
@@ -60,7 +60,7 @@ class HermesShadowPlaybookTests(unittest.TestCase):
                 break
             if stripped and not stripped.startswith("#"):
                 members.append(stripped)
-        self.assertEqual(members, [])
+        self.assertEqual(members, ["jn-t14s-lin"])
         self.assertNotIn("hermes-shadow.yml", SITE.read_text(encoding="utf-8"))
 
     def test_profiles_are_distinct_and_have_no_host_execution(self) -> None:
@@ -78,6 +78,18 @@ class HermesShadowPlaybookTests(unittest.TestCase):
                 {"terminal", "file", "code_execution", "discord_admin"}
                 <= set(profile["disabled_toolsets"])
             )
+
+    def test_same_host_capacity_is_checked_before_install(self) -> None:
+        cpu = self.task("Read Hermes target logical CPU capacity")
+        memory = self.task("Read Hermes target available memory")
+        disk = self.task("Read Hermes target free root filesystem space")
+        gate = self.task("Require reviewed same-host Hermes capacity")
+        self.assertIn("_NPROCESSORS_ONLN", cpu)
+        self.assertIn("/proc/meminfo", memory)
+        self.assertIn("--output=avail", disk)
+        self.assertIn("minimumLogicalCpus", gate)
+        self.assertIn("minimumAvailableMemoryMiB", gate)
+        self.assertIn("minimumFreeDiskGiB", gate)
 
     def test_every_managed_config_renders_with_fail_closed_policy(self) -> None:
         template = self.environment.from_string(self.config_template)
@@ -162,6 +174,13 @@ class HermesShadowPlaybookTests(unittest.TestCase):
         self.assertIn("enabled: false", start)
         self.assertIn("state: started", start)
         self.assertIn("hermes_shadow_mode == 'shadow'", start)
+
+        inspect = self.task("Inspect legacy OpenClaw listeners before Hermes start")
+        reject = self.task("Reject concurrent OpenClaw and Hermes gateways")
+        self.assertIn("- ss", inspect)
+        for port in ("18789", "19789", "19790"):
+            self.assertIn(port, reject)
+        self.assertIn("break-before-make", reject)
 
     def test_new_runtime_requires_reviewed_installer_hash(self) -> None:
         provenance = self.task("Require reviewed Hermes release provenance")
@@ -271,7 +290,9 @@ class HermesShadowPlaybookTests(unittest.TestCase):
         self.assertIn("openclaw-health-receiver.yml", sources)
         self.assertIn("--repository-root", validation)
         self.assertNotIn("hermes cron create", self.playbook)
-        self.assertNotIn("systemd_service:\n        name: hermes-automation", self.playbook)
+        self.assertNotIn(
+            "systemd_service:\n        name: hermes-automation", self.playbook
+        )
 
     def test_operating_contracts_are_root_owned(self) -> None:
         task = self.task("Deploy root-owned Hermes operating contracts")

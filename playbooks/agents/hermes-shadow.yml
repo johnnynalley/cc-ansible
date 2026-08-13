@@ -61,8 +61,12 @@
           - hermes_shadow_change_approved | bool
           - inventory_hostname == hermes_shadow_contract.deployment.targetHost
           - hermes_shadow_contract.deployment.mode == 'shadow'
-          - hermes_shadow_contract.deployment.preferredNode is none
-          - hermes_shadow_contract.deployment.vmid is none
+          - hermes_shadow_contract.deployment.sameHostReplacement | bool
+          - not hermes_shadow_contract.deployment.sourceRuntimeConcurrentEnabled
+          - hermes_shadow_contract.deployment.sourceFilesRetained | bool
+          - >-
+            not hermes_shadow_contract.deployment
+            .sourceFilesDirectlyReadableByHermes
           - not hermes_shadow_contract.deployment.productionDeliveryEnabled
           - not hermes_shadow_contract.deployment.productionSchedulerEnabled
           - not hermes_shadow_contract.deployment.productionRouteEnabled
@@ -108,6 +112,50 @@
       loop: "{{ hermes_shadow_profiles }}"
       loop_control:
         label: "{{ item.name }}"
+
+    - name: Read Hermes target logical CPU capacity
+      ansible.builtin.command:
+        argv:
+          - getconf
+          - _NPROCESSORS_ONLN
+      register: hermes_shadow_host_cpus
+      changed_when: false
+
+    - name: Read Hermes target available memory
+      ansible.builtin.command:
+        argv:
+          - awk
+          - /MemAvailable/ {print int($2 / 1024)}
+          - /proc/meminfo
+      register: hermes_shadow_host_available_memory
+      changed_when: false
+
+    - name: Read Hermes target free root filesystem space
+      ansible.builtin.command:
+        argv:
+          - df
+          - --output=avail
+          - -BG
+          - /
+      register: hermes_shadow_host_free_disk
+      changed_when: false
+
+    - name: Require reviewed same-host Hermes capacity
+      ansible.builtin.assert:
+        that:
+          - >-
+            hermes_shadow_host_cpus.stdout | int
+            >= hermes_shadow_contract.host.minimumLogicalCpus | int
+          - >-
+            hermes_shadow_host_available_memory.stdout | int
+            >= hermes_shadow_contract.host.minimumAvailableMemoryMiB | int
+          - >-
+            hermes_shadow_host_free_disk.stdout_lines[-1]
+            | regex_replace('[^0-9]', '') | int
+            >= hermes_shadow_contract.host.minimumFreeDiskGiB | int
+        fail_msg: >-
+          The same-host Hermes CPU, available-memory, or free-disk preflight no
+          longer meets the reviewed contract. Do not install or start Hermes.
 
     - name: Inspect Hermes runtime
       ansible.builtin.stat:
@@ -664,6 +712,27 @@
           - hermes_shadow_start_approved | bool
         fail_msg: >-
           Starting shadow gateways requires an attended provider/config proof.
+      when: hermes_shadow_mode == 'shadow'
+
+    - name: Inspect legacy OpenClaw listeners before Hermes start
+      ansible.builtin.command:
+        argv:
+          - ss
+          - -H
+          - -ltn
+      register: hermes_shadow_legacy_listeners
+      changed_when: false
+      when: hermes_shadow_mode == 'shadow'
+
+    - name: Reject concurrent OpenClaw and Hermes gateways
+      ansible.builtin.assert:
+        that:
+          - >-
+            hermes_shadow_legacy_listeners.stdout
+            is not search(':(18789|19789|19790)(?:\\s|$)')
+        fail_msg: >-
+          Stop the production and isolated OpenClaw gateways before starting
+          Hermes. Same-host replacement is break-before-make.
       when: hermes_shadow_mode == 'shadow'
 
     - name: Create Hermes shadow readiness markers

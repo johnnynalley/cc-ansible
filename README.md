@@ -1051,12 +1051,10 @@ ansible-playbook playbooks/proxmox/proxmox-notifications.yml
 
 ## Hermes Replacement (staged)
 
-The isolated Hermes replacement is declaratively implemented but has no
-selected host. `hermes_hosts` is intentionally empty because `pve-alto`,
-`ts440`, and `pve-herc` failed the capacity/role gate while `pve-m70q` was
-unreachable. The playbook defaults to `disabled`, installs no runtime during
-normal convergence, starts no listener, contains no production token, and is
-not imported by `site.yml`.
+The isolated Hermes replacement is declaratively targeted at `jn-t14s-lin` as
+a direct replacement for OpenClaw. The playbook defaults to `disabled`,
+installs no runtime during normal convergence, starts no listener, contains no
+production token, and is not imported by `site.yml`.
 
 - **Playbook**: `playbooks/agents/hermes-shadow.yml`
 - **Architecture and gates**: `docs/hermes-replacement.md`
@@ -1067,9 +1065,9 @@ not imported by `site.yml`.
   classified into agent-backed local proposals, external systemd owners, or
   deterministic no-agent jobs; Health remains external and Siri remains absent
 - **Validation**: `ansible-playbook playbooks/agents/hermes-shadow.yml --syntax-check`
-- **Do not run bootstrap** until a new VM placement passes and the official
-  installer hash, immutable release tag/commit, and attended approvals are
-  supplied.
+- **Do not run bootstrap** until the official installer hash, immutable release
+  tag/commit, same-host disk preflight, and attended approvals are supplied.
+  Hermes gateways cannot start while any OpenClaw Gateway listener is active.
 
 ## OpenClaw (jn-t14s-lin)
 

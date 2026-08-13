@@ -28,8 +28,8 @@ settings into a broad catch-all file when a concern-specific file exists.
   reboot-on-required behavior.
 - `nas_server`: portable NAS role owner for storage services.
 - `docker_hosts`: hosts that receive Docker Compose stacks.
-- `hermes_hosts`: future isolated Hermes VM; intentionally empty until the
-  placement gate passes.
+- `hermes_hosts`: same-host Hermes replacement target (`jn-t14s-lin`); its
+  playbook is outside normal convergence and disabled by default.
 - `gluetun_hosts`: hosts with Gluetun/qBittorrent VPN automation.
 - `cloudflare_ddns_hosts`: hosts that run Cloudflare DNS-only DDNS timers.
 - `tailscale_peer_relay_endpoint_hosts`: hosts that sync peer-relay endpoints.

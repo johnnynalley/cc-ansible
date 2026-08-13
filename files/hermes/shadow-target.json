@@ -1,11 +1,12 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "deployment": {
     "mode": "shadow",
-    "targetHost": "hermes-vm",
-    "preferredNode": null,
-    "placementRequiresLiveGate": true,
-    "vmid": null,
+    "targetHost": "jn-t14s-lin",
+    "sameHostReplacement": true,
+    "sourceRuntimeConcurrentEnabled": false,
+    "sourceFilesRetained": true,
+    "sourceFilesDirectlyReadableByHermes": false,
     "productionDeliveryEnabled": false,
     "productionSchedulerEnabled": false,
     "dashboardEnabled": false,
@@ -16,15 +17,18 @@
     "sourceArchiveEnabled": false,
     "retiredVmReuseEnabled": false
   },
-  "vm": {
-    "osTrack": "current-tier1-ubuntu-lts",
-    "vcpus": 4,
-    "memoryMiB": 8192,
-    "diskGiB": 64,
-    "nasPassthrough": false,
-    "controllerHomePassthrough": false,
-    "dockerSocketPassthrough": false,
-    "usbPassthrough": false
+  "host": {
+    "osTrack": "managed-jn-t14s-lin",
+    "minimumLogicalCpus": 8,
+    "minimumAvailableMemoryMiB": 8192,
+    "minimumFreeDiskGiB": 24,
+    "separateServiceUsers": true,
+    "sharedProfileHomes": false,
+    "sourceStateCopiedWholesale": false,
+    "sourceStateDirectlyMounted": false,
+    "controllerHomeReadable": false,
+    "dockerSocketReadable": false,
+    "usbDeviceAccess": false
   },
   "runtime": {
     "installMethod": "official-root-git",
@@ -163,8 +167,8 @@
     "sqliteSafeHermesBackup": true,
     "preUpdateFullBackup": true,
     "encryptedRestic": true,
-    "proxmoxBackup": true,
+    "hostFilesystemBackup": true,
     "restoreTestRequired": true,
-    "openclawRollbackPreserved": true
+    "openclawReferencePreserved": true
   }
 }

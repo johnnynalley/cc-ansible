@@ -342,39 +342,33 @@ prompt content trustworthy.
 
 ### Deployment Topology
 
-Provision a new `hermes-vm`; do not reuse VM 140 or any retired OpenClaw disk.
-No Proxmox node is selected yet. A live check rejected `pve-alto`: it has only
-two CPU cores and about 7.46 GiB total RAM, with about 1.21 GiB available at
-the time of inspection, so it cannot satisfy the target without weakening the
-isolation baseline. A second live check rejected `ts440`: although it has about
-31.1 GiB total RAM, only about 8.3 GiB was available, its four CPUs equal the
-entire Hermes baseline, and it is already the critical NAS, NFS/Samba host, UPS
-master, and live media-VM host. Select a different node from live capacity,
-storage, UPS, and VMID evidence rather than silently shrinking the VM or
-co-locating it on the controller.
+Hermes replaces OpenClaw directly on `jn-t14s-lin`; it does not require a new
+VM. The earlier VM-placement branch came from misreading "keep OpenClaw just in
+case" as a requirement to retain a concurrently runnable OpenClaw system. The
+actual requirement is to preserve OpenClaw's files for offline reference while
+Hermes becomes the only running agent platform.
 
-`pve-herc` is also rejected. Its live probe timed out, so no live capacity was
-inferred, but the managed inventory explicitly identifies it as a 4-core,
-8-GiB host already running PBS and FreePBX, plus Samba/Time Machine storage,
-and warns that additional appliances must stay lightweight. A later bounded
-`pve-m70q` probe reached the node through its cluster-record LAN address. The
-node has 12 logical CPUs and about 15.3 GiB total RAM, but only about 2.83 GiB
-was available while its 12-GiB Docker VM was running. Its active local ZFS pool
-had only about 20.2 GiB available. It therefore cannot host the 8-GiB/64-GiB
-Hermes baseline without unsafe memory and storage overcommit. No existing node
-currently passes the placement gate; provisioning requires additional suitable
-capacity or deliberate capacity reclamation followed by a new live gate.
+A bounded 2026-08-13 host check found 16 logical CPUs, about 10.6 GiB available
+RAM, and about 31.9 GiB free on `/`. That is sufficient for the cloud-model
+Hermes runtime after OpenClaw stops. The host does not have room for another
+wholesale copy of the roughly 37.3-GB OpenClaw tree, and none is needed. Curated
+profile state is imported into the separate Hermes homes; the original tree
+stays in place as offline source evidence.
 
-Use the then-current Tier-1 Ubuntu LTS cloud image with verified publisher
-checksum and signature. The baseline allocation is four vCPUs, 8 GiB RAM, and
-a 64 GiB system disk, with memory increased before accepting swap pressure or
-Gateway instability. The VM has no NAS, controller-home, Docker-socket, USB, or
-host filesystem passthrough.
+Hermes uses three no-login service users, `/var/lib/hermes/*` profile homes,
+root-owned policy and secrets, and rootless Podman. `ProtectHome=true`, the
+absence of host mounts, and separate UIDs prevent Hermes from reading the raw
+OpenClaw tree or the controller user's home. If later migration needs another
+source fact, a root-controlled review/import step extracts only that approved
+item instead of mounting the legacy tree into an agent context.
 
-OpenClaw stays on `jn-t14s-lin` as the production source and later rollback
-system. The Hermes shadow has no production channel token or Caddy/Tailscale
-route. Both systems may be installed during migration, but only OpenClaw may
-deliver production messages or run production schedules before cutover.
+Installation may coexist only while Hermes is stopped and has no production
+credentials. Starting any Hermes gateway requires the production OpenClaw
+listener and the loopback OpenClaw canary listeners to be stopped first. The
+attended cutover then proves the old listeners and schedules are inactive
+before enrolling Discord routes and starting Hermes. Health remains a separate
+service. After acceptance, OpenClaw stays disabled; its files remain available
+for operator-controlled reference, not executable fallback authority.
 
 ### Identities And State
 
@@ -413,8 +407,8 @@ stable branch rather than setting a policy-level exact-version pin.
 
 Updates are root-managed transactions:
 
-1. Back up every profile with Hermes's SQLite-safe backup path and take the VM
-   rollback artifact.
+1. Back up every profile with Hermes's SQLite-safe backup path and take a
+   targeted host rollback artifact for Hermes code, policy, units, and state.
 2. Update the shared code through the official mechanism with full pre-update
    backup enabled.
 3. Run offline config migration, Doctor, supply-chain audit, prompt-size,
@@ -498,17 +492,16 @@ kernel/control-group/module protections, and a restrictive umask. Keep the
 namespace operations rootless Podman needs; reject hardening that silently
 breaks the sandbox and causes fallback to local execution.
 
-The VM accepts administrative SSH only from the controller/owner path. It has
-no public inbound listener and no dashboard route. Outbound policy permits DNS,
-time, system updates, the selected model providers, Discord, and explicitly
-approved report/broker endpoints. Deny LAN, tailnet, metadata, link-local, and
-other private destinations by default. Broker exceptions are exact destination
-and port rules, not private-network ranges.
+Hermes adds no administrative SSH path to the host and has no public inbound
+listener or dashboard route. Profile services receive only the outbound paths
+needed for selected model providers, Discord, and explicitly approved report
+or broker endpoints. Rootless tool containers default to no network. Broker
+exceptions are exact destination and port rules, not private-network ranges.
 
 ### Host Data And Action Brokers
 
 Hermes never receives the controller's Ansible, SSH, Docker, Health, Git, or
-vault credentials. Root-managed collectors on `hermes-vm` use dedicated
+vault credentials. Root-managed collectors on `jn-t14s-lin` use dedicated
 read-only credentials to fetch bounded Health and Docker reports, validate
 their schema/signature/age, and atomically publish root-owned read-only inputs
 for Astra. Dubble and Rigel cannot traverse those paths.
@@ -533,7 +526,7 @@ Use both application and infrastructure backups:
 - pre-update and pre-migration full Hermes backups;
 - encrypted restic copies of profile homes and root-owned policy, excluding
   transient rootless container layers unless a test explicitly needs them;
-- Proxmox Backup Server VM backups; and
+- the existing managed host backup for `jn-t14s-lin`; and
 - a manifest of code revision, config schema, profile declarations, bot-token
   identities, cron declarations, and backup hashes.
 
@@ -541,18 +534,20 @@ Restore tests use a channel-less clone with replaced credentials. A backup is
 not accepted because an archive exists; Doctor, session search, memory, skills,
 cron declarations, and one synthetic model turn must work after restore.
 
-OpenClaw rollback remains independent: its services, state, secrets, sessions,
-workspace, package runtime, and backups are preserved unchanged. Cutover does
-not uninstall OpenClaw, reuse its ports/state directories, rotate away its only
-working credentials, or run OpenClaw/Hermes cleanup commands.
+Immediate cutover rollback remains independent until Hermes acceptance: the
+OpenClaw services, state, secrets, sessions, workspace, package runtime, and
+backups remain available but stopped. Cutover does not reuse OpenClaw state
+directories or run migration cleanup. After acceptance, OpenClaw stays disabled
+and its files remain offline for operator-controlled reference. Hermes cannot
+read them directly or treat them as an executable fallback.
 
 ### Gate 3 Acceptance
 
 This design gate is complete when implementation assets express these
 boundaries without installing Hermes:
 
-1. VM provisioning inputs keep the node and VMID unset until one node passes
-   capacity, UPS, storage, and conflict checks.
+1. The target is exactly `jn-t14s-lin`, its live CPU/RAM/disk preflight passes,
+   and the contract rejects concurrent OpenClaw and Hermes gateways.
 2. Service identities, homes, groups, units, managed scope, secrets paths, and
    rootless Podman prerequisites are explicit and lintable.
 3. Every profile's allowed tools, Discord scope, inputs, outputs, and forbidden
@@ -567,26 +562,9 @@ boundaries without installing Hermes:
 The credential-free machine-readable declaration is
 `files/hermes/shadow-target.json`. The fail-closed validator is
 `scripts/agents/hermes-shadow-target-audit.py`; it rejects unknown top-level
-schema instead of using natural-language phrase matching. The declaration
-remains in shadow state with no VMID until the live placement gate passes.
-
-The blank multi-node capacity probe attempted during this design gate stalled
-in Ansible SSH interpreter discovery and left workers after the wrapper ended.
-Those exact workers were terminated and no capacity result was inferred. A
-later bounded raw probe established only that `pve-alto` is undersized. An
-initial bounded `pve-m70q` probe through its configured Tailscale address timed
-out and left no workers. The cluster-record LAN address accepted SSH; a
-privileged, read-only, output-allowlisted query then proved that its available
-RAM and local ZFS space are both below the Hermes baseline. The other
-repository LAN address and the configured Tailscale address were unreachable
-during this check; that connectivity/configuration drift is not treated as a
-capacity result. A separate bounded probe established `ts440`'s capacity, and
-repository role evidence rejected it as the placement because it has no safe
-headroom beyond its critical storage and media duties. The live `pve-herc`
-probe also timed out cleanly; managed inventory nevertheless rejects it
-independently as an already-loaded 4-core/8-GiB host. The existing-node survey
-therefore ends with no selected node. Placement remains an implementation
-precondition, not a fabricated design fact.
+schema instead of using natural-language phrase matching. The declaration pins
+`jn-t14s-lin`, forbids concurrent OpenClaw/Hermes gateways, forbids raw source
+mounts or wholesale copies, and retains the source files offline.
 
 ## Gate 4 Declarative Runtime
 
@@ -594,7 +572,8 @@ The disabled-by-default implementation is
 `playbooks/agents/hermes-shadow.yml`, with defaults under
 `inventory/group_vars/hermes_hosts/`, policy under `files/hermes/`, and
 rendered sources under `templates/hermes/`. The `hermes_hosts` inventory group
-is intentionally empty and this playbook is not imported by `site.yml`.
+contains only `jn-t14s-lin`; the playbook is not imported by `site.yml` and its
+default disabled mode cannot install or start Hermes.
 
 Its modes are explicit:
 

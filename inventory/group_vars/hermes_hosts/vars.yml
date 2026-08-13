@@ -29,7 +29,8 @@ hermes_automation_contract_live: >-
   /usr/local/share/hermes-shadow/automation-contract.json
 hermes_automation_audit_source: >-
   scripts/agents/hermes-automation-contract-audit.py
-hermes_automation_audit_live: /usr/local/libexec/hermes-automation-contract-audit
+hermes_automation_audit_live: >-
+  /usr/local/libexec/hermes-automation-contract-audit
 hermes_rigel_schedule_source: scripts/agents/hermes-rigel-schedule.py
 hermes_rigel_schedule_manifest_source: >-
   files/hermes/jobs/rigel-academic-alerts.json
