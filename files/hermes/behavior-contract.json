@@ -1,0 +1,63 @@
+{
+  "schemaVersion": 1,
+  "mode": "shadow-policy",
+  "routing": {
+    "selector": "semantic-intent-stakes-uncertainty-state",
+    "phraseMatching": false,
+    "keywordTriggering": false,
+    "fullThreadRequired": true,
+    "durableStateRequiredWhenRelevant": true
+  },
+  "output": {
+    "directAnswerFirst": true,
+    "singleUserFacingAnswer": true,
+    "privateReviewerEvidence": true,
+    "internalReasoningVisible": false,
+    "toolPlumbingVisible": false,
+    "correctionTransactionVisible": false,
+    "routineValidationNarrationVisible": false
+  },
+  "corrections": {
+    "fixCurrentAnswerFirst": true,
+    "rootCauseClassRequired": true,
+    "generalizeBeforeProposal": true,
+    "incidentSpecificRuleDefault": "reject",
+    "existingControlFailureDisposition": "regression-or-enforcement-proposal",
+    "generatedOutputMayServeAsEvidence": false
+  },
+  "selfEvolution": {
+    "mechanism": "hermes-native-background-review",
+    "selection": "semantic-context-review",
+    "memoryWrites": "stage-for-owner-approval",
+    "skillWrites": "stage-for-owner-approval",
+    "pendingWritesSurviveRestart": true,
+    "automaticApply": false,
+    "selfApproval": false,
+    "rootPolicyWritableByAgent": false,
+    "toolAuthorityWritableByAgent": false,
+    "notifications": "off",
+    "reviewSurfaces": [
+      "/memory pending",
+      "/memory approve",
+      "/memory reject",
+      "/skills pending",
+      "/skills diff",
+      "/skills approve",
+      "/skills reject"
+    ],
+    "proposalRouting": {
+      "user-preference": "user-memory",
+      "stable-environment-fact": "profile-memory",
+      "reusable-procedure": "profile-skill",
+      "behavior-policy": "owner-managed-source",
+      "security-policy": "owner-managed-source",
+      "deployment-policy": "owner-managed-source"
+    }
+  },
+  "profilePolicies": {
+    "astra": "files/hermes/profiles/astra/AGENTS.md",
+    "dubble": "files/hermes/profiles/dubble/AGENTS.md",
+    "rigel": "files/hermes/profiles/rigel/AGENTS.md"
+  },
+  "regressionCases": "files/hermes/behavior-regressions.json"
+}

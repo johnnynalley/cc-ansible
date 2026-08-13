@@ -27,6 +27,13 @@ transcripts.
   ordinary data, operator policy, structured transforms, approved memory, and
   private reviewer evidence while forbidding raw prompt injection and
   cross-profile mounts.
+- `behavior-contract.json` defines semantic reasoning, concise output,
+  correction generalization, and Hermes-native approval-gated self-evolution.
+  `behavior-regressions.json` contains sanitized promotion cases derived from
+  the private transcript evidence; it contains no transcript text or platform
+  identifiers.
+- `profiles/*/AGENTS.md` contains each profile's root-owned operating contract.
+  These files are always-on behavior policy, not keyword-triggered skills.
 - `scripts/agents/hermes-shadow-target-audit.py` is the fail-closed validator.
 - `scripts/agents/hermes-openclaw-migration-audit.py` validates the migration
   contract and inventories top-level source metadata without reading contents.

@@ -445,6 +445,20 @@
       loop_control:
         label: "{{ item.name }}"
 
+    - name: Deploy root-owned Hermes operating contracts
+      ansible.builtin.copy:
+        src: >-
+          {{ playbook_dir
+             }}/../../files/hermes/profiles/{{ item.name }}/AGENTS.md
+        dest: "{{ item.home }}/AGENTS.md"
+        owner: root
+        group: "{{ item.group }}"
+        mode: "0440"
+        backup: true
+      loop: "{{ hermes_shadow_profiles }}"
+      loop_control:
+        label: "{{ item.name }}"
+
     - name: Deploy deterministic Rigel academic schedule
       ansible.builtin.copy:
         src: >-

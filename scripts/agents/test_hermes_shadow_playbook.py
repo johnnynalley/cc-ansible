@@ -96,6 +96,7 @@ class HermesShadowPlaybookTests(unittest.TestCase):
             self.assertEqual(config["terminal"]["docker_volumes"], [])
             self.assertEqual(config["display"]["tool_progress"], "off")
             self.assertFalse(config["display"]["busy_ack_enabled"])
+            self.assertEqual(config["display"]["memory_notifications"], "off")
             self.assertEqual(config["onboarding"]["profile_build"], "off")
 
     def test_every_service_is_scoped_and_boot_disabled(self) -> None:
@@ -190,6 +191,16 @@ class HermesShadowPlaybookTests(unittest.TestCase):
         self.assertNotIn("subprocess", self.rigel_script)
         self.assertNotIn("provider", self.rigel_job)
         self.assertNotIn("model", self.rigel_job)
+
+    def test_operating_contracts_are_root_owned(self) -> None:
+        task = self.task("Deploy root-owned Hermes operating contracts")
+        self.assertIn("/AGENTS.md", task)
+        self.assertIn("owner: root", task)
+        self.assertIn('mode: "0440"', task)
+        for profile in self.variables["hermes_shadow_profiles"]:
+            source = ROOT / "files" / "hermes" / "profiles" / profile["name"] / "AGENTS.md"
+            self.assertTrue(source.is_file())
+            self.assertFalse(source.is_symlink())
 
 
 if __name__ == "__main__":

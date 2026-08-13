@@ -547,6 +547,45 @@ contract maps all 31 retained workspace rules and both state-root curation
 rules with no duplicate targets or unmapped source. Fourteen negative
 regressions enforce those boundaries. No live data has been copied or changed.
 
+## Behavior And Self-Evolution
+
+The replacement does not use a plugin or phrase table to decide when Astra
+should research, compare hardware, perform RCA, or learn. The root-owned
+`AGENTS.md` for each profile is always loaded with its `SOUL.md`. Astra selects
+evidence from the request's intent, stakes, uncertainty, exact object, current
+thread, and durable project state. Dubble and Rigel have separate operating
+contracts and cannot read Astra's policy or data through a shared profile.
+
+Hermes' native background review is the semantic self-evolution mechanism. It
+runs after a turn and can propose compact memory or procedural skill changes.
+Both `memory.write_approval` and `skills.write_approval` remain enabled in the
+root-managed config, so foreground and background writes are staged rather
+than applied. Pending proposals survive restart and are reviewed with
+`/memory pending`, `/memory approve`, `/memory reject`, `/skills pending`,
+`/skills diff`, `/skills approve`, and `/skills reject`. Background memory
+notifications are off so this mechanism does not append another process wall
+to an otherwise normal answer. Official behavior and approval semantics are
+documented under
+[persistent memory](https://hermes-agent.nousresearch.com/docs/user-guide/features/memory/)
+and [skills](https://hermes-agent.nousresearch.com/docs/user-guide/features/skills/).
+
+The agent may propose only three writable outcomes: user preference/stable fact
+memory, profile memory, or a reusable profile skill. Behavior, security,
+deployment, tool authority, `SOUL.md`, and `AGENTS.md` remain root-owned and
+outside agent write access. The agent cannot approve its own proposal. If an
+existing general rule already covered a failure, the correct outcome is a
+regression or enforcement proposal, not another incident-specific reminder.
+
+`files/hermes/behavior-regressions.json` converts the saved private transcripts
+into 12 sanitized promotion cases without copying transcript text, private
+paths, or platform identifiers into the repository. The cases cover antecedent
+resolution, current regional research, purchase-state reconciliation,
+compatibility versus performance, direct decisions, useful walkthrough
+checkpoints, expected absence, incident RCA, scope/preferences, concise Star,
+source-backed alerts, and correction generalization. Static tests prove the
+policy and deployment shape now; Gate 7 must still run the cases against the
+actual isolated model before promotion.
+
 ## Migration Gates
 
 1. **Source checkpoint:** freeze and verify OpenClaw state, runtime, listeners,

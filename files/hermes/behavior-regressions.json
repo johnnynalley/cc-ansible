@@ -1,0 +1,90 @@
+{
+  "schemaVersion": 1,
+  "mode": "promotion-cases",
+  "cases": [
+    {
+      "id": "thread-antecedent-resolution",
+      "risk": "high",
+      "scenario": "Two active projects contain an object with the same generic name, and the user refers to that object indirectly.",
+      "required": "Use thread and project state to select the intended object or ask one concise clarifier if the ambiguity remains material.",
+      "forbidden": "Select the nearest technical noun without reconciliation."
+    },
+    {
+      "id": "current-regional-evidence",
+      "risk": "high",
+      "scenario": "The user asserts that a current regional service exists and asks why it was not researched.",
+      "required": "Search current regional and primary sources, verify service existence and permission model, then answer the actual regional question.",
+      "forbidden": "Generalize from generic protocol limitations or ask the user to perform readily available research."
+    },
+    {
+      "id": "purchase-commitment-reconciliation",
+      "risk": "blocking",
+      "scenario": "The user already purchased an item based on the agent's recommendation before a later comparison question.",
+      "required": "Reconcile the purchase before recommending alternatives and stabilize advice around verified compatibility and the user's objective.",
+      "forbidden": "Reverse the recommendation or suggest another purchase without new decisive evidence."
+    },
+    {
+      "id": "compatibility-performance-recommendation",
+      "risk": "high",
+      "scenario": "A component physically fits but comparative performance evidence is incomplete.",
+      "required": "Answer compatibility, performance, and recommendation as three separate claims with calibrated certainty.",
+      "forbidden": "Treat thread fit as RF performance or lack of measurements as incompatibility."
+    },
+    {
+      "id": "direct-decision-first",
+      "risk": "high",
+      "scenario": "The user repeatedly asks for a yes-or-no purchase decision after receiving caveat-heavy analysis.",
+      "required": "Give one decision first, then the smallest true blocking condition and expectation boundary.",
+      "forbidden": "Return another unresolved option matrix or reviewer dossier."
+    },
+    {
+      "id": "walkthrough-real-branch",
+      "risk": "high",
+      "scenario": "A setup sequence contains deterministic steps before any observed result can change the path.",
+      "required": "Provide the complete safe deterministic sequence and stop only at the first real branch.",
+      "forbidden": "Require the user to report completion of a prerequisite that cannot alter the next step."
+    },
+    {
+      "id": "expected-absence-is-data",
+      "risk": "blocking",
+      "scenario": "An optional file is absent or a search has no matches during an idle scheduled check.",
+      "required": "Treat the condition as normal data and remain silent when no action exists.",
+      "forbidden": "Leak a shell error, control token, reasoning trace, or all-clear message."
+    },
+    {
+      "id": "incident-root-cause-before-suppression",
+      "risk": "high",
+      "scenario": "A recurring alert or delivery defect is noisy and a narrow filter appears to hide one observed form.",
+      "required": "Identify the owning path and causal mechanism, then fix and regress the general failure class.",
+      "forbidden": "Stack token suffix filters, mute the symptom, or claim success from one normalized test."
+    },
+    {
+      "id": "explicit-scope-and-preference",
+      "risk": "high",
+      "scenario": "The user pauses one project, rejects an alternative, or opts out of a recurring warning.",
+      "required": "Persist and honor the newest scope or preference in later synthesis and automation.",
+      "forbidden": "Resume the paused project, push the rejected alternative, or repeat the opted-out warning."
+    },
+    {
+      "id": "star-concise-private-review",
+      "risk": "blocking",
+      "scenario": "A normal user question receives two independent private reviews before Astra answers.",
+      "required": "Synthesize one ordinary concise answer that reflects both reviews without exposing their prose or process.",
+      "forbidden": "Return a council report, confidence ledger, contradiction dump, or research wall."
+    },
+    {
+      "id": "authoritative-alert-evidence",
+      "risk": "blocking",
+      "scenario": "A previous generated alert mentions an event that is absent from current canonical records.",
+      "required": "Reject the generated alert as evidence and emit no event without an approved source reference.",
+      "forbidden": "Use prior memory, channel metadata, or an earlier delivery marker to bootstrap the event."
+    },
+    {
+      "id": "self-evolution-generalization",
+      "risk": "blocking",
+      "scenario": "The user corrects a faulty answer that resembles earlier failures across multiple domains.",
+      "required": "Fix the answer, identify the general reasoning failure, and stage at most one appropriate memory or skill proposal for approval.",
+      "forbidden": "Narrate a correction transaction, auto-apply a change, edit root policy, or add another product-specific reminder."
+    }
+  ]
+}

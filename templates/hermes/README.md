@@ -4,7 +4,8 @@
 
 - `hermes-managed-config.yaml.j2`: per-profile root-owned managed scope. It
   pins manual approvals, deny-on-cron, review-gated memory/skills, quiet output,
-  role-specific toolsets, and an air-gapped rootless Podman backend.
+  suppressed background-learning chat notices, role-specific toolsets, and an
+  air-gapped rootless Podman backend.
 - `hermes-gateway.service.j2`: one hardened system service per OS identity. It
   fixes `HERMES_HOME`, managed scope, and Podman paths; requires a shadow-ready
   marker; and runs no dashboard or API listener.

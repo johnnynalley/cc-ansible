@@ -38,6 +38,10 @@
   targets, owner drift, cross-profile assignment, private reviewer evidence,
   approved memory curation, raw-prompt denial, inert safety controls, state
   mapping completeness, source hash drift, and behavior-source symlinks.
+- `test_hermes_behavior_contract.py` validates semantic routing without phrase
+  triggers, one concise user-facing answer, native background review with
+  staged memory/skill approval, owner-only policy changes, complete sanitized
+  promotion cases, non-symlink profile policies, and control-token exclusion.
 
 ## Health Receiver
 
