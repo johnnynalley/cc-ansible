@@ -81,6 +81,7 @@
           - hermes_shadow_contract.sandbox.hostVolumes | length == 0
           - hermes_shadow_contract.sandbox.forwardEnvironment | length == 0
           - hermes_shadow_contract.sandbox.forwardCredentialFiles | length == 0
+          - hermes_shadow_config_version | int > 0
           - >-
             hermes_shadow_profiles | map(attribute='name') | list
             == ['astra', 'dubble', 'rigel']
@@ -671,7 +672,7 @@
 
     - name: Seed mutable Hermes profile config once
       ansible.builtin.copy:
-        content: "{}\n"
+        content: "_config_version: {{ hermes_shadow_config_version }}\n"
         dest: "{{ item.home }}/config.yaml"
         owner: "{{ item.user }}"
         group: "{{ item.group }}"
@@ -680,6 +681,51 @@
       loop: "{{ hermes_shadow_profiles }}"
       loop_control:
         label: "{{ item.name }}"
+
+    - name: Read mutable Hermes profile configs before schema repair
+      ansible.builtin.slurp:
+        src: "{{ item.home }}/config.yaml"
+      loop: "{{ hermes_shadow_profiles }}"
+      loop_control:
+        label: "{{ item.name }}"
+      register: hermes_shadow_mutable_configs_before_repair
+      no_log: true
+
+    - name: Stamp only newly seeded empty Hermes profile configs
+      ansible.builtin.copy:
+        content: "_config_version: {{ hermes_shadow_config_version }}\n"
+        dest: "{{ item.item.home }}/config.yaml"
+        owner: "{{ item.item.user }}"
+        group: "{{ item.item.group }}"
+        mode: "0600"
+      loop: "{{ hermes_shadow_mutable_configs_before_repair.results }}"
+      loop_control:
+        label: "{{ item.item.name }}"
+      when: (item.content | b64decode | from_yaml) == {}
+      no_log: true
+
+    - name: Read current mutable Hermes profile configs
+      ansible.builtin.slurp:
+        src: "{{ item.home }}/config.yaml"
+      loop: "{{ hermes_shadow_profiles }}"
+      loop_control:
+        label: "{{ item.name }}"
+      register: hermes_shadow_mutable_configs
+      no_log: true
+
+    - name: Require current mutable Hermes config schema
+      ansible.builtin.assert:
+        that:
+          - >-
+            (item.content | b64decode | from_yaml)._config_version | int
+            == hermes_shadow_config_version | int
+        fail_msg: >-
+          Existing Hermes profile config requires an attended offline schema
+          migration before any gateway may start.
+      loop: "{{ hermes_shadow_mutable_configs.results }}"
+      loop_control:
+        label: "{{ item.item.name }}"
+      no_log: true
 
     - name: Seed root-managed Hermes service environment once
       ansible.builtin.copy:
@@ -715,6 +761,31 @@
         fail_msg: >-
           Hermes shadow service environments cannot contain Discord settings.
       loop: "{{ hermes_shadow_service_environments.results }}"
+      loop_control:
+        label: "{{ item.item.name }}"
+      no_log: true
+
+    - name: Hash root-managed Hermes policy and environment
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/sha256sum
+          - "/etc/hermes/{{ item.name }}/config.yaml"
+          - "/etc/hermes/{{ item.name }}/.env"
+      loop: "{{ hermes_shadow_profiles }}"
+      loop_control:
+        label: "{{ item.name }}"
+      register: hermes_shadow_managed_policy_hashes
+      changed_when: false
+      no_log: true
+
+    - name: Deploy root-owned Hermes policy checksum manifests
+      ansible.builtin.copy:
+        content: "{{ item.stdout }}\n"
+        dest: "/etc/hermes/{{ item.item.name }}/managed-policy.sha256"
+        owner: root
+        group: "{{ item.item.group }}"
+        mode: "0440"
+      loop: "{{ hermes_shadow_managed_policy_hashes.results }}"
       loop_control:
         label: "{{ item.item.name }}"
       no_log: true

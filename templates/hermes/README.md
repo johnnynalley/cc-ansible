@@ -9,12 +9,14 @@
   concurrent children and 12 iterations, with child orchestration disabled.
   Discord fails closed with no shadow allowlists, silent unknown DMs, no bot
   input, no history or missed-message backfill, per-user sessions, explicit
-  thread mentions, bounded attachments, and no slash registration.
+  thread mentions, bounded attachments, and no slash registration. It carries
+  the reviewed Hermes config schema version.
 - `hermes-gateway.service.j2`: one hardened system service per OS identity. It
   fixes `HERMES_HOME`, root-writable profile-scoped managed credentials, and
   Podman paths; requires a root-owned shadow-ready marker; runs the shadow,
-  Discord, and automation/Health contract audits before startup; and exposes
-  no dashboard or API listener.
+  Discord, and automation/Health contract audits before startup; rejects any
+  managed config or environment checksum drift before Hermes's fail-open
+  managed-scope parser can run; and exposes no dashboard or API listener.
 
 ## Consumer
 

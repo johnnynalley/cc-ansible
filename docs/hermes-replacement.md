@@ -494,6 +494,14 @@ Root-owned managed scope enforces at least:
 - a write-safe root limited to the role's export/work area; and
 - only the minimum role-specific toolsets.
 
+Hermes's native managed-scope loader is deliberately fail-open on parse errors,
+so filesystem ownership alone is not the startup gate. Each profile unit first
+verifies a root-owned SHA-256 manifest covering its managed `config.yaml` and
+`.env`; any edit, truncation, or unapproved credential/policy change therefore
+blocks startup before Hermes can ignore the managed layer. Both mutable and
+managed config carry the release's reviewed schema version, and an older
+non-empty mutable config requires an attended offline migration.
+
 Hooks and plugins begin empty. A new hook or plugin requires source review,
 provenance, a failure-mode test, a rollback artifact, and explicit activation.
 Because Hermes hook consent keys the command string rather than script content,

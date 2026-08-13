@@ -94,8 +94,17 @@ class HermesShadowPlaybookTests(unittest.TestCase):
     def test_every_managed_config_renders_with_fail_closed_policy(self) -> None:
         template = self.environment.from_string(self.config_template)
         for profile in self.variables["hermes_shadow_profiles"]:
-            rendered = template.render(hermes_profile=profile)
+            rendered = template.render(
+                hermes_profile=profile,
+                hermes_shadow_config_version=self.variables[
+                    "hermes_shadow_config_version"
+                ],
+            )
             config = yaml.safe_load(rendered)
+            self.assertEqual(
+                config["_config_version"],
+                self.variables["hermes_shadow_config_version"],
+            )
             self.assertEqual(config["approvals"]["mode"], "manual")
             self.assertEqual(config["approvals"]["cron_mode"], "deny")
             self.assertFalse(config["security"]["tirith_fail_open"])
@@ -166,6 +175,8 @@ class HermesShadowPlaybookTests(unittest.TestCase):
             )
             self.assertIn("hermes-discord-cutover-audit", rendered)
             self.assertIn("hermes-automation-contract-audit", rendered)
+            self.assertIn("sha256sum --check --status --strict", rendered)
+            self.assertIn("managed-policy.sha256", rendered)
             self.assertNotIn("docker.sock", rendered)
             self.assertNotIn("sudo", rendered)
             self.assertNotIn("ListenStream", rendered)
@@ -225,6 +236,23 @@ class HermesShadowPlaybookTests(unittest.TestCase):
         self.assertIn("hermes_shadow_installed_tag_commit", source)
         self.assertIn("hermes_shadow_installed_status", source)
         self.assertNotIn("when:", source)
+
+    def test_profile_config_schema_and_managed_scope_are_fail_closed(self) -> None:
+        seed = self.task("Seed mutable Hermes profile config once")
+        repair = self.task("Stamp only newly seeded empty Hermes profile configs")
+        schema = self.task("Require current mutable Hermes config schema")
+        hashes = self.task("Hash root-managed Hermes policy and environment")
+        manifests = self.task("Deploy root-owned Hermes policy checksum manifests")
+        self.assertIn("hermes_shadow_config_version", seed)
+        self.assertIn("force: false", seed)
+        self.assertIn("from_yaml) == {}", repair)
+        self.assertIn("hermes_shadow_config_version", schema)
+        self.assertIn("sha256sum", hashes)
+        self.assertIn("config.yaml", hashes)
+        self.assertIn(".env", hashes)
+        self.assertIn("managed-policy.sha256", manifests)
+        self.assertIn("owner: root", manifests)
+        self.assertIn('mode: "0440"', manifests)
 
     def test_contract_and_playbook_forbid_production_authority(self) -> None:
         contract = CONTRACT.read_text(encoding="utf-8")

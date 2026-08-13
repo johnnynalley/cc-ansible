@@ -19,6 +19,7 @@ EnvironmentFile=/etc/hermes/{{ hermes_profile.name }}/.env
 ExecStartPre={{ hermes_shadow_audit_live }} {{ hermes_shadow_contract_live }}
 ExecStartPre={{ hermes_discord_audit_live }} {{ hermes_discord_contract_live }} --repository-root /usr/local/share/hermes-shadow/repository
 ExecStartPre={{ hermes_automation_audit_live }} {{ hermes_automation_contract_live }} --repository-root /usr/local/share/hermes-shadow/repository
+ExecStartPre=/usr/bin/sha256sum --check --status --strict /etc/hermes/{{ hermes_profile.name }}/managed-policy.sha256
 ExecStartPre={{ hermes_shadow_runtime_binary }} config check
 ExecStart={{ hermes_shadow_runtime_binary }} gateway run --external-supervisor
 Restart=on-failure
