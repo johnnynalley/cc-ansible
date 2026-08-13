@@ -670,6 +670,63 @@ or activated a job or messaging route. Any future unknown top-level category,
 workspace policy hash change, filesystem-kind drift, or top-level symlink
 fails closed and requires an explicit review.
 
+## Protected Importer Dry Run
+
+The official importer is an advisory inventory source, not the migration
+authority. `playbooks/agents/hermes-openclaw-dry-run.yml` deploys the pinned
+shape-only contract and root wrapper only after explicit operator approval.
+The wrapper builds a disposable source containing generic placeholders and a
+disposable copy of Astra's inert target config. It copies no source text,
+credential, identifier, session, transcript, prompt, executable code, or
+symlink target. Top-level skill links contribute only an anonymous count.
+
+The importer runs as the existing no-login `openclaw-migrate` account in a
+transient systemd service with a private network, no capabilities, strict
+system protection, and read-only source and target trees. The exact root-owned
+Hermes venv link, resolved Python binary hash, `pyvenv.cfg` hash, importer
+hash, release, and commit are pinned before execution. The wrapper passes no
+execute, secret, output-directory, workspace-target, overwrite, cleanup,
+archive-source, messaging, scheduler, or activation argument. Raw importer
+items are discarded; retained files contain only source counts and totals by
+kind/status, are root-owned mode `0600`, and the temporary view must be absent
+before the playbook accepts the run.
+
+The accepted 2026-08-13 run inventoried 125 shape objects: one config, one
+approval policy, seven standard documents, 102 daily-memory placeholders, 11
+workspace-skill placeholders, three shared-skill placeholders, and no project
+skills. One shared-skill entry was a link represented only by count. The
+aggregate report at
+`/var/backups/hermes-openclaw-dry-run/20260813T233105Z` contained 23 advisory
+"would migrate" results, 11 "would archive" results, 21 skipped results, and
+zero errors. Secret migration and forbidden-option selection were both false.
+All three Hermes gateways remained inactive and disabled, the OpenClaw and
+Health service-state snapshots matched exactly before and after, and the
+temporary work root was empty.
+
+The report does not authorize any direct import:
+
+- behavior, identity, user profile, and session proposals are replaced by the
+  reviewed profile contracts;
+- command allowlists are rebuilt through root-managed policy and brokers, not
+  copied from OpenClaw;
+- memory and daily memory enter profile-specific curation only;
+- all skill proposals remain review-and-rebuild inputs, never copied code;
+- cron, logging, memory-backend, and skills-config archive proposals are
+  reconciled against their modern Hermes or external owners; and
+- skipped credentials, providers, messaging, channels, plugins, hooks, MCP,
+  browser, TTS, and Gateway categories remain excluded or cutover-only.
+
+Three fail-closed corrections were required before acceptance. The first run
+rejected a known shared-skill symlink; the durable fix anonymously represents
+skill-link count without following the target. The initial transient service
+could not traverse a `0700` work parent; it is now `root:openclaw-migrate 0710`
+while evidence remains `root:root 0700`. Finally, using the canonical base
+Python omitted Hermes venv dependencies, so the exact root-owned venv link and
+complete resolution chain are now pinned. The importer also redacts its own
+`migrate_secrets` boolean and reports excluded categories for reconciliation;
+the wrapper therefore proves authority from the exact command and selected
+options instead of misclassifying redacted fields or advisory item labels.
+
 ## Profile Import Contract
 
 `files/hermes/profile-import-contract.json` owns the next Gate 5 boundary. It

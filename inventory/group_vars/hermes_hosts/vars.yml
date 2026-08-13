@@ -8,6 +8,20 @@ hermes_shadow_change_approved: false
 hermes_shadow_install_approved: false
 hermes_shadow_start_approved: false
 
+# Operator-only official importer inventory. The default is inert. Dry-run
+# mode builds a temporary shape-only view and never exposes the live source to
+# a Hermes service identity.
+hermes_openclaw_dry_run_mode: disabled
+hermes_openclaw_dry_run_approved: false
+hermes_openclaw_dry_run_contract_source: >-
+  files/hermes/openclaw-dry-run-contract.json
+hermes_openclaw_dry_run_contract_live: >-
+  /usr/local/share/hermes-shadow/openclaw-dry-run-contract.json
+hermes_openclaw_dry_run_script_source: >-
+  scripts/agents/hermes-openclaw-dry-run.py
+hermes_openclaw_dry_run_script_live: >-
+  /usr/local/libexec/hermes-openclaw-dry-run
+
 hermes_shadow_source_repo: https://github.com/NousResearch/hermes-agent.git
 hermes_shadow_install_ref: v2026.8.3
 hermes_shadow_expected_tag_object: 7de39e700d2c329e15d32eb0b96e2f7cdd9fbdb2

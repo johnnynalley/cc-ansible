@@ -1,0 +1,306 @@
+---
+# yamllint disable rule:line-length
+# Purpose: Inventory the pinned official OpenClaw importer through a shape-only source view.
+# Hosts: hermes_hosts.
+# Key vars: hermes_openclaw_dry_run_*.
+# Scripts: scripts/agents/hermes-openclaw-dry-run.py.
+# Validation: ansible-playbook playbooks/agents/hermes-openclaw-dry-run.yml --syntax-check.
+
+- name: Run protected Hermes OpenClaw importer inventory
+  hosts: hermes_hosts
+  become: true
+  gather_facts: false
+
+  vars:
+    hermes_openclaw_dry_run_contract_path: >-
+      {{ playbook_dir }}/../../{{ hermes_openclaw_dry_run_contract_source }}
+    hermes_openclaw_dry_run_contract: >-
+      {{ lookup('ansible.builtin.file', hermes_openclaw_dry_run_contract_path) | from_json }}
+    hermes_openclaw_dry_run_system_units:
+      - hermes-gateway-astra.service
+      - hermes-gateway-dubble.service
+      - hermes-gateway-rigel.service
+      - openclaw-health-receiver.service
+      - openclaw-isolated-codex.service
+      - openclaw-isolated-gateway.service
+
+  tasks:
+    - name: Validate protected Hermes importer mode
+      ansible.builtin.assert:
+        that:
+          - hermes_openclaw_dry_run_mode in ['disabled', 'dry-run']
+        fail_msg: >-
+          hermes_openclaw_dry_run_mode must be disabled or dry-run. This
+          playbook has no importer execute, cleanup, or archive mode.
+
+    - name: Skip protected Hermes importer when disabled
+      ansible.builtin.meta: end_host
+      when: hermes_openclaw_dry_run_mode == 'disabled'
+
+    - name: Require explicit protected Hermes importer approval
+      ansible.builtin.assert:
+        that:
+          - hermes_openclaw_dry_run_approved | bool
+          - inventory_hostname == 'jn-t14s-lin'
+          - hermes_openclaw_dry_run_contract.schemaVersion == 1
+          - hermes_openclaw_dry_run_contract.mode == 'shape-only-dry-run'
+          - not hermes_openclaw_dry_run_contract.sourceShape.rawContentCopied
+          - not hermes_openclaw_dry_run_contract.sourceShape.secretsCopied
+          - not hermes_openclaw_dry_run_contract.sourceShape.credentialsCopied
+          - not hermes_openclaw_dry_run_contract.sourceShape.sessionsCopied
+          - not hermes_openclaw_dry_run_contract.sourceShape.transcriptsCopied
+          - not hermes_openclaw_dry_run_contract.sourceShape.promptsCopied
+          - not hermes_openclaw_dry_run_contract.sourceShape.executableCodeCopied
+          - not hermes_openclaw_dry_run_contract.sourceShape.opaqueIdentityValuesCopied
+          - not hermes_openclaw_dry_run_contract.sourceShape.symlinksAllowed
+          - not hermes_openclaw_dry_run_contract.execution.executeFlagAllowed
+          - not hermes_openclaw_dry_run_contract.execution.migrateSecretsAllowed
+          - not hermes_openclaw_dry_run_contract.execution.outputDirectoryAllowed
+          - not hermes_openclaw_dry_run_contract.execution.workspaceTargetAllowed
+          - not hermes_openclaw_dry_run_contract.execution.sourceCleanupAllowed
+          - not hermes_openclaw_dry_run_contract.execution.sourceArchiveAllowed
+          - not hermes_openclaw_dry_run_contract.execution.runtimeActivationAllowed
+          - not hermes_openclaw_dry_run_contract.execution.messagingActivationAllowed
+          - not hermes_openclaw_dry_run_contract.execution.schedulerActivationAllowed
+          - hermes_openclaw_dry_run_contract.report.aggregateOnlyStdout | bool
+          - not hermes_openclaw_dry_run_contract.report.rawImporterReportPersisted
+          - not hermes_openclaw_dry_run_contract.report.itemDetailsPersisted
+          - not hermes_openclaw_dry_run_contract.report.sourceValuesPersisted
+        fail_msg: >-
+          The protected importer request differs from the reviewed shape-only,
+          no-secret, no-write, no-activation contract.
+
+    - name: Inspect protected Hermes importer fixed sources
+      ansible.builtin.stat:
+        path: "{{ item }}"
+        follow: false
+      loop:
+        - "{{ hermes_openclaw_dry_run_contract.paths.source }}"
+        - "{{ hermes_openclaw_dry_run_contract.paths.workspace }}"
+        - "{{ hermes_openclaw_dry_run_contract.paths.astraConfig }}"
+        - "{{ hermes_openclaw_dry_run_contract.runtime.pythonResolvedTarget }}"
+        - "{{ hermes_openclaw_dry_run_contract.runtime.venvConfig }}"
+        - "{{ hermes_openclaw_dry_run_contract.runtime.engine }}"
+      register: hermes_openclaw_dry_run_sources
+      check_mode: false
+
+    - name: Require non-symlink protected Hermes importer sources
+      ansible.builtin.assert:
+        that:
+          - item.stat.exists
+          - not item.stat.islnk | default(false)
+          - >-
+            item.stat.isdir
+            if item.item in [
+              hermes_openclaw_dry_run_contract.paths.source,
+              hermes_openclaw_dry_run_contract.paths.workspace
+            ]
+            else item.stat.isreg
+        fail_msg: >-
+          A protected importer source is absent, the wrong kind, or a symlink.
+      loop: "{{ hermes_openclaw_dry_run_sources.results }}"
+      loop_control:
+        label: "{{ item.item }}"
+
+    - name: Inspect pinned Hermes venv Python link
+      ansible.builtin.stat:
+        path: "{{ hermes_openclaw_dry_run_contract.runtime.python }}"
+        follow: false
+      register: hermes_openclaw_dry_run_python_link
+      check_mode: false
+
+    - name: Require exact root-owned Hermes venv Python link
+      ansible.builtin.assert:
+        that:
+          - hermes_openclaw_dry_run_python_link.stat.exists
+          - hermes_openclaw_dry_run_python_link.stat.islnk
+          - hermes_openclaw_dry_run_python_link.stat.pw_name == 'root'
+          - hermes_openclaw_dry_run_python_link.stat.gr_name == 'root'
+          - hermes_openclaw_dry_run_python_link.stat.lnk_target == hermes_openclaw_dry_run_contract.runtime.pythonLinkTarget
+        fail_msg: >-
+          The Hermes venv Python is not the exact reviewed root-owned link.
+
+    - name: Report protected Hermes importer check-mode boundary
+      ansible.builtin.debug:
+        msg: >-
+          Check mode validated the fixed host, sources, runtime, and inert
+          contract. It did not stage source shape, run the importer, or write
+          private evidence.
+      when: ansible_check_mode
+
+    - name: Stop protected Hermes importer before mutation in check mode
+      ansible.builtin.meta: end_host
+      when: ansible_check_mode
+
+    - name: Inspect service states before protected Hermes importer run
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/systemctl
+          - show
+          - --property=LoadState
+          - --property=ActiveState
+          - --property=UnitFileState
+          - "{{ item }}"
+      loop: "{{ hermes_openclaw_dry_run_system_units }}"
+      register: hermes_openclaw_dry_run_services_before
+      changed_when: false
+      failed_when: false
+
+    - name: Require every Hermes gateway stopped before importer inventory
+      ansible.builtin.assert:
+        that:
+          - "'ActiveState=inactive' in item.stdout"
+        fail_msg: >-
+          A Hermes Gateway is active. The importer inventory requires all
+          Hermes runtime profiles to remain stopped.
+      loop: "{{ hermes_openclaw_dry_run_services_before.results[0:3] }}"
+      loop_control:
+        label: "{{ item.item }}"
+
+    - name: Create protected Hermes importer deployment directories
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: directory
+        owner: root
+        group: root
+        mode: "0755"
+      loop:
+        - /usr/local/libexec
+        - /usr/local/share/hermes-shadow
+
+    - name: Deploy protected Hermes importer contract
+      ansible.builtin.copy:
+        src: "{{ ansible_config_file | dirname }}/{{ hermes_openclaw_dry_run_contract_source }}"
+        dest: "{{ hermes_openclaw_dry_run_contract_live }}"
+        owner: root
+        group: root
+        mode: "0444"
+
+    - name: Deploy protected Hermes importer wrapper
+      ansible.builtin.copy:
+        src: "{{ ansible_config_file | dirname }}/{{ hermes_openclaw_dry_run_script_source }}"
+        dest: "{{ hermes_openclaw_dry_run_script_live }}"
+        owner: root
+        group: root
+        mode: "0755"
+
+    - name: Run shape-only Hermes OpenClaw importer inventory
+      ansible.builtin.command:
+        argv:
+          - "{{ hermes_openclaw_dry_run_script_live }}"
+          - --contract
+          - "{{ hermes_openclaw_dry_run_contract_live }}"
+      register: hermes_openclaw_dry_run_result
+      changed_when: true
+
+    - name: Parse aggregate Hermes importer result
+      ansible.builtin.set_fact:
+        hermes_openclaw_dry_run_result_json: >-
+          {{ hermes_openclaw_dry_run_result.stdout | from_json }}
+
+    - name: Require successful aggregate Hermes importer result
+      ansible.builtin.assert:
+        that:
+          - hermes_openclaw_dry_run_result_json.status == 'ok'
+          - hermes_openclaw_dry_run_result_json.summary is mapping
+          - hermes_openclaw_dry_run_result_json.evidence is match('^/var/backups/hermes-openclaw-dry-run/[0-9]{8}T[0-9]{6}Z$')
+        fail_msg: >-
+          The protected Hermes importer did not return a successful bounded
+          aggregate result.
+
+    - name: Inspect protected Hermes importer evidence
+      ansible.builtin.stat:
+        path: "{{ hermes_openclaw_dry_run_result_json.evidence }}/{{ item }}"
+        follow: false
+        get_checksum: true
+      loop:
+        - proof.json
+        - report.json
+        - source-shape.json
+      register: hermes_openclaw_dry_run_evidence
+
+    - name: Require private regular Hermes importer evidence
+      ansible.builtin.assert:
+        that:
+          - item.stat.exists
+          - item.stat.isreg
+          - not item.stat.islnk | default(false)
+          - item.stat.pw_name == 'root'
+          - item.stat.gr_name == 'root'
+          - item.stat.mode == '0600'
+        fail_msg: >-
+          Protected importer evidence is absent, linked, or not root-private.
+      loop: "{{ hermes_openclaw_dry_run_evidence.results }}"
+      loop_control:
+        label: "{{ item.item }}"
+
+    - name: Read protected Hermes importer proof privately
+      ansible.builtin.slurp:
+        src: "{{ hermes_openclaw_dry_run_result_json.evidence }}/proof.json"
+      register: hermes_openclaw_dry_run_proof_raw
+      no_log: true
+
+    - name: Parse protected Hermes importer proof privately
+      ansible.builtin.set_fact:
+        hermes_openclaw_dry_run_proof: >-
+          {{ hermes_openclaw_dry_run_proof_raw.content | b64decode | from_json }}
+      no_log: true
+
+    - name: Require protected Hermes importer isolation proof
+      ansible.builtin.assert:
+        that:
+          - hermes_openclaw_dry_run_proof.status == 'ok'
+          - hermes_openclaw_dry_run_proof.sourceViewReadOnly | bool
+          - hermes_openclaw_dry_run_proof.targetViewReadOnly | bool
+          - hermes_openclaw_dry_run_proof.privateNetwork | bool
+          - not hermes_openclaw_dry_run_proof.rawContentCopied
+          - not hermes_openclaw_dry_run_proof.rawImporterReportPersisted
+          - hermes_openclaw_dry_run_proof.temporaryViewRemoved | bool
+          - hermes_openclaw_dry_run_proof.engineSha256 == hermes_openclaw_dry_run_contract.runtime.engineSha256
+        fail_msg: >-
+          The importer run did not prove its no-network, read-only, temporary,
+          no-raw-content boundary.
+      no_log: true
+
+    - name: Inspect temporary Hermes importer work root
+      ansible.builtin.find:
+        paths: "{{ hermes_openclaw_dry_run_contract.paths.workRoot }}"
+        file_type: any
+        hidden: true
+        recurse: true
+      register: hermes_openclaw_dry_run_work_root
+
+    - name: Require no retained temporary Hermes importer view
+      ansible.builtin.assert:
+        that:
+          - hermes_openclaw_dry_run_work_root.matched | int == 0
+        fail_msg: >-
+          A temporary source or target view remains after importer inventory.
+
+    - name: Inspect service states after protected Hermes importer run
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/systemctl
+          - show
+          - --property=LoadState
+          - --property=ActiveState
+          - --property=UnitFileState
+          - "{{ item }}"
+      loop: "{{ hermes_openclaw_dry_run_system_units }}"
+      register: hermes_openclaw_dry_run_services_after
+      changed_when: false
+      failed_when: false
+
+    - name: Require unchanged services after protected Hermes importer run
+      ansible.builtin.assert:
+        that:
+          - >-
+            hermes_openclaw_dry_run_services_before.results
+            | map(attribute='stdout')
+            | list
+            == hermes_openclaw_dry_run_services_after.results
+            | map(attribute='stdout')
+            | list
+        fail_msg: >-
+          A Hermes, OpenClaw canary, or Health system service changed state
+          during the protected importer inventory.

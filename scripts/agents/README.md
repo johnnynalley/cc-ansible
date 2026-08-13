@@ -28,6 +28,17 @@
   workspace disposition, Health's external ownership, secret re-enrollment,
   disabled cron reconstruction, queue draining, stopped SQLite backup, unknown
   entries, kind drift, and symlink rejection.
+- `hermes-openclaw-dry-run.py` creates an ephemeral shape-only OpenClaw source
+  and disposable Hermes target, runs the pinned official importer as the
+  no-login migration account with no network and read-only trees, strips all
+  item details from retained evidence, and removes the view. Legacy skill
+  symlinks are represented only by an anonymous count and are never followed.
+  Raw source text, prompts, credentials, sessions, code, and opaque identities
+  never enter it.
+- `test_hermes_openclaw_dry_run.py` covers contract immutability, source
+  placeholders, secret/prompt/code exclusion, ordinary-source symlink
+  rejection, anonymous skill-link handling, structural report stripping,
+  disabled deployment, and systemd confinement.
 - `hermes-profile-import-audit.py` pins the workspace and state contracts,
   validates three distinct profile roots and behavior sources, and requires
   every retained or curated source to have exactly one profile, namespace,

@@ -297,6 +297,7 @@ Packages are merged from multiple sources (all applicable variables combined):
 | `vm-storage-gate.yml` | `proxmox_nodes` | Per-VM start gate: hookscript blocks `qm start`/`pct start` if VM's declared host mountpoints aren't mounted. Per-VM declarations in `host_vars/<vm>/storage.yml` |
 | `openclaw.yml` | `openclaw_hosts` | OpenClaw AI agent (npm install, gateway service, repo-sync/update-check timers) |
 | `hermes-shadow.yml` | `hermes_hosts` | Boot-disabled, isolated Hermes replacement staging with no production delivery |
+| `hermes-openclaw-dry-run.yml` | `hermes_hosts` | Operator-approved, shape-only official importer inventory with no source content, activation, or service-state change |
 | `openclaw-health-receiver.yml` | `openclaw_hosts` | Isolated Health receiver and aggregate-only report publisher (disabled by default) |
 | `openclaw-isolated-gateway.yml` | `openclaw_hosts` | Modernized split Gateway/Codex canary with immutable runtime/provider code, separate no-login identities and secrets, isolated executor OAuth, and model proof (disabled by default) |
 | `openclaw-state-rehearsal.yml` | `openclaw_hosts` | Verified relocation rehearsal for active file-backed sessions with bounded current/rollback generation retention (disabled by default) |
@@ -1057,6 +1058,10 @@ installs no runtime during normal convergence, starts no listener, contains no
 production token, and is not imported by `site.yml`.
 
 - **Playbook**: `playbooks/agents/hermes-shadow.yml`
+- **Protected importer inventory**:
+  `playbooks/agents/hermes-openclaw-dry-run.yml` is disabled by default and
+  retains only root-private structural evidence from a networkless,
+  read-only, shape-only source view
 - **Architecture and gates**: `docs/hermes-replacement.md`
 - **Discord handoff**: three credential-free profile declarations, silent
   unknown DMs, fail-closed allowlists, no replay/backfill, and an attended

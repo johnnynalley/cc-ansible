@@ -1,0 +1,99 @@
+{
+  "schemaVersion": 1,
+  "mode": "shape-only-dry-run",
+  "runtime": {
+    "release": "v2026.8.3",
+    "commit": "3c27eb6234bf91b8ceee9e9071591b31e9b148cb",
+    "python": "/usr/local/lib/hermes-agent/venv/bin/python",
+    "pythonLinkTarget": "/usr/local/share/uv/python/cpython-3.11-linux-x86_64-gnu/bin/python3.11",
+    "pythonResolvedTarget": "/usr/local/share/uv/python/cpython-3.11.15-linux-x86_64-gnu/bin/python3.11",
+    "pythonResolvedSha256": "0253b01a7f5d96a042a2b9f5e0f5ff5062707a1c75be2b089098e3111cd186d2",
+    "venvConfig": "/usr/local/lib/hermes-agent/venv/pyvenv.cfg",
+    "venvConfigSha256": "265121fad66922fd2443c416e450d9ba14f6fb03e49b5c8851942bd38e5e2263",
+    "engine": "/usr/local/lib/hermes-agent/optional-skills/migration/openclaw-migration/scripts/openclaw_to_hermes.py",
+    "engineSha256": "5253b7e83e10688080ede199c378241082a3c591f45651932afc939dc0e87676"
+  },
+  "paths": {
+    "source": "/home/johnny/.openclaw",
+    "workspace": "/home/johnny/.openclaw/workspace",
+    "astraConfig": "/var/lib/hermes/astra/config.yaml",
+    "workRoot": "/var/lib/hermes-openclaw-dry-run",
+    "evidenceRoot": "/var/backups/hermes-openclaw-dry-run"
+  },
+  "executor": {
+    "user": "openclaw-migrate",
+    "group": "openclaw-migrate",
+    "network": false,
+    "capabilities": false,
+    "sourceWritable": false,
+    "targetWritable": false
+  },
+  "selectedOptions": [
+    "agent-config",
+    "approvals-config",
+    "archive",
+    "command-allowlist",
+    "cron-jobs",
+    "daily-memory",
+    "logging-config",
+    "memory",
+    "memory-backend",
+    "session-config",
+    "shared-skills",
+    "skills",
+    "skills-config",
+    "soul",
+    "tools-config",
+    "ui-identity",
+    "user-profile",
+    "workspace-agents"
+  ],
+  "forbiddenOptions": [
+    "browser-config",
+    "deep-channels",
+    "discord-settings",
+    "full-providers",
+    "gateway-config",
+    "hooks-config",
+    "mcp-servers",
+    "messaging-settings",
+    "model-config",
+    "plugins-config",
+    "provider-keys",
+    "secret-settings",
+    "signal-settings",
+    "slack-settings",
+    "tts-assets",
+    "tts-config",
+    "whatsapp-settings"
+  ],
+  "sourceShape": {
+    "rawContentCopied": false,
+    "secretsCopied": false,
+    "credentialsCopied": false,
+    "sessionsCopied": false,
+    "transcriptsCopied": false,
+    "promptsCopied": false,
+    "executableCodeCopied": false,
+    "opaqueIdentityValuesCopied": false,
+    "symlinksAllowed": false
+  },
+  "execution": {
+    "executeFlagAllowed": false,
+    "migrateSecretsAllowed": false,
+    "outputDirectoryAllowed": false,
+    "workspaceTargetAllowed": false,
+    "sourceCleanupAllowed": false,
+    "sourceArchiveAllowed": false,
+    "runtimeActivationAllowed": false,
+    "messagingActivationAllowed": false,
+    "schedulerActivationAllowed": false
+  },
+  "report": {
+    "rawImporterReportPersisted": false,
+    "itemDetailsPersisted": false,
+    "sourceValuesPersisted": false,
+    "aggregateOnlyStdout": true,
+    "mode": "0600"
+  }
+}
