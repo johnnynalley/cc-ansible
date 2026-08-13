@@ -356,10 +356,14 @@ co-locating it on the controller.
 `pve-herc` is also rejected. Its live probe timed out, so no live capacity was
 inferred, but the managed inventory explicitly identifies it as a 4-core,
 8-GiB host already running PBS and FreePBX, plus Samba/Time Machine storage,
-and warns that additional appliances must stay lightweight. `pve-m70q` remains
-unavailable after its bounded live probe timed out. No existing node currently
-passes the placement gate; provisioning must wait for `pve-m70q` to become
-reachable and qualify, or for additional suitable capacity.
+and warns that additional appliances must stay lightweight. A later bounded
+`pve-m70q` probe reached the node through its cluster-record LAN address. The
+node has 12 logical CPUs and about 15.3 GiB total RAM, but only about 2.83 GiB
+was available while its 12-GiB Docker VM was running. Its active local ZFS pool
+had only about 20.2 GiB available. It therefore cannot host the 8-GiB/64-GiB
+Hermes baseline without unsafe memory and storage overcommit. No existing node
+currently passes the placement gate; provisioning requires additional suitable
+capacity or deliberate capacity reclamation followed by a new live gate.
 
 Use the then-current Tier-1 Ubuntu LTS cloud image with verified publisher
 checksum and signature. The baseline allocation is four vCPUs, 8 GiB RAM, and
@@ -564,16 +568,20 @@ remains in shadow state with no VMID until the live placement gate passes.
 The blank multi-node capacity probe attempted during this design gate stalled
 in Ansible SSH interpreter discovery and left workers after the wrapper ended.
 Those exact workers were terminated and no capacity result was inferred. A
-later bounded raw probe established only that `pve-alto` is undersized. A
-bounded `pve-m70q` probe timed out without returning host evidence; its workers
-were verified absent afterward, and it is classified as unavailable rather
-than as a capacity result. A separate bounded probe established `ts440`'s
-capacity, and repository role evidence rejected it as the placement because it
-has no safe headroom beyond its critical storage and media duties. The live
-`pve-herc` probe also timed out cleanly; managed inventory nevertheless rejects
-it independently as an already-loaded 4-core/8-GiB host. The existing-node
-survey therefore ends with no selected node. Placement remains an
-implementation precondition, not a fabricated design fact.
+later bounded raw probe established only that `pve-alto` is undersized. An
+initial bounded `pve-m70q` probe through its configured Tailscale address timed
+out and left no workers. The cluster-record LAN address accepted SSH; a
+privileged, read-only, output-allowlisted query then proved that its available
+RAM and local ZFS space are both below the Hermes baseline. The other
+repository LAN address and the configured Tailscale address were unreachable
+during this check; that connectivity/configuration drift is not treated as a
+capacity result. A separate bounded probe established `ts440`'s capacity, and
+repository role evidence rejected it as the placement because it has no safe
+headroom beyond its critical storage and media duties. The live `pve-herc`
+probe also timed out cleanly; managed inventory nevertheless rejects it
+independently as an already-loaded 4-core/8-GiB host. The existing-node survey
+therefore ends with no selected node. Placement remains an implementation
+precondition, not a fabricated design fact.
 
 ## Gate 4 Declarative Runtime
 
