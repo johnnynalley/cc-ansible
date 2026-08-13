@@ -7,6 +7,7 @@ Jinja rendering. Use `templates/` when a file needs variable substitution.
 
 | File | Owner area | Consumers | Notes |
 | --- | --- | --- | --- |
+| `hermes/` | Hermes replacement target policy | Future isolated Hermes VM/profile deployment | Credential-free structured shadow contract. It keeps delivery, scheduling, listeners, host authority, and source cleanup disabled until later gates pass. |
 | `openclaw/` | OpenClaw behavior modernization | Future dedicated-service production workspace deployment | Compact credential-free Astra/Fleet bootstrap sources plus an explicit legacy-workspace disposition policy. Mutable memories and retained project data are staged separately by ownership class. |
 | `qbit-release-stamper.py` | Media release stamping | Legacy/static source for qBittorrent post-download stamping | Prefer repo-managed script/template paths for new work. |
 | `sab-release-stamper.py` | Media release stamping | Legacy/static source for SABnzbd post-download stamping | Prefer repo-managed script/template paths for new work. |
@@ -29,5 +30,8 @@ Jinja rendering. Use `templates/` when a file needs variable substitution.
 - OpenClaw behavior files under `files/openclaw/` are root-deployed active
   source for the modern runtime. Do not mix mutable memory or runtime data into
   that tree.
+- Hermes target files under `files/hermes/` are credential-free structured
+  deployment policy. Keep user/channel IDs, secrets, sessions, memory, and
+  transcripts out of that tree.
 - Update playbooks, docs, and `scripts/repo/repo-audit` expectations when
   moving or retiring a static file.

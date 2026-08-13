@@ -1,0 +1,170 @@
+{
+  "schemaVersion": 1,
+  "deployment": {
+    "mode": "shadow",
+    "targetHost": "hermes-vm",
+    "preferredNode": "pve-alto",
+    "placementRequiresLiveGate": true,
+    "vmid": null,
+    "productionDeliveryEnabled": false,
+    "productionSchedulerEnabled": false,
+    "dashboardEnabled": false,
+    "apiServerEnabled": false,
+    "externalListenerEnabled": false,
+    "productionRouteEnabled": false,
+    "sourceCleanupEnabled": false,
+    "sourceArchiveEnabled": false,
+    "retiredVmReuseEnabled": false
+  },
+  "vm": {
+    "osTrack": "current-tier1-ubuntu-lts",
+    "vcpus": 4,
+    "memoryMiB": 8192,
+    "diskGiB": 64,
+    "nasPassthrough": false,
+    "controllerHomePassthrough": false,
+    "dockerSocketPassthrough": false,
+    "usbPassthrough": false
+  },
+  "runtime": {
+    "installMethod": "official-root-git",
+    "releaseTrack": "official-default",
+    "codeRoot": "/usr/local/lib/hermes-agent",
+    "launcher": "/usr/local/bin/hermes",
+    "managedScope": "/etc/hermes",
+    "runtimeSelfUpdateEnabled": false,
+    "runtimeLazyInstallsEnabled": false,
+    "bundledSkillsEnabled": false
+  },
+  "sandbox": {
+    "backend": "docker",
+    "binary": "/usr/bin/podman",
+    "rootless": true,
+    "dockerGroup": false,
+    "dockerSocket": false,
+    "localTerminalFallback": false,
+    "mountCwd": false,
+    "hostVolumes": [],
+    "forwardEnvironment": [],
+    "forwardCredentialFiles": [],
+    "networkEnabled": false,
+    "runAsHostUser": false,
+    "profileScopedContainers": true,
+    "resourceEnforcementRequiresProof": true
+  },
+  "commonPolicy": {
+    "approvalMode": "manual",
+    "cronApprovalMode": "deny",
+    "permanentCommandAllowlist": [],
+    "memoryWriteApproval": true,
+    "skillsWriteApproval": true,
+    "agentSkillScan": true,
+    "promptInjectionScan": true,
+    "secretRedaction": true,
+    "ssrfProtection": true,
+    "destructiveSlashConfirmation": true,
+    "mcpReloadConfirmation": true,
+    "autoAcceptHooks": false,
+    "allowAllDiscordUsers": false,
+    "sudoers": false,
+    "supplementaryDockerGroup": false
+  },
+  "profiles": [
+    {
+      "name": "astra",
+      "serviceUser": "hermes-astra",
+      "serviceGroup": "hermes-astra",
+      "home": "/var/lib/hermes/astra",
+      "unit": "hermes-gateway-astra.service",
+      "productionTokenPresent": false,
+      "productionCronDeliveryEnabled": false,
+      "terminalEnabled": false,
+      "requiredCapabilities": [
+        "discord",
+        "web-research",
+        "memory",
+        "session-search",
+        "review-gated-skills",
+        "mixture-of-agents",
+        "cron-declarations",
+        "aggregate-report-read",
+        "broker-proposal"
+      ],
+      "forbiddenCapabilities": [
+        "sudo",
+        "docker-daemon",
+        "ansible-vault",
+        "controller-ssh",
+        "raw-health",
+        "broker-approval"
+      ]
+    },
+    {
+      "name": "dubble",
+      "serviceUser": "hermes-dubble",
+      "serviceGroup": "hermes-dubble",
+      "home": "/var/lib/hermes/dubble",
+      "unit": "hermes-gateway-dubble.service",
+      "productionTokenPresent": false,
+      "productionCronDeliveryEnabled": false,
+      "terminalEnabled": false,
+      "requiredCapabilities": [
+        "discord",
+        "public-support",
+        "memory",
+        "session-search",
+        "bounded-astra-handoff"
+      ],
+      "forbiddenCapabilities": [
+        "terminal",
+        "sudo",
+        "docker-daemon",
+        "host-reports",
+        "infrastructure",
+        "cross-profile-secrets"
+      ]
+    },
+    {
+      "name": "rigel",
+      "serviceUser": "hermes-rigel",
+      "serviceGroup": "hermes-rigel",
+      "home": "/var/lib/hermes/rigel",
+      "unit": "hermes-gateway-rigel.service",
+      "productionTokenPresent": false,
+      "productionCronDeliveryEnabled": false,
+      "terminalEnabled": false,
+      "requiredCapabilities": [
+        "discord",
+        "study-context",
+        "memory",
+        "session-search",
+        "always-enabled-silent-scheduler",
+        "canonical-source-read"
+      ],
+      "forbiddenCapabilities": [
+        "terminal",
+        "sudo",
+        "docker-daemon",
+        "host-reports",
+        "infrastructure",
+        "cross-profile-secrets"
+      ]
+    }
+  ],
+  "brokers": {
+    "healthInput": "aggregate-only-read",
+    "dockerInput": "result-only-read",
+    "dockerUpdate": "proposal-and-approved-plan-only",
+    "agentCanApprovePlan": false,
+    "arbitraryCommand": false,
+    "arbitraryPath": false
+  },
+  "backup": {
+    "sqliteSafeHermesBackup": true,
+    "preUpdateFullBackup": true,
+    "encryptedRestic": true,
+    "proxmoxBackup": true,
+    "restoreTestRequired": true,
+    "openclawRollbackPreserved": true
+  }
+}

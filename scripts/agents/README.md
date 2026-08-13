@@ -1,5 +1,16 @@
 # Agent Runtime Scripts
 
+## Hermes Replacement
+
+- `hermes-shadow-target-audit.py` validates the structured, credential-free
+  Gate 3 target declaration. It fails closed on unknown top-level schema,
+  production delivery/scheduling/listeners, pre-gate VM selection, Docker
+  group/socket access, local-terminal fallback, host mounts, forwarded secrets,
+  unsafe approvals, cross-profile identity reuse, broad Dubble/Rigel authority,
+  broker self-approval, or missing backup/rollback controls.
+- `test_hermes_shadow_target_audit.py` covers the real policy plus negative
+  regressions for those privilege and cutover boundaries.
+
 ## Health Receiver
 
 - `health-receiver.py` is the bounded, authenticated Health Auto Export

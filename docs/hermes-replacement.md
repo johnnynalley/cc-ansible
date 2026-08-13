@@ -401,6 +401,12 @@ boundaries without installing Hermes:
 6. A static audit rejects Docker group/socket access, sudoers, host mounts,
    cross-profile secret reads, local-terminal fallback, and allow-all Discord.
 
+The credential-free machine-readable declaration is
+`files/hermes/shadow-target.json`. The fail-closed validator is
+`scripts/agents/hermes-shadow-target-audit.py`; it rejects unknown top-level
+schema instead of using natural-language phrase matching. The declaration
+remains in shadow state with no VMID until the live placement gate passes.
+
 The blank multi-node capacity probe attempted during this design gate stalled
 in Ansible SSH interpreter discovery and left workers after the wrapper ended.
 Those exact workers were terminated and no capacity result was inferred. The
