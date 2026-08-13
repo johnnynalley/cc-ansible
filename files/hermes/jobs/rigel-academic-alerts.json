@@ -1,0 +1,16 @@
+{
+  "schemaVersion": 1,
+  "name": "rigel-academic-alerts",
+  "schedule": "every 30m",
+  "script": "hermes-rigel-schedule.py",
+  "no_agent": true,
+  "deliver": "discord",
+  "wrap_response": false,
+  "attach_to_session": false,
+  "desired_state": "paused-until-cutover",
+  "source": "data/academic-state.json",
+  "dedupe_state": "state/rigel-schedule-state.json",
+  "health_state": "state/rigel-schedule-health.json",
+  "expected_idle_stdout": "",
+  "expected_idle_model_calls": 0
+}

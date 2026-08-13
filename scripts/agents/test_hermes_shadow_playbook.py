@@ -15,6 +15,8 @@ VARS = ROOT / "inventory" / "group_vars" / "hermes_hosts" / "vars.yml"
 CONFIG = ROOT / "templates" / "hermes" / "hermes-managed-config.yaml.j2"
 SERVICE = ROOT / "templates" / "hermes" / "hermes-gateway.service.j2"
 CONTRACT = ROOT / "files" / "hermes" / "shadow-target.json"
+RIGEL_JOB = ROOT / "files" / "hermes" / "jobs" / "rigel-academic-alerts.json"
+RIGEL_SCRIPT = ROOT / "scripts" / "agents" / "hermes-rigel-schedule.py"
 INVENTORY = ROOT / "inventory" / "hosts.ini"
 SITE = ROOT / "site.yml"
 
@@ -26,6 +28,8 @@ class HermesShadowPlaybookTests(unittest.TestCase):
         cls.variables = yaml.safe_load(VARS.read_text(encoding="utf-8"))
         cls.config_template = CONFIG.read_text(encoding="utf-8")
         cls.service_template = SERVICE.read_text(encoding="utf-8")
+        cls.rigel_job = yaml.safe_load(RIGEL_JOB.read_text(encoding="utf-8"))
+        cls.rigel_script = RIGEL_SCRIPT.read_text(encoding="utf-8")
         cls.environment = Environment(undefined=StrictUndefined, autoescape=False)
 
     def task(self, name: str) -> str:
@@ -162,6 +166,30 @@ class HermesShadowPlaybookTests(unittest.TestCase):
         self.assertIn("hermes_shadow_mode == 'bootstrap'", markers)
         self.assertIn("enabled: false", stopped)
         self.assertIn("state: stopped", stopped)
+
+    def test_rigel_schedule_is_root_owned_and_not_activated(self) -> None:
+        script = self.task("Deploy deterministic Rigel academic schedule")
+        declaration = self.task("Deploy paused Rigel academic job declaration")
+        self.assertIn("/var/lib/hermes/rigel/scripts", script)
+        self.assertIn("owner: root", script)
+        self.assertIn('mode: "0550"', script)
+        self.assertIn("/etc/hermes/rigel", declaration)
+        self.assertNotIn("hermes cron create", self.playbook)
+        self.assertNotIn("jobs.json", self.playbook)
+        self.assertEqual(self.rigel_job["schedule"], "every 30m")
+        self.assertTrue(self.rigel_job["no_agent"])
+        self.assertEqual(self.rigel_job["deliver"], "discord")
+        self.assertEqual(self.rigel_job["expected_idle_stdout"], "")
+        self.assertEqual(self.rigel_job["expected_idle_model_calls"], 0)
+        self.assertEqual(
+            self.rigel_job["desired_state"],
+            "paused-until-cutover",
+        )
+        self.assertNotIn("HEARTBEAT_OK", self.rigel_script)
+        self.assertNotIn("[SILENT]", self.rigel_script)
+        self.assertNotIn("subprocess", self.rigel_script)
+        self.assertNotIn("provider", self.rigel_job)
+        self.assertNotIn("model", self.rigel_job)
 
 
 if __name__ == "__main__":

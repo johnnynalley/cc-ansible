@@ -236,11 +236,23 @@
       loop: >-
         {{ hermes_shadow_profiles
            | product([
-               'memories', 'skills', 'cron', 'sessions', 'logs', 'pending'
+               'memories', 'skills', 'cron', 'sessions', 'logs', 'pending',
+               'data', 'state'
              ])
            | list }}
       loop_control:
         label: "{{ item.0.name }}/{{ item.1 }}"
+
+    - name: Create root-owned Hermes script directories
+      ansible.builtin.file:
+        path: "{{ item.home }}/scripts"
+        state: directory
+        owner: root
+        group: "{{ item.group }}"
+        mode: "0750"
+      loop: "{{ hermes_shadow_profiles }}"
+      loop_control:
+        label: "{{ item.name }}"
 
     - name: Download reviewed official Hermes installer
       ansible.builtin.get_url:
@@ -432,6 +444,27 @@
       loop: "{{ hermes_shadow_profiles }}"
       loop_control:
         label: "{{ item.name }}"
+
+    - name: Deploy deterministic Rigel academic schedule
+      ansible.builtin.copy:
+        src: >-
+          {{ playbook_dir }}/../../{{ hermes_rigel_schedule_source }}
+        dest: /var/lib/hermes/rigel/scripts/hermes-rigel-schedule.py
+        owner: root
+        group: hermes-rigel
+        mode: "0550"
+        backup: true
+
+    - name: Deploy paused Rigel academic job declaration
+      ansible.builtin.copy:
+        src: >-
+          {{ playbook_dir
+             }}/../../{{ hermes_rigel_schedule_manifest_source }}
+        dest: /etc/hermes/rigel/rigel-academic-alerts.json
+        owner: root
+        group: root
+        mode: "0644"
+        backup: true
 
     - name: Deploy Hermes shadow gateway units
       ansible.builtin.template:

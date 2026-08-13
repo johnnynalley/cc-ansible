@@ -12,6 +12,10 @@ transcripts.
 - `profiles/*/SOUL.md` contains the root-owned baseline identity for Astra,
   Dubble, and Rigel. It encodes transcript-derived behavior boundaries without
   copying transcript content, user IDs, memories, or credentials.
+- `jobs/rigel-academic-alerts.json` is the paused, credential-free declaration
+  for Rigel's always-enabled 30-minute script-only schedule. It is activated
+  through the Hermes CLI only after cutover approval; Ansible never edits
+  Hermes `jobs.json` directly.
 - `scripts/agents/hermes-shadow-target-audit.py` is the fail-closed validator.
 
 The target declaration is deliberately structured. Do not replace it with

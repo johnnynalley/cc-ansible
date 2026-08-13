@@ -87,23 +87,35 @@ narrow host brokers as the authority boundary.
 Rigel remains scheduled every 30 minutes. The schedule is not disabled during
 breaks, an empty semester, or missing optional daily files.
 
-A root-owned, read-only precheck runs before the model:
+A root-owned, read-only script-only job runs without a model:
 
 1. Read only declared canonical course and calendar sources.
 2. Treat an absent optional daily memory file, empty event list, completed
    semester, and no due event as normal state.
-3. Return `{"wakeAgent": false}` with no stdout or delivery for normal state.
-4. Wake Rigel only for a source-backed candidate that needs semantic handling.
-5. Fingerprint and privately record malformed-source or precheck failures.
+3. Return empty stdout and no delivery for normal state.
+4. Format only explicit source-backed candidates; the scheduler path never asks
+   a model to infer whether an event exists.
+5. Fingerprint and privately record malformed-source or evaluator failures.
    Route one deduplicated operational alert through the health path; do not
    leak shell errors, reasoning, or control strings into `#rigel`.
-6. Require Rigel to cite the canonical source before sending an exam or event
-   alert. A prior alert marker is never evidence that the underlying event was
-   real.
+6. Require every event record to carry a canonical evidence reference before
+   the script can emit it. A prior alert marker is never evidence that the
+   underlying event was real.
 
-Hermes cron's `[SILENT]` behavior is useful but is not the primary safety
-mechanism because failed jobs are still delivered. Expected absence must be a
-successful deterministic no-op before the model runs.
+Hermes officially supports script-only cron, where empty stdout is a silent
+tick with no model or provider call. `[SILENT]` is not used because failed
+agent jobs are still delivered. Expected absence and source errors are caught
+as successful no-output evaluations and written to local health state; a
+separate freshness/health check owns operational failure alerts outside
+`#rigel`.
+
+The legacy academic Markdown is migration input, not runtime authority. Its
+current layout can place archived dated entries beneath an "Upcoming Exams"
+heading even after the semester is marked complete, which is ambiguous to a
+model. The attended migration converts that material once into structured
+semester/event records with explicit status and evidence fields. The running
+schedule never parses the legacy Markdown, delivery receipts, channel metadata,
+or prior generated alerts, and it needs no heartbeat control-token filter.
 
 ## Star Verification Design
 
