@@ -198,6 +198,8 @@ class HermesShadowPlaybookTests(unittest.TestCase):
         self.assertIn("when: not hermes_shadow_runtime.stat.exists", gate)
         self.assertIn("hermes_shadow_uv_archive_sha256", uv_download)
         self.assertIn("hermes_shadow_uv_version", uv_verify)
+        self.assertIn("(?:\\\\s|$)", uv_verify)
+        self.assertIn("Expected reviewed uv", uv_verify)
         self.assertIn("hermes_shadow_expected_commit", checkout)
         self.assertIn("--locked", sync)
         self.assertIn("--extra", sync)

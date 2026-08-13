@@ -370,7 +370,14 @@
         that:
           - >-
             hermes_shadow_uv_installed_version.stdout
-            == 'uv ' + hermes_shadow_uv_version
+            is match(
+              '^uv '
+              ~ (hermes_shadow_uv_version | regex_escape)
+              ~ '(?:\\s|$)'
+            )
+        fail_msg: >-
+          Expected reviewed uv {{ hermes_shadow_uv_version }}; got
+          {{ hermes_shadow_uv_installed_version.stdout | default('missing') }}.
       when: not hermes_shadow_runtime.stat.exists
 
     - name: Check out exact official Hermes source
