@@ -201,6 +201,8 @@ class HermesShadowPlaybookTests(unittest.TestCase):
         self.assertIn("hermes_shadow_expected_commit", checkout)
         self.assertIn("--locked", sync)
         self.assertIn("--extra", sync)
+        self.assertIn("UV_CACHE_DIR", sync)
+        self.assertIn("hermes_shadow_uv_cache_dir", sync)
         self.assertNotIn("pip install", sync)
         self.assertNotIn("npm", self.playbook)
         self.assertNotIn("install.sh", self.playbook)

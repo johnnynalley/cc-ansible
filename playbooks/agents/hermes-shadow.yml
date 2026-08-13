@@ -280,6 +280,7 @@
         - /usr/local/libexec
         - /var/cache/hermes
         - "{{ hermes_shadow_uv_extract_dir }}"
+        - "{{ hermes_shadow_uv_cache_dir }}"
         - /var/lib/hermes/bootstrap
         - /var/lib/hermes/bootstrap/bin
         - /usr/local/share/uv
@@ -395,6 +396,7 @@
         HOME: /root
         HERMES_HOME: /var/lib/hermes/bootstrap
         UV_NO_CONFIG: "1"
+        UV_CACHE_DIR: "{{ hermes_shadow_uv_cache_dir }}"
         UV_PROJECT_ENVIRONMENT: "{{ hermes_shadow_runtime_venv }}"
         UV_PYTHON_INSTALL_DIR: /usr/local/share/uv/python
         UV_PYTHON_BIN_DIR: /usr/local/share/uv/bin

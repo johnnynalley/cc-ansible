@@ -419,10 +419,11 @@ runtime does not need. Instead, deploy official `uv` `0.12.4` from its reviewed
 archive with SHA-256
 `c8c60f47e6f88d18dbf6f33d7279fb1fbf7ae76631768152cf5578c3d65729b4`,
 check out the exact official Hermes commit, and require `uv sync --extra all
---locked` to succeed without fallback. Preserve Hermes's native Git install
-marker and launcher layout, disable bundled-skill seeding, and require the
-post-install origin, tag object, commit, and clean-tree checks before
-configuration proceeds.
+--locked` to succeed without fallback. Keep `uv`'s cache and managed Python
+under Hermes-owned `/var/cache/hermes` and `/usr/local/share/uv`, not root's
+home. Preserve Hermes's native Git install marker and launcher layout, disable
+bundled-skill seeding, and require the post-install origin, tag object, commit,
+and clean-tree checks before configuration proceeds.
 
 Updates are root-managed transactions:
 

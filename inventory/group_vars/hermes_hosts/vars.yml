@@ -19,6 +19,7 @@ hermes_shadow_uv_archive_sha256: >-
   c8c60f47e6f88d18dbf6f33d7279fb1fbf7ae76631768152cf5578c3d65729b4
 hermes_shadow_uv_archive_cache: /var/cache/hermes/uv-0.12.4.tar.gz
 hermes_shadow_uv_extract_dir: /var/cache/hermes/uv-0.12.4
+hermes_shadow_uv_cache_dir: /var/cache/hermes/uv-cache
 hermes_shadow_uv_binary: /var/lib/hermes/bootstrap/bin/uv
 hermes_shadow_runtime_binary: /usr/local/bin/hermes
 hermes_shadow_runtime_root: /usr/local/lib/hermes-agent
