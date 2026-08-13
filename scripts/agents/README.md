@@ -42,6 +42,11 @@
   triggers, one concise user-facing answer, native background review with
   staged memory/skill approval, owner-only policy changes, complete sanitized
   promotion cases, non-symlink profile policies, and control-token exclusion.
+- `test_hermes_star_contract.py` validates two independent parallel leaf
+  reviewers, distinct corroboration/challenge roles, bounded inherited
+  authority, no exact model pin, complete-review requirements, one normal
+  private synthesis, MoA's documented role-prompt gap, and six sanitized
+  promotion cases.
 
 ## Health Receiver
 

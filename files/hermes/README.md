@@ -32,6 +32,10 @@ transcripts.
   `behavior-regressions.json` contains sanitized promotion cases derived from
   the private transcript evidence; it contains no transcript text or platform
   identifiers.
+- `star-contract.json` defines exactly two private parallel leaf reviewers,
+  distinct Vega/Antares goals, bounded inherited authority, both-reviewer
+  completion, and one concise Astra synthesis. `star-regressions.json` contains
+  six sanitized runtime promotion cases.
 - `profiles/*/AGENTS.md` contains each profile's root-owned operating contract.
   These files are always-on behavior policy, not keyword-triggered skills.
 - `scripts/agents/hermes-shadow-target-audit.py` is the fail-closed validator.

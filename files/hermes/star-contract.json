@@ -1,0 +1,78 @@
+{
+  "schemaVersion": 1,
+  "mode": "shadow-policy",
+  "mechanism": "hermes-native-parallel-leaf-delegation",
+  "selection": {
+    "strategy": "semantic-stakes-uncertainty",
+    "phraseMatching": false,
+    "keywordTriggering": false,
+    "useForConsequentialRecommendations": true,
+    "useForMateriallyUncertainCurrentFacts": true,
+    "useWhenExplicitlyRequested": true,
+    "skipForTrivialOrMechanicalAnswers": true
+  },
+  "delegation": {
+    "batchSize": 2,
+    "maxConcurrentChildren": 2,
+    "maxSpawnDepth": 1,
+    "orchestratorEnabled": false,
+    "maxIterationsPerReviewer": 12,
+    "reviewersSeeEachOther": false,
+    "reviewersReceiveParentHiddenReasoning": false,
+    "reviewersReceiveOnlyNecessaryContext": true,
+    "reviewersCanClarify": false,
+    "reviewersCanWriteMemory": false,
+    "reviewersCanDelegate": false,
+    "modelPolicy": "inherit-reviewed-astra-route-without-exact-version-pin"
+  },
+  "reviewers": [
+    {
+      "id": "vega",
+      "role": "independent-corroborator",
+      "objective": "Verify the exact object, current primary evidence, constraints, calculations, and proposed answer; identify unsupported claims and the strongest defensible conclusion.",
+      "requiredOutput": [
+        "verdict",
+        "supporting-evidence",
+        "material-unknowns",
+        "recommended-answer"
+      ]
+    },
+    {
+      "id": "antares",
+      "role": "adversarial-challenger",
+      "objective": "Assume the candidate answer may be wrong; search for premise errors, contradictions, stale facts, ignored user constraints, commitment harm, unsafe actions, and stronger alternatives.",
+      "requiredOutput": [
+        "failure-mode",
+        "counterevidence",
+        "must-fix",
+        "accept-or-reject"
+      ]
+    }
+  ],
+  "completion": {
+    "bothReviewersRequiredForStarClaim": true,
+    "failedReviewerMayBeSilentlyIgnored": false,
+    "retryLimit": 1,
+    "reviewerFailureDisposition": "concise-unverified-caveat-or-defer",
+    "partialReviewMayBeCalledStarVerified": false
+  },
+  "synthesis": {
+    "actingAgent": "astra",
+    "oneUserFacingAnswer": true,
+    "directAnswerFirst": true,
+    "normalAnswerLength": true,
+    "reviewerProseVisible": false,
+    "reviewerLabelsVisible": false,
+    "reviewStatusNarrationVisible": false,
+    "confidenceLedgerVisible": false,
+    "contradictionDumpVisible": false,
+    "researchDossierVisible": false,
+    "discloseMaterialUnresolvedConflict": true
+  },
+  "moaDisposition": {
+    "primaryForStar": false,
+    "reason": "Current native MoA reference slots have no documented per-reference role prompt, so they cannot preserve Vega corroboration and Antares challenge semantics.",
+    "reconsiderWhen": "Hermes provides per-reference instructions or model promotion tests prove equivalent adversarial behavior."
+  },
+  "promotionCases": "files/hermes/star-regressions.json"
+}

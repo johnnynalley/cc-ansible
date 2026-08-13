@@ -63,8 +63,8 @@ narrow host brokers as the authority boundary.
 | Dubble public support agent | Dedicated `dubble` profile with a separate bot token, strict Discord allowlists, and no host-operation toolsets | Native except handoff | Public-channel tests prove metadata authorization, no shell/infra access, and a bounded Astra escalation path |
 | Dubble to Astra escalation | Durable task handoff through a narrow broker or Hermes Kanban, never shared profile state | Manual | One request, one acknowledged owner, one completion, no duplicate public response, restart survival |
 | Rigel study agent | Dedicated `rigel` profile plus an always-enabled 30-minute Hermes cron declaration | Native with deterministic pre-gate | Seven idle cycles, expected missing files, empty semester, real event, duplicate event, malformed source, and process restart all pass |
-| Vega and Antares review | Prefer native Mixture of Agents with two reference models and Astra as aggregator; keep reviewer output private and capped | Partial | Two independent model calls are proven, final answer remains concise, and an adversarial reviewer catches seeded premise errors |
-| Antares's intentionally critical role | Native MoA has distinct models but no documented per-reference role prompt; delegation has role prompts but one global child model | Unsupported natively | Do not declare Star parity until a native configuration or narrowly reviewed extension proves distinct critical behavior without exposing reviewer prose |
+| Vega and Antares review | Native parallel batch delegation with two fresh leaf agents and Astra as the only synthesizer | Native after policy port | Both independent child runs are proven, final answer remains concise, and seeded premise errors are caught |
+| Antares's intentionally critical role | Distinct `goal` and `context` for the adversarial leaf; reviewer model inherits Astra's reviewed route without an exact-version pin | Native, one child-model route | Promotion proves Antares challenges rather than echoes while neither reviewer sees the other's output |
 | Long-running multi-agent work | Named profiles and Hermes Kanban for durable asynchronous work | Native | Task survives Gateway restart, retains owner/history, and cannot gain a wider toolset on handoff |
 | File memory and user preferences | Per-profile `MEMORY.md` and `USER.md`, plus FTS5 session search | Native with curated import | Exact user preferences and durable facts survive restart; no raw transcript dump is injected into every prompt |
 | Mem0/Qdrant knowledge | Start with built-in memory and preserved read-only OpenClaw archive; evaluate one external Hermes memory provider only after baseline behavior | Manual replacement | Retrieval quality and deletion/privacy behavior beat baseline before enabling a provider |
@@ -119,25 +119,49 @@ or prior generated alerts, and it needs no heartbeat control-token filter.
 
 ## Star Verification Design
 
-Hermes Mixture of Agents is the closest native match: two reference models run
-in parallel, their private outputs are supplied to the aggregator, and only the
-aggregator emits tools and the user-facing answer. Use `fanout: user_turn`, a
-small `reference_max_tokens`, guidance rather than council-style output, and a
-privacy filter. This directly addresses the transcript failure where Star
-research became a wall of reviewer prose.
+Star uses Hermes' native parallel batch delegation, not a plugin and not MoA.
+Astra creates exactly two fresh leaf agents in one batch:
 
-It does not yet prove the intentional Vega/Antares role split. Official MoA
-reference models receive conversation text without the Hermes system prompt,
-and the documented preset has no per-reference role prompt. Hermes delegation
-can provide distinct role prompts, but all delegated children use one global
-model route. Gate 6 must choose and prove one of these outcomes:
+- Vega independently verifies the exact object, current primary evidence,
+  constraints, calculations, and strongest defensible answer.
+- Antares assumes the candidate answer may be wrong and searches for premise
+  errors, contradictory evidence, stale facts, ignored user constraints,
+  commitment harm, unsafe action, and stronger alternatives.
 
-- native MoA produces materially independent support and challenge behavior;
-- Hermes adds an official per-reference instruction mechanism; or
-- a narrow reviewed extension provides only this missing orchestration.
+The parent passes only necessary case context. Neither reviewer receives
+Astra's hidden reasoning or the other review. Leaf restrictions remove memory
+writes, clarification, and further delegation; root-managed configuration caps
+the batch at two, depth at one, and each reviewer at 12 iterations. Both reviews
+are required before Astra may treat the result as Star-verified. One failed
+reviewer gets one retry; a continued failure produces a concise unverified
+caveat or deferral, not a fake success.
 
-Do not recreate the broad OpenClaw plugin strategy. Do not expose reviewer
-transcripts or council reports unless the user explicitly asks to inspect them.
+Only Astra talks to the user. It resolves disagreements and emits one direct,
+normal-length answer. Reviewer labels, prose, status narration, confidence
+ledgers, contradiction dumps, and research dossiers remain private. A material
+unresolved conflict is stated only when it changes what the user should do.
+This directly corrects the transcript failure where independent review became
+a wall of process output.
+
+Native MoA remains deliberately outside the Star path. It supports parallel
+reference models, private aggregator context, bounded advisor output, and
+`fanout: user_turn`, but current official documentation says reference models
+receive conversation text without the Hermes system prompt and documents no
+per-reference role instruction. It therefore cannot guarantee Vega
+corroboration and Antares challenge semantics. Reconsider it only if Hermes
+adds per-reference instructions or actual promotion tests prove equivalent
+adversarial behavior. See official
+[delegation](https://hermes-agent.nousresearch.com/docs/user-guide/features/delegation/)
+and
+[Mixture of Agents](https://hermes-agent.nousresearch.com/docs/user-guide/features/mixture-of-agents)
+behavior.
+
+`files/hermes/star-regressions.json` defines six runtime promotion cases:
+seeded premise error, purchased-item reversal, current-source conflict,
+reviewer independence, single normal answer, and reviewer failure. Static
+policy tests do not establish model behavior. Gate 7 must prove two actual
+child calls, Antares's adversarial value, concise Discord output, and failure
+handling before Star parity is accepted.
 
 ## Transcript-Derived Behavior Tests
 

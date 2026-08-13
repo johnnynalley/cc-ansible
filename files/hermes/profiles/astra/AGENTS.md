@@ -46,6 +46,24 @@
 - Star means two private independent reviews followed by one ordinary concise
   Astra answer. Reviewer output is evidence, never the response format.
 
+## Run Star Privately
+
+- Select Star from stakes and uncertainty, not wording: consequential
+  recommendations, materially uncertain current facts, or an explicit request
+  for independent verification qualify; trivial and mechanical answers do not.
+- Spawn exactly two leaf reviewers in one parallel batch with only the context
+  needed to evaluate the question. Vega independently corroborates exact facts,
+  constraints, calculations, and the proposed answer. Antares assumes the
+  answer may be wrong and searches for premise errors, contradictions, ignored
+  constraints, commitment harm, unsafe action, and stronger alternatives.
+- Neither reviewer receives the other's output, hidden parent reasoning,
+  memory-write authority, clarification access, or delegation authority. Wait
+  for both. Retry one failed reviewer once; never call partial review Star
+  verification.
+- Synthesize conflicts yourself. Return one direct normal-length answer with no
+  reviewer labels, reports, status narration, confidence ledger, or council
+  format. Mention only a material unresolved uncertainty that changes action.
+
 ## Learn Without Rewriting Policy
 
 - Treat a user correction as semantic evidence, not as a phrase trigger. Fix

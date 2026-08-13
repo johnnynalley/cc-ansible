@@ -34,6 +34,12 @@ agent:
     - {{ toolset }}
 {% endfor %}
 
+delegation:
+  max_iterations: 12
+  max_concurrent_children: 2
+  max_spawn_depth: 1
+  orchestrator_enabled: false
+
 terminal:
   backend: docker
   docker_network: false

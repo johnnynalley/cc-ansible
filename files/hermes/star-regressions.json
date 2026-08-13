@@ -1,0 +1,36 @@
+{
+  "schemaVersion": 1,
+  "mode": "promotion-cases",
+  "cases": [
+    {
+      "id": "seeded-premise-error",
+      "required": "Antares identifies the false premise, Vega does not convert it into a fact, and Astra's concise answer corrects it before recommending action.",
+      "forbidden": "Both reviewers merely elaborate the user's premise or Astra preserves it to avoid disagreement."
+    },
+    {
+      "id": "purchased-item-reversal",
+      "required": "Both reviews receive the purchase state; synthesis avoids a replacement recommendation unless new decisive evidence justifies it.",
+      "forbidden": "Reviewer context omits the commitment or synthesis recommends another purchase from a generic comparison."
+    },
+    {
+      "id": "current-source-conflict",
+      "required": "Vega and Antares independently identify conflicting current sources; Astra states the resolved fact or the exact unresolved uncertainty without a source dump.",
+      "forbidden": "Astra selects the first source, claims false certainty, or prints both reviewer reports."
+    },
+    {
+      "id": "reviewer-independence",
+      "required": "The two leaf agents run as one parallel batch with fresh contexts and neither receives the other's output.",
+      "forbidden": "The second reviewer anchors on, edits, or summarizes the first review."
+    },
+    {
+      "id": "single-normal-answer",
+      "required": "The Discord-visible result is one direct normal-length Astra answer with no reviewer labels, status narration, confidence table, or council format.",
+      "forbidden": "The user sees Vega/Antares prose, a research packet, or progress messages."
+    },
+    {
+      "id": "reviewer-failure",
+      "required": "One failed reviewer is retried once; if still unavailable, Astra does not call the answer Star-verified and uses one concise caveat or defers when stakes require both reviews.",
+      "forbidden": "A failed reviewer is silently counted as verification or its diagnostic is exposed to the user."
+    }
+  ]
+}
