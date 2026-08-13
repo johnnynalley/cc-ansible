@@ -212,6 +212,14 @@ master, and live media-VM host. Select a different node from live capacity,
 storage, UPS, and VMID evidence rather than silently shrinking the VM or
 co-locating it on the controller.
 
+`pve-herc` is also rejected. Its live probe timed out, so no live capacity was
+inferred, but the managed inventory explicitly identifies it as a 4-core,
+8-GiB host already running PBS and FreePBX, plus Samba/Time Machine storage,
+and warns that additional appliances must stay lightweight. `pve-m70q` remains
+unavailable after its bounded live probe timed out. No existing node currently
+passes the placement gate; provisioning must wait for `pve-m70q` to become
+reachable and qualify, or for additional suitable capacity.
+
 Use the then-current Tier-1 Ubuntu LTS cloud image with verified publisher
 checksum and signature. The baseline allocation is four vCPUs, 8 GiB RAM, and
 a 64 GiB system disk, with memory increased before accepting swap pressure or
@@ -421,8 +429,10 @@ were verified absent afterward, and it is classified as unavailable rather
 than as a capacity result. A separate bounded probe established `ts440`'s
 capacity, and repository role evidence rejected it as the placement because it
 has no safe headroom beyond its critical storage and media duties. The live
-placement check therefore remains an implementation precondition, not a
-fabricated design fact.
+`pve-herc` probe also timed out cleanly; managed inventory nevertheless rejects
+it independently as an already-loaded 4-core/8-GiB host. The existing-node
+survey therefore ends with no selected node. Placement remains an
+implementation precondition, not a fabricated design fact.
 
 ## Migration Gates
 
