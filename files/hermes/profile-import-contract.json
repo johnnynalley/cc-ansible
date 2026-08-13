@@ -1,0 +1,341 @@
+{
+  "schemaVersion": 1,
+  "mode": "audit-only",
+  "sourceContracts": {
+    "workspacePolicy": {
+      "path": "files/openclaw/workspace-migration-policy.json",
+      "sha256": "08e30aa55c72a54a6ac0e7c67e6d99b5557bd0fed75e8b16a19af556ee20e211"
+    },
+    "stateMigration": {
+      "path": "files/hermes/openclaw-state-migration-contract.json",
+      "sha256": "dc9887db3fafe562812b6781a14bd56582cd103a7ff94b851e49d72ffa4ddcae"
+    }
+  },
+  "safety": {
+    "sourceMutationAuthorized": false,
+    "runtimeActivationAuthorized": false,
+    "rawSessionImportAuthorized": false,
+    "rawTranscriptImportAuthorized": false,
+    "credentialImportAuthorized": false,
+    "automaticMemoryApprovalAuthorized": false,
+    "crossProfileMountsAuthorized": false,
+    "executableRetentionAuthorized": false,
+    "symlinkRetentionAuthorized": false
+  },
+  "profiles": {
+    "astra": {
+      "serviceUser": "hermes-astra",
+      "targetRoot": "/var/lib/hermes/astra",
+      "behaviorSource": "files/hermes/profiles/astra/SOUL.md"
+    },
+    "dubble": {
+      "serviceUser": "hermes-dubble",
+      "targetRoot": "/var/lib/hermes/dubble",
+      "behaviorSource": "files/hermes/profiles/dubble/SOUL.md"
+    },
+    "rigel": {
+      "serviceUser": "hermes-rigel",
+      "targetRoot": "/var/lib/hermes/rigel",
+      "behaviorSource": "files/hermes/profiles/rigel/SOUL.md"
+    }
+  },
+  "workspaceMappings": [
+    {
+      "sourceRuleId": "antares-memory-data",
+      "profile": "astra",
+      "targetNamespace": "imports/reviewers/antares/memory",
+      "ownerClass": "executor-writable",
+      "importMode": "private-reviewer-curation",
+      "exposure": "private-review-only",
+      "rawPromptInjection": false
+    },
+    {
+      "sourceRuleId": "assets-data",
+      "profile": "astra",
+      "targetNamespace": "data/assets",
+      "ownerClass": "executor-writable",
+      "importMode": "data-stage",
+      "exposure": "on-demand",
+      "rawPromptInjection": false
+    },
+    {
+      "sourceRuleId": "case-data",
+      "profile": "astra",
+      "targetNamespace": "data/cases",
+      "ownerClass": "executor-writable",
+      "importMode": "data-stage",
+      "exposure": "on-demand",
+      "rawPromptInjection": false
+    },
+    {
+      "sourceRuleId": "draft-data",
+      "profile": "astra",
+      "targetNamespace": "data/drafts",
+      "ownerClass": "executor-writable",
+      "importMode": "data-stage",
+      "exposure": "on-demand",
+      "rawPromptInjection": false
+    },
+    {
+      "sourceRuleId": "dubble-authorization",
+      "profile": "dubble",
+      "targetNamespace": "policy/AUTH.yaml",
+      "ownerClass": "operator-readonly",
+      "importMode": "operator-reference",
+      "exposure": "root-policy",
+      "rawPromptInjection": false
+    },
+    {
+      "sourceRuleId": "dubble-knowledge",
+      "profile": "dubble",
+      "targetNamespace": "data/knowledge",
+      "ownerClass": "executor-writable",
+      "importMode": "data-stage",
+      "exposure": "on-demand",
+      "rawPromptInjection": false
+    },
+    {
+      "sourceRuleId": "dubble-memory",
+      "profile": "dubble",
+      "targetNamespace": "imports/memory",
+      "ownerClass": "executor-writable",
+      "importMode": "memory-curation",
+      "exposure": "approved-memory",
+      "rawPromptInjection": false
+    },
+    {
+      "sourceRuleId": "dubble-users",
+      "profile": "dubble",
+      "targetNamespace": "data/users",
+      "ownerClass": "executor-writable",
+      "importMode": "structured-transform",
+      "exposure": "on-demand",
+      "rawPromptInjection": false
+    },
+    {
+      "sourceRuleId": "fortnite-progress",
+      "profile": "astra",
+      "targetNamespace": "data/fortnite-progress",
+      "ownerClass": "executor-writable",
+      "importMode": "data-stage",
+      "exposure": "on-demand",
+      "rawPromptInjection": false
+    },
+    {
+      "sourceRuleId": "freshrss-state",
+      "profile": "astra",
+      "targetNamespace": "data/integrations/freshrss/state.json",
+      "ownerClass": "executor-writable",
+      "importMode": "structured-transform",
+      "exposure": "on-demand",
+      "rawPromptInjection": false
+    },
+    {
+      "sourceRuleId": "freshrss-latest-json",
+      "profile": "astra",
+      "targetNamespace": "data/integrations/freshrss/latest-briefing.json",
+      "ownerClass": "executor-writable",
+      "importMode": "data-stage",
+      "exposure": "on-demand",
+      "rawPromptInjection": false
+    },
+    {
+      "sourceRuleId": "freshrss-latest-markdown",
+      "profile": "astra",
+      "targetNamespace": "data/integrations/freshrss/latest-briefing.md",
+      "ownerClass": "executor-writable",
+      "importMode": "data-stage",
+      "exposure": "on-demand",
+      "rawPromptInjection": false
+    },
+    {
+      "sourceRuleId": "hardware-inventory",
+      "profile": "astra",
+      "targetNamespace": "data/hardware-inventory",
+      "ownerClass": "executor-writable",
+      "importMode": "data-stage",
+      "exposure": "on-demand",
+      "rawPromptInjection": false
+    },
+    {
+      "sourceRuleId": "job-search",
+      "profile": "astra",
+      "targetNamespace": "data/job-search",
+      "ownerClass": "executor-writable",
+      "importMode": "data-stage",
+      "exposure": "on-demand",
+      "rawPromptInjection": false
+    },
+    {
+      "sourceRuleId": "media-inbound",
+      "profile": "astra",
+      "targetNamespace": "data/media-inbound",
+      "ownerClass": "executor-writable",
+      "importMode": "data-stage",
+      "exposure": "on-demand",
+      "rawPromptInjection": false
+    },
+    {
+      "sourceRuleId": "media-outbound",
+      "profile": "astra",
+      "targetNamespace": "data/media-outbound",
+      "ownerClass": "executor-writable",
+      "importMode": "data-stage",
+      "exposure": "on-demand",
+      "rawPromptInjection": false
+    },
+    {
+      "sourceRuleId": "legacy-memory-tree",
+      "profile": "astra",
+      "targetNamespace": "imports/memory",
+      "ownerClass": "executor-writable",
+      "importMode": "memory-curation",
+      "exposure": "approved-memory",
+      "rawPromptInjection": false
+    },
+    {
+      "sourceRuleId": "project-plans",
+      "profile": "astra",
+      "targetNamespace": "data/plans",
+      "ownerClass": "executor-writable",
+      "importMode": "data-stage",
+      "exposure": "on-demand",
+      "rawPromptInjection": false
+    },
+    {
+      "sourceRuleId": "reddit-sync-state",
+      "profile": "astra",
+      "targetNamespace": "data/integrations/reddit/sync-state.json",
+      "ownerClass": "executor-writable",
+      "importMode": "structured-transform",
+      "exposure": "on-demand",
+      "rawPromptInjection": false
+    },
+    {
+      "sourceRuleId": "legacy-references",
+      "profile": "astra",
+      "targetNamespace": "imports/references",
+      "ownerClass": "operator-readonly",
+      "importMode": "operator-reference",
+      "exposure": "on-demand",
+      "rawPromptInjection": false
+    },
+    {
+      "sourceRuleId": "rigel-courses",
+      "profile": "rigel",
+      "targetNamespace": "imports/courses",
+      "ownerClass": "operator-readonly",
+      "importMode": "structured-transform",
+      "exposure": "schedule-input",
+      "rawPromptInjection": false
+    },
+    {
+      "sourceRuleId": "rigel-memory",
+      "profile": "rigel",
+      "targetNamespace": "imports/memory",
+      "ownerClass": "executor-writable",
+      "importMode": "memory-curation",
+      "exposure": "approved-memory",
+      "rawPromptInjection": false
+    },
+    {
+      "sourceRuleId": "rigel-syllabus",
+      "profile": "rigel",
+      "targetNamespace": "imports/courses/dracula-syllabus.pdf",
+      "ownerClass": "operator-readonly",
+      "importMode": "operator-reference",
+      "exposure": "on-demand",
+      "rawPromptInjection": false
+    },
+    {
+      "sourceRuleId": "sobriety-state",
+      "profile": "astra",
+      "targetNamespace": "data/sober-tracking",
+      "ownerClass": "executor-writable",
+      "importMode": "structured-transform",
+      "exposure": "on-demand",
+      "rawPromptInjection": false
+    },
+    {
+      "sourceRuleId": "nextcloud-task-state",
+      "profile": "astra",
+      "targetNamespace": "data/tasks/nextcloud-tasks.json",
+      "ownerClass": "executor-writable",
+      "importMode": "structured-transform",
+      "exposure": "on-demand",
+      "rawPromptInjection": false
+    },
+    {
+      "sourceRuleId": "task-config-state",
+      "profile": "astra",
+      "targetNamespace": "policy/tasks/config.json",
+      "ownerClass": "operator-readonly",
+      "importMode": "operator-reference",
+      "exposure": "root-policy",
+      "rawPromptInjection": false
+    },
+    {
+      "sourceRuleId": "uefn-project",
+      "profile": "astra",
+      "targetNamespace": "data/uefn",
+      "ownerClass": "executor-writable",
+      "importMode": "data-stage",
+      "exposure": "on-demand",
+      "rawPromptInjection": false
+    },
+    {
+      "sourceRuleId": "vega-memory-data",
+      "profile": "astra",
+      "targetNamespace": "imports/reviewers/vega/memory",
+      "ownerClass": "executor-writable",
+      "importMode": "private-reviewer-curation",
+      "exposure": "private-review-only",
+      "rawPromptInjection": false
+    },
+    {
+      "sourceRuleId": "youtube-project",
+      "profile": "astra",
+      "targetNamespace": "data/youtube",
+      "ownerClass": "executor-writable",
+      "importMode": "data-stage",
+      "exposure": "on-demand",
+      "rawPromptInjection": false
+    },
+    {
+      "sourceRuleId": "fortnite-locker",
+      "profile": "astra",
+      "targetNamespace": "data/fortnite-locker.md",
+      "ownerClass": "executor-writable",
+      "importMode": "data-stage",
+      "exposure": "on-demand",
+      "rawPromptInjection": false
+    },
+    {
+      "sourceRuleId": "marvel-watchlist",
+      "profile": "astra",
+      "targetNamespace": "data/marvel-missing-watchlist.md",
+      "ownerClass": "executor-writable",
+      "importMode": "data-stage",
+      "exposure": "on-demand",
+      "rawPromptInjection": false
+    }
+  ],
+  "stateRootMappings": [
+    {
+      "sourceRuleId": "memory-state",
+      "profile": "astra",
+      "targetNamespace": "imports/openclaw-provider-memory",
+      "importMode": "memory-curation",
+      "exposure": "approved-memory",
+      "rawPromptInjection": false
+    },
+    {
+      "sourceRuleId": "task-state",
+      "profile": "astra",
+      "targetNamespace": "imports/openclaw-task-state",
+      "importMode": "structured-transform",
+      "exposure": "on-demand",
+      "rawPromptInjection": false
+    }
+  ]
+}

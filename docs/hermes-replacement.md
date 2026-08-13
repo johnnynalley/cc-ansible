@@ -518,6 +518,35 @@ or activated a job or messaging route. Any future unknown top-level category,
 workspace policy hash change, filesystem-kind drift, or top-level symlink
 fails closed and requires an explicit review.
 
+## Profile Import Contract
+
+`files/hermes/profile-import-contract.json` owns the next Gate 5 boundary. It
+pins both source classifiers by SHA-256 and maps every current workspace
+`retain` rule exactly once: 24 sources to Astra, four to Dubble, and three to
+Rigel. It also maps the two top-level curated categories, provider memory and
+durable task state, to Astra staging. The contract grants no copy or runtime
+authority; it only defines where reviewed data belongs.
+
+Five import modes keep unlike data from being treated as generic memory:
+
+- `data-stage` preserves normal user project data outside the prompt;
+- `structured-transform` converts legacy runtime-shaped state into a typed
+  target owned by the new workflow;
+- `operator-reference` keeps authorization, configuration, and course
+  references read-only and on-demand;
+- `memory-curation` creates reviewable profile-specific memory proposals; and
+- `private-reviewer-curation` preserves Vega and Antares evidence for private
+  Star work without exposing reviewer prose to the user or promoting it into
+  Astra's ordinary memory.
+
+Every raw source has prompt injection disabled. Raw sessions, transcripts,
+credentials, executable bits, symlinks, automatic memory approval, cross-profile
+mounts, source mutation, and runtime activation remain forbidden. Dubble and
+Rigel sources can target only their own isolated profile roots. The current
+contract maps all 31 retained workspace rules and both state-root curation
+rules with no duplicate targets or unmapped source. Fourteen negative
+regressions enforce those boundaries. No live data has been copied or changed.
+
 ## Migration Gates
 
 1. **Source checkpoint:** freeze and verify OpenClaw state, runtime, listeners,

@@ -28,6 +28,16 @@
   workspace disposition, Health's external ownership, secret re-enrollment,
   disabled cron reconstruction, queue draining, stopped SQLite backup, unknown
   entries, kind drift, and symlink rejection.
+- `hermes-profile-import-audit.py` pins the workspace and state contracts,
+  validates three distinct profile roots and behavior sources, and requires
+  every retained or curated source to have exactly one profile, namespace,
+  owner class, import mode, and non-raw exposure. Dubble/Rigel data cannot cross
+  profile roots; reviewer memory remains private evidence; ordinary memory
+  remains an approval-gated proposal source.
+- `test_hermes_profile_import_audit.py` covers complete mapping, duplicate
+  targets, owner drift, cross-profile assignment, private reviewer evidence,
+  approved memory curation, raw-prompt denial, inert safety controls, state
+  mapping completeness, source hash drift, and behavior-source symlinks.
 
 ## Health Receiver
 
@@ -317,5 +327,7 @@ python3 scripts/agents/openclaw-bootstrap-audit.py --root files/openclaw/workspa
 python3 scripts/agents/openclaw-modern-config-audit.py --config /path/to/rendered/openclaw.json
 python3 scripts/agents/openclaw-provider-auth-boundary-audit.py --help
 python3 scripts/agents/openclaw-workspace-inventory.py --source /home/johnny/.openclaw/workspace --policy files/openclaw/workspace-migration-policy.json --pretty
+python3 scripts/agents/hermes-openclaw-migration-audit.py --state-root /home/johnny/.openclaw --contract files/hermes/openclaw-state-migration-contract.json --workspace-policy files/openclaw/workspace-migration-policy.json --pretty
+python3 scripts/agents/hermes-profile-import-audit.py --contract files/hermes/profile-import-contract.json --workspace-policy files/openclaw/workspace-migration-policy.json --state-migration files/hermes/openclaw-state-migration-contract.json --repository-root . --pretty
 black --check scripts/agents
 ```

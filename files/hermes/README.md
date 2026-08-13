@@ -22,9 +22,16 @@ transcripts.
   workspace paths to the existing hashed workspace migration policy and grants
   no source mutation, archive, cleanup, live migration, delivery, or scheduler
   activation authority.
+- `profile-import-contract.json` assigns every workspace `retain` rule and
+  state-root curation rule exactly once to Astra, Dubble, or Rigel. It separates
+  ordinary data, operator policy, structured transforms, approved memory, and
+  private reviewer evidence while forbidding raw prompt injection and
+  cross-profile mounts.
 - `scripts/agents/hermes-shadow-target-audit.py` is the fail-closed validator.
 - `scripts/agents/hermes-openclaw-migration-audit.py` validates the migration
   contract and inventories top-level source metadata without reading contents.
+- `scripts/agents/hermes-profile-import-audit.py` validates profile ownership,
+  target namespaces, owner classes, source hashes, and memory isolation.
 
 The target declaration is deliberately structured. Do not replace it with
 natural-language phrase matching. Update the schema, validator, tests, and
