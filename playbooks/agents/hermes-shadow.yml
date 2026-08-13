@@ -283,6 +283,8 @@
         - "{{ hermes_shadow_uv_cache_dir }}"
         - /var/lib/hermes/bootstrap
         - /var/lib/hermes/bootstrap/bin
+        - "{{ hermes_shadow_uv_config_home }}"
+        - "{{ hermes_shadow_uv_config_dirs }}"
         - /usr/local/share/uv
 
     - name: Create per-profile Hermes managed scopes
@@ -400,10 +402,12 @@
         chdir: "{{ hermes_shadow_runtime_root }}"
         creates: "{{ hermes_shadow_runtime_venv }}/bin/hermes"
       environment:
-        HOME: /root
+        HOME: /var/lib/hermes/bootstrap
         HERMES_HOME: /var/lib/hermes/bootstrap
-        UV_NO_CONFIG: "1"
+        XDG_CONFIG_HOME: "{{ hermes_shadow_uv_config_home }}"
+        XDG_CONFIG_DIRS: "{{ hermes_shadow_uv_config_dirs }}"
         UV_CACHE_DIR: "{{ hermes_shadow_uv_cache_dir }}"
+        UV_NO_ENV_FILE: "1"
         UV_PROJECT_ENVIRONMENT: "{{ hermes_shadow_runtime_venv }}"
         UV_PYTHON_INSTALL_DIR: /usr/local/share/uv/python
         UV_PYTHON_BIN_DIR: /usr/local/share/uv/bin

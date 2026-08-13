@@ -421,9 +421,12 @@ archive with SHA-256
 check out the exact official Hermes commit, and require `uv sync --extra all
 --locked` to succeed without fallback. Keep `uv`'s cache and managed Python
 under Hermes-owned `/var/cache/hermes` and `/usr/local/share/uv`, not root's
-home. Preserve Hermes's native Git install marker and launcher layout, disable
-bundled-skill seeding, and require the post-install origin, tag object, commit,
-and clean-tree checks before configuration proceeds.
+home. Preserve the source tree's `[tool.uv]` settings because the committed
+lockfile includes that resolution policy; isolate user/system configuration
+through empty root-owned XDG config roots instead of disabling project config.
+Preserve Hermes's native Git install marker and launcher layout, disable bundled
+skill seeding, and require the post-install origin, tag object, commit, and
+clean-tree checks before configuration proceeds.
 
 Updates are root-managed transactions:
 

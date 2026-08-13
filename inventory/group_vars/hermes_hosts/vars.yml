@@ -21,6 +21,8 @@ hermes_shadow_uv_archive_cache: /var/cache/hermes/uv-0.12.4.tar.gz
 hermes_shadow_uv_extract_dir: /var/cache/hermes/uv-0.12.4
 hermes_shadow_uv_cache_dir: /var/cache/hermes/uv-cache
 hermes_shadow_uv_binary: /var/lib/hermes/bootstrap/bin/uv
+hermes_shadow_uv_config_home: /var/lib/hermes/bootstrap/config
+hermes_shadow_uv_config_dirs: /var/lib/hermes/bootstrap/config-dirs
 hermes_shadow_runtime_binary: /usr/local/bin/hermes
 hermes_shadow_runtime_root: /usr/local/lib/hermes-agent
 hermes_shadow_runtime_venv: /usr/local/lib/hermes-agent/venv
