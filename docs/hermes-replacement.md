@@ -197,6 +197,216 @@ This boundary assumes any user-authorized agent conversation can be malicious.
 Messaging authorization limits who can ask Hermes to act; it does not make
 prompt content trustworthy.
 
+## Isolated Target Design
+
+### Deployment Topology
+
+Provision a new `hermes-vm`; do not reuse VM 140 or any retired OpenClaw disk.
+The preferred placement is `pve-alto`, subject to a fresh attended capacity,
+storage, UPS, and VMID check immediately before provisioning. If that gate
+fails, select another Proxmox node from live evidence rather than silently
+shrinking the VM or co-locating it on the controller.
+
+Use the then-current Tier-1 Ubuntu LTS cloud image with verified publisher
+checksum and signature. The baseline allocation is four vCPUs, 8 GiB RAM, and
+a 64 GiB system disk, with memory increased before accepting swap pressure or
+Gateway instability. The VM has no NAS, controller-home, Docker-socket, USB, or
+host filesystem passthrough.
+
+OpenClaw stays on `jn-t14s-lin` as the production source and later rollback
+system. The Hermes shadow has no production channel token or Caddy/Tailscale
+route. Both systems may be installed during migration, but only OpenClaw may
+deliver production messages or run production schedules before cutover.
+
+### Identities And State
+
+Use three separate no-login service accounts, not three writable profiles under
+one Unix identity:
+
+| Identity | Hermes home | Authority |
+| --- | --- | --- |
+| `hermes-astra` | `/var/lib/hermes/astra` | Primary conversation, web research, review synthesis, approved learning proposals, aggregate reports, and broker proposals |
+| `hermes-dubble` | `/var/lib/hermes/dubble` | Public support only; no terminal, host report, infrastructure, update, or cross-profile credential access |
+| `hermes-rigel` | `/var/lib/hermes/rigel` | Study context and the continuously enabled, deterministically pre-gated scheduler only |
+
+Each home has independent config, auth, state database, memory, skills,
+sessions, cron, pending approvals, cache, sandbox metadata, and logs. Files are
+mode `0600` and directories `0700` unless a documented root-owned input needs a
+narrow group read. No service identity is a member of another profile's group.
+
+Common mandatory policy lives in root-owned `/etc/hermes/` managed scope.
+Role-specific identity and behavior sources live under
+`/etc/hermes/profiles/<role>/` and are read-only bind-mounted over the runtime
+view by systemd. Hermes runtime data remains writable; root policy, service
+units, broker clients, and acceptance tests do not.
+
+Provider and Discord credentials are supplied by separate root-owned systemd
+environment files, readable only by root and the matching service group. Do
+not duplicate secrets in profile distributions, shell profiles, Compose files,
+or shared environment files. Codex OAuth state is profile-specific and never
+shared with another role or copied into a terminal sandbox.
+
+### Runtime And Updates
+
+Install the official supported root-mode Git distribution under
+`/usr/local/lib/hermes-agent` with `/usr/local/bin/hermes` as the launcher. The
+service users cannot update or patch that code. Track the official default
+stable branch rather than setting a policy-level exact-version pin.
+
+Updates are root-managed transactions:
+
+1. Back up every profile with Hermes's SQLite-safe backup path and take the VM
+   rollback artifact.
+2. Update the shared code through the official mechanism with full pre-update
+   backup enabled.
+3. Run offline config migration, Doctor, supply-chain audit, prompt-size,
+   profile, and declaration checks.
+4. Start a tokenless shadow service and run behavior/security smoke tests.
+5. Restart production profiles one at a time only after the shadow passes.
+6. Restore the prior code and profile backup if any gate fails.
+
+Runtime lazy dependency installation is disabled. Required extras are installed
+and audited during the root-owned build transaction, never by a live Gateway.
+Bundled skills are initially opted out; only reviewed, required skills are
+seeded per role.
+
+### Terminal Sandbox
+
+Use Hermes's `docker` terminal backend with
+`HERMES_DOCKER_BINARY=/usr/bin/podman`. Podman runs rootless under the matching
+service account; there is no rootful Docker daemon, Docker group, or API socket
+available to Hermes. Hermes officially scopes persistent terminal containers
+by profile labels, and the separate Unix identities add a second boundary.
+
+Mandatory baseline for every role that has terminal tools:
+
+```yaml
+terminal:
+  backend: docker
+  home_mode: profile
+  docker_mount_cwd_to_workspace: false
+  docker_volumes: []
+  docker_forward_env: []
+  docker_network: false
+  docker_run_as_host_user: false
+  container_persistent: true
+```
+
+Set CPU, memory, PID, and disk limits only after a live rootless-cgroup-v2 test
+proves Podman enforces them; a configured but ignored limit is a failed gate.
+The sandbox gets no host bind mounts, profile secrets, broker credentials, or
+network by default. Generated files cross the boundary only through a bounded
+export directory after extension, size, ownership, and path validation.
+
+Dubble and Rigel start without terminal or code-execution toolsets. Astra gets
+the rootless terminal only if transcript tests demonstrate a real need. Native
+web tools handle research; shell network access is not required for browsing.
+
+### Mandatory Hermes Policy
+
+Root-owned managed scope enforces at least:
+
+- manual command approvals and `cron_mode: deny`;
+- no permanent command allowlist;
+- memory and skill write approval enabled;
+- agent-created skill scanning enabled;
+- lazy runtime installs disabled;
+- secret redaction, context injection scanning, SSRF protection, and website
+  policy enabled;
+- destructive slash-command and MCP reload confirmation enabled;
+- no automatic hook acceptance;
+- dashboard and API server disabled;
+- a write-safe root limited to the role's export/work area; and
+- only the minimum role-specific toolsets.
+
+Hooks and plugins begin empty. A new hook or plugin requires source review,
+provenance, a failure-mode test, a rollback artifact, and explicit activation.
+Because Hermes hook consent keys the command string rather than script content,
+an unchanged path with changed bytes is untrusted until re-audited.
+
+### Systemd And Network
+
+Root owns one unit per role:
+
+- `hermes-gateway-astra.service`
+- `hermes-gateway-dubble.service`
+- `hermes-gateway-rigel.service`
+
+Each unit has one `User=`, one `Group=`, explicit `HERMES_HOME`, a minimal
+`PATH`, its own environment file, its own runtime directory, an event-loop
+watchdog, restart bounds, CPU/memory/task limits, and no capabilities. Apply
+`NoNewPrivileges`, strict system and home protection, private temporary state,
+kernel/control-group/module protections, and a restrictive umask. Keep the
+namespace operations rootless Podman needs; reject hardening that silently
+breaks the sandbox and causes fallback to local execution.
+
+The VM accepts administrative SSH only from the controller/owner path. It has
+no public inbound listener and no dashboard route. Outbound policy permits DNS,
+time, system updates, the selected model providers, Discord, and explicitly
+approved report/broker endpoints. Deny LAN, tailnet, metadata, link-local, and
+other private destinations by default. Broker exceptions are exact destination
+and port rules, not private-network ranges.
+
+### Host Data And Action Brokers
+
+Hermes never receives the controller's Ansible, SSH, Docker, Health, Git, or
+vault credentials. Root-managed collectors on `hermes-vm` use dedicated
+read-only credentials to fetch bounded Health and Docker reports, validate
+their schema/signature/age, and atomically publish root-owned read-only inputs
+for Astra. Dubble and Rigel cannot traverse those paths.
+
+The Docker update broker remains separately approved and digest-bound. Astra
+may submit a fixed-schema proposal and later invoke only an already-approved,
+unexpired plan. It cannot approve a plan, select arbitrary compose paths or
+commands, broaden targets, or reach a Docker daemon. Renaming OpenClaw-specific
+service accounts and paths to platform-neutral agent names occurs only in the
+later Docker gate with compatibility cleanup and rollback coverage.
+
+### Backups And Recovery
+
+Use both application and infrastructure backups:
+
+- nightly `hermes backup` archives for each home, using SQLite's backup API;
+- pre-update and pre-migration full Hermes backups;
+- encrypted restic copies of profile homes and root-owned policy, excluding
+  transient rootless container layers unless a test explicitly needs them;
+- Proxmox Backup Server VM backups; and
+- a manifest of code revision, config schema, profile declarations, bot-token
+  identities, cron declarations, and backup hashes.
+
+Restore tests use a channel-less clone with replaced credentials. A backup is
+not accepted because an archive exists; Doctor, session search, memory, skills,
+cron declarations, and one synthetic model turn must work after restore.
+
+OpenClaw rollback remains independent: its services, state, secrets, sessions,
+workspace, package runtime, and backups are preserved unchanged. Cutover does
+not uninstall OpenClaw, reuse its ports/state directories, rotate away its only
+working credentials, or run OpenClaw/Hermes cleanup commands.
+
+### Gate 3 Acceptance
+
+This design gate is complete when implementation assets express these
+boundaries without installing Hermes:
+
+1. VM provisioning inputs have no conflicting live VMID and the chosen node
+   passes capacity/UPS/storage checks.
+2. Service identities, homes, groups, units, managed scope, secrets paths, and
+   rootless Podman prerequisites are explicit and lintable.
+3. Every profile's allowed tools, Discord scope, inputs, outputs, and forbidden
+   paths are machine-readable.
+4. Shadow mode has no production token, scheduler delivery, dashboard, remote
+   listener, host credential, or broker mutation authority.
+5. Backup, restore, cutover, and OpenClaw rollback procedures have explicit
+   pass/fail checks.
+6. A static audit rejects Docker group/socket access, sudoers, host mounts,
+   cross-profile secret reads, local-terminal fallback, and allow-all Discord.
+
+The blank multi-node capacity probe attempted during this design gate stalled
+in Ansible SSH interpreter discovery and left workers after the wrapper ended.
+Those exact workers were terminated and no capacity result was inferred. The
+live placement check therefore remains an implementation precondition, not a
+fabricated design fact.
+
 ## Migration Gates
 
 1. **Source checkpoint:** freeze and verify OpenClaw state, runtime, listeners,
