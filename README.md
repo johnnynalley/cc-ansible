@@ -280,7 +280,7 @@ Packages are merged from multiple sources (all applicable variables combined):
 | `stream-relay.yml` | media-vm | OBS SRT ingest, Quadro NVENC encode, reliable local fanout, platform RTMP workers, and VOD delivery |
 | `plex-server-health.yml` | media-vm, `nas_server` | Plex identity, guest VirtioFS, host virtiofsd, VM 100, and scrub-window sentinel |
 | `docker-auto-update.yml` | `docker_hosts` | Auto-update selected containers every 6h with major version guard |
-| `openclaw-docker-report.yml` | `docker_hosts` | Publish a redacted result-only Docker inventory for a future dedicated OpenClaw identity (disabled by default) |
+| `agent-docker-report.yml` | `docker_hosts` | Publish a schema-v2 result-only Docker inventory for dedicated agent identities such as Hermes (disabled by default) |
 | `openclaw-docker-update-broker.yml` | `docker_hosts` | Install a digest-bound, separately approved service update broker for the isolated OpenClaw identity (disabled by default) |
 | `virtiofs.yml` | `proxmox_nodes`, `vms` | Configure VirtioFS shares between Proxmox hosts and VMs |
 | `proxmox-vm-hardware.yml` | `proxmox_nodes` | Apply durable Proxmox VM hardware settings such as CPU model overrides |

@@ -21,7 +21,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import quote
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 MAX_RESPONSE_BYTES = 32 * 1024 * 1024
 MAX_REPORT_BYTES = 16 * 1024 * 1024
 MAX_CONTAINERS = 2048
@@ -112,11 +112,24 @@ def safe_token(value: Any, max_length: int) -> str | None:
     return cleaned
 
 
+def safe_identifier(value: Any, max_length: int) -> str | None:
+    if not isinstance(value, str):
+        return None
+    cleaned = value.strip()
+    if len(cleaned) > max_length or not re.fullmatch(
+        r"[A-Za-z0-9][A-Za-z0-9_.-]*", cleaned
+    ):
+        return None
+    return cleaned
+
+
 def normalize_name(names: Any) -> str:
     if not isinstance(names, list) or not names:
         return "unknown"
-    name = safe_text(names[0], 128) or "unknown"
-    return name.lstrip("/") or "unknown"
+    raw_name = names[0]
+    if not isinstance(raw_name, str):
+        return "unknown"
+    return safe_identifier(raw_name.lstrip("/"), 128) or "unknown"
 
 
 def image_update_state(
@@ -134,7 +147,7 @@ def image_update_state(
         raise
     if not isinstance(tagged_image, dict):
         raise DockerAPIError("/images/name/json", 200, "expected object")
-    tagged_image_id = safe_text(tagged_image.get("Id"), 128)
+    tagged_image_id = safe_token(tagged_image.get("Id"), 128)
     if not tagged_image_id:
         return "unknown", None
     state = "current-local" if tagged_image_id == running_image_id else "pending-local"
@@ -142,7 +155,7 @@ def image_update_state(
 
 
 def container_record(api: DockerAPI, summary: dict[str, Any]) -> dict[str, Any]:
-    container_id = safe_text(summary.get("Id"), 128)
+    container_id = safe_token(summary.get("Id"), 128)
     if not container_id:
         raise DockerAPIError("/containers/json", 200, "container missing Id")
 
@@ -152,8 +165,8 @@ def container_record(api: DockerAPI, summary: dict[str, Any]) -> dict[str, Any]:
     config = detail.get("Config") if isinstance(detail.get("Config"), dict) else {}
     state = detail.get("State") if isinstance(detail.get("State"), dict) else {}
     labels = config.get("Labels") if isinstance(config.get("Labels"), dict) else {}
-    image_ref = safe_text(config.get("Image") or summary.get("Image"), 512)
-    running_image_id = safe_text(detail.get("Image") or summary.get("ImageID"), 128)
+    image_ref = safe_token(config.get("Image") or summary.get("Image"), 512)
+    running_image_id = safe_token(detail.get("Image") or summary.get("ImageID"), 128)
 
     image = (
         api.get(f"/images/{quote(running_image_id, safe='')}/json")
@@ -173,32 +186,42 @@ def container_record(api: DockerAPI, summary: dict[str, Any]) -> dict[str, Any]:
         raw_repo_digests = []
     repo_digests = [
         value
-        for value in (safe_text(item, 512) for item in raw_repo_digests)
+        for value in (safe_token(item, 512) for item in raw_repo_digests)
         if value is not None
     ][:16]
     update_state, tagged_image_id = image_update_state(api, image_ref, running_image_id)
 
     health = None
     if isinstance(state.get("Health"), dict):
-        health = safe_text(state["Health"].get("Status"), 32)
+        health = safe_identifier(state["Health"].get("Status"), 32)
+
+    restart_count = detail.get("RestartCount")
+    if not isinstance(restart_count, int) or isinstance(restart_count, bool):
+        restart_count = None
+    exit_code = state.get("ExitCode")
+    if not isinstance(exit_code, int) or isinstance(exit_code, bool):
+        exit_code = None
 
     return {
         "containerId": container_id[:12],
         "name": normalize_name(summary.get("Names")),
-        "state": safe_text(state.get("Status") or summary.get("State"), 32)
+        "state": safe_identifier(state.get("Status") or summary.get("State"), 32)
         or "unknown",
-        "status": safe_text(summary.get("Status"), 256),
         "health": health,
+        "restartCount": restart_count,
+        "exitCode": exit_code,
+        "startedAt": safe_token(state.get("StartedAt"), 64),
+        "finishedAt": safe_token(state.get("FinishedAt"), 64),
         "compose": {
-            "project": safe_text(labels.get(COMPOSE_LABELS[0]), 128),
-            "service": safe_text(labels.get(COMPOSE_LABELS[1]), 128),
+            "project": safe_identifier(labels.get(COMPOSE_LABELS[0]), 128),
+            "service": safe_identifier(labels.get(COMPOSE_LABELS[1]), 128),
         },
         "image": {
             "reference": image_ref,
             "runningId": running_image_id,
             "taggedLocalId": tagged_image_id,
             "repoDigests": repo_digests,
-            "created": safe_text(image.get("Created"), 64),
+            "created": safe_token(image.get("Created"), 64),
             "version": safe_token(image_labels.get(OCI_LABELS[0]), 128),
             "revision": safe_token(image_labels.get(OCI_LABELS[1]), 128),
             "updateState": update_state,
@@ -220,13 +243,13 @@ def build_report(api: DockerAPI, hostname: str) -> dict[str, Any]:
     return {
         "schemaVersion": SCHEMA_VERSION,
         "generatedAt": datetime.now(timezone.utc).isoformat(),
-        "host": safe_text(hostname, 255) or "unknown",
+        "host": safe_identifier(hostname, 255) or "unknown",
         "updateSemantics": "local-tag-comparison-only",
         "engine": {
-            "version": safe_text(version.get("Version"), 64),
+            "version": safe_token(version.get("Version"), 64),
             "apiVersion": safe_text(version.get("ApiVersion"), 16),
-            "os": safe_text(version.get("Os"), 32),
-            "arch": safe_text(version.get("Arch"), 32),
+            "os": safe_identifier(version.get("Os"), 32),
+            "arch": safe_identifier(version.get("Arch"), 32),
         },
         "containers": containers,
     }

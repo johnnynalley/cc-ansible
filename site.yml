@@ -189,9 +189,9 @@
   ansible.builtin.import_playbook: playbooks/docker/docker-auto-update.yml
   tags: [docker, auto-update]
 
-- name: Configure redacted OpenClaw Docker inventory
-  ansible.builtin.import_playbook: playbooks/docker/openclaw-docker-report.yml
-  tags: [docker, openclaw, openclaw-docker-report]
+- name: Configure redacted agent Docker inventory
+  ansible.builtin.import_playbook: playbooks/docker/agent-docker-report.yml
+  tags: [docker, agents, agent-docker-report]
 
 - name: Configure approval-gated OpenClaw Docker updates
   ansible.builtin.import_playbook: playbooks/docker/openclaw-docker-update-broker.yml

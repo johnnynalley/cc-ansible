@@ -1,12 +1,15 @@
-# OpenClaw Docker Access
+# Agent Docker Access
 
 ## Current State
 
 The implementation is intentionally disabled. The live OpenClaw Gateway still
 runs as `johnny`, which is already a root-equivalent controller account. Giving
 that process any additional Docker path would not create a meaningful security
-boundary. Do not enable `openclaw_docker_report_enabled` until the dedicated
-OpenClaw runtime identity and key are in place and the rollout is approved.
+boundary. Do not enable `agent_docker_report_enabled` until a dedicated Hermes
+runtime identity and report-reader key are in place and the rollout is
+approved. The reporter is platform-neutral so a restored OpenClaw deployment
+can receive its own separately scoped key later without restoring legacy
+service names.
 
 The Siri relay is retired. The authenticated Health receiver remains in use,
 but it must move to its own no-exec service identity during the runtime
@@ -14,9 +17,9 @@ migration; it is not a Docker-management transport.
 
 ## Threat Model
 
-Treat the OpenClaw Gateway, every agent response, fetched web content, Discord
-content, attachments, skills, and tool output as potentially prompt-injected.
-Compromise of that boundary must not grant any of the following:
+Treat every agent runtime, response, fetched web page, Discord message,
+attachment, skill, and tool result as potentially prompt-injected. Compromise
+of that boundary must not grant any of the following:
 
 - membership in the `docker` group or direct access to `docker.sock`;
 - sudo, a human login shell, controller credentials, or Ansible vault access;
@@ -30,13 +33,13 @@ a root-owned program that emits a strict result schema.
 
 ## Read-Only Reporter
 
-`playbooks/docker/openclaw-docker-report.yml` installs two separate boundaries
+`playbooks/docker/agent-docker-report.yml` installs two separate boundaries
 on each opted-in Docker host:
 
 1. A hardened root-owned oneshot service reads the local Unix socket and writes
-   `/var/lib/openclaw-docker-report/data/report.json` every five minutes.
-2. A dedicated `openclaw-report` SSH account can run only
-   `/usr/local/bin/openclaw-docker-report-cat` from an allowlisted source CIDR.
+   `/var/lib/agent-docker-report/data/report.json` every five minutes.
+2. A dedicated `agent-report` SSH account can run only
+   `/usr/local/bin/agent-docker-report-cat` from an allowlisted source CIDR.
    The reader rejects reports older than 15 minutes instead of silently serving
    stale container state.
 
@@ -46,17 +49,20 @@ interactive command, port forwarding, agent forwarding, PTY, or writable
 before OpenSSH configuration is written. The reporter allows only these fields:
 
 - Engine version, API version, OS, and architecture;
-- container short ID, name, state, status text, and health state;
+- container short ID, name, structured state and health tokens, restart count,
+  exit code, and start/finish timestamps;
 - exact Compose project and service labels;
 - configured image reference, running and local tagged image IDs, repository
   digests, creation timestamp, and OCI version/revision labels.
 
-It never serializes raw Docker responses. Regression tests inject secret
+Schema version 2 never serializes raw Docker responses or Docker's free-text
+container status. Every agent-visible string is constrained to a bounded token
+or identifier grammar; values shaped like prose are dropped rather than copied
+into an agent prompt. Regression tests inject secret and prompt-injection
 sentinels into environment variables, commands, health logs, mounts, ports,
 networks, and private labels and require all of them to remain absent. OCI
-version and revision values must also be bounded single tokens; prose-shaped
-labels are dropped instead of being carried into an agent prompt. The reporter
-fails closed above 2,048 containers or a 16 MiB encoded report.
+version and revision values follow the same rule. The reporter fails closed
+above 2,048 containers or a 16 MiB encoded report.
 
 `updateState` compares the running image with the image currently resolved by
 the same local tag. `pending-local` means a newer image is already present on
@@ -65,11 +71,11 @@ remains owned by the existing auto-update and Diun workflows.
 
 ## Update Boundary
 
-The read-only reporter does not update containers. The separately managed
-`playbooks/docker/openclaw-docker-update-broker.yml` implementation is also
-disabled by default. It gives the isolated Gateway only a forced-command SSH
-request interface; it does not give the Gateway Docker, sudo, shell, or Compose
-access.
+The read-only reporter does not update containers. The separately managed,
+legacy-named `playbooks/docker/openclaw-docker-update-broker.yml`
+implementation is also disabled by default and will be modernized in its own
+gate. It gives an isolated agent only a forced-command SSH request interface;
+it does not give the agent Docker, sudo, shell, or Compose access.
 
 The broker enforces these properties:
 
@@ -138,17 +144,17 @@ or the existing broad `dbc` helpers directly to Astra as an update mechanism.
 
 ## Rollout Order
 
-1. Create dedicated `openclaw` and `openclaw-health` service identities on the
-   controller and move the Gateway and Health receiver without copying human
-   SSH, Git, sudo, Docker, or vault credentials.
-2. Generate a dedicated Ed25519 report-reader key under the `openclaw` identity.
+1. Create dedicated Hermes profile identities and an `openclaw-health` service
+   identity without copying human SSH, Git, sudo, Docker, or vault credentials.
+2. Generate a dedicated Ed25519 report-reader key for Astra's Hermes runtime.
 3. Back up the affected host state, populate the public key and exact Tailscale
    source CIDR, enable the reporter, and canary one Docker host. The enabled
    playbook backs up any pre-existing managed artifacts to
    `/srv/live-rollbacks` before replacing them; a clean first install has no
    prior artifact to copy.
-4. Verify the report schema, forced-command rejection, source restriction,
-   timer health, and absence of every secret sentinel before estate rollout.
+4. Verify schema version 2, forced-command rejection, source restriction,
+   timer health, legacy-artifact cleanup, and absence of every secret and
+   prompt-injection sentinel before estate rollout.
 5. Populate one reviewed, health-checked, stateless service target and a
    separate update-request key, then canary the broker only after a distinct
    owner approval. Its enabled playbook applies the same pre-existing-artifact
@@ -160,12 +166,12 @@ or the existing broad `dbc` helpers directly to Astra as an update mechanism.
 ## Validation
 
 ```bash
-python3 scripts/docker/test_openclaw_docker_report.py
+python3 scripts/docker/test_agent_docker_report.py
 python3 scripts/docker/test_openclaw_docker_update_broker.py
 python3 scripts/docker/test_openclaw_docker_playbooks.py
-shellcheck scripts/docker/openclaw-docker-report-cat
-ansible-playbook playbooks/docker/openclaw-docker-report.yml --syntax-check
-ansible-playbook playbooks/docker/openclaw-docker-report.yml --check --diff
+shellcheck scripts/docker/agent-docker-report-cat
+ansible-playbook playbooks/docker/agent-docker-report.yml --syntax-check
+ansible-playbook playbooks/docker/agent-docker-report.yml --check --diff
 ansible-playbook playbooks/docker/openclaw-docker-update-broker.yml --syntax-check
 ansible-playbook playbooks/docker/openclaw-docker-update-broker.yml --check --diff
 ```

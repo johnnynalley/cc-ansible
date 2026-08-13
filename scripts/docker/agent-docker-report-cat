@@ -6,7 +6,7 @@ if [ -n "${SSH_ORIGINAL_COMMAND:-}" ]; then
     exit 64
 fi
 
-report=/var/lib/openclaw-docker-report/data/report.json
+report=/var/lib/agent-docker-report/data/report.json
 if ! /usr/bin/find "$report" -type f -mmin -15 -print -quit | /usr/bin/grep -q .; then
     echo "Docker inventory report is unavailable or stale" >&2
     exit 75

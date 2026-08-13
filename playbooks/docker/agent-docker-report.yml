@@ -1,0 +1,447 @@
+# Purpose: Publish a redacted Docker inventory to a forced-command SSH account.
+# Hosts: docker_hosts.
+# Key vars: agent_docker_report_*.
+# Templates: none.
+# Scripts: scripts/docker/agent-docker-report.py,
+# scripts/docker/agent-docker-report-cat.
+# Validation: ansible-playbook
+# playbooks/docker/agent-docker-report.yml --syntax-check.
+
+---
+- name: Configure agent Docker inventory reporter
+  hosts: docker_hosts
+  become: true
+  gather_facts: false
+
+  vars:
+    agent_docker_report_effective_group: >-
+      {{ agent_docker_report_group | default('agent-report') }}
+    agent_docker_report_effective_home: /var/lib/agent-docker-report
+    agent_docker_report_effective_socket: >-
+      {{ agent_docker_report_socket | default('/var/run/docker.sock') }}
+    agent_docker_report_effective_user: >-
+      {{ agent_docker_report_user | default('agent-report') }}
+    agent_docker_report_managed_artifacts:
+      - /usr/local/sbin/agent-docker-report
+      - /usr/local/bin/agent-docker-report-cat
+      - >-
+        {{ agent_docker_report_effective_home
+        }}/.ssh/authorized_keys
+      - /etc/systemd/system/agent-docker-report.service
+      - /etc/systemd/system/agent-docker-report.timer
+    agent_docker_report_legacy_artifacts:
+      - /usr/local/sbin/openclaw-docker-report
+      - /usr/local/bin/openclaw-docker-report-cat
+      - /var/lib/openclaw-docker-report
+      - /etc/systemd/system/openclaw-docker-report.service
+      - /etc/systemd/system/openclaw-docker-report.timer
+
+  tasks:
+    - name: Stop and disable Agent Docker report units when disabled
+      ansible.builtin.systemd:
+        name: "{{ item }}"
+        enabled: false
+        state: stopped
+        daemon_reload: true
+      loop:
+        - agent-docker-report.timer
+        - agent-docker-report.service
+        - openclaw-docker-report.timer
+        - openclaw-docker-report.service
+      when:
+        - not (agent_docker_report_enabled | default(false) | bool)
+      failed_when: false
+
+    - name: Revoke Agent Docker report SSH access when disabled
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: absent
+      loop:
+        - >-
+          {{ agent_docker_report_effective_home
+          }}/.ssh/authorized_keys
+        - /var/lib/openclaw-docker-report/.ssh/authorized_keys
+      when: not (agent_docker_report_enabled | default(false) | bool)
+
+    - name: Skip hosts without Agent Docker reporting enabled
+      ansible.builtin.meta: end_host
+      when: not (agent_docker_report_enabled | default(false) | bool)
+
+    - name: Require a dedicated key and source restriction
+      ansible.builtin.assert:
+        that:
+          - agent_docker_report_rollout_approved | default(false) | bool
+          - agent_docker_report_authorized_keys | default([]) | length > 0
+          - agent_docker_report_source_cidrs | default([]) | length > 0
+        fail_msg: >-
+          Enabling Agent Docker reporting requires explicit rollout
+          approval, at least one dedicated Ed25519 public key, and one allowed
+          source CIDR.
+
+    - name: Validate dedicated Agent Docker report keys
+      ansible.builtin.assert:
+        that:
+          - item is match('^ssh-ed25519 [A-Za-z0-9+/]+={0,3}( [^\r\n]+)?$')
+          - item | length <= 1024
+        fail_msg: "Only single-line Ed25519 public keys are accepted."
+      loop: "{{ agent_docker_report_authorized_keys }}"
+      loop_control:
+        label: "dedicated Ed25519 key"
+      no_log: true
+
+    - name: Validate Agent Docker report source CIDRs
+      ansible.builtin.assert:
+        that:
+          - item is match('^[0-9A-Fa-f:.]+/[0-9]{1,3}$')
+        fail_msg: "Source restrictions must be literal IPv4 or IPv6 CIDRs."
+      loop: "{{ agent_docker_report_source_cidrs }}"
+
+    - name: Parse Agent Docker report source CIDRs exactly
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/python3
+          - -c
+          - >-
+            import ipaddress, sys;
+            value = ipaddress.ip_network(sys.argv[1], strict=True);
+            raise SystemExit(0 if str(value) == sys.argv[1] else 2)
+          - "{{ item }}"
+      changed_when: false
+      check_mode: false
+      loop: "{{ agent_docker_report_source_cidrs }}"
+      loop_control:
+        label: "{{ item }}"
+
+    - name: Inspect prior Agent Docker report artifacts
+      ansible.builtin.stat:
+        path: "{{ item }}"
+        follow: false
+      loop: >-
+        {{
+          agent_docker_report_managed_artifacts
+          + agent_docker_report_legacy_artifacts
+        }}
+      register: agent_docker_report_prior_artifacts
+
+    - name: Reject symlinked Agent Docker report artifacts
+      ansible.builtin.assert:
+        that:
+          - not (item.stat.islnk | default(false))
+        fail_msg: >-
+          Refusing to replace a symlinked Docker report artifact at
+          {{ item.item }}.
+      loop: "{{ agent_docker_report_prior_artifacts.results }}"
+      loop_control:
+        label: "{{ item.item }}"
+      when: item.stat.exists | default(false)
+
+    - name: Select prior Agent Docker report artifacts for backup
+      ansible.builtin.set_fact:
+        agent_docker_report_backup_paths: >-
+          {{
+            agent_docker_report_prior_artifacts.results
+            | selectattr('stat.exists', 'defined')
+            | selectattr('stat.exists')
+            | map(attribute='item')
+            | list
+          }}
+
+    - name: Initialize Agent Docker report backup command
+      ansible.builtin.set_fact:
+        agent_docker_report_backup_argv:
+          - /usr/local/sbin/live-rollback-backup
+          - --domain
+          - agent-docker-access
+          - --name
+          - docker-report-rollout
+      when: agent_docker_report_backup_paths | length > 0
+
+    - name: Add prior Docker report paths to backup command
+      ansible.builtin.set_fact:
+        agent_docker_report_backup_argv: >-
+          {{
+            agent_docker_report_backup_argv
+            + ['--path', item]
+          }}
+      loop: "{{ agent_docker_report_backup_paths }}"
+      when: agent_docker_report_backup_paths | length > 0
+
+    - name: Verify live rollback storage before Docker report rollout
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/mountpoint
+          - -q
+          - /srv/live-rollbacks
+      changed_when: false
+      when:
+        - not ansible_check_mode
+        - agent_docker_report_backup_paths | length > 0
+
+    - name: Back up prior Agent Docker report artifacts
+      ansible.builtin.command:
+        argv: "{{ agent_docker_report_backup_argv }}"
+      register: agent_docker_report_rollout_backup
+      changed_when: true
+      when:
+        - not ansible_check_mode
+        - agent_docker_report_backup_paths | length > 0
+
+    - name: Create Agent Docker report group
+      ansible.builtin.group:
+        name: "{{ agent_docker_report_effective_group }}"
+        system: true
+
+    - name: Create Agent Docker report account
+      ansible.builtin.user:
+        name: "{{ agent_docker_report_effective_user }}"
+        group: "{{ agent_docker_report_effective_group }}"
+        groups: ""
+        append: false
+        shell: /bin/sh
+        system: true
+        create_home: false
+        home: "{{ agent_docker_report_effective_home }}"
+        comment: "Forced-command reader for redacted Docker inventory"
+        password_lock: true
+
+    - name: Inspect Agent Docker report account groups
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/id
+          - --groups
+          - --name
+          - "{{ agent_docker_report_effective_user }}"
+      register: agent_docker_report_account_groups
+      changed_when: false
+
+    - name: Require isolated Agent Docker report account groups
+      ansible.builtin.assert:
+        that:
+          - >-
+            agent_docker_report_account_groups.stdout.split() ==
+            [agent_docker_report_effective_group]
+        fail_msg: >-
+          The report-reader account has an unexpected supplementary group.
+
+    - name: Create Agent Docker report directories
+      ansible.builtin.file:
+        path: "{{ item.path }}"
+        state: directory
+        owner: "{{ item.owner }}"
+        group: "{{ item.group }}"
+        mode: "{{ item.mode }}"
+      loop:
+        - path: "{{ agent_docker_report_effective_home }}"
+          owner: root
+          group: root
+          mode: "0755"
+        - path: "{{ agent_docker_report_effective_home }}/data"
+          owner: root
+          group: "{{ agent_docker_report_effective_group }}"
+          mode: "0750"
+        - path: "{{ agent_docker_report_effective_home }}/.ssh"
+          owner: root
+          group: root
+          mode: "0755"
+
+    - name: Deploy redacted Agent Docker reporter
+      ansible.builtin.copy:
+        src: >-
+          {{ ansible_config_file | dirname
+          }}/scripts/docker/agent-docker-report.py
+        dest: /usr/local/sbin/agent-docker-report
+        owner: root
+        group: root
+        mode: "0755"
+
+    - name: Deploy fixed Agent Docker report reader
+      ansible.builtin.copy:
+        src: >-
+          {{ ansible_config_file | dirname
+          }}/scripts/docker/agent-docker-report-cat
+        dest: /usr/local/bin/agent-docker-report-cat
+        owner: root
+        group: root
+        mode: "0755"
+
+    - name: Install root-owned forced-command authorized keys
+      ansible.builtin.copy:
+        dest: >-
+          {{ agent_docker_report_effective_home
+          }}/.ssh/authorized_keys
+        owner: root
+        group: root
+        mode: "0644"
+        # yamllint disable rule:line-length
+        content: |
+          {% for key in agent_docker_report_authorized_keys %}
+          restrict,command="/usr/local/bin/agent-docker-report-cat",from="{{ agent_docker_report_source_cidrs | join(',') }}" {{ key }}
+          {% endfor %}
+        # yamllint enable rule:line-length
+
+    - name: Create hardened Agent Docker report service
+      ansible.builtin.copy:
+        dest: /etc/systemd/system/agent-docker-report.service
+        owner: root
+        group: root
+        mode: "0644"
+        content: |
+          [Unit]
+          Description=Generate redacted Docker inventory for agent runtimes
+          After=docker.service
+          Requires=docker.service
+
+          [Service]
+          Type=oneshot
+          User=root
+          Group=root
+          UMask=0027
+          ExecStart=/usr/local/sbin/agent-docker-report \
+            --socket {{ agent_docker_report_effective_socket }} \
+            --output \
+            {{ agent_docker_report_effective_home }}/data/report.json \
+            --group {{ agent_docker_report_effective_group }}
+          TimeoutStartSec=60
+          Nice=10
+          IOSchedulingClass=idle
+          NoNewPrivileges=yes
+          CapabilityBoundingSet=
+          AmbientCapabilities=
+          PrivateDevices=yes
+          PrivateNetwork=yes
+          PrivateTmp=yes
+          ProtectClock=yes
+          ProtectControlGroups=yes
+          ProtectHome=yes
+          ProtectHostname=yes
+          ProtectKernelLogs=yes
+          ProtectKernelModules=yes
+          ProtectKernelTunables=yes
+          ProtectProc=invisible
+          ProtectSystem=strict
+          ProcSubset=pid
+          ReadWritePaths={{ agent_docker_report_effective_home }}/data
+          RemoveIPC=yes
+          RestrictAddressFamilies=AF_UNIX
+          RestrictNamespaces=yes
+          RestrictRealtime=yes
+          RestrictSUIDSGID=yes
+          LockPersonality=yes
+          MemoryDenyWriteExecute=yes
+          SystemCallArchitectures=native
+      notify: Reload systemd
+
+    - name: Create Agent Docker report timer
+      ansible.builtin.copy:
+        dest: /etc/systemd/system/agent-docker-report.timer
+        owner: root
+        group: root
+        mode: "0644"
+        content: |
+          [Unit]
+          Description=Refresh redacted Docker inventory for agent runtimes
+
+          [Timer]
+          OnBootSec={{ agent_docker_report_on_boot_sec | default('2m') }}
+          OnUnitActiveSec={{ agent_docker_report_interval | default('5m') }}
+          RandomizedDelaySec={{
+            agent_docker_report_randomized_delay | default('30s') }}
+          AccuracySec=15s
+
+          [Install]
+          WantedBy=timers.target
+      notify: Reload systemd
+
+    - name: Generate and validate the initial redacted report
+      when: not ansible_check_mode
+      block:
+        - name: Run Agent Docker reporter once
+          ansible.builtin.systemd:
+            name: agent-docker-report.service
+            state: started
+            daemon_reload: true
+
+        - name: Inspect generated Agent Docker report
+          ansible.builtin.stat:
+            path: >-
+              {{ agent_docker_report_effective_home
+              }}/data/report.json
+          register: agent_docker_report_file
+
+        - name: Verify generated Agent Docker report ownership
+          ansible.builtin.assert:
+            that:
+              - agent_docker_report_file.stat.exists
+              - agent_docker_report_file.stat.isreg
+              - agent_docker_report_file.stat.mode == '0640'
+              - agent_docker_report_file.stat.pw_name == 'root'
+              - >-
+                agent_docker_report_file.stat.gr_name ==
+                agent_docker_report_effective_group
+            fail_msg: >-
+              The redacted Docker report was not generated with the required
+              ownership boundary.
+
+        - name: Validate generated Agent Docker report schema
+          ansible.builtin.command:
+            argv:
+              - /usr/bin/python3
+              - -c
+              - >-
+                import json, sys;
+                value = json.load(open(sys.argv[1], encoding='utf-8'));
+                raise SystemExit(0 if value.get('schemaVersion') == 2 else 2)
+              - >-
+                {{ agent_docker_report_effective_home
+                }}/data/report.json
+          changed_when: false
+
+    - name: Enable and start Agent Docker report timer
+      ansible.builtin.systemd:
+        name: agent-docker-report.timer
+        enabled: true
+        state: started
+        daemon_reload: true
+      when: not ansible_check_mode
+
+    - name: Stop and disable legacy OpenClaw Docker report units
+      ansible.builtin.systemd:
+        name: "{{ item }}"
+        enabled: false
+        state: stopped
+        daemon_reload: true
+      loop:
+        - openclaw-docker-report.timer
+        - openclaw-docker-report.service
+      failed_when: false
+      when: not ansible_check_mode
+
+    - name: Remove validated legacy OpenClaw Docker report artifacts
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: absent
+      loop: "{{ agent_docker_report_legacy_artifacts }}"
+      notify: Reload systemd
+      when: not ansible_check_mode
+
+    - name: Remove legacy OpenClaw Docker report account
+      ansible.builtin.user:
+        name: openclaw-report
+        state: absent
+        remove: false
+      when:
+        - not ansible_check_mode
+        - agent_docker_report_effective_user != 'openclaw-report'
+
+    - name: Remove legacy OpenClaw Docker report group
+      ansible.builtin.group:
+        name: openclaw-report
+        state: absent
+      when:
+        - not ansible_check_mode
+        - agent_docker_report_effective_group != 'openclaw-report'
+
+  handlers:
+    - name: Reload systemd
+      ansible.builtin.systemd:
+        daemon_reload: true

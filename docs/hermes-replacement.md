@@ -513,12 +513,15 @@ read-only credentials to fetch bounded Health and Docker reports, validate
 their schema/signature/age, and atomically publish root-owned read-only inputs
 for Astra. Dubble and Rigel cannot traverse those paths.
 
-The Docker update broker remains separately approved and digest-bound. Astra
-may submit a fixed-schema proposal and later invoke only an already-approved,
-unexpired plan. It cannot approve a plan, select arbitrary compose paths or
-commands, broaden targets, or reach a Docker daemon. Renaming OpenClaw-specific
-service accounts and paths to platform-neutral agent names occurs only in the
-later Docker gate with compatibility cleanup and rollback coverage.
+The Docker inventory reporter is now platform-neutral under `agent-report`,
+uses a prompt-resistant schema-v2 result, and includes backed, validation-gated
+cleanup for the old OpenClaw reporter artifacts. It remains disabled until the
+Hermes identity, source CIDR, and dedicated key are approved for live rollout.
+The Docker update broker remains separately approved and digest-bound under
+its legacy name until its own gate. Astra may submit a fixed-schema proposal
+and later invoke only an already-approved, unexpired plan. It cannot approve a
+plan, select arbitrary compose paths or commands, broaden targets, or reach a
+Docker daemon.
 
 ### Backups And Recovery
 
