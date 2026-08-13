@@ -202,10 +202,12 @@ prompt content trustworthy.
 ### Deployment Topology
 
 Provision a new `hermes-vm`; do not reuse VM 140 or any retired OpenClaw disk.
-The preferred placement is `pve-alto`, subject to a fresh attended capacity,
-storage, UPS, and VMID check immediately before provisioning. If that gate
-fails, select another Proxmox node from live evidence rather than silently
-shrinking the VM or co-locating it on the controller.
+No Proxmox node is selected yet. A live check rejected `pve-alto`: it has only
+two CPU cores and about 7.46 GiB total RAM, with about 1.21 GiB available at
+the time of inspection, so it cannot satisfy the target without weakening the
+isolation baseline. Select a different node from live capacity, storage, UPS,
+and VMID evidence rather than silently shrinking the VM or co-locating it on
+the controller.
 
 Use the then-current Tier-1 Ubuntu LTS cloud image with verified publisher
 checksum and signature. The baseline allocation is four vCPUs, 8 GiB RAM, and
@@ -409,9 +411,12 @@ remains in shadow state with no VMID until the live placement gate passes.
 
 The blank multi-node capacity probe attempted during this design gate stalled
 in Ansible SSH interpreter discovery and left workers after the wrapper ended.
-Those exact workers were terminated and no capacity result was inferred. The
-live placement check therefore remains an implementation precondition, not a
-fabricated design fact.
+Those exact workers were terminated and no capacity result was inferred. A
+later bounded raw probe established only that `pve-alto` is undersized. A
+bounded `pve-m70q` probe timed out without returning host evidence; its workers
+were verified absent afterward, and it is classified as unavailable rather
+than as a capacity result. The live placement check therefore remains an
+implementation precondition, not a fabricated design fact.
 
 ## Migration Gates
 

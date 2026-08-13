@@ -51,6 +51,11 @@ class HermesShadowTargetAuditTests(unittest.TestCase):
         data["deployment"]["vmid"] = 160
         self.assert_rejected(data, "vmid-selected-before-live-gate")
 
+    def test_preferred_node_before_live_gate_is_rejected(self) -> None:
+        data = copy.deepcopy(self.base)
+        data["deployment"]["preferredNode"] = "pve-alto"
+        self.assert_rejected(data, "preferred-node-selected-before-live-gate")
+
     def test_docker_group_is_rejected(self) -> None:
         data = copy.deepcopy(self.base)
         data["sandbox"]["dockerGroup"] = True

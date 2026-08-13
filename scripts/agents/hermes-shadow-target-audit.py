@@ -57,6 +57,10 @@ def validate_deployment(data: dict[str, Any]) -> None:
     require(deployment.get("mode") == "shadow", "deployment-not-shadow")
     require(deployment.get("targetHost") == "hermes-vm", "target-host")
     require(
+        deployment.get("preferredNode") is None,
+        "preferred-node-selected-before-live-gate",
+    )
+    require(
         deployment.get("placementRequiresLiveGate") is True,
         "placement-live-gate-disabled",
     )

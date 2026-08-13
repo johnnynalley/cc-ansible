@@ -3,7 +3,7 @@
   "deployment": {
     "mode": "shadow",
     "targetHost": "hermes-vm",
-    "preferredNode": "pve-alto",
+    "preferredNode": null,
     "placementRequiresLiveGate": true,
     "vmid": null,
     "productionDeliveryEnabled": false,
