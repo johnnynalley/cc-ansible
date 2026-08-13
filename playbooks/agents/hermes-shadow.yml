@@ -172,20 +172,24 @@
           - >-
             hermes_shadow_expected_commit
             is match('^[0-9a-f]{40}$')
+          - >-
+            hermes_shadow_expected_tag_object
+            is match('^[0-9a-f]{40}$')
         fail_msg: >-
-          Every active Hermes run requires an immutable reviewed release tag
-          and that tag's exact expected commit.
+          Every active Hermes run requires a reviewed release tag object and
+          that tag's exact expected commit.
 
-    - name: Require reviewed installer artifact for a new runtime
+    - name: Require reviewed locked artifacts for a new runtime
       ansible.builtin.assert:
         that:
           - hermes_shadow_install_approved | bool
           - >-
-            hermes_shadow_installer_sha256
+            hermes_shadow_uv_archive_sha256
             is match('^[0-9a-f]{64}$')
+          - hermes_shadow_uv_version is match('^[0-9]+(\.[0-9]+){2}$')
         fail_msg: >-
-          A fresh Hermes install requires explicit approval and the SHA-256 of
-          the reviewed current official installer.
+          A fresh Hermes install requires explicit approval and the reviewed
+          uv release checksum used by the locked dependency transaction.
       when: not hermes_shadow_runtime.stat.exists
 
     - name: Install Hermes shadow host prerequisites
@@ -275,6 +279,10 @@
         - /usr/local/share/hermes-shadow/repository/scripts/agents
         - /usr/local/libexec
         - /var/cache/hermes
+        - "{{ hermes_shadow_uv_extract_dir }}"
+        - /var/lib/hermes/bootstrap
+        - /var/lib/hermes/bootstrap/bin
+        - /usr/local/share/uv
 
     - name: Create per-profile Hermes managed scopes
       ansible.builtin.file:
@@ -315,31 +323,115 @@
       loop_control:
         label: "{{ item.name }}"
 
-    - name: Download reviewed official Hermes installer
+    - name: Download reviewed uv release archive
       ansible.builtin.get_url:
-        url: "{{ hermes_shadow_installer_url }}"
-        dest: "{{ hermes_shadow_installer_cache }}"
-        checksum: "sha256:{{ hermes_shadow_installer_sha256 }}"
+        url: "{{ hermes_shadow_uv_archive_url }}"
+        dest: "{{ hermes_shadow_uv_archive_cache }}"
+        checksum: "sha256:{{ hermes_shadow_uv_archive_sha256 }}"
+        owner: root
+        group: root
+        mode: "0644"
+      when: not hermes_shadow_runtime.stat.exists
+
+    - name: Extract reviewed uv release archive
+      ansible.builtin.unarchive:
+        src: "{{ hermes_shadow_uv_archive_cache }}"
+        dest: "{{ hermes_shadow_uv_extract_dir }}"
+        remote_src: true
+        creates: >-
+          {{ hermes_shadow_uv_extract_dir
+             }}/uv-x86_64-unknown-linux-gnu/uv
+      when: not hermes_shadow_runtime.stat.exists
+
+    - name: Install reviewed Hermes-managed uv binary
+      ansible.builtin.copy:
+        src: >-
+          {{ hermes_shadow_uv_extract_dir
+             }}/uv-x86_64-unknown-linux-gnu/uv
+        dest: "{{ hermes_shadow_uv_binary }}"
+        remote_src: true
         owner: root
         group: root
         mode: "0755"
       when: not hermes_shadow_runtime.stat.exists
 
-    - name: Install official Hermes runtime without setup or browser
+    - name: Verify reviewed Hermes-managed uv version
       ansible.builtin.command:
         argv:
-          - "{{ hermes_shadow_installer_cache }}"
-          - --skip-setup
-          - --skip-browser
-          - --branch
-          - "{{ hermes_shadow_install_ref }}"
-          - --hermes-home
-          - /var/lib/hermes/bootstrap
-        creates: "{{ hermes_shadow_runtime_binary }}"
+          - "{{ hermes_shadow_uv_binary }}"
+          - --version
+      register: hermes_shadow_uv_installed_version
+      changed_when: false
+      when: not hermes_shadow_runtime.stat.exists
+
+    - name: Require exact Hermes-managed uv version
+      ansible.builtin.assert:
+        that:
+          - >-
+            hermes_shadow_uv_installed_version.stdout
+            == 'uv ' + hermes_shadow_uv_version
+      when: not hermes_shadow_runtime.stat.exists
+
+    - name: Check out exact official Hermes source
+      ansible.builtin.git:
+        repo: "{{ hermes_shadow_source_repo }}"
+        dest: "{{ hermes_shadow_runtime_root }}"
+        version: "{{ hermes_shadow_expected_commit }}"
+        force: false
+        update: true
+      when: not hermes_shadow_runtime.stat.exists
+
+    - name: Synchronize only locked Hermes dependencies
+      ansible.builtin.command:
+        argv:
+          - "{{ hermes_shadow_uv_binary }}"
+          - sync
+          - --extra
+          - all
+          - --locked
+        chdir: "{{ hermes_shadow_runtime_root }}"
+        creates: "{{ hermes_shadow_runtime_venv }}/bin/hermes"
       environment:
         HOME: /root
         HERMES_HOME: /var/lib/hermes/bootstrap
+        UV_NO_CONFIG: "1"
+        UV_PROJECT_ENVIRONMENT: "{{ hermes_shadow_runtime_venv }}"
+        UV_PYTHON_INSTALL_DIR: /usr/local/share/uv/python
+        UV_PYTHON_BIN_DIR: /usr/local/share/uv/bin
       when: not hermes_shadow_runtime.stat.exists
+
+    - name: Install Hermes launcher
+      ansible.builtin.copy:
+        content: |
+          #!/usr/bin/env bash
+          unset PYTHONPATH
+          unset PYTHONHOME
+          exec "{{ hermes_shadow_runtime_venv }}/bin/python" \
+            "{{ hermes_shadow_runtime_root }}/hermes" "$@"
+        dest: "{{ hermes_shadow_runtime_binary }}"
+        owner: root
+        group: root
+        mode: "0755"
+      when: not hermes_shadow_runtime.stat.exists
+
+    - name: Record native Hermes Git install method
+      ansible.builtin.copy:
+        content: "git\n"
+        dest: "{{ hermes_shadow_runtime_root }}/.install_method"
+        owner: root
+        group: root
+        mode: "0644"
+
+    - name: Disable bundled skill seeding for Hermes profiles
+      ansible.builtin.copy:
+        content: "managed\n"
+        dest: "{{ item.home }}/.no-bundled-skills"
+        owner: root
+        group: "{{ item.group }}"
+        mode: "0440"
+      loop: "{{ hermes_shadow_profiles }}"
+      loop_control:
+        label: "{{ item.name }}"
 
     - name: Inspect Hermes source origin
       ansible.builtin.command:
@@ -362,6 +454,17 @@
           - rev-parse
           - HEAD
       register: hermes_shadow_installed_commit
+      changed_when: false
+
+    - name: Inspect reviewed Hermes release tag object
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/git
+          - -C
+          - "{{ hermes_shadow_runtime_root }}"
+          - rev-parse
+          - "refs/tags/{{ hermes_shadow_install_ref }}"
+      register: hermes_shadow_installed_tag_object
       changed_when: false
 
     - name: Resolve reviewed Hermes release tag
@@ -398,6 +501,9 @@
           - >-
             hermes_shadow_installed_commit.stdout
             == hermes_shadow_expected_commit
+          - >-
+            hermes_shadow_installed_tag_object.stdout
+            == hermes_shadow_expected_tag_object
           - >-
             hermes_shadow_installed_tag_commit.stdout
             == hermes_shadow_expected_commit

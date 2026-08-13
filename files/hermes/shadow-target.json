@@ -31,8 +31,12 @@
     "usbDeviceAccess": false
   },
   "runtime": {
-    "installMethod": "official-root-git",
+    "installMethod": "official-root-git-locked",
     "releaseTrack": "official-default",
+    "sourceRepo": "https://github.com/NousResearch/hermes-agent.git",
+    "dependencySync": "uv-sync-extra-all-locked",
+    "dependencyFallbackEnabled": false,
+    "nodeDependencyInstallEnabled": false,
     "codeRoot": "/usr/local/lib/hermes-agent",
     "launcher": "/usr/local/bin/hermes",
     "managedScope": "/etc/hermes",

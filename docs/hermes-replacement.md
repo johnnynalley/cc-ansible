@@ -405,6 +405,25 @@ Install the official supported root-mode Git distribution under
 service users cannot update or patch that code. Track the official default
 stable branch rather than setting a policy-level exact-version pin.
 
+The initial reviewed bootstrap uses stable release `v2026.8.3` (Hermes
+v0.20.0), annotated tag object
+`7de39e700d2c329e15d32eb0b96e2f7cdd9fbdb2`, and exact commit
+`3c27eb6234bf91b8ceee9e9071591b31e9b148cb`. GitHub reports the tag signature
+as valid. The exact tag and commit are transaction provenance, not a permanent
+update-policy pin.
+
+Do not execute the release's monolithic installer for this managed bootstrap.
+It can download a mutable `uv` installer, fall back from `uv sync --locked` to
+an unlocked PyPI resolve, and install Node dependencies that the headless
+runtime does not need. Instead, deploy official `uv` `0.12.4` from its reviewed
+archive with SHA-256
+`c8c60f47e6f88d18dbf6f33d7279fb1fbf7ae76631768152cf5578c3d65729b4`,
+check out the exact official Hermes commit, and require `uv sync --extra all
+--locked` to succeed without fallback. Preserve Hermes's native Git install
+marker and launcher layout, disable bundled-skill seeding, and require the
+post-install origin, tag object, commit, and clean-tree checks before
+configuration proceeds.
+
 Updates are root-managed transactions:
 
 1. Back up every profile with Hermes's SQLite-safe backup path and take a

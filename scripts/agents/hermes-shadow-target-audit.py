@@ -110,10 +110,18 @@ def validate_runtime(data: dict[str, Any]) -> None:
     runtime = data["runtime"]
     require(isinstance(runtime, dict), "runtime-not-object")
     require(
-        runtime.get("installMethod") == "official-root-git",
+        runtime.get("installMethod") == "official-root-git-locked",
         "runtime-install-method",
     )
     require(runtime.get("releaseTrack") == "official-default", "release-track")
+    require(
+        runtime.get("sourceRepo") == "https://github.com/NousResearch/hermes-agent.git",
+        "runtime-source-repo",
+    )
+    require(
+        runtime.get("dependencySync") == "uv-sync-extra-all-locked",
+        "runtime-dependency-sync",
+    )
     require(
         runtime.get("codeRoot") == "/usr/local/lib/hermes-agent",
         "runtime-code-root",
@@ -121,6 +129,8 @@ def validate_runtime(data: dict[str, Any]) -> None:
     require(runtime.get("launcher") == "/usr/local/bin/hermes", "runtime-launcher")
     require(runtime.get("managedScope") == "/etc/hermes", "managed-scope")
     for key in (
+        "dependencyFallbackEnabled",
+        "nodeDependencyInstallEnabled",
         "runtimeSelfUpdateEnabled",
         "runtimeLazyInstallsEnabled",
         "bundledSkillsEnabled",
