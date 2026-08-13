@@ -136,6 +136,15 @@ Do not commit real secrets. Encrypted values belong in `vault.yml` files beside 
 
 When rotating credentials, app passwords, OAuth tokens, API keys, or service auth tokens, plan for a single intended surviving credential per client before generation. Do not leave failed, test, duplicate, migrated, or legacy tokens active. If a generated secret is printed to stdout, pasted into chat, captured in logs, or otherwise exposed, treat it as compromised and revoke it immediately. Before closing the task, verify the provider's token list, delete every unused token, confirm the intended replacement still works, and report which token names/IDs were retired without revealing secret values.
 
+Never run `ansible-inventory --host` or `ansible-inventory --list` unfiltered in
+an agent session or any command path whose stdout is captured. Those commands
+render inherited variables and can decrypt vault-backed credentials. Read
+non-secret inventory source files for static host metadata, use a structured
+allowlist filter directly in the same pipeline when inventory resolution is
+required, and collect live capacity through a bounded host probe that emits
+only the explicitly requested facts. Do not write an unredacted inventory
+projection to an intermediate file.
+
 ### Live Change Backups
 
 Before mutating live infrastructure state, application configs, databases, service data, or generated controller/runtime files, take a targeted timestamped backup, snapshot, export, or app-native backup of the affected state unless the change is trivial and fully reproducible or the user explicitly waives backups for that operation. Record the backup path in the working notes, docs, or final response when it matters for rollback. Treat these as temporary rollback aids: keep them while the rollout is being validated, then document or perform cleanup/retention once the change is proven. Read-only diagnostics and dry runs do not need backups.
