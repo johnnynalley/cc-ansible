@@ -1,0 +1,57 @@
+[Unit]
+Description=Hermes shadow gateway ({{ hermes_profile.name }})
+After=network-online.target
+Wants=network-online.target
+ConditionPathExists={{ hermes_profile.home }}/.shadow-ready
+
+[Service]
+Type=notify
+NotifyAccess=main
+User={{ hermes_profile.user }}
+Group={{ hermes_profile.group }}
+WorkingDirectory={{ hermes_profile.home }}
+Environment=HOME={{ hermes_profile.home }}
+Environment=HERMES_HOME={{ hermes_profile.home }}
+Environment=HERMES_MANAGED_DIR=/etc/hermes/{{ hermes_profile.name }}
+Environment=HERMES_DOCKER_BINARY=/usr/bin/podman
+Environment=XDG_RUNTIME_DIR=/run/hermes-{{ hermes_profile.name }}
+ExecStartPre={{ hermes_shadow_audit_live }} {{ hermes_shadow_contract_live }}
+ExecStartPre={{ hermes_shadow_runtime_binary }} config check
+ExecStart={{ hermes_shadow_runtime_binary }} gateway run --external-supervisor
+Restart=on-failure
+RestartSec=10s
+TimeoutStopSec=90s
+WatchdogSec=120s
+RuntimeDirectory=hermes-{{ hermes_profile.name }}
+RuntimeDirectoryMode=0700
+UMask=0077
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths={{ hermes_profile.home }} /run/hermes-{{ hermes_profile.name }}
+PrivateTmp=true
+ProtectClock=true
+ProtectControlGroups=true
+ProtectHostname=true
+ProtectKernelLogs=true
+ProtectKernelModules=true
+ProtectKernelTunables=true
+ProtectProc=invisible
+LockPersonality=true
+MemoryDenyWriteExecute=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+CapabilityBoundingSet=
+AmbientCapabilities=
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK
+DevicePolicy=closed
+DeviceAllow=/dev/null rw
+DeviceAllow=/dev/urandom r
+DeviceAllow=/dev/random r
+DeviceAllow=/dev/fuse rw
+Delegate=yes
+TasksMax=1024
+KillMode=mixed
+
+[Install]
+WantedBy=multi-user.target

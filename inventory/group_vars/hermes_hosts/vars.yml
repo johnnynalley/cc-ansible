@@ -1,0 +1,85 @@
+---
+# =============================================================================
+# Hermes shadow runtime defaults
+# =============================================================================
+
+hermes_shadow_mode: disabled
+hermes_shadow_change_approved: false
+hermes_shadow_install_approved: false
+hermes_shadow_start_approved: false
+
+hermes_shadow_installer_url: https://hermes-agent.nousresearch.com/install.sh
+hermes_shadow_installer_sha256: ""
+hermes_shadow_install_ref: ""
+hermes_shadow_expected_commit: ""
+hermes_shadow_installer_cache: /var/cache/hermes/install.sh
+hermes_shadow_runtime_binary: /usr/local/bin/hermes
+hermes_shadow_runtime_root: /usr/local/lib/hermes-agent
+hermes_shadow_contract_source: files/hermes/shadow-target.json
+hermes_shadow_contract_live: /usr/local/share/hermes-shadow/shadow-target.json
+hermes_shadow_audit_live: /usr/local/libexec/hermes-shadow-target-audit
+
+hermes_shadow_profiles:
+  - name: astra
+    user: hermes-astra
+    group: hermes-astra
+    uid: 62010
+    home: /var/lib/hermes/astra
+    subid_start: 200000
+    toolsets:
+      - safe
+      - skills
+      - memory
+      - session_search
+      - todo
+      - clarify
+      - delegation
+    disabled_toolsets:
+      - terminal
+      - file
+      - code_execution
+      - cronjob
+      - discord_admin
+      - homeassistant
+  - name: dubble
+    user: hermes-dubble
+    group: hermes-dubble
+    uid: 62011
+    home: /var/lib/hermes/dubble
+    subid_start: 265536
+    toolsets:
+      - safe
+      - skills
+      - memory
+      - session_search
+      - todo
+      - clarify
+    disabled_toolsets:
+      - terminal
+      - file
+      - code_execution
+      - cronjob
+      - delegation
+      - discord_admin
+      - homeassistant
+  - name: rigel
+    user: hermes-rigel
+    group: hermes-rigel
+    uid: 62012
+    home: /var/lib/hermes/rigel
+    subid_start: 331072
+    toolsets:
+      - safe
+      - skills
+      - memory
+      - session_search
+      - todo
+      - clarify
+    disabled_toolsets:
+      - terminal
+      - file
+      - code_execution
+      - cronjob
+      - delegation
+      - discord_admin
+      - homeassistant

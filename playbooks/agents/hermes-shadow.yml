@@ -1,0 +1,505 @@
+---
+# Purpose: Stage the isolated Hermes replacement without production delivery.
+# Hosts: hermes_hosts.
+# Key vars: hermes_shadow_*.
+# Templates: templates/hermes.
+# Scripts: scripts/agents/hermes-shadow-target-audit.py.
+# Validation: ansible-playbook playbooks/agents/hermes-shadow.yml
+#             --syntax-check.
+
+- name: Configure isolated Hermes shadow runtime
+  hosts: hermes_hosts
+  become: true
+  gather_facts: false
+
+  vars:
+    hermes_shadow_contract_path: >-
+      {{ playbook_dir }}/../../{{ hermes_shadow_contract_source }}
+    hermes_shadow_contract: >-
+      {{ lookup(
+           'ansible.builtin.file',
+           hermes_shadow_contract_path
+         ) | from_json }}
+
+  tasks:
+    - name: Validate Hermes shadow mode
+      ansible.builtin.assert:
+        that:
+          - hermes_shadow_mode in ['disabled', 'bootstrap', 'shadow']
+        fail_msg: >-
+          hermes_shadow_mode must be disabled, bootstrap, or shadow. This
+          playbook does not implement production delivery or cutover.
+
+    - name: Inspect Hermes shadow units
+      ansible.builtin.stat:
+        path: "/etc/systemd/system/hermes-gateway-{{ item.name }}.service"
+      loop: "{{ hermes_shadow_profiles }}"
+      loop_control:
+        label: "{{ item.name }}"
+      register: hermes_shadow_units
+      check_mode: false
+
+    - name: Stop Hermes shadow units when disabled
+      ansible.builtin.systemd_service:
+        name: "hermes-gateway-{{ item.item.name }}.service"
+        enabled: false
+        state: stopped
+      loop: "{{ hermes_shadow_units.results }}"
+      loop_control:
+        label: "{{ item.item.name }}"
+      when:
+        - hermes_shadow_mode == 'disabled'
+        - item.stat.exists
+
+    - name: Skip hosts without Hermes shadow approval
+      ansible.builtin.meta: end_host
+      when: hermes_shadow_mode == 'disabled'
+
+    - name: Require explicit Hermes shadow approval
+      ansible.builtin.assert:
+        that:
+          - hermes_shadow_change_approved | bool
+          - inventory_hostname == hermes_shadow_contract.deployment.targetHost
+          - hermes_shadow_contract.deployment.mode == 'shadow'
+          - hermes_shadow_contract.deployment.preferredNode is none
+          - hermes_shadow_contract.deployment.vmid is none
+          - not hermes_shadow_contract.deployment.productionDeliveryEnabled
+          - not hermes_shadow_contract.deployment.productionSchedulerEnabled
+          - not hermes_shadow_contract.deployment.productionRouteEnabled
+          - not hermes_shadow_contract.deployment.sourceCleanupEnabled
+          - not hermes_shadow_contract.deployment.sourceArchiveEnabled
+          - hermes_shadow_contract.sandbox.binary == '/usr/bin/podman'
+          - hermes_shadow_contract.sandbox.rootless | bool
+          - not hermes_shadow_contract.sandbox.dockerGroup
+          - not hermes_shadow_contract.sandbox.dockerSocket
+          - not hermes_shadow_contract.sandbox.localTerminalFallback
+          - not hermes_shadow_contract.sandbox.networkEnabled
+          - hermes_shadow_contract.sandbox.hostVolumes | length == 0
+          - hermes_shadow_contract.sandbox.forwardEnvironment | length == 0
+          - hermes_shadow_contract.sandbox.forwardCredentialFiles | length == 0
+          - >-
+            hermes_shadow_profiles | map(attribute='name') | list
+            == ['astra', 'dubble', 'rigel']
+        fail_msg: >-
+          The requested host, mode, profiles, or security boundary differs from
+          the reviewed Hermes shadow contract.
+
+    - name: Validate Hermes profile identity declarations
+      ansible.builtin.assert:
+        that:
+          - item.user == 'hermes-' + item.name
+          - item.group == item.user
+          - item.home == '/var/lib/hermes/' + item.name
+          - item.uid | int >= 62010
+          - item.uid | int <= 62012
+          - item.subid_start | int >= 200000
+          - item.toolsets | length > 0
+          - "'terminal' in item.disabled_toolsets"
+          - "'file' in item.disabled_toolsets"
+          - "'code_execution' in item.disabled_toolsets"
+          - "'discord_admin' in item.disabled_toolsets"
+        fail_msg: >-
+          Hermes profile {{ item.name }} exceeds its reviewed authority.
+      loop: "{{ hermes_shadow_profiles }}"
+      loop_control:
+        label: "{{ item.name }}"
+
+    - name: Inspect Hermes runtime
+      ansible.builtin.stat:
+        path: "{{ hermes_shadow_runtime_binary }}"
+      register: hermes_shadow_runtime
+      check_mode: false
+
+    - name: Require reviewed Hermes release provenance
+      ansible.builtin.assert:
+        that:
+          - >-
+            hermes_shadow_install_ref
+            is match('^v[0-9]{4}(\.[0-9]+){2,3}$')
+          - >-
+            hermes_shadow_expected_commit
+            is match('^[0-9a-f]{40}$')
+        fail_msg: >-
+          Every active Hermes run requires an immutable reviewed release tag
+          and that tag's exact expected commit.
+
+    - name: Require reviewed installer artifact for a new runtime
+      ansible.builtin.assert:
+        that:
+          - hermes_shadow_install_approved | bool
+          - >-
+            hermes_shadow_installer_sha256
+            is match('^[0-9a-f]{64}$')
+        fail_msg: >-
+          A fresh Hermes install requires explicit approval and the SHA-256 of
+          the reviewed current official installer.
+      when: not hermes_shadow_runtime.stat.exists
+
+    - name: Install Hermes shadow host prerequisites
+      ansible.builtin.apt:
+        name:
+          - ca-certificates
+          - curl
+          - fuse-overlayfs
+          - git
+          - podman
+          - slirp4netns
+          - uidmap
+          - xz-utils
+        state: present
+        update_cache: true
+
+    - name: Create Hermes service groups
+      ansible.builtin.group:
+        name: "{{ item.group }}"
+        gid: "{{ item.uid }}"
+        system: true
+        state: present
+      loop: "{{ hermes_shadow_profiles }}"
+      loop_control:
+        label: "{{ item.name }}"
+
+    - name: Create Hermes no-login service accounts
+      ansible.builtin.user:
+        name: "{{ item.user }}"
+        uid: "{{ item.uid }}"
+        group: "{{ item.group }}"
+        home: "{{ item.home }}"
+        shell: /usr/sbin/nologin
+        create_home: true
+        system: true
+        password_lock: true
+        state: present
+      loop: "{{ hermes_shadow_profiles }}"
+      loop_control:
+        label: "{{ item.name }}"
+
+    - name: Allocate rootless Podman subordinate UIDs
+      ansible.builtin.lineinfile:
+        path: /etc/subuid
+        regexp: "^{{ item.user | regex_escape }}:"
+        line: "{{ item.user }}:{{ item.subid_start }}:65536"
+        create: true
+        owner: root
+        group: root
+        mode: "0644"
+        backup: true
+      loop: "{{ hermes_shadow_profiles }}"
+      loop_control:
+        label: "{{ item.name }}"
+
+    - name: Allocate rootless Podman subordinate GIDs
+      ansible.builtin.lineinfile:
+        path: /etc/subgid
+        regexp: "^{{ item.user | regex_escape }}:"
+        line: "{{ item.user }}:{{ item.subid_start }}:65536"
+        create: true
+        owner: root
+        group: root
+        mode: "0644"
+        backup: true
+      loop: "{{ hermes_shadow_profiles }}"
+      loop_control:
+        label: "{{ item.name }}"
+
+    - name: Create Hermes root-owned deployment directories
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: directory
+        owner: root
+        group: root
+        mode: "0755"
+      loop:
+        - /etc/hermes
+        - /usr/local/share/hermes-shadow
+        - /usr/local/libexec
+        - /var/cache/hermes
+
+    - name: Create per-profile Hermes managed scopes
+      ansible.builtin.file:
+        path: "/etc/hermes/{{ item.name }}"
+        state: directory
+        owner: root
+        group: root
+        mode: "0755"
+      loop: "{{ hermes_shadow_profiles }}"
+      loop_control:
+        label: "{{ item.name }}"
+
+    - name: Create per-profile Hermes mutable directories
+      ansible.builtin.file:
+        path: "{{ item.0.home }}/{{ item.1 }}"
+        state: directory
+        owner: "{{ item.0.user }}"
+        group: "{{ item.0.group }}"
+        mode: "0700"
+      loop: >-
+        {{ hermes_shadow_profiles
+           | product([
+               'memories', 'skills', 'cron', 'sessions', 'logs', 'pending'
+             ])
+           | list }}
+      loop_control:
+        label: "{{ item.0.name }}/{{ item.1 }}"
+
+    - name: Download reviewed official Hermes installer
+      ansible.builtin.get_url:
+        url: "{{ hermes_shadow_installer_url }}"
+        dest: "{{ hermes_shadow_installer_cache }}"
+        checksum: "sha256:{{ hermes_shadow_installer_sha256 }}"
+        owner: root
+        group: root
+        mode: "0755"
+      when: not hermes_shadow_runtime.stat.exists
+
+    - name: Install official Hermes runtime without setup or browser
+      ansible.builtin.command:
+        argv:
+          - "{{ hermes_shadow_installer_cache }}"
+          - --skip-setup
+          - --skip-browser
+          - --branch
+          - "{{ hermes_shadow_install_ref }}"
+          - --hermes-home
+          - /var/lib/hermes/bootstrap
+        creates: "{{ hermes_shadow_runtime_binary }}"
+      environment:
+        HOME: /root
+        HERMES_HOME: /var/lib/hermes/bootstrap
+      when: not hermes_shadow_runtime.stat.exists
+
+    - name: Inspect Hermes source origin
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/git
+          - -C
+          - "{{ hermes_shadow_runtime_root }}"
+          - remote
+          - get-url
+          - origin
+      register: hermes_shadow_installed_origin
+      changed_when: false
+
+    - name: Inspect Hermes source commit
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/git
+          - -C
+          - "{{ hermes_shadow_runtime_root }}"
+          - rev-parse
+          - HEAD
+      register: hermes_shadow_installed_commit
+      changed_when: false
+
+    - name: Resolve reviewed Hermes release tag
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/git
+          - -C
+          - "{{ hermes_shadow_runtime_root }}"
+          - rev-list
+          - -n
+          - "1"
+          - "{{ hermes_shadow_install_ref }}"
+      register: hermes_shadow_installed_tag_commit
+      changed_when: false
+
+    - name: Inspect Hermes source modifications
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/git
+          - -C
+          - "{{ hermes_shadow_runtime_root }}"
+          - status
+          - --porcelain
+          - --untracked-files=all
+      register: hermes_shadow_installed_status
+      changed_when: false
+
+    - name: Require exact Hermes source
+      ansible.builtin.assert:
+        that:
+          - >-
+            hermes_shadow_installed_origin.stdout
+            == 'https://github.com/NousResearch/hermes-agent.git'
+          - >-
+            hermes_shadow_installed_commit.stdout
+            == hermes_shadow_expected_commit
+          - >-
+            hermes_shadow_installed_tag_commit.stdout
+            == hermes_shadow_expected_commit
+          - hermes_shadow_installed_status.stdout | length == 0
+        fail_msg: >-
+          The installed Hermes source origin, tag, commit, or clean-tree state
+          differs from the attended release transaction.
+
+    - name: Verify Hermes runtime layout
+      ansible.builtin.stat:
+        path: "{{ item }}"
+      loop:
+        - "{{ hermes_shadow_runtime_binary }}"
+        - "{{ hermes_shadow_runtime_root }}"
+      register: hermes_shadow_runtime_layout
+      check_mode: false
+
+    - name: Require complete Hermes runtime layout
+      ansible.builtin.assert:
+        that:
+          - >-
+            hermes_shadow_runtime_layout.results
+            | map(attribute='stat.exists')
+            | min
+        fail_msg: "The official Hermes root-mode runtime layout is incomplete."
+
+    - name: Deploy Hermes shadow contract
+      ansible.builtin.copy:
+        src: "{{ playbook_dir }}/../../{{ hermes_shadow_contract_source }}"
+        dest: "{{ hermes_shadow_contract_live }}"
+        owner: root
+        group: root
+        mode: "0644"
+        backup: true
+
+    - name: Deploy Hermes shadow contract audit
+      ansible.builtin.copy:
+        src: >-
+          {{ playbook_dir
+             }}/../../scripts/agents/hermes-shadow-target-audit.py
+        dest: "{{ hermes_shadow_audit_live }}"
+        owner: root
+        group: root
+        mode: "0755"
+        backup: true
+
+    - name: Validate deployed Hermes shadow contract
+      ansible.builtin.command:
+        argv:
+          - "{{ hermes_shadow_audit_live }}"
+          - "{{ hermes_shadow_contract_live }}"
+      changed_when: false
+
+    - name: Deploy per-profile Hermes managed policy
+      ansible.builtin.template:
+        src: >-
+          {{ playbook_dir
+             }}/../../templates/hermes/hermes-managed-config.yaml.j2
+        dest: "/etc/hermes/{{ hermes_profile.name }}/config.yaml"
+        owner: root
+        group: root
+        mode: "0644"
+        backup: true
+      loop: "{{ hermes_shadow_profiles }}"
+      loop_control:
+        loop_var: hermes_profile
+        label: "{{ hermes_profile.name }}"
+
+    - name: Seed mutable Hermes profile config once
+      ansible.builtin.copy:
+        content: "{}\n"
+        dest: "{{ item.home }}/config.yaml"
+        owner: "{{ item.user }}"
+        group: "{{ item.group }}"
+        mode: "0600"
+        force: false
+      loop: "{{ hermes_shadow_profiles }}"
+      loop_control:
+        label: "{{ item.name }}"
+
+    - name: Seed private Hermes environment file once
+      ansible.builtin.copy:
+        content: |
+          # Provider credentials are enrolled during an attended gate.
+        dest: "{{ item.home }}/.env"
+        owner: "{{ item.user }}"
+        group: "{{ item.group }}"
+        mode: "0600"
+        force: false
+      loop: "{{ hermes_shadow_profiles }}"
+      loop_control:
+        label: "{{ item.name }}"
+      no_log: true
+
+    - name: Deploy root-owned Hermes identities
+      ansible.builtin.copy:
+        src: >-
+          {{ playbook_dir
+             }}/../../files/hermes/profiles/{{ item.name }}/SOUL.md
+        dest: "{{ item.home }}/SOUL.md"
+        owner: root
+        group: "{{ item.group }}"
+        mode: "0440"
+        backup: true
+      loop: "{{ hermes_shadow_profiles }}"
+      loop_control:
+        label: "{{ item.name }}"
+
+    - name: Deploy Hermes shadow gateway units
+      ansible.builtin.template:
+        src: >-
+          {{ playbook_dir
+             }}/../../templates/hermes/hermes-gateway.service.j2
+        dest: >-
+          /etc/systemd/system/hermes-gateway-{{ hermes_profile.name }}.service
+        owner: root
+        group: root
+        mode: "0644"
+        backup: true
+      loop: "{{ hermes_shadow_profiles }}"
+      loop_control:
+        loop_var: hermes_profile
+        label: "{{ hermes_profile.name }}"
+      register: hermes_shadow_unit_changes
+
+    - name: Reload systemd for Hermes shadow units
+      ansible.builtin.systemd_service:
+        daemon_reload: true
+      when: hermes_shadow_unit_changes.changed
+
+    - name: Remove Hermes readiness markers during bootstrap
+      ansible.builtin.file:
+        path: "{{ item.home }}/.shadow-ready"
+        state: absent
+      loop: "{{ hermes_shadow_profiles }}"
+      loop_control:
+        label: "{{ item.name }}"
+      when: hermes_shadow_mode == 'bootstrap'
+
+    - name: Keep Hermes gateways stopped during bootstrap
+      ansible.builtin.systemd_service:
+        name: "hermes-gateway-{{ item.name }}.service"
+        enabled: false
+        state: stopped
+      loop: "{{ hermes_shadow_profiles }}"
+      loop_control:
+        label: "{{ item.name }}"
+      when: hermes_shadow_mode == 'bootstrap'
+
+    - name: Require explicit approval to start Hermes shadow gateways
+      ansible.builtin.assert:
+        that:
+          - hermes_shadow_start_approved | bool
+        fail_msg: >-
+          Starting shadow gateways requires an attended provider/config proof.
+      when: hermes_shadow_mode == 'shadow'
+
+    - name: Create Hermes shadow readiness markers
+      ansible.builtin.file:
+        path: "{{ item.home }}/.shadow-ready"
+        state: touch
+        owner: "{{ item.user }}"
+        group: "{{ item.group }}"
+        mode: "0600"
+      loop: "{{ hermes_shadow_profiles }}"
+      loop_control:
+        label: "{{ item.name }}"
+      when: hermes_shadow_mode == 'shadow'
+
+    - name: Start boot-disabled Hermes shadow gateways
+      ansible.builtin.systemd_service:
+        name: "hermes-gateway-{{ item.name }}.service"
+        enabled: false
+        state: started
+      loop: "{{ hermes_shadow_profiles }}"
+      loop_control:
+        label: "{{ item.name }}"
+      when: hermes_shadow_mode == 'shadow'

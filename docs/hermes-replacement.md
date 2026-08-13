@@ -401,8 +401,8 @@ working credentials, or run OpenClaw/Hermes cleanup commands.
 This design gate is complete when implementation assets express these
 boundaries without installing Hermes:
 
-1. VM provisioning inputs have no conflicting live VMID and the chosen node
-   passes capacity/UPS/storage checks.
+1. VM provisioning inputs keep the node and VMID unset until one node passes
+   capacity, UPS, storage, and conflict checks.
 2. Service identities, homes, groups, units, managed scope, secrets paths, and
    rootless Podman prerequisites are explicit and lintable.
 3. Every profile's allowed tools, Discord scope, inputs, outputs, and forbidden
@@ -433,6 +433,39 @@ has no safe headroom beyond its critical storage and media duties. The live
 it independently as an already-loaded 4-core/8-GiB host. The existing-node
 survey therefore ends with no selected node. Placement remains an
 implementation precondition, not a fabricated design fact.
+
+## Gate 4 Declarative Runtime
+
+The disabled-by-default implementation is
+`playbooks/agents/hermes-shadow.yml`, with defaults under
+`inventory/group_vars/hermes_hosts/`, policy under `files/hermes/`, and
+rendered sources under `templates/hermes/`. The `hermes_hosts` inventory group
+is intentionally empty and this playbook is not imported by `site.yml`.
+
+Its modes are explicit:
+
+- `disabled`: stop existing shadow units and end without mutation.
+- `bootstrap`: require owner approval, a reviewed official-installer hash, and
+  a reviewed immutable release tag plus expected commit; install/configure the
+  isolated runtime, verify its origin/commit, and keep all units stopped.
+- `shadow`: additionally requires attended start approval, creates readiness
+  markers, and starts boot-disabled gateways without production Discord tokens,
+  scheduler delivery, route, dashboard, or API listener.
+
+Each profile has a distinct no-login OS identity, fixed home, subordinate-ID
+range, root-owned managed scope, and hardened system unit. Agent command/file
+execution remains disabled. The dormant terminal backend is rootless Podman
+with no Docker group/socket, host mounts, host user mapping, forwarded
+environment, forwarded credentials, or network. Managed-scope validation is
+not treated as the sandbox: official Hermes documentation says malformed
+managed YAML is ignored and filesystem ownership is its enforcement boundary.
+The systemd/OS/Podman controls therefore remain independently required.
+
+Validation on 2026-08-12 passed YAML lint, Ansible syntax, the structured target
+audit, and 21 contract/deployment regressions. `ansible-lint` did not inspect the
+playbook because the controller currently exposes an Ansible CLI 2.20.1/Python
+module 2.21.0 mismatch; that validator-environment failure is not a Hermes
+runtime result. No live host was changed and no Hermes runtime was installed.
 
 ## Migration Gates
 

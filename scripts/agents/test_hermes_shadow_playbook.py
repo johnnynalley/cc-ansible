@@ -1,0 +1,168 @@
+#!/usr/bin/env python3
+"""Regression tests for the inert Hermes shadow deployment."""
+
+from __future__ import annotations
+
+import unittest
+from pathlib import Path
+
+import yaml
+from jinja2 import Environment, StrictUndefined
+
+ROOT = Path(__file__).parents[2]
+PLAYBOOK = ROOT / "playbooks" / "agents" / "hermes-shadow.yml"
+VARS = ROOT / "inventory" / "group_vars" / "hermes_hosts" / "vars.yml"
+CONFIG = ROOT / "templates" / "hermes" / "hermes-managed-config.yaml.j2"
+SERVICE = ROOT / "templates" / "hermes" / "hermes-gateway.service.j2"
+CONTRACT = ROOT / "files" / "hermes" / "shadow-target.json"
+INVENTORY = ROOT / "inventory" / "hosts.ini"
+SITE = ROOT / "site.yml"
+
+
+class HermesShadowPlaybookTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.playbook = PLAYBOOK.read_text(encoding="utf-8")
+        cls.variables = yaml.safe_load(VARS.read_text(encoding="utf-8"))
+        cls.config_template = CONFIG.read_text(encoding="utf-8")
+        cls.service_template = SERVICE.read_text(encoding="utf-8")
+        cls.environment = Environment(undefined=StrictUndefined, autoescape=False)
+
+    def task(self, name: str) -> str:
+        marker = f"    - name: {name}"
+        start = self.playbook.index(marker)
+        end = self.playbook.find("\n    - name:", start + len(marker))
+        if end == -1:
+            end = len(self.playbook)
+        return self.playbook[start:end]
+
+    def test_default_mode_is_inert(self) -> None:
+        self.assertEqual(self.variables["hermes_shadow_mode"], "disabled")
+        self.assertFalse(self.variables["hermes_shadow_change_approved"])
+        self.assertFalse(self.variables["hermes_shadow_install_approved"])
+        self.assertFalse(self.variables["hermes_shadow_start_approved"])
+        stop = self.task("Stop Hermes shadow units when disabled")
+        self.assertIn("enabled: false", stop)
+        self.assertIn("state: stopped", stop)
+        self.assertIn("ansible.builtin.meta: end_host", self.playbook)
+
+    def test_shadow_is_not_in_normal_convergence_or_inventory(self) -> None:
+        lines = INVENTORY.read_text(encoding="utf-8").splitlines()
+        start = lines.index("[hermes_hosts]") + 1
+        members = []
+        for line in lines[start:]:
+            stripped = line.strip()
+            if stripped.startswith("["):
+                break
+            if stripped and not stripped.startswith("#"):
+                members.append(stripped)
+        self.assertEqual(members, [])
+        self.assertNotIn("hermes-shadow.yml", SITE.read_text(encoding="utf-8"))
+
+    def test_profiles_are_distinct_and_have_no_host_execution(self) -> None:
+        profiles = self.variables["hermes_shadow_profiles"]
+        self.assertEqual(
+            [item["name"] for item in profiles], ["astra", "dubble", "rigel"]
+        )
+        self.assertEqual(len({item["user"] for item in profiles}), 3)
+        self.assertEqual(len({item["uid"] for item in profiles}), 3)
+        self.assertEqual(len({item["subid_start"] for item in profiles}), 3)
+        for profile in profiles:
+            self.assertEqual(profile["user"], f"hermes-{profile['name']}")
+            self.assertEqual(profile["home"], f"/var/lib/hermes/{profile['name']}")
+            self.assertTrue(
+                {"terminal", "file", "code_execution", "discord_admin"}
+                <= set(profile["disabled_toolsets"])
+            )
+
+    def test_every_managed_config_renders_with_fail_closed_policy(self) -> None:
+        template = self.environment.from_string(self.config_template)
+        for profile in self.variables["hermes_shadow_profiles"]:
+            rendered = template.render(hermes_profile=profile)
+            config = yaml.safe_load(rendered)
+            self.assertEqual(config["approvals"]["mode"], "manual")
+            self.assertEqual(config["approvals"]["cron_mode"], "deny")
+            self.assertFalse(config["security"]["tirith_fail_open"])
+            self.assertTrue(config["memory"]["write_approval"])
+            self.assertTrue(config["skills"]["write_approval"])
+            self.assertFalse(config["terminal"]["docker_network"])
+            self.assertFalse(config["terminal"]["docker_mount_cwd_to_workspace"])
+            self.assertFalse(config["terminal"]["docker_run_as_host_user"])
+            self.assertEqual(config["terminal"]["docker_forward_env"], [])
+            self.assertEqual(config["terminal"]["docker_volumes"], [])
+            self.assertEqual(config["display"]["tool_progress"], "off")
+            self.assertFalse(config["display"]["busy_ack_enabled"])
+            self.assertEqual(config["onboarding"]["profile_build"], "off")
+
+    def test_every_service_is_scoped_and_boot_disabled(self) -> None:
+        template = self.environment.from_string(self.service_template)
+        common = {
+            "hermes_shadow_audit_live": self.variables["hermes_shadow_audit_live"],
+            "hermes_shadow_contract_live": self.variables[
+                "hermes_shadow_contract_live"
+            ],
+            "hermes_shadow_runtime_binary": self.variables[
+                "hermes_shadow_runtime_binary"
+            ],
+        }
+        for profile in self.variables["hermes_shadow_profiles"]:
+            rendered = template.render(hermes_profile=profile, **common)
+            self.assertIn(f"User={profile['user']}", rendered)
+            self.assertIn(f"Group={profile['group']}", rendered)
+            self.assertIn(f"HERMES_HOME={profile['home']}", rendered)
+            self.assertIn("HERMES_DOCKER_BINARY=/usr/bin/podman", rendered)
+            self.assertIn("NoNewPrivileges=true", rendered)
+            self.assertIn("ProtectSystem=strict", rendered)
+            self.assertIn("CapabilityBoundingSet=", rendered)
+            self.assertIn("ConditionPathExists=", rendered)
+            self.assertNotIn("docker.sock", rendered)
+            self.assertNotIn("sudo", rendered)
+            self.assertNotIn("ListenStream", rendered)
+
+        start = self.task("Start boot-disabled Hermes shadow gateways")
+        self.assertIn("enabled: false", start)
+        self.assertIn("state: started", start)
+        self.assertIn("hermes_shadow_mode == 'shadow'", start)
+
+    def test_new_runtime_requires_reviewed_installer_hash(self) -> None:
+        provenance = self.task("Require reviewed Hermes release provenance")
+        gate = self.task("Require reviewed installer artifact for a new runtime")
+        install = self.task("Install official Hermes runtime without setup or browser")
+        self.assertIn("hermes_shadow_install_ref", provenance)
+        self.assertIn("hermes_shadow_expected_commit", provenance)
+        self.assertIn("hermes_shadow_install_approved", gate)
+        self.assertIn("^[0-9a-f]{64}$", gate)
+        self.assertIn("when: not hermes_shadow_runtime.stat.exists", gate)
+        self.assertIn("--skip-setup", install)
+        self.assertIn("--skip-browser", install)
+        self.assertIn("--branch", install)
+        self.assertNotIn("version", install.lower())
+        source = self.task("Require exact Hermes source")
+        self.assertIn("https://github.com/NousResearch/hermes-agent.git", source)
+        self.assertIn("hermes_shadow_expected_commit", source)
+        self.assertIn("hermes_shadow_installed_tag_commit", source)
+        self.assertIn("hermes_shadow_installed_status", source)
+        self.assertNotIn("when:", source)
+
+    def test_contract_and_playbook_forbid_production_authority(self) -> None:
+        contract = CONTRACT.read_text(encoding="utf-8")
+        self.assertIn('"productionDeliveryEnabled": false', contract)
+        self.assertIn('"productionSchedulerEnabled": false', contract)
+        self.assertIn('"productionRouteEnabled": false', contract)
+        self.assertIn('"dockerGroup": false', contract)
+        self.assertIn('"dockerSocket": false', contract)
+        self.assertNotIn("DISCORD_BOT_TOKEN", self.playbook)
+        self.assertNotIn("GATEWAY_ALLOW_ALL_USERS", self.playbook)
+        self.assertNotIn("docker_group", self.playbook)
+
+    def test_bootstrap_removes_markers_and_stops_all_units(self) -> None:
+        markers = self.task("Remove Hermes readiness markers during bootstrap")
+        stopped = self.task("Keep Hermes gateways stopped during bootstrap")
+        self.assertIn("state: absent", markers)
+        self.assertIn("hermes_shadow_mode == 'bootstrap'", markers)
+        self.assertIn("enabled: false", stopped)
+        self.assertIn("state: stopped", stopped)
+
+
+if __name__ == "__main__":
+    unittest.main()

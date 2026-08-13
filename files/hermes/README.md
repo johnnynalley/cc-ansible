@@ -9,6 +9,9 @@ transcripts.
   tokenless, delivery-disabled, scheduler-disabled shadow state and records the
   required identities, paths, sandbox, approval, broker, backup, and rollback
   boundaries.
+- `profiles/*/SOUL.md` contains the root-owned baseline identity for Astra,
+  Dubble, and Rigel. It encodes transcript-derived behavior boundaries without
+  copying transcript content, user IDs, memories, or credentials.
 - `scripts/agents/hermes-shadow-target-audit.py` is the fail-closed validator.
 
 The target declaration is deliberately structured. Do not replace it with

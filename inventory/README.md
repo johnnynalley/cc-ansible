@@ -28,6 +28,8 @@ settings into a broad catch-all file when a concern-specific file exists.
   reboot-on-required behavior.
 - `nas_server`: portable NAS role owner for storage services.
 - `docker_hosts`: hosts that receive Docker Compose stacks.
+- `hermes_hosts`: future isolated Hermes VM; intentionally empty until the
+  placement gate passes.
 - `gluetun_hosts`: hosts with Gluetun/qBittorrent VPN automation.
 - `cloudflare_ddns_hosts`: hosts that run Cloudflare DNS-only DDNS timers.
 - `tailscale_peer_relay_endpoint_hosts`: hosts that sync peer-relay endpoints.
@@ -49,7 +51,7 @@ settings into a broad catch-all file when a concern-specific file exists.
 | Immich media inbox | `host_vars/docker-vm/immich-media-inbox.yml` | `playbooks/media/immich-media-inbox.yml` | `docs/immich-media-inbox.md`, Astra skill, `templates/media-inbox/`, `scripts/media-inbox/` |
 | Media release policy | `host_vars/docker-vm/*release*`, `host_vars/docker-vm/nightly-media-maintenance.yml` | `playbooks/media/media-release-stamper.yml`, `playbooks/media/nightly-media-maintenance.yml` | `docs/media-release-policy.md`, `scripts/media-release/` |
 | Storage pools and shares | `group_vars/nas_server/`, `host_vars/ts440/` | `playbooks/storage/` | `templates/storage/`, `templates/samba/`, `scripts/storage/` |
-| Agent services | `host_vars/*/codex.yml`, `host_vars/*/openclaw.yml` | `playbooks/agents/` | `templates/openclaw/`, `docs/openclaw-heartbeats.md` |
+| Agent services | `host_vars/*/codex.yml`, `host_vars/*/openclaw.yml`, `group_vars/hermes_hosts/` | `playbooks/agents/` | `templates/openclaw/`, `templates/hermes/`, `docs/openclaw-heartbeats.md`, `docs/hermes-replacement.md` |
 
 ## Operating Rules
 

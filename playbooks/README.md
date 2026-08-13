@@ -23,7 +23,7 @@ shown here.
 - `docker/`: Docker Compose stacks and container maintenance.
 - `media/`: Plex, streaming, media maintenance, release-policy automation.
 - `backup-sync/`: Backups, sync jobs, and Nextcloud external-storage refresh.
-- `agents/`: Codex, Claude archive sync, and OpenClaw services.
+- `agents/`: Codex, Claude archive sync, OpenClaw, and Hermes services.
 - `proxmox/`: Proxmox cluster, firewall, PBS, PDM, and VM hardware.
 - `windows/`: Windows gaming workstation automation.
 - `apps/`: Standalone application appliances.
@@ -119,11 +119,12 @@ Owner area: Backups, sync jobs, and Nextcloud external-storage refresh.
 
 ### agents
 
-Owner area: Codex, Claude archive sync, and OpenClaw services.
+Owner area: Codex, Claude archive sync, OpenClaw, and Hermes services.
 
 | Playbook | Hosts | Purpose | Main vars/sources | Safe validation |
 | --- | --- | --- | --- | --- |
 | `playbooks/agents/codex-cli.yml` | `orchestrator` | Configure Codex CLI. | codex_*, claude_memory_sync_*, openclaw_*; templates/openclaw; none by default. | `ansible-playbook playbooks/agents/codex-cli.yml --syntax-check` |
+| `playbooks/agents/hermes-shadow.yml` | `hermes_hosts` | Stage three isolated Hermes profiles with rootless Podman and no production delivery; disabled by default. | hermes_shadow_*; templates/hermes; files/hermes; scripts/agents. | `ansible-playbook playbooks/agents/hermes-shadow.yml --syntax-check` |
 | `playbooks/agents/openclaw.yml` | `openclaw_hosts` | Deploy OpenClaw AI agent. | codex_*, claude_memory_sync_*, openclaw_*; templates/openclaw; none by default. | `ansible-playbook playbooks/agents/openclaw.yml --syntax-check` |
 | `playbooks/agents/openclaw-health-receiver.yml` | `openclaw_hosts` | Isolate Health ingestion and publish aggregate-only reports; disabled by default. | openclaw_health_receiver_*; scripts/agents; none by default. | `ansible-playbook playbooks/agents/openclaw-health-receiver.yml --syntax-check` |
 | `playbooks/agents/openclaw-isolated-gateway.yml` | `openclaw_hosts` | Stage a modernized split Gateway/Codex canary with immutable runtime/provider code, separate no-login identities and secrets, isolated executor OAuth, and a required model proof; disabled by default. | openclaw_isolated_gateway_*; templates/openclaw; scripts/agents. | `ansible-playbook playbooks/agents/openclaw-isolated-gateway.yml --syntax-check` |

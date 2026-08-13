@@ -10,6 +10,9 @@
   broker self-approval, or missing backup/rollback controls.
 - `test_hermes_shadow_target_audit.py` covers the real policy plus negative
   regressions for those privilege and cutover boundaries.
+- `test_hermes_shadow_playbook.py` renders every managed profile config and
+  service unit, then rejects host execution, production authority, unreviewed
+  installer input, unsafe startup, or a weakened Podman boundary.
 
 ## Health Receiver
 

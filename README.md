@@ -90,7 +90,7 @@ cc-ansible/
 │   ├── docker/                 # Compose stacks, Gluetun, container auto-updates
 │   ├── media/                  # Plex, streaming, media health, release stamping, maintenance
 │   ├── backup-sync/            # Restic, local restic, rclone, git sync, Nextcloud scans
-│   ├── agents/                 # Codex, Claude archive sync, OpenClaw
+│   ├── agents/                 # Codex, Claude archive sync, OpenClaw, Hermes
 │   ├── proxmox/                # Proxmox firewall, PBS, PDM, HA, guest hardware, boot ordering
 │   ├── windows/                # Windows gaming workstation automation
 │   └── apps/                   # Standalone app appliances such as FreePBX/Homebridge
@@ -296,6 +296,7 @@ Packages are merged from multiple sources (all applicable variables combined):
 | `proxmox-ha.yml` | `proxmox_nodes` | Stop/disable/mask `pve-ha-{lrm,crm}` cluster-wide (no HA resources configured; removes fencing risk). Driven by `pve_ha_enabled` (default `false`) |
 | `vm-storage-gate.yml` | `proxmox_nodes` | Per-VM start gate: hookscript blocks `qm start`/`pct start` if VM's declared host mountpoints aren't mounted. Per-VM declarations in `host_vars/<vm>/storage.yml` |
 | `openclaw.yml` | `openclaw_hosts` | OpenClaw AI agent (npm install, gateway service, repo-sync/update-check timers) |
+| `hermes-shadow.yml` | `hermes_hosts` | Boot-disabled, isolated Hermes replacement staging with no production delivery |
 | `openclaw-health-receiver.yml` | `openclaw_hosts` | Isolated Health receiver and aggregate-only report publisher (disabled by default) |
 | `openclaw-isolated-gateway.yml` | `openclaw_hosts` | Modernized split Gateway/Codex canary with immutable runtime/provider code, separate no-login identities and secrets, isolated executor OAuth, and model proof (disabled by default) |
 | `openclaw-state-rehearsal.yml` | `openclaw_hosts` | Verified relocation rehearsal for active file-backed sessions with bounded current/rollback generation retention (disabled by default) |
@@ -1045,6 +1046,22 @@ PVE notifications route to Apprise → Pushover via webhook. Deployed by `playbo
 # Deploy/update notification webhooks
 ansible-playbook playbooks/proxmox/proxmox-notifications.yml
 ```
+
+## Hermes Replacement (staged)
+
+The isolated Hermes replacement is declaratively implemented but has no
+selected host. `hermes_hosts` is intentionally empty because `pve-alto`,
+`ts440`, and `pve-herc` failed the capacity/role gate while `pve-m70q` was
+unreachable. The playbook defaults to `disabled`, installs no runtime during
+normal convergence, starts no listener, contains no production token, and is
+not imported by `site.yml`.
+
+- **Playbook**: `playbooks/agents/hermes-shadow.yml`
+- **Architecture and gates**: `docs/hermes-replacement.md`
+- **Validation**: `ansible-playbook playbooks/agents/hermes-shadow.yml --syntax-check`
+- **Do not run bootstrap** until a new VM placement passes and the official
+  installer hash, immutable release tag/commit, and attended approvals are
+  supplied.
 
 ## OpenClaw (jn-t14s-lin)
 

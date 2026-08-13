@@ -1,0 +1,99 @@
+# Managed by Ansible. Root-owned policy for {{ hermes_profile.name }}.
+timezone: America/Chicago
+max_concurrent_sessions: 4
+group_sessions_per_user: true
+unauthorized_dm_behavior: ignore
+hooks_auto_accept: false
+command_allowlist: []
+
+runtime:
+  nofile_soft_limit: 4096
+
+gateway:
+  delivery_ledger: true
+  systemd_watchdog_seconds: 120
+
+session_reset:
+  mode: none
+
+toolsets:
+{% for toolset in hermes_profile.toolsets %}
+  - {{ toolset }}
+{% endfor %}
+
+agent:
+  verify_on_stop: auto
+  verify_guidance: true
+  max_verify_nudges: 2
+  disabled_toolsets:
+{% for toolset in hermes_profile.disabled_toolsets %}
+    - {{ toolset }}
+{% endfor %}
+
+terminal:
+  backend: docker
+  docker_network: false
+  docker_mount_cwd_to_workspace: false
+  docker_run_as_host_user: false
+  docker_forward_env: []
+  docker_env: {}
+  docker_volumes: []
+  docker_extra_args: []
+  docker_persist_across_processes: true
+  docker_orphan_reaper: true
+  container_cpu: 1
+  container_memory: 2048
+  container_disk: 8192
+  timeout: 180
+
+approvals:
+  mode: manual
+  timeout: 300
+  cron_mode: deny
+  mcp_reload_confirm: true
+  destructive_slash_confirm: true
+  denial_breaker_threshold: 3
+  deny:
+    - '*sudo*'
+    - '*docker*'
+    - '*podman*'
+    - '*systemctl*'
+    - '*curl*|*sh*'
+
+security:
+  redact_secrets: true
+  tirith_enabled: true
+  tirith_path: tirith
+  tirith_timeout: 5
+  tirith_fail_open: false
+
+memory:
+  memory_enabled: true
+  user_profile_enabled: true
+  memory_char_limit: 4000
+  user_char_limit: 2500
+  write_approval: true
+
+skills:
+  guard_agent_created: true
+  write_approval: true
+
+compression:
+  enabled: true
+  progress_notices: false
+
+display:
+  tool_progress: "off"
+  busy_ack_enabled: false
+  background_process_notifications: error
+
+streaming:
+  enabled: false
+
+discord:
+  require_mention: true
+  free_response_channels: ''
+  auto_thread: false
+
+onboarding:
+  profile_build: "off"

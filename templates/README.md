@@ -20,6 +20,7 @@ service units, scripts, Docker Compose files, and host-side helper files.
 - `docker/`: Docker Compose, Caddy, Diun, and Docker maintenance templates.
 - `freepbx/`: FreePBX support templates.
 - `gluetun/`: Gluetun and qBittorrent port-sync templates.
+- `hermes/`: Isolated Hermes managed policy and system service templates.
 - `logging/`: Alloy/Loki centralized logging templates.
 - `media-inbox/`: Headless Immich semantic-vision service, Astra wrapper, and cloud-worker unit templates.
 - `media-maintenance/`: Nightly media maintenance units and clients.
