@@ -86,6 +86,16 @@ When working on Astra/OpenClaw behavior, Codex's role is to teach Astra how to r
 
 Do not introduce or preserve policy-level exact-version pins for self-updating applications, external plugins, or model routes unless the user explicitly approves the pin after its compatibility and update tradeoffs are explained. Prefer the product's stable channel, release track, or unversioned package spec so native update mechanisms can advance normally. Distinguish an update-policy pin from a lockfile or install record that merely records the exact artifact currently resolved. When a migration converts `latest` or a channel into an exact requested spec, treat that as configuration drift: restore the intended tracking policy and audit sibling install records for the same damage.
 
+For managed agent runtimes and their first-party components, inspect and
+preserve the product's supported native update lifecycle before designing
+custom update automation. A least-privilege wrapper may authorize or invoke
+one exact native update operation when the runtime is installed in root-owned
+paths, but it must not reimplement release discovery, version selection,
+dependency migration, or installation unless exact product evidence proves
+the native path cannot meet the requirement. "The live agent must not have
+general root" is a privilege-boundary requirement, not permission to replace
+native self-update behavior.
+
 ### Session Naming
 
 When the user asks Codex to name a session, consider the full context of the session before proposing a title. Use a natural-language title that describes what the session was really about; do not force lowercase slugs or replace spaces with hyphens unless the user explicitly asks for a filename-safe form.
