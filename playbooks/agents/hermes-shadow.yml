@@ -364,6 +364,7 @@
           sha256: "{{ hermes_tirith_certificate_encoded_sha256 }}"
       loop_control:
         label: "{{ item.dest }}"
+      when: not ansible_check_mode
 
     - name: Decode reviewed Tirith signing certificate
       ansible.builtin.command:

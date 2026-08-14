@@ -392,6 +392,7 @@ class HermesShadowPlaybookTests(unittest.TestCase):
         self.assertIn("tirithFailOpen", approval)
         self.assertIn("- cosign", prerequisites)
         self.assertIn("checksum:", assets)
+        self.assertIn("when: not ansible_check_mode", assets)
         self.assertIn("/usr/bin/cosign", verify)
         self.assertIn("--certificate-identity-regexp", verify)
         self.assertIn("owner: root", install)
