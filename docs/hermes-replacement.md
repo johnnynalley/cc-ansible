@@ -754,7 +754,50 @@ mounts, source mutation, and runtime activation remain forbidden. Dubble and
 Rigel sources can target only their own isolated profile roots. The current
 contract maps all 31 retained workspace rules and both state-root curation
 rules with no duplicate targets or unmapped source. Fourteen negative
-regressions enforce those boundaries. No live data has been copied or changed.
+regressions enforce those boundaries. That contract copied no raw profile data;
+only the separately reviewed compact memory transaction below has changed live
+Hermes profile state.
+
+## Curated Profile Memory
+
+Raw legacy daily memory is not promoted into Hermes prompts. It remains an
+offline operator reference. `files/hermes/profile-memory-contract.json`
+declares four compact Ansible Vault ciphertext seeds: `MEMORY.md` and `USER.md`
+for Astra, and the same pair for Rigel. Dubble starts with an empty memory store
+instead of inheriting historical incidents or another profile's preferences.
+
+The managed Hermes limits are the documented compact defaults: 2,200
+characters for `MEMORY.md` entries and 1,375 for `USER.md`. The staging
+validator imports the parser and threat scanner from the exact installed
+Hermes runtime, rejects symlinks and executable files, enforces clean native
+entry round trips, and emits no seed text. Agent-written memory remains
+approval-gated after cutover.
+
+`playbooks/agents/hermes-profile-memory.yml` is disabled by default and has no
+Gateway, scheduler, messaging, credential, or model path. An approved run
+requires all three Gateways stopped and boot-disabled, verifies Dubble is
+empty, backs up all three stores, decrypts only into a root-private transient
+directory, installs the four files atomically, revalidates each file as its
+service identity, compares exact SHA-256 checksums, and restores all three
+stores if any post-install or service-state proof fails.
+
+The accepted 2026-08-13 staging installed four mode-`0600` files owned by the
+matching Astra and Rigel identities. Their file sizes are 1,797, 1,346, 551,
+and 278 bytes; all four passed the native scanner and clean parser round trip.
+Dubble remained empty, decrypted staging was absent afterward, all Hermes
+Gateways remained inactive and disabled, and the production OpenClaw and
+Health user services remained active and enabled. The pre-seed rollback is
+`/srv/live-rollbacks/jn-t14s-lin/hermes-migration/20260813T235259Z-pre-profile-memory`;
+its manifest hash matches the retained archive.
+
+The first live attempt exposed an Ansible transport issue: `become_user`
+could not create a module directory beneath the controller's root-only remote
+temporary path. The transaction restored all three stores before failing. The
+durable path now invokes the content-free validator through root-controlled
+`runuser`, and both identity execution and the complete retry passed. The live
+root-managed configs still carry the prior 4,000/2,500 character limits;
+converging the reviewed 2,200/1,375 template is a separate stopped-Gateway gate
+and remains required before model-backed behavior testing.
 
 ## Behavior And Self-Evolution
 

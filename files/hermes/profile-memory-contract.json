@@ -1,0 +1,74 @@
+{
+  "schemaVersion": 1,
+  "mode": "curated-seed",
+  "source": {
+    "vaultEncrypted": true,
+    "rawLegacyMemoryCopied": false,
+    "rawSessionsCopied": false,
+    "rawTranscriptsCopied": false,
+    "legacyMemoryDisposition": "offline-operator-reference"
+  },
+  "profiles": {
+    "astra": {
+      "user": "hermes-astra",
+      "group": "hermes-astra",
+      "home": "/var/lib/hermes/astra",
+      "seeds": [
+        {
+          "name": "MEMORY.md",
+          "source": "files/hermes/profile-memory/astra/MEMORY.md.vault",
+          "charLimit": 2200
+        },
+        {
+          "name": "USER.md",
+          "source": "files/hermes/profile-memory/astra/USER.md.vault",
+          "charLimit": 1375
+        }
+      ]
+    },
+    "dubble": {
+      "user": "hermes-dubble",
+      "group": "hermes-dubble",
+      "home": "/var/lib/hermes/dubble",
+      "mustRemainEmpty": true,
+      "seeds": []
+    },
+    "rigel": {
+      "user": "hermes-rigel",
+      "group": "hermes-rigel",
+      "home": "/var/lib/hermes/rigel",
+      "seeds": [
+        {
+          "name": "MEMORY.md",
+          "source": "files/hermes/profile-memory/rigel/MEMORY.md.vault",
+          "charLimit": 2200
+        },
+        {
+          "name": "USER.md",
+          "source": "files/hermes/profile-memory/rigel/USER.md.vault",
+          "charLimit": 1375
+        }
+      ]
+    }
+  },
+  "validation": {
+    "nativeThreatScannerRequired": true,
+    "utf8Required": true,
+    "cleanRoundTripRequired": true,
+    "regularFileRequired": true,
+    "symlinkAllowed": false,
+    "executableAllowed": false,
+    "characterLimitsRequired": true
+  },
+  "execution": {
+    "backupRequired": true,
+    "transactionRollbackRequired": true,
+    "gatewayActivationAllowed": false,
+    "schedulerActivationAllowed": false,
+    "messagingActivationAllowed": false,
+    "providerCredentialRequired": false,
+    "modelInvocationAllowed": false,
+    "automaticMemoryApprovalAllowed": false,
+    "sourceMutationAllowed": false
+  }
+}

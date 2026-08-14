@@ -4,7 +4,8 @@ Owner area: Codex, Claude archive sync, OpenClaw, and Hermes services.
 
 ## Operating Notes
 
-- Key vars: codex_*, claude_memory_sync_*, openclaw_*, hermes_shadow_*.
+- Key vars: codex_*, claude_memory_sync_*, openclaw_*, hermes_shadow_*,
+  hermes_profile_memory_*.
 - Template owners: templates/openclaw and templates/hermes.
 - Script owners: templates/openclaw managed helper scripts.
 - Isolated non-model services use repo-managed sources under `scripts/agents/`.
@@ -29,6 +30,7 @@ Owner area: Codex, Claude archive sync, OpenClaw, and Hermes services.
 | `codex-memory-sync.yml` | `nas_server, orchestrator` | Configure Codex memory sync to NAS. | `ansible-playbook playbooks/agents/codex-memory-sync.yml --syntax-check` |
 | `hermes-shadow.yml` | `hermes_hosts` | Stage the isolated, boot-disabled Hermes runtime with three OS identities, root-owned identity/operating/Discord/automation contracts, approval-gated learning, root-writable profile-scoped managed environments, and no production delivery or schedules; disabled by default. | `ansible-playbook playbooks/agents/hermes-shadow.yml --syntax-check` |
 | `hermes-openclaw-dry-run.yml` | `hermes_hosts` | Run the pinned official importer against an ephemeral shape-only, no-secret, read-only source and target; retain only root-private structural evidence and leave all services unchanged; disabled by default. | `ansible-playbook playbooks/agents/hermes-openclaw-dry-run.yml --syntax-check` |
+| `hermes-profile-memory.yml` | `hermes_hosts` | Transactionally stage four vault-encrypted, compact native memory seeds for Astra and Rigel while keeping Dubble empty and every Gateway stopped; disabled by default. | `ansible-playbook playbooks/agents/hermes-profile-memory.yml --syntax-check` |
 | `openclaw.yml` | `openclaw_hosts` | Deploy OpenClaw AI agent. | `ansible-playbook playbooks/agents/openclaw.yml --syntax-check` |
 | `openclaw-health-receiver.yml` | `openclaw_hosts` | Stage or cut over the isolated Health receiver and aggregate-only publisher; disabled by default. | `ansible-playbook playbooks/agents/openclaw-health-receiver.yml --syntax-check` |
 | `openclaw-isolated-gateway.yml` | `openclaw_hosts` | Stage a modernized split Gateway/Codex canary with immutable runtime/plugin code, separate no-login identities and secrets, fresh executor OAuth, and a required model proof; disabled by default. | `ansible-playbook playbooks/agents/openclaw-isolated-gateway.yml --syntax-check` |

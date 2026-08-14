@@ -2,8 +2,10 @@
 
 This directory contains credential-free, machine-readable source for the
 isolated Hermes replacement. It is not live Hermes state and must never contain
-bot tokens, provider credentials, user/channel IDs, memories, sessions, or
-transcripts.
+bot tokens, provider credentials, user/channel IDs, plaintext memories,
+sessions, or transcripts. The only memory payloads allowed here are the
+reviewed Ansible Vault ciphertext seeds declared by
+`profile-memory-contract.json`.
 
 - `shadow-target.json` is the Gate 3 target declaration. It keeps Hermes in a
   tokenless, delivery-disabled, scheduler-disabled shadow state and records the
@@ -31,6 +33,12 @@ transcripts.
   ordinary data, operator policy, structured transforms, approved memory, and
   private reviewer evidence while forbidding raw prompt injection and
   cross-profile mounts.
+- `profile-memory-contract.json` declares the four compact, vault-encrypted
+  native Hermes seeds for Astra and Rigel. Dubble is intentionally unseeded.
+  It requires the pinned Hermes scanner, exact character limits, a complete
+  three-profile rollback archive, atomic install, and no service activation.
+  `profile-memory/*/*.vault` is ciphertext only; decrypted staging is
+  root-private under `/run` and removed after every transaction.
 - `behavior-contract.json` defines semantic reasoning, concise output,
   correction generalization, and Hermes-native approval-gated self-evolution.
   `behavior-regressions.json` contains sanitized promotion cases derived from
@@ -71,6 +79,9 @@ transcripts.
   using the pinned dependency environment.
 - `scripts/agents/hermes-profile-import-audit.py` validates profile ownership,
   target namespaces, owner classes, source hashes, and memory isolation.
+- `scripts/agents/hermes-memory-seed-validate.py` validates one decrypted seed
+  with Hermes's pinned native parser and threat scanner while returning only
+  bounded metadata and hashes.
 - `scripts/agents/hermes-discord-cutover-audit.py` validates source pins,
   distinct profile and Discord identities, inert authority, ordered source
   drain and target activation, rollback, Health continuity, and the complete

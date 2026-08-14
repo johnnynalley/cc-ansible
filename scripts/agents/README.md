@@ -49,6 +49,14 @@
   targets, owner drift, cross-profile assignment, private reviewer evidence,
   approved memory curation, raw-prompt denial, inert safety controls, state
   mapping completeness, source hash drift, and behavior-source symlinks.
+- `hermes-memory-seed-validate.py` validates one root-staged curated memory
+  seed with the pinned Hermes parser and native threat scanner. It enforces
+  UTF-8, regular non-executable files, clean entry round trips, and Hermes's
+  documented compact character limits without printing seed content.
+- `test_hermes_profile_memory.py` covers the encrypted curated-source
+  contract, profile isolation, intentionally empty Dubble store, compact
+  config limits, transactional rollback, exact checksum verification, and
+  absence of Gateway activation.
 - `test_hermes_behavior_contract.py` validates semantic routing without phrase
   triggers, one concise user-facing answer, native background review with
   staged memory/skill approval, owner-only policy changes, complete sanitized

@@ -22,6 +22,19 @@ hermes_openclaw_dry_run_script_source: >-
 hermes_openclaw_dry_run_script_live: >-
   /usr/local/libexec/hermes-openclaw-dry-run
 
+# Curated profile-memory seed transaction. Vault-encrypted source files are
+# validated with Hermes's native scanner before any target memory changes.
+hermes_profile_memory_mode: disabled
+hermes_profile_memory_approved: false
+hermes_profile_memory_contract_source: >-
+  files/hermes/profile-memory-contract.json
+hermes_profile_memory_validator_source: >-
+  scripts/agents/hermes-memory-seed-validate.py
+hermes_profile_memory_validator_live: >-
+  /usr/local/libexec/hermes-memory-seed-validate
+hermes_profile_memory_rollback_root: >-
+  /srv/live-rollbacks/jn-t14s-lin/hermes-migration
+
 hermes_shadow_source_repo: https://github.com/NousResearch/hermes-agent.git
 hermes_shadow_install_ref: v2026.8.3
 hermes_shadow_expected_tag_object: 7de39e700d2c329e15d32eb0b96e2f7cdd9fbdb2
