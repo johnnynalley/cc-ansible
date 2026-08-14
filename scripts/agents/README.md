@@ -57,6 +57,14 @@
   contract, profile isolation, intentionally empty Dubble store, compact
   config limits, transactional rollback, exact checksum verification, and
   absence of Gateway activation.
+- `hermes-profile-skills-validate.py` validates reviewed declarative profile
+  skills with Hermes's pinned native frontmatter parser and threat scanner,
+  exact source and installed hashes, exclusive root-owned inventories, and the
+  native skill index inside the service's read-only bind namespace.
+- `test_hermes_profile_skills.py` covers replacement of legacy phrase-triggered
+  skills, semantic descriptions, capability-field exclusions, profile
+  isolation, transactional rollback, native service bindings, and absence of
+  Gateway activation.
 - `test_hermes_behavior_contract.py` validates semantic routing without phrase
   triggers, one concise user-facing answer, native background review with
   staged memory/skill approval, owner-only policy changes, complete sanitized

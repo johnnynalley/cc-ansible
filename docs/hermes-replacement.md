@@ -322,6 +322,13 @@ Initial production policy:
 - `memory.write_approval: true` and `skills.write_approval: true`.
 - Agent-created skill scanning enabled; third-party skills are not installed
   until inspected and pinned by provenance, not by stale application version.
+- Reviewed baseline skills are declarative, exact-hashed, and root-owned under
+  `/etc/hermes/<profile>/skills`. Each Gateway bind-mounts only its own tree
+  read-only under `~/.hermes/skills/managed`; its service identity cannot edit
+  or replace the mounted content while running. Hermes's native frontmatter
+  validator, threat scanner, exact inventory, and model-visible skill index
+  must all pass before startup. Profile-local agent proposals remain separate
+  and retain native scan plus explicit write approval.
 - No auto-accepted hooks. Any hook is root-reviewed and its consent record is
   audited after edits because Hermes hook consent keys the command path, not
   script content.
@@ -443,7 +450,10 @@ Updates are root-managed transactions:
 Runtime lazy dependency installation is disabled. Required extras are installed
 and audited during the root-owned build transaction, never by a live Gateway.
 Bundled skills are initially opted out; only reviewed, required skills are
-seeded per role.
+seeded per role. Do not configure root-owned baseline skills only through
+`skills.external_dirs` in managed scope: Hermes v0.20.0's lightweight runtime
+skill loader reads the profile-local config directly and would ignore that
+merged managed value even though `hermes config check` accepts it.
 
 ### Terminal Sandbox
 

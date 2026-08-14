@@ -1,0 +1,98 @@
+{
+  "schemaVersion": 1,
+  "mode": "reviewed-native-seed",
+  "source": {
+    "rootReviewed": true,
+    "declarativeMarkdownOnly": true,
+    "rawLegacySkillsCopied": false,
+    "legacyExecutablesCopied": false,
+    "rawSessionsCopied": false,
+    "rawTranscriptsCopied": false,
+    "phraseTriggerTablesAllowed": false
+  },
+  "validation": {
+    "nativeFrontmatterRequired": true,
+    "nativeThreatScannerRequired": true,
+    "cleanScannerVerdictRequired": true,
+    "descriptionPromptLimit": 57,
+    "exactContentHashRequired": true,
+    "symlinkAllowed": false,
+    "supportingFilesAllowed": false,
+    "executableAllowed": false,
+    "inlineCommandExpansionAllowed": false,
+    "blueprintAllowed": false,
+    "requiredEnvironmentAllowed": false,
+    "requiredCredentialFilesAllowed": false
+  },
+  "execution": {
+    "backupRequired": true,
+    "transactionRollbackRequired": true,
+    "managedRootExclusive": true,
+    "gatewayActivationAllowed": false,
+    "schedulerActivationAllowed": false,
+    "messagingActivationAllowed": false,
+    "providerCredentialRequired": false,
+    "modelInvocationAllowed": false,
+    "automaticSkillApprovalAllowed": false,
+    "legacySourceMutationAllowed": false
+  },
+  "profiles": {
+    "astra": {
+      "user": "hermes-astra",
+      "group": "hermes-astra",
+      "home": "/var/lib/hermes/astra",
+      "managedRoot": "/etc/hermes/astra/skills",
+      "runtimeRoot": "/var/lib/hermes/astra/skills/managed",
+      "skills": [
+        {
+          "name": "evidence-led-investigation",
+          "description": "Use when behavior needs a causal explanation.",
+          "source": "files/hermes/profile-skills/astra/evidence-led-investigation/SKILL.md",
+          "sha256": "8aab70ffb91890863ea90e634c98a7ffd5568cffc6cdc2327453bfd41bb53904"
+        },
+        {
+          "name": "consequential-recommendation",
+          "description": "Use when advice may cause a consequential commitment.",
+          "source": "files/hermes/profile-skills/astra/consequential-recommendation/SKILL.md",
+          "sha256": "d5030090a870af8b947cbcca764f3598078ba21abc728b90b1e7a0b32d8bc906"
+        },
+        {
+          "name": "guided-operation",
+          "description": "Use for an interactive setup, repair, or migration.",
+          "source": "files/hermes/profile-skills/astra/guided-operation/SKILL.md",
+          "sha256": "3f209da0a5be141f4161fe160da2c44f6bf7bbb7e6bbfd2de172ba71d88c1939"
+        }
+      ]
+    },
+    "dubble": {
+      "user": "hermes-dubble",
+      "group": "hermes-dubble",
+      "home": "/var/lib/hermes/dubble",
+      "managedRoot": "/etc/hermes/dubble/skills",
+      "runtimeRoot": "/var/lib/hermes/dubble/skills/managed",
+      "skills": [
+        {
+          "name": "public-support-triage",
+          "description": "Use when resolving a public support or policy question.",
+          "source": "files/hermes/profile-skills/dubble/public-support-triage/SKILL.md",
+          "sha256": "b5448fce2ef788806769e949904defc1e7ef8874d37815349e40249f70441ebb"
+        }
+      ]
+    },
+    "rigel": {
+      "user": "hermes-rigel",
+      "group": "hermes-rigel",
+      "home": "/var/lib/hermes/rigel",
+      "managedRoot": "/etc/hermes/rigel/skills",
+      "runtimeRoot": "/var/lib/hermes/rigel/skills/managed",
+      "skills": [
+        {
+          "name": "source-grounded-study",
+          "description": "Use for tutoring and verified academic event tracking.",
+          "source": "files/hermes/profile-skills/rigel/source-grounded-study/SKILL.md",
+          "sha256": "41b3ab47505bf845303fbdca8d75c4f928505e8ae97812b5a2a9ceea4fca9b7c"
+        }
+      ]
+    }
+  }
+}

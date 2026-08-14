@@ -175,6 +175,12 @@ class HermesShadowPlaybookTests(unittest.TestCase):
             "hermes_automation_contract_live": self.variables[
                 "hermes_automation_contract_live"
             ],
+            "hermes_profile_skills_validator_live": self.variables[
+                "hermes_profile_skills_validator_live"
+            ],
+            "hermes_profile_skills_contract_live": self.variables[
+                "hermes_profile_skills_contract_live"
+            ],
         }
         for profile in self.variables["hermes_shadow_profiles"]:
             rendered = template.render(hermes_profile=profile, **common)
@@ -197,6 +203,14 @@ class HermesShadowPlaybookTests(unittest.TestCase):
             self.assertIn("hermes-automation-contract-audit", rendered)
             self.assertIn("sha256sum --check --status --strict", rendered)
             self.assertIn("managed-policy.sha256", rendered)
+            self.assertIn(
+                f"BindReadOnlyPaths=/etc/hermes/{profile['name']}/skills:"
+                f"{profile['home']}/skills/managed",
+                rendered,
+            )
+            self.assertIn(
+                f"--mode runtime --profile {profile['name']}", rendered
+            )
             self.assertNotIn("docker.sock", rendered)
             self.assertNotIn("sudo", rendered)
             self.assertNotIn("ListenStream", rendered)

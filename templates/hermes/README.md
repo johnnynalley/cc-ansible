@@ -17,6 +17,9 @@
   Discord, and automation/Health contract audits before startup; rejects any
   managed config or environment checksum drift before Hermes's fail-open
   managed-scope parser can run; and exposes no dashboard or API listener.
+  It also bind-mounts the profile's root-owned reviewed skill tree read-only
+  under Hermes's native local skill root and requires the exact contract plus
+  native skill-index validator to pass before the Gateway process starts.
 
 ## Consumer
 

@@ -299,6 +299,7 @@ Packages are merged from multiple sources (all applicable variables combined):
 | `hermes-shadow.yml` | `hermes_hosts` | Boot-disabled, isolated Hermes replacement staging with no production delivery |
 | `hermes-openclaw-dry-run.yml` | `hermes_hosts` | Operator-approved, shape-only official importer inventory with no source content, activation, or service-state change |
 | `hermes-profile-memory.yml` | `hermes_hosts` | Disabled-by-default, transactional native memory seeding for Astra and Rigel; Dubble remains empty and all Gateways remain stopped |
+| `hermes-profile-skills.yml` | `hermes_hosts` | Disabled-by-default, transactional native skill staging with exact hashes, root-owned per-profile sources, and read-only runtime discovery proof |
 | `openclaw-health-receiver.yml` | `openclaw_hosts` | Isolated Health receiver and aggregate-only report publisher (disabled by default) |
 | `openclaw-isolated-gateway.yml` | `openclaw_hosts` | Modernized split Gateway/Codex canary with immutable runtime/provider code, separate no-login identities and secrets, isolated executor OAuth, and model proof (disabled by default) |
 | `openclaw-state-rehearsal.yml` | `openclaw_hosts` | Verified relocation rehearsal for active file-backed sessions with bounded current/rollback generation retention (disabled by default) |
@@ -1069,6 +1070,12 @@ production token, and is not imported by `site.yml`.
   backs up all three stores, installs atomically, and rolls back on any failed
   checksum, identity, Dubble-isolation, or service-state proof. The matching
   compact managed limits are converged and natively validated on all profiles.
+- **Reviewed profile skills**:
+  `playbooks/agents/hermes-profile-skills.yml` replaces the legacy mutable
+  phrase-triggered trees with five declarative Hermes-native skills. Exact
+  hashes, native parsing and threat scanning, profile isolation, transactional
+  rollback, root ownership, read-only service binding, and Hermes's own runtime
+  skill index are required; no Gateway or model starts during staging.
 - **Architecture and gates**: `docs/hermes-replacement.md`
 - **Discord handoff**: three credential-free profile declarations, silent
   unknown DMs, fail-closed allowlists, no replay/backfill, and an attended
@@ -1077,9 +1084,11 @@ production token, and is not imported by `site.yml`.
   classified into agent-backed local proposals, external systemd owners, or
   deterministic no-agent jobs; Health remains external and Siri remains absent
 - **Validation**: `ansible-playbook playbooks/agents/hermes-shadow.yml --syntax-check`
-- **Do not run bootstrap** until the official installer hash, immutable release
-  tag/commit, same-host disk preflight, and attended approvals are supplied.
-  Hermes gateways cannot start while any OpenClaw Gateway listener is active.
+- **Inactive runtime**: the exact official release, locked dependencies,
+  no-login identities, managed policies, compact memory, and reviewed skills
+  are staged. Provider credentials, Discord routes, readiness markers, and
+  schedules remain absent. Hermes gateways cannot start while any OpenClaw
+  Gateway listener is active.
 
 ## OpenClaw (jn-t14s-lin)
 

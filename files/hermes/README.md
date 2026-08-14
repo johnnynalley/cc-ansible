@@ -39,6 +39,14 @@ reviewed Ansible Vault ciphertext seeds declared by
   three-profile rollback archive, atomic install, and no service activation.
   `profile-memory/*/*.vault` is ciphertext only; decrypted staging is
   root-private under `/run` and removed after every transaction.
+- `profile-skills-contract.json` declares five reviewed Hermes-native,
+  declarative skills: three for Astra, one for Dubble, and one for Rigel.
+  `profile-skills/*/*/SKILL.md` contains no legacy skill copy, executable,
+  credential requirement, inline command expansion, or automation blueprint.
+  The pinned native frontmatter validator and threat scanner must pass exact
+  hashes before root-owned `/etc/hermes/<profile>/skills` content is installed.
+  Each Gateway bind-mounts that tree read-only under its native local skill
+  root and revalidates both the tree and Hermes's own skill index before start.
 - `behavior-contract.json` defines semantic reasoning, concise output,
   correction generalization, and Hermes-native approval-gated self-evolution.
   `behavior-regressions.json` contains sanitized promotion cases derived from
@@ -82,6 +90,9 @@ reviewed Ansible Vault ciphertext seeds declared by
 - `scripts/agents/hermes-memory-seed-validate.py` validates one decrypted seed
   with Hermes's pinned native parser and threat scanner while returning only
   bounded metadata and hashes.
+- `scripts/agents/hermes-profile-skills-validate.py` applies Hermes's pinned
+  native frontmatter validator, threat scanner, exact inventory/hash checks,
+  and native runtime-index proof to the reviewed per-profile skills.
 - `scripts/agents/hermes-discord-cutover-audit.py` validates source pins,
   distinct profile and Discord identities, inert authority, ordered source
   drain and target activation, rollback, Health continuity, and the complete

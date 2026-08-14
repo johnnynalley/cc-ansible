@@ -330,6 +330,37 @@
       loop_control:
         label: "{{ item.name }}"
 
+    - name: Inspect native Hermes managed-skill mountpoints
+      ansible.builtin.stat:
+        path: "{{ item.home }}/skills/managed"
+        follow: false
+      loop: "{{ hermes_shadow_profiles }}"
+      loop_control:
+        label: "{{ item.name }}"
+      register: hermes_shadow_managed_skill_mountpoints
+
+    - name: Reject unsafe native Hermes managed-skill mountpoints
+      ansible.builtin.assert:
+        that:
+          - not item.stat.exists or (item.stat.isdir and not item.stat.islnk)
+        fail_msg: >-
+          A native Hermes managed-skill mountpoint is not absent or a regular,
+          non-symlink directory.
+      loop: "{{ hermes_shadow_managed_skill_mountpoints.results }}"
+      loop_control:
+        label: "{{ item.item.name }}"
+
+    - name: Create root-owned native Hermes managed-skill mountpoints
+      ansible.builtin.file:
+        path: "{{ item.home }}/skills/managed"
+        state: directory
+        owner: root
+        group: "{{ item.group }}"
+        mode: "0750"
+      loop: "{{ hermes_shadow_profiles }}"
+      loop_control:
+        label: "{{ item.name }}"
+
     - name: Download reviewed uv release archive
       ansible.builtin.get_url:
         url: "{{ hermes_shadow_uv_archive_url }}"
