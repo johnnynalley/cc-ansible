@@ -7,6 +7,8 @@
   suppressed background-learning chat notices, role-specific toolsets, and an
   air-gapped rootless Podman backend. Delegation is flat, capped at two
   concurrent children and 12 iterations, with child orchestration disabled.
+  Only Astra enables the reviewed hook-only Star privacy plugin; Dubble and
+  Rigel keep an empty plugin set.
   Discord fails closed with no shadow allowlists, silent unknown DMs, no bot
   input, no history or missed-message backfill, per-user sessions, explicit
   thread mentions, bounded attachments, and no slash registration. It carries
@@ -24,6 +26,9 @@
   while root-managed operator references are bound read-only. Root and
   service-identity preflights verify the complete manifest, exact bind pair,
   and read/write mount modes before the Gateway process can start.
+  Astra additionally validates identical root-owned plugin trees, the exact
+  six-hook/no-tool registration surface, and a read-only managed-to-runtime
+  plugin bind before startup.
 
 ## Consumer
 

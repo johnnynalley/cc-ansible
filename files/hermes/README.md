@@ -66,9 +66,12 @@ reviewed Ansible Vault ciphertext seeds declared by
   the private transcript evidence; it contains no transcript text or platform
   identifiers.
 - `star-contract.json` defines exactly two private parallel leaf reviewers,
-  distinct Vega/Antares goals, bounded inherited authority, both-reviewer
-  completion, and one concise Astra synthesis. `star-regressions.json` contains
-  six sanitized runtime promotion cases.
+  distinct Vega/Antares goals, asynchronous completion, same-session opaque-ID
+  trust, bounded inherited authority, both-reviewer completion, and one concise
+  Astra synthesis. `plugins/star-dispatch-privacy/` is Astra's root-owned,
+  hook-only output boundary; it exposes no model tool and leaves ordinary
+  delegation unchanged. `star-regressions.json` contains six sanitized runtime
+  promotion cases.
 - `discord-cutover-contract.json` pins the inert shadow and source-delivery
   controls, declares three distinct private Discord enrollments, and defines
   the attended one-consumer cutover and rollback order. It contains only

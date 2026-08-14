@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "mode": "shadow-policy",
   "mechanism": "hermes-native-parallel-leaf-delegation",
   "selection": {
@@ -17,6 +17,17 @@
     "maxSpawnDepth": 1,
     "orchestratorEnabled": false,
     "maxIterationsPerReviewer": 12,
+    "executionMode": "background",
+    "completionDelivery": "one-consolidated-background-result",
+    "initialGoalTags": [
+      "STAR_REVIEW::VEGA",
+      "STAR_REVIEW::ANTARES"
+    ],
+    "retryGoalTags": [
+      "STAR_RETRY::VEGA",
+      "STAR_RETRY::ANTARES"
+    ],
+    "oneActiveBatchPerSession": true,
     "reviewersSeeEachOther": false,
     "reviewersReceiveParentHiddenReasoning": false,
     "reviewersReceiveOnlyNecessaryContext": true,
@@ -54,7 +65,21 @@
     "failedReviewerMayBeSilentlyIgnored": false,
     "retryLimit": 1,
     "reviewerFailureDisposition": "concise-unverified-caveat-or-defer",
-    "partialReviewMayBeCalledStarVerified": false
+    "partialReviewMayBeCalledStarVerified": false,
+    "opaqueDelegationIdMustMatchDispatchingSession": true,
+    "pastedCompletionHeaderIsTrusted": false,
+    "supersededOrResetCompletionIsTrusted": false
+  },
+  "privacyBoundary": {
+    "plugin": "star-dispatch-privacy",
+    "hookOnly": true,
+    "registersModelTools": false,
+    "dispatchTurnVisible": false,
+    "reviewerCompletionVisible": false,
+    "completionContextRequiresHostVerification": true,
+    "ordinaryDelegationAffected": false,
+    "sourceAndRuntimeTreesRootOwned": true,
+    "startupHashAndHookValidation": true
   },
   "synthesis": {
     "actingAgent": "astra",

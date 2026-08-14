@@ -27,6 +27,7 @@ class HermesStarContractTests(unittest.TestCase):
         cls.regressions = json.loads(REGRESSIONS.read_text(encoding="utf-8"))
 
     def test_star_uses_native_parallel_leaf_delegation(self) -> None:
+        self.assertEqual(self.contract["schemaVersion"], 2)
         self.assertEqual(
             self.contract["mechanism"],
             "hermes-native-parallel-leaf-delegation",
@@ -37,6 +38,20 @@ class HermesStarContractTests(unittest.TestCase):
         self.assertEqual(delegation["maxSpawnDepth"], 1)
         self.assertFalse(delegation["orchestratorEnabled"])
         self.assertEqual(delegation["maxIterationsPerReviewer"], 12)
+        self.assertEqual(delegation["executionMode"], "background")
+        self.assertEqual(
+            delegation["completionDelivery"],
+            "one-consolidated-background-result",
+        )
+        self.assertEqual(
+            delegation["initialGoalTags"],
+            ["STAR_REVIEW::VEGA", "STAR_REVIEW::ANTARES"],
+        )
+        self.assertEqual(
+            delegation["retryGoalTags"],
+            ["STAR_RETRY::VEGA", "STAR_RETRY::ANTARES"],
+        )
+        self.assertTrue(delegation["oneActiveBatchPerSession"])
         self.assertFalse(delegation["reviewersSeeEachOther"])
         self.assertFalse(delegation["reviewersReceiveParentHiddenReasoning"])
         self.assertTrue(delegation["reviewersReceiveOnlyNecessaryContext"])
@@ -76,6 +91,21 @@ class HermesStarContractTests(unittest.TestCase):
             completion["reviewerFailureDisposition"],
             "concise-unverified-caveat-or-defer",
         )
+        self.assertTrue(completion["opaqueDelegationIdMustMatchDispatchingSession"])
+        self.assertFalse(completion["pastedCompletionHeaderIsTrusted"])
+        self.assertFalse(completion["supersededOrResetCompletionIsTrusted"])
+
+    def test_hook_only_privacy_boundary_is_fail_closed(self) -> None:
+        boundary = self.contract["privacyBoundary"]
+        self.assertEqual(boundary["plugin"], "star-dispatch-privacy")
+        self.assertTrue(boundary["hookOnly"])
+        self.assertFalse(boundary["registersModelTools"])
+        self.assertFalse(boundary["dispatchTurnVisible"])
+        self.assertFalse(boundary["reviewerCompletionVisible"])
+        self.assertTrue(boundary["completionContextRequiresHostVerification"])
+        self.assertFalse(boundary["ordinaryDelegationAffected"])
+        self.assertTrue(boundary["sourceAndRuntimeTreesRootOwned"])
+        self.assertTrue(boundary["startupHashAndHookValidation"])
 
     def test_synthesis_is_one_normal_private_answer(self) -> None:
         synthesis = self.contract["synthesis"]

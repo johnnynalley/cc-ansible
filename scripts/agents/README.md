@@ -92,9 +92,16 @@
   promotion cases, non-symlink profile policies, and control-token exclusion.
 - `test_hermes_star_contract.py` validates two independent parallel leaf
   reviewers, distinct corroboration/challenge roles, bounded inherited
-  authority, no exact model pin, complete-review requirements, one normal
-  private synthesis, MoA's documented role-prompt gap, and six sanitized
-  promotion cases.
+  authority, asynchronous same-session completion trust, no exact model pin,
+  complete-review requirements, one normal private synthesis, MoA's documented
+  role-prompt gap, and six sanitized promotion cases.
+- `hermes-star-dispatch-privacy-validate.py` rejects Astra plugin inventory,
+  ownership, mode, hash, enabled-set, hook-set, or tool-registration drift
+  before Gateway startup without exposing reviewer content.
+- `test_hermes_star_dispatch_privacy.py` proves ordinary delegation is
+  untouched, malformed Star batches fail closed, dispatch turns are silent,
+  completion IDs are session-bound, reset state is discarded, and only one
+  failed-reviewer retry is accepted.
 - `hermes-discord-cutover-audit.py` validates the credential-free Discord
   handoff contract. It pins the source shadow, migration, and delivery-audit
   assets; requires three distinct profile/application/token references; keeps

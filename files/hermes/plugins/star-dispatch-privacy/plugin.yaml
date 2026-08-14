@@ -1,0 +1,4 @@
+---
+name: star-dispatch-privacy
+version: "1.0.0"
+description: Keep private Star reviewer dispatches out of user-facing chat.

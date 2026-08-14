@@ -84,6 +84,19 @@ hermes_profile_transforms_manifest_live: >-
 hermes_profile_transforms_rollback_root: >-
   /srv/live-rollbacks/jn-t14s-lin/hermes-migration
 
+# Root-reviewed, hook-only Astra privacy boundary for asynchronous native Star
+# delegation. It adds no model tool and is validated before Gateway startup.
+hermes_star_privacy_plugin_source: >-
+  files/hermes/plugins/star-dispatch-privacy
+hermes_star_privacy_plugin_managed_root: >-
+  /etc/hermes/astra/plugins/star-dispatch-privacy
+hermes_star_privacy_plugin_runtime_root: >-
+  /var/lib/hermes/astra/plugins/star-dispatch-privacy
+hermes_star_privacy_validator_source: >-
+  scripts/agents/hermes-star-dispatch-privacy-validate.py
+hermes_star_privacy_validator_live: >-
+  /usr/local/libexec/hermes-star-dispatch-privacy-validate
+
 hermes_shadow_source_repo: https://github.com/NousResearch/hermes-agent.git
 hermes_shadow_install_ref: v2026.8.3
 hermes_shadow_expected_tag_object: 7de39e700d2c329e15d32eb0b96e2f7cdd9fbdb2
@@ -135,6 +148,8 @@ hermes_shadow_profiles:
     discord_free_response_channels: []
     discord_admin_users: []
     discord_slash_commands: false
+    plugins_enabled:
+      - star-dispatch-privacy
     toolsets:
       - safe
       - skills
@@ -161,6 +176,7 @@ hermes_shadow_profiles:
     discord_free_response_channels: []
     discord_admin_users: []
     discord_slash_commands: false
+    plugins_enabled: []
     toolsets:
       - safe
       - skills
@@ -187,6 +203,7 @@ hermes_shadow_profiles:
     discord_free_response_channels: []
     discord_admin_users: []
     discord_slash_commands: false
+    plugins_enabled: []
     toolsets:
       - safe
       - skills

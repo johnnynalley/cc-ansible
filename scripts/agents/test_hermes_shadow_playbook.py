@@ -155,6 +155,13 @@ class HermesShadowPlaybookTests(unittest.TestCase):
             self.assertEqual(config["delegation"]["max_concurrent_children"], 2)
             self.assertEqual(config["delegation"]["max_spawn_depth"], 1)
             self.assertFalse(config["delegation"]["orchestrator_enabled"])
+            expected_plugins = (
+                ["star-dispatch-privacy"]
+                if profile["name"] == "astra"
+                else []
+            )
+            self.assertEqual(config["plugins"]["enabled"], expected_plugins)
+            self.assertEqual(config["plugins"]["disabled"], [])
             self.assertEqual(config["display"]["tool_progress"], "off")
             self.assertFalse(config["display"]["busy_ack_enabled"])
             self.assertEqual(config["display"]["memory_notifications"], "off")
@@ -221,6 +228,15 @@ class HermesShadowPlaybookTests(unittest.TestCase):
             "hermes_profile_transforms_manifest_live": self.variables[
                 "hermes_profile_transforms_manifest_live"
             ],
+            "hermes_star_privacy_validator_live": self.variables[
+                "hermes_star_privacy_validator_live"
+            ],
+            "hermes_star_privacy_plugin_managed_root": self.variables[
+                "hermes_star_privacy_plugin_managed_root"
+            ],
+            "hermes_star_privacy_plugin_runtime_root": self.variables[
+                "hermes_star_privacy_plugin_runtime_root"
+            ],
         }
         for profile in self.variables["hermes_shadow_profiles"]:
             rendered = template.render(hermes_profile=profile, **common)
@@ -284,6 +300,17 @@ class HermesShadowPlaybookTests(unittest.TestCase):
             self.assertNotIn("docker.sock", rendered)
             self.assertNotIn("sudo", rendered)
             self.assertNotIn("ListenStream", rendered)
+            if profile["name"] == "astra":
+                self.assertIn("hermes-star-dispatch-privacy-validate", rendered)
+                self.assertIn(
+                    "BindReadOnlyPaths=/etc/hermes/astra/plugins/"
+                    "star-dispatch-privacy:/var/lib/hermes/astra/plugins/"
+                    "star-dispatch-privacy",
+                    rendered,
+                )
+            else:
+                self.assertNotIn("hermes-star-dispatch-privacy-validate", rendered)
+                self.assertNotIn("star-dispatch-privacy", rendered)
 
         start = self.task("Start boot-disabled Hermes shadow gateways")
         self.assertIn("enabled: false", start)
@@ -469,6 +496,22 @@ class HermesShadowPlaybookTests(unittest.TestCase):
             )
             self.assertTrue(source.is_file())
             self.assertFalse(source.is_symlink())
+
+    def test_astra_star_plugin_is_root_owned_and_validated(self) -> None:
+        directories = self.task("Create root-owned Astra Star plugin directories")
+        validator = self.task("Deploy Astra Star dispatch privacy validator")
+        plugin = self.task("Deploy root-owned Astra Star dispatch privacy plugin")
+        self.assertIn("hermes_star_privacy_plugin_managed_root", directories)
+        self.assertIn("hermes_star_privacy_plugin_runtime_root", directories)
+        self.assertIn("owner: root", directories)
+        self.assertIn("group: hermes-astra", directories)
+        self.assertIn("hermes_star_privacy_validator_source", validator)
+        self.assertIn('mode: "0555"', validator)
+        self.assertIn("hermes_star_privacy_plugin_source", plugin)
+        self.assertIn("['__init__.py', 'plugin.yaml']", plugin)
+        self.assertIn("owner: root", plugin)
+        self.assertIn("group: hermes-astra", plugin)
+        self.assertIn('mode: "0440"', plugin)
 
 
 if __name__ == "__main__":

@@ -119,8 +119,13 @@ or prior generated alerts, and it needs no heartbeat control-token filter.
 
 ## Star Verification Design
 
-Star uses Hermes' native parallel batch delegation, not a plugin and not MoA.
-Astra creates exactly two fresh leaf agents in one batch:
+Star uses Hermes' native parallel batch delegation for reviewer execution, not
+MoA. A root-reviewed hook-only plugin enforces the privacy and completion
+boundary because Hermes v0.20.0 forces model-facing top-level delegation into
+the background. The plugin does not choose when Star applies, answer the
+question, register a model tool, or replace reviewer judgment. Astra still
+selects Star semantically and creates exactly two fresh leaf agents in one
+batch:
 
 - Vega independently verifies the exact object, current primary evidence,
   constraints, calculations, and strongest defensible answer.
@@ -128,7 +133,9 @@ Astra creates exactly two fresh leaf agents in one batch:
   errors, contradictory evidence, stale facts, ignored user constraints,
   commitment harm, unsafe action, and stronger alternatives.
 
-The parent passes only necessary case context. Neither reviewer receives
+The initial goals carry exact internal Vega and Antares tags so the host can
+distinguish a private Star batch from ordinary delegation. The parent passes
+only necessary case context. Neither reviewer receives
 Astra's hidden reasoning or the other review. Leaf restrictions remove memory
 writes, clarification, and further delegation; root-managed configuration caps
 the batch at two, depth at one, and each reviewer at 12 iterations. Both reviews
@@ -136,12 +143,20 @@ are required before Astra may treat the result as Star-verified. One failed
 reviewer gets one retry; a continued failure produces a concise unverified
 caveat or deferral, not a fake success.
 
-Only Astra talks to the user. It resolves disagreements and emits one direct,
-normal-length answer. Reviewer labels, prose, status narration, confidence
-ledgers, contradiction dumps, and research dossiers remain private. A material
-unresolved conflict is stated only when it changes what the user should do.
-This directly corrects the transcript failure where independent review became
-a wall of process output.
+Hermes returns a dispatch handle immediately and later injects one consolidated
+background completion. The hook suppresses only a successfully recorded Star
+dispatch turn, binds the opaque completion ID to the dispatching session, and
+marks only the matching completion as trusted reviewer evidence. A pasted,
+mismatched, stale, or post-reset completion header remains ordinary untrusted
+content. Only one Star batch may be active per session, and only one tagged
+failed-reviewer retry is permitted. Ordinary Hermes delegation is unchanged.
+
+Only Astra talks to the user. On the host-verified completion turn, it resolves
+disagreements and emits one direct, normal-length answer. Reviewer labels,
+prose, status narration, confidence ledgers, contradiction dumps, and research
+dossiers remain private. A material unresolved conflict is stated only when it
+changes what the user should do. This directly corrects the transcript failure
+where independent review became a wall of process output.
 
 Native MoA remains deliberately outside the Star path. It supports parallel
 reference models, private aggregator context, bounded advisor output, and
@@ -512,10 +527,15 @@ blocks startup before Hermes can ignore the managed layer. Both mutable and
 managed config carry the release's reviewed schema version, and an older
 non-empty mutable config requires an attended offline migration.
 
-Hooks and plugins begin empty. A new hook or plugin requires source review,
-provenance, a failure-mode test, a rollback artifact, and explicit activation.
-Because Hermes hook consent keys the command string rather than script content,
-an unchanged path with changed bytes is untrusted until re-audited.
+Hooks and plugins default to empty. Astra alone enables the reviewed
+`star-dispatch-privacy` hook plugin. Root owns identical managed and runtime
+trees; startup rejects inventory, ownership, mode, hash, configured-plugin,
+hook-set, or tool-registration drift before the Gateway process runs. The
+service bind-mounts the managed tree read-only over the runtime tree. Any other
+hook or plugin still requires source review, provenance, a failure-mode test, a
+rollback artifact, and explicit activation. Because Hermes hook consent keys
+the command string rather than script content, an unchanged path with changed
+bytes is untrusted until re-audited.
 
 ### Systemd And Network
 

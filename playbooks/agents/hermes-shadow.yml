@@ -103,6 +103,9 @@
           - item.discord_free_response_channels | length == 0
           - item.discord_admin_users | length == 0
           - not item.discord_slash_commands | bool
+          - >-
+            item.plugins_enabled
+            == (['star-dispatch-privacy'] if item.name == 'astra' else [])
           - item.toolsets | length > 0
           - "'terminal' in item.disabled_toolsets"
           - "'file' in item.disabled_toolsets"
@@ -302,6 +305,41 @@
       loop: "{{ hermes_shadow_profiles }}"
       loop_control:
         label: "{{ item.name }}"
+
+    - name: Inspect Astra Star plugin directories
+      ansible.builtin.stat:
+        path: "{{ item }}"
+        follow: false
+      loop:
+        - /etc/hermes/astra/plugins
+        - "{{ hermes_star_privacy_plugin_managed_root }}"
+        - /var/lib/hermes/astra/plugins
+        - "{{ hermes_star_privacy_plugin_runtime_root }}"
+      register: hermes_star_privacy_plugin_directories
+
+    - name: Reject unsafe Astra Star plugin directories
+      ansible.builtin.assert:
+        that:
+          - not item.stat.exists or (item.stat.isdir and not item.stat.islnk)
+        fail_msg: >-
+          An Astra Star plugin path is not absent or a regular, non-symlink
+          directory.
+      loop: "{{ hermes_star_privacy_plugin_directories.results }}"
+      loop_control:
+        label: "{{ item.item }}"
+
+    - name: Create root-owned Astra Star plugin directories
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: directory
+        owner: root
+        group: hermes-astra
+        mode: "0750"
+      loop:
+        - /etc/hermes/astra/plugins
+        - "{{ hermes_star_privacy_plugin_managed_root }}"
+        - /var/lib/hermes/astra/plugins
+        - "{{ hermes_star_privacy_plugin_runtime_root }}"
 
     - name: Create per-profile Hermes mutable directories
       ansible.builtin.file:
@@ -709,6 +747,37 @@
         group: root
         mode: "0755"
         backup: true
+
+    - name: Deploy Astra Star dispatch privacy validator
+      ansible.builtin.copy:
+        src: >-
+          {{ playbook_dir
+             }}/../../{{ hermes_star_privacy_validator_source }}
+        dest: "{{ hermes_star_privacy_validator_live }}"
+        owner: root
+        group: root
+        mode: "0555"
+        backup: true
+
+    - name: Deploy root-owned Astra Star dispatch privacy plugin
+      ansible.builtin.copy:
+        src: >-
+          {{ playbook_dir
+             }}/../../{{ hermes_star_privacy_plugin_source }}/{{ item.1 }}
+        dest: "{{ item.0 }}/{{ item.1 }}"
+        owner: root
+        group: hermes-astra
+        mode: "0440"
+        backup: true
+      loop: >-
+        {{ [
+             hermes_star_privacy_plugin_managed_root,
+             hermes_star_privacy_plugin_runtime_root
+           ]
+           | product(['__init__.py', 'plugin.yaml'])
+           | list }}
+      loop_control:
+        label: "{{ item.0 }}/{{ item.1 }}"
 
     - name: Deploy Hermes profile-data staging contract
       ansible.builtin.copy:

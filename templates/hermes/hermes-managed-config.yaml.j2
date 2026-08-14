@@ -40,6 +40,17 @@ cron:
 session_reset:
   mode: none
 
+plugins:
+{% if hermes_profile.plugins_enabled %}
+  enabled:
+{% for plugin in hermes_profile.plugins_enabled %}
+    - {{ plugin }}
+{% endfor %}
+{% else %}
+  enabled: []
+{% endif %}
+  disabled: []
+
 toolsets:
 {% for toolset in hermes_profile.toolsets %}
   - {{ toolset }}
