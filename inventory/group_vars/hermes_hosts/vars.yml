@@ -150,6 +150,7 @@ hermes_shadow_uv_config_dirs: /var/lib/hermes/bootstrap/config-dirs
 hermes_shadow_runtime_binary: /usr/local/bin/hermes
 hermes_shadow_runtime_root: /usr/local/lib/hermes-agent
 hermes_shadow_runtime_venv: /usr/local/lib/hermes-agent/venv
+hermes_shadow_version_only_migration_from: 33
 hermes_shadow_config_version: 34
 hermes_shadow_contract_source: files/hermes/shadow-target.json
 hermes_shadow_contract_live: /usr/local/share/hermes-shadow/shadow-target.json

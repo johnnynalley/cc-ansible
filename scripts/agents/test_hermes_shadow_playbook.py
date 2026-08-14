@@ -410,6 +410,9 @@ class HermesShadowPlaybookTests(unittest.TestCase):
     def test_profile_config_schema_and_managed_scope_are_fail_closed(self) -> None:
         seed = self.task("Seed mutable Hermes profile config once")
         repair = self.task("Stamp only newly seeded empty Hermes profile configs")
+        migrate = self.task(
+            "Migrate version-only Hermes profile configs one schema forward"
+        )
         schema = self.task("Require current mutable Hermes config schema")
         native_check = self.task(
             "Validate merged Hermes config as each service identity"
@@ -419,6 +422,10 @@ class HermesShadowPlaybookTests(unittest.TestCase):
         self.assertIn("hermes_shadow_config_version", seed)
         self.assertIn("force: false", seed)
         self.assertIn("from_yaml) == {}", repair)
+        self.assertIn("hermes_shadow_version_only_migration_from", migrate)
+        self.assertIn("hermes_existing_mutable_config | length == 1", migrate)
+        self.assertIn("+ 1", migrate)
+        self.assertIn("no_log: true", migrate)
         self.assertIn("hermes_shadow_config_version", schema)
         self.assertIn("/usr/sbin/runuser", native_check)
         self.assertIn("HERMES_MANAGED_DIR=/etc/hermes/", native_check)

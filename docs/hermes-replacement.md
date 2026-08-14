@@ -487,6 +487,9 @@ signed manifest, and installs the binary mode `0555` under
 `/usr/local/libexec`. Service startup requires the absolute binary and sets
 `TIRITH_OFFLINE=1`; attended deployment also proves one benign allow verdict
 and one pipe-to-interpreter block verdict without network access.
+The policy-schema transaction advances an existing profile-local config only
+when it is the exact prior one-key version stub. Any profile with additional
+mutable settings remains blocked for an explicit reviewed migration.
 
 ### Terminal Sandbox
 
