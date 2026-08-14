@@ -287,6 +287,14 @@ Infrastructure changes should converge through the normal playbook graph. Before
 - One-time queries (checking status, logs)
 - Operations that shouldn't be repeated (manual data migrations)
 
+For an ad-hoc `ansible.builtin.command` diagnostic, pass ordinary free-form
+executable arguments after `-a`, or use a managed YAML task when structured
+`argv` is required. Do not pass a textual `argv=[...]` expression through
+`-a`; Ansible treats that text as the executable name and produces a false
+command failure. Keep expected-negative probes exit-clean and report the
+observed state as data so a denied permission or inactive unit is not emitted
+as a tooling error banner.
+
 If a package exists in the system repos, add it to the appropriate `packages_*` variable. If a service needs configuration, create or update the relevant playbook/task file.
 
 ### New Host Onboarding
