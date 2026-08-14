@@ -42,6 +42,8 @@
     "managedScope": "/etc/hermes",
     "runtimeSelfUpdateEnabled": false,
     "runtimeLazyInstallsEnabled": false,
+    "rootManagedCommandScanner": true,
+    "scannerRuntimeNetworkEnabled": false,
     "bundledSkillsEnabled": false
   },
   "sandbox": {
@@ -70,6 +72,8 @@
     "promptInjectionScan": true,
     "secretRedaction": true,
     "ssrfProtection": true,
+    "privateUrlAccess": false,
+    "tirithFailOpen": false,
     "destructiveSlashConfirmation": true,
     "mcpReloadConfirmation": true,
     "autoAcceptHooks": false,

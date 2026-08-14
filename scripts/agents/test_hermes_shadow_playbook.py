@@ -135,6 +135,7 @@ class HermesShadowPlaybookTests(unittest.TestCase):
                 hermes_shadow_config_version=self.variables[
                     "hermes_shadow_config_version"
                 ],
+                hermes_tirith_binary=self.variables["hermes_tirith_binary"],
             )
             config = yaml.safe_load(rendered)
             self.assertEqual(
@@ -143,6 +144,12 @@ class HermesShadowPlaybookTests(unittest.TestCase):
             )
             self.assertEqual(config["approvals"]["mode"], "manual")
             self.assertEqual(config["approvals"]["cron_mode"], "deny")
+            self.assertFalse(config["security"]["allow_lazy_installs"])
+            self.assertFalse(config["security"]["allow_private_urls"])
+            self.assertEqual(
+                config["security"]["tirith_path"],
+                self.variables["hermes_tirith_binary"],
+            )
             self.assertFalse(config["security"]["tirith_fail_open"])
             self.assertTrue(config["memory"]["write_approval"])
             self.assertTrue(config["skills"]["write_approval"])
@@ -237,6 +244,7 @@ class HermesShadowPlaybookTests(unittest.TestCase):
             "hermes_star_privacy_plugin_runtime_root": self.variables[
                 "hermes_star_privacy_plugin_runtime_root"
             ],
+            "hermes_tirith_binary": self.variables["hermes_tirith_binary"],
         }
         for profile in self.variables["hermes_shadow_profiles"]:
             rendered = template.render(hermes_profile=profile, **common)
@@ -244,6 +252,7 @@ class HermesShadowPlaybookTests(unittest.TestCase):
             self.assertIn(f"Group={profile['group']}", rendered)
             self.assertIn(f"HERMES_HOME={profile['home']}", rendered)
             self.assertIn("HERMES_DOCKER_BINARY=/usr/bin/podman", rendered)
+            self.assertIn("TIRITH_OFFLINE=1", rendered)
             self.assertIn("NoNewPrivileges=true", rendered)
             self.assertIn("ProtectSystem=strict", rendered)
             self.assertIn("CapabilityBoundingSet=", rendered)
@@ -259,6 +268,10 @@ class HermesShadowPlaybookTests(unittest.TestCase):
             self.assertIn("hermes-automation-contract-audit", rendered)
             self.assertIn("sha256sum --check --status --strict", rendered)
             self.assertIn("managed-policy.sha256", rendered)
+            self.assertIn(
+                f"ExecStartPre={self.variables['hermes_tirith_binary']} --version",
+                rendered,
+            )
             self.assertIn(
                 f"BindReadOnlyPaths=/etc/hermes/{profile['name']}/skills:"
                 f"{profile['home']}/skills/managed",
@@ -360,6 +373,32 @@ class HermesShadowPlaybookTests(unittest.TestCase):
         self.assertIn("unset PYTHONPATH", launcher)
         self.assertIn("/bin/python", launcher)
         self.assertIn("/hermes", launcher)
+
+    def test_tirith_is_root_managed_offline_and_supply_chain_verified(self) -> None:
+        approval = self.task("Require explicit Hermes shadow approval")
+        provenance = self.task("Require reviewed root-managed Tirith provenance")
+        prerequisites = self.task("Install Hermes shadow host prerequisites")
+        assets = self.task("Download reviewed Tirith release assets")
+        verify = self.task("Verify Tirith signed checksum provenance")
+        install = self.task("Install root-managed Tirith binary")
+        allow = self.task("Prove Tirith allows a benign command offline")
+        block = self.task("Prove Tirith blocks pipe-to-interpreter offline")
+        self.assertIn("official-latest", provenance)
+        self.assertIn("/usr/local/libexec/hermes-tirith", provenance)
+        self.assertIn("rootManagedCommandScanner", approval)
+        self.assertIn("runtimeLazyInstallsEnabled", approval)
+        self.assertIn("scannerRuntimeNetworkEnabled", approval)
+        self.assertIn("privateUrlAccess", approval)
+        self.assertIn("tirithFailOpen", approval)
+        self.assertIn("- cosign", prerequisites)
+        self.assertIn("checksum:", assets)
+        self.assertIn("/usr/bin/cosign", verify)
+        self.assertIn("--certificate-identity-regexp", verify)
+        self.assertIn("owner: root", install)
+        self.assertIn('mode: "0555"', install)
+        self.assertIn('TIRITH_OFFLINE: "1"', allow)
+        self.assertIn("--no-daemon", allow)
+        self.assertIn("failed_when: hermes_tirith_block_probe.rc != 1", block)
         source = self.task("Require exact Hermes source")
         self.assertIn("https://github.com/NousResearch/hermes-agent.git", source)
         self.assertIn("hermes_shadow_expected_commit", source)

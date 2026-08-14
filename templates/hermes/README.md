@@ -5,7 +5,9 @@
 - `hermes-managed-config.yaml.j2`: per-profile root-owned managed scope. It
   pins manual approvals, deny-on-cron, review-gated memory/skills, quiet output,
   suppressed background-learning chat notices, role-specific toolsets, and an
-  air-gapped rootless Podman backend. Delegation is flat, capped at two
+  air-gapped rootless Podman backend. It disables lazy installs and private URL
+  access, points Tirith at the absolute root-managed binary, and requires
+  scanner failures to deny the command. Delegation is flat, capped at two
   concurrent children and 12 iterations, with child orchestration disabled.
   Only Astra enables the reviewed hook-only Star privacy plugin; Dubble and
   Rigel keep an empty plugin set.
@@ -28,7 +30,8 @@
   and read/write mount modes before the Gateway process can start.
   Astra additionally validates identical root-owned plugin trees, the exact
   six-hook/no-tool registration surface, and a read-only managed-to-runtime
-  plugin bind before startup.
+  plugin bind before startup. The unit requires the root-managed Tirith binary
+  before Hermes starts and forces the scanner to operate offline.
 
 ## Consumer
 

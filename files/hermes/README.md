@@ -10,7 +10,8 @@ reviewed Ansible Vault ciphertext seeds declared by
 - `shadow-target.json` is the Gate 3 target declaration. It keeps Hermes in a
   tokenless, delivery-disabled, scheduler-disabled shadow state and records the
   required identities, paths, sandbox, approval, broker, backup, and rollback
-  boundaries.
+  boundaries. It also requires a root-managed offline command scanner, disabled
+  runtime lazy installs, blocked private URLs, and fail-closed Tirith behavior.
 - `profiles/*/SOUL.md` contains the root-owned baseline identity for Astra,
   Dubble, and Rigel. It encodes transcript-derived behavior boundaries without
   copying transcript content, user IDs, memories, or credentials.

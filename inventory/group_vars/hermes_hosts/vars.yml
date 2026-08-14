@@ -97,6 +97,41 @@ hermes_star_privacy_validator_source: >-
 hermes_star_privacy_validator_live: >-
   /usr/local/libexec/hermes-star-dispatch-privacy-validate
 
+# Root-managed Tirith transaction provenance. The release track remains the
+# official latest channel; these values record the currently reviewed artifact
+# and are advanced only through an attended root-owned update transaction.
+hermes_tirith_release_track: official-latest
+hermes_tirith_version: 0.3.3
+hermes_tirith_release_base_url: >-
+  https://github.com/sheeki03/tirith/releases/download/v0.3.3
+hermes_tirith_archive_name: tirith-x86_64-unknown-linux-gnu.tar.gz
+hermes_tirith_archive_sha256: >-
+  6cdbe35e8f9ccf42e70ad95b501c93cd218ac18201c3df958d54f6ba0d995ce2
+hermes_tirith_checksums_sha256: >-
+  acb5544bb8f98e8d6760e5bdd6b5f3a878e17af485c11e3b736cfd30f9641371
+hermes_tirith_signature_sha256: >-
+  d794010c10ca6b9898efbfb856685f10bd12ebc2a619f9cf0f218f9989ba5c75
+hermes_tirith_certificate_encoded_sha256: >-
+  aefa92fe00b89f92dee402bb67f9d0d4dd03bdd69fe70f4217a30e5cbe18e99c
+hermes_tirith_certificate_sha256: >-
+  bf04bd991bbb70ee8022a3341b7288aff619872a4837c4d07e6cd89f724e29ca
+hermes_tirith_cache_root: /var/cache/hermes/tirith-0.3.3
+hermes_tirith_archive_cache: >-
+  /var/cache/hermes/tirith-0.3.3/tirith-x86_64-unknown-linux-gnu.tar.gz
+hermes_tirith_checksums_cache: >-
+  /var/cache/hermes/tirith-0.3.3/checksums.txt
+hermes_tirith_signature_cache: >-
+  /var/cache/hermes/tirith-0.3.3/checksums.txt.sig
+hermes_tirith_certificate_encoded_cache: >-
+  /var/cache/hermes/tirith-0.3.3/checksums.txt.pem.b64
+hermes_tirith_certificate_cache: >-
+  /var/cache/hermes/tirith-0.3.3/checksums.txt.pem
+hermes_tirith_extract_root: /var/cache/hermes/tirith-0.3.3/extracted
+hermes_tirith_binary: /usr/local/libexec/hermes-tirith
+hermes_tirith_cosign_identity_regexp: >-
+  ^https://github.com/sheeki03/tirith/\.github/workflows/release\.yml@refs/tags/v
+hermes_tirith_cosign_issuer: https://token.actions.githubusercontent.com
+
 hermes_shadow_source_repo: https://github.com/NousResearch/hermes-agent.git
 hermes_shadow_install_ref: v2026.8.3
 hermes_shadow_expected_tag_object: 7de39e700d2c329e15d32eb0b96e2f7cdd9fbdb2
@@ -115,7 +150,7 @@ hermes_shadow_uv_config_dirs: /var/lib/hermes/bootstrap/config-dirs
 hermes_shadow_runtime_binary: /usr/local/bin/hermes
 hermes_shadow_runtime_root: /usr/local/lib/hermes-agent
 hermes_shadow_runtime_venv: /usr/local/lib/hermes-agent/venv
-hermes_shadow_config_version: 33
+hermes_shadow_config_version: 34
 hermes_shadow_contract_source: files/hermes/shadow-target.json
 hermes_shadow_contract_live: /usr/local/share/hermes-shadow/shadow-target.json
 hermes_shadow_audit_live: /usr/local/libexec/hermes-shadow-target-audit

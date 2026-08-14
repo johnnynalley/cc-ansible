@@ -347,8 +347,12 @@ Initial production policy:
 - No auto-accepted hooks. Any hook is root-reviewed and its consent record is
   audited after edits because Hermes hook consent keys the command path, not
   script content.
-- Prompt-injection scanning and secret redaction enabled. Any optional external
-  scanner must fail closed.
+- Prompt-injection scanning and secret redaction enabled. Tirith is installed
+  by a root-owned transaction from an exact official release artifact after
+  Sigstore identity and signed-checksum verification. Gateways use only the
+  absolute root-owned binary, run it offline, reject runtime lazy installs,
+  and fail closed on scanner errors. Hermes's built-in background downloader
+  is never part of the production path.
 - Dashboard/API disabled. Gateway listeners remain loopback-only unless a
   separately authenticated Tailscale proxy is deliberately approved.
 - Egress is restricted to required model, web, Discord, Health-report, and
@@ -358,7 +362,10 @@ Initial production policy:
 
 This boundary assumes any user-authorized agent conversation can be malicious.
 Messaging authorization limits who can ask Hermes to act; it does not make
-prompt content trustworthy.
+prompt content trustworthy. Tirith and the native prompt scanner are heuristic
+defenses, not containment. Separate no-login identities, systemd confinement,
+the rootless terminal sandbox, and narrow authenticated brokers remain the
+authority boundary even when a scanner misses adversarial content.
 
 ## Isolated Target Design
 
@@ -469,6 +476,17 @@ seeded per role. Do not configure root-owned baseline skills only through
 `skills.external_dirs` in managed scope: Hermes v0.20.0's lightweight runtime
 skill loader reads the profile-local config directly and would ignore that
 merged managed value even though `hermes config check` accepts it.
+
+Hermes v0.20.0 otherwise starts a background Tirith installer when the scanner
+is absent. The managed deployment disables that path explicitly and installs
+Tirith from a root-owned release transaction. The transaction checks the
+downloaded archive and release metadata by exact SHA-256, decodes the release
+certificate, verifies the checksums file with `cosign` against the official
+GitHub Actions workflow identity and issuer, requires the archive in that
+signed manifest, and installs the binary mode `0555` under
+`/usr/local/libexec`. Service startup requires the absolute binary and sets
+`TIRITH_OFFLINE=1`; attended deployment also proves one benign allow verdict
+and one pipe-to-interpreter block verdict without network access.
 
 ### Terminal Sandbox
 

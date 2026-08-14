@@ -103,8 +103,10 @@ approvals:
 
 security:
   redact_secrets: true
+  allow_lazy_installs: false
+  allow_private_urls: false
   tirith_enabled: true
-  tirith_path: tirith
+  tirith_path: {{ hermes_tirith_binary }}
   tirith_timeout: 5
   tirith_fail_open: false
 

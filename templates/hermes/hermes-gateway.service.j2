@@ -14,12 +14,14 @@ Environment=HOME={{ hermes_profile.home }}
 Environment=HERMES_HOME={{ hermes_profile.home }}
 Environment=HERMES_MANAGED_DIR=/etc/hermes/{{ hermes_profile.name }}
 Environment=HERMES_DOCKER_BINARY=/usr/bin/podman
+Environment=TIRITH_OFFLINE=1
 Environment=XDG_RUNTIME_DIR=/run/hermes-{{ hermes_profile.name }}
 EnvironmentFile=/etc/hermes/{{ hermes_profile.name }}/.env
 ExecStartPre={{ hermes_shadow_audit_live }} {{ hermes_shadow_contract_live }}
 ExecStartPre={{ hermes_discord_audit_live }} {{ hermes_discord_contract_live }} --repository-root /usr/local/share/hermes-shadow/repository
 ExecStartPre={{ hermes_automation_audit_live }} {{ hermes_automation_contract_live }} --repository-root /usr/local/share/hermes-shadow/repository
 ExecStartPre=/usr/bin/sha256sum --check --status --strict /etc/hermes/{{ hermes_profile.name }}/managed-policy.sha256
+ExecStartPre={{ hermes_tirith_binary }} --version
 ExecStartPre={{ hermes_shadow_runtime_binary }} config check
 ExecStartPre=/usr/local/lib/hermes-agent/venv/bin/python {{ hermes_profile_skills_validator_live }} --contract {{ hermes_profile_skills_contract_live }} --mode runtime --profile {{ hermes_profile.name }} --hermes-source /usr/local/lib/hermes-agent
 ExecStartPre=+{{ hermes_profile_data_stager_live }} --contract {{ hermes_profile_data_contract_live }} --repository-root /usr/local/share/hermes-shadow/repository --target-root {{ hermes_profile_data_root }} --manifest {{ hermes_profile_data_manifest_live }} --mode verify --allow-writable-drift

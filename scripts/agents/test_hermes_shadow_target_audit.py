@@ -86,6 +86,26 @@ class HermesShadowTargetAuditTests(unittest.TestCase):
         data["commonPolicy"]["memoryWriteApproval"] = False
         self.assert_rejected(data, "policy-required-memoryWriteApproval")
 
+    def test_runtime_scanner_download_is_rejected(self) -> None:
+        data = copy.deepcopy(self.base)
+        data["runtime"]["scannerRuntimeNetworkEnabled"] = True
+        self.assert_rejected(data, "scanner-runtime-network-enabled")
+
+    def test_profile_managed_scanner_is_rejected(self) -> None:
+        data = copy.deepcopy(self.base)
+        data["runtime"]["rootManagedCommandScanner"] = False
+        self.assert_rejected(data, "root-managed-command-scanner-disabled")
+
+    def test_private_url_access_is_rejected(self) -> None:
+        data = copy.deepcopy(self.base)
+        data["commonPolicy"]["privateUrlAccess"] = True
+        self.assert_rejected(data, "private-url-access-enabled")
+
+    def test_fail_open_tirith_is_rejected(self) -> None:
+        data = copy.deepcopy(self.base)
+        data["commonPolicy"]["tirithFailOpen"] = True
+        self.assert_rejected(data, "tirith-fail-open")
+
     def test_duplicate_profile_identity_is_rejected(self) -> None:
         data = copy.deepcopy(self.base)
         data["profiles"][1]["serviceUser"] = "hermes-astra"

@@ -296,7 +296,7 @@ Packages are merged from multiple sources (all applicable variables combined):
 | `proxmox-ha.yml` | `proxmox_nodes` | Stop/disable/mask `pve-ha-{lrm,crm}` cluster-wide (no HA resources configured; removes fencing risk). Driven by `pve_ha_enabled` (default `false`) |
 | `vm-storage-gate.yml` | `proxmox_nodes` | Per-VM start gate: hookscript blocks `qm start`/`pct start` if VM's declared host mountpoints aren't mounted. Per-VM declarations in `host_vars/<vm>/storage.yml` |
 | `openclaw.yml` | `openclaw_hosts` | OpenClaw AI agent (npm install, gateway service, repo-sync/update-check timers) |
-| `hermes-shadow.yml` | `hermes_hosts` | Boot-disabled, isolated Hermes replacement staging with no production delivery |
+| `hermes-shadow.yml` | `hermes_hosts` | Boot-disabled Hermes staging with signed offline command scanning and no production delivery |
 | `hermes-openclaw-dry-run.yml` | `hermes_hosts` | Operator-approved, shape-only official importer inventory with no source content, activation, or service-state change |
 | `hermes-profile-memory.yml` | `hermes_hosts` | Disabled-by-default, transactional native memory seeding for Astra and Rigel; Dubble remains empty and all Gateways remain stopped |
 | `hermes-profile-skills.yml` | `hermes_hosts` | Disabled-by-default, transactional native skill staging with exact hashes, root-owned per-profile sources, and read-only runtime discovery proof |
@@ -1062,6 +1062,10 @@ installs no runtime during normal convergence, starts no listener, contains no
 production token, and is not imported by `site.yml`.
 
 - **Playbook**: `playbooks/agents/hermes-shadow.yml`
+- **Command scanner**: Tirith is installed by a root-owned transaction from an
+  exact official release artifact after signed-checksum and Sigstore identity
+  verification. Gateways use only that absolute binary in offline, fail-closed
+  mode; runtime lazy downloads remain disabled.
 - **Protected importer inventory**:
   `playbooks/agents/hermes-openclaw-dry-run.yml` is disabled by default and
   retains only root-private structural evidence from a networkless,

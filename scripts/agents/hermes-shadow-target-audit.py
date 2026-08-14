@@ -136,6 +136,14 @@ def validate_runtime(data: dict[str, Any]) -> None:
         "bundledSkillsEnabled",
     ):
         require(runtime.get(key) is False, f"unsafe-runtime-{key}")
+    require(
+        runtime.get("rootManagedCommandScanner") is True,
+        "root-managed-command-scanner-disabled",
+    )
+    require(
+        runtime.get("scannerRuntimeNetworkEnabled") is False,
+        "scanner-runtime-network-enabled",
+    )
 
 
 def validate_sandbox(data: dict[str, Any]) -> None:
@@ -179,6 +187,8 @@ def validate_common_policy(data: dict[str, Any]) -> None:
         "mcpReloadConfirmation",
     ):
         require(policy.get(key) is True, f"policy-required-{key}")
+    require(policy.get("privateUrlAccess") is False, "private-url-access-enabled")
+    require(policy.get("tirithFailOpen") is False, "tirith-fail-open")
     for key in (
         "autoAcceptHooks",
         "allowAllDiscordUsers",

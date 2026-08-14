@@ -12,7 +12,9 @@
   regressions for those privilege and cutover boundaries.
 - `test_hermes_shadow_playbook.py` renders every managed profile config and
   service unit, then rejects host execution, production authority, unreviewed
-  installer input, unsafe startup, or a weakened Podman boundary.
+  installer input, unsafe startup, scanner supply-chain drift, runtime scanner
+  downloads, private URL access, fail-open scanning, or a weakened Podman
+  boundary.
 - `hermes-rigel-schedule.py` is Rigel's deterministic, script-only academic
   alert evaluator. Expected idle, missing, or malformed source state produces
   no stdout; exact source-backed alerts are deduplicated in profile-local state.
