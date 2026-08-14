@@ -55,6 +55,11 @@ reviewed Ansible Vault ciphertext seeds declared by
   reviewer, structured-transform, credential, messaging, scheduler, model, or
   Gateway authority. The complete manifest is root-private; each runtime sees
   only its own writable bind and read-only managed bind.
+- `profile-transform-contract.json` permits six schema-checked legacy-state
+  conversions into a separate small transactional generation. It reads only
+  seven declared source objects, rejects links and active/unparsed Rigel
+  semesters, exposes no raw source tree, and produces isolated writable state
+  for Astra/Dubble plus one root-managed read-only Rigel schedule input.
 - `behavior-contract.json` defines semantic reasoning, concise output,
   correction generalization, and Hermes-native approval-gated self-evolution.
   `behavior-regressions.json` contains sanitized promotion cases derived from
@@ -106,6 +111,10 @@ reviewed Ansible Vault ciphertext seeds declared by
   executable bits, mounting the source, or importing raw content as prompts.
   It fails on source drift, manifest or inventory drift, unsafe ownership,
   unexpected object kinds, and incorrect runtime bind modes.
+- `scripts/agents/hermes-profile-transform.py` validates and canonicalizes the
+  six reviewed structured-transform mappings, writes a root-private manifest,
+  verifies source stability and output hashes, and enforces separate writable
+  and read-only runtime bind identities without mounting legacy state.
 - `scripts/agents/hermes-discord-cutover-audit.py` validates source pins,
   distinct profile and Discord identities, inert authority, ordered source
   drain and target activation, rollback, Health continuity, and the complete

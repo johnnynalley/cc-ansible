@@ -75,6 +75,17 @@
   and source-race rejection, executable-bit removal, manifest and root-shape
   drift, managed immutability, bounded writable drift, runtime identity and
   mount modes, transaction cleanup, rollback, and absence of Gateway starts.
+- `hermes-profile-transform.py` parses only the six reviewed structured-state
+  mappings and writes six canonical JSON outputs into a separate per-profile
+  generation. It fails closed on source-contract drift, links, unknown schema,
+  active or ambiguous legacy Rigel state, source races, unsafe ownership, and
+  writable/read-only bind drift while never exposing raw source values in its
+  plan or manifest.
+- `test_hermes_profile_transform.py` covers all six transforms, private-state
+  preservation, the completed-semester idle result, active/pending Rigel
+  rejection, empty Dubble initialization, symlink rejection, managed
+  immutability, bounded writable drift, transaction controls, and job-path
+  wiring.
 - `test_hermes_behavior_contract.py` validates semantic routing without phrase
   triggers, one concise user-facing answer, native background review with
   staged memory/skill approval, owner-only policy changes, complete sanitized

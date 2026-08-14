@@ -13,7 +13,7 @@
     },
     "rigelJob": {
       "path": "files/hermes/jobs/rigel-academic-alerts.json",
-      "sha256": "192aadbc53cb954cf92a1e86f551a7d08260a43ceabf69de0dddcacf3a756070"
+      "sha256": "b92bf252a991b15a167756b076cc962b27b8f9741c4807eb7b3b5122b9f9cf3e"
     },
     "healthReceiverPlaybook": {
       "path": "playbooks/agents/openclaw-health-receiver.yml",

@@ -209,6 +209,18 @@ class HermesShadowPlaybookTests(unittest.TestCase):
             "hermes_profile_data_manifest_live": self.variables[
                 "hermes_profile_data_manifest_live"
             ],
+            "hermes_profile_transformer_live": self.variables[
+                "hermes_profile_transformer_live"
+            ],
+            "hermes_profile_transforms_contract_live": self.variables[
+                "hermes_profile_transforms_contract_live"
+            ],
+            "hermes_profile_transforms_root": self.variables[
+                "hermes_profile_transforms_root"
+            ],
+            "hermes_profile_transforms_manifest_live": self.variables[
+                "hermes_profile_transforms_manifest_live"
+            ],
         }
         for profile in self.variables["hermes_shadow_profiles"]:
             rendered = template.render(hermes_profile=profile, **common)
@@ -252,6 +264,20 @@ class HermesShadowPlaybookTests(unittest.TestCase):
             self.assertIn("hermes-profile-data-stage", rendered)
             self.assertIn("--allow-writable-drift", rendered)
             self.assertIn("ExecStartPre=+/usr/local/libexec/hermes-profile-data-stage", rendered)
+            self.assertIn(
+                "ExecStartPre=+/usr/local/libexec/hermes-profile-transform",
+                rendered,
+            )
+            self.assertIn(
+                f"BindPaths=/var/lib/hermes/profile-transforms/{profile['name']}/writable:"
+                f"{profile['home']}/transformed-data",
+                rendered,
+            )
+            self.assertIn(
+                f"BindReadOnlyPaths=/var/lib/hermes/profile-transforms/{profile['name']}/managed:"
+                f"{profile['home']}/transformed-managed",
+                rendered,
+            )
             self.assertIn(
                 f"--mode runtime --profile {profile['name']}", rendered
             )

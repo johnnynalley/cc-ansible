@@ -877,6 +877,31 @@ read permission; each `0750` profile subtree still rejects every other profile.
 The failed-attempt rollback and the targeted pre-correction contract/stager
 rollback remain under the same live-rollbacks domain for diagnosis.
 
+Structured legacy runtime state is a separate transaction from copied project
+data. `files/hermes/profile-transform-contract.json` declares exactly six
+conversions and seven input objects. The root-owned transformer parses and
+canonicalizes FreshRSS dedupe state, Reddit sync state, the private sobriety
+tracker, Nextcloud task state, an empty Dubble user registry, and Rigel's
+completed-semester/calendar-request source. It neither copies nor mounts the
+169 MB Rigel course archive into a profile.
+
+Rigel migration is intentionally fail-closed. The legacy source is accepted
+only when it explicitly identifies a completed semester, says there are no
+upcoming exams, and has no pending calendar request below its marker. Active,
+ambiguous, or pending state must be curated into the native academic schema by
+an operator instead of being guessed from Markdown. The accepted migration
+produces zero events and zero calendar requests, so the always-on 30-minute
+evaluator is immediately idle and emits no stdout, reasoning text, token, or
+Discord message.
+
+`playbooks/agents/hermes-profile-transforms.yml` stages the small generation
+under `/var/lib/hermes/profile-transforms`, records a root-only manifest and
+rollback archive, verifies stable input/output hashes, then proves each
+no-login profile sees only its own writable bind and read-only managed bind.
+The Hermes Gateway units verify both the root manifest and unprivileged bind
+identity before start. This component remains disabled until an attended
+staging run and does not start a Gateway, model, scheduler, or messaging route.
+
 ## Behavior And Self-Evolution
 
 The replacement does not use a plugin or phrase table to decide when Astra

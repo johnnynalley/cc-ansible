@@ -1,0 +1,133 @@
+{
+  "schemaVersion": 1,
+  "mode": "inactive-reviewed-profile-transforms",
+  "sourceRoot": "/home/johnny/.openclaw/workspace",
+  "sourcePins": {
+    "profileImport": {
+      "path": "files/hermes/profile-import-contract.json",
+      "sha256": "70407207f61fe511ea240eff22c19b313eb72de1873d2397456339df3c9ba349"
+    },
+    "workspacePolicy": {
+      "path": "files/openclaw/workspace-migration-policy.json",
+      "sha256": "08e30aa55c72a54a6ac0e7c67e6d99b5557bd0fed75e8b16a19af556ee20e211"
+    }
+  },
+  "profiles": {
+    "astra": {
+      "uid": 62010,
+      "gid": 62010,
+      "writableRoot": "/var/lib/hermes/profile-transforms/astra/writable",
+      "managedRoot": "/var/lib/hermes/profile-transforms/astra/managed",
+      "writableRuntimeRoot": "/var/lib/hermes/astra/transformed-data",
+      "managedRuntimeRoot": "/var/lib/hermes/astra/transformed-managed"
+    },
+    "dubble": {
+      "uid": 62011,
+      "gid": 62011,
+      "writableRoot": "/var/lib/hermes/profile-transforms/dubble/writable",
+      "managedRoot": "/var/lib/hermes/profile-transforms/dubble/managed",
+      "writableRuntimeRoot": "/var/lib/hermes/dubble/transformed-data",
+      "managedRuntimeRoot": "/var/lib/hermes/dubble/transformed-managed"
+    },
+    "rigel": {
+      "uid": 62012,
+      "gid": 62012,
+      "writableRoot": "/var/lib/hermes/profile-transforms/rigel/writable",
+      "managedRoot": "/var/lib/hermes/profile-transforms/rigel/managed",
+      "writableRuntimeRoot": "/var/lib/hermes/rigel/transformed-data",
+      "managedRuntimeRoot": "/var/lib/hermes/rigel/transformed-managed"
+    }
+  },
+  "ownership": {
+    "operatorUid": 0,
+    "operatorGid": 0,
+    "generationRootMode": "0711",
+    "writableDirectoryMode": "0750",
+    "writableFileMode": "0640",
+    "managedDirectoryMode": "0550",
+    "managedFileMode": "0440"
+  },
+  "limits": {
+    "maxInputs": 8,
+    "maxInputBytes": 1048576,
+    "maxOutputs": 6,
+    "maxOutputBytes": 1048576,
+    "maxCollectionItems": 2048,
+    "maxStringBytes": 16384
+  },
+  "transforms": [
+    {
+      "id": "dubble-users",
+      "profile": "dubble",
+      "ownerClass": "executor-writable",
+      "sources": ["dubble/users"],
+      "output": "data/users/index.json",
+      "transform": "empty-user-registry"
+    },
+    {
+      "id": "freshrss-state",
+      "profile": "astra",
+      "ownerClass": "executor-writable",
+      "sources": ["freshrss/state.json"],
+      "output": "data/integrations/freshrss/state.json",
+      "transform": "freshrss-state-v1"
+    },
+    {
+      "id": "reddit-sync-state",
+      "profile": "astra",
+      "ownerClass": "executor-writable",
+      "sources": ["reddit/sync-state.json"],
+      "output": "data/integrations/reddit/sync-state.json",
+      "transform": "reddit-sync-state-v1"
+    },
+    {
+      "id": "rigel-courses",
+      "profile": "rigel",
+      "ownerClass": "operator-readonly",
+      "sources": [
+        "rigel/courses/semester-context.md",
+        "rigel/courses/pending-calendar-requests.md"
+      ],
+      "output": "imports/courses/academic-state.json",
+      "transform": "rigel-completed-semester-v1"
+    },
+    {
+      "id": "sobriety-state",
+      "profile": "astra",
+      "ownerClass": "executor-writable",
+      "sources": ["sober-tracking/state.json"],
+      "output": "data/sober-tracking/state.json",
+      "transform": "sobriety-state-v1"
+    },
+    {
+      "id": "nextcloud-task-state",
+      "profile": "astra",
+      "ownerClass": "executor-writable",
+      "sources": ["tasks/nextcloud-tasks.json"],
+      "output": "data/tasks/nextcloud-tasks.json",
+      "transform": "nextcloud-task-state-v1"
+    }
+  ],
+  "safety": {
+    "sourceMutationAllowed": false,
+    "sourceMountAllowed": false,
+    "rawSourceExposureAllowed": false,
+    "rawPromptInjectionAllowed": false,
+    "symlinksAllowed": false,
+    "specialFilesAllowed": false,
+    "executableBitsRetained": false,
+    "credentialsAllowed": false,
+    "gatewayActivationAllowed": false,
+    "schedulerActivationAllowed": false,
+    "messagingActivationAllowed": false,
+    "modelInvocationAllowed": false
+  },
+  "execution": {
+    "backupRequired": true,
+    "transactionRollbackRequired": true,
+    "sourceStabilityRequired": true,
+    "contentHashVerificationRequired": true,
+    "managedRuntimeReadOnly": true,
+    "writableRuntimeProfileIsolated": true
+  }
+}

@@ -53,14 +53,17 @@ class HermesRigelScheduleTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temporary = tempfile.TemporaryDirectory()
         self.home = Path(self.temporary.name)
-        (self.home / "data").mkdir()
+        self.source_root = (
+            self.home / "transformed-managed" / "imports" / "courses"
+        )
+        self.source_root.mkdir(parents=True)
         (self.home / "state").mkdir()
 
     def tearDown(self) -> None:
         self.temporary.cleanup()
 
     def write_source(self, value: dict) -> None:
-        (self.home / "data" / "academic-state.json").write_text(
+        (self.source_root / "academic-state.json").write_text(
             json.dumps(value),
             encoding="utf-8",
         )
@@ -157,7 +160,7 @@ class HermesRigelScheduleTests(unittest.TestCase):
     def test_symlinked_source_is_silent(self) -> None:
         target = self.home / "target.json"
         target.write_text(json.dumps(source()), encoding="utf-8")
-        (self.home / "data" / "academic-state.json").symlink_to(target)
+        (self.source_root / "academic-state.json").symlink_to(target)
         self.assertEqual(MODULE.run(self.home, NOW), "")
         self.assertFalse(self.health()["healthy"])
 

@@ -322,7 +322,13 @@ def status_payload(
 
 def run(home: Path, now: datetime) -> str:
     require(home.is_absolute(), "home-not-absolute")
-    source_path = home / "data" / "academic-state.json"
+    source_path = (
+        home
+        / "transformed-managed"
+        / "imports"
+        / "courses"
+        / "academic-state.json"
+    )
     ledger_path = home / "state" / "rigel-schedule-state.json"
     health_path = home / "state" / "rigel-schedule-health.json"
     zone = ZoneInfo(TIMEZONE)

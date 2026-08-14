@@ -301,6 +301,7 @@ Packages are merged from multiple sources (all applicable variables combined):
 | `hermes-profile-memory.yml` | `hermes_hosts` | Disabled-by-default, transactional native memory seeding for Astra and Rigel; Dubble remains empty and all Gateways remain stopped |
 | `hermes-profile-skills.yml` | `hermes_hosts` | Disabled-by-default, transactional native skill staging with exact hashes, root-owned per-profile sources, and read-only runtime discovery proof |
 | `hermes-profile-data.yml` | `hermes_hosts` | Disabled-by-default, copy-only staging of reviewed project data and read-only operator references into isolated Hermes profile roots; memory, credentials, transforms, and activation remain excluded |
+| `hermes-profile-transforms.yml` | `hermes_hosts` | Disabled-by-default, transactional schema normalization of six reviewed legacy state sources into isolated Hermes writable/read-only roots; raw source and activation remain excluded |
 | `openclaw-health-receiver.yml` | `openclaw_hosts` | Isolated Health receiver and aggregate-only report publisher (disabled by default) |
 | `openclaw-isolated-gateway.yml` | `openclaw_hosts` | Modernized split Gateway/Codex canary with immutable runtime/provider code, separate no-login identities and secrets, isolated executor OAuth, and model proof (disabled by default) |
 | `openclaw-state-rehearsal.yml` | `openclaw_hosts` | Verified relocation rehearsal for active file-backed sessions with bounded current/rollback generation retention (disabled by default) |

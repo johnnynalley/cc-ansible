@@ -67,6 +67,23 @@ hermes_profile_data_manifest_live: /etc/hermes/profile-data-manifest.json
 hermes_profile_data_rollback_root: >-
   /srv/live-rollbacks/jn-t14s-lin/hermes-migration
 
+# Strictly normalized legacy runtime state. Raw OpenClaw files are parsed only
+# by the root-owned transformer and are never mounted into a Hermes profile.
+hermes_profile_transforms_mode: disabled
+hermes_profile_transforms_approved: false
+hermes_profile_transforms_contract_source: >-
+  files/hermes/profile-transform-contract.json
+hermes_profile_transforms_contract_live: >-
+  /etc/hermes/profile-transform-contract.json
+hermes_profile_transformer_source: >-
+  scripts/agents/hermes-profile-transform.py
+hermes_profile_transformer_live: /usr/local/libexec/hermes-profile-transform
+hermes_profile_transforms_root: /var/lib/hermes/profile-transforms
+hermes_profile_transforms_manifest_live: >-
+  /etc/hermes/profile-transforms-manifest.json
+hermes_profile_transforms_rollback_root: >-
+  /srv/live-rollbacks/jn-t14s-lin/hermes-migration
+
 hermes_shadow_source_repo: https://github.com/NousResearch/hermes-agent.git
 hermes_shadow_install_ref: v2026.8.3
 hermes_shadow_expected_tag_object: 7de39e700d2c329e15d32eb0b96e2f7cdd9fbdb2

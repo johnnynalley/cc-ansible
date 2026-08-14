@@ -397,6 +397,41 @@
       loop_control:
         label: "{{ item.0.name }}/{{ item.1 }}"
 
+    - name: Inspect Hermes profile-transform runtime mountpoints
+      ansible.builtin.stat:
+        path: "{{ item.0.home }}/{{ item.1 }}"
+        follow: false
+      loop: >-
+        {{ hermes_shadow_profiles
+           | product(['transformed-data', 'transformed-managed'])
+           | list }}
+      register: hermes_shadow_profile_transform_mountpoints
+
+    - name: Reject unsafe Hermes profile-transform runtime mountpoints
+      ansible.builtin.assert:
+        that:
+          - not item.stat.exists or (item.stat.isdir and not item.stat.islnk)
+        fail_msg: >-
+          A Hermes profile-transform runtime mountpoint is not absent or a
+          regular, non-symlink directory.
+      loop: "{{ hermes_shadow_profile_transform_mountpoints.results }}"
+      loop_control:
+        label: "{{ item.item.0.name }}/{{ item.item.1 }}"
+
+    - name: Create root-owned Hermes profile-transform runtime mountpoints
+      ansible.builtin.file:
+        path: "{{ item.0.home }}/{{ item.1 }}"
+        state: directory
+        owner: root
+        group: "{{ item.0.group }}"
+        mode: "0750"
+      loop: >-
+        {{ hermes_shadow_profiles
+           | product(['transformed-data', 'transformed-managed'])
+           | list }}
+      loop_control:
+        label: "{{ item.0.name }}/{{ item.1 }}"
+
     - name: Download reviewed uv release archive
       ansible.builtin.get_url:
         url: "{{ hermes_shadow_uv_archive_url }}"
@@ -689,6 +724,26 @@
       ansible.builtin.copy:
         src: "{{ playbook_dir }}/../../{{ hermes_profile_data_stager_source }}"
         dest: "{{ hermes_profile_data_stager_live }}"
+        owner: root
+        group: root
+        mode: "0755"
+        backup: true
+
+    - name: Deploy Hermes profile-transform contract
+      ansible.builtin.copy:
+        src: >-
+          {{ playbook_dir
+             }}/../../{{ hermes_profile_transforms_contract_source }}
+        dest: "{{ hermes_profile_transforms_contract_live }}"
+        owner: root
+        group: root
+        mode: "0444"
+        backup: true
+
+    - name: Deploy Hermes profile transformer
+      ansible.builtin.copy:
+        src: "{{ playbook_dir }}/../../{{ hermes_profile_transformer_source }}"
+        dest: "{{ hermes_profile_transformer_live }}"
         owner: root
         group: root
         mode: "0755"
