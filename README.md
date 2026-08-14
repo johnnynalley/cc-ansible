@@ -300,6 +300,7 @@ Packages are merged from multiple sources (all applicable variables combined):
 | `hermes-openclaw-dry-run.yml` | `hermes_hosts` | Operator-approved, shape-only official importer inventory with no source content, activation, or service-state change |
 | `hermes-profile-memory.yml` | `hermes_hosts` | Disabled-by-default, transactional native memory seeding for Astra and Rigel; Dubble remains empty and all Gateways remain stopped |
 | `hermes-profile-skills.yml` | `hermes_hosts` | Disabled-by-default, transactional native skill staging with exact hashes, root-owned per-profile sources, and read-only runtime discovery proof |
+| `hermes-profile-data.yml` | `hermes_hosts` | Disabled-by-default, copy-only staging of reviewed project data and read-only operator references into isolated Hermes profile roots; memory, credentials, transforms, and activation remain excluded |
 | `openclaw-health-receiver.yml` | `openclaw_hosts` | Isolated Health receiver and aggregate-only report publisher (disabled by default) |
 | `openclaw-isolated-gateway.yml` | `openclaw_hosts` | Modernized split Gateway/Codex canary with immutable runtime/provider code, separate no-login identities and secrets, isolated executor OAuth, and model proof (disabled by default) |
 | `openclaw-state-rehearsal.yml` | `openclaw_hosts` | Verified relocation rehearsal for active file-backed sessions with bounded current/rollback generation retention (disabled by default) |
@@ -1076,6 +1077,15 @@ production token, and is not imported by `site.yml`.
   hashes, native parsing and threat scanning, profile isolation, transactional
   rollback, root ownership, read-only service binding, and Hermes's own runtime
   skill index are required; no Gateway or model starts during staging.
+- **Reviewed profile data**:
+  `playbooks/agents/hermes-profile-data.yml` copies only `data-stage` and
+  `operator-reference` mappings into separate per-profile roots. Writable
+  project data is owned by its no-login profile; authorization, configuration,
+  and course references remain root-owned and runtime-read-only. Exact source
+  pins, source stability, content hashes, ownership, mount modes, transactional
+  rollback, and unchanged service states are required. Legacy memory,
+  reviewer evidence, structured transforms, credentials, sessions, and raw
+  prompt injection remain excluded.
 - **Architecture and gates**: `docs/hermes-replacement.md`
 - **Discord handoff**: three credential-free profile declarations, silent
   unknown DMs, fail-closed allowlists, no replay/backfill, and an attended
@@ -1085,10 +1095,10 @@ production token, and is not imported by `site.yml`.
   deterministic no-agent jobs; Health remains external and Siri remains absent
 - **Validation**: `ansible-playbook playbooks/agents/hermes-shadow.yml --syntax-check`
 - **Inactive runtime**: the exact official release, locked dependencies,
-  no-login identities, managed policies, compact memory, and reviewed skills
-  are staged. Provider credentials, Discord routes, readiness markers, and
-  schedules remain absent. Hermes gateways cannot start while any OpenClaw
-  Gateway listener is active.
+  no-login identities, managed policies, compact memory, reviewed skills, and
+  isolated reviewed data bindings are staged. Provider credentials, Discord
+  routes, readiness markers, and schedules remain absent. Hermes gateways
+  cannot start while any OpenClaw Gateway listener is active.
 
 ## OpenClaw (jn-t14s-lin)
 

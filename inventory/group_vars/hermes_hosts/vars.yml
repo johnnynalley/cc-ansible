@@ -51,6 +51,22 @@ hermes_profile_skills_contract_live: >-
 hermes_profile_skills_rollback_root: >-
   /srv/live-rollbacks/jn-t14s-lin/hermes-migration
 
+# Reviewed project data and operator references copied into a new isolated
+# Hermes generation. This remains disabled and does not import memory,
+# credentials, structured runtime state, schedules, routes, or model context.
+hermes_profile_data_mode: disabled
+hermes_profile_data_approved: false
+hermes_profile_data_contract_source: >-
+  files/hermes/profile-data-stage-contract.json
+hermes_profile_data_contract_live: /etc/hermes/profile-data-stage-contract.json
+hermes_profile_data_stager_source: >-
+  scripts/agents/hermes-profile-data-stage.py
+hermes_profile_data_stager_live: /usr/local/libexec/hermes-profile-data-stage
+hermes_profile_data_root: /var/lib/hermes/profile-data
+hermes_profile_data_manifest_live: /etc/hermes/profile-data-manifest.json
+hermes_profile_data_rollback_root: >-
+  /srv/live-rollbacks/jn-t14s-lin/hermes-migration
+
 hermes_shadow_source_repo: https://github.com/NousResearch/hermes-agent.git
 hermes_shadow_install_ref: v2026.8.3
 hermes_shadow_expected_tag_object: 7de39e700d2c329e15d32eb0b96e2f7cdd9fbdb2

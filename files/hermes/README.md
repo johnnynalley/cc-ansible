@@ -47,6 +47,14 @@ reviewed Ansible Vault ciphertext seeds declared by
   hashes before root-owned `/etc/hermes/<profile>/skills` content is installed.
   Each Gateway bind-mounts that tree read-only under its native local skill
   root and revalidates both the tree and Hermes's own skill index before start.
+- `profile-data-stage-contract.json` permits a copy-only inactive transaction
+  for exactly the `data-stage` and `operator-reference` mappings from the
+  pinned profile-import and workspace-policy contracts. It defines distinct
+  per-profile writable and managed roots, fixed no-login identities, strict
+  size and object limits, source-stability and rollback gates, and no memory,
+  reviewer, structured-transform, credential, messaging, scheduler, model, or
+  Gateway authority. The complete manifest is root-private; each runtime sees
+  only its own writable bind and read-only managed bind.
 - `behavior-contract.json` defines semantic reasoning, concise output,
   correction generalization, and Hermes-native approval-gated self-evolution.
   `behavior-regressions.json` contains sanitized promotion cases derived from
@@ -93,6 +101,11 @@ reviewed Ansible Vault ciphertext seeds declared by
 - `scripts/agents/hermes-profile-skills-validate.py` applies Hermes's pinned
   native frontmatter validator, threat scanner, exact inventory/hash checks,
   and native runtime-index proof to the reviewed per-profile skills.
+- `scripts/agents/hermes-profile-data-stage.py` plans, copies, and verifies the
+  reviewed project/reference inventory without following links, preserving
+  executable bits, mounting the source, or importing raw content as prompts.
+  It fails on source drift, manifest or inventory drift, unsafe ownership,
+  unexpected object kinds, and incorrect runtime bind modes.
 - `scripts/agents/hermes-discord-cutover-audit.py` validates source pins,
   distinct profile and Discord identities, inert authority, ordered source
   drain and target activation, rollback, Health continuity, and the complete

@@ -19,7 +19,11 @@
   managed-scope parser can run; and exposes no dashboard or API listener.
   It also bind-mounts the profile's root-owned reviewed skill tree read-only
   under Hermes's native local skill root and requires the exact contract plus
-  native skill-index validator to pass before the Gateway process starts.
+  native skill-index validator to pass before the Gateway process starts. Its
+  reviewed project-data source is bound writable only to the matching profile,
+  while root-managed operator references are bound read-only. Root and
+  service-identity preflights verify the complete manifest, exact bind pair,
+  and read/write mount modes before the Gateway process can start.
 
 ## Consumer
 

@@ -65,6 +65,16 @@
   skills, semantic descriptions, capability-field exclusions, profile
   isolation, transactional rollback, native service bindings, and absence of
   Gateway activation.
+- `hermes-profile-data-stage.py` selects only the reviewed `data-stage` and
+  `operator-reference` mappings from pinned source contracts, takes a stable
+  no-link snapshot, copies bytes into isolated writable/root-managed profile
+  roots, normalizes modes, writes a root-private content manifest, and verifies
+  exact managed inventory, safe writable drift, and runtime bind identity plus
+  read/write mount flags. It never mounts or mutates the OpenClaw source.
+- `test_hermes_profile_data_stage.py` covers selection boundaries, source-pin
+  and source-race rejection, executable-bit removal, manifest and root-shape
+  drift, managed immutability, bounded writable drift, runtime identity and
+  mount modes, transaction cleanup, rollback, and absence of Gateway starts.
 - `test_hermes_behavior_contract.py` validates semantic routing without phrase
   triggers, one concise user-facing answer, native background review with
   staged memory/skill approval, owner-only policy changes, complete sanitized

@@ -111,6 +111,22 @@ class HermesShadowPlaybookTests(unittest.TestCase):
             with self.subTest(task=name):
                 self.assertIn("check_mode: false", self.task(name))
 
+    def test_every_pinned_profile_data_destination_parent_is_declared(self) -> None:
+        directories = self.task("Create Hermes root-owned deployment directories")
+        pinned_sources = self.task("Deploy pinned Hermes profile-data source contracts")
+        self.assertIn(
+            "/usr/local/share/hermes-shadow/repository/files/hermes",
+            directories,
+        )
+        self.assertIn(
+            "/usr/local/share/hermes-shadow/repository/files/openclaw",
+            directories,
+        )
+        self.assertIn("files/hermes/profile-import-contract.json", pinned_sources)
+        self.assertIn(
+            "files/openclaw/workspace-migration-policy.json", pinned_sources
+        )
+
     def test_every_managed_config_renders_with_fail_closed_policy(self) -> None:
         template = self.environment.from_string(self.config_template)
         for profile in self.variables["hermes_shadow_profiles"]:
@@ -181,6 +197,18 @@ class HermesShadowPlaybookTests(unittest.TestCase):
             "hermes_profile_skills_contract_live": self.variables[
                 "hermes_profile_skills_contract_live"
             ],
+            "hermes_profile_data_stager_live": self.variables[
+                "hermes_profile_data_stager_live"
+            ],
+            "hermes_profile_data_contract_live": self.variables[
+                "hermes_profile_data_contract_live"
+            ],
+            "hermes_profile_data_root": self.variables[
+                "hermes_profile_data_root"
+            ],
+            "hermes_profile_data_manifest_live": self.variables[
+                "hermes_profile_data_manifest_live"
+            ],
         }
         for profile in self.variables["hermes_shadow_profiles"]:
             rendered = template.render(hermes_profile=profile, **common)
@@ -208,6 +236,22 @@ class HermesShadowPlaybookTests(unittest.TestCase):
                 f"{profile['home']}/skills/managed",
                 rendered,
             )
+            self.assertIn(
+                f"--mode runtime --profile {profile['name']}", rendered
+            )
+            self.assertIn(
+                f"BindPaths=/var/lib/hermes/profile-data/{profile['name']}/writable:"
+                f"{profile['home']}/imported-data",
+                rendered,
+            )
+            self.assertIn(
+                f"BindReadOnlyPaths=/var/lib/hermes/profile-data/{profile['name']}/managed:"
+                f"{profile['home']}/managed-data",
+                rendered,
+            )
+            self.assertIn("hermes-profile-data-stage", rendered)
+            self.assertIn("--allow-writable-drift", rendered)
+            self.assertIn("ExecStartPre=+/usr/local/libexec/hermes-profile-data-stage", rendered)
             self.assertIn(
                 f"--mode runtime --profile {profile['name']}", rendered
             )

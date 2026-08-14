@@ -277,6 +277,7 @@
         - /usr/local/share/hermes-shadow/repository/files
         - /usr/local/share/hermes-shadow/repository/files/hermes
         - /usr/local/share/hermes-shadow/repository/files/hermes/jobs
+        - /usr/local/share/hermes-shadow/repository/files/openclaw
         - /usr/local/share/hermes-shadow/repository/playbooks
         - /usr/local/share/hermes-shadow/repository/playbooks/agents
         - /usr/local/share/hermes-shadow/repository/scripts
@@ -360,6 +361,41 @@
       loop: "{{ hermes_shadow_profiles }}"
       loop_control:
         label: "{{ item.name }}"
+
+    - name: Inspect Hermes profile-data runtime mountpoints
+      ansible.builtin.stat:
+        path: "{{ item.0.home }}/{{ item.1 }}"
+        follow: false
+      loop: >-
+        {{ hermes_shadow_profiles
+           | product(['imported-data', 'managed-data'])
+           | list }}
+      register: hermes_shadow_profile_data_mountpoints
+
+    - name: Reject unsafe Hermes profile-data runtime mountpoints
+      ansible.builtin.assert:
+        that:
+          - not item.stat.exists or (item.stat.isdir and not item.stat.islnk)
+        fail_msg: >-
+          A Hermes profile-data runtime mountpoint is not absent or a regular,
+          non-symlink directory.
+      loop: "{{ hermes_shadow_profile_data_mountpoints.results }}"
+      loop_control:
+        label: "{{ item.item.0.name }}/{{ item.item.1 }}"
+
+    - name: Create root-owned Hermes profile-data runtime mountpoints
+      ansible.builtin.file:
+        path: "{{ item.0.home }}/{{ item.1 }}"
+        state: directory
+        owner: root
+        group: "{{ item.0.group }}"
+        mode: "0750"
+      loop: >-
+        {{ hermes_shadow_profiles
+           | product(['imported-data', 'managed-data'])
+           | list }}
+      loop_control:
+        label: "{{ item.0.name }}/{{ item.1 }}"
 
     - name: Download reviewed uv release archive
       ansible.builtin.get_url:
@@ -639,6 +675,25 @@
         mode: "0755"
         backup: true
 
+    - name: Deploy Hermes profile-data staging contract
+      ansible.builtin.copy:
+        src: >-
+          {{ playbook_dir }}/../../{{ hermes_profile_data_contract_source }}
+        dest: "{{ hermes_profile_data_contract_live }}"
+        owner: root
+        group: root
+        mode: "0444"
+        backup: true
+
+    - name: Deploy Hermes profile-data stager
+      ansible.builtin.copy:
+        src: "{{ playbook_dir }}/../../{{ hermes_profile_data_stager_source }}"
+        dest: "{{ hermes_profile_data_stager_live }}"
+        owner: root
+        group: root
+        mode: "0755"
+        backup: true
+
     - name: Deploy pinned Hermes Discord audit sources
       ansible.builtin.copy:
         src: "{{ playbook_dir }}/../../{{ item }}"
@@ -668,6 +723,18 @@
         - files/hermes/automation-regressions.json
         - playbooks/agents/openclaw-health-receiver.yml
         - scripts/agents/openclaw-control-plane-inventory.py
+
+    - name: Deploy pinned Hermes profile-data source contracts
+      ansible.builtin.copy:
+        src: "{{ playbook_dir }}/../../{{ item }}"
+        dest: "/usr/local/share/hermes-shadow/repository/{{ item }}"
+        owner: root
+        group: root
+        mode: "0444"
+        backup: true
+      loop:
+        - files/hermes/profile-import-contract.json
+        - files/openclaw/workspace-migration-policy.json
 
     - name: Validate deployed Hermes shadow contract
       ansible.builtin.command:

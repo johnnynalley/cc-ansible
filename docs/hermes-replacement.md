@@ -817,6 +817,66 @@ Check-mode safety probes now explicitly execute instead of returning empty
 Ansible placeholder results, and native merged-config validation occurs during
 every bootstrap before checksum promotion.
 
+## Reviewed Profile Skills And Data
+
+Five legacy procedural areas have been rebuilt as declarative Hermes-native
+skills rather than copied from mutable phrase-triggered trees. Their
+root-owned sources are staged per profile, parsed and threat-scanned by the
+exact installed Hermes runtime, bound read-only under each profile's native
+skill root, and checked through Hermes's own runtime skill index before any
+Gateway can start. The accepted inactive transaction left all Gateways stopped
+and production OpenClaw and Health unchanged.
+
+Normal project data is a separate boundary from memory and skills.
+`files/hermes/profile-data-stage-contract.json` permits only the 16
+`data-stage` mappings and four `operator-reference` mappings already assigned
+by the pinned profile-import contract. Current planning selects 1,195 objects,
+1,125 files, and 752,637,034 bytes: 1,120 Astra files, four Dubble files, and
+one Rigel reference file. The bulk is user project/media data; it is not loaded
+into a model prompt.
+
+`playbooks/agents/hermes-profile-data.yml` is disabled by default. An approved
+run requires every Hermes Gateway stopped and boot-disabled, verifies the
+OpenClaw source and both source-contract hashes, copies into a root-private
+generation without links or executable bits, verifies source stability and
+every content hash, records a root-only rollback artifact, and promotes the
+complete generation as one transaction. Writable project data is owned by the
+matching no-login profile. Managed authorization, configuration, and course
+references are root-owned and read-only at runtime. The active generation root
+is root-owned execute-only traversal (`0711`); each profile subtree is `0750`
+with a distinct group, so a profile can verify and enter only its own sources.
+The full manifest is never exposed to a profile; a fixed root preflight
+verifies it, then an unprivileged preflight proves only that profile's exact
+writable and read-only bind pair.
+
+Memory curation, private reviewer evidence, structured transforms,
+credentials, sessions, transcripts, delivery queues, provider state, and raw
+prompt injection are excluded from this transaction. The original OpenClaw
+tree remains untouched and unmounted. Gateway, model, Discord, scheduler, and
+readiness activation are outside this playbook.
+
+The accepted 2026-08-13 transaction installed all 1,125 files and
+752,637,034 bytes. The root-private mode-`0400` manifest strictly revalidated
+in the post-install check run, and all three transient service namespaces
+proved the exact writable/read-only bind pair as their no-login identities.
+The active generation root is `root:root 0711`; profile roots and data retain
+their distinct group and mode boundaries. Production OpenClaw and Health
+remain active and enabled, both isolated OpenClaw canaries remain active but
+boot-disabled, and all Hermes Gateways remain inactive and disabled. A full
+stopped-bootstrap convergence afterward reported zero changes. The successful
+pre-data rollback is
+`/srv/live-rollbacks/jn-t14s-lin/hermes-migration/20260814T012914962035272Z-pre-profile-data`;
+its recorded archive SHA-256 matches the retained artifact.
+
+The first live attempt was intentionally rejected by its unprivileged
+namespace proof after copy and promotion because the initial active root mode
+`0700` blocked a profile from traversing to its own source path. The rescue
+removed the generation and manifest, restored the prior absent state, and left
+no staging tree. The corrected `0711` top level grants traversal but no list or
+read permission; each `0750` profile subtree still rejects every other profile.
+The failed-attempt rollback and the targeted pre-correction contract/stager
+rollback remain under the same live-rollbacks domain for diagnosis.
+
 ## Behavior And Self-Evolution
 
 The replacement does not use a plugin or phrase table to decide when Astra

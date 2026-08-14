@@ -1,0 +1,626 @@
+---
+# yamllint disable rule:line-length
+# Purpose: Stage reviewed project data and operator references for inactive Hermes profiles.
+# Hosts: hermes_hosts.
+# Key vars: hermes_profile_data_*.
+# Scripts: scripts/agents/hermes-profile-data-stage.py.
+# Validation: ansible-playbook playbooks/agents/hermes-profile-data.yml --syntax-check.
+
+- name: Stage reviewed Hermes profile data
+  hosts: hermes_hosts
+  become: true
+  gather_facts: false
+
+  vars:
+    hermes_profile_data_contract_path: >-
+      {{ playbook_dir }}/../../{{ hermes_profile_data_contract_source }}
+    hermes_profile_data_contract: >-
+      {{ lookup('ansible.builtin.file', hermes_profile_data_contract_path) | from_json }}
+    hermes_profile_data_repository_root: /usr/local/share/hermes-shadow/repository
+    hermes_profile_data_gateway_units:
+      - hermes-gateway-astra.service
+      - hermes-gateway-dubble.service
+      - hermes-gateway-rigel.service
+    hermes_profile_data_system_units:
+      - hermes-gateway-astra.service
+      - hermes-gateway-dubble.service
+      - hermes-gateway-rigel.service
+      - openclaw-isolated-codex.service
+      - openclaw-isolated-gateway.service
+    hermes_profile_data_user_units:
+      - openclaw-gateway.service
+      - health-receiver.service
+
+  tasks:
+    - name: Validate Hermes profile-data mode
+      ansible.builtin.assert:
+        that:
+          - hermes_profile_data_mode in ['disabled', 'stage']
+        fail_msg: >-
+          hermes_profile_data_mode must be disabled or stage. This playbook has
+          no Gateway, model, scheduler, route, or delivery activation mode.
+
+    - name: Skip Hermes profile data when disabled
+      ansible.builtin.meta: end_host
+      when: hermes_profile_data_mode == 'disabled'
+
+    - name: Require explicit reviewed Hermes profile-data approval
+      ansible.builtin.assert:
+        that:
+          - hermes_profile_data_approved | bool
+          - inventory_hostname == 'jn-t14s-lin'
+          - hermes_profile_data_contract.schemaVersion == 1
+          - hermes_profile_data_contract.mode == 'inactive-reviewed-profile-data'
+          - hermes_profile_data_contract.selectedImportModes | sort == ['data-stage', 'operator-reference']
+          - hermes_profile_data_contract.profiles.keys() | list | sort == ['astra', 'dubble', 'rigel']
+          - hermes_profile_data_contract.safety.values() | select('equalto', false) | list | length == hermes_profile_data_contract.safety | length
+          - hermes_profile_data_contract.execution.values() | select('equalto', true) | list | length == hermes_profile_data_contract.execution | length
+        fail_msg: >-
+          The requested profile-data transaction differs from the reviewed
+          no-source-mount, no-memory, no-credential, no-activation contract.
+
+    - name: Inspect reviewed Hermes profile-data runtime dependencies
+      ansible.builtin.stat:
+        path: "{{ item }}"
+        follow: false
+        get_checksum: true
+        checksum_algorithm: sha256
+      loop:
+        - "{{ hermes_profile_data_stager_live }}"
+        - "{{ hermes_profile_data_contract_live }}"
+        - "{{ hermes_profile_data_repository_root }}/files/hermes/profile-import-contract.json"
+        - "{{ hermes_profile_data_repository_root }}/files/openclaw/workspace-migration-policy.json"
+        - "{{ hermes_profile_data_contract.sourceRoot }}"
+      register: hermes_profile_data_dependencies
+
+    - name: Require safe Hermes profile-data runtime dependencies
+      ansible.builtin.assert:
+        that:
+          - hermes_profile_data_dependencies.results[0].stat.isreg
+          - not hermes_profile_data_dependencies.results[0].stat.islnk
+          - hermes_profile_data_dependencies.results[1].stat.isreg
+          - not hermes_profile_data_dependencies.results[1].stat.islnk
+          - hermes_profile_data_dependencies.results[2].stat.checksum == hermes_profile_data_contract.sourcePins.profileImport.sha256
+          - hermes_profile_data_dependencies.results[3].stat.checksum == hermes_profile_data_contract.sourcePins.workspacePolicy.sha256
+          - hermes_profile_data_dependencies.results[4].stat.isdir
+          - not hermes_profile_data_dependencies.results[4].stat.islnk
+        fail_msg: >-
+          A profile-data stager, pinned contract, or protected source root is
+          missing, unsafe, or has drifted.
+
+    - name: Inspect service states before Hermes profile-data staging
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/systemctl
+          - show
+          - --property=LoadState
+          - --property=ActiveState
+          - --property=UnitFileState
+          - "{{ item }}"
+      loop: "{{ hermes_profile_data_system_units }}"
+      register: hermes_profile_data_system_before
+      check_mode: false
+      changed_when: false
+      failed_when: false
+
+    - name: Require all Hermes gateways stopped and disabled before data staging
+      ansible.builtin.assert:
+        that:
+          - "'LoadState=loaded' in item.stdout"
+          - "'ActiveState=inactive' in item.stdout"
+          - "'UnitFileState=disabled' in item.stdout"
+        fail_msg: >-
+          A Hermes Gateway is active, missing, or boot-enabled. Profile data may
+          be staged only while all Hermes profiles are stopped and disabled.
+      loop: "{{ hermes_profile_data_system_before.results[0:3] }}"
+      loop_control:
+        label: "{{ item.item }}"
+
+    - name: Inspect production user-service states before profile-data staging
+      ansible.builtin.command:
+        argv:
+          - /usr/sbin/runuser
+          - --user
+          - johnny
+          - --
+          - /usr/bin/env
+          - XDG_RUNTIME_DIR=/run/user/1000
+          - DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus
+          - /usr/bin/systemctl
+          - --user
+          - show
+          - --property=LoadState
+          - --property=ActiveState
+          - --property=UnitFileState
+          - "{{ item }}"
+      loop: "{{ hermes_profile_data_user_units }}"
+      register: hermes_profile_data_user_before
+      check_mode: false
+      changed_when: false
+
+    - name: Require production OpenClaw and Health services to exist
+      ansible.builtin.assert:
+        that:
+          - "'LoadState=loaded' in item.stdout"
+        fail_msg: >-
+          Production OpenClaw or Health is missing. The inactive data seed will
+          not proceed without before/after parity evidence.
+      loop: "{{ hermes_profile_data_user_before.results }}"
+      loop_control:
+        label: "{{ item.item }}"
+
+    - name: Read Hermes Gateway units for profile-data bindings
+      ansible.builtin.slurp:
+        src: "/etc/systemd/system/hermes-gateway-{{ item.key }}.service"
+      loop: "{{ hermes_profile_data_contract.profiles | dict2items }}"
+      register: hermes_profile_data_gateway_sources
+
+    - name: Require reviewed profile-data bindings and startup gates
+      ansible.builtin.assert:
+        that:
+          - >-
+            ('BindPaths=' ~ item.item.value.writableRoot ~ ':' ~ item.item.value.writableRuntimeRoot)
+            in (item.content | b64decode)
+          - >-
+            ('BindReadOnlyPaths=' ~ item.item.value.managedRoot ~ ':' ~ item.item.value.managedRuntimeRoot)
+            in (item.content | b64decode)
+          - >-
+            ('--mode runtime --profile ' ~ item.item.key)
+            in (item.content | b64decode)
+          - hermes_profile_data_stager_live in (item.content | b64decode)
+          - hermes_profile_data_manifest_live in (item.content | b64decode)
+        fail_msg: >-
+          A Hermes Gateway unit lacks its isolated writable bind, read-only
+          managed bind, root manifest verifier, or profile-identity probe.
+      loop: "{{ hermes_profile_data_gateway_sources.results }}"
+      loop_control:
+        label: "{{ item.item.key }}"
+
+    - name: Plan reviewed Hermes profile data without reading source text
+      ansible.builtin.command:
+        argv:
+          - "{{ hermes_profile_data_stager_live }}"
+          - --contract
+          - "{{ hermes_profile_data_contract_live }}"
+          - --repository-root
+          - "{{ hermes_profile_data_repository_root }}"
+          - --source-root
+          - "{{ hermes_profile_data_contract.sourceRoot }}"
+          - --mode
+          - plan
+      register: hermes_profile_data_plan_command
+      check_mode: false
+      changed_when: false
+
+    - name: Parse reviewed Hermes profile-data plan
+      ansible.builtin.set_fact:
+        hermes_profile_data_plan: "{{ hermes_profile_data_plan_command.stdout | from_json }}"
+
+    - name: Require bounded reviewed Hermes profile-data plan
+      ansible.builtin.assert:
+        that:
+          - hermes_profile_data_plan.status == 'ok'
+          - hermes_profile_data_plan.mode == 'plan'
+          - hermes_profile_data_plan.summary.objects > 0
+          - hermes_profile_data_plan.summary.objects <= hermes_profile_data_contract.limits.maxObjects
+          - hermes_profile_data_plan.summary.bytes <= hermes_profile_data_contract.limits.maxTotalBytes
+          - hermes_profile_data_plan.summary.profiles.astra.files > 0
+          - hermes_profile_data_plan.summary.profiles.dubble.files > 0
+          - hermes_profile_data_plan.summary.profiles.rigel.managedFiles > 0
+        fail_msg: >-
+          The selected data/reference inventory is empty, too large, or missing
+          a required profile. Memory and structured-transform rows are excluded.
+
+    - name: Report Hermes profile-data check-mode boundary
+      ansible.builtin.debug:
+        msg: >-
+          Check mode validated the stopped services, exact unit bindings, and
+          shape-only plan. It did not copy source data or change a target.
+      when: ansible_check_mode
+
+    - name: Stop Hermes profile-data staging before mutation in check mode
+      ansible.builtin.meta: end_host
+      when: ansible_check_mode
+
+    - name: Read host timestamp for Hermes profile-data transaction
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/date
+          - -u
+          - +%Y%m%dT%H%M%S%NZ
+      register: hermes_profile_data_timestamp
+      changed_when: false
+
+    - name: Set Hermes profile-data transaction paths
+      ansible.builtin.set_fact:
+        hermes_profile_data_stage_root: >-
+          /var/lib/hermes/.profile-data-stage-{{ hermes_profile_data_timestamp.stdout }}
+        hermes_profile_data_stage_generation: >-
+          /var/lib/hermes/.profile-data-stage-{{ hermes_profile_data_timestamp.stdout }}/generation
+        hermes_profile_data_stage_manifest: >-
+          /var/lib/hermes/.profile-data-stage-{{ hermes_profile_data_timestamp.stdout }}/manifest.json
+        hermes_profile_data_backup_dir: >-
+          {{ hermes_profile_data_rollback_root }}/{{ hermes_profile_data_timestamp.stdout }}-pre-profile-data
+
+    - name: Inspect active Hermes profile-data targets before staging
+      ansible.builtin.stat:
+        path: "{{ item }}"
+        follow: false
+      loop:
+        - "{{ hermes_profile_data_root }}"
+        - "{{ hermes_profile_data_manifest_live }}"
+      register: hermes_profile_data_targets_before
+
+    - name: Reject unsafe active Hermes profile-data targets
+      ansible.builtin.assert:
+        that:
+          - >-
+            hermes_profile_data_targets_before.results[0].stat.exists
+            == hermes_profile_data_targets_before.results[1].stat.exists
+          - >-
+            not hermes_profile_data_targets_before.results[0].stat.exists
+            or (hermes_profile_data_targets_before.results[0].stat.isdir
+                and not hermes_profile_data_targets_before.results[0].stat.islnk)
+          - >-
+            not hermes_profile_data_targets_before.results[1].stat.exists
+            or (hermes_profile_data_targets_before.results[1].stat.isreg
+                and not hermes_profile_data_targets_before.results[1].stat.islnk)
+        fail_msg: >-
+          The active profile-data root and manifest are incomplete, mismatched,
+          or not the expected non-symlink object types.
+
+    - name: Verify existing Hermes profile-data generation before convergence
+      ansible.builtin.command:
+        argv:
+          - "{{ hermes_profile_data_stager_live }}"
+          - --contract
+          - "{{ hermes_profile_data_contract_live }}"
+          - --repository-root
+          - "{{ hermes_profile_data_repository_root }}"
+          - --target-root
+          - "{{ hermes_profile_data_root }}"
+          - --manifest
+          - "{{ hermes_profile_data_manifest_live }}"
+          - --mode
+          - verify
+      register: hermes_profile_data_existing_verify
+      check_mode: false
+      changed_when: false
+      when: hermes_profile_data_targets_before.results[0].stat.exists
+
+    - name: Read available bytes for Hermes profile-data staging
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/df
+          - --output=avail
+          - -B1
+          - /var/lib/hermes
+      register: hermes_profile_data_available
+      changed_when: false
+
+    - name: Require capacity for a complete new profile-data generation
+      ansible.builtin.assert:
+        that:
+          - >-
+            hermes_profile_data_available.stdout_lines[-1] | int
+            > hermes_profile_data_plan.summary.bytes | int + 536870912
+        fail_msg: >-
+          The Hermes filesystem lacks the planned generation size plus the
+          reviewed 512 MiB staging reserve.
+
+    - name: Build and verify a complete Hermes profile-data generation
+      block:
+        - name: Create root-private Hermes profile-data staging root
+          ansible.builtin.file:
+            path: "{{ hermes_profile_data_stage_root }}"
+            state: directory
+            owner: root
+            group: root
+            mode: "0700"
+
+        - name: Create empty Hermes profile-data generation root
+          ansible.builtin.file:
+            path: "{{ hermes_profile_data_stage_generation }}"
+            state: directory
+            owner: root
+            group: root
+            mode: "0700"
+
+        - name: Stage and verify complete Hermes profile-data generation
+          ansible.builtin.command:
+            argv:
+              - "{{ hermes_profile_data_stager_live }}"
+              - --contract
+              - "{{ hermes_profile_data_contract_live }}"
+              - --repository-root
+              - "{{ hermes_profile_data_repository_root }}"
+              - --source-root
+              - "{{ hermes_profile_data_contract.sourceRoot }}"
+              - --target-root
+              - "{{ hermes_profile_data_stage_generation }}"
+              - --manifest
+              - "{{ hermes_profile_data_stage_manifest }}"
+              - --mode
+              - stage
+          register: hermes_profile_data_stage_command
+          changed_when: true
+
+        - name: Parse staged Hermes profile-data result
+          ansible.builtin.set_fact:
+            hermes_profile_data_stage_result: "{{ hermes_profile_data_stage_command.stdout | from_json }}"
+
+        - name: Require staged Hermes profile-data parity with the plan
+          ansible.builtin.assert:
+            that:
+              - hermes_profile_data_stage_result.status == 'ok'
+              - hermes_profile_data_stage_result.mode == 'stage'
+              - hermes_profile_data_stage_result.summary.files == hermes_profile_data_plan.summary.files
+              - hermes_profile_data_stage_result.summary.bytes == hermes_profile_data_plan.summary.bytes
+            fail_msg: >-
+              The copied generation does not match the accepted shape-only plan.
+      rescue:
+        - name: Remove incomplete Hermes profile-data staging root
+          ansible.builtin.file:
+            path: "{{ hermes_profile_data_stage_root }}"
+            state: absent
+
+        - name: Stop after failed Hermes profile-data generation staging
+          ansible.builtin.fail:
+            msg: >-
+              Hermes profile-data copying or generation verification failed.
+              The incomplete root-private staging tree was removed, no active
+              data was changed, and all source data remains untouched.
+
+    - name: Build and record Hermes profile-data rollback artifact
+      block:
+        - name: Create Hermes profile-data rollback directory
+          ansible.builtin.file:
+            path: "{{ hermes_profile_data_backup_dir }}"
+            state: directory
+            owner: root
+            group: root
+            mode: "0700"
+
+        - name: Build Hermes profile-data backup inventory
+          ansible.builtin.set_fact:
+            hermes_profile_data_existing_backup_paths: >-
+              {{
+                (['var/lib/hermes/profile-data']
+                 if hermes_profile_data_targets_before.results[0].stat.exists else [])
+                + (['etc/hermes/profile-data-manifest.json']
+                   if hermes_profile_data_targets_before.results[1].stat.exists else [])
+              }}
+
+        - name: Record existing Hermes profile-data paths for backup
+          ansible.builtin.copy:
+            dest: "{{ hermes_profile_data_stage_root }}/backup-paths.txt"
+            owner: root
+            group: root
+            mode: "0600"
+            content: |
+              {% for path in hermes_profile_data_existing_backup_paths %}
+              {{ path }}
+              {% endfor %}
+          when: hermes_profile_data_existing_backup_paths | length > 0
+
+        - name: Back up current Hermes profile data
+          ansible.builtin.command:
+            argv:
+              - /usr/bin/tar
+              - --create
+              - --file
+              - "{{ hermes_profile_data_backup_dir }}/profile-data.tar"
+              - --directory
+              - /
+              - --files-from
+              - >-
+                {{
+                  hermes_profile_data_stage_root ~ '/backup-paths.txt'
+                  if hermes_profile_data_existing_backup_paths | length > 0
+                  else '/dev/null'
+                }}
+          changed_when: true
+
+        - name: Restrict Hermes profile-data rollback archive
+          ansible.builtin.file:
+            path: "{{ hermes_profile_data_backup_dir }}/profile-data.tar"
+            owner: root
+            group: root
+            mode: "0600"
+
+        - name: Hash Hermes profile-data rollback archive
+          ansible.builtin.command:
+            argv:
+              - /usr/bin/sha256sum
+              - "{{ hermes_profile_data_backup_dir }}/profile-data.tar"
+          register: hermes_profile_data_backup_hash
+          changed_when: false
+
+        - name: Record Hermes profile-data rollback manifest
+          ansible.builtin.copy:
+            dest: "{{ hermes_profile_data_backup_dir }}/manifest.json"
+            owner: root
+            group: root
+            mode: "0600"
+            content: >-
+              {{ {
+                'schemaVersion': 1,
+                'createdAt': hermes_profile_data_timestamp.stdout,
+                'host': inventory_hostname,
+                'artifact': 'profile-data.tar',
+                'artifactSha256': hermes_profile_data_backup_hash.stdout.split()[0],
+                'existingActiveRoot': hermes_profile_data_targets_before.results[0].stat.exists,
+                'existingManifest': hermes_profile_data_targets_before.results[1].stat.exists,
+                'plannedFiles': hermes_profile_data_plan.summary.files,
+                'plannedBytes': hermes_profile_data_plan.summary.bytes
+              } | to_nice_json }}
+      rescue:
+        - name: Remove staged generation after rollback creation failure
+          ansible.builtin.file:
+            path: "{{ hermes_profile_data_stage_root }}"
+            state: absent
+
+        - name: Stop after failed Hermes profile-data rollback creation
+          ansible.builtin.fail:
+            msg: >-
+              Hermes profile-data rollback creation or hashing failed. The
+              staged generation was removed, active data was not changed, and
+              the partial root-private rollback directory was preserved for
+              operator inspection.
+
+    - name: Install and verify reviewed Hermes profile data
+      block:
+        - name: Remove prior active Hermes profile-data generation
+          ansible.builtin.file:
+            path: "{{ hermes_profile_data_root }}"
+            state: absent
+
+        - name: Promote staged Hermes profile-data generation atomically
+          ansible.builtin.command:
+            argv:
+              - /usr/bin/mv
+              - "{{ hermes_profile_data_stage_generation }}"
+              - "{{ hermes_profile_data_root }}"
+          changed_when: true
+
+        - name: Install root-private Hermes profile-data manifest
+          ansible.builtin.copy:
+            src: "{{ hermes_profile_data_stage_manifest }}"
+            dest: "{{ hermes_profile_data_manifest_live }}"
+            remote_src: true
+            owner: root
+            group: root
+            mode: "0400"
+
+        - name: Verify installed Hermes profile data and managed references
+          ansible.builtin.command:
+            argv:
+              - "{{ hermes_profile_data_stager_live }}"
+              - --contract
+              - "{{ hermes_profile_data_contract_live }}"
+              - --repository-root
+              - "{{ hermes_profile_data_repository_root }}"
+              - --target-root
+              - "{{ hermes_profile_data_root }}"
+              - --manifest
+              - "{{ hermes_profile_data_manifest_live }}"
+              - --mode
+              - verify
+              - --allow-writable-drift
+          changed_when: false
+
+        - name: Prove each profile sees only its reviewed runtime bind pair
+          ansible.builtin.command:
+            argv:
+              - /usr/bin/systemd-run
+              - --quiet
+              - --wait
+              - --pipe
+              - --collect
+              - "--unit=hermes-profile-data-{{ item.key }}-{{ hermes_profile_data_timestamp.stdout | lower }}"
+              - --property=Type=exec
+              - "--property=User=hermes-{{ item.key }}"
+              - "--property=Group=hermes-{{ item.key }}"
+              - "--property=NoNewPrivileges=yes"
+              - --property=ProtectSystem=strict
+              - --property=ProtectHome=yes
+              - "--property=ReadWritePaths={{ item.value.writableRoot }}"
+              - "--property=BindPaths={{ item.value.writableRoot }}:{{ item.value.writableRuntimeRoot }}"
+              - "--property=BindReadOnlyPaths={{ item.value.managedRoot }}:{{ item.value.managedRuntimeRoot }}"
+              - "{{ hermes_profile_data_stager_live }}"
+              - --contract
+              - "{{ hermes_profile_data_contract_live }}"
+              - --repository-root
+              - "{{ hermes_profile_data_repository_root }}"
+              - --mode
+              - runtime
+              - --profile
+              - "{{ item.key }}"
+          loop: "{{ hermes_profile_data_contract.profiles | dict2items }}"
+          loop_control:
+            label: "{{ item.key }}"
+          changed_when: false
+
+        - name: Inspect service states after Hermes profile-data staging
+          ansible.builtin.command:
+            argv:
+              - /usr/bin/systemctl
+              - show
+              - --property=LoadState
+              - --property=ActiveState
+              - --property=UnitFileState
+              - "{{ item }}"
+          loop: "{{ hermes_profile_data_system_units }}"
+          register: hermes_profile_data_system_after
+          check_mode: false
+          changed_when: false
+          failed_when: false
+
+        - name: Require unchanged system services after profile-data staging
+          ansible.builtin.assert:
+            that:
+              - hermes_profile_data_system_before.results | map(attribute='stdout') | list == hermes_profile_data_system_after.results | map(attribute='stdout') | list
+            fail_msg: >-
+              A Hermes or OpenClaw system service changed during inactive data staging.
+
+        - name: Inspect production user-service states after profile-data staging
+          ansible.builtin.command:
+            argv:
+              - /usr/sbin/runuser
+              - --user
+              - johnny
+              - --
+              - /usr/bin/env
+              - XDG_RUNTIME_DIR=/run/user/1000
+              - DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus
+              - /usr/bin/systemctl
+              - --user
+              - show
+              - --property=LoadState
+              - --property=ActiveState
+              - --property=UnitFileState
+              - "{{ item }}"
+          loop: "{{ hermes_profile_data_user_units }}"
+          register: hermes_profile_data_user_after
+          check_mode: false
+          changed_when: false
+
+        - name: Require unchanged production user services after data staging
+          ansible.builtin.assert:
+            that:
+              - hermes_profile_data_user_before.results | map(attribute='stdout') | list == hermes_profile_data_user_after.results | map(attribute='stdout') | list
+            fail_msg: >-
+              Production OpenClaw or Health changed during inactive data staging.
+      rescue:
+        - name: Remove failed Hermes profile-data generation
+          ansible.builtin.file:
+            path: "{{ hermes_profile_data_root }}"
+            state: absent
+
+        - name: Remove failed Hermes profile-data manifest
+          ansible.builtin.file:
+            path: "{{ hermes_profile_data_manifest_live }}"
+            state: absent
+
+        - name: Restore prior Hermes profile data after staging failure
+          ansible.builtin.command:
+            argv:
+              - /usr/bin/tar
+              - --extract
+              - --file
+              - "{{ hermes_profile_data_backup_dir }}/profile-data.tar"
+              - --directory
+              - /
+          changed_when: true
+
+        - name: Stop after restoring failed Hermes profile-data transaction
+          ansible.builtin.fail:
+            msg: >-
+              Hermes profile-data staging failed. The prior active generation
+              and manifest were restored from the recorded rollback artifact.
+      always:
+        - name: Remove Hermes profile-data staging root
+          ansible.builtin.file:
+            path: "{{ hermes_profile_data_stage_root }}"
+            state: absent
+          changed_when: false
