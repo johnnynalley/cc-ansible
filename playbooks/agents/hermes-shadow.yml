@@ -1445,6 +1445,47 @@
           == hermes_shadow_version_only_migration_from | int + 1
       no_log: true
 
+    - name: Migrate reviewed Astra Codex route one schema forward
+      ansible.builtin.copy:
+        content: >-
+          {{
+            hermes_existing_mutable_config
+            | combine({'_config_version': hermes_shadow_config_version})
+            | to_nice_yaml(indent=2, sort_keys=false)
+          }}
+        dest: "{{ item.item.home }}/config.yaml"
+        owner: "{{ item.item.user }}"
+        group: "{{ item.item.group }}"
+        mode: "0600"
+      loop: "{{ hermes_shadow_mutable_configs_before_repair.results }}"
+      loop_control:
+        label: "{{ item.item.name }}"
+      vars:
+        hermes_existing_mutable_config: >-
+          {{ item.content | b64decode | from_yaml }}
+        hermes_existing_model_route: >-
+          {{ hermes_existing_mutable_config.model | default({}) }}
+      when:
+        - item.item.name == 'astra'
+        - hermes_existing_mutable_config | length == 2
+        - hermes_existing_mutable_config._config_version is defined
+        - >-
+          hermes_existing_mutable_config._config_version | int
+          == hermes_shadow_version_only_migration_from | int
+        - >-
+          hermes_shadow_config_version | int
+          == hermes_shadow_version_only_migration_from | int + 1
+        - hermes_existing_model_route is mapping
+        - >-
+          hermes_existing_model_route.keys() | sort
+          == ['base_url', 'default', 'provider']
+        - hermes_existing_model_route.provider == 'openai-codex'
+        - hermes_existing_model_route.default == 'gpt-5.6-sol'
+        - >-
+          hermes_existing_model_route.base_url
+          == 'https://chatgpt.com/backend-api/codex'
+      no_log: true
+
     - name: Read current mutable Hermes profile configs
       ansible.builtin.slurp:
         src: "{{ item.home }}/config.yaml"

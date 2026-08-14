@@ -154,6 +154,16 @@ class HermesShadowPlaybookTests(unittest.TestCase):
             with self.subTest(task=name):
                 self.assertIn("check_mode: false", self.task(name))
 
+    def test_astra_codex_schema_migration_is_exact_and_fail_closed(self) -> None:
+        task = self.task("Migrate reviewed Astra Codex route one schema forward")
+        self.assertIn("item.item.name == 'astra'", task)
+        self.assertIn("hermes_existing_mutable_config | length == 2", task)
+        self.assertIn("['base_url', 'default', 'provider']", task)
+        self.assertIn("openai-codex", task)
+        self.assertIn("gpt-5.6-sol", task)
+        self.assertIn("https://chatgpt.com/backend-api/codex", task)
+        self.assertIn("no_log: true", task)
+
     def test_every_pinned_profile_data_destination_parent_is_declared(self) -> None:
         directories = self.task("Create Hermes root-owned deployment directories")
         pinned_sources = self.task("Deploy pinned Hermes profile-data source contracts")

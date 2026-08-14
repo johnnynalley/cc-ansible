@@ -231,6 +231,10 @@ independent Health receiver online, records only content-free root-private
 evidence, and has an automatic rescue block that stops Hermes and restores the
 previous OpenClaw unit state if any post-stop assertion fails. The neutral
 `.gateway-ready` marker replaces the staging-era `.shadow-ready` name.
+The shadow convergence permits one narrow mutable-config schema migration for
+Astra's already-proven native Codex route: schema 34, exactly the provider,
+model, and official Codex base URL fields, to schema 35. Any additional field
+or route drift still requires an offline reviewed migration.
 
 History and missed-message backfill remain disabled, so a message sent during
 the maintenance gap is not reconstructed later. This is an explicit short
