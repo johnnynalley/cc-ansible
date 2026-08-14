@@ -307,6 +307,15 @@ dedicated `openclaw-health` system service passes cutover validation.
   pending database and session blockers, unknown schema/status rejection,
   symlink rejection, redaction, private report permissions, and gate exit
   behavior.
+- `openclaw-delivery-recovery-reconcile.py` is the attended production
+  reconciliation tool for reviewed stale recovery metadata. It inventories
+  records without exposing session keys or payloads, requires the complete
+  live SHA-256 fingerprint set to match exactly, creates a private byte-exact
+  backup, removes only recovery fields from active rows, and replaces the
+  session index atomically while preserving its owner and mode.
+- `test_openclaw_delivery_recovery_reconcile.py` covers content-free
+  inventory, exact-set mutation, private backup preservation, archived-row
+  preservation, mismatch refusal, and inspect-mode redaction.
 - `openclaw-session-transition.py` consumes a complete native `sessions.list`
   response, keeps durable main/channel routes and native
   `agent:<agent>:main:heartbeat` sessions, plans archive actions only for

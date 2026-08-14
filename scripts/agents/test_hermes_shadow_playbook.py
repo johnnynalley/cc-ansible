@@ -727,6 +727,9 @@ class HermesShadowPlaybookTests(unittest.TestCase):
         live_delivery_audit = self.task(
             "Deploy executable OpenClaw delivery cutover audit"
         )
+        reconciliation = self.task(
+            "Deploy exact delivery-recovery reconciliation tool"
+        )
         validation = self.task("Validate deployed Hermes Discord cutover contract")
         environment = self.task("Seed root-managed Hermes service environment once")
         local_environment = self.task(
@@ -741,6 +744,9 @@ class HermesShadowPlaybookTests(unittest.TestCase):
             live_delivery_audit,
         )
         self.assertIn('mode: "0755"', live_delivery_audit)
+        self.assertIn("hermes_delivery_reconcile_source", reconciliation)
+        self.assertIn("hermes_delivery_reconcile_live", reconciliation)
+        self.assertIn('mode: "0755"', reconciliation)
         self.assertIn("--repository-root", validation)
         self.assertIn("/etc/hermes/{{ item.name }}/.env", environment)
         self.assertIn("owner: root", environment)

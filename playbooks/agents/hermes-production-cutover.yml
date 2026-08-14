@@ -79,6 +79,7 @@
             hermes_production_cutover_source_database,
             hermes_production_cutover_rigel_source,
             hermes_discord_enroll_live,
+            hermes_delivery_reconcile_live,
             '/usr/local/libexec/openclaw-delivery-cutover-audit.py'
           ]
           + hermes_production_cutover_source_session_indexes
@@ -372,6 +373,43 @@
               - hermes_cutover_openclaw_processes.stdout | length == 0
             fail_msg: >-
               An OpenClaw delivery consumer remained after the source stop.
+
+        - name: Build exact delivery-recovery reconciliation command
+          ansible.builtin.set_fact:
+            hermes_cutover_reconcile_argv:
+              - "{{ hermes_delivery_reconcile_live }}"
+              - --mode
+              - apply
+              - --session-index
+              - "{{ hermes_production_cutover_recovery_session_index }}"
+              - --backup
+              - >-
+                {{ hermes_cutover_run_root
+                   }}/source-session-index-before-reconcile.json
+              - --output
+              - >-
+                {{ hermes_cutover_run_root
+                   }}/source-delivery-reconciliation.json
+          when: hermes_production_cutover_recovery_fingerprints | length > 0
+
+        - name: Add reviewed recovery fingerprints to reconciliation command
+          ansible.builtin.set_fact:
+            hermes_cutover_reconcile_argv: >-
+              {{
+                hermes_cutover_reconcile_argv
+                + ['--expected-fingerprint', item]
+              }}
+          loop: "{{ hermes_production_cutover_recovery_fingerprints }}"
+          loop_control:
+            label: "{{ item[:12] }}..."
+          when: hermes_production_cutover_recovery_fingerprints | length > 0
+
+        - name: Reconcile only explicitly reviewed delivery-recovery records
+          ansible.builtin.command:
+            argv: "{{ hermes_cutover_reconcile_argv }}"
+          register: hermes_cutover_reconciliation
+          changed_when: true
+          when: hermes_production_cutover_recovery_fingerprints | length > 0
 
         - name: Build stopped-source delivery audit command
           ansible.builtin.set_fact:

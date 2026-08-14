@@ -59,6 +59,24 @@ class HermesProductionCutoverTests(unittest.TestCase):
         self.assertIn("openclaw-delivery-cutover-audit.py", self.playbook)
         self.assertIn("--require-clean", self.playbook)
 
+    def test_recovery_reconciliation_is_exact_opt_in_after_source_stop(self) -> None:
+        stop = self.task_offset("Prove OpenClaw delivery consumers are absent")
+        reconcile = self.task_offset(
+            "Reconcile only explicitly reviewed delivery-recovery records"
+        )
+        audit = self.task_offset(
+            "Prove stopped OpenClaw has no replay-capable delivery state"
+        )
+        self.assertLess(stop, reconcile)
+        self.assertLess(reconcile, audit)
+        task = self.playbook[reconcile:audit]
+        self.assertIn("hermes_production_cutover_recovery_fingerprints", task)
+        self.assertIn("hermes_cutover_reconcile_argv", task)
+        self.assertEqual(
+            self.variables["hermes_production_cutover_recovery_fingerprints"],
+            [],
+        )
+
     def test_break_before_make_and_two_consumer_topology(self) -> None:
         source_stop = self.task_offset(
             "Stop and disable production OpenClaw user gateway"

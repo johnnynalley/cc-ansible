@@ -37,6 +37,11 @@ hermes_production_cutover_source_session_indexes:
     path: /home/johnny/.openclaw/agents/vega/sessions/sessions.json
   - name: antares
     path: /home/johnny/.openclaw/agents/antares/sessions/sessions.json
+hermes_production_cutover_recovery_session_index: >-
+  /home/johnny/.openclaw/agents/main/sessions/sessions.json
+# Exact content-derived fingerprints are supplied only for an attended cutover.
+# An empty set preserves the strict read-only delivery gate.
+hermes_production_cutover_recovery_fingerprints: []
 hermes_production_cutover_user: johnny
 hermes_production_cutover_user_uid: 1000
 hermes_production_cutover_user_gateway: openclaw-gateway.service
@@ -244,6 +249,10 @@ hermes_discord_audit_source: >-
 hermes_discord_audit_live: /usr/local/libexec/hermes-discord-cutover-audit
 hermes_discord_enroll_source: scripts/agents/hermes-discord-enroll.py
 hermes_discord_enroll_live: /usr/local/libexec/hermes-discord-enroll
+hermes_delivery_reconcile_source: >-
+  scripts/agents/openclaw-delivery-recovery-reconcile.py
+hermes_delivery_reconcile_live: >-
+  /usr/local/libexec/openclaw-delivery-recovery-reconcile.py
 hermes_automation_contract_source: files/hermes/automation-contract.json
 hermes_automation_contract_live: >-
   /usr/local/share/hermes-shadow/automation-contract.json

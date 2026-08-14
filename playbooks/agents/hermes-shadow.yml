@@ -1327,6 +1327,15 @@
         mode: "0755"
         backup: true
 
+    - name: Deploy exact delivery-recovery reconciliation tool
+      ansible.builtin.copy:
+        src: "{{ playbook_dir }}/../../{{ hermes_delivery_reconcile_source }}"
+        dest: "{{ hermes_delivery_reconcile_live }}"
+        owner: root
+        group: root
+        mode: "0755"
+        backup: true
+
     - name: Deploy pinned Hermes automation audit sources
       ansible.builtin.copy:
         src: "{{ playbook_dir }}/../../{{ item }}"
