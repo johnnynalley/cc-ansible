@@ -1184,8 +1184,21 @@
       ansible.builtin.assert:
         that:
           - >-
-            (item.content | b64decode | from_yaml)._config_version | int
-            == hermes_shadow_config_version | int
+            (
+              (item.content | b64decode | from_yaml)._config_version | int
+              == hermes_shadow_config_version | int
+            )
+            or
+            (
+              ansible_check_mode
+              and (item.content | b64decode | from_yaml) | length == 1
+              and
+              (item.content | b64decode | from_yaml)._config_version | int
+              == hermes_shadow_version_only_migration_from | int
+              and
+              hermes_shadow_config_version | int
+              == hermes_shadow_version_only_migration_from | int + 1
+            )
         fail_msg: >-
           Existing Hermes profile config requires an attended offline schema
           migration before any gateway may start.
