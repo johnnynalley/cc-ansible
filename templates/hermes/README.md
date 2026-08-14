@@ -32,7 +32,10 @@
   Astra additionally validates identical root-owned plugin trees, the exact
   six-hook/no-tool registration surface, and a read-only managed-to-runtime
   plugin bind before startup. The unit requires the dedicated Tirith binary
-  before Hermes starts and forces the scanner to operate offline.
+  before Hermes starts and forces the scanner to operate offline. Each service
+  also runs the Discord dependency audit through the managed Hermes interpreter
+  and cannot become active until its main process owns an established TLS
+  session.
 - `hermes-launcher.sh.j2`: the normal native Hermes launcher. Its only special
   branch recognizes the exact `update --gateway` argv emitted by Hermes's
   Discord `/update` command and lets only `hermes-astra` invoke the narrow
@@ -44,12 +47,18 @@
   Git selection, backup, dependency migration, rollback, and gateway restart.
   The unit runs as `hermes-astra`, loads no Gateway secret environment, has no
   root capabilities, and gives the native updater write access only to the
-  checkout and Astra's private profile state. The normal Discord Gateway unit
+  checkout and Astra's private profile state. It reconciles Hermes's official
+  `messaging` extra after the native update because upstream intentionally
+  excludes messaging from `all`, then normalizes the credential-free shared
+  runtime group and restarts the two production consumers through the existing
+  exact-command sudo boundary. The normal Discord Gateway unit
   keeps `/usr/local` read-only, so Astra can change program files only inside the
   dedicated update namespace. The root-managed Astra directory is entirely
   inaccessible to the updater; selected root-owned runtime policy paths remain
-  read-only. The code checkout uses normal `0022` install semantics because all
-  three isolated Gateway identities execute the same credential-free runtime.
+  read-only. The code checkout uses the `hermes-runtime-readers` primary group
+  during updates; all three isolated Gateway identities can read that shared
+  credential-free runtime but cannot read one another's homes or managed
+  credentials.
 - `hermes-tirith-native-update.service.j2` and
   `hermes-tirith-native-update.timer.j2`: run Tirith's own mandatory-signature,
   atomic self-updater under the dedicated no-login `hermes-updater` identity.
@@ -61,6 +70,7 @@
 ## Consumer
 
 - `playbooks/agents/hermes-shadow.yml`
+- `playbooks/agents/hermes-production-runtime.yml`
 
 ## Safety Notes
 

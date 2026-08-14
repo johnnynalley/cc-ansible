@@ -8,7 +8,8 @@ ConditionPathIsDirectory={{ hermes_shadow_runtime_root }}/.git
 [Service]
 Type=oneshot
 User={{ hermes_native_update_user }}
-Group={{ hermes_native_update_group }}
+Group={{ hermes_runtime_readers_group }}
+SupplementaryGroups={{ hermes_native_update_group }}
 WorkingDirectory={{ hermes_shadow_runtime_root }}
 Environment=HOME={{ hermes_native_update_home }}
 Environment=HERMES_HOME={{ hermes_native_update_home }}
@@ -16,9 +17,13 @@ Environment=PATH={{ hermes_native_update_home }}/bin:{{ hermes_shadow_uv_bin_dir
 Environment=PYTHONUNBUFFERED=1
 Environment=UV_LINK_MODE=copy
 ExecStart={{ hermes_shadow_runtime_venv }}/bin/python {{ hermes_shadow_runtime_root }}/hermes update --gateway --yes
+ExecStartPost={{ hermes_shadow_uv_binary }} pip install --strict --python {{ hermes_shadow_runtime_venv }}/bin/python -e {{ hermes_shadow_runtime_root }}[messaging]
+ExecStartPost=/usr/bin/chgrp -R --no-dereference {{ hermes_runtime_readers_group }} {{ hermes_shadow_runtime_root }}
 {% for post_setup_key in hermes_native_post_setup_keys %}
 ExecStartPost={{ hermes_shadow_runtime_binary }} tools post-setup {{ post_setup_key }}
 {% endfor %}
+ExecStartPost=/usr/bin/sudo -n /usr/bin/systemctl restart hermes-gateway-astra.service
+ExecStartPost=/usr/bin/sudo -n /usr/bin/systemctl restart hermes-gateway-dubble.service
 StandardOutput=append:{{ hermes_native_update_home }}/.update_output.txt
 StandardError=append:{{ hermes_native_update_home }}/.update_output.txt
 UMask=0022

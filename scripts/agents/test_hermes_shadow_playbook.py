@@ -260,9 +260,18 @@ class HermesShadowPlaybookTests(unittest.TestCase):
             "hermes_shadow_runtime_binary": self.variables[
                 "hermes_shadow_runtime_binary"
             ],
+            "hermes_shadow_runtime_venv": self.variables[
+                "hermes_shadow_runtime_venv"
+            ],
             "hermes_discord_audit_live": self.variables["hermes_discord_audit_live"],
             "hermes_discord_contract_live": self.variables[
                 "hermes_discord_contract_live"
+            ],
+            "hermes_discord_runtime_audit_live": self.variables[
+                "hermes_discord_runtime_audit_live"
+            ],
+            "hermes_runtime_readers_group": self.variables[
+                "hermes_runtime_readers_group"
             ],
             "hermes_automation_audit_live": self.variables[
                 "hermes_automation_audit_live"
@@ -318,12 +327,28 @@ class HermesShadowPlaybookTests(unittest.TestCase):
             rendered = template.render(hermes_profile=profile, **common)
             self.assertIn(f"User={profile['user']}", rendered)
             self.assertIn(f"Group={profile['group']}", rendered)
+            self.assertIn(
+                f"SupplementaryGroups={self.variables['hermes_runtime_readers_group']}",
+                rendered,
+            )
             self.assertIn(f"HERMES_HOME={profile['home']}", rendered)
             self.assertIn("HERMES_DOCKER_BINARY=/usr/bin/podman", rendered)
             self.assertIn("TIRITH_OFFLINE=1", rendered)
             self.assertIn("NoNewPrivileges=true", rendered)
             self.assertIn("ProtectSystem=strict", rendered)
             self.assertIn("CapabilityBoundingSet=", rendered)
+            self.assertIn(
+                f"ExecStartPre={self.variables['hermes_shadow_runtime_venv']}/bin/python "
+                f"{self.variables['hermes_discord_runtime_audit_live']} "
+                "--imports-only",
+                rendered,
+            )
+            self.assertIn(
+                f"ExecStartPost={self.variables['hermes_shadow_runtime_venv']}/bin/python "
+                f"{self.variables['hermes_discord_runtime_audit_live']} "
+                "--pid=${MAINPID} --timeout=30",
+                rendered,
+            )
             self.assertIn(
                 f"ConditionPathExists=/etc/hermes/{profile['name']}/"
                 f"{self.variables['hermes_gateway_readiness_marker']}",
@@ -427,6 +452,7 @@ class HermesShadowPlaybookTests(unittest.TestCase):
         self.assertIn("hermes_shadow_expected_commit", checkout)
         self.assertIn("--locked", sync)
         self.assertIn("--extra", sync)
+        self.assertIn("- messaging", sync)
         self.assertIn("UV_CACHE_DIR", sync)
         self.assertIn("hermes_shadow_uv_cache_dir", sync)
         self.assertIn("XDG_CONFIG_HOME", sync)
@@ -519,11 +545,13 @@ class HermesShadowPlaybookTests(unittest.TestCase):
                 "hermes_native_update_randomized_delay",
                 "hermes_native_update_user",
                 "hermes_native_update_group",
+                "hermes_runtime_readers_group",
                 "hermes_native_update_home",
                 "hermes_shadow_runtime_binary",
                 "hermes_shadow_runtime_root",
                 "hermes_shadow_runtime_venv",
                 "hermes_shadow_uv_bin_dir",
+                "hermes_shadow_uv_binary",
                 "hermes_native_post_setup_keys",
                 "hermes_tirith_binary",
                 "hermes_tirith_update_service",
@@ -566,8 +594,8 @@ class HermesShadowPlaybookTests(unittest.TestCase):
         )
         self.assertNotIn("ExecStartPre=-/usr/bin/systemctl", hermes_service)
         self.assertIn("User=hermes-astra", hermes_service)
-        self.assertIn("Group=hermes-astra", hermes_service)
-        self.assertNotIn("SupplementaryGroups=", hermes_service)
+        self.assertIn("Group=hermes-runtime-readers", hermes_service)
+        self.assertIn("SupplementaryGroups=hermes-astra", hermes_service)
         self.assertIn(
             "/venv/bin/python /usr/local/lib/hermes-agent/hermes update",
             hermes_service,
@@ -577,6 +605,10 @@ class HermesShadowPlaybookTests(unittest.TestCase):
         self.assertIn("/var/lib/hermes/bootstrap/bin", hermes_service)
         self.assertIn("tools post-setup", hermes_service)
         self.assertIn("tools post-setup ddgs", hermes_service)
+        self.assertIn("[messaging]", hermes_service)
+        self.assertIn("chgrp -R --no-dereference hermes-runtime-readers", hermes_service)
+        self.assertIn("restart hermes-gateway-astra.service", hermes_service)
+        self.assertIn("restart hermes-gateway-dubble.service", hermes_service)
         self.assertNotIn("HERMES_MANAGED_DIR=", hermes_service)
         self.assertIn("UMask=0022", hermes_service)
         self.assertNotIn("UMask=0077", hermes_service)
@@ -623,7 +655,8 @@ class HermesShadowPlaybookTests(unittest.TestCase):
         self.assertIn("hermes_native_update_user", checkout)
         self.assertIn("recurse: true", checkout)
         self.assertNotIn("mode:", checkout)
-        self.assertIn('mode: "0755"', checkout_root)
+        self.assertIn("hermes_runtime_readers_group", checkout)
+        self.assertIn('mode: "0750"', checkout_root)
         self.assertEqual(self.variables["hermes_native_update_user"], "hermes-astra")
         self.assertIn("owner: hermes-astra", update_state)
         self.assertIn("mode: u=rwX,go=", update_state)

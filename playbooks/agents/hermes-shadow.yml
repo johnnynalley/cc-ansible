@@ -312,6 +312,12 @@
       loop_control:
         label: "{{ item.name }}"
 
+    - name: Create credential-free Hermes runtime readers group
+      ansible.builtin.group:
+        name: "{{ hermes_runtime_readers_group }}"
+        system: true
+        state: present
+
     - name: Create Hermes no-login service accounts
       ansible.builtin.user:
         name: "{{ item.user }}"
@@ -322,6 +328,9 @@
         create_home: true
         system: true
         password_lock: true
+        groups:
+          - "{{ hermes_runtime_readers_group }}"
+        append: true
         state: present
       loop: "{{ hermes_shadow_profiles }}"
       loop_control:
@@ -919,6 +928,8 @@
           - sync
           - --extra
           - all
+          - --extra
+          - messaging
           - --locked
         chdir: "{{ hermes_shadow_runtime_root }}"
         creates: "{{ hermes_shadow_runtime_venv }}/bin/hermes"
@@ -968,13 +979,13 @@
       ansible.builtin.file:
         path: "{{ hermes_shadow_runtime_root }}"
         owner: "{{ hermes_native_update_user }}"
-        group: "{{ hermes_native_update_group }}"
+        group: "{{ hermes_runtime_readers_group }}"
         recurse: true
 
     - name: Keep Hermes runtime root traversable
       ansible.builtin.file:
         path: "{{ hermes_shadow_runtime_root }}"
-        mode: "0755"
+        mode: "0750"
 
     - name: Install required Hermes native tool backends
       ansible.builtin.command:
@@ -1203,6 +1214,17 @@
         owner: root
         group: root
         mode: "0755"
+        backup: true
+
+    - name: Deploy Hermes Discord runtime audit
+      ansible.builtin.copy:
+        src: >-
+          {{ playbook_dir
+             }}/../../{{ hermes_discord_runtime_audit_source }}
+        dest: "{{ hermes_discord_runtime_audit_live }}"
+        owner: root
+        group: "{{ hermes_runtime_readers_group }}"
+        mode: "0550"
         backup: true
 
     - name: Deploy Hermes private Discord enrollment tool

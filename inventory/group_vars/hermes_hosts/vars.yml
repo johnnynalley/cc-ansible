@@ -67,6 +67,11 @@ hermes_production_cutover_rigel_job_name: rigel-academic-alerts
 hermes_production_cutover_completion_message: >-
   Hermes cutover complete. Astra and Dubble are live; Rigel is available in
   its channel and its idle academic checks remain silent.
+hermes_production_runtime_mode: disabled
+hermes_production_runtime_approved: false
+hermes_production_runtime_confirmation: ""
+hermes_production_runtime_required_confirmation: >-
+  converge-live-hermes-runtime-on-jn-t14s-lin
 hermes_gateway_readiness_marker: .gateway-ready
 hermes_gateway_legacy_readiness_marker: .shadow-ready
 
@@ -218,6 +223,7 @@ hermes_shadow_uv_config_dirs: /var/lib/hermes/bootstrap/config-dirs
 hermes_shadow_runtime_binary: /usr/local/bin/hermes
 hermes_shadow_runtime_root: /usr/local/lib/hermes-agent
 hermes_shadow_runtime_venv: /usr/local/lib/hermes-agent/venv
+hermes_runtime_readers_group: hermes-runtime-readers
 hermes_native_update_user: hermes-astra
 hermes_native_update_group: hermes-astra
 hermes_native_update_home: /var/lib/hermes/astra
@@ -247,6 +253,10 @@ hermes_discord_contract_live: >-
 hermes_discord_audit_source: >-
   scripts/agents/hermes-discord-cutover-audit.py
 hermes_discord_audit_live: /usr/local/libexec/hermes-discord-cutover-audit
+hermes_discord_runtime_audit_source: >-
+  scripts/agents/hermes-discord-runtime-audit.py
+hermes_discord_runtime_audit_live: >-
+  /usr/local/libexec/hermes-discord-runtime-audit
 hermes_discord_enroll_source: scripts/agents/hermes-discord-enroll.py
 hermes_discord_enroll_live: /usr/local/libexec/hermes-discord-enroll
 hermes_delivery_reconcile_source: >-

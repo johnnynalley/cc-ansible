@@ -121,6 +121,13 @@ class HermesProductionCutoverTests(unittest.TestCase):
         self.assertIn("state: started", task)
         self.assertIn("enabled: true", task)
 
+    def test_gateway_active_state_requires_discord_runtime_readiness(self) -> None:
+        self.assertIn("hermes_discord_runtime_audit_live", self.service)
+        self.assertIn("--imports-only", self.service)
+        self.assertIn("--pid=${MAINPID} --timeout=30", self.service)
+        self.assertIn("hermes_shadow_runtime_venv", self.service)
+        self.assertIn("SupplementaryGroups={{ hermes_runtime_readers_group }}", self.service)
+
     def test_gateway_marker_is_neutral_and_legacy_marker_is_retired(self) -> None:
         self.assertEqual(
             self.variables["hermes_gateway_readiness_marker"], ".gateway-ready"

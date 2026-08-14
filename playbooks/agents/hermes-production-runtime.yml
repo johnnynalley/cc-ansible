@@ -1,0 +1,356 @@
+---
+# Purpose: Converge the live Hermes shared runtime and Gateway units safely.
+# Hosts: hermes_hosts.
+# Key vars: hermes_production_runtime_*, hermes_shadow_*, hermes_runtime_*.
+# Templates: templates/hermes/hermes-gateway.service.j2,
+#            templates/hermes/hermes-native-update.service.j2.
+# Scripts: scripts/agents/hermes-discord-runtime-audit.py.
+# Validation: ansible-playbook playbooks/agents/hermes-production-runtime.yml
+#             --syntax-check.
+
+- name: Converge the live Hermes production runtime
+  hosts: hermes_hosts
+  become: true
+  gather_facts: true
+
+  vars:
+    hermes_runtime_backup_id: >-
+      {{
+        ansible_facts['date_time']['iso8601_basic_short']
+        ~ '-pre-runtime-converge'
+      }}
+    hermes_runtime_backup_root: >-
+      {{ hermes_production_cutover_rollback_root
+         }}/{{ hermes_runtime_backup_id }}
+    hermes_runtime_unit_paths:
+      - /etc/systemd/system/hermes-gateway-astra.service
+      - /etc/systemd/system/hermes-gateway-dubble.service
+      - /etc/systemd/system/hermes-gateway-rigel.service
+      - /etc/systemd/system/hermes-native-update.service
+    hermes_runtime_user_environment:
+      XDG_RUNTIME_DIR: >-
+        /run/user/{{ hermes_production_cutover_user_uid }}
+      DBUS_SESSION_BUS_ADDRESS: >-
+        unix:path=/run/user/{{ hermes_production_cutover_user_uid }}/bus
+
+  tasks:
+    - name: Validate Hermes production runtime mode
+      ansible.builtin.assert:
+        that:
+          - hermes_production_runtime_mode in ['disabled', 'converge']
+        fail_msg: >-
+          hermes_production_runtime_mode must be disabled or converge.
+
+    - name: Skip hosts without Hermes production runtime approval
+      ansible.builtin.meta: end_host
+      when: hermes_production_runtime_mode == 'disabled'
+
+    - name: Require exact Hermes production runtime authorization
+      ansible.builtin.assert:
+        that:
+          - hermes_production_runtime_approved | bool
+          - >-
+            hermes_production_runtime_confirmation
+            == hermes_production_runtime_required_confirmation
+          - inventory_hostname == 'jn-t14s-lin'
+          - hermes_shadow_profiles | map(attribute='name') | list
+            == ['astra', 'dubble', 'rigel']
+        fail_msg: >-
+          Live runtime convergence requires host-specific approval and the
+          exact confirmation string.
+
+    - name: Inspect required live Hermes runtime files
+      ansible.builtin.stat:
+        path: "{{ item }}"
+        follow: false
+      loop: >-
+        {{ hermes_runtime_unit_paths
+           + [hermes_shadow_runtime_root,
+              hermes_shadow_runtime_venv ~ '/bin/python'] }}
+      register: hermes_runtime_required_files
+      check_mode: false
+
+    - name: Require an existing complete live Hermes runtime
+      ansible.builtin.assert:
+        that:
+          - >-
+            hermes_runtime_required_files.results
+            | map(attribute='stat.exists')
+            | min
+        fail_msg: >-
+          The production runtime playbook cannot bootstrap a missing Hermes
+          installation or missing unit.
+
+    - name: Check OpenClaw system delivery units before convergence
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/systemctl
+          - is-active
+          - "{{ item.name }}"
+      loop: "{{ hermes_production_cutover_source_system_units }}"
+      register: hermes_runtime_openclaw_system_state
+      changed_when: false
+      failed_when: false
+      check_mode: false
+
+    - name: Check OpenClaw user Gateway before convergence
+      ansible.builtin.command:
+        argv:
+          - /usr/sbin/runuser
+          - --user
+          - "{{ hermes_production_cutover_user }}"
+          - --
+          - /usr/bin/systemctl
+          - --user
+          - is-active
+          - "{{ hermes_production_cutover_user_gateway }}"
+      environment: "{{ hermes_runtime_user_environment }}"
+      register: hermes_runtime_openclaw_user_state
+      changed_when: false
+      failed_when: false
+      check_mode: false
+
+    - name: Require OpenClaw delivery to remain offline
+      ansible.builtin.assert:
+        that:
+          - >-
+            hermes_runtime_openclaw_system_state.results
+            | selectattr('stdout', 'equalto', 'active')
+            | list
+            | length == 0
+          - hermes_runtime_openclaw_user_state.stdout != 'active'
+        fail_msg: >-
+          Refusing live Hermes convergence while an OpenClaw delivery path is
+          active.
+
+    - name: Create targeted pre-convergence rollback directory
+      ansible.builtin.file:
+        path: "{{ hermes_runtime_backup_root }}"
+        state: directory
+        owner: root
+        group: root
+        mode: "0700"
+
+    - name: Back up live Hermes systemd units
+      ansible.builtin.copy:
+        src: "{{ item }}"
+        dest: "{{ hermes_runtime_backup_root }}/{{ item | basename }}"
+        remote_src: true
+        owner: root
+        group: root
+        mode: "0600"
+      loop: "{{ hermes_runtime_unit_paths }}"
+      when: not ansible_check_mode
+
+    - name: Converge live Hermes runtime transaction
+      block:
+        - name: Create credential-free Hermes runtime readers group
+          ansible.builtin.group:
+            name: "{{ hermes_runtime_readers_group }}"
+            system: true
+            state: present
+
+        - name: Enroll isolated Hermes identities as runtime readers
+          ansible.builtin.user:
+            name: "{{ item.user }}"
+            groups:
+              - "{{ hermes_runtime_readers_group }}"
+            append: true
+          loop: "{{ hermes_shadow_profiles }}"
+          loop_control:
+            label: "{{ item.name }}"
+
+        - name: Normalize shared Hermes runtime ownership
+          ansible.builtin.file:
+            path: "{{ hermes_shadow_runtime_root }}"
+            owner: "{{ hermes_native_update_user }}"
+            group: "{{ hermes_runtime_readers_group }}"
+            recurse: true
+
+        - name: Restrict shared Hermes runtime root traversal
+          ansible.builtin.file:
+            path: "{{ hermes_shadow_runtime_root }}"
+            mode: "0750"
+
+        - name: Deploy Hermes Discord runtime audit
+          ansible.builtin.copy:
+            src: >-
+              {{ playbook_dir
+                 }}/../../{{ hermes_discord_runtime_audit_source }}
+            dest: "{{ hermes_discord_runtime_audit_live }}"
+            owner: root
+            group: "{{ hermes_runtime_readers_group }}"
+            mode: "0550"
+            backup: true
+
+        - name: Deploy production Hermes update unit
+          ansible.builtin.template:
+            src: >-
+              {{ playbook_dir
+                 }}/../../templates/hermes/hermes-native-update.service.j2
+            dest: /etc/systemd/system/hermes-native-update.service
+            owner: root
+            group: root
+            mode: "0644"
+            backup: true
+
+        - name: Deploy production Hermes Gateway units
+          ansible.builtin.template:
+            src: >-
+              {{ playbook_dir
+                 }}/../../templates/hermes/hermes-gateway.service.j2
+            dest: >-
+              {{
+                '/etc/systemd/system/hermes-gateway-'
+                ~ hermes_profile.name ~ '.service'
+              }}
+            owner: root
+            group: root
+            mode: "0644"
+            backup: true
+          loop: "{{ hermes_shadow_profiles }}"
+          loop_control:
+            loop_var: hermes_profile
+            label: "{{ hermes_profile.name }}"
+
+        - name: Reload production Hermes systemd units
+          ansible.builtin.systemd_service:
+            daemon_reload: true
+
+        - name: Validate Discord imports as every isolated identity
+          ansible.builtin.command:
+            argv:
+              - /usr/sbin/runuser
+              - --user
+              - "{{ item.user }}"
+              - --
+              - "{{ hermes_shadow_runtime_venv }}/bin/python"
+              - "{{ hermes_discord_runtime_audit_live }}"
+              - --imports-only
+          loop: "{{ hermes_shadow_profiles }}"
+          loop_control:
+            label: "{{ item.name }}"
+          changed_when: false
+
+        - name: Keep standalone Rigel Gateway stopped and disabled
+          ansible.builtin.systemd_service:
+            name: hermes-gateway-rigel.service
+            state: stopped
+            enabled: false
+
+        - name: Restart and verify Astra Discord consumer
+          ansible.builtin.systemd_service:
+            name: hermes-gateway-astra.service
+            state: restarted
+            enabled: true
+
+        - name: Restart and verify Dubble Discord consumer
+          ansible.builtin.systemd_service:
+            name: hermes-gateway-dubble.service
+            state: restarted
+            enabled: true
+
+        - name: Require live Hermes consumers and native update timers
+          ansible.builtin.command:
+            argv:
+              - /usr/bin/systemctl
+              - is-active
+              - "{{ item }}"
+          loop:
+            - hermes-gateway-astra.service
+            - hermes-gateway-dubble.service
+            - "{{ hermes_native_update_timer }}"
+            - "{{ hermes_tirith_update_timer }}"
+          register: hermes_runtime_live_units
+          changed_when: false
+          check_mode: false
+
+        - name: Require all production Hermes units active
+          ansible.builtin.assert:
+            that:
+              - item.stdout == 'active'
+          loop: "{{ hermes_runtime_live_units.results }}"
+          loop_control:
+            label: "{{ item.item }}"
+
+        - name: Scan restarted Hermes consumers for adapter failures
+          ansible.builtin.command:
+            argv:
+              - /usr/bin/journalctl
+              - -u
+              - hermes-gateway-astra.service
+              - -u
+              - hermes-gateway-dubble.service
+              - --since=-2 minutes
+              - --no-pager
+              - -o
+              - cat
+              - >-
+                {{
+                  '--grep=No adapter|requirements not met'
+                  ~ '|runtime audit failed|Traceback|Permission denied'
+                }}
+          register: hermes_runtime_failure_scan
+          changed_when: false
+          failed_when: hermes_runtime_failure_scan.rc not in [0, 1]
+          check_mode: false
+
+        - name: Require clean post-restart Hermes journals
+          ansible.builtin.assert:
+            that:
+              - hermes_runtime_failure_scan.stdout | length == 0
+            fail_msg: >-
+              A restarted Hermes consumer logged an adapter, dependency,
+              permission, audit, or traceback failure.
+
+        - name: Verify Health receiver remains active
+          ansible.builtin.command:
+            argv:
+              - /usr/sbin/runuser
+              - --user
+              - "{{ hermes_production_cutover_user }}"
+              - --
+              - /usr/bin/systemctl
+              - --user
+              - is-active
+              - "{{ hermes_production_cutover_health_service }}"
+          environment: "{{ hermes_runtime_user_environment }}"
+          register: hermes_runtime_health_state
+          changed_when: false
+          check_mode: false
+
+        - name: Require Health receiver continuity
+          ansible.builtin.assert:
+            that:
+              - hermes_runtime_health_state.stdout == 'active'
+
+      rescue:
+        - name: Restore pre-convergence Hermes systemd units
+          ansible.builtin.copy:
+            src: "{{ hermes_runtime_backup_root }}/{{ item | basename }}"
+            dest: "{{ item }}"
+            remote_src: true
+            owner: root
+            group: root
+            mode: "0644"
+          loop: "{{ hermes_runtime_unit_paths }}"
+
+        - name: Reload restored Hermes systemd units
+          ansible.builtin.systemd_service:
+            daemon_reload: true
+
+        - name: Restore Astra and Dubble consumers after convergence failure
+          ansible.builtin.systemd_service:
+            name: "{{ item }}"
+            state: restarted
+            enabled: true
+          loop:
+            - hermes-gateway-astra.service
+            - hermes-gateway-dubble.service
+          failed_when: false
+
+        - name: Fail after restoring pre-convergence units
+          ansible.builtin.fail:
+            msg: >-
+              Hermes production runtime convergence failed. Prior units were
+              restored from {{ hermes_runtime_backup_root }}.

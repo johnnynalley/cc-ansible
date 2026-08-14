@@ -505,12 +505,20 @@ Gateway units. Together with the exact update-unit trigger, those commands are
 Astra's entire sudo surface. Dubble and Rigel have no sudo authority.
 
 The same native oneshot is scheduled automatically after production cutover.
-It remains staged and disabled while Hermes has no production route so the
-accepted source cannot move underneath migration testing. Hermes's native
+It is now enabled in production together with Tirith's native updater. Hermes's native
 default quick snapshot protects critical Astra state before code or dependency
 changes; the retained host migration backup protects the complete profile,
 checkout, and separately managed Dubble and Rigel profiles. Config checks and
 policy hashes remain startup gates, not a replacement update pipeline.
+
+Hermes intentionally excludes the optional `messaging` profile from `all`.
+Bootstrap therefore synchronizes both official extras from the reviewed lock,
+and the native update unit reconciles the current source tree's official
+`messaging` extra after Hermes completes its own update. The updater runs with
+the code-only `hermes-runtime-readers` primary group, then normalizes that
+shared credential-free checkout and restarts Astra and Dubble through the same
+exact-command sudo boundary. This does not grant access to another profile's
+home, managed environment, token, memory, or imported data.
 
 The first capability-stripped root unit was rejected in live testing before it
 changed Git or dependencies. Hermes tried to inspect the optional
@@ -1061,9 +1069,10 @@ paths, or platform identifiers into the repository. The cases cover antecedent
 resolution, current regional research, purchase-state reconciliation,
 compatibility versus performance, direct decisions, useful walkthrough
 checkpoints, expected absence, incident RCA, scope/preferences, concise Star,
-source-backed alerts, and correction generalization. Static tests prove the
-policy and deployment shape now; Gate 7 must still run the cases against the
-actual isolated model before promotion.
+source-backed alerts, and correction generalization. The isolated model run
+passed all nine model-owned cases with independent Vega and Antares verdicts;
+current research, deterministic idle silence, and concise Star synthesis passed
+through their separately owned integration gates.
 
 The corpus assigns each case to its real execution owner. Nine reasoning cases
 run privately through `scripts/agents/hermes-behavior-acceptance.py` and require
@@ -1096,15 +1105,38 @@ generic model prompt merely to report a complete gate.
 10. **Retention:** keep OpenClaw stopped, disabled, backed up, and documented.
     Do not uninstall or delete it until the owner separately approves removal.
 
-## Gate 2 Decision
+## Production Status
 
-Replacement is feasible, but not by blindly importing OpenClaw. Astra, Dubble,
-Rigel, Discord, memory, skills, cron, and sandboxing have viable Hermes-native
-targets. Health and Docker authority remain safer as external least-privilege
-services. OpenClaw session history remains an offline archive. Distinct
-role-prompted Vega and Antares reviewers are the only material behavior gap;
-Hermes MoA is the preferred native candidate, but it must pass the adversarial
-review regression before the gap can be marked closed.
+Gates 1 through 8 completed on 2026-08-14. OpenClaw's production Gateway,
+isolated canaries, repo-sync timer, and update-check timer are stopped and
+disabled; its files remain offline for reference and rollback. Health remains
+an independent active user service. Astra and Dubble are the two active Hermes
+Discord consumers. Astra also owns the Rigel channel prompt, skill binding,
+canonical academic state, and exact 30-minute no-model scheduler. The
+standalone Rigel Gateway remains disabled because the source installation has
+only two Discord applications.
 
-Gate 3 may design the isolated Hermes target. It may not install or start
-Hermes until that design and its rollback artifacts are reviewed.
+The first cutover acceptance incorrectly treated active systemd processes as
+proof of messaging. Both processes had stayed alive for cron after logging
+`No adapter available for discord`. Root cause was the missing official
+`messaging` extra plus shared-runtime group modes that denied Dubble after the
+first repair. The corrected service now runs the dependency audit with the
+managed Hermes interpreter before startup and cannot become active until its
+main process owns an established TLS session. Production convergence restarts
+Astra and Dubble one at a time and rejects adapter, dependency, permission,
+audit, or traceback journal patterns while treating an expected no-match as a
+successful probe.
+
+Current rollback artifacts include:
+
+- `20260814T133103Z-pre-discord-runtime-repair`
+- `20260814T133908Z-pre-runtime-reader-group`
+- `20260814T085809-pre-runtime-converge` for the failed-closed interpreter
+  preflight and automatic unit restore
+- `20260814T090022-pre-runtime-converge` for the accepted live unit convergence
+
+Gate 9 remains: deploy the already-reviewed platform-neutral Docker report and
+approval-gated update broker under a dedicated least-privilege boundary, then
+complete the final prompt-injection, Gateway, credential, filesystem, network,
+privilege, update, and rollback security analysis. Docker group/socket access
+remains prohibited.

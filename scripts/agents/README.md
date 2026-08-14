@@ -137,6 +137,17 @@
   default, backs up before source shutdown, drains before enrollment, starts
   exactly two consumers, keeps Rigel's third Gateway stopped, preserves
   Health, enables native updates, and restores OpenClaw in rescue.
+- `hermes-discord-runtime-audit.py` is the silent service readiness gate for
+  the installed Discord modules and the running Gateway's established TLS
+  session. It prevents a cron-only Hermes process from satisfying production
+  messaging health.
+- `test_hermes_discord_runtime_audit.py` covers owned socket discovery,
+  established HTTPS state, wrong-port/state rejection, identity isolation,
+  and the exact Discord runtime imports.
+- `test_hermes_production_runtime.py` covers the disabled-by-default live
+  convergence, OpenClaw exclusion, rollback-first sequencing, shared-code-only
+  reader access, sequential consumer restarts, no-match journal handling, and
+  Health/native-update continuity.
 - `hermes-automation-contract-audit.py` validates all 28 current cron jobs and
   three heartbeat lanes against their agent-backed, external, or no-agent
   owners. With `--source-inventory`, it fails on new jobs, recurring-job

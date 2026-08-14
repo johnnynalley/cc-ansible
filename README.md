@@ -298,6 +298,7 @@ Packages are merged from multiple sources (all applicable variables combined):
 | `openclaw.yml` | `openclaw_hosts` | OpenClaw AI agent (npm install, gateway service, repo-sync/update-check timers) |
 | `hermes-shadow.yml` | `hermes_hosts` | Boot-disabled Hermes staging with signed offline command scanning and no production delivery |
 | `hermes-production-cutover.yml` | `hermes_hosts` | Disabled-by-default, rollback-capable OpenClaw-to-Hermes production handoff with two Discord consumers, native Rigel scheduling, Health continuity, and native updates |
+| `hermes-production-runtime.yml` | `hermes_hosts` | Disabled-by-default live Hermes runtime convergence with official messaging dependencies, functional Discord readiness, sequential restarts, rollback, and Health/OpenClaw gates |
 | `hermes-openclaw-dry-run.yml` | `hermes_hosts` | Operator-approved, shape-only official importer inventory with no source content, activation, or service-state change |
 | `hermes-profile-memory.yml` | `hermes_hosts` | Disabled-by-default, transactional native memory seeding for Astra and Rigel; Dubble remains empty and all Gateways remain stopped |
 | `hermes-profile-skills.yml` | `hermes_hosts` | Disabled-by-default, transactional staging of six native skill deployments with exact hashes, root-owned per-profile sources, and read-only runtime discovery proof |
@@ -1055,125 +1056,53 @@ PVE notifications route to Apprise → Pushover via webhook. Deployed by `playbo
 ansible-playbook playbooks/proxmox/proxmox-notifications.yml
 ```
 
-## Hermes Replacement (staged)
+## Hermes Production
 
-The isolated Hermes replacement is declaratively targeted at `jn-t14s-lin` as
-a direct replacement for OpenClaw. The playbook defaults to `disabled`,
-installs no runtime during normal convergence, starts no listener, contains no
-production token, and is not imported by `site.yml`.
+Hermes replaced OpenClaw on `jn-t14s-lin`. Astra and Dubble run as two isolated
+system services for three logical Discord roles: Astra also owns the Rigel
+channel route and deterministic academic scheduler. The standalone Rigel
+Gateway remains disabled until a third Discord application is deliberately
+created.
 
-- **Playbook**: `playbooks/agents/hermes-shadow.yml`
-- **Command scanner**: Tirith is installed by a root-owned transaction from an
-  exact official release artifact after signed-checksum and Sigstore identity
-  verification. Gateways use only that absolute binary in offline, fail-closed
-  mode; runtime lazy downloads remain disabled.
-- **Protected importer inventory**:
-  `playbooks/agents/hermes-openclaw-dry-run.yml` is disabled by default and
-  retains only root-private structural evidence from a networkless,
-  read-only, shape-only source view
-- **Curated profile memory**:
-  `playbooks/agents/hermes-profile-memory.yml` validates four vault-encrypted
-  Astra/Rigel seeds with the pinned native Hermes parser and threat scanner,
-  backs up all three stores, installs atomically, and rolls back on any failed
-  checksum, identity, Dubble-isolation, or service-state proof. The matching
-  compact managed limits are converged and natively validated on all profiles.
-- **Reviewed profile skills**:
-  `playbooks/agents/hermes-profile-skills.yml` replaces the legacy mutable
-  phrase-triggered trees with five declarative Hermes-native skills. Exact
-  hashes, native parsing and threat scanning, profile isolation, transactional
-  rollback, root ownership, read-only service binding, and Hermes's own runtime
-  skill index are required; no Gateway or model starts during staging.
-- **Reviewed profile data**:
-  `playbooks/agents/hermes-profile-data.yml` copies only `data-stage` and
-  `operator-reference` mappings into separate per-profile roots. Writable
-  project data is owned by its no-login profile; authorization, configuration,
-  and course references remain root-owned and runtime-read-only. Exact source
-  pins, source stability, content hashes, ownership, mount modes, transactional
-  rollback, and unchanged service states are required. Legacy memory,
-  reviewer evidence, structured transforms, credentials, sessions, and raw
-  prompt injection remain excluded.
-- **Architecture and gates**: `docs/hermes-replacement.md`
-- **Discord handoff**: three credential-free profile declarations, silent
-  unknown DMs, fail-closed allowlists, no replay/backfill, and an attended
-  stopped-source-before-target cutover/rollback contract
-- **Automation handoff**: all 28 current cron jobs plus three heartbeats are
-  classified into agent-backed local proposals, external systemd owners, or
-  deterministic no-agent jobs; Health remains external and Siri remains absent
-- **Validation**: `ansible-playbook playbooks/agents/hermes-shadow.yml --syntax-check`
-- **Inactive runtime**: the exact official release, locked dependencies,
-  no-login identities, managed policies, compact memory, reviewed skills, and
-  isolated reviewed data bindings are staged. Provider credentials, Discord
-  routes, readiness markers, and schedules remain absent. Hermes gateways
-  cannot start while any OpenClaw Gateway listener is active.
+- **Production consumers**: `hermes-gateway-astra.service` and
+  `hermes-gateway-dubble.service`
+- **Runtime convergence**:
+  `playbooks/agents/hermes-production-runtime.yml` is disabled by default,
+  backs up live units, requires OpenClaw offline, restarts one consumer at a
+  time, and preserves Health
+- **Discord readiness**: service startup requires the official messaging
+  dependencies plus an established TLS session owned by the Gateway process;
+  a cron-only process cannot report healthy messaging
+- **Native updates**: `hermes-native-update.timer` and
+  `hermes-tirith-native-update.timer` are enabled. Hermes retains native
+  release discovery, backup, Git update, and Gateway orchestration; the unit
+  reconciles the official messaging extra excluded from upstream `all`
+- **Isolation**: Astra, Dubble, and Rigel retain separate no-login identities,
+  homes, managed credentials, data, memory, and skills. A code-only
+  `hermes-runtime-readers` group grants read access solely to the shared
+  credential-free runtime
+- **Health**: `health-receiver.service` remains an independent enabled user
+  service. The retired Siri relay was not migrated
+- **Architecture, behavior, security, and rollback**:
+  `docs/hermes-replacement.md`
 
-## OpenClaw (jn-t14s-lin)
+## OpenClaw Archive (jn-t14s-lin)
 
-OpenClaw AI agent platform — personal homelab admin assistant via web UI and Discord. The current Gateway still runs as `johnny` and therefore inherits that account's sudo, Docker, controller credentials, and repository access; the dedicated least-privilege runtime migration remains pending.
+OpenClaw is no longer a production runtime. Its user Gateway, isolated canaries,
+repo-sync timer, and update-check timer are stopped and disabled. The files,
+sessions, configuration, and rollback artifacts remain offline for reference
+and operator-controlled rollback; Hermes cannot mount or read the raw source
+tree.
 
-- **Web UI**: `https://openclaw.jnalley.me` (Tailscale only)
-- **Gateway**: Current production uses port 18789 on the tailnet with token auth
-  and `docker-vm` as its only trusted proxy. The migration target preserves
-  `openclaw.jnalley.me` while moving the Gateway to loopback behind a root-owned
-  named Tailscale Serve service; the OpenClaw account receives no Tailscale
-  operator authority.
-- **Host**: `jn-t14s-lin` (current OpenClaw controller/runtime)
-- **Service**: User-level systemd via `openclaw gateway install` (NOT a custom system service)
-- **Config**: `~/.openclaw/openclaw.json` + `.env` — manual, backed up by restic
-- **Timers**: repo-sync (5 min), update-check (daily 08:00 → Apprise)
-- **Playbook**: `ansible-playbook playbooks/agents/openclaw.yml` (opt-in via `openclaw_enabled`)
-- **Isolation canary**: A hardened `openclaw` system service and modernized
-  release pipeline are implemented but disabled by default. A credential-less
-  ephemeral account resolves stable core and reviewed plugin versions with
-  lifecycle scripts disabled; root atomically promotes immutable core, while
-  OpenClaw's native installer creates integrity-bearing plugin ownership rows
-  before root freezes plugin code read-only. The attended canary uses loopback
-  port 19789, has no channels, and does not stop or modify production. Verify
-  its current unit/listener state before relying on it; the final corrected
-  native-plugin bootstrap replay is still pending.
-- **State modernization rehearsals**: The promoted generation contains active
-  file-backed history plus only policy-classified retained workspace data and
-  the root-owned modern behavior overlay; cached legacy bootstrap snapshots are
-  discarded for native rebuilding. Active copied delivery-recovery fields are explicitly
-  quarantined and counted so a canary cannot replay a production reply; the
-  untouched source indexes remain rollback evidence, and final cutover must
-  reconcile pending delivery rather than discard it. A separate
-  disabled-by-default Doctor rehearsal
-  takes online SQLite backups, scrubs copied provider auth, retires eight
-  legacy plugin install records through the supported CLI, rebuilds four
-  retained plugins with integrity-bearing npm provenance in an isolated
-  credential-free builder, freezes their code root-owned/read-only, and
-  requires clean warning gates plus a second idempotent Doctor pass before
-  promotion. Neither rehearsal modifies or authenticates production. A third
-  attended handoff can transactionally place those verified file-backed
-  sessions and a freshly policy-staged workspace into the silent five-agent
-  loopback canary, then use native `sessions.list`/`sessions.patch` in plan or
-  apply mode. It backs up and restores only canary data and never controls the
-  production Gateway.
-- **Behavior modernization**: The compact repo-owned Astra/Fleet bootstrap is
-  under `files/openclaw/workspace/` and is guarded by
-  `scripts/agents/openclaw-bootstrap-audit.py`. It replaces generic worker
-  prompts, the hardcoded cognitive-stack hook, hardcoded session routes,
-  transcript polling, and text-token heartbeat suppression. It is not deployed
-  to production until the attended dedicated-user cutover. A separate
-  disabled-by-default behavior rehearsal is designed to prove concise Dubble
-  output, native Vega-to-Antares review lineage, and a structured idle-silent
-  Rigel heartbeat in the channel-less canary. The applied silent-canary data
-  handoff is complete; behavior execution remains pending fresh isolated
-  executor authentication. The rehearsal restores the heartbeat-disabled
-  baseline and archives only its synthetic sessions.
-- **Mem0 memory**: `@mem0/openclaw-mem0` plugin with Qdrant (localhost:6333), Gemini embeddings, and the configured OpenAI-compatible LLM for fact extraction. Auto-capture + auto-recall across sessions.
-- **dbc ops access**: Narrow host-specific wrappers, including candidate-scoped Immich Media Inbox access on docker-vm. Its isolated vision workers may read pixels/OCR only for admitted candidates; there is no arbitrary Immich, credential, SQLite, or general Docker access. Existing media-stack/Caddy operational paths remain separately scoped.
-- **Docker reporting**: A strict result-only reporter is implemented but remains disabled until the dedicated runtime identity and key are deployed. See `docs/agent-docker-access.md`.
-- **Docker updates**: A separate target-allowlisted, digest-bound broker is implemented but remains disabled. Astra can propose or execute an independently approved one-use plan; it cannot approve plans, choose paths/commands, or access Docker directly. See `docs/agent-docker-access.md`.
-- **Health isolation**: The dedicated receiver and aggregate report boundary are implemented but disabled pending an approved canary/cutover. See `docs/openclaw-runtime-security.md`.
-
-```bash
-# Check gateway status (on the current OpenClaw host)
-systemctl --user status openclaw-gateway.service
-
-# Check update-check timer
-systemctl list-timers openclaw-update-check*
-```
+- **Production authority**: none
+- **Retained source**: `~/.openclaw` and the prior managed artifacts
+- **Rollback policy**: use the reviewed migration backups and cutover runbook;
+  do not start an OpenClaw consumer while either Hermes consumer is active
+- **Legacy playbook**: `playbooks/agents/openclaw.yml` remains opt-in and must
+  not be included in normal convergence
+- **Docker controls**: the platform-neutral result-only reporter and separate
+  approval-gated update broker remain outside the agent runtime. See
+  `docs/agent-docker-access.md`
 
 ## Planned: WAN Failover
 
