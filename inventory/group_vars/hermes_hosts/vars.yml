@@ -404,6 +404,9 @@ hermes_shadow_profiles:
     subid_start: 200000
     model_provider: openai-codex
     model_default: gpt-5.6-sol
+    fallback_providers:
+      - provider: ollama-cloud
+        model: glm-5.2
     discord_allowed_users:
       - "740687933803331726"
     discord_allowed_channels:
@@ -461,6 +464,7 @@ hermes_shadow_profiles:
     subid_start: 265536
     model_provider: anthropic
     model_default: claude-sonnet-4-6
+    fallback_providers: []
     discord_allowed_users: []
     discord_allowed_channels:
       - "1483229851350728784"
@@ -499,6 +503,7 @@ hermes_shadow_profiles:
     subid_start: 331072
     model_provider: anthropic
     model_default: claude-sonnet-4-6
+    fallback_providers: []
     discord_allowed_users: []
     discord_allowed_channels: []
     discord_free_response_channels: []

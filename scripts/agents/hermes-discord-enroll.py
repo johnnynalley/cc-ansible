@@ -208,6 +208,7 @@ def build_enrollment(env: dict[str, str], config: dict[str, Any]) -> tuple[dict[
     astra_token = secret(env, "DISCORD_BOT_TOKEN")
     dubble_token = secret(env, "DISCORD_DUBBLE_BOT_TOKEN")
     anthropic_key = secret(env, "ANTHROPIC_API_KEY")
+    ollama_key = secret(env, "OLLAMA_API_KEY")
     astra_enabled = source_enabled_channels(config, "default")
     dubble_enabled = source_enabled_channels(config, "dubble")
     astra_bot, astra_channels = bot_and_channels(
@@ -276,6 +277,7 @@ def build_enrollment(env: dict[str, str], config: dict[str, Any]) -> tuple[dict[
                 f"DISCORD_ALLOWED_USERS={owner}",
                 f"DISCORD_HOME_CHANNEL={astra}",
                 "DISCORD_HOME_CHANNEL_NAME=Astra",
+                f"OLLAMA_API_KEY={ollama_key}",
                 "",
             )
         ),
@@ -337,6 +339,7 @@ def verify_target(target_root: Path, enrollment_path: Path) -> dict[str, Any]:
         env = read_dotenv(path, allow_group_read=True)
         require("DISCORD_BOT_TOKEN" in env if profile != "rigel" else "DISCORD_BOT_TOKEN" not in env, f"target-{profile}-discord")
         require("ANTHROPIC_API_KEY" in env if profile != "astra" else "ANTHROPIC_API_KEY" not in env, f"target-{profile}-provider")
+        require("OLLAMA_API_KEY" in env if profile == "astra" else "OLLAMA_API_KEY" not in env, f"target-{profile}-fallback")
     return {"status": "ok", "consumers": 2, "profiles": 3, "channels": 4}
 
 

@@ -11,6 +11,14 @@ command_allowlist: []
 model:
   provider: {{ hermes_profile.model_provider }}
   default: {{ hermes_profile.model_default }}
+{% if hermes_profile.fallback_providers | default([]) %}
+
+fallback_providers:
+{% for fallback in hermes_profile.fallback_providers %}
+  - provider: {{ fallback.provider }}
+    model: {{ fallback.model }}
+{% endfor %}
+{% endif %}
 
 runtime:
   nofile_soft_limit: 4096

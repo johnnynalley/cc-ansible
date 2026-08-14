@@ -8,6 +8,8 @@ import re
 import unittest
 from pathlib import Path
 
+import yaml
+
 
 ROOT = Path(__file__).parents[2]
 
@@ -118,6 +120,30 @@ class ProductionAutomationTests(unittest.TestCase):
         self.assertIn('tool_progress: "off"', text)
         self.assertIn("progress_notices: false", text)
         self.assertIn("background_process_notifications: error", text)
+
+    def test_astra_has_native_glm_fallback_with_private_credential_rollout(self):
+        variables = yaml.safe_load(
+            (ROOT / "inventory/group_vars/hermes_hosts/vars.yml").read_text()
+        )
+        astra = next(
+            profile
+            for profile in variables["hermes_shadow_profiles"]
+            if profile["name"] == "astra"
+        )
+        self.assertEqual(
+            astra["fallback_providers"],
+            [{"provider": "ollama-cloud", "model": "glm-5.2"}],
+        )
+        template = (
+            ROOT / "templates/hermes/hermes-managed-config.yaml.j2"
+        ).read_text()
+        self.assertIn("fallback_providers:", template)
+        self.assertIn("fallback.provider", template)
+        playbook = (ROOT / "playbooks/agents/hermes-automation.yml").read_text()
+        self.assertIn("Read retained Ollama Cloud credential privately", playbook)
+        self.assertIn("Enroll Astra Ollama Cloud fallback credential", playbook)
+        self.assertIn("'/etc/hermes/astra/.env'", playbook)
+        self.assertIn("hermes_automation_astra_provider_environment.changed", playbook)
 
     def test_gateway_uses_live_manifest_instead_of_design_contract(self):
         base = (ROOT / "templates/hermes/hermes-gateway.service.j2").read_text()

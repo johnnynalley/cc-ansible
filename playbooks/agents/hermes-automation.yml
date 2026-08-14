@@ -50,6 +50,7 @@
           '/var/lib/hermes/astra/cron/jobs.json',
           hermes_automation_manifest_live,
           hermes_automation_reconciliation_live,
+          '/etc/hermes/astra/.env',
           '/etc/systemd/system/hermes-gateway-astra.service',
           '/etc/systemd/system/' ~ hermes_native_update_service,
           '/etc/sudoers.d/hermes-native-update',
@@ -439,6 +440,29 @@
         label: "{{ item.name }}"
       check_mode: false
 
+    - name: Read retained Ollama Cloud credential privately
+      ansible.builtin.slurp:
+        src: "{{ hermes_production_cutover_source_env }}"
+      register: hermes_automation_source_environment
+      no_log: true
+
+    - name: Require exactly one retained Ollama Cloud credential
+      ansible.builtin.assert:
+        that:
+          - hermes_automation_ollama_credentials | length == 1
+          - hermes_automation_ollama_credentials[0] | length > 0
+        fail_msg: >-
+          The retained OpenClaw environment does not contain exactly one
+          usable OLLAMA_API_KEY. No Hermes credential was changed.
+      vars:
+        hermes_automation_ollama_credentials: >-
+          {{
+            hermes_automation_source_environment.content
+            | b64decode
+            | regex_findall('(?m)^OLLAMA_API_KEY=([^\r\n]+)$')
+          }}
+      no_log: true
+
     - name: Remove native profile backup staging directories
       ansible.builtin.file:
         path: "{{ item.home }}/backups/{{ hermes_automation_backup_id }}"
@@ -450,6 +474,24 @@
 
     - name: Converge Hermes automation transaction
       block:
+        - name: Enroll Astra Ollama Cloud fallback credential
+          ansible.builtin.lineinfile:
+            path: /etc/hermes/astra/.env
+            regexp: '^OLLAMA_API_KEY='
+            line: >-
+              OLLAMA_API_KEY={{
+                (
+                  hermes_automation_source_environment.content
+                  | b64decode
+                  | regex_findall('(?m)^OLLAMA_API_KEY=([^\r\n]+)$')
+                )[0]
+              }}
+            owner: root
+            group: hermes-astra
+            mode: "0440"
+          register: hermes_automation_astra_provider_environment
+          no_log: true
+
         - name: Create bounded automation readers group
           ansible.builtin.group:
             name: "{{ hermes_automation_readers_group }}"
@@ -580,6 +622,7 @@
           loop_control:
             loop_var: hermes_profile
             label: "{{ hermes_profile.name }}"
+          register: hermes_automation_managed_policies
 
         - name: Hash bounded Hermes policy and environment
           ansible.builtin.command:
@@ -606,6 +649,7 @@
           loop_control:
             label: "{{ item.item.name }}"
           no_log: true
+          register: hermes_automation_policy_manifests
 
         - name: Deploy Astra Gateway automation read boundary
           ansible.builtin.template:
@@ -619,6 +663,7 @@
             backup: true
           vars:
             hermes_profile: "{{ hermes_shadow_profiles[0] }}"
+          register: hermes_automation_astra_gateway_unit
 
         - name: Create Astra Gateway systemd drop-in directory
           ansible.builtin.file:
@@ -639,15 +684,83 @@
             group: root
             mode: "0644"
             backup: true
+          register: hermes_automation_astra_gateway_dropin
 
         - name: Reload Hermes automation systemd units
           ansible.builtin.systemd_service:
             daemon_reload: true
 
-        - name: Stop Astra briefly for atomic cron reconciliation
+        - name: Check Astra cron drift before any interruption
+          ansible.builtin.command:
+            argv:
+              - /usr/sbin/runuser
+              - --user
+              - hermes-astra
+              - --
+              - /usr/bin/env
+              - HOME=/var/lib/hermes/astra
+              - HERMES_HOME=/var/lib/hermes/astra
+              - "{{ hermes_shadow_runtime_venv }}/bin/python"
+              - "{{ hermes_cron_reconcile_live }}"
+              - --manifest
+              - "{{ hermes_automation_manifest_live }}"
+              - --home
+              - /var/lib/hermes/astra
+              - --profile
+              - astra
+              - --check
+          register: hermes_automation_reconcile_precheck
+          changed_when: false
+          check_mode: false
+
+        - name: Decide which production consumers need one restart
+          ansible.builtin.set_fact:
+            hermes_automation_shared_policy_changed: >-
+              {{
+                (
+                  hermes_automation_managed_policies.results
+                  | selectattr('hermes_profile.name', 'equalto', 'dubble')
+                  | map(attribute='changed')
+                  | first
+                )
+                or
+                (
+                  hermes_automation_policy_manifests.results
+                  | selectattr('item.item.name', 'equalto', 'dubble')
+                  | map(attribute='changed')
+                  | first
+                )
+              }}
+            hermes_automation_astra_restart_required: >-
+              {{
+                (
+                  (hermes_automation_reconcile_precheck.stdout | from_json)
+                  .changes | length > 0
+                )
+                or hermes_automation_astra_provider_environment.changed
+                or
+                (
+                  hermes_automation_managed_policies.results
+                  | selectattr('hermes_profile.name', 'equalto', 'astra')
+                  | map(attribute='changed')
+                  | first
+                )
+                or
+                (
+                  hermes_automation_policy_manifests.results
+                  | selectattr('item.item.name', 'equalto', 'astra')
+                  | map(attribute='changed')
+                  | first
+                )
+                or hermes_automation_astra_gateway_unit.changed
+                or hermes_automation_astra_gateway_dropin.changed
+              }}
+
+        - name: Stop Astra once when cron or runtime state changed
           ansible.builtin.systemd_service:
             name: hermes-gateway-astra.service
             state: stopped
+          when: hermes_automation_astra_restart_required | bool
 
         - name: Refresh the native cron backup with Astra stopped
           ansible.builtin.copy:
@@ -659,6 +772,7 @@
             owner: root
             group: root
             mode: "0600"
+          when: hermes_automation_astra_restart_required | bool
 
         - name: Reconcile Astra jobs through the native Hermes API
           ansible.builtin.command:
@@ -684,12 +798,30 @@
             (hermes_automation_reconcile.stdout | from_json).changes
             | length > 0
           check_mode: false
+          when: hermes_automation_astra_restart_required | bool
 
-        - name: Restart Astra with the bounded production schedule
+        - name: Start Astra after the single bounded reconciliation
           ansible.builtin.systemd_service:
             name: hermes-gateway-astra.service
             state: started
             enabled: true
+          when: hermes_automation_astra_restart_required | bool
+
+        - name: Restart Dubble only when shared managed policy changed
+          ansible.builtin.systemd_service:
+            name: hermes-gateway-dubble.service
+            state: restarted
+            enabled: true
+          when: hermes_automation_shared_policy_changed | bool
+
+        - name: Ensure both production consumers remain active
+          ansible.builtin.systemd_service:
+            name: "hermes-gateway-{{ item }}.service"
+            state: started
+            enabled: true
+          loop:
+            - astra
+            - dubble
 
         - name: Enable production automation and backup timers
           ansible.builtin.systemd_service:

@@ -203,6 +203,10 @@ class HermesShadowPlaybookTests(unittest.TestCase):
             )
             self.assertEqual(config["model"]["provider"], profile["model_provider"])
             self.assertEqual(config["model"]["default"], profile["model_default"])
+            self.assertEqual(
+                config.get("fallback_providers", []),
+                profile.get("fallback_providers", []),
+            )
             self.assertEqual(config["approvals"]["mode"], "manual")
             self.assertEqual(config["approvals"]["cron_mode"], "deny")
             if profile["name"] == "astra":

@@ -24,6 +24,7 @@ class HermesDiscordEnrollTests(unittest.TestCase):
             "DISCORD_BOT_TOKEN": "a" * 64,
             "DISCORD_DUBBLE_BOT_TOKEN": "b" * 64,
             "ANTHROPIC_API_KEY": "c" * 64,
+            "OLLAMA_API_KEY": "d" * 64,
         }
         owner = "1111111111111111"
         config = {
@@ -94,6 +95,7 @@ class HermesDiscordEnrollTests(unittest.TestCase):
             [{"id": "1000000000000003", "skills": ["source-grounded-study"]}],
         )
         self.assertIn("DISCORD_BOT_TOKEN=" + "a" * 64, credentials["astra"])
+        self.assertIn("OLLAMA_API_KEY=" + "d" * 64, credentials["astra"])
         self.assertIn("DISCORD_BOT_TOKEN=" + "b" * 64, credentials["dubble"])
         self.assertEqual(
             enrollment["profiles"]["dubble"]["ignoredChannels"],
