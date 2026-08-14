@@ -97,9 +97,9 @@ hermes_star_privacy_validator_source: >-
 hermes_star_privacy_validator_live: >-
   /usr/local/libexec/hermes-star-dispatch-privacy-validate
 
-# Root-managed Tirith transaction provenance. The release track remains the
-# official latest channel; these values record the currently reviewed artifact
-# and are advanced only through an attended root-owned update transaction.
+# Tirith bootstrap transaction provenance. These exact values authenticate the
+# first install only. The live binary then follows Tirith's native signed
+# self-update channel from a dedicated self-managed service identity.
 hermes_tirith_release_track: official-latest
 hermes_tirith_version: 0.3.3
 hermes_tirith_release_base_url: >-
@@ -127,7 +127,12 @@ hermes_tirith_certificate_encoded_cache: >-
 hermes_tirith_certificate_cache: >-
   /var/cache/hermes/tirith-0.3.3/checksums.txt.pem
 hermes_tirith_extract_root: /var/cache/hermes/tirith-0.3.3/extracted
-hermes_tirith_binary: /usr/local/libexec/hermes-tirith
+hermes_tirith_update_user: hermes-updater
+hermes_tirith_update_group: hermes-updater
+hermes_tirith_update_uid: 62013
+hermes_tirith_update_home: /var/lib/hermes-updater
+hermes_tirith_binary: /var/lib/hermes-updater/.local/bin/tirith
+hermes_tirith_legacy_binary: /usr/local/libexec/hermes-tirith
 hermes_tirith_cosign_identity_regexp: >-
   ^https://github.com/sheeki03/tirith/\.github/workflows/release\.yml@refs/tags/v
 hermes_tirith_cosign_issuer: https://token.actions.githubusercontent.com
@@ -150,6 +155,18 @@ hermes_shadow_uv_config_dirs: /var/lib/hermes/bootstrap/config-dirs
 hermes_shadow_runtime_binary: /usr/local/bin/hermes
 hermes_shadow_runtime_root: /usr/local/lib/hermes-agent
 hermes_shadow_runtime_venv: /usr/local/lib/hermes-agent/venv
+hermes_native_update_user: hermes-astra
+hermes_native_update_group: hermes-astra
+hermes_native_update_home: /var/lib/hermes/astra
+hermes_native_update_service: hermes-native-update.service
+hermes_native_update_timer: hermes-native-update.timer
+hermes_tirith_update_service: hermes-tirith-native-update.service
+hermes_tirith_update_timer: hermes-tirith-native-update.timer
+# Timers remain staged while Hermes has no production route. The attended
+# cutover must set this true so both native updaters run automatically.
+hermes_native_updates_automatic: false
+hermes_native_update_calendar: daily
+hermes_native_update_randomized_delay: 6h
 hermes_shadow_version_only_migration_from: 33
 hermes_shadow_config_version: 34
 hermes_shadow_contract_source: files/hermes/shadow-target.json
@@ -176,6 +193,7 @@ hermes_shadow_profiles:
   - name: astra
     user: hermes-astra
     group: hermes-astra
+    unit: hermes-gateway-astra.service
     uid: 62010
     home: /var/lib/hermes/astra
     subid_start: 200000
@@ -204,6 +222,7 @@ hermes_shadow_profiles:
   - name: dubble
     user: hermes-dubble
     group: hermes-dubble
+    unit: hermes-gateway-dubble.service
     uid: 62011
     home: /var/lib/hermes/dubble
     subid_start: 265536
@@ -231,6 +250,7 @@ hermes_shadow_profiles:
   - name: rigel
     user: hermes-rigel
     group: hermes-rigel
+    unit: hermes-gateway-rigel.service
     uid: 62012
     home: /var/lib/hermes/rigel
     subid_start: 331072

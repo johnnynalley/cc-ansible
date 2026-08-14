@@ -31,7 +31,7 @@
     "usbDeviceAccess": false
   },
   "runtime": {
-    "installMethod": "official-root-git-locked",
+    "installMethod": "official-git-native-update",
     "releaseTrack": "official-default",
     "sourceRepo": "https://github.com/NousResearch/hermes-agent.git",
     "dependencySync": "uv-sync-extra-all-locked",
@@ -40,7 +40,21 @@
     "codeRoot": "/usr/local/lib/hermes-agent",
     "launcher": "/usr/local/bin/hermes",
     "managedScope": "/etc/hermes",
-    "runtimeSelfUpdateEnabled": false,
+    "runtimeSelfUpdateEnabled": true,
+    "nativeUpdateCommand": "hermes update",
+    "nativeUpdatePrivilegeBridge": "astra-exact-systemd-unit",
+    "nativeUpdateExecutionUser": "hermes-astra",
+    "nativeUpdateGatewayManageUnits": [
+      "hermes-gateway-astra.service",
+      "hermes-gateway-dubble.service",
+      "hermes-gateway-rigel.service"
+    ],
+    "nativeUpdateLoadsServiceSecrets": false,
+    "nativeUpdateRootCapabilities": false,
+    "nativeAutomaticUpdateTimerStaged": true,
+    "automaticUpdatesRequiredAtCutover": true,
+    "tirithInstallMethod": "official-self-managed",
+    "tirithNativeUpdateCommand": "tirith update",
     "runtimeLazyInstallsEnabled": false,
     "rootManagedCommandScanner": true,
     "scannerRuntimeNetworkEnabled": false,
@@ -78,7 +92,8 @@
     "mcpReloadConfirmation": true,
     "autoAcceptHooks": false,
     "allowAllDiscordUsers": false,
-    "sudoers": false,
+    "generalSudoers": false,
+    "nativeUpdateTriggerSudoers": true,
     "supplementaryDockerGroup": false
   },
   "profiles": [
@@ -100,7 +115,8 @@
         "mixture-of-agents",
         "cron-declarations",
         "aggregate-report-read",
-        "broker-proposal"
+        "broker-proposal",
+        "native-self-update-trigger"
       ],
       "forbiddenCapabilities": [
         "sudo",

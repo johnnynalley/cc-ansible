@@ -1,0 +1,7 @@
+# Astra may request exactly the native Hermes update transaction and nothing else.
+Cmnd_Alias HERMES_NATIVE_UPDATE = /usr/bin/systemctl start {{ hermes_native_update_service }}
+hermes-astra ALL=(root) NOPASSWD: HERMES_NATIVE_UPDATE
+
+# Hermes's native updater discovers active gateways itself. This permits only
+# the exact manage-unit verbs it natively issues for the reviewed Hermes units.
+Cmnd_Alias HERMES_NATIVE_GATEWAY_MANAGE = {% for profile in hermes_shadow_profiles %}/usr/bin/systemctl --no-ask-password reset-failed {{ profile.unit }}, /usr/bin/systemctl --no-ask-password start {{ profile.unit }}, /usr/bin/systemctl --no-ask-password restart {{ profile.unit }}{% if not loop.last %}, {% endif %}{% endfor %}{{ '\n' }}{{ hermes_native_update_user }} ALL=(root) NOPASSWD: HERMES_NATIVE_GATEWAY_MANAGE

@@ -347,18 +347,22 @@ Initial production policy:
 - No auto-accepted hooks. Any hook is root-reviewed and its consent record is
   audited after edits because Hermes hook consent keys the command path, not
   script content.
-- Prompt-injection scanning and secret redaction enabled. Tirith is installed
-  by a root-owned transaction from an exact official release artifact after
-  Sigstore identity and signed-checksum verification. Gateways use only the
-  absolute root-owned binary, run it offline, reject runtime lazy installs,
-  and fail closed on scanner errors. Hermes's built-in background downloader
-  is never part of the production path.
+- Prompt-injection scanning and secret redaction enabled. Tirith is bootstrapped
+  from an exact official release after Sigstore identity and signed-checksum
+  verification, then maintained by its own signed atomic updater under the
+  dedicated `hermes-updater` identity. Gateways use only the absolute binary,
+  run it offline, reject runtime lazy installs, and fail closed on scanner
+  errors. Hermes's background downloader is never part of the production path.
 - Dashboard/API disabled. Gateway listeners remain loopback-only unless a
   separately authenticated Tailscale proxy is deliberately approved.
 - Egress is restricted to required model, web, Discord, Health-report, and
   broker endpoints. Private/link-local metadata destinations remain blocked.
-- The Hermes service has no sudoers entry and no supplementary group that can
-  write controller code, read secrets, or administer containers.
+- The Hermes profiles have no general sudo or supplementary group that can
+  write controller code, read secrets, or administer containers. Astra alone
+  may start the exact root-owned native update unit; Dubble and Rigel cannot.
+- That unit still runs Hermes's own updater as Astra. It sets uv's documented
+  `UV_LINK_MODE=copy` behavior so cache files cannot become hardlinked to the
+  shared runtime tree and normal updates do not emit hardlink fallback noise.
 
 This boundary assumes any user-authorized agent conversation can be malicious.
 Messaging authorization limits who can ask Hermes to act; it does not make
@@ -429,10 +433,12 @@ shared with another role or copied into a terminal sandbox.
 
 ### Runtime And Updates
 
-Install the official supported root-mode Git distribution under
-`/usr/local/lib/hermes-agent` with `/usr/local/bin/hermes` as the launcher. The
-service users cannot update or patch that code. Track the official default
-stable branch rather than setting a policy-level exact-version pin.
+Install the official Git distribution under `/usr/local/lib/hermes-agent` with
+`/usr/local/bin/hermes` as the launcher. Root performs the reviewed bootstrap,
+then `hermes-astra` owns the checkout so Hermes can use its native updater.
+The Discord Gateway still cannot patch that code because its hardened systemd
+namespace makes `/usr/local` read-only. Track the official default branch rather
+than setting a policy-level exact-version pin.
 
 The initial reviewed bootstrap uses stable release `v2026.8.3` (Hermes
 v0.20.0), annotated tag object
@@ -457,20 +463,61 @@ Preserve Hermes's native Git install marker and launcher layout, disable bundled
 skill seeding, and require the post-install origin, tag object, commit, and
 clean-tree checks before configuration proceeds.
 
-Updates are root-managed transactions:
+Updates use Hermes's native lifecycle. The root-owned launcher recognizes only
+the exact `update --gateway` argv that Hermes's own Discord `/update` command
+emits. For Astra only, that branch starts a hardened systemd oneshot which runs
+`hermes update --gateway --yes`; all release discovery, Git movement,
+backup, dependency migration, syntax rollback, config migration, and Gateway
+restart remain in upstream Hermes. The bridge does not implement an updater.
+Dubble and Rigel have no update trigger or sudoers entry.
 
-1. Back up every profile with Hermes's SQLite-safe backup path and take a
-   targeted host rollback artifact for Hermes code, policy, units, and state.
-2. Update the shared code through the official mechanism with full pre-update
-   backup enabled.
-3. Run offline config migration, Doctor, supply-chain audit, prompt-size,
-   profile, and declaration checks.
-4. Start a tokenless shadow service and run behavior/security smoke tests.
-5. Restart production profiles one at a time only after the shadow passes.
-6. Restore the prior code and profile backup if any gate fails.
+The oneshot runs as `hermes-astra`, not root, and invokes the native CLI entry
+directly so it cannot recurse through the launcher trigger. This lets Hermes use
+its normal private mode-`0700` profile home without ACL or group exceptions. The
+unit does not set `HERMES_MANAGED_DIR`; the entire root-managed Astra directory
+is inaccessible to it, so Hermes cannot load the Gateway's credentials while
+updating. It has no Linux capabilities and sees root-owned behavior, plugin,
+script, and imported-data paths read-only. Hermes's own restart logic may issue
+only `reset-failed`, `start`, and `restart` for the three enumerated Hermes
+Gateway units. Together with the exact update-unit trigger, those commands are
+Astra's entire sudo surface. Dubble and Rigel have no sudo authority.
 
-Runtime lazy dependency installation is disabled. Required extras are installed
-and audited during the root-owned build transaction, never by a live Gateway.
+The same native oneshot is scheduled automatically after production cutover.
+It remains staged and disabled while Hermes has no production route so the
+accepted source cannot move underneath migration testing. Hermes's native
+default quick snapshot protects critical Astra state before code or dependency
+changes; the retained host migration backup protects the complete profile,
+checkout, and separately managed Dubble and Rigel profiles. Config checks and
+policy hashes remain startup gates, not a replacement update pipeline.
+
+The first capability-stripped root unit was rejected in live testing before it
+changed Git or dependencies. Hermes tried to inspect the optional
+`/var/lib/hermes/astra/.env`, but root with an empty capability bounding set
+could not traverse Astra's mode-`0700` home. Broad DAC capabilities would have
+defeated the security boundary. A subsequent separate-updater design completed
+one native update, but required home ACLs and directory modes that Hermes's own
+config checks correctly restored to private state. That design was retired
+rather than preserving recurring permission churn. Running the native updater
+as Astra inside a separate systemd write namespace is the durable correction.
+The unit still excludes `HERMES_MANAGED_DIR`, because Hermes loads managed
+`.env` before dispatching every subcommand and an update must not receive the
+Gateway's credentials.
+
+The first successful native update exposed one more boundary error before any
+Gateway start: `UMask=0077` made newly checked-out Python files mode `0600`, so
+the three service identities could not import the shared runtime. Runtime code
+contains no credentials and must be executable/readable by all three isolated
+Gateway identities. The updater therefore uses normal install umask `0022`,
+and convergence normalizes only the official checkout's ownership to Astra.
+It does not recursively rewrite native source modes; the updater's `0022` umask
+produces the shared read/execute permissions and the stopped acceptance probes
+verify all three service identities can import the runtime. Gateway secrets
+remain outside the checkout under inaccessible root-managed profile
+directories.
+
+Runtime lazy dependency installation is disabled. The reviewed bootstrap
+installs required extras once; future dependency changes remain inside native
+`hermes update` inside the dedicated update unit, never the live Gateway unit.
 Bundled skills are initially opted out; only reviewed, required skills are
 seeded per role. Do not configure root-owned baseline skills only through
 `skills.external_dirs` in managed scope: Hermes v0.20.0's lightweight runtime
@@ -478,13 +525,16 @@ skill loader reads the profile-local config directly and would ignore that
 merged managed value even though `hermes config check` accepts it.
 
 Hermes v0.20.0 otherwise starts a background Tirith installer when the scanner
-is absent. The managed deployment disables that path explicitly and installs
-Tirith from a root-owned release transaction. The transaction checks the
-downloaded archive and release metadata by exact SHA-256, decodes the release
-certificate, verifies the checksums file with `cosign` against the official
-GitHub Actions workflow identity and issuer, requires the archive in that
-signed manifest, and installs the binary mode `0555` under
-`/usr/local/libexec`. Service startup requires the absolute binary and sets
+is absent. The managed deployment disables that lazy path and authenticates the
+initial Tirith release with exact SHA-256 plus `cosign` verification against
+the official GitHub Actions identity and issuer. It installs that bootstrap
+artifact at `/var/lib/hermes-updater/.local/bin/tirith`, owned by a dedicated
+no-login identity. This location matters: Tirith classifies system paths such
+as `/usr/local/libexec` as package-managed and refuses native self-replacement,
+whereas its supported `~/.local/bin` layout is self-managed. Future scanner
+updates therefore run unmodified `tirith update --yes --format json`, retaining
+Tirith's mandatory signature check, atomic swap, previous-binary sidecar, and
+native rollback. Service startup uses the absolute binary with
 `TIRITH_OFFLINE=1`; attended deployment also proves one benign allow verdict
 and one pipe-to-interpreter block verdict without network access.
 The policy-schema transaction advances an existing profile-local config only
@@ -638,8 +688,9 @@ boundaries without installing Hermes:
    listener, host credential, or broker mutation authority.
 5. Backup, restore, cutover, and OpenClaw rollback procedures have explicit
    pass/fail checks.
-6. A static audit rejects Docker group/socket access, sudoers, host mounts,
-   cross-profile secret reads, local-terminal fallback, and allow-all Discord.
+6. A static audit rejects Docker group/socket access, general sudoers, host
+   mounts, cross-profile secret reads, local-terminal fallback, and allow-all
+   Discord while requiring the exact Astra-only native-update trigger.
 
 The credential-free machine-readable declaration is
 `files/hermes/shadow-target.json`. The fail-closed validator is

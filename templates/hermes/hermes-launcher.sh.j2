@@ -1,0 +1,19 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+unset PYTHONPATH
+unset PYTHONHOME
+
+# Hermes's Discord /update command invokes this exact argv. The launcher only
+# crosses the privilege boundary; release selection and installation remain
+# owned by Hermes's native updater.
+if [[ "${EUID}" -ne 0 && "$#" -eq 2 && "$1" == "update" && "$2" == "--gateway" ]]; then
+  if [[ "$(id -un)" != "hermes-astra" ]]; then
+    printf 'Hermes native updates may only be requested by the Astra service.\n' >&2
+    exit 77
+  fi
+  exec /usr/bin/sudo -n /usr/bin/systemctl start {{ hermes_native_update_service }}
+fi
+
+exec "{{ hermes_shadow_runtime_venv }}/bin/python" \
+  "{{ hermes_shadow_runtime_root }}/hermes" "$@"

@@ -6,8 +6,9 @@
   pins manual approvals, deny-on-cron, review-gated memory/skills, quiet output,
   suppressed background-learning chat notices, role-specific toolsets, and an
   air-gapped rootless Podman backend. It disables lazy installs and private URL
-  access, points Tirith at the absolute root-managed binary, and requires
-  scanner failures to deny the command. Delegation is flat, capped at two
+  access, points Tirith at the absolute self-managed binary, requires scanner
+  failures to deny the command, and makes full native pre-update backups the
+  default. Delegation is flat, capped at two
   concurrent children and 12 iterations, with child orchestration disabled.
   Only Astra enables the reviewed hook-only Star privacy plugin; Dubble and
   Rigel keep an empty plugin set.
@@ -30,8 +31,32 @@
   and read/write mount modes before the Gateway process can start.
   Astra additionally validates identical root-owned plugin trees, the exact
   six-hook/no-tool registration surface, and a read-only managed-to-runtime
-  plugin bind before startup. The unit requires the root-managed Tirith binary
+  plugin bind before startup. The unit requires the dedicated Tirith binary
   before Hermes starts and forces the scanner to operate offline.
+- `hermes-launcher.sh.j2`: the normal native Hermes launcher. Its only special
+  branch recognizes the exact `update --gateway` argv emitted by Hermes's
+  Discord `/update` command and lets only `hermes-astra` invoke the narrow
+  systemd update unit. It does not discover, select, download, or install a
+  release.
+- `hermes-native-update.service.j2` and `hermes-native-update.timer.j2`: a
+  hardened privilege boundary and automatic schedule around the unmodified
+  `hermes update --gateway --yes` command. Hermes retains ownership of
+  Git selection, backup, dependency migration, rollback, and gateway restart.
+  The unit runs as `hermes-astra`, loads no Gateway secret environment, has no
+  root capabilities, and gives the native updater write access only to the
+  checkout and Astra's private profile state. The normal Discord Gateway unit
+  keeps `/usr/local` read-only, so Astra can change program files only inside the
+  dedicated update namespace. The root-managed Astra directory is entirely
+  inaccessible to the updater; selected root-owned runtime policy paths remain
+  read-only. The code checkout uses normal `0022` install semantics because all
+  three isolated Gateway identities execute the same credential-free runtime.
+- `hermes-tirith-native-update.service.j2` and
+  `hermes-tirith-native-update.timer.j2`: run Tirith's own mandatory-signature,
+  atomic self-updater under the dedicated no-login `hermes-updater` identity.
+- `hermes-native-update.sudoers.j2`: permits only `hermes-astra` to start the
+  exact Hermes native update unit and to issue Hermes's exact `reset-failed`,
+  `start`, and `restart` calls for the three enumerated Gateway units. It gets no
+  shell or arbitrary systemctl authority; Dubble and Rigel get no sudo access.
 
 ## Consumer
 

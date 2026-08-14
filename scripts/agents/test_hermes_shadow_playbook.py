@@ -14,6 +14,16 @@ PLAYBOOK = ROOT / "playbooks" / "agents" / "hermes-shadow.yml"
 VARS = ROOT / "inventory" / "group_vars" / "hermes_hosts" / "vars.yml"
 CONFIG = ROOT / "templates" / "hermes" / "hermes-managed-config.yaml.j2"
 SERVICE = ROOT / "templates" / "hermes" / "hermes-gateway.service.j2"
+LAUNCHER = ROOT / "templates" / "hermes" / "hermes-launcher.sh.j2"
+UPDATE_SERVICE = ROOT / "templates" / "hermes" / "hermes-native-update.service.j2"
+UPDATE_TIMER = ROOT / "templates" / "hermes" / "hermes-native-update.timer.j2"
+TIRITH_UPDATE_SERVICE = (
+    ROOT / "templates" / "hermes" / "hermes-tirith-native-update.service.j2"
+)
+TIRITH_UPDATE_TIMER = (
+    ROOT / "templates" / "hermes" / "hermes-tirith-native-update.timer.j2"
+)
+UPDATE_SUDOERS = ROOT / "templates" / "hermes" / "hermes-native-update.sudoers.j2"
 CONTRACT = ROOT / "files" / "hermes" / "shadow-target.json"
 RIGEL_JOB = ROOT / "files" / "hermes" / "jobs" / "rigel-academic-alerts.json"
 RIGEL_SCRIPT = ROOT / "scripts" / "agents" / "hermes-rigel-schedule.py"
@@ -28,6 +38,16 @@ class HermesShadowPlaybookTests(unittest.TestCase):
         cls.variables = yaml.safe_load(VARS.read_text(encoding="utf-8"))
         cls.config_template = CONFIG.read_text(encoding="utf-8")
         cls.service_template = SERVICE.read_text(encoding="utf-8")
+        cls.launcher_template = LAUNCHER.read_text(encoding="utf-8")
+        cls.update_service_template = UPDATE_SERVICE.read_text(encoding="utf-8")
+        cls.update_timer_template = UPDATE_TIMER.read_text(encoding="utf-8")
+        cls.tirith_update_service_template = TIRITH_UPDATE_SERVICE.read_text(
+            encoding="utf-8"
+        )
+        cls.tirith_update_timer_template = TIRITH_UPDATE_TIMER.read_text(
+            encoding="utf-8"
+        )
+        cls.update_sudoers_template = UPDATE_SUDOERS.read_text(encoding="utf-8")
         cls.rigel_job = yaml.safe_load(RIGEL_JOB.read_text(encoding="utf-8"))
         cls.rigel_script = RIGEL_SCRIPT.read_text(encoding="utf-8")
         cls.environment = Environment(undefined=StrictUndefined, autoescape=False)
@@ -48,6 +68,9 @@ class HermesShadowPlaybookTests(unittest.TestCase):
         stop = self.task("Stop Hermes shadow units when disabled")
         self.assertIn("enabled: false", stop)
         self.assertIn("state: stopped", stop)
+        timer_stop = self.task("Stop Hermes native update timers when disabled")
+        self.assertIn("enabled: false", timer_stop)
+        self.assertIn("state: stopped", timer_stop)
         self.assertIn("ansible.builtin.meta: end_host", self.playbook)
 
     def test_shadow_targets_existing_host_but_not_normal_convergence(self) -> None:
@@ -74,6 +97,9 @@ class HermesShadowPlaybookTests(unittest.TestCase):
         for profile in profiles:
             self.assertEqual(profile["user"], f"hermes-{profile['name']}")
             self.assertEqual(profile["home"], f"/var/lib/hermes/{profile['name']}")
+            self.assertEqual(
+                profile["unit"], f"hermes-gateway-{profile['name']}.service"
+            )
             self.assertTrue(
                 {"terminal", "file", "code_execution", "discord_admin"}
                 <= set(profile["disabled_toolsets"])
@@ -98,6 +124,8 @@ class HermesShadowPlaybookTests(unittest.TestCase):
             "Read Hermes target free root filesystem space",
             "Inspect Hermes source origin",
             "Inspect Hermes source commit",
+            "Inspect Hermes source branch",
+            "Inspect official Hermes main commit",
             "Inspect reviewed Hermes release tag object",
             "Resolve reviewed Hermes release tag",
             "Inspect Hermes source modifications",
@@ -151,6 +179,10 @@ class HermesShadowPlaybookTests(unittest.TestCase):
                 self.variables["hermes_tirith_binary"],
             )
             self.assertFalse(config["security"]["tirith_fail_open"])
+            self.assertNotIn("pre_update_backup", config["updates"])
+            self.assertEqual(
+                config["updates"]["non_interactive_local_changes"], "discard"
+            )
             self.assertTrue(config["memory"]["write_approval"])
             self.assertTrue(config["skills"]["write_approval"])
             self.assertFalse(config["terminal"]["docker_network"])
@@ -366,25 +398,34 @@ class HermesShadowPlaybookTests(unittest.TestCase):
         self.assertIn("UV_NO_ENV_FILE", sync)
         self.assertNotIn("UV_NO_CONFIG", sync)
         self.assertNotIn("pip install", sync)
-        self.assertNotIn("npm", self.playbook)
+        self.assertNotIn("community.general.npm", self.playbook)
+        self.assertNotIn("npm install", self.playbook)
+        self.assertNotIn("npm ci", self.playbook)
         self.assertNotIn("install.sh", self.playbook)
         self.assertIn('content: "git\\n"', install_method)
+        self.assertIn("owner: \"{{ hermes_native_update_user }}\"", install_method)
+        self.assertIn("group: \"{{ hermes_native_update_group }}\"", install_method)
         launcher = self.task("Install Hermes launcher")
-        self.assertIn("unset PYTHONPATH", launcher)
-        self.assertIn("/bin/python", launcher)
-        self.assertIn("/hermes", launcher)
+        self.assertIn("hermes-launcher.sh.j2", launcher)
+        self.assertNotIn("when: not hermes_shadow_runtime.stat.exists", launcher)
+        self.assertIn("unset PYTHONPATH", self.launcher_template)
+        self.assertIn("/bin/python", self.launcher_template)
+        self.assertIn("/hermes", self.launcher_template)
 
-    def test_tirith_is_root_managed_offline_and_supply_chain_verified(self) -> None:
+    def test_tirith_is_native_self_managed_offline_and_supply_chain_verified(self) -> None:
         approval = self.task("Require explicit Hermes shadow approval")
-        provenance = self.task("Require reviewed root-managed Tirith provenance")
+        provenance = self.task("Require reviewed Tirith bootstrap provenance")
         prerequisites = self.task("Install Hermes shadow host prerequisites")
         assets = self.task("Download reviewed Tirith release assets")
         verify = self.task("Verify Tirith signed checksum provenance")
-        install = self.task("Install root-managed Tirith binary")
+        install = self.task("Install Tirith native self-managed bootstrap binary")
+        native = self.task("Require Tirith native self-update ownership")
+        account_probe = self.task("Inspect realized Tirith native update account")
+        update_dirs = self.task("Create Tirith self-managed update directories")
         allow = self.task("Prove Tirith allows a benign command offline")
         block = self.task("Prove Tirith blocks pipe-to-interpreter offline")
         self.assertIn("official-latest", provenance)
-        self.assertIn("/usr/local/libexec/hermes-tirith", provenance)
+        self.assertIn("/var/lib/hermes-updater/.local/bin/tirith", provenance)
         self.assertIn("rootManagedCommandScanner", approval)
         self.assertIn("runtimeLazyInstallsEnabled", approval)
         self.assertIn("scannerRuntimeNetworkEnabled", approval)
@@ -392,21 +433,175 @@ class HermesShadowPlaybookTests(unittest.TestCase):
         self.assertIn("tirithFailOpen", approval)
         self.assertIn("- cosign", prerequisites)
         self.assertIn("checksum:", assets)
-        self.assertIn("when: not ansible_check_mode", assets)
+        self.assertIn("- not ansible_check_mode", assets)
+        self.assertIn("not hermes_tirith_runtime.stat.exists", assets)
         self.assertIn("/usr/bin/cosign", verify)
         self.assertIn("--certificate-identity-regexp", verify)
-        self.assertIn("owner: root", install)
-        self.assertIn('mode: "0555"', install)
+        self.assertIn("hermes_tirith_update_user", install)
+        self.assertIn('mode: "0755"', install)
+        self.assertIn("self-managed", native)
+        self.assertIn("/usr/bin/getent", account_probe)
+        self.assertIn("check_mode: false", account_probe)
+        self.assertIn("rc not in [0, 2]", account_probe)
+        self.assertIn("else omit", update_dirs)
+        self.assertIn("hermes_tirith_update_account_probe.rc == 0", update_dirs)
         self.assertIn('TIRITH_OFFLINE: "1"', allow)
         self.assertIn("--no-daemon", allow)
         self.assertIn("failed_when: hermes_tirith_block_probe.rc != 1", block)
-        source = self.task("Require exact Hermes source")
+        source = self.task("Require clean official Hermes source track")
         self.assertIn("https://github.com/NousResearch/hermes-agent.git", source)
         self.assertIn("hermes_shadow_expected_commit", source)
+        self.assertIn("hermes_shadow_origin_main_commit", source)
+        self.assertIn("hermes_shadow_installed_branch", source)
         self.assertIn("hermes_shadow_expected_tag_object", source)
         self.assertIn("hermes_shadow_installed_tag_commit", source)
         self.assertIn("hermes_shadow_installed_status", source)
         self.assertNotIn("when:", source)
+        for task_name in (
+            "Inspect Hermes source origin",
+            "Inspect Hermes source commit",
+            "Inspect Hermes source branch",
+            "Inspect official Hermes main commit",
+            "Inspect reviewed Hermes release tag object",
+            "Resolve reviewed Hermes release tag",
+            "Inspect Hermes source modifications",
+        ):
+            task = self.task(task_name)
+            self.assertIn("- /usr/bin/git", task)
+            self.assertIn("safe.directory={{ hermes_shadow_runtime_root }}", task)
+            self.assertNotIn("/usr/sbin/runuser", task)
+            self.assertNotIn("become_user:", task)
+
+    def test_native_updaters_own_release_selection_and_are_narrowly_triggered(self) -> None:
+        values = {
+            key: self.variables[key]
+            for key in (
+                "hermes_native_update_service",
+                "hermes_native_update_timer",
+                "hermes_native_update_calendar",
+                "hermes_native_update_randomized_delay",
+                "hermes_native_update_user",
+                "hermes_native_update_group",
+                "hermes_native_update_home",
+                "hermes_shadow_runtime_binary",
+                "hermes_shadow_runtime_root",
+                "hermes_shadow_runtime_venv",
+                "hermes_tirith_binary",
+                "hermes_tirith_update_service",
+                "hermes_tirith_update_timer",
+                "hermes_tirith_update_user",
+                "hermes_tirith_update_group",
+                "hermes_tirith_update_home",
+                "hermes_shadow_profiles",
+            )
+        }
+        launcher = self.environment.from_string(self.launcher_template).render(**values)
+        hermes_service = self.environment.from_string(
+            self.update_service_template
+        ).render(**values)
+        hermes_timer = self.environment.from_string(
+            self.update_timer_template
+        ).render(**values)
+        tirith_service = self.environment.from_string(
+            self.tirith_update_service_template
+        ).render(**values)
+        tirith_timer = self.environment.from_string(
+            self.tirith_update_timer_template
+        ).render(**values)
+        sudoers = self.environment.from_string(self.update_sudoers_template).render(
+            **values
+        )
+
+        self.assertIn('"$1" == "update"', launcher)
+        self.assertIn('"$2" == "--gateway"', launcher)
+        self.assertIn('"$(id -un)" != "hermes-astra"', launcher)
+        self.assertIn(
+            "sudo -n /usr/bin/systemctl start hermes-native-update.service",
+            launcher,
+        )
+        self.assertIn("hermes update --gateway --yes", hermes_service)
+        self.assertNotIn("--backup", hermes_service)
+        self.assertIn(
+            "Wants=network-online.target hermes-tirith-native-update.service",
+            hermes_service,
+        )
+        self.assertNotIn("ExecStartPre=-/usr/bin/systemctl", hermes_service)
+        self.assertIn("User=hermes-astra", hermes_service)
+        self.assertIn("Group=hermes-astra", hermes_service)
+        self.assertNotIn("SupplementaryGroups=", hermes_service)
+        self.assertIn(
+            "/venv/bin/python /usr/local/lib/hermes-agent/hermes update",
+            hermes_service,
+        )
+        self.assertIn("InaccessiblePaths=/etc/hermes/astra", hermes_service)
+        self.assertIn("Environment=UV_LINK_MODE=copy", hermes_service)
+        self.assertNotIn("HERMES_MANAGED_DIR=", hermes_service)
+        self.assertIn("UMask=0022", hermes_service)
+        self.assertNotIn("UMask=0077", hermes_service)
+        self.assertIn("CapabilityBoundingSet=", hermes_service)
+        self.assertNotIn("curl", hermes_service)
+        self.assertNotIn("github.com/NousResearch", hermes_service)
+        self.assertIn("tirith update --yes --format json", tirith_service)
+        self.assertIn("ConditionFileIsExecutable=", tirith_service)
+        self.assertNotIn("ConditionPathIsExecutable=", tirith_service)
+        self.assertIn("User=hermes-updater", tirith_service)
+        self.assertNotIn("curl", tirith_service)
+        self.assertIn("OnCalendar=daily", hermes_timer)
+        self.assertIn("OnCalendar=daily", tirith_timer)
+        self.assertIn(
+            "hermes-astra ALL=(root) NOPASSWD: HERMES_NATIVE_UPDATE", sudoers
+        )
+        self.assertIn(
+            "hermes-astra ALL=(root) NOPASSWD: "
+            "HERMES_NATIVE_GATEWAY_MANAGE",
+            sudoers,
+        )
+        self.assertIn(
+            "hermes-gateway-rigel.service\nhermes-astra ALL=",
+            sudoers,
+        )
+        self.assertNotIn("hermes-native-updater ALL=", sudoers)
+        for profile in values["hermes_shadow_profiles"]:
+            for verb in ("reset-failed", "start", "restart"):
+                self.assertIn(
+                    f"/usr/bin/systemctl --no-ask-password {verb} "
+                    f"{profile['unit']}",
+                    sudoers,
+                )
+        self.assertNotIn("hermes-dubble ALL=", sudoers)
+        self.assertNotIn("hermes-rigel ALL=", sudoers)
+
+        checkout = self.task("Normalize Astra-owned Hermes runtime tree")
+        checkout_root = self.task("Keep Hermes runtime root traversable")
+        update_state = self.task("Keep Astra native update roots private")
+        root_state = self.task("Normalize native update root state files")
+        obsolete_account = self.task(
+            "Remove obsolete separate Hermes updater account"
+        )
+        self.assertIn("hermes_native_update_user", checkout)
+        self.assertIn("recurse: true", checkout)
+        self.assertNotIn("mode:", checkout)
+        self.assertIn('mode: "0755"', checkout_root)
+        self.assertEqual(self.variables["hermes_native_update_user"], "hermes-astra")
+        self.assertIn("owner: hermes-astra", update_state)
+        self.assertIn("mode: u=rwX,go=", update_state)
+        self.assertNotIn("recurse: true", update_state)
+        self.assertIn("owner: hermes-astra", root_state)
+        self.assertIn('mode: "0600"', root_state)
+        self.assertIn("name: hermes-native-updater", obsolete_account)
+        self.assertIn("state: absent", obsolete_account)
+        self.assertNotIn("ansible.posix.acl", self.playbook)
+
+        deploy = self.task("Deploy native Hermes and Tirith update units")
+        bridge = self.task("Deploy exact Astra native update sudoers bridge")
+        staged = self.task("Keep native update timers staged before cutover")
+        automatic = self.task("Enable automatic native updates after cutover")
+        self.assertIn("hermes-native-update.service.j2", deploy)
+        self.assertIn("hermes-tirith-native-update.service.j2", deploy)
+        self.assertIn("visudo -cf %s", bridge)
+        self.assertIn("enabled: false", staged)
+        self.assertIn("enabled: true", automatic)
+        self.assertIn("hermes_native_updates_automatic", automatic)
 
     def test_profile_config_schema_and_managed_scope_are_fail_closed(self) -> None:
         seed = self.task("Seed mutable Hermes profile config once")

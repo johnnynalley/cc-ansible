@@ -91,6 +91,31 @@ class HermesShadowTargetAuditTests(unittest.TestCase):
         data["runtime"]["scannerRuntimeNetworkEnabled"] = True
         self.assert_rejected(data, "scanner-runtime-network-enabled")
 
+    def test_native_self_update_cannot_be_disabled(self) -> None:
+        data = copy.deepcopy(self.base)
+        data["runtime"]["runtimeSelfUpdateEnabled"] = False
+        self.assert_rejected(data, "native-update-disabled")
+
+    def test_native_update_cannot_be_replaced_by_custom_command(self) -> None:
+        data = copy.deepcopy(self.base)
+        data["runtime"]["nativeUpdateCommand"] = "custom-updater"
+        self.assert_rejected(data, "native-update-command")
+
+    def test_tirith_must_remain_native_self_managed(self) -> None:
+        data = copy.deepcopy(self.base)
+        data["runtime"]["tirithInstallMethod"] = "apt"
+        self.assert_rejected(data, "tirith-install-method")
+
+    def test_general_sudoers_is_rejected(self) -> None:
+        data = copy.deepcopy(self.base)
+        data["commonPolicy"]["generalSudoers"] = True
+        self.assert_rejected(data, "general-sudoers-enabled")
+
+    def test_exact_native_update_bridge_is_required(self) -> None:
+        data = copy.deepcopy(self.base)
+        data["commonPolicy"]["nativeUpdateTriggerSudoers"] = False
+        self.assert_rejected(data, "native-update-trigger-sudoers-disabled")
+
     def test_profile_managed_scanner_is_rejected(self) -> None:
         data = copy.deepcopy(self.base)
         data["runtime"]["rootManagedCommandScanner"] = False

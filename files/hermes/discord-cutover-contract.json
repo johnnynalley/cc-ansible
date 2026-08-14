@@ -4,7 +4,7 @@
   "sourcePins": {
     "shadowTarget": {
       "path": "files/hermes/shadow-target.json",
-      "sha256": "331e71be5fde2259af99de1bbb079aaaf03a3a237fcc39fe69dbdaff0023f51e"
+      "sha256": "da45b1f0fbb4092841add6556be056feb9a9b8d7aa69015a2736d58888d7c1fb"
     },
     "stateMigration": {
       "path": "files/hermes/openclaw-state-migration-contract.json",

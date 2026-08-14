@@ -110,7 +110,7 @@ def validate_runtime(data: dict[str, Any]) -> None:
     runtime = data["runtime"]
     require(isinstance(runtime, dict), "runtime-not-object")
     require(
-        runtime.get("installMethod") == "official-root-git-locked",
+        runtime.get("installMethod") == "official-git-native-update",
         "runtime-install-method",
     )
     require(runtime.get("releaseTrack") == "official-default", "release-track")
@@ -128,10 +128,52 @@ def validate_runtime(data: dict[str, Any]) -> None:
     )
     require(runtime.get("launcher") == "/usr/local/bin/hermes", "runtime-launcher")
     require(runtime.get("managedScope") == "/etc/hermes", "managed-scope")
+    require(runtime.get("runtimeSelfUpdateEnabled") is True, "native-update-disabled")
+    require(runtime.get("nativeUpdateCommand") == "hermes update", "native-update-command")
+    require(
+        runtime.get("nativeUpdatePrivilegeBridge") == "astra-exact-systemd-unit",
+        "native-update-privilege-bridge",
+    )
+    require(
+        runtime.get("nativeUpdateExecutionUser") == "hermes-astra",
+        "native-update-execution-user",
+    )
+    require(
+        runtime.get("nativeUpdateGatewayManageUnits")
+        == [
+            "hermes-gateway-astra.service",
+            "hermes-gateway-dubble.service",
+            "hermes-gateway-rigel.service",
+        ],
+        "native-update-gateway-manage-units",
+    )
+    require(
+        runtime.get("nativeUpdateLoadsServiceSecrets") is False,
+        "native-update-loads-service-secrets",
+    )
+    require(
+        runtime.get("nativeUpdateRootCapabilities") is False,
+        "native-update-root-capabilities",
+    )
+    require(
+        runtime.get("nativeAutomaticUpdateTimerStaged") is True,
+        "native-update-timer-not-staged",
+    )
+    require(
+        runtime.get("automaticUpdatesRequiredAtCutover") is True,
+        "native-update-not-required-at-cutover",
+    )
+    require(
+        runtime.get("tirithInstallMethod") == "official-self-managed",
+        "tirith-install-method",
+    )
+    require(
+        runtime.get("tirithNativeUpdateCommand") == "tirith update",
+        "tirith-native-update-command",
+    )
     for key in (
         "dependencyFallbackEnabled",
         "nodeDependencyInstallEnabled",
-        "runtimeSelfUpdateEnabled",
         "runtimeLazyInstallsEnabled",
         "bundledSkillsEnabled",
     ):
@@ -189,10 +231,14 @@ def validate_common_policy(data: dict[str, Any]) -> None:
         require(policy.get(key) is True, f"policy-required-{key}")
     require(policy.get("privateUrlAccess") is False, "private-url-access-enabled")
     require(policy.get("tirithFailOpen") is False, "tirith-fail-open")
+    require(policy.get("generalSudoers") is False, "general-sudoers-enabled")
+    require(
+        policy.get("nativeUpdateTriggerSudoers") is True,
+        "native-update-trigger-sudoers-disabled",
+    )
     for key in (
         "autoAcceptHooks",
         "allowAllDiscordUsers",
-        "sudoers",
         "supplementaryDockerGroup",
     ):
         require(policy.get(key) is False, f"unsafe-policy-{key}")
@@ -254,6 +300,10 @@ def validate_profiles(data: dict[str, Any]) -> None:
             "cross-profile-secrets" in by_name[name]["forbiddenCapabilities"],
             f"cross-profile-not-forbidden-{name}",
         )
+    require(
+        "native-self-update-trigger" in by_name["astra"]["requiredCapabilities"],
+        "astra-native-update-trigger-missing",
+    )
 
 
 def validate_brokers_and_backup(data: dict[str, Any]) -> None:

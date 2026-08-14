@@ -1,0 +1,11 @@
+[Unit]
+Description=Run Tirith's native signed self-updater automatically
+
+[Timer]
+OnCalendar={{ hermes_native_update_calendar }}
+RandomizedDelaySec={{ hermes_native_update_randomized_delay }}
+Persistent=true
+Unit={{ hermes_tirith_update_service }}
+
+[Install]
+WantedBy=timers.target
