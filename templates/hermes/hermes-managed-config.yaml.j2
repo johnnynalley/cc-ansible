@@ -8,6 +8,10 @@ unauthorized_dm_behavior: ignore
 hooks_auto_accept: false
 command_allowlist: []
 
+model:
+  provider: {{ hermes_profile.model_provider }}
+  default: {{ hermes_profile.model_default }}
+
 runtime:
   nofile_soft_limit: 4096
 
@@ -50,6 +54,11 @@ plugins:
   enabled: []
 {% endif %}
   disabled: []
+
+{% if 'web' in hermes_profile.toolsets %}
+web:
+  search_backend: ddgs
+{% endif %}
 
 toolsets:
 {% for toolset in hermes_profile.toolsets %}
@@ -149,7 +158,31 @@ discord:
 {% for value in hermes_profile.discord_allowed_channels %}
     - "{{ value }}"
 {% endfor %}
-  ignored_channels: []
+{% if hermes_profile.discord_channel_prompts %}
+  channel_prompts:
+{% for channel_id, prompt in hermes_profile.discord_channel_prompts.items() %}
+    "{{ channel_id }}": |
+{{ prompt | indent(6, true) }}
+{% endfor %}
+{% else %}
+  channel_prompts: {}
+{% endif %}
+{% if hermes_profile.discord_channel_skill_bindings %}
+  channel_skill_bindings:
+{% for binding in hermes_profile.discord_channel_skill_bindings %}
+    - id: "{{ binding.id }}"
+      skills:
+{% for skill in binding.skills %}
+        - {{ skill }}
+{% endfor %}
+{% endfor %}
+{% else %}
+  channel_skill_bindings: []
+{% endif %}
+  ignored_channels:
+{% for value in hermes_profile.discord_ignored_channels %}
+    - "{{ value }}"
+{% endfor %}
   auto_thread: false
   allow_bots: "none"
   reactions: false

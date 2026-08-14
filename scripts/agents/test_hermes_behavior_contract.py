@@ -82,6 +82,11 @@ class HermesBehaviorContractTests(unittest.TestCase):
         self.assertTrue(corrections["fixCurrentAnswerFirst"])
         self.assertTrue(corrections["rootCauseClassRequired"])
         self.assertTrue(corrections["generalizeBeforeProposal"])
+        self.assertTrue(corrections["preventionRegressionRequired"])
+        self.assertEqual(
+            corrections["foregroundProposalNarration"],
+            "only-when-owner-action-required",
+        )
         self.assertEqual(corrections["incidentSpecificRuleDefault"], "reject")
         self.assertEqual(
             corrections["existingControlFailureDisposition"],
@@ -109,16 +114,57 @@ class HermesBehaviorContractTests(unittest.TestCase):
         self.assertEqual(set(ids), EXPECTED_CASES)
         for case in cases:
             self.assertEqual(
-                set(case), {"id", "risk", "scenario", "required", "forbidden"}
+                set(case),
+                {
+                    "id",
+                    "risk",
+                    "exerciseMode",
+                    "scenario",
+                    "prompt",
+                    "required",
+                    "forbidden",
+                },
             )
             self.assertIn(case["risk"], {"medium", "high", "blocking"})
+            self.assertIn(
+                case["exerciseMode"],
+                {
+                    "isolated-model",
+                    "live-evidence",
+                    "deterministic-idle",
+                    "gateway-integration",
+                },
+            )
             self.assertTrue(case["scenario"].strip())
+            self.assertTrue(case["prompt"].strip())
             self.assertTrue(case["required"].strip())
             self.assertTrue(case["forbidden"].strip())
             serialized = json.dumps(case)
             self.assertNotIn("/home/", serialized)
             self.assertNotIn("@Jaah", serialized)
             self.assertNotIn("LuhJaah", serialized)
+
+    def test_promotion_cases_assign_real_execution_owners(self) -> None:
+        by_id = {case["id"]: case for case in self.regressions["cases"]}
+        self.assertEqual(
+            by_id["expected-absence-is-data"]["exerciseMode"],
+            "deterministic-idle",
+        )
+        self.assertEqual(
+            by_id["current-regional-evidence"]["exerciseMode"],
+            "live-evidence",
+        )
+        self.assertEqual(
+            by_id["star-concise-private-review"]["exerciseMode"],
+            "gateway-integration",
+        )
+        self.assertEqual(
+            sum(
+                case["exerciseMode"] == "isolated-model"
+                for case in self.regressions["cases"]
+            ),
+            9,
+        )
 
     def test_every_transcript_derived_failure_is_promotion_blocking_or_high(
         self,

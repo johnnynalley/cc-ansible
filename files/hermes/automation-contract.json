@@ -9,7 +9,7 @@
     },
     "discordCutover": {
       "path": "files/hermes/discord-cutover-contract.json",
-      "sha256": "c6ba8f2133ec73986bbc0f58c67251531039078d824b34b39388192ba7e0daee"
+      "sha256": "49d54e99bfa8af4d9b07c9894f4fded27c251d885c691bbd21f3c4ce6da82790"
     },
     "rigelJob": {
       "path": "files/hermes/jobs/rigel-academic-alerts.json",

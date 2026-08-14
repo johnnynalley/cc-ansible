@@ -123,6 +123,7 @@
         "docker-daemon",
         "ansible-vault",
         "controller-ssh",
+        "computer-use",
         "raw-health",
         "broker-approval"
       ]
@@ -145,6 +146,7 @@
       ],
       "forbiddenCapabilities": [
         "terminal",
+        "computer-use",
         "sudo",
         "docker-daemon",
         "host-reports",
@@ -171,6 +173,7 @@
       ],
       "forbiddenCapabilities": [
         "terminal",
+        "computer-use",
         "sudo",
         "docker-daemon",
         "host-reports",

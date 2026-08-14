@@ -12,10 +12,13 @@ Group={{ hermes_native_update_group }}
 WorkingDirectory={{ hermes_shadow_runtime_root }}
 Environment=HOME={{ hermes_native_update_home }}
 Environment=HERMES_HOME={{ hermes_native_update_home }}
-Environment=PATH={{ hermes_native_update_home }}/bin:{{ hermes_shadow_runtime_venv }}/bin:/usr/local/bin:/usr/bin:/bin
+Environment=PATH={{ hermes_native_update_home }}/bin:{{ hermes_shadow_uv_bin_dir }}:{{ hermes_shadow_runtime_venv }}/bin:/usr/local/bin:/usr/bin:/bin
 Environment=PYTHONUNBUFFERED=1
 Environment=UV_LINK_MODE=copy
 ExecStart={{ hermes_shadow_runtime_venv }}/bin/python {{ hermes_shadow_runtime_root }}/hermes update --gateway --yes
+{% for post_setup_key in hermes_native_post_setup_keys %}
+ExecStartPost={{ hermes_shadow_runtime_binary }} tools post-setup {{ post_setup_key }}
+{% endfor %}
 StandardOutput=append:{{ hermes_native_update_home }}/.update_output.txt
 StandardError=append:{{ hermes_native_update_home }}/.update_output.txt
 UMask=0022

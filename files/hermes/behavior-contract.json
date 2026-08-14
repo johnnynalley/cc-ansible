@@ -21,6 +21,8 @@
     "fixCurrentAnswerFirst": true,
     "rootCauseClassRequired": true,
     "generalizeBeforeProposal": true,
+    "preventionRegressionRequired": true,
+    "foregroundProposalNarration": "only-when-owner-action-required",
     "incidentSpecificRuleDefault": "reject",
     "existingControlFailureDisposition": "regression-or-enforcement-proposal",
     "generatedOutputMayServeAsEvidence": false

@@ -1,10 +1,10 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "mode": "design-only",
   "sourcePins": {
     "shadowTarget": {
       "path": "files/hermes/shadow-target.json",
-      "sha256": "da45b1f0fbb4092841add6556be056feb9a9b8d7aa69015a2736d58888d7c1fb"
+      "sha256": "5ec9a9c50767b0f6447650f7aca8ac796b98ea72e968c8a593b9a1e68e6f2a79"
     },
     "stateMigration": {
       "path": "files/hermes/openclaw-state-migration-contract.json",
@@ -27,9 +27,11 @@
   },
   "invariants": {
     "oneActiveConsumerPerDiscordIdentity": true,
-    "threeDistinctHermesProfiles": true,
-    "threeDistinctDiscordApplications": true,
-    "threeDistinctDiscordBotTokens": true,
+    "threeLogicalHermesProfiles": true,
+    "twoDistinctDiscordApplications": true,
+    "twoDistinctDiscordBotTokens": true,
+    "rigelUsesAstraDeliveryConsumer": true,
+    "rigelChannelPromptAndSkillBindingRequired": true,
     "nativeHermesTokenLocksRequired": true,
     "noSharedProfileHome": true,
     "noSharedCredentialFile": true,
@@ -53,6 +55,7 @@
   "profiles": [
     {
       "name": "astra",
+      "deliveryOwner": "astra",
       "service": "hermes-gateway-astra.service",
       "home": "/var/lib/hermes/astra",
       "managedDir": "/etc/hermes/astra",
@@ -71,6 +74,7 @@
     },
     {
       "name": "dubble",
+      "deliveryOwner": "dubble",
       "service": "hermes-gateway-dubble.service",
       "home": "/var/lib/hermes/dubble",
       "managedDir": "/etc/hermes/dubble",
@@ -89,19 +93,20 @@
     },
     {
       "name": "rigel",
-      "service": "hermes-gateway-rigel.service",
+      "deliveryOwner": "astra",
+      "service": null,
       "home": "/var/lib/hermes/rigel",
       "managedDir": "/etc/hermes/rigel",
-      "credentialFile": "/etc/hermes/rigel/.env",
-      "applicationIdentityRef": "private-enrollment:discord/rigel/application",
-      "botTokenRef": "private-enrollment:discord/rigel/token",
-      "authorizationMode": "user-and-channel",
+      "credentialFile": null,
+      "applicationIdentityRef": null,
+      "botTokenRef": null,
+      "authorizationMode": "astra-channel-persona",
       "allowedUsersRef": "private-enrollment:discord/rigel/allowed-users",
       "allowedRolesRef": null,
       "allowedChannelsRef": "private-enrollment:discord/rigel/allowed-channels",
       "freeResponseChannelsRef": "private-enrollment:discord/rigel/free-response-channels",
       "homeChannelRef": "private-enrollment:discord/rigel/home-channel",
-      "adminUsersRef": "private-enrollment:discord/rigel/admin-users",
+      "adminUsersRef": "private-enrollment:discord/astra/admin-users",
       "regularUserCommands": [],
       "proactiveDelivery": true
     }
@@ -148,12 +153,10 @@
       "slashCommandRegistration": "enable-only-after-distinct-application-proof"
     },
     "targetStartOrder": [
-      "start-astra-only",
-      "prove-astra-routing-and-single-delivery",
-      "start-dubble-only",
+      "start-astra-delivery-gateway",
+      "prove-astra-and-rigel-channel-routing-and-single-delivery",
+      "start-dubble-delivery-gateway",
       "prove-dubble-routing-and-single-delivery",
-      "start-rigel-only",
-      "prove-rigel-routing-and-single-delivery",
       "enable-reviewed-hermes-schedules",
       "prove-rigel-idle-silence"
     ],
@@ -161,7 +164,9 @@
       "openclawGateways": "stopped-and-disabled",
       "openclawScheduler": "stopped",
       "openclawState": "preserved-restorable",
-      "hermesGateways": "three-active-distinct-identities",
+      "hermesGateways": "two-active-distinct-identities",
+      "logicalProfiles": "astra-dubble-rigel",
+      "rigelDelivery": "astra-single-consumer-channel-persona",
       "hermesSchedules": "reviewed-only",
       "healthReceiver": "active-external",
       "activeConsumerCountPerDiscordIdentity": 1

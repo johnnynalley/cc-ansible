@@ -1,8 +1,8 @@
 [Unit]
-Description=Hermes shadow gateway ({{ hermes_profile.name }})
+Description=Hermes gateway ({{ hermes_profile.name }})
 After=network-online.target
 Wants=network-online.target
-ConditionPathExists=/etc/hermes/{{ hermes_profile.name }}/.shadow-ready
+ConditionPathExists=/etc/hermes/{{ hermes_profile.name }}/{{ hermes_gateway_readiness_marker }}
 
 [Service]
 Type=notify
@@ -49,6 +49,7 @@ BindPaths={{ hermes_profile_transforms_root }}/{{ hermes_profile.name }}/writabl
 BindReadOnlyPaths={{ hermes_profile_transforms_root }}/{{ hermes_profile.name }}/managed:{{ hermes_profile.home }}/transformed-managed
 {% if hermes_profile.name == 'astra' %}
 BindReadOnlyPaths={{ hermes_star_privacy_plugin_managed_root }}:{{ hermes_star_privacy_plugin_runtime_root }}
+BindReadOnlyPaths=/var/lib/hermes/rigel-channel-state:{{ hermes_profile.home }}/rigel-channel-state
 {% endif %}
 ReadWritePaths={{ hermes_profile.home }} /run/hermes-{{ hermes_profile.name }} {{ hermes_profile_data_root }}/{{ hermes_profile.name }}/writable {{ hermes_profile_transforms_root }}/{{ hermes_profile.name }}/writable
 PrivateTmp=true

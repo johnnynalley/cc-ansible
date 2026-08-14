@@ -23,9 +23,11 @@ EXPECTED_AUTHORITY = {
 }
 EXPECTED_INVARIANTS = {
     "oneActiveConsumerPerDiscordIdentity": True,
-    "threeDistinctHermesProfiles": True,
-    "threeDistinctDiscordApplications": True,
-    "threeDistinctDiscordBotTokens": True,
+    "threeLogicalHermesProfiles": True,
+    "twoDistinctDiscordApplications": True,
+    "twoDistinctDiscordBotTokens": True,
+    "rigelUsesAstraDeliveryConsumer": True,
+    "rigelChannelPromptAndSkillBindingRequired": True,
     "nativeHermesTokenLocksRequired": True,
     "noSharedProfileHome": True,
     "noSharedCredentialFile": True,
@@ -48,26 +50,33 @@ EXPECTED_INVARIANTS = {
 }
 EXPECTED_PROFILES = {
     "astra": {
+        "deliveryOwner": "astra",
         "authorizationMode": "user-and-channel",
         "proactiveDelivery": True,
         "requiresAllowedUsers": True,
         "requiresHomeChannel": True,
+        "hasConsumer": True,
     },
     "dubble": {
+        "deliveryOwner": "dubble",
         "authorizationMode": "channel-scope-plus-admin-user",
         "proactiveDelivery": False,
         "requiresAllowedUsers": False,
         "requiresHomeChannel": False,
+        "hasConsumer": True,
     },
     "rigel": {
-        "authorizationMode": "user-and-channel",
+        "deliveryOwner": "astra",
+        "authorizationMode": "astra-channel-persona",
         "proactiveDelivery": True,
         "requiresAllowedUsers": True,
         "requiresHomeChannel": True,
+        "hasConsumer": False,
     },
 }
 EXPECTED_PROFILE_KEYS = {
     "name",
+    "deliveryOwner",
     "service",
     "home",
     "managedDir",
@@ -102,12 +111,10 @@ EXPECTED_SOURCE_STOP = [
     "archive-source-delivery-evidence-without-replay",
 ]
 EXPECTED_TARGET_START = [
-    "start-astra-only",
-    "prove-astra-routing-and-single-delivery",
-    "start-dubble-only",
+    "start-astra-delivery-gateway",
+    "prove-astra-and-rigel-channel-routing-and-single-delivery",
+    "start-dubble-delivery-gateway",
     "prove-dubble-routing-and-single-delivery",
-    "start-rigel-only",
-    "prove-rigel-routing-and-single-delivery",
     "enable-reviewed-hermes-schedules",
     "prove-rigel-idle-silence",
 ]
@@ -200,10 +207,12 @@ def _validate_profiles(rows: Any) -> dict[str, Any]:
     if not isinstance(rows, list) or len(rows) != 3:
         raise DiscordCutoverAuditError("exactly three profile routes are required")
     seen_names: set[str] = set()
-    unique_fields = {
-        "service": set(),
+    unique_profile_fields = {
         "home": set(),
         "managedDir": set(),
+    }
+    unique_consumer_fields = {
+        "service": set(),
         "credentialFile": set(),
         "applicationIdentityRef": set(),
         "botTokenRef": set(),
@@ -216,26 +225,34 @@ def _validate_profiles(rows: Any) -> dict[str, Any]:
         if expected is None or name in seen_names:
             raise DiscordCutoverAuditError("profile route identity drift")
         seen_names.add(name)
-        if row["service"] != f"hermes-gateway-{name}.service":
+        if row["deliveryOwner"] != expected["deliveryOwner"]:
+            raise DiscordCutoverAuditError(f"delivery owner drift for {name}")
+        expected_service = (
+            f"hermes-gateway-{name}.service" if expected["hasConsumer"] else None
+        )
+        if row["service"] != expected_service:
             raise DiscordCutoverAuditError(f"service drift for {name}")
         if row["home"] != f"/var/lib/hermes/{name}":
             raise DiscordCutoverAuditError(f"home drift for {name}")
         if row["managedDir"] != f"/etc/hermes/{name}":
             raise DiscordCutoverAuditError(f"managed directory drift for {name}")
-        if row["credentialFile"] != f"/etc/hermes/{name}/.env":
+        expected_credential = (
+            f"/etc/hermes/{name}/.env" if expected["hasConsumer"] else None
+        )
+        if row["credentialFile"] != expected_credential:
             raise DiscordCutoverAuditError(f"credential path drift for {name}")
         if row["authorizationMode"] != expected["authorizationMode"]:
             raise DiscordCutoverAuditError(f"authorization mode drift for {name}")
         if row["proactiveDelivery"] is not expected["proactiveDelivery"]:
             raise DiscordCutoverAuditError(f"delivery policy drift for {name}")
-        for field in (
-            "applicationIdentityRef",
-            "botTokenRef",
-            "allowedChannelsRef",
-            "freeResponseChannelsRef",
-            "adminUsersRef",
-        ):
+        for field in ("allowedChannelsRef", "freeResponseChannelsRef", "adminUsersRef"):
             _private_ref(row[field], f"{name}.{field}")
+        for field in ("applicationIdentityRef", "botTokenRef"):
+            _private_ref(
+                row[field], f"{name}.{field}", optional=not expected["hasConsumer"]
+            )
+            if expected["hasConsumer"] and row[field] is None:
+                raise DiscordCutoverAuditError(f"consumer identity missing for {name}")
         _private_ref(row["allowedRolesRef"], f"{name}.allowedRolesRef", optional=True)
         _private_ref(row["allowedUsersRef"], f"{name}.allowedUsersRef", optional=True)
         _private_ref(row["homeChannelRef"], f"{name}.homeChannelRef", optional=True)
@@ -247,16 +264,24 @@ def _validate_profiles(rows: Any) -> dict[str, Any]:
             raise DiscordCutoverAuditError(
                 f"regular slash commands must be empty for {name}"
             )
-        for field, values in unique_fields.items():
+        for field, values in unique_profile_fields.items():
             values.add(row[field])
+        if expected["hasConsumer"]:
+            for field, values in unique_consumer_fields.items():
+                values.add(row[field])
     if seen_names != set(EXPECTED_PROFILES):
         raise DiscordCutoverAuditError("profile route set is incomplete")
-    for field, values in unique_fields.items():
+    for field, values in unique_profile_fields.items():
         if len(values) != 3:
             raise DiscordCutoverAuditError(
                 f"shared profile field is forbidden: {field}"
             )
-    return {"profiles": sorted(seen_names), "distinctIdentities": 3}
+    for field, values in unique_consumer_fields.items():
+        if len(values) != 2:
+            raise DiscordCutoverAuditError(
+                f"Discord consumer field is not distinct: {field}"
+            )
+    return {"profiles": sorted(seen_names), "distinctIdentities": 2}
 
 
 def _validate_cutover(cutover: Any) -> None:
@@ -296,6 +321,12 @@ def _validate_cutover(cutover: Any) -> None:
         raise DiscordCutoverAuditError("single-consumer success proof is missing")
     if success.get("openclawState") != "preserved-restorable":
         raise DiscordCutoverAuditError("OpenClaw rollback state is not preserved")
+    if success.get("hermesGateways") != "two-active-distinct-identities":
+        raise DiscordCutoverAuditError("Discord consumer topology drift")
+    if success.get("logicalProfiles") != "astra-dubble-rigel":
+        raise DiscordCutoverAuditError("logical profile topology drift")
+    if success.get("rigelDelivery") != "astra-single-consumer-channel-persona":
+        raise DiscordCutoverAuditError("Rigel delivery topology drift")
 
 
 def _validate_rollback(rollback: Any) -> None:
@@ -344,7 +375,7 @@ def _validate_regressions(path: Path) -> int:
 
 def audit_contract(contract_path: Path, repository_root: Path) -> dict[str, Any]:
     contract = _load_json(contract_path, "Discord cutover contract")
-    if contract.get("schemaVersion") != 1 or contract.get("mode") != "design-only":
+    if contract.get("schemaVersion") != 2 or contract.get("mode") != "design-only":
         raise DiscordCutoverAuditError("Discord cutover contract header drift")
     if contract.get("authority") != EXPECTED_AUTHORITY:
         raise DiscordCutoverAuditError("Discord cutover authority drift")
@@ -379,7 +410,7 @@ def audit_contract(contract_path: Path, repository_root: Path) -> dict[str, Any]
         raise DiscordCutoverAuditError("Discord promotion path drift")
     case_count = _validate_regressions(repository_root / promotion_path)
     return {
-        "schemaVersion": 1,
+        "schemaVersion": 2,
         "status": "ok",
         "mode": "design-only",
         "sourcePins": len(pins),
@@ -404,7 +435,7 @@ def main() -> int:
     try:
         result = audit_contract(args.contract, args.repository_root.resolve())
     except DiscordCutoverAuditError as exc:
-        print(json.dumps({"schemaVersion": 1, "status": "error", "reason": str(exc)}))
+        print(json.dumps({"schemaVersion": 2, "status": "error", "reason": str(exc)}))
         return 1
     print(json.dumps(result, sort_keys=True))
     return 0

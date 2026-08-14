@@ -11,7 +11,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 SCRIPT = Path(__file__).with_name("hermes-rigel-schedule.py")
@@ -75,6 +75,42 @@ class HermesRigelScheduleTests(unittest.TestCase):
             )
         )
 
+    def write_job_status(
+        self,
+        *,
+        last_run_at: str | None = None,
+        last_status: str | None = None,
+        delivery_error: str | None = None,
+    ) -> None:
+        cron = self.home / "cron"
+        cron.mkdir(exist_ok=True)
+        (cron / "jobs.json").write_text(
+            json.dumps(
+                {
+                    "version": 1,
+                    "jobs": [
+                        {
+                            "id": "rigel-job",
+                            "name": MODULE.JOB_NAME,
+                            "no_agent": True,
+                            "script": MODULE.JOB_SCRIPT,
+                            "last_run_at": last_run_at,
+                            "last_status": last_status,
+                            "last_delivery_error": delivery_error,
+                        }
+                    ],
+                }
+            ),
+            encoding="utf-8",
+        )
+
+    def ledger(self) -> dict:
+        return json.loads(
+            (self.home / "state" / "rigel-schedule-state.json").read_text(
+                encoding="utf-8"
+            )
+        )
+
     def test_missing_source_is_silent_and_records_health_error(self) -> None:
         self.assertEqual(MODULE.run(self.home, NOW), "")
         self.assertFalse(self.health()["healthy"])
@@ -107,6 +143,7 @@ class HermesRigelScheduleTests(unittest.TestCase):
         self.write_source(source(events=[event()]))
         self.assertTrue(MODULE.run(self.home, NOW))
         self.assertEqual(MODULE.run(self.home, NOW), "")
+        self.assertEqual(self.health()["status"], "delivery-pending")
 
     def test_malformed_source_is_silent_and_never_bootstraps_an_alert(self) -> None:
         malformed = source(events=[event()])
@@ -122,6 +159,35 @@ class HermesRigelScheduleTests(unittest.TestCase):
         ledger = self.home / "state" / "rigel-schedule-state.json"
         self.assertEqual(stat.S_IMODE(ledger.stat().st_mode), 0o600)
         self.assertEqual(MODULE.run(self.home, NOW), "")
+
+    def test_delivery_is_not_committed_before_native_confirmation(self) -> None:
+        self.write_job_status()
+        self.write_source(source(events=[event()]))
+        self.assertTrue(MODULE.run(self.home, NOW))
+        self.assertEqual(self.ledger()["emitted"], {})
+        self.assertIsNotNone(self.ledger()["pending"])
+
+        completed = (NOW + timedelta(minutes=1)).isoformat()
+        self.write_job_status(last_run_at=completed, last_status="ok")
+        self.assertEqual(MODULE.run(self.home, NOW + timedelta(minutes=30)), "")
+        self.assertEqual(len(self.ledger()["emitted"]), 1)
+        self.assertIsNone(self.ledger()["pending"])
+
+    def test_failed_native_delivery_is_retried(self) -> None:
+        self.write_job_status()
+        self.write_source(source(events=[event()]))
+        first = MODULE.run(self.home, NOW)
+        self.assertTrue(first)
+
+        completed = (NOW + timedelta(minutes=1)).isoformat()
+        self.write_job_status(
+            last_run_at=completed,
+            last_status="ok",
+            delivery_error="temporary Discord failure",
+        )
+        retried = MODULE.run(self.home, NOW + timedelta(minutes=30))
+        self.assertEqual(retried, first)
+        self.assertEqual(self.ledger()["emitted"], {})
 
     def test_inactive_semester_with_scheduled_event_fails_silent(self) -> None:
         self.write_source(source(status="inactive", events=[event()]))
@@ -190,8 +256,13 @@ class HermesRigelScheduleTests(unittest.TestCase):
             }
             events.append(item)
         self.write_source(source(events=events))
+        self.write_job_status()
         first = MODULE.run(self.home, NOW)
-        second = MODULE.run(self.home, NOW)
+        self.write_job_status(
+            last_run_at=(NOW + timedelta(minutes=1)).isoformat(),
+            last_status="ok",
+        )
+        second = MODULE.run(self.home, NOW + timedelta(minutes=30))
         self.assertLessEqual(len(first), MODULE.MAX_DELIVERY_CHARS)
         self.assertTrue(first)
         self.assertTrue(second)

@@ -148,9 +148,17 @@
           - item.uid | int >= 62010
           - item.uid | int <= 62012
           - item.subid_start | int >= 200000
+          - >-
+            item.model_provider
+            == ('openai-codex' if item.name == 'astra' else 'anthropic')
+          - >-
+            item.model_default
+            == ('gpt-5.6-sol' if item.name == 'astra' else 'claude-sonnet-4-6')
           - item.discord_allowed_users | length == 0
           - item.discord_allowed_channels | length == 0
           - item.discord_free_response_channels | length == 0
+          - item.discord_channel_prompts | length == 0
+          - item.discord_channel_skill_bindings | length == 0
           - item.discord_admin_users | length == 0
           - not item.discord_slash_commands | bool
           - >-
@@ -160,6 +168,7 @@
           - "'terminal' in item.disabled_toolsets"
           - "'file' in item.disabled_toolsets"
           - "'code_execution' in item.disabled_toolsets"
+          - "'computer_use' in item.disabled_toolsets"
           - "'discord_admin' in item.disabled_toolsets"
         fail_msg: >-
           Hermes profile {{ item.name }} exceeds its reviewed authority.
@@ -967,6 +976,37 @@
         path: "{{ hermes_shadow_runtime_root }}"
         mode: "0755"
 
+    - name: Install required Hermes native tool backends
+      ansible.builtin.command:
+        argv:
+          - /usr/sbin/runuser
+          - -u
+          - "{{ hermes_native_update_user }}"
+          - --
+          - /usr/bin/env
+          - "HOME={{ hermes_native_update_home }}"
+          - "HERMES_HOME={{ hermes_native_update_home }}"
+          - >-
+            PATH={{
+              [
+                hermes_native_update_home ~ '/bin',
+                hermes_shadow_uv_bin_dir,
+                hermes_shadow_runtime_venv ~ '/bin',
+                '/usr/local/bin',
+                '/usr/bin',
+                '/bin'
+              ] | join(':')
+            }}
+          - "{{ hermes_shadow_runtime_binary }}"
+          - tools
+          - post-setup
+          - "{{ item }}"
+      loop: "{{ hermes_native_post_setup_keys }}"
+      register: hermes_native_post_setup
+      changed_when: >-
+        'already installed' not in hermes_native_post_setup.stdout
+      when: not ansible_check_mode
+
     - name: Disable bundled skill seeding for Hermes profiles
       ansible.builtin.copy:
         content: "managed\n"
@@ -1163,6 +1203,15 @@
         owner: root
         group: root
         mode: "0755"
+        backup: true
+
+    - name: Deploy Hermes private Discord enrollment tool
+      ansible.builtin.copy:
+        src: "{{ playbook_dir }}/../../{{ hermes_discord_enroll_source }}"
+        dest: "{{ hermes_discord_enroll_live }}"
+        owner: root
+        group: root
+        mode: "0700"
         backup: true
 
     - name: Deploy Hermes automation contract
@@ -1703,9 +1752,10 @@
         - not ansible_check_mode
         - hermes_native_updates_automatic | bool
 
-    - name: Remove Hermes readiness markers during bootstrap
+    - name: Remove Hermes gateway readiness markers during bootstrap
       ansible.builtin.file:
-        path: "/etc/hermes/{{ item.name }}/.shadow-ready"
+        path: >-
+          /etc/hermes/{{ item.name }}/{{ hermes_gateway_readiness_marker }}
         state: absent
       loop: "{{ hermes_shadow_profiles }}"
       loop_control:
@@ -1714,7 +1764,20 @@
 
     - name: Remove legacy profile-writable Hermes readiness markers
       ansible.builtin.file:
-        path: "{{ item.home }}/.shadow-ready"
+        path: >-
+          {{ item.home }}/{{ hermes_gateway_legacy_readiness_marker }}
+        state: absent
+      loop: "{{ hermes_shadow_profiles }}"
+      loop_control:
+        label: "{{ item.name }}"
+
+    - name: Remove legacy root-managed Hermes readiness markers
+      ansible.builtin.file:
+        path: >-
+          {{
+            '/etc/hermes/' ~ item.name ~ '/'
+            ~ hermes_gateway_legacy_readiness_marker
+          }}
         state: absent
       loop: "{{ hermes_shadow_profiles }}"
       loop_control:
@@ -1760,9 +1823,10 @@
           Hermes. Same-host replacement is break-before-make.
       when: hermes_shadow_mode == 'shadow'
 
-    - name: Create Hermes shadow readiness markers
+    - name: Create Hermes gateway readiness markers
       ansible.builtin.file:
-        path: "/etc/hermes/{{ item.name }}/.shadow-ready"
+        path: >-
+          /etc/hermes/{{ item.name }}/{{ hermes_gateway_readiness_marker }}
         state: touch
         owner: root
         group: root

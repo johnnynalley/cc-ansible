@@ -65,6 +65,7 @@ class HermesProfileSkillsTests(unittest.TestCase):
                 "evidence-led-investigation",
                 "consequential-recommendation",
                 "guided-operation",
+                "source-grounded-study",
             },
             "dubble": {"public-support-triage"},
             "rigel": {"source-grounded-study"},
@@ -85,8 +86,8 @@ class HermesProfileSkillsTests(unittest.TestCase):
             )
             self.assertEqual({skill["name"] for skill in profile["skills"]}, names)
             all_sources.extend(skill["source"] for skill in profile["skills"])
-        self.assertEqual(len(all_sources), 5)
-        self.assertEqual(len(set(all_sources)), 5)
+        self.assertEqual(len(all_sources), 6)
+        self.assertEqual(len(set(all_sources)), 6)
 
     def test_each_skill_is_hashed_declarative_and_semantically_described(self) -> None:
         source_root = ROOT / "files" / "hermes" / "profile-skills"

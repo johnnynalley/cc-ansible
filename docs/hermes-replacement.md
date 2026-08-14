@@ -180,11 +180,15 @@ handling before Star parity is accepted.
 
 ## Discord Routing And Cutover
 
-Hermes uses one profile, service, home, Discord application identity, and bot
-token for each of Astra, Dubble, and Rigel. Native Hermes token locks are a
-last defensive check, not permission to overlap consumers: OpenClaw and Hermes
-must never use the same Discord identity concurrently. Bot-authored input is
-disabled so the profiles cannot trigger each other.
+The retained OpenClaw configuration has two Discord applications. Astra's
+application serves both `#astra` and `#rigel`; Dubble has the second
+application. Production Hermes therefore runs two delivery Gateways for three
+logical roles. Astra owns the Astra route plus a channel-scoped Rigel persona
+and study skill, while Dubble owns only its support route. The isolated Rigel
+profile remains preserved and stopped unless a future third Discord
+application is enrolled. Native Hermes token locks are a last defensive check,
+not permission to overlap consumers: OpenClaw and Hermes must never use the
+same Discord identity concurrently. Bot-authored input is disabled.
 
 The managed shadow config is deliberately inert. It has no Discord token,
 user, role, channel, home-channel, or free-response enrollment; unknown DMs
@@ -193,18 +197,20 @@ backfill, and missed-message backfill are off. Server threads still require an
 explicit mention and shared-channel sessions remain per user. Attachments are
 bounded and remain untrusted input subject to the same policy and sandbox.
 
-Private production enrollment happens through one root-owned, mode-`0440`
-managed-scope `.env` per profile after OpenClaw has stopped. Only root can
-write it and only the matching service group can read it. Managed-scope
-precedence prevents a profile-local `.env` or inherited shell value from
-overriding pinned Discord authority. Values never enter Git, shell arguments,
-normal logs, or cutover evidence. Astra and Rigel require explicit user and
-channel scope. Dubble uses approved channel scope for public support plus a
-private admin-user set; its profile still has no terminal or infrastructure
-authority. Slash-command registration is enabled only after each profile's
-distinct Discord application has been proven.
+Private production enrollment happens through root-owned mode-`0440`
+managed-scope environments after OpenClaw has stopped. Astra and Dubble receive
+their distinct Discord tokens; Dubble and the preserved Rigel profile receive
+their independently scoped model provider environment. Only root can write a
+file and only its matching service group can read it. Managed-scope precedence
+prevents profile-local or inherited values from overriding pinned authority.
+Values never enter Git, shell arguments, normal logs, or cutover evidence.
+Astra requires explicit owner and channel scope for both private routes.
+Dubble uses approved channel scope for public support plus a private admin-user
+set; it still has no terminal or infrastructure authority. Slash-command
+registration remains off during initial cutover.
 
-The attended handoff is break-before-make:
+The owner-authorized handoff is break-before-make and is implemented by the
+disabled-by-default `playbooks/agents/hermes-production-cutover.yml`:
 
 1. Back up OpenClaw and every Hermes profile; prove both schedulers and all
    sessions idle.
@@ -214,10 +220,17 @@ The attended handoff is break-before-make:
    `openclaw-delivery-cutover-audit.py`. Pending queue rows or active session
    recovery fields block cutover; failed history may be archived but is never
    replayed.
-4. Enroll the three private Hermes identities. Start Astra, Dubble, and Rigel
-   one at a time, proving authorized routing, unauthorized silence, and exactly
-   one response before starting the next.
+4. Enroll both Discord identities and all three provider scopes. Start Astra,
+   prove the Astra and Rigel channel routes, then start Dubble and prove its
+   route. Keep the Rigel Gateway stopped because Astra is its sole delivery
+   consumer.
 5. Enable only reviewed schedules and prove Rigel's idle tick remains empty.
+
+The playbook also enables Hermes's and Tirith's native update timers, keeps the
+independent Health receiver online, records only content-free root-private
+evidence, and has an automatic rescue block that stops Hermes and restores the
+previous OpenClaw unit state if any post-stop assertion fails. The neutral
+`.gateway-ready` marker replaces the staging-era `.shadow-ready` name.
 
 History and missed-message backfill remain disabled, so a message sent during
 the maintenance gap is not reconstructed later. This is an explicit short
@@ -229,7 +242,9 @@ receiver stays running during cutover and rollback.
 
 The machine-readable source is
 `files/hermes/discord-cutover-contract.json`; its validator is
-`scripts/agents/hermes-discord-cutover-audit.py`. Twelve sanitized runtime
+`scripts/agents/hermes-discord-cutover-audit.py`; private route discovery and
+credential enrollment are performed by
+`scripts/agents/hermes-discord-enroll.py`. Twelve sanitized runtime
 cases in `files/hermes/discord-regressions.json` block promotion until the
 isolated deployment proves route isolation, unauthorized user/channel and DM
 silence, token-lock behavior, bot-loop prevention, no restart replay, hostile
@@ -320,15 +335,18 @@ cannot be promoted until the following tests pass:
 
 ## Security Boundary
 
-The target uses a dedicated no-login `hermes` service identity distinct from
-the retained `openclaw` identity. Profile state is writable only where Hermes
-requires runtime state. Behavior policy, broker clients, systemd units, and
-deployment configuration are root-owned and read-only to Hermes.
+The target uses three dedicated no-login Hermes service identities distinct
+from the retained `openclaw` identity. Profile state is writable only where
+Hermes requires runtime state. Behavior policy, broker clients, systemd units,
+and deployment configuration are root-owned and read-only to Hermes.
 
 Initial production policy:
 
 - `terminal.backend: docker` with no Docker socket, host bind mounts, forwarded
   environment variables, or credential files by default.
+- `computer_use` is explicitly disabled for every profile. Browser retrieval
+  remains available for current-source research, but no agent receives desktop
+  control merely because Hermes includes that tool in its built-in safe set.
 - Host facts and actions are exposed only through fixed-schema, allowlisted,
   independently authenticated report or action brokers.
 - `approvals.mode: manual`, `approvals.cron_mode: deny`, empty permanent command
@@ -518,6 +536,16 @@ directories.
 Runtime lazy dependency installation is disabled. The reviewed bootstrap
 installs required extras once; future dependency changes remain inside native
 `hermes update` inside the dedicated update unit, never the live Gateway unit.
+Hermes's no-key DDGS search provider is an upstream-supported post-setup
+backend rather than a core locked extra. Astra explicitly selects it for
+search-only web research. Bootstrap and the native update unit run the
+idempotent `hermes tools post-setup ddgs` hook, using the reviewed managed `uv`
+binary, so an environment rebuild cannot leave `web_search` nominally enabled
+but unavailable. Dubble and Rigel do not receive web search by default; they
+retain bounded handoff/canonical-source workflows instead of unnecessary
+public egress. DDGS remains a rate-limited search backend and does not provide
+page extraction; a credentialed extraction provider is an optional future
+upgrade, not assumed parity.
 Bundled skills are initially opted out; only reviewed, required skills are
 seeded per role. Do not configure root-owned baseline skills only through
 `skills.external_dirs` in managed scope: Hermes v0.20.0's lightweight runtime
@@ -1032,6 +1060,14 @@ checkpoints, expected absence, incident RCA, scope/preferences, concise Star,
 source-backed alerts, and correction generalization. Static tests prove the
 policy and deployment shape now; Gate 7 must still run the cases against the
 actual isolated model before promotion.
+
+The corpus assigns each case to its real execution owner. Nine reasoning cases
+run privately through `scripts/agents/hermes-behavior-acceptance.py` and require
+independent Vega and Antares semantic pass verdicts. Current regional research
+waits for the reviewed live-evidence route, idle absence remains owned by the
+deterministic Rigel evaluator, and concise Star synthesis remains a Gateway
+integration test. The runner must not collapse those three boundaries into a
+generic model prompt merely to report a complete gate.
 
 ## Migration Gates
 

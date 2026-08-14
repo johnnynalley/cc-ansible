@@ -39,7 +39,7 @@ class HermesDiscordCutoverAuditTests(unittest.TestCase):
         result = MODULE.audit_contract(CONTRACT_PATH, ROOT)
         self.assertEqual(result["status"], "ok")
         self.assertEqual(result["profiles"], ["astra", "dubble", "rigel"])
-        self.assertEqual(result["distinctIdentities"], 3)
+        self.assertEqual(result["distinctIdentities"], 2)
         self.assertEqual(result["promotionCases"], 12)
         self.assertFalse(result["liveChangeAuthorized"])
 
@@ -83,6 +83,23 @@ class HermesDiscordCutoverAuditTests(unittest.TestCase):
                     MODULE.audit_contract(
                         self.write_contract(Path(directory), payload), ROOT
                     )
+
+    def test_rigel_cannot_start_a_duplicate_discord_consumer(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            payload = copy.deepcopy(self.contract)
+            rigel = payload["profiles"][2]
+            rigel["service"] = "hermes-gateway-rigel.service"
+            rigel["credentialFile"] = "/etc/hermes/rigel/.env"
+            rigel["applicationIdentityRef"] = (
+                "private-enrollment:discord/rigel/application"
+            )
+            rigel["botTokenRef"] = "private-enrollment:discord/rigel/token"
+            with self.assertRaisesRegex(
+                MODULE.DiscordCutoverAuditError, "service drift"
+            ):
+                MODULE.audit_contract(
+                    self.write_contract(Path(directory), payload), ROOT
+                )
 
     def test_allow_all_pairing_bot_input_or_backfill_is_rejected(self) -> None:
         mutations = {

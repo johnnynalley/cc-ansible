@@ -101,9 +101,24 @@ class HermesShadowPlaybookTests(unittest.TestCase):
                 profile["unit"], f"hermes-gateway-{profile['name']}.service"
             )
             self.assertTrue(
-                {"terminal", "file", "code_execution", "discord_admin"}
+                {
+                    "terminal",
+                    "file",
+                    "code_execution",
+                    "computer_use",
+                    "discord_admin",
+                }
                 <= set(profile["disabled_toolsets"])
             )
+        self.assertIn("web", profiles[0]["toolsets"])
+        self.assertNotIn("web", profiles[1]["toolsets"])
+        self.assertNotIn("web", profiles[2]["toolsets"])
+        self.assertEqual(profiles[0]["model_provider"], "openai-codex")
+        self.assertEqual(profiles[0]["model_default"], "gpt-5.6-sol")
+        for profile in profiles[1:]:
+            self.assertEqual(profile["model_provider"], "anthropic")
+            self.assertEqual(profile["model_default"], "claude-sonnet-4-6")
+        self.assertEqual(self.variables["hermes_native_post_setup_keys"], ["ddgs"])
 
     def test_same_host_capacity_is_checked_before_install(self) -> None:
         cpu = self.task("Read Hermes target logical CPU capacity")
@@ -170,8 +185,14 @@ class HermesShadowPlaybookTests(unittest.TestCase):
                 config["_config_version"],
                 self.variables["hermes_shadow_config_version"],
             )
+            self.assertEqual(config["model"]["provider"], profile["model_provider"])
+            self.assertEqual(config["model"]["default"], profile["model_default"])
             self.assertEqual(config["approvals"]["mode"], "manual")
             self.assertEqual(config["approvals"]["cron_mode"], "deny")
+            if profile["name"] == "astra":
+                self.assertEqual(config["web"]["search_backend"], "ddgs")
+            else:
+                self.assertNotIn("web", config)
             self.assertFalse(config["security"]["allow_lazy_installs"])
             self.assertFalse(config["security"]["allow_private_urls"])
             self.assertEqual(
@@ -210,6 +231,8 @@ class HermesShadowPlaybookTests(unittest.TestCase):
             self.assertTrue(config["discord"]["require_mention"])
             self.assertTrue(config["discord"]["thread_require_mention"])
             self.assertEqual(config["discord"]["allow_bots"], "none")
+            self.assertEqual(config["discord"]["channel_prompts"], {})
+            self.assertEqual(config["discord"]["channel_skill_bindings"], [])
             self.assertFalse(config["discord"]["history_backfill"])
             self.assertFalse(config["discord"]["missed_message_backfill"]["enabled"])
             self.assertFalse(config["discord"]["reactions"])
@@ -277,6 +300,9 @@ class HermesShadowPlaybookTests(unittest.TestCase):
                 "hermes_star_privacy_plugin_runtime_root"
             ],
             "hermes_tirith_binary": self.variables["hermes_tirith_binary"],
+            "hermes_gateway_readiness_marker": self.variables[
+                "hermes_gateway_readiness_marker"
+            ],
         }
         for profile in self.variables["hermes_shadow_profiles"]:
             rendered = template.render(hermes_profile=profile, **common)
@@ -289,7 +315,8 @@ class HermesShadowPlaybookTests(unittest.TestCase):
             self.assertIn("ProtectSystem=strict", rendered)
             self.assertIn("CapabilityBoundingSet=", rendered)
             self.assertIn(
-                f"ConditionPathExists=/etc/hermes/{profile['name']}/.shadow-ready",
+                f"ConditionPathExists=/etc/hermes/{profile['name']}/"
+                f"{self.variables['hermes_gateway_readiness_marker']}",
                 rendered,
             )
             self.assertIn(
@@ -486,6 +513,8 @@ class HermesShadowPlaybookTests(unittest.TestCase):
                 "hermes_shadow_runtime_binary",
                 "hermes_shadow_runtime_root",
                 "hermes_shadow_runtime_venv",
+                "hermes_shadow_uv_bin_dir",
+                "hermes_native_post_setup_keys",
                 "hermes_tirith_binary",
                 "hermes_tirith_update_service",
                 "hermes_tirith_update_timer",
@@ -535,6 +564,9 @@ class HermesShadowPlaybookTests(unittest.TestCase):
         )
         self.assertIn("InaccessiblePaths=/etc/hermes/astra", hermes_service)
         self.assertIn("Environment=UV_LINK_MODE=copy", hermes_service)
+        self.assertIn("/var/lib/hermes/bootstrap/bin", hermes_service)
+        self.assertIn("tools post-setup", hermes_service)
+        self.assertIn("tools post-setup ddgs", hermes_service)
         self.assertNotIn("HERMES_MANAGED_DIR=", hermes_service)
         self.assertIn("UMask=0022", hermes_service)
         self.assertNotIn("UMask=0077", hermes_service)
@@ -591,6 +623,13 @@ class HermesShadowPlaybookTests(unittest.TestCase):
         self.assertIn("name: hermes-native-updater", obsolete_account)
         self.assertIn("state: absent", obsolete_account)
         self.assertNotIn("ansible.posix.acl", self.playbook)
+
+        native_backends = self.task("Install required Hermes native tool backends")
+        self.assertIn("/usr/sbin/runuser", native_backends)
+        self.assertIn("hermes_native_post_setup_keys", native_backends)
+        self.assertIn("tools", native_backends)
+        self.assertIn("post-setup", native_backends)
+        self.assertIn("not ansible_check_mode", native_backends)
 
         deploy = self.task("Deploy native Hermes and Tirith update units")
         bridge = self.task("Deploy exact Astra native update sudoers bridge")
@@ -655,18 +694,20 @@ class HermesShadowPlaybookTests(unittest.TestCase):
         self.assertIn("is search('(?m)^DISCORD_')", self.playbook)
 
     def test_bootstrap_removes_markers_and_stops_all_units(self) -> None:
-        markers = self.task("Remove Hermes readiness markers during bootstrap")
+        markers = self.task(
+            "Remove Hermes gateway readiness markers during bootstrap"
+        )
         stopped = self.task("Keep Hermes gateways stopped during bootstrap")
         self.assertIn("state: absent", markers)
         self.assertIn("hermes_shadow_mode == 'bootstrap'", markers)
-        self.assertIn("/etc/hermes/{{ item.name }}/.shadow-ready", markers)
+        self.assertIn("hermes_gateway_readiness_marker", markers)
         self.assertIn("enabled: false", stopped)
         self.assertIn("state: stopped", stopped)
-        create = self.task("Create Hermes shadow readiness markers")
-        self.assertIn("/etc/hermes/{{ item.name }}/.shadow-ready", create)
+        create = self.task("Create Hermes gateway readiness markers")
+        self.assertIn("hermes_gateway_readiness_marker", create)
         self.assertIn("owner: root", create)
         legacy = self.task("Remove legacy profile-writable Hermes readiness markers")
-        self.assertIn("{{ item.home }}/.shadow-ready", legacy)
+        self.assertIn("hermes_gateway_legacy_readiness_marker", legacy)
         self.assertIn("state: absent", legacy)
 
     def test_discord_contract_is_deployed_and_validated_without_secrets(self) -> None:

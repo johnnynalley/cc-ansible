@@ -8,6 +8,63 @@ hermes_shadow_change_approved: false
 hermes_shadow_install_approved: false
 hermes_shadow_start_approved: false
 
+# Production replacement transaction. This remains inert unless the operator
+# supplies all three controls to the dedicated cutover playbook. The exact
+# confirmation string prevents a generic `-e approved=true` from stopping the
+# active OpenClaw delivery path.
+hermes_production_cutover_mode: disabled
+hermes_production_cutover_approved: false
+hermes_production_cutover_confirmation: ""
+hermes_production_cutover_required_confirmation: >-
+  replace-openclaw-with-hermes-on-jn-t14s-lin
+hermes_production_cutover_rollback_root: >-
+  /srv/live-rollbacks/jn-t14s-lin/hermes-migration
+hermes_production_cutover_evidence_root: /var/lib/hermes/cutover-evidence
+hermes_production_cutover_enrollment: >-
+  /etc/hermes/private-discord-enrollment.json
+hermes_production_cutover_source_env: /home/johnny/.openclaw/.env
+hermes_production_cutover_source_config: /home/johnny/.openclaw/openclaw.json
+hermes_production_cutover_source_database: >-
+  /home/johnny/.openclaw/state/openclaw.sqlite
+hermes_production_cutover_source_session_indexes:
+  - name: main
+    path: /home/johnny/.openclaw/agents/main/sessions/sessions.json
+  - name: dubble
+    path: /home/johnny/.openclaw/agents/dubble/sessions/sessions.json
+  - name: rigel
+    path: /home/johnny/.openclaw/agents/rigel/sessions/sessions.json
+  - name: vega
+    path: /home/johnny/.openclaw/agents/vega/sessions/sessions.json
+  - name: antares
+    path: /home/johnny/.openclaw/agents/antares/sessions/sessions.json
+hermes_production_cutover_user: johnny
+hermes_production_cutover_user_uid: 1000
+hermes_production_cutover_user_gateway: openclaw-gateway.service
+hermes_production_cutover_health_service: health-receiver.service
+hermes_production_cutover_source_system_units:
+  - name: openclaw-isolated-gateway.service
+    restore: started-disabled
+  - name: openclaw-isolated-codex.service
+    restore: started-disabled
+  - name: openclaw-repo-sync.timer
+    restore: started-enabled
+  - name: openclaw-update-check.timer
+    restore: started-enabled
+hermes_production_cutover_source_ports:
+  - 18789
+  - 19789
+  - 19790
+hermes_production_cutover_health_port: 18791
+hermes_production_cutover_rigel_source: >-
+  /var/lib/hermes/profile-transforms/rigel/managed/imports/courses/academic-state.json
+hermes_production_cutover_rigel_root: /var/lib/hermes/rigel-channel-state
+hermes_production_cutover_rigel_job_name: rigel-academic-alerts
+hermes_production_cutover_completion_message: >-
+  Hermes cutover complete. Astra and Dubble are live; Rigel is available in
+  its channel and its idle academic checks remain silent.
+hermes_gateway_readiness_marker: .gateway-ready
+hermes_gateway_legacy_readiness_marker: .shadow-ready
+
 # Operator-only official importer inventory. The default is inert. Dry-run
 # mode builds a temporary shape-only view and never exposes the live source to
 # a Hermes service identity.
@@ -150,6 +207,7 @@ hermes_shadow_uv_archive_cache: /var/cache/hermes/uv-0.12.4.tar.gz
 hermes_shadow_uv_extract_dir: /var/cache/hermes/uv-0.12.4
 hermes_shadow_uv_cache_dir: /var/cache/hermes/uv-cache
 hermes_shadow_uv_binary: /var/lib/hermes/bootstrap/bin/uv
+hermes_shadow_uv_bin_dir: /var/lib/hermes/bootstrap/bin
 hermes_shadow_uv_config_home: /var/lib/hermes/bootstrap/config
 hermes_shadow_uv_config_dirs: /var/lib/hermes/bootstrap/config-dirs
 hermes_shadow_runtime_binary: /usr/local/bin/hermes
@@ -167,8 +225,14 @@ hermes_tirith_update_timer: hermes-tirith-native-update.timer
 hermes_native_updates_automatic: false
 hermes_native_update_calendar: daily
 hermes_native_update_randomized_delay: 6h
-hermes_shadow_version_only_migration_from: 33
-hermes_shadow_config_version: 34
+# Hermes ships DDGS as a supported native post-setup backend instead of a
+# locked core extra. Keep the selection explicit and re-run the idempotent
+# native hook after bootstrap/update so web research cannot disappear when the
+# shared environment is rebuilt.
+hermes_native_post_setup_keys:
+  - ddgs
+hermes_shadow_version_only_migration_from: 34
+hermes_shadow_config_version: 35
 hermes_shadow_contract_source: files/hermes/shadow-target.json
 hermes_shadow_contract_live: /usr/local/share/hermes-shadow/shadow-target.json
 hermes_shadow_audit_live: /usr/local/libexec/hermes-shadow-target-audit
@@ -178,6 +242,8 @@ hermes_discord_contract_live: >-
 hermes_discord_audit_source: >-
   scripts/agents/hermes-discord-cutover-audit.py
 hermes_discord_audit_live: /usr/local/libexec/hermes-discord-cutover-audit
+hermes_discord_enroll_source: scripts/agents/hermes-discord-enroll.py
+hermes_discord_enroll_live: /usr/local/libexec/hermes-discord-enroll
 hermes_automation_contract_source: files/hermes/automation-contract.json
 hermes_automation_contract_live: >-
   /usr/local/share/hermes-shadow/automation-contract.json
@@ -197,9 +263,14 @@ hermes_shadow_profiles:
     uid: 62010
     home: /var/lib/hermes/astra
     subid_start: 200000
+    model_provider: openai-codex
+    model_default: gpt-5.6-sol
     discord_allowed_users: []
     discord_allowed_channels: []
     discord_free_response_channels: []
+    discord_ignored_channels: []
+    discord_channel_prompts: {}
+    discord_channel_skill_bindings: []
     discord_admin_users: []
     discord_slash_commands: false
     plugins_enabled:
@@ -212,10 +283,12 @@ hermes_shadow_profiles:
       - todo
       - clarify
       - delegation
+      - web
     disabled_toolsets:
       - terminal
       - file
       - code_execution
+      - computer_use
       - cronjob
       - discord_admin
       - homeassistant
@@ -226,9 +299,14 @@ hermes_shadow_profiles:
     uid: 62011
     home: /var/lib/hermes/dubble
     subid_start: 265536
+    model_provider: anthropic
+    model_default: claude-sonnet-4-6
     discord_allowed_users: []
     discord_allowed_channels: []
     discord_free_response_channels: []
+    discord_ignored_channels: []
+    discord_channel_prompts: {}
+    discord_channel_skill_bindings: []
     discord_admin_users: []
     discord_slash_commands: false
     plugins_enabled: []
@@ -243,6 +321,7 @@ hermes_shadow_profiles:
       - terminal
       - file
       - code_execution
+      - computer_use
       - cronjob
       - delegation
       - discord_admin
@@ -254,9 +333,14 @@ hermes_shadow_profiles:
     uid: 62012
     home: /var/lib/hermes/rigel
     subid_start: 331072
+    model_provider: anthropic
+    model_default: claude-sonnet-4-6
     discord_allowed_users: []
     discord_allowed_channels: []
     discord_free_response_channels: []
+    discord_ignored_channels: []
+    discord_channel_prompts: {}
+    discord_channel_skill_bindings: []
     discord_admin_users: []
     discord_slash_commands: false
     plugins_enabled: []
@@ -271,6 +355,7 @@ hermes_shadow_profiles:
       - terminal
       - file
       - code_execution
+      - computer_use
       - cronjob
       - delegation
       - discord_admin

@@ -91,7 +91,16 @@
 - `test_hermes_behavior_contract.py` validates semantic routing without phrase
   triggers, one concise user-facing answer, native background review with
   staged memory/skill approval, owner-only policy changes, complete sanitized
-  promotion cases, non-symlink profile policies, and control-token exclusion.
+  promotion cases with explicit execution owners, non-symlink profile policies,
+  and control-token exclusion.
+- `hermes-behavior-acceptance.py` runs only the nine model-owned sanitized
+  promotion cases against an isolated profile, then requires independent Vega
+  and Antares semantic verdicts before writing a private atomic report. It does
+  not pretend to cover live regional research, deterministic idle silence, or
+  Gateway-only Star synthesis; those remain separate integration gates.
+- `test_hermes_behavior_acceptance.py` covers contract shape and execution-mode
+  ownership, criterion-blind candidate prompts, distinct private reviewer
+  roles, complete and internally consistent verdicts, and mode-`0600` reports.
 - `test_hermes_star_contract.py` validates two independent parallel leaf
   reviewers, distinct corroboration/challenge roles, bounded inherited
   authority, asynchronous same-session completion trust, no exact model pin,
@@ -106,14 +115,28 @@
   failed-reviewer retry is accepted.
 - `hermes-discord-cutover-audit.py` validates the credential-free Discord
   handoff contract. It pins the source shadow, migration, and delivery-audit
-  assets; requires three distinct profile/application/token references; keeps
-  unknown DMs, bot input, backfill, replay, and allow-all access disabled; and
-  enforces stopped-source-before-target and stopped-target-before-rollback
-  ordering while the Health receiver remains online.
+  assets; requires two distinct application/token consumers for Astra,
+  Dubble, and the Astra-owned Rigel channel persona; keeps unknown DMs, bot
+  input, backfill, replay, and allow-all access disabled; and enforces
+  stopped-source-before-target and stopped-target-before-rollback ordering
+  while the Health receiver remains online.
+- `hermes-discord-enroll.py` performs root-only private cutover enrollment. It
+  discovers the exact four named channels through the two existing bot
+  applications, proves source-route and owner scope, writes only profile-group
+  environments plus a mode-`0400` route manifest, and emits content-free
+  counts. Rigel receives no Discord token; Astra owns its channel prompt,
+  skill binding, and proactive delivery destination.
+- `test_hermes_discord_enroll.py` covers source permissions, route mismatch,
+  duplicate bot identities, private file modes, provider scope, and redacted
+  output.
 - `test_hermes_discord_cutover_audit.py` covers authority drift, shared
   identities or homes, pairing and bot loops, replay/backfill, source ordering,
   Health continuity, rollback ordering, source-hash drift, redacted output,
   and all 12 sanitized Discord promotion cases.
+- `test_hermes_production_cutover.py` proves the live playbook is inert by
+  default, backs up before source shutdown, drains before enrollment, starts
+  exactly two consumers, keeps Rigel's third Gateway stopped, preserves
+  Health, enables native updates, and restores OpenClaw in rescue.
 - `hermes-automation-contract-audit.py` validates all 28 current cron jobs and
   three heartbeat lanes against their agent-backed, external, or no-agent
   owners. With `--source-inventory`, it fails on new jobs, recurring-job

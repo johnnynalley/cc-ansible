@@ -61,6 +61,12 @@
           "description": "Use for an interactive setup, repair, or migration.",
           "source": "files/hermes/profile-skills/astra/guided-operation/SKILL.md",
           "sha256": "3f209da0a5be141f4161fe160da2c44f6bf7bbb7e6bbfd2de172ba71d88c1939"
+        },
+        {
+          "name": "source-grounded-study",
+          "description": "Use for tutoring and verified academic event tracking.",
+          "source": "files/hermes/profile-skills/astra/source-grounded-study/SKILL.md",
+          "sha256": "41b3ab47505bf845303fbdca8d75c4f928505e8ae97812b5a2a9ceea4fca9b7c"
         }
       ]
     },

@@ -297,9 +297,10 @@ Packages are merged from multiple sources (all applicable variables combined):
 | `vm-storage-gate.yml` | `proxmox_nodes` | Per-VM start gate: hookscript blocks `qm start`/`pct start` if VM's declared host mountpoints aren't mounted. Per-VM declarations in `host_vars/<vm>/storage.yml` |
 | `openclaw.yml` | `openclaw_hosts` | OpenClaw AI agent (npm install, gateway service, repo-sync/update-check timers) |
 | `hermes-shadow.yml` | `hermes_hosts` | Boot-disabled Hermes staging with signed offline command scanning and no production delivery |
+| `hermes-production-cutover.yml` | `hermes_hosts` | Disabled-by-default, rollback-capable OpenClaw-to-Hermes production handoff with two Discord consumers, native Rigel scheduling, Health continuity, and native updates |
 | `hermes-openclaw-dry-run.yml` | `hermes_hosts` | Operator-approved, shape-only official importer inventory with no source content, activation, or service-state change |
 | `hermes-profile-memory.yml` | `hermes_hosts` | Disabled-by-default, transactional native memory seeding for Astra and Rigel; Dubble remains empty and all Gateways remain stopped |
-| `hermes-profile-skills.yml` | `hermes_hosts` | Disabled-by-default, transactional native skill staging with exact hashes, root-owned per-profile sources, and read-only runtime discovery proof |
+| `hermes-profile-skills.yml` | `hermes_hosts` | Disabled-by-default, transactional staging of six native skill deployments with exact hashes, root-owned per-profile sources, and read-only runtime discovery proof |
 | `hermes-profile-data.yml` | `hermes_hosts` | Disabled-by-default, copy-only staging of reviewed project data and read-only operator references into isolated Hermes profile roots; memory, credentials, transforms, and activation remain excluded |
 | `hermes-profile-transforms.yml` | `hermes_hosts` | Disabled-by-default, transactional schema normalization of six reviewed legacy state sources into isolated Hermes writable/read-only roots; raw source and activation remain excluded |
 | `openclaw-health-receiver.yml` | `openclaw_hosts` | Isolated Health receiver and aggregate-only report publisher (disabled by default) |

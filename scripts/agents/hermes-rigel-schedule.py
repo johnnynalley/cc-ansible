@@ -17,7 +17,10 @@ from typing import Any, Iterator
 from zoneinfo import ZoneInfo
 
 SCHEMA_VERSION = 1
+LEDGER_SCHEMA_VERSION = 2
 TIMEZONE = "America/Chicago"
+JOB_NAME = "rigel-academic-alerts"
+JOB_SCRIPT = "hermes-rigel-schedule.py"
 ALERT_DAYS = {0, 1, 3, 7}
 MAX_SOURCE_BYTES = 262_144
 MAX_EVENTS = 256
@@ -249,19 +252,106 @@ def validate_source(data: dict[str, Any]) -> tuple[list[dict[str, Any]], int]:
     return normalized, pending_requests
 
 
-def load_ledger(path: Path) -> dict[str, str]:
+def load_ledger(path: Path) -> dict[str, Any]:
     data = read_json(path, optional=True)
     if data is None:
-        return {}
-    require(set(data) == {"schemaVersion", "emitted"}, "ledger-schema")
-    require(data["schemaVersion"] == SCHEMA_VERSION, "ledger-version")
+        return {"emitted": {}, "pending": None}
+    require(set(data) == {"schemaVersion", "emitted", "pending"}, "ledger-schema")
+    require(data["schemaVersion"] == LEDGER_SCHEMA_VERSION, "ledger-version")
     emitted = data["emitted"]
     require(isinstance(emitted, dict), "ledger-emitted")
     require(len(emitted) <= MAX_EMITTED, "ledger-too-large")
     for key, value in emitted.items():
         checked_text(key, "ledger-key", 160)
         parse_timestamp(value, "ledger-timestamp")
-    return emitted
+    pending = data["pending"]
+    if pending is not None:
+        require(isinstance(pending, dict), "ledger-pending")
+        require(
+            set(pending) == {"keys", "stagedAt", "priorLastRunAt"},
+            "ledger-pending-schema",
+        )
+        require(isinstance(pending["keys"], list), "ledger-pending-keys")
+        require(0 < len(pending["keys"]) <= 10, "ledger-pending-keys")
+        require(len(set(pending["keys"])) == len(pending["keys"]), "ledger-pending-keys")
+        for key in pending["keys"]:
+            checked_text(key, "ledger-pending-key", 160)
+        parse_timestamp(pending["stagedAt"], "ledger-pending-staged")
+        prior = pending["priorLastRunAt"]
+        require(prior is None or isinstance(prior, str), "ledger-pending-prior")
+        if prior is not None:
+            parse_timestamp(prior, "ledger-pending-prior")
+    return {"emitted": emitted, "pending": pending}
+
+
+def load_job_status(home: Path) -> dict[str, Any] | None:
+    data = read_json(home / "cron" / "jobs.json", optional=True)
+    if data is None:
+        return None
+    require(isinstance(data.get("jobs"), list), "jobs-schema")
+    matches = [
+        row
+        for row in data["jobs"]
+        if isinstance(row, dict)
+        and row.get("name") == JOB_NAME
+        and row.get("no_agent") is True
+        and Path(str(row.get("script", ""))).name == JOB_SCRIPT
+    ]
+    require(len(matches) == 1, "rigel-job-not-unique")
+    job = matches[0]
+    last_run = job.get("last_run_at")
+    require(last_run is None or isinstance(last_run, str), "rigel-job-last-run")
+    if last_run is not None:
+        parse_timestamp(last_run, "rigel-job-last-run")
+    status = job.get("last_status")
+    require(status is None or isinstance(status, str), "rigel-job-status")
+    delivery_error = job.get("last_delivery_error")
+    require(
+        delivery_error is None or isinstance(delivery_error, str),
+        "rigel-job-delivery-error",
+    )
+    return {
+        "lastRunAt": last_run,
+        "lastStatus": status,
+        "lastDeliveryError": delivery_error,
+    }
+
+
+def reconcile_pending(
+    home: Path,
+    ledger: dict[str, Any],
+    now: datetime,
+) -> tuple[dict[str, Any], str]:
+    pending = ledger["pending"]
+    if pending is None:
+        return ledger, "none"
+    job = load_job_status(home)
+    if job is None or job["lastRunAt"] == pending["priorLastRunAt"]:
+        return ledger, "pending"
+    if job["lastStatus"] == "ok" and job["lastDeliveryError"] is None:
+        emitted_at = now.astimezone(timezone.utc).isoformat()
+        for key in pending["keys"]:
+            ledger["emitted"][key] = emitted_at
+        if len(ledger["emitted"]) > MAX_EMITTED:
+            ordered = sorted(ledger["emitted"].items(), key=lambda item: item[1])
+            ledger["emitted"] = dict(ordered[-MAX_EMITTED:])
+        ledger["pending"] = None
+        return ledger, "delivered"
+    if job["lastStatus"] is not None:
+        ledger["pending"] = None
+        return ledger, "retry"
+    return ledger, "pending"
+
+
+def write_ledger(path: Path, ledger: dict[str, Any]) -> None:
+    atomic_json(
+        path,
+        {
+            "schemaVersion": LEDGER_SCHEMA_VERSION,
+            "emitted": ledger["emitted"],
+            "pending": ledger["pending"],
+        },
+    )
 
 
 def event_fingerprint(event: dict[str, Any]) -> str:
@@ -322,8 +412,11 @@ def status_payload(
 
 def run(home: Path, now: datetime) -> str:
     require(home.is_absolute(), "home-not-absolute")
+    channel_source = home / "rigel-channel-state" / "academic-state.json"
     source_path = (
-        home
+        channel_source
+        if channel_source.exists()
+        else home
         / "transformed-managed"
         / "imports"
         / "courses"
@@ -342,7 +435,12 @@ def run(home: Path, now: datetime) -> str:
                 json.dumps(source, sort_keys=True, separators=(",", ":")).encode()
             ).hexdigest()
             events, pending_requests = validate_source(source)
-            emitted = load_ledger(ledger_path)
+            ledger = load_ledger(ledger_path)
+            ledger, pending_status = reconcile_pending(home, ledger, now)
+            if pending_status in {"delivered", "retry"}:
+                write_ledger(ledger_path, ledger)
+            emitted = ledger["emitted"]
+            pending_keys = set(ledger["pending"]["keys"]) if ledger["pending"] else set()
             due = []
             for event in events:
                 if event["status"] != "scheduled":
@@ -354,7 +452,7 @@ def run(home: Path, now: datetime) -> str:
                 if days not in ALERT_DAYS:
                     continue
                 key = f"{event['id']}:{days}:{event_fingerprint(event)}"
-                if key not in emitted:
+                if key not in emitted and key not in pending_keys:
                     due.append((local_start, days, key, event))
             due.sort(key=lambda item: (item[0], item[3]["id"]))
             require(len(due) <= 10, "too-many-due-alerts")
@@ -364,7 +462,11 @@ def run(home: Path, now: datetime) -> str:
                     status_payload(
                         now,
                         healthy=True,
-                        status_value="idle",
+                        status_value=(
+                            "delivery-pending"
+                            if ledger["pending"] is not None
+                            else "idle"
+                        ),
                         source_digest=source_digest,
                         pending_calendar_requests=pending_requests,
                     ),
@@ -383,23 +485,22 @@ def run(home: Path, now: datetime) -> str:
                 messages.append(message)
             require(bool(selected), "alert-too-large")
 
-            emitted_at = now.astimezone(timezone.utc).isoformat()
-            for _, _, key, _ in selected:
-                emitted[key] = emitted_at
-            if len(emitted) > MAX_EMITTED:
-                ordered = sorted(emitted.items(), key=lambda item: item[1])
-                emitted = dict(ordered[-MAX_EMITTED:])
-            atomic_json(
-                ledger_path,
-                {"schemaVersion": SCHEMA_VERSION, "emitted": emitted},
-            )
+            job_status = load_job_status(home)
+            ledger["pending"] = {
+                "keys": [candidate[2] for candidate in selected],
+                "stagedAt": now.astimezone(timezone.utc).isoformat(),
+                "priorLastRunAt": (
+                    job_status["lastRunAt"] if job_status is not None else None
+                ),
+            }
+            write_ledger(ledger_path, ledger)
             try:
                 atomic_json(
                     health_path,
                     status_payload(
                         now,
                         healthy=True,
-                        status_value="alert-emitted",
+                        status_value="alert-staged",
                         source_digest=source_digest,
                         due_alerts=len(selected),
                         pending_calendar_requests=pending_requests,

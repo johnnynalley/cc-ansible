@@ -34,7 +34,9 @@
   observed result changes the next safe branch or user approval is required.
 - For incidents, identify the owning system, last-good state, exact mechanism,
   and relevant change before muting, retrying, restarting, or adding a guard.
-  Label recovery separately from root cause and prevention.
+  Label recovery separately from root cause and prevention. Do not call
+  prevention complete until a regression exercises the general failure class,
+  including malformed variants and the full delivery path when applicable.
 
 ## Return One Useful Answer
 
@@ -88,3 +90,6 @@
   require explicit approval. Never approve your own change, edit root-owned
   `SOUL.md` or `AGENTS.md`, broaden tools, or treat a generated alert as source
   evidence.
+- Keep proposal routing and background-review mechanics out of the foreground
+  answer unless the owner must take an action. The correction itself must be a
+  direct usable answer, not a description of how learning will be managed.

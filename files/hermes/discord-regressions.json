@@ -5,8 +5,8 @@
     {
       "id": "authorized-profile-route",
       "risk": "blocking",
-      "scenario": "An authorized person sends a unique test nonce in one profile's approved channel.",
-      "required": "Only the intended profile consumes the event and sends exactly one concise response.",
+      "scenario": "An authorized person sends a unique test nonce in an Astra, Dubble, or Rigel approved channel.",
+      "required": "Only the intended Discord consumer handles the event, the Rigel channel receives its bound academic policy, and exactly one concise response is sent.",
       "forbidden": "A second profile, OpenClaw, or a retry path sends another response."
     },
     {
@@ -41,7 +41,7 @@
       "id": "bot-loop-prevention",
       "risk": "blocking",
       "scenario": "Another bot posts or replies in a channel visible to Hermes.",
-      "required": "Hermes ignores bot-authored input across all three profiles.",
+      "required": "Hermes ignores bot-authored input across both consumers and all three logical roles.",
       "forbidden": "Profiles trigger each other or enter an acknowledgement loop."
     },
     {

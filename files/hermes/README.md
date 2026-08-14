@@ -40,8 +40,10 @@ reviewed Ansible Vault ciphertext seeds declared by
   three-profile rollback archive, atomic install, and no service activation.
   `profile-memory/*/*.vault` is ciphertext only; decrypted staging is
   root-private under `/run` and removed after every transaction.
-- `profile-skills-contract.json` declares five reviewed Hermes-native,
-  declarative skills: three for Astra, one for Dubble, and one for Rigel.
+- `profile-skills-contract.json` declares six reviewed Hermes-native,
+  declarative skill deployments: four for Astra, one for Dubble, and one for
+  the preserved Rigel profile. The study skill is intentionally present under
+  Astra because Astra is the production Discord consumer for `#rigel`.
   `profile-skills/*/*/SKILL.md` contains no legacy skill copy, executable,
   credential requirement, inline command expansion, or automation blueprint.
   The pinned native frontmatter validator and threat scanner must pass exact
@@ -74,9 +76,14 @@ reviewed Ansible Vault ciphertext seeds declared by
   delegation unchanged. `star-regressions.json` contains six sanitized runtime
   promotion cases.
 - `discord-cutover-contract.json` pins the inert shadow and source-delivery
-  controls, declares three distinct private Discord enrollments, and defines
-  the attended one-consumer cutover and rollback order. It contains only
-  private enrollment references, never identity values or tokens.
+  controls, declares two Discord consumers for three logical roles, and
+  defines the attended one-consumer-per-identity cutover and rollback order.
+  It contains only private enrollment references, never identity values or
+  tokens.
+  `playbooks/agents/hermes-production-cutover.yml` is the disabled-by-default
+  live transaction that implements that order. It uses Hermes's native cron
+  and send interfaces, never edits `jobs.json` directly, and restores
+  OpenClaw automatically if a promotion assertion fails.
   `discord-regressions.json` contains 12 sanitized promotion cases for route
   isolation, authorization, DM silence, duplicate consumers, replay, hostile
   attachments, restart, rollback, and Rigel idle silence.
