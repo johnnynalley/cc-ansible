@@ -1,3 +1,4 @@
+---
 # =============================================================================
 # docker-vm - Docker Compose Stacks
 # =============================================================================
@@ -73,7 +74,9 @@ docker_stacks:
   - name: docker-socket-proxy
     path: /opt/docker-socket-proxy
     build: false
-    auto_update: true
+    # This image can reach the Docker daemon socket. Keep upgrades attended
+    # through normal Ansible convergence instead of blind registry pulls.
+    auto_update: false
   - name: portainer
     path: /opt/portainer
     build: false

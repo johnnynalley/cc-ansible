@@ -280,8 +280,8 @@ Packages are merged from multiple sources (all applicable variables combined):
 | `stream-relay.yml` | media-vm | OBS SRT ingest, Quadro NVENC encode, reliable local fanout, platform RTMP workers, and VOD delivery |
 | `plex-server-health.yml` | media-vm, `nas_server` | Plex identity, guest VirtioFS, host virtiofsd, VM 100, and scrub-window sentinel |
 | `docker-auto-update.yml` | `docker_hosts` | Auto-update selected containers every 6h with major version guard |
-| `agent-docker-report.yml` | `docker_hosts` | Publish a schema-v2 result-only Docker inventory for dedicated agent identities such as Hermes (disabled by default) |
-| `agent-docker-update-broker.yml` | `docker_hosts` | Install a token-safe, digest-bound service update broker with approval outside the agent boundary (disabled by default) |
+| `agent-docker-report.yml` | `docker_hosts` | Publish a schema-v2 result-only Docker inventory through a dedicated forced-command identity |
+| `agent-docker-update-trigger.yml` | `docker_hosts` | Expose only status and start for the existing Ansible-selected Docker updater through a separate forced-command identity |
 | `virtiofs.yml` | `proxmox_nodes`, `vms` | Configure VirtioFS shares between Proxmox hosts and VMs |
 | `proxmox-vm-hardware.yml` | `proxmox_nodes` | Apply durable Proxmox VM hardware settings such as CPU model overrides |
 | `proxmox-boot-order.yml` | `proxmox_nodes` | Configure Proxmox boot ordering guardrails so `pve-cluster` waits for local filesystems and guest autostart waits for `pve-cluster` |
@@ -299,6 +299,7 @@ Packages are merged from multiple sources (all applicable variables combined):
 | `hermes-shadow.yml` | `hermes_hosts` | Boot-disabled Hermes staging with signed offline command scanning and no production delivery |
 | `hermes-production-cutover.yml` | `hermes_hosts` | Disabled-by-default, rollback-capable OpenClaw-to-Hermes production handoff with two Discord consumers, native Rigel scheduling, Health continuity, and native updates |
 | `hermes-production-runtime.yml` | `hermes_hosts` | Disabled-by-default live Hermes runtime convergence with official messaging dependencies, functional Discord readiness, sequential restarts, rollback, and Health/OpenClaw gates |
+| `hermes-docker-inventory.yml` | `hermes_hosts` | Approval-gated promotion of Astra's fixed Docker inventory/update tools, native per-turn update approval hook, credentials, validation, and rollback |
 | `hermes-openclaw-dry-run.yml` | `hermes_hosts` | Operator-approved, shape-only official importer inventory with no source content, activation, or service-state change |
 | `hermes-profile-memory.yml` | `hermes_hosts` | Disabled-by-default, transactional native memory seeding for Astra and Rigel; Dubble remains empty and all Gateways remain stopped |
 | `hermes-profile-skills.yml` | `hermes_hosts` | Disabled-by-default, transactional staging of six native skill deployments with exact hashes, root-owned per-profile sources, and read-only runtime discovery proof |
@@ -408,11 +409,12 @@ Check status: `journalctl -u docker-auto-update`, `systemctl list-timers docker-
 
 ## Agent Docker Access
 
-The result-only Docker reporter is implemented but disabled pending the
-dedicated Hermes identity and an approved canary rollout. The independently
-approved update broker is also implemented but disabled. Neither path grants
-Astra Docker socket or Docker group access, and the broker's narrow sudo rule
-exposes only its fixed request parser. See
+Hermes Astra has live result-only Docker inventory on all four Docker hosts and
+a separate fixed trigger for the existing managed updater on `docker-vm`,
+`media-vm`, and `nextcloud-vm`. Scheduled updates remain automatic; an
+unscheduled Astra run requires fresh native approval bound to the current user
+turn. Neither path grants Hermes a Docker socket, Docker group, general shell,
+or broad sudo. See
 [docs/agent-docker-access.md](docs/agent-docker-access.md) for the schema,
 threat model, migration handling, and rollout gates.
 
@@ -1101,7 +1103,7 @@ tree.
 - **Legacy playbook**: `playbooks/agents/openclaw.yml` remains opt-in and must
   not be included in normal convergence
 - **Docker controls**: the platform-neutral result-only reporter and separate
-  approval-gated update broker remain outside the agent runtime. See
+  fixed managed-updater trigger remain outside the agent runtime. See
   `docs/agent-docker-access.md`
 
 ## Planned: WAN Failover

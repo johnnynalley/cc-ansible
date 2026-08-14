@@ -168,11 +168,18 @@ def container_record(api: DockerAPI, summary: dict[str, Any]) -> dict[str, Any]:
     image_ref = safe_token(config.get("Image") or summary.get("Image"), 512)
     running_image_id = safe_token(detail.get("Image") or summary.get("ImageID"), 128)
 
-    image = (
-        api.get(f"/images/{quote(running_image_id, safe='')}/json")
-        if running_image_id
-        else {}
-    )
+    try:
+        image = (
+            api.get(f"/images/{quote(running_image_id, safe='')}/json")
+            if running_image_id
+            else {}
+        )
+    except DockerAPIError as exc:
+        if exc.status != 404:
+            raise
+        # A stopped container can outlive a pruned image. Preserve the
+        # container record and mark image metadata unavailable.
+        image = {}
     if not isinstance(image, dict):
         raise DockerAPIError("/images/id/json", 200, "expected object")
     image_config = image.get("Config") if isinstance(image.get("Config"), dict) else {}
@@ -293,6 +300,7 @@ def write_atomic(path: Path, payload: dict[str, Any], group_name: str | None) ->
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
+    parser.add_argument("--host", required=True)
     parser.add_argument("--socket", default="/var/run/docker.sock")
     parser.add_argument("--output", required=True, type=Path)
     parser.add_argument("--group")
@@ -302,8 +310,11 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> int:
     args = parse_args()
+    hostname = safe_identifier(args.host, 255)
+    if hostname != args.host:
+        raise SystemExit("invalid managed host identity")
     api = DockerAPI(args.socket, args.timeout)
-    report = build_report(api, socket.gethostname())
+    report = build_report(api, hostname)
     write_atomic(args.output, report, args.group)
     return 0
 

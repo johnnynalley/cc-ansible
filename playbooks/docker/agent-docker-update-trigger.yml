@@ -1,0 +1,313 @@
+---
+# Purpose: Expose only the existing Ansible-managed Docker updater trigger.
+# Hosts: docker_hosts with docker_auto_update_enabled.
+# Key vars: agent_docker_update_trigger_* and docker_auto_update_*.
+# Scripts: scripts/docker/agent-docker-update-trigger.py.
+# Validation: ansible-playbook playbooks/docker/agent-docker-update-trigger.yml
+#             --syntax-check.
+
+- name: Configure fixed Agent Docker auto-update trigger
+  hosts: docker_hosts
+  become: true
+  gather_facts: true
+  serial: 1
+
+  vars:
+    agent_docker_update_trigger_candidate_paths:
+      - "{{ agent_docker_update_trigger_binary }}"
+      - "{{ agent_docker_update_trigger_sudoers_path }}"
+      - "{{ agent_docker_update_trigger_home }}/.ssh/authorized_keys"
+    agent_docker_update_trigger_backup_id: >-
+      {{ ansible_facts['date_time']['iso8601_basic_short']
+         }}-pre-agent-docker-update-trigger
+    agent_docker_update_trigger_backup_dir: >-
+      {{
+        agent_docker_update_trigger_backup_root
+        ~ '/agent-docker-update-trigger/'
+        ~ agent_docker_update_trigger_backup_id
+      }}
+    agent_docker_update_trigger_backup_archive: >-
+      {{ agent_docker_update_trigger_backup_dir }}/artifacts.tar
+    agent_docker_update_trigger_exact_command: >-
+      {{ agent_docker_update_trigger_binary }} request
+      --host {{ inventory_hostname }}
+      --state-dir {{ agent_docker_update_trigger_state_dir }}
+      --cooldown {{ agent_docker_update_trigger_cooldown_seconds }}
+
+  tasks:
+    - name: Revoke Agent Docker update trigger access when disabled
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: absent
+      loop:
+        - "{{ agent_docker_update_trigger_home }}/.ssh/authorized_keys"
+        - "{{ agent_docker_update_trigger_sudoers_path }}"
+      when: not (agent_docker_update_trigger_enabled | bool)
+
+    - name: Skip hosts without managed Docker auto-updates
+      ansible.builtin.meta: end_host
+      when: not (agent_docker_update_trigger_enabled | bool)
+
+    - name: Require explicit Docker update trigger rollout approval
+      ansible.builtin.assert:
+        that:
+          - agent_docker_update_trigger_rollout_approved | bool
+          - agent_docker_update_trigger_authorized_keys | length == 1
+          - agent_docker_update_trigger_source_cidrs | length == 1
+          - docker_auto_update_enabled | default(true) | bool
+          - >-
+            docker_stacks
+            | selectattr('auto_update', 'defined')
+            | selectattr('auto_update', 'equalto', true)
+            | list | length
+            + docker_stacks
+            | selectattr('auto_update_services', 'defined')
+            | list | length > 0
+          - agent_docker_update_trigger_cooldown_seconds | int >= 300
+          - agent_docker_update_trigger_cooldown_seconds | int <= 86400
+        fail_msg: >-
+          The Docker update trigger requires one approved key, one source CIDR,
+          an active managed updater, and at least one Ansible-selected target.
+
+    - name: Validate Docker update trigger public key
+      ansible.builtin.assert:
+        that:
+          - >-
+            item is match(
+              '^ssh-ed25519 [A-Za-z0-9+/]+={0,3}( [A-Za-z0-9_.@-]+)?$'
+            )
+      loop: "{{ agent_docker_update_trigger_authorized_keys }}"
+      no_log: true
+
+    - name: Validate Docker update trigger source CIDR
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/python3
+          - -c
+          - >-
+            import ipaddress,sys;
+            value=ipaddress.ip_network(sys.argv[1], strict=True);
+            assert str(value)==sys.argv[1]
+          - "{{ item }}"
+      loop: "{{ agent_docker_update_trigger_source_cidrs }}"
+      changed_when: false
+
+    - name: Inspect prior Docker update trigger artifacts
+      ansible.builtin.stat:
+        path: "{{ item }}"
+        follow: false
+      loop: "{{ agent_docker_update_trigger_candidate_paths }}"
+      register: agent_docker_update_trigger_prior_artifacts
+
+    - name: Reject symlinked Docker update trigger artifacts
+      ansible.builtin.assert:
+        that:
+          - not item.stat.exists or not item.stat.islnk
+      loop: "{{ agent_docker_update_trigger_prior_artifacts.results }}"
+
+    - name: Select existing Docker update trigger artifacts
+      ansible.builtin.set_fact:
+        agent_docker_update_trigger_existing_paths: >-
+          {{ agent_docker_update_trigger_prior_artifacts.results
+             | selectattr('stat.exists')
+             | map(attribute='item') | list }}
+
+    - name: Require approved Docker update trigger backup root
+      ansible.builtin.assert:
+        that:
+          - >-
+            agent_docker_update_trigger_backup_root
+            in [
+              '/srv/live-rollbacks',
+              '/var/backups',
+              '/var/backups/agent-docker-access'
+            ]
+
+    - name: Verify central rollback storage when selected
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/mountpoint
+          - -q
+          - /srv/live-rollbacks
+      when:
+        - agent_docker_update_trigger_existing_paths | length > 0
+        - agent_docker_update_trigger_backup_root == '/srv/live-rollbacks'
+      changed_when: false
+      check_mode: false
+
+    - name: Create targeted Docker update trigger backup directory
+      ansible.builtin.file:
+        path: "{{ agent_docker_update_trigger_backup_dir }}"
+        state: directory
+        owner: root
+        group: root
+        mode: "0700"
+      when: agent_docker_update_trigger_existing_paths | length > 0
+
+    - name: Back up prior Docker update trigger artifacts
+      ansible.builtin.command:
+        argv: >-
+          {{ ['/usr/bin/tar', '--acls', '--xattrs', '-C', '/', '-cpf',
+              agent_docker_update_trigger_backup_archive]
+             + (agent_docker_update_trigger_existing_paths
+                | map('regex_replace', '^/', '') | list) }}
+      when:
+        - not ansible_check_mode
+        - agent_docker_update_trigger_existing_paths | length > 0
+      changed_when: true
+
+    - name: Create Docker update trigger group
+      ansible.builtin.group:
+        name: "{{ agent_docker_update_trigger_group }}"
+        system: true
+
+    - name: Create Docker update trigger account
+      ansible.builtin.user:
+        name: "{{ agent_docker_update_trigger_user }}"
+        group: "{{ agent_docker_update_trigger_group }}"
+        groups: ""
+        append: false
+        home: "{{ agent_docker_update_trigger_home }}"
+        create_home: false
+        # OpenSSH executes authorized_keys forced commands through the account
+        # shell. The locked password and sole restrict,command= key are the
+        # interactive-login boundary; nologin would block the forced command.
+        shell: /bin/sh
+        password_lock: true
+        system: true
+
+    - name: Require isolated Docker update trigger groups
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/id
+          - -Gn
+          - "{{ agent_docker_update_trigger_user }}"
+      register: agent_docker_update_trigger_account_groups
+      changed_when: false
+      when: not ansible_check_mode
+
+    - name: Verify Docker update trigger has no supplementary groups
+      ansible.builtin.assert:
+        that:
+          - >-
+            agent_docker_update_trigger_account_groups.stdout.split()
+            == [agent_docker_update_trigger_group]
+      when: not ansible_check_mode
+
+    - name: Create Docker update trigger directories
+      ansible.builtin.file:
+        path: "{{ item.path }}"
+        state: directory
+        owner: "{{ item.owner }}"
+        group: "{{ item.group }}"
+        mode: "{{ item.mode }}"
+      loop:
+        - path: "{{ agent_docker_update_trigger_home }}"
+          owner: root
+          group: >-
+            {{ 'root' if ansible_check_mode
+               else agent_docker_update_trigger_group }}
+          mode: "0750"
+        - path: "{{ agent_docker_update_trigger_home }}/.ssh"
+          owner: root
+          group: >-
+            {{ 'root' if ansible_check_mode
+               else agent_docker_update_trigger_group }}
+          mode: "0750"
+        - path: "{{ agent_docker_update_trigger_state_dir }}"
+          owner: root
+          group: root
+          mode: "0700"
+
+    - name: Deploy fixed Docker update trigger
+      ansible.builtin.copy:
+        src: >-
+          {{ ansible_config_file | dirname
+             }}/scripts/docker/agent-docker-update-trigger.py
+        dest: "{{ agent_docker_update_trigger_binary }}"
+        owner: root
+        group: root
+        mode: "0755"
+        validate: >-
+          /usr/bin/python3 -c
+          "import ast,sys;
+          ast.parse(open(sys.argv[1], encoding='utf-8').read())"
+          %s
+
+    - name: Install exact Docker update trigger sudo rule
+      ansible.builtin.copy:
+        dest: "{{ agent_docker_update_trigger_sudoers_path }}"
+        owner: root
+        group: root
+        mode: "0440"
+        validate: /usr/sbin/visudo -cf %s
+        content: |
+          Defaults:{{ agent_docker_update_trigger_user }} !setenv
+          {{
+            'Defaults:' ~ agent_docker_update_trigger_user
+            ~ ' secure_path=/usr/local/sbin:/usr/local/bin:/usr/sbin:'
+            ~ '/usr/bin:/sbin:/bin'
+          }}
+          {{
+            agent_docker_update_trigger_user
+            ~ ' ALL=(root) NOPASSWD: '
+            ~ agent_docker_update_trigger_exact_command
+          }}
+
+    - name: Install forced-command Docker update trigger key
+      ansible.builtin.copy:
+        dest: "{{ agent_docker_update_trigger_home }}/.ssh/authorized_keys"
+        owner: root
+        group: >-
+          {{ 'root' if ansible_check_mode
+             else agent_docker_update_trigger_group }}
+        mode: "0440"
+        content: |
+          {% for key in agent_docker_update_trigger_authorized_keys %}
+          {{
+            'restrict,command="/usr/bin/sudo -n '
+            ~ agent_docker_update_trigger_exact_command
+            ~ '",from="'
+            ~ (agent_docker_update_trigger_source_cidrs | join(','))
+            ~ '" '
+            ~ key
+          }}
+          {% endfor %}
+
+    - name: Validate installed Docker update trigger status boundary
+      ansible.builtin.command:
+        argv:
+          - /usr/sbin/runuser
+          - --user
+          - "{{ agent_docker_update_trigger_user }}"
+          - --
+          - /usr/bin/sudo
+          - -n
+          - "{{ agent_docker_update_trigger_binary }}"
+          - request
+          - --host
+          - "{{ inventory_hostname }}"
+          - --state-dir
+          - "{{ agent_docker_update_trigger_state_dir }}"
+          - --cooldown
+          - "{{ agent_docker_update_trigger_cooldown_seconds }}"
+        stdin: '{"schemaVersion":1,"action":"status"}'
+      register: agent_docker_update_trigger_status
+      changed_when: false
+      when: not ansible_check_mode
+
+    - name: Parse installed Docker update trigger status
+      ansible.builtin.set_fact:
+        agent_docker_update_trigger_status_value: >-
+          {{ agent_docker_update_trigger_status.stdout | from_json }}
+      when: not ansible_check_mode
+
+    - name: Require installed Docker update trigger to be ready
+      ansible.builtin.assert:
+        that:
+          - agent_docker_update_trigger_status_value.schemaVersion == 1
+          - agent_docker_update_trigger_status_value.status == 'ok'
+          - agent_docker_update_trigger_status_value.action == 'status'
+          - agent_docker_update_trigger_status_value.outcome == 'ready'
+          - agent_docker_update_trigger_status_value.host == inventory_hostname
+      when: not ansible_check_mode

@@ -17,6 +17,9 @@
     agent_docker_report_effective_group: >-
       {{ agent_docker_report_group | default('agent-report') }}
     agent_docker_report_effective_home: /var/lib/agent-docker-report
+    agent_docker_report_effective_backup_root: >-
+      {{ agent_docker_report_backup_root
+         | default('/srv/live-rollbacks') }}
     agent_docker_report_effective_socket: >-
       {{ agent_docker_report_socket | default('/var/run/docker.sock') }}
     agent_docker_report_effective_user: >-
@@ -77,6 +80,68 @@
           Enabling Agent Docker reporting requires explicit rollout
           approval, at least one dedicated Ed25519 public key, and one allowed
           source CIDR.
+
+    - name: Require an approved Docker report backup root
+      ansible.builtin.assert:
+        that:
+          - >-
+            agent_docker_report_effective_backup_root in
+            ['/srv/live-rollbacks', '/var/backups/agent-docker-access']
+        fail_msg: >-
+          Docker report backups may use only the central live-rollback mount
+          or the root-only host-local fallback.
+
+    - name: Install missing live rollback backup helper
+      ansible.builtin.copy:
+        src: "{{ playbook_dir }}/../../scripts/storage/live-rollback-backup"
+        dest: /usr/local/sbin/live-rollback-backup
+        owner: root
+        group: root
+        mode: "0755"
+        force: false
+
+    - name: Inspect live rollback backup helper
+      ansible.builtin.stat:
+        path: /usr/local/sbin/live-rollback-backup
+        follow: false
+      register: agent_docker_report_backup_helper
+
+    - name: Require a hardened live rollback backup helper
+      ansible.builtin.assert:
+        that:
+          - agent_docker_report_backup_helper.stat.isreg | default(false)
+          - not (agent_docker_report_backup_helper.stat.islnk | default(false))
+          - agent_docker_report_backup_helper.stat.pw_name == 'root'
+          - agent_docker_report_backup_helper.stat.gr_name == 'root'
+          - agent_docker_report_backup_helper.stat.mode == '0755'
+        fail_msg: >-
+          The live rollback helper is missing, symlinked, or has unsafe
+          ownership or permissions.
+      when:
+        - >-
+          not ansible_check_mode
+          or agent_docker_report_backup_helper.stat.exists | default(false)
+
+    - name: Inspect live rollback backup helper interface
+      ansible.builtin.command:
+        argv:
+          - /usr/local/sbin/live-rollback-backup
+          - --help
+      register: agent_docker_report_backup_helper_help
+      changed_when: false
+      check_mode: false
+      when: agent_docker_report_backup_helper.stat.exists | default(false)
+
+    - name: Require live rollback root override support
+      ansible.builtin.assert:
+        that:
+          - >-
+            '--root ROOT' in
+            agent_docker_report_backup_helper_help.stdout
+        fail_msg: >-
+          The installed live rollback helper does not support an explicit
+          rollback root.
+      when: agent_docker_report_backup_helper.stat.exists | default(false)
 
     - name: Validate dedicated Agent Docker report keys
       ansible.builtin.assert:
@@ -150,6 +215,8 @@
       ansible.builtin.set_fact:
         agent_docker_report_backup_argv:
           - /usr/local/sbin/live-rollback-backup
+          - --root
+          - "{{ agent_docker_report_effective_backup_root }}"
           - --domain
           - agent-docker-access
           - --name
@@ -166,7 +233,21 @@
       loop: "{{ agent_docker_report_backup_paths }}"
       when: agent_docker_report_backup_paths | length > 0
 
-    - name: Verify live rollback storage before Docker report rollout
+    - name: Create approved host-local Docker report backup root
+      ansible.builtin.file:
+        path: "{{ agent_docker_report_effective_backup_root }}"
+        state: directory
+        owner: root
+        group: root
+        mode: "0700"
+      when:
+        - not ansible_check_mode
+        - agent_docker_report_backup_paths | length > 0
+        - >-
+          agent_docker_report_effective_backup_root ==
+          '/var/backups/agent-docker-access'
+
+    - name: Verify central rollback storage before Docker report rollout
       ansible.builtin.command:
         argv:
           - /usr/bin/mountpoint
@@ -176,6 +257,7 @@
       when:
         - not ansible_check_mode
         - agent_docker_report_backup_paths | length > 0
+        - agent_docker_report_effective_backup_root == '/srv/live-rollbacks'
 
     - name: Back up prior Agent Docker report artifacts
       ansible.builtin.command:
@@ -190,6 +272,18 @@
       ansible.builtin.group:
         name: "{{ agent_docker_report_effective_group }}"
         system: true
+
+    - name: Inspect existing Agent Docker report group in check mode
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/getent
+          - group
+          - "{{ agent_docker_report_effective_group }}"
+      register: agent_docker_report_existing_group
+      changed_when: false
+      failed_when: false
+      check_mode: false
+      when: ansible_check_mode
 
     - name: Create Agent Docker report account
       ansible.builtin.user:
@@ -213,6 +307,7 @@
           - "{{ agent_docker_report_effective_user }}"
       register: agent_docker_report_account_groups
       changed_when: false
+      when: not ansible_check_mode
 
     - name: Require isolated Agent Docker report account groups
       ansible.builtin.assert:
@@ -222,6 +317,7 @@
             [agent_docker_report_effective_group]
         fail_msg: >-
           The report-reader account has an unexpected supplementary group.
+      when: not ansible_check_mode
 
     - name: Create Agent Docker report directories
       ansible.builtin.file:
@@ -243,6 +339,10 @@
           owner: root
           group: root
           mode: "0755"
+      when: >-
+        not ansible_check_mode
+        or item.group == 'root'
+        or agent_docker_report_existing_group.rc == 0
 
     - name: Deploy redacted Agent Docker reporter
       ansible.builtin.copy:
@@ -294,13 +394,13 @@
           [Service]
           Type=oneshot
           User=root
-          Group=root
+          Group={{ agent_docker_report_effective_group }}
           UMask=0027
           ExecStart=/usr/local/sbin/agent-docker-report \
+            --host {{ inventory_hostname }} \
             --socket {{ agent_docker_report_effective_socket }} \
             --output \
-            {{ agent_docker_report_effective_home }}/data/report.json \
-            --group {{ agent_docker_report_effective_group }}
+            {{ agent_docker_report_effective_home }}/data/report.json
           TimeoutStartSec=60
           Nice=10
           IOSchedulingClass=idle

@@ -68,6 +68,7 @@ class HermesProductionRuntimeTests(unittest.TestCase):
         self.assertLess(imports, astra)
         self.assertLess(astra, dubble)
         self.assertIn("--imports-only", self.playbook)
+        self.assertIn('"{{ item.home }}"', self.playbook[imports:])
         self.assertIn("hermes_shadow_runtime_venv", self.playbook[imports:astra])
         self.assertIn("state: stopped", self.playbook[self.offset(
             "Keep standalone Rigel Gateway stopped and disabled"

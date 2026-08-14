@@ -226,6 +226,8 @@
               - --
               - "{{ hermes_shadow_runtime_venv }}/bin/python"
               - "{{ hermes_discord_runtime_audit_live }}"
+              - --home
+              - "{{ item.home }}"
               - --imports-only
           loop: "{{ hermes_shadow_profiles }}"
           loop_control:

@@ -4,8 +4,8 @@
 # explicitly approved. Docker socket access remains confined to the root-owned
 # reporter; the SSH account can only read the generated report.
 
-agent_docker_report_enabled: false
-agent_docker_report_rollout_approved: false
+agent_docker_report_enabled: true
+agent_docker_report_rollout_approved: true
 agent_docker_report_user: agent-report
 agent_docker_report_group: agent-report
 agent_docker_report_socket: /var/run/docker.sock
@@ -15,5 +15,10 @@ agent_docker_report_randomized_delay: 30s
 
 # Populate only with dedicated per-runtime report-reader keys and the exact
 # source CIDRs of approved runtimes. Do not reuse a human or Ansible key.
-agent_docker_report_authorized_keys: []
-agent_docker_report_source_cidrs: []
+agent_docker_report_authorized_keys:
+  - >-
+    ssh-ed25519
+    AAAAC3NzaC1lZDI1NTE5AAAAIE9oLtgBGP3zDJccjTwJXtyzpwNszTl+GT4vbCdzjbKR
+    hermes-astra-agent-report
+agent_docker_report_source_cidrs:
+  - 192.168.1.31/32

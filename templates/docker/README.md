@@ -7,8 +7,6 @@
 - `caddy.Dockerfile`: Caddy image build with Cloudflare DNS support.
 - `diun.yml.j2`: Diun update-monitor configuration.
 - `docker-auto-update.sh.j2`: Docker auto-update runner.
-- `agent-docker-update-manifest.json.j2`: Root-owned allowlist and transaction
-  policy for the disabled-by-default Agent Docker update broker.
 - `docker-media-stack.yml.j2`: docker-vm media automation compose template.
   It applies bounded `json-file` logging to media-stack containers and raises
   SABnzbd's `nofile` limit to avoid file-descriptor exhaustion during heavy
@@ -29,7 +27,6 @@
 
 - `playbooks/docker/docker-stacks.yml`
 - `playbooks/docker/docker-auto-update.yml`
-- `playbooks/docker/agent-docker-update-broker.yml`
 - `playbooks/media/media-stack-health.yml`
 - Docker stack definitions in `inventory/host_vars/*/docker.yml`
 

@@ -1,9 +1,11 @@
+---
 # Purpose: Configure Docker container auto-updates.
 # Hosts: docker_hosts.
 # Key vars: docker_stacks, docker_auto_update_*, gluetun_*, qbit_*.
 # Templates: templates/docker, templates/gluetun.
 # Scripts: scripts/docker.
-# Validation: ansible-playbook playbooks/docker/docker-auto-update.yml --syntax-check.
+# Validation: ansible-playbook playbooks/docker/docker-auto-update.yml
+#             --syntax-check.
 
 # =============================================================================
 # Docker Auto-Update Playbook - Systemd timer for container auto-updates
@@ -47,7 +49,9 @@
 
     - name: Deploy docker-stack-diff utility
       ansible.builtin.copy:
-        src: "{{ ansible_config_file | dirname }}/scripts/docker/docker-stack-diff"
+        src: >-
+          {{ ansible_config_file | dirname
+             }}/scripts/docker/docker-stack-diff
         dest: /usr/local/bin/docker-stack-diff
         owner: root
         group: root
@@ -55,11 +59,14 @@
 
     - name: Create docker-auto-update script
       ansible.builtin.template:
-        src: "{{ ansible_config_file | dirname }}/templates/docker/docker-auto-update.sh.j2"
+        src: >-
+          {{ ansible_config_file | dirname
+             }}/templates/docker/docker-auto-update.sh.j2
         dest: /usr/local/sbin/docker-auto-update
         owner: root
         group: root
-        mode: "0755"
+        # The rendered script contains the notification credential.
+        mode: "0700"
 
     - name: Create docker-auto-update.service
       ansible.builtin.copy:

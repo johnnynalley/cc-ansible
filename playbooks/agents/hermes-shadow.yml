@@ -163,7 +163,13 @@
           - not item.discord_slash_commands | bool
           - >-
             item.plugins_enabled
-            == (['star-dispatch-privacy'] if item.name == 'astra' else [])
+            == (
+              ['star-dispatch-privacy', 'agent-docker-inventory']
+              if item.name == 'astra' else []
+            )
+          - >-
+            ('agent_docker' in item.toolsets)
+            == (item.name == 'astra')
           - item.toolsets | length > 0
           - "'terminal' in item.disabled_toolsets"
           - "'file' in item.disabled_toolsets"
@@ -727,6 +733,37 @@
         - /var/lib/hermes/astra/plugins
         - "{{ hermes_star_privacy_plugin_runtime_root }}"
 
+    - name: Inspect Astra Docker inventory plugin directories
+      ansible.builtin.stat:
+        path: "{{ item }}"
+        follow: false
+      loop:
+        - "{{ hermes_docker_inventory_plugin_managed_root }}"
+        - "{{ hermes_docker_inventory_plugin_runtime_root }}"
+      register: hermes_docker_inventory_plugin_directories
+
+    - name: Reject unsafe Astra Docker inventory plugin directories
+      ansible.builtin.assert:
+        that:
+          - not item.stat.exists or (item.stat.isdir and not item.stat.islnk)
+        fail_msg: >-
+          An Astra Docker inventory plugin path is not absent or a regular,
+          non-symlink directory.
+      loop: "{{ hermes_docker_inventory_plugin_directories.results }}"
+      loop_control:
+        label: "{{ item.item }}"
+
+    - name: Create root-owned Astra Docker inventory plugin directories
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: directory
+        owner: root
+        group: hermes-astra
+        mode: "0750"
+      loop:
+        - "{{ hermes_docker_inventory_plugin_managed_root }}"
+        - "{{ hermes_docker_inventory_plugin_runtime_root }}"
+
     - name: Create per-profile Hermes mutable directories
       ansible.builtin.file:
         path: "{{ item.0.home }}/{{ item.1 }}"
@@ -1279,6 +1316,37 @@
         {{ [
              hermes_star_privacy_plugin_managed_root,
              hermes_star_privacy_plugin_runtime_root
+           ]
+           | product(['__init__.py', 'plugin.yaml'])
+           | list }}
+      loop_control:
+        label: "{{ item.0 }}/{{ item.1 }}"
+
+    - name: Deploy Astra Docker inventory plugin validator
+      ansible.builtin.copy:
+        src: >-
+          {{ playbook_dir
+             }}/../../{{ hermes_docker_inventory_validator_source }}
+        dest: "{{ hermes_docker_inventory_validator_live }}"
+        owner: root
+        group: root
+        mode: "0555"
+        backup: true
+
+    - name: Deploy root-owned Astra Docker inventory plugin
+      ansible.builtin.copy:
+        src: >-
+          {{ playbook_dir
+             }}/../../{{ hermes_docker_inventory_plugin_source }}/{{ item.1 }}
+        dest: "{{ item.0 }}/{{ item.1 }}"
+        owner: root
+        group: hermes-astra
+        mode: "0440"
+        backup: true
+      loop: >-
+        {{ [
+             hermes_docker_inventory_plugin_managed_root,
+             hermes_docker_inventory_plugin_runtime_root
            ]
            | product(['__init__.py', 'plugin.yaml'])
            | list }}

@@ -1,0 +1,22 @@
+---
+# Least-privilege trigger for the existing Ansible-owned Docker auto-updater.
+agent_docker_update_trigger_enabled: >-
+  {{ docker_auto_update_enabled | default(true) | bool }}
+agent_docker_update_trigger_rollout_approved: true
+agent_docker_update_trigger_authorized_keys:
+  - >-
+    ssh-ed25519
+    AAAAC3NzaC1lZDI1NTE5AAAAIEP6BbANniI2qvJMBvBq1cnQ81zoKOgRjYdzo9PTxuRc
+    hermes-astra-agent-auto-update
+agent_docker_update_trigger_source_cidrs:
+  - 192.168.1.31/32
+agent_docker_update_trigger_user: agent-auto-update
+agent_docker_update_trigger_group: agent-auto-update
+agent_docker_update_trigger_home: /var/lib/agent-docker-update-remote
+agent_docker_update_trigger_state_dir: /var/lib/agent-docker-update-trigger
+agent_docker_update_trigger_binary: /usr/local/sbin/agent-docker-update-trigger
+agent_docker_update_trigger_sudoers_path: >-
+  /etc/sudoers.d/agent-docker-update-trigger
+agent_docker_update_trigger_cooldown_seconds: 3600
+agent_docker_update_trigger_backup_root: >-
+  {{ agent_docker_report_backup_root | default('/srv/live-rollbacks') }}

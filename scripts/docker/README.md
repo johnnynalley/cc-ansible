@@ -11,16 +11,15 @@
   generated report and rejects client-supplied commands.
 - `test_agent_docker_report.py`: Regression coverage for schema redaction,
   bounded metadata, local image comparison, and report permissions.
-- `agent-docker-update-broker.py`: Root-owned transaction broker that accepts
-  only allowlisted target IDs, creates digest-bound plans, requires separate
-  root approval, verifies health, and rolls back failed Compose updates.
-- `test_agent_docker_update_broker.py`: Regression coverage for strict input,
-  plan integrity, approval separation, redaction, drift rejection,
-  one-use failure handling, stateless sandbox enforcement, trusted Compose
-  inputs, and rollback.
+- `agent-docker-update-trigger.py`: Root-owned fixed-schema trigger for the
+  existing Ansible-managed `docker-auto-update.service`; it accepts only status
+  or run and cannot select a target, image, path, command, or Compose option.
+- `test_agent_docker_update_trigger.py`: Regression coverage for strict input,
+  updater availability, serialization, cooldown, bounded output, and the fixed
+  systemd action.
 - `test_agent_docker_playbooks.py`: Static regression coverage for locked
   forced-command accounts, exact CIDR parsing, pre-change rollback backups,
-  stateless target policy, and complete disabled-state unit shutdown.
+  group isolation, the fixed update target, and bytecode-free validation.
 
 ## Safety Notes
 
@@ -30,11 +29,8 @@
 - Docker socket access is still root-equivalent. Only the root-owned reporter
   may receive it; agent runtimes receive the generated result and never the
   socket.
-- The update request account may invoke only the broker's fixed `request`
-  command. Root-only `approve` and `reject` commands remain outside Astra's
-  trust boundary.
-- Broker responses are restricted to bounded machine tokens. Legacy state is
-  retained as an inert root-only archive, not imported as executable plans.
-- Eligible broker targets are intentionally narrow: one stateless, non-root,
-  read-only, capability-free, health-checked service with no mounts, devices,
-  build context, secrets, configs, or shared host namespaces.
+- The update request account may invoke only one exact root-owned trigger
+  command. It can start the existing updater but cannot change its Ansible
+  target selection or major-version policy.
+- Trigger responses are restricted to bounded machine tokens and a one-hour
+  per-host cooldown limits repeated requests.

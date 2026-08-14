@@ -2,10 +2,11 @@
 
 ## Status
 
-The target is the official Nous Research Hermes Agent. OpenClaw remains the
-production system until an isolated Hermes deployment passes every gate in
-this document. OpenClaw must then be stopped and disabled, not cleaned up or
-deleted, so it remains a complete rollback system.
+The official Nous Research Hermes Agent is the production runtime on
+`jn-t14s-lin`. Astra and Dubble are the two active Discord consumers; Astra
+also owns the Rigel channel persona and deterministic academic schedule.
+OpenClaw delivery and update units are stopped and disabled, while their files
+remain offline for reference and operator-controlled rollback.
 
 This document owns the replacement architecture, parity decisions, behavior
 acceptance tests, security boundary, migration order, and rollback contract.
@@ -23,8 +24,9 @@ The existing OpenClaw documents remain authoritative for the source system.
   relay is not migrated.
 - Give Hermes no sudo, Docker socket, Docker group, human home, Ansible vault,
   controller SSH keys, or unrestricted host shell.
-- Add Docker inventory, version reporting, and updates only through the
-  separately authenticated report and one-use approval broker.
+- Add Docker inventory, version reporting, and updates only through separate
+  fixed-schema forced-command identities. Immediate updates require native
+  turn-bound approval; the existing external systemd schedule remains automatic.
 - Keep exactly one production messaging and scheduler path during cutover.
 - Preserve all OpenClaw source state, sessions, transcripts, secrets, runtime,
   and rollback instructions until Hermes has passed an attended rollback test.
@@ -50,10 +52,10 @@ multi-agent setup, channel bindings, cron, plugins, hooks, heartbeat files, and
 other behavior-bearing state require manual reconciliation.
 
 Hermes command approval is a guardrail for an honest but mistaken agent, not a
-security boundary against prompt injection. Official guidance requires an
-isolated terminal backend for a production Gateway. File-write guards do not
-constrain shell commands. This deployment therefore treats the sandbox and
-narrow host brokers as the authority boundary.
+complete security boundary against prompt injection. File-write guards do not
+constrain shell commands. This deployment therefore disables host terminal and
+file execution for the Discord profiles and treats OS isolation plus narrow,
+fixed forced-command services as the authority boundary.
 
 ## Parity Matrix
 
@@ -74,9 +76,9 @@ narrow host brokers as the authority boundary.
 | 14 semantic scheduled jobs | Recreate disabled in Hermes cron with exact schedule, timezone, owner, bounded tools, and delivery policy | Manual | Declaration diff plus one attended run per job before enabling |
 | 10 deterministic command jobs | Root-managed unprivileged systemd services/timers or no-agent Hermes prechecks | Replace | Empty stdout is silent, failures are bounded and classified, and no Gateway credential enters the worker |
 | Main heartbeat catalog | Deterministic collectors and per-check state feed bounded semantic jobs; do not fan out the full catalog in one turn | Manual modernization | Existing cadence, pressure gates, dedupe, and maximum concurrency are regression-tested |
-| Discord | One Gateway per profile and bot token, explicit user/role/channel allowlists, DMs denied or paired deliberately | Native | Unauthorized user, unauthorized channel, duplicate token, DM, attachment, and restart tests |
+| Discord | Two isolated Gateways and bot tokens, explicit user/channel allowlists, DMs denied, and nonempty pairing grants rejected at startup | Native | Unauthorized user, unauthorized channel, duplicate token, DM, attachment, pairing-state, and restart tests |
 | Health receiver | Retain the current isolated receiver and aggregate report publisher; Hermes reads only the aggregate report | Retain externally | Hermes cannot read token, raw database, row-level records, or source-device names |
-| Docker visibility and updates | Rename the existing result-only reporter and digest-bound one-use update broker for platform-neutral agent use | Retain externally | No Docker socket/group; report is read-only; updates require independently approved exact target and digest |
+| Docker visibility and updates | Separate result-only reporter and fixed trigger for the existing Ansible-selected updater | Retain externally with native approval | No Docker socket/group/shell; strict response schemas; scheduled updates remain automatic; immediate runs require a fresh turn-bound approval |
 | Model routing | Per-profile providers plus a named MoA preset for Star; no policy-level exact-version pin unless explicitly approved | Native with reconciliation | Provider auth, context size, fallback, model identity, and no unintended exact pin are verified |
 | Hooks and plugins | Default to none. Add only root-reviewed hooks or plugins required by a proven parity gap | Manual | Hash/provenance, consent, tool scope, failure mode, update behavior, and rollback are documented |
 | Dashboard and API | Disabled during shadow and initial production; any later UI remains loopback-only behind independent authentication | Deliberately omitted | No listener or remote route exists during initial rollout |
@@ -339,20 +341,24 @@ cannot be promoted until the following tests pass:
 
 ## Security Boundary
 
-The target uses three dedicated no-login Hermes service identities distinct
-from the retained `openclaw` identity. Profile state is writable only where
-Hermes requires runtime state. Behavior policy, broker clients, systemd units,
-and deployment configuration are root-owned and read-only to Hermes.
+The target uses three dedicated no-login Hermes profile identities. Only Astra
+and Dubble have active Gateways; the Rigel profile remains dormant while Astra
+owns the current Rigel route and script-only schedule. Profile state is
+writable only where Hermes requires runtime state. Behavior policy, fixed host
+access plugins, systemd units, and deployment configuration are root-owned and
+read-only to Hermes.
 
 Initial production policy:
 
-- `terminal.backend: docker` with no Docker socket, host bind mounts, forwarded
-  environment variables, or credential files by default.
+- Host terminal, file, and code-execution toolsets are disabled for every
+  Discord profile. The staged rootless Podman backend has no Docker socket,
+  host bind mounts, forwarded environment variables, or credential files and
+  is not exposed to the active profiles.
 - `computer_use` is explicitly disabled for every profile. Browser retrieval
   remains available for current-source research, but no agent receives desktop
   control merely because Hermes includes that tool in its built-in safe set.
 - Host facts and actions are exposed only through fixed-schema, allowlisted,
-  independently authenticated report or action brokers.
+  independently authenticated forced-command boundaries.
 - `approvals.mode: manual`, `approvals.cron_mode: deny`, empty permanent command
   allowlist, and destructive session confirmations enabled.
 - Explicit Discord allowlists; no allow-all mode.
@@ -377,12 +383,15 @@ Initial production policy:
   errors. Hermes's background downloader is never part of the production path.
 - Dashboard/API disabled. Gateway listeners remain loopback-only unless a
   separately authenticated Tailscale proxy is deliberately approved.
-- Egress is restricted to required model, web, Discord, Health-report, and
-  broker endpoints. Private/link-local metadata destinations remain blocked.
+- Egress is restricted to required model, web, Discord, aggregate-report, and
+  fixed-action endpoints. Private/link-local metadata destinations remain
+  blocked.
 - The Hermes profiles have no general sudo or supplementary group that can
   write controller code, read secrets, or administer containers. Astra alone
-  may start the exact root-owned native update unit; Dubble and Rigel cannot.
-- That unit still runs Hermes's own updater as Astra. It sets uv's documented
+  may start the exact native update service and restart/reset the three named
+  Gateway units; Dubble and Rigel have no sudo. The automatic timer invokes the
+  same update service without model involvement.
+- The native update unit sets uv's documented
   `UV_LINK_MODE=copy` behavior so cache files cannot become hardlinked to the
   shared runtime tree and normal updates do not emit hardlink fallback noise.
 
@@ -390,8 +399,8 @@ This boundary assumes any user-authorized agent conversation can be malicious.
 Messaging authorization limits who can ask Hermes to act; it does not make
 prompt content trustworthy. Tirith and the native prompt scanner are heuristic
 defenses, not containment. Separate no-login identities, systemd confinement,
-the rootless terminal sandbox, and narrow authenticated brokers remain the
-authority boundary even when a scanner misses adversarial content.
+disabled host-execution toolsets, and narrow authenticated forced commands
+remain the authority boundary even when a scanner misses adversarial content.
 
 ## Isolated Target Design
 
@@ -432,9 +441,9 @@ one Unix identity:
 
 | Identity | Hermes home | Authority |
 | --- | --- | --- |
-| `hermes-astra` | `/var/lib/hermes/astra` | Primary conversation, web research, review synthesis, approved learning proposals, aggregate reports, and broker proposals |
+| `hermes-astra` | `/var/lib/hermes/astra` | Primary conversation, web research, review synthesis, approved learning proposals, aggregate reports, fixed Docker tools, and the Rigel route/schedule |
 | `hermes-dubble` | `/var/lib/hermes/dubble` | Public support only; no terminal, host report, infrastructure, update, or cross-profile credential access |
-| `hermes-rigel` | `/var/lib/hermes/rigel` | Study context and the continuously enabled, deterministically pre-gated scheduler only |
+| `hermes-rigel` | `/var/lib/hermes/rigel` | Dormant retained study profile; no active Gateway, Discord credential, or production schedule |
 
 Each home has independent config, auth, state database, memory, skills,
 sessions, cron, pending approvals, cache, sandbox metadata, and logs. Files are
@@ -445,7 +454,7 @@ Common mandatory policy lives in root-owned `/etc/hermes/` managed scope.
 Role-specific identity and behavior sources live under
 `/etc/hermes/profiles/<role>/` and are read-only bind-mounted over the runtime
 view by systemd. Hermes runtime data remains writable; root policy, service
-units, broker clients, and acceptance tests do not.
+units, fixed-access plugins, and acceptance tests do not.
 
 Provider and Discord credentials are supplied by separate root-owned systemd
 environment files, readable only by root and the matching service group. Do
@@ -667,10 +676,10 @@ breaks the sandbox and causes fallback to local execution.
 Hermes adds no administrative SSH path to the host and has no public inbound
 listener or dashboard route. Profile services receive only the outbound paths
 needed for selected model providers, Discord, and explicitly approved report
-or broker endpoints. Rootless tool containers default to no network. Broker
-exceptions are exact destination and port rules, not private-network ranges.
+or fixed-action endpoints. Rootless tool containers default to no network.
+Remote exceptions use pinned host keys, one source address, and forced commands.
 
-### Host Data And Action Brokers
+### Host Data And Fixed Actions
 
 Hermes never receives the controller's Ansible, SSH, Docker, Health, Git, or
 vault credentials. Root-managed collectors on `jn-t14s-lin` use dedicated
@@ -678,17 +687,20 @@ read-only credentials to fetch bounded Health and Docker reports, validate
 their schema/signature/age, and atomically publish root-owned read-only inputs
 for Astra. Dubble and Rigel cannot traverse those paths.
 
-The Docker inventory reporter is now platform-neutral under `agent-report`,
-uses a prompt-resistant schema-v2 result, and includes backed, validation-gated
-cleanup for the old OpenClaw reporter artifacts. It remains disabled until the
-Hermes identity, source CIDR, and dedicated key are approved for live rollout.
-The Docker update broker is also platform-neutral under `agent-update`. It
-validates before exposing access, emits only token-safe results, preserves old
-history without activating old approvals, and remains disabled until a target
-and dedicated key are explicitly approved. Astra may submit a fixed-schema
-proposal and later invoke only an already-approved, unexpired plan. It cannot
-approve a plan, select arbitrary compose paths or commands, broaden targets,
-or reach a Docker daemon.
+The live Docker inventory reporter uses a prompt-resistant schema-v2 result and
+a dedicated `agent-report` identity on all four Docker hosts. The live update
+path uses a different key and `agent-auto-update` identity on the three hosts
+whose existing `docker-auto-update.timer` is enabled. It accepts only `status`
+or `run` for that fixed root-owned service, adds a one-hour cooldown, and emits
+bounded result tokens. Astra cannot select images, services, paths, arguments,
+or Compose options and cannot reach a Docker daemon.
+
+Scheduled systemd updates remain automatic. The native Astra plugin asks for
+fresh approval only for an unscheduled `run`, and its rule key includes the
+current turn ID so a session or permanent choice cannot authorize a later
+turn. The Docker socket proxy is excluded from blind updates because a
+compromised proxy image has daemon authority. It is updated only through
+attended Ansible convergence.
 
 ### Backups And Recovery
 
@@ -1088,7 +1100,7 @@ generic model prompt merely to report a complete gate.
    sessions, jobs, and backups without stopping production.
 2. **Parity:** approve this matrix and record every unsupported/manual item.
 3. **Target design:** define the service identity, paths, systemd units,
-   sandbox, secrets, backup, loopback listeners, and broker schemas.
+   sandbox, secrets, backup, loopback listeners, and fixed host-action schemas.
 4. **Shadow install:** install Hermes with no production bot token, delivery,
    host authority, cron delivery, dashboard, or external listener.
 5. **Dry-run import:** run `hermes claw migrate --dry-run` against a protected
@@ -1116,6 +1128,13 @@ canonical academic state, and exact 30-minute no-model scheduler. The
 standalone Rigel Gateway remains disabled because the source installation has
 only two Discord applications.
 
+Gate 9 was not exercised against production during this closeout because it
+would deliberately interrupt the now-live Hermes Discord path and briefly
+reactivate the legacy delivery/scheduler path while the owner was relying on
+the agent. Transaction rescue and retained rollback artifacts are verified;
+an attended end-to-end OpenClaw message drill remains optional rather than a
+condition for keeping Hermes live.
+
 The first cutover acceptance incorrectly treated active systemd processes as
 proof of messaging. Both processes had stayed alive for cron after logging
 `No adapter available for discord`. Root cause was the missing official
@@ -1135,8 +1154,12 @@ Current rollback artifacts include:
   preflight and automatic unit restore
 - `20260814T090022-pre-runtime-converge` for the accepted live unit convergence
 
-Gate 9 remains: deploy the already-reviewed platform-neutral Docker report and
-approval-gated update broker under a dedicated least-privilege boundary, then
-complete the final prompt-injection, Gateway, credential, filesystem, network,
-privilege, update, and rollback security analysis. Docker group/socket access
-remains prohibited.
+The Docker/security closeout completed on 2026-08-14. The result-only Docker
+reporter is live on all four Docker hosts, while the fixed managed-updater
+trigger is live only on the three hosts with an enabled updater policy. Astra
+receives the two credentials
+through systemd; Dubble and Rigel receive neither. Native turn-bound approval
+protects unscheduled runs, and scheduled systemd updates remain automatic.
+Docker group, socket, arbitrary SSH, general sudo, and free-form update access
+remain prohibited. The final risk analysis is maintained in
+`docs/openclaw-runtime-security.md` and `docs/agent-docker-access.md`.

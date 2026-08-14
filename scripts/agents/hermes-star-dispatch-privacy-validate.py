@@ -9,11 +9,15 @@ import importlib.util
 import json
 import os
 import stat
+import sys
 from pathlib import Path
 
 import yaml
 
+sys.dont_write_bytecode = True
+
 PLUGIN = "star-dispatch-privacy"
+ENABLED_PLUGINS = [PLUGIN, "agent-docker-inventory"]
 EXPECTED_FILES = ("__init__.py", "plugin.yaml")
 EXPECTED_HOOKS = {
     "on_session_finalize",
@@ -92,7 +96,10 @@ def validate_config(path: Path) -> None:
     require(isinstance(config, dict), "config-invalid")
     plugins = config.get("plugins")
     require(isinstance(plugins, dict), "plugins-config-missing")
-    require(plugins.get("enabled") == [PLUGIN], "plugin-not-exclusively-enabled")
+    require(
+        plugins.get("enabled") == ENABLED_PLUGINS,
+        "plugin-set-or-order-drift",
+    )
     disabled = plugins.get("disabled", [])
     require(isinstance(disabled, list) and PLUGIN not in disabled, "plugin-disabled")
 

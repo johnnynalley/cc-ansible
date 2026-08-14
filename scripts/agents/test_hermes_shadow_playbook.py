@@ -29,6 +29,12 @@ RIGEL_JOB = ROOT / "files" / "hermes" / "jobs" / "rigel-academic-alerts.json"
 RIGEL_SCRIPT = ROOT / "scripts" / "agents" / "hermes-rigel-schedule.py"
 INVENTORY = ROOT / "inventory" / "hosts.ini"
 SITE = ROOT / "site.yml"
+DOCKER_INVENTORY_PLAYBOOK = (
+    ROOT / "playbooks" / "agents" / "hermes-docker-inventory.yml"
+)
+STAR_VALIDATOR = (
+    ROOT / "scripts" / "agents" / "hermes-star-dispatch-privacy-validate.py"
+)
 
 
 class HermesShadowPlaybookTests(unittest.TestCase):
@@ -226,7 +232,7 @@ class HermesShadowPlaybookTests(unittest.TestCase):
             self.assertEqual(config["delegation"]["max_spawn_depth"], 1)
             self.assertFalse(config["delegation"]["orchestrator_enabled"])
             expected_plugins = (
-                ["star-dispatch-privacy"]
+                ["star-dispatch-privacy", "agent-docker-inventory"]
                 if profile["name"] == "astra"
                 else []
             )
@@ -241,14 +247,77 @@ class HermesShadowPlaybookTests(unittest.TestCase):
             self.assertTrue(config["discord"]["require_mention"])
             self.assertTrue(config["discord"]["thread_require_mention"])
             self.assertEqual(config["discord"]["allow_bots"], "none")
-            self.assertEqual(config["discord"]["channel_prompts"], {})
-            self.assertEqual(config["discord"]["channel_skill_bindings"], [])
+            self.assertEqual(
+                {
+                    key: value.rstrip("\n")
+                    for key, value in config["discord"]["channel_prompts"].items()
+                },
+                profile["discord_channel_prompts"],
+            )
+            self.assertEqual(
+                config["discord"]["channel_skill_bindings"],
+                profile["discord_channel_skill_bindings"],
+            )
             self.assertFalse(config["discord"]["history_backfill"])
             self.assertFalse(config["discord"]["missed_message_backfill"]["enabled"])
             self.assertFalse(config["discord"]["reactions"])
             self.assertFalse(
                 config["gateway"]["platforms"]["discord"]["extra"]["slash_commands"]
             )
+
+    def test_managed_profiles_preserve_production_discord_routes(self) -> None:
+        profiles = {
+            profile["name"]: profile
+            for profile in self.variables["hermes_shadow_profiles"]
+        }
+        owner = "740687933803331726"
+        self.assertEqual(profiles["astra"]["discord_allowed_users"], [owner])
+        self.assertEqual(profiles["astra"]["discord_admin_users"], [owner])
+        self.assertEqual(
+            profiles["astra"]["discord_allowed_channels"],
+            ["1482585492330381343", "1488752822466904256"],
+        )
+        self.assertEqual(
+            profiles["astra"]["discord_free_response_channels"],
+            profiles["astra"]["discord_allowed_channels"],
+        )
+        self.assertEqual(
+            profiles["astra"]["discord_ignored_channels"],
+            ["1482589440663617638"],
+        )
+        self.assertEqual(
+            profiles["astra"]["discord_channel_skill_bindings"],
+            [
+                {
+                    "id": "1488752822466904256",
+                    "skills": ["source-grounded-study"],
+                }
+            ],
+        )
+        self.assertEqual(profiles["dubble"]["discord_allowed_users"], [])
+        self.assertEqual(profiles["dubble"]["discord_admin_users"], [owner])
+        self.assertEqual(
+            profiles["dubble"]["discord_allowed_channels"],
+            ["1483229851350728784"],
+        )
+        self.assertEqual(
+            profiles["dubble"]["discord_free_response_channels"],
+            profiles["dubble"]["discord_allowed_channels"],
+        )
+        self.assertEqual(
+            profiles["dubble"]["discord_ignored_channels"],
+            ["1483229869079920741"],
+        )
+        self.assertEqual(profiles["rigel"]["discord_allowed_users"], [])
+        self.assertEqual(profiles["rigel"]["discord_allowed_channels"], [])
+        self.assertEqual(profiles["rigel"]["discord_admin_users"], [])
+
+    def test_star_validation_is_idempotent_during_plugin_promotion(self) -> None:
+        validator = STAR_VALIDATOR.read_text(encoding="utf-8")
+        promotion = DOCKER_INVENTORY_PLAYBOOK.read_text(encoding="utf-8")
+        self.assertIn("sys.dont_write_bytecode = True", validator)
+        self.assertIn("Remove stale managed plugin bytecode caches", promotion)
+        self.assertIn("hermes_star_privacy_plugin_runtime_root", promotion)
 
     def test_every_service_is_scoped_and_boot_disabled(self) -> None:
         template = self.environment.from_string(self.service_template)
@@ -318,6 +387,24 @@ class HermesShadowPlaybookTests(unittest.TestCase):
             "hermes_star_privacy_plugin_runtime_root": self.variables[
                 "hermes_star_privacy_plugin_runtime_root"
             ],
+            "hermes_docker_inventory_private_key": self.variables[
+                "hermes_docker_inventory_private_key"
+            ],
+            "hermes_docker_update_private_key": self.variables[
+                "hermes_docker_update_private_key"
+            ],
+            "hermes_docker_inventory_validator_live": self.variables[
+                "hermes_docker_inventory_validator_live"
+            ],
+            "hermes_docker_inventory_plugin_managed_root": self.variables[
+                "hermes_docker_inventory_plugin_managed_root"
+            ],
+            "hermes_docker_inventory_plugin_runtime_root": self.variables[
+                "hermes_docker_inventory_plugin_runtime_root"
+            ],
+            "hermes_docker_inventory_known_hosts": self.variables[
+                "hermes_docker_inventory_known_hosts"
+            ],
             "hermes_tirith_binary": self.variables["hermes_tirith_binary"],
             "hermes_gateway_readiness_marker": self.variables[
                 "hermes_gateway_readiness_marker"
@@ -336,17 +423,25 @@ class HermesShadowPlaybookTests(unittest.TestCase):
             self.assertIn("TIRITH_OFFLINE=1", rendered)
             self.assertIn("NoNewPrivileges=true", rendered)
             self.assertIn("ProtectSystem=strict", rendered)
+            self.assertIn("RestrictNamespaces=true", rendered)
+            self.assertIn("PrivateDevices=true", rendered)
+            self.assertNotIn("DeviceAllow=/dev/fuse", rendered)
+            self.assertNotIn("Delegate=yes", rendered)
+            self.assertIn(
+                "RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6\n",
+                rendered,
+            )
             self.assertIn("CapabilityBoundingSet=", rendered)
             self.assertIn(
                 f"ExecStartPre={self.variables['hermes_shadow_runtime_venv']}/bin/python "
                 f"{self.variables['hermes_discord_runtime_audit_live']} "
-                "--imports-only",
+                f"--home={profile['home']} --imports-only",
                 rendered,
             )
             self.assertIn(
                 f"ExecStartPost={self.variables['hermes_shadow_runtime_venv']}/bin/python "
                 f"{self.variables['hermes_discord_runtime_audit_live']} "
-                "--pid=${MAINPID} --timeout=30",
+                f"--home={profile['home']} --pid=${{MAINPID}} --timeout=30",
                 rendered,
             )
             self.assertIn(

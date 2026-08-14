@@ -2,195 +2,148 @@
 
 ## Current State
 
-The implementation is intentionally disabled. The live OpenClaw Gateway still
-runs as `johnny`, which is already a root-equivalent controller account. Giving
-that process any additional Docker path would not create a meaningful security
-boundary. Do not enable `agent_docker_report_enabled` until a dedicated Hermes
-runtime identity and report-reader key are in place and the rollout is
-approved. The reporter is platform-neutral so a restored OpenClaw deployment
-can receive its own separately scoped key later without restoring legacy
-service names.
+Hermes Astra has two live, separate Docker capabilities. Neither grants the
+Hermes service a Docker socket, Docker group membership, sudo, a general SSH
+shell, Compose paths, image selection, or arbitrary command arguments.
 
-The Siri relay is retired. The authenticated Health receiver remains in use,
-but it must move to its own no-exec service identity during the runtime
-migration; it is not a Docker-management transport.
+- `docker_inventory` reads a generated schema-v2 report from `docker-vm`,
+  `media-vm`, `nextcloud-vm`, or `jn-t14s-lin`.
+- `docker_update` reads updater status or starts the existing
+  Ansible-managed `docker-auto-update.service` on `docker-vm`, `media-vm`,
+  `nextcloud-vm`, or all three.
 
-## Threat Model
+`jn-t14s-lin` remains inventory-only because its managed Docker auto-update
+policy is disabled. Dubble and the logical Rigel role receive neither tool nor
+credential. The retired Siri relay is unrelated and remains retired. The
+independent Health receiver remains active.
 
-Treat every agent runtime, response, fetched web page, Discord message,
-attachment, skill, and tool result as potentially prompt-injected. Compromise
-of that boundary must not grant any of the following:
+## Trust Boundaries
 
-- membership in the `docker` group or direct access to `docker.sock`;
-- general sudo, a human login shell, controller credentials, or Ansible vault
-  access; the update identity may elevate only the broker's exact `request`
-  command;
-- arbitrary commands, Docker Engine API calls, compose edits, or container logs;
-- environment variables, mounts, ports, networks, commands, or arbitrary labels;
-- approval of an action proposed by the same compromised Gateway.
+The reporter and updater use different Ed25519 keys, remote accounts, forced
+commands, sudo rules, state directories, and systemd credentials. Both SSH
+keys are restricted to the exact `192.168.1.31/32` source and pinned Ed25519
+host keys. Client commands, forwarding, PTYs, agents, and user rc files are
+disabled.
 
-Docker socket access is root-equivalent. A read-only filesystem mount of the
-socket does not make the Docker API read-only, so the socket must remain behind
-a root-owned program that emits a strict result schema.
+The remote accounts are password-locked and have no supplementary groups.
+The report account uses `nologin`. The update account uses `/bin/sh` because
+OpenSSH executes an `authorized_keys` forced command through the account
+shell; `nologin` blocks the forced command before it can run. This does not
+create an interactive path because the sole authorized key has
+`restrict,command=...`, password authentication is locked, and the sudo rule
+matches one exact root-owned command.
 
-## Read-Only Reporter
+The Hermes unit receives each private key as a read-only systemd credential.
+The keys are not present in profile state, prompts, plugin source, Git, or
+normal logs. Only the Astra Gateway unit receives them.
 
-`playbooks/docker/agent-docker-report.yml` installs two separate boundaries
-on each opted-in Docker host:
+## Inventory Boundary
 
-1. A hardened root-owned oneshot service reads the local Unix socket and writes
-   `/var/lib/agent-docker-report/data/report.json` every five minutes.
-2. A dedicated `agent-report` SSH account can run only
-   `/usr/local/bin/agent-docker-report-cat` from an allowlisted source CIDR.
-   The reader rejects reports older than 15 minutes instead of silently serving
-   stale container state.
+`playbooks/docker/agent-docker-report.yml` installs:
 
-The account has no password login, Docker group, sudo rule, writable home,
-interactive command, port forwarding, agent forwarding, PTY, or writable
-`authorized_keys`. Source restrictions are parsed as canonical IPv4/IPv6 CIDRs
-before OpenSSH configuration is written. The reporter allows only these fields:
+1. a root-owned collector that reads Docker locally and writes an atomic
+   result file every five minutes; and
+2. a forced-command reader that returns only that result.
 
-- Engine version, API version, OS, and architecture;
-- container short ID, name, structured state and health tokens, restart count,
-  exit code, and start/finish timestamps;
-- exact Compose project and service labels;
-- configured image reference, running and local tagged image IDs, repository
-  digests, creation timestamp, and OCI version/revision labels.
+The report contains the host and Engine versions plus bounded per-container
+identity, state, health, restart/exit status, Compose project/service, image
+reference and IDs, repository digests, image version/revision labels, and a
+local update comparison.
 
-Schema version 2 never serializes raw Docker responses or Docker's free-text
-container status. Every agent-visible string is constrained to a bounded token
-or identifier grammar; values shaped like prose are dropped rather than copied
-into an agent prompt. Regression tests inject secret and prompt-injection
-sentinels into environment variables, commands, health logs, mounts, ports,
-networks, and private labels and require all of them to remain absent. OCI
-version and revision values follow the same rule. The reporter fails closed
-above 2,048 containers or a 16 MiB encoded report.
+The schema deliberately excludes environment variables, mounts, ports,
+commands, labels other than the allowlisted version fields, logs, networks,
+secrets, configs, events, volumes, file contents, and Docker object inspection
+payloads. `pending-local` means a newer image is already present under the same
+local tag; it is not registry freshness evidence.
 
-`updateState` compares the running image with the image currently resolved by
-the same local tag. `pending-local` means a newer image is already present on
-that host; it is not a remote-registry update guarantee. Registry checking
-remains owned by the existing auto-update and Diun workflows.
+The Hermes plugin independently validates the complete response shape, host,
+field character sets, list bounds, and size before returning it to the model.
 
 ## Update Boundary
 
-The read-only reporter does not update containers. The separately managed
-`playbooks/docker/agent-docker-update-broker.yml` implementation is also
-disabled by default. It gives an isolated agent only a forced-command SSH
-request interface; it does not give the agent Docker, general sudo, shell, or
-Compose access.
+`playbooks/docker/agent-docker-update-trigger.yml` exposes one operation: start
+the already-managed `docker-auto-update.service`. The request schema is exactly:
 
-The broker enforces these properties:
-
-- Astra may create a proposal, but may not approve or alter the accepted plan.
-- Approval occurs outside the Gateway trust boundary through a human/Codex or
-  dedicated operator path.
-- The broker accepts only strict JSON with `propose`, `status`, or `execute`
-  plus one opaque target or plan ID. Paths, image references, service names,
-  Compose arguments, health checks, and backup files cannot come from Astra.
-- A root-owned inventory manifest maps an opaque target ID to one Compose
-  service transaction. Unknown fields, path traversal, multiple services or
-  replicas, missing image digests, stale plans, runtime drift, configuration
-  drift, and candidate-tag drift are rejected. The complete Compose project
-  tree must be root-owned, contain no symlinks or special files, and be
-  non-writable by group or other so implicit `.env`, include, and extends
-  inputs cannot bypass the allowlist.
-- Proposal creation pulls the allowlisted service image into the local cache,
-  but cannot recreate a container. It records the current and candidate image
-  IDs/digests in a short-lived content-addressed plan.
-- Only a local root/operator command can approve that exact plan. Approval is
-  short-lived, stored outside the request account's access, and consumed before
-  the first transactional side effect. A preparation failure records a
-  terminal `failed` result and cannot reuse the approval. The root-only
-  approval record and audit log name the sudo operator when available. Astra
-  cannot call the approve or reject paths.
-- The initial broker supports only `stateless-image` targets. It rejects an
-  image that declares volumes; any running-container mount or device access;
-  and Compose services with volumes, secrets, configs, builds, added
-  capabilities, shared namespaces, or privileged mode. Eligible services must
-  run as a numeric non-root UID, use a read-only root filesystem, drop all
-  capabilities, set `no-new-privileges`, and expose a Docker health check.
-  Stateful or broadly privileged containers remain visible in the report but
-  are not eligible for Astra-driven updates.
-- Docker CLI subprocesses use an isolated root-only `DOCKER_CONFIG` directory,
-  not root's normal credential store. Candidate version and revision fields
-  use the same bounded-token rule as the reporter.
-- It captures the relevant compose/config rollback artifact, applies the exact
-  approved digest through a generated Compose override, runs fixed
-  service-specific health checks, and recreates the previous locally tagged
-  image on failure.
-- Plans are one-use. A process interruption after execution starts leaves the
-  transaction in `executing` for operator recovery rather than replaying it.
-- It returns a bounded token-only result document and never returns secrets,
-  raw logs, Docker status prose, or arbitrary external strings. An output guard
-  replaces any response outside that grammar with a fixed error.
-- Deployment validates the replacement binary and manifest before installing
-  its sudo rule or SSH key. Legacy OpenClaw plans, approvals, results, and audit
-  records are archived under the new root-only state directory, but are never
-  activated as current plans; old pending approvals therefore cannot survive
-  the namespace migration.
-
-Image-and-config rollback is not application-data rollback. A stateful service
-may be added only after its target has a separately reviewed, application-native
-backup and restore transaction with a proved recovery test. Merely retaining the
-old image or copying Compose files is not sufficient for a database migration.
-
-For namespace rollback, revoke the new key and sudo rule first, restore the
-legacy binaries/config/access artifacts from the recorded live-rollback
-backup, then move `legacy-openclaw` back to
-`/var/lib/openclaw-docker-update`. Never expose both request identities at the
-same time or move archived approvals into the active agent state directory.
-
-The operator flow, after a broker proposal is independently reviewed, is:
-
-```bash
-sudo agent-docker-update-broker show PLAN_ID
-sudo agent-docker-update-broker approve PLAN_ID
-# Astra may now send the one-use execute request before approval expires.
-sudo agent-docker-update-broker reject PLAN_ID
+```json
+{"schemaVersion":1,"action":"status"}
 ```
 
-Approval must compare the exact target, current image, candidate digest,
-version/revision evidence, and expected downtime. A registry image remains
-untrusted code: digest pinning prevents tag movement between approval and
-execution, but it cannot make a compromised upstream image safe.
+or:
 
-Do not expose `/usr/local/sbin/docker-auto-update`, the Docker socket, Portainer,
-or the existing broad `dbc` helpers directly to Astra as an update mechanism.
+```json
+{"schemaVersion":1,"action":"run"}
+```
 
-## Rollout Order
+The trigger accepts no target, service, image, tag, digest, path, command,
+environment value, or Compose option. It verifies that the managed timer is
+active, serializes requests under a root-owned lock, and enforces a one-hour
+cooldown. Responses are bounded status tokens only.
 
-1. Create dedicated Hermes profile identities and an `openclaw-health` service
-   identity without copying human SSH, Git, sudo, Docker, or vault credentials.
-2. Generate a dedicated Ed25519 report-reader key for Astra's Hermes runtime.
-3. Back up the affected host state, populate the public key and exact Tailscale
-   source CIDR, enable the reporter, and canary one Docker host. The enabled
-   playbook backs up any pre-existing managed artifacts to
-   `/srv/live-rollbacks` before replacing them; a clean first install has no
-   prior artifact to copy.
-4. Verify schema version 2, forced-command rejection, source restriction,
-   timer health, legacy-artifact cleanup, and absence of every secret and
-   prompt-injection sentinel before estate rollout.
-5. Populate one reviewed, health-checked, stateless service target and a
-   separate update-request key, then canary the broker only after a distinct
-   owner approval. Its enabled playbook applies the same pre-existing-artifact
-   backup gate and archives legacy history without reusing pending approvals.
-6. Verify proposal redaction, approval separation, digest/config drift
-   rejection, health failure rollback, replay rejection, and root-only audit
-   artifacts before adding another target or host.
+The existing Ansible Docker policy remains authoritative for what updates:
+
+- only stacks or services selected by `docker_stacks` auto-update fields;
+- existing required-path, lock, health, and service-specific handling remains
+  in the managed updater;
+- confident major-version changes remain blocked by the existing major guard;
+- Docker-socket proxy images are excluded from blind auto-updates and require
+  attended Ansible convergence because compromise of that image can reach the
+  host Docker daemon;
+- Hermes cannot modify that policy or bypass it through this tool.
+
+Scheduled systemd timer runs remain automatic. An unscheduled
+`docker_update(action=run)` call is intercepted by Hermes's native
+`pre_tool_call` approval path. The approval key includes the current turn ID,
+so choosing session or permanent approval cannot authorize a later turn. Cron
+contexts deny the call; they use the external systemd timer instead. Status
+queries require no approval.
+
+This is intentionally not a custom transaction broker. The rejected broker
+would have duplicated Compose orchestration, introduced interrupted-plan and
+rollback state, and risked applying unrelated Compose drift. Triggering the
+already-operated native updater keeps one update implementation and gives
+Hermes the unattended behavior the owner requested.
+
+No production update was triggered during deployment. Status and boundary
+probes passed; the next naturally scheduled run exercises the unchanged
+updater, while the trigger's `run` branch is covered by isolated tests.
+
+## Prompt-Injection Impact
+
+A successful prompt injection into Astra can read the same redacted inventory
+Astra can read, but an immediate updater run stops at a fresh native approval.
+If the owner approves it, the one-hour per-host cooldown still applies. The
+agent cannot choose what updates, cross a major-version block, obtain a shell,
+inspect container secrets, or reach the Docker socket through these boundaries.
+
+That is containment, not a claim that prompt injection is harmless. An
+unwanted update can still cause the ordinary availability or upstream
+supply-chain risk of the pre-authorized auto-update policy. Keep the target
+allowlist narrow, retain backups and health checks, review upstream policy, and
+revoke the dedicated update key or forced-command file to disable the path.
+
+## Rollout And Revocation
+
+The source-of-truth playbooks are:
+
+- `playbooks/docker/agent-docker-report.yml`
+- `playbooks/docker/agent-docker-update-trigger.yml`
+- `playbooks/agents/hermes-docker-inventory.yml`
+
+Each live rollout takes a targeted backup before replacing existing artifacts.
+To revoke a remote boundary, set its `*_enabled` value false and converge the
+owning Docker playbook. To revoke Astra, stop the Gateway and remove its
+systemd credential bindings through the Hermes playbook. Do not manually add
+Hermes to `docker`, expose `/var/run/docker.sock`, or grant broad updater sudo.
 
 ## Validation
 
 ```bash
-python3 scripts/docker/test_agent_docker_report.py
-python3 scripts/docker/test_agent_docker_update_broker.py
-python3 scripts/docker/test_agent_docker_playbooks.py
+PYTHONDONTWRITEBYTECODE=1 python3 scripts/docker/test_agent_docker_report.py
+PYTHONDONTWRITEBYTECODE=1 python3 scripts/docker/test_agent_docker_update_trigger.py
+PYTHONDONTWRITEBYTECODE=1 python3 scripts/docker/test_agent_docker_playbooks.py
+PYTHONDONTWRITEBYTECODE=1 python3 scripts/agents/test_hermes_agent_docker_inventory.py
 shellcheck scripts/docker/agent-docker-report-cat
 ansible-playbook playbooks/docker/agent-docker-report.yml --syntax-check
-ansible-playbook playbooks/docker/agent-docker-report.yml --check --diff
-ansible-playbook playbooks/docker/agent-docker-update-broker.yml --syntax-check
-ansible-playbook playbooks/docker/agent-docker-update-broker.yml --check --diff
+ansible-playbook playbooks/docker/agent-docker-update-trigger.yml --syntax-check
+ansible-playbook playbooks/agents/hermes-docker-inventory.yml --syntax-check
 ```
-
-The default check runs must leave all hosts disabled and must not provision a
-key, account, timer, report, broker target, proposal, credential, or Docker
-access path.

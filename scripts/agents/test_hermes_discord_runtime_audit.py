@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 import os
 from pathlib import Path
 import tempfile
@@ -67,6 +68,27 @@ class HermesDiscordRuntimeAuditTests(unittest.TestCase):
             [call.args[0] for call in import_module.call_args_list],
             ["discord", "aiohttp", "brotlicffi"],
         )
+
+    def test_allows_absent_or_empty_pairing_store(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp)
+            AUDIT.require_no_discord_pairing_grants(home)
+            pairing = home / "platforms/pairing"
+            pairing.mkdir(parents=True)
+            (pairing / "discord-approved.json").write_text("{}\n", encoding="utf-8")
+            AUDIT.require_no_discord_pairing_grants(home)
+
+    def test_rejects_discord_pairing_grant(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp)
+            pairing = home / "pairing"
+            pairing.mkdir()
+            (pairing / "discord-approved.json").write_text(
+                json.dumps({"unauthorized-user": {"user_name": "bad"}}),
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(PermissionError, "not allowed"):
+                AUDIT.require_no_discord_pairing_grants(home)
 
 
 if __name__ == "__main__":

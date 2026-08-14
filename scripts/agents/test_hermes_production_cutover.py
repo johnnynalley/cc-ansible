@@ -123,6 +123,7 @@ class HermesProductionCutoverTests(unittest.TestCase):
 
     def test_gateway_active_state_requires_discord_runtime_readiness(self) -> None:
         self.assertIn("hermes_discord_runtime_audit_live", self.service)
+        self.assertIn("--home={{ hermes_profile.home }}", self.service)
         self.assertIn("--imports-only", self.service)
         self.assertIn("--pid=${MAINPID} --timeout=30", self.service)
         self.assertIn("hermes_shadow_runtime_venv", self.service)

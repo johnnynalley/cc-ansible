@@ -2,23 +2,44 @@
 
 ## Current State
 
-The live OpenClaw Gateway on `jn-t14s-lin` still runs as the human/controller
-account `johnny`. That account has sudo, Docker, automation credentials, and
-write access to active OpenClaw behavior. Model instructions, persona prompts,
-and output filters do not make that a security boundary. Until the Gateway is
-moved to a dedicated OS identity, prompt injection or a Gateway compromise can
-become a controller and homelab compromise.
+Hermes replaced OpenClaw as the production agent runtime on `jn-t14s-lin` on
+2026-08-14. `hermes-gateway-astra.service` and
+`hermes-gateway-dubble.service` are active and enabled. Astra also owns the
+Rigel Discord route and deterministic 30-minute academic schedule; the
+standalone Rigel Gateway is intentionally disabled. The OpenClaw user Gateway,
+isolated services, repo-sync timer, and update-check timer are inactive and
+disabled. OpenClaw files remain offline for reference and rollback but are not
+mounted into Hermes.
 
-The first deterministic boundaries are implemented in repository source.
-Production cutover remains disabled, and those source changes do not reduce the
-authority of the current `johnny` process until they are applied and proven.
-The attended Gateway canary definition is loopback-only and disabled at boot.
-The split Gateway/executor deployment now passes its attended bootstrap and
-restart checks; both units are active only for the current test window, remain
-disabled at boot, and listen only on loopback `19789/19790`. Production remains
-the only externally reachable Gateway on the Tailscale address and port
-`18789`. The canary still requires authenticated behavior, data-handoff, and
-security rehearsals before any production cutover:
+The production profiles run as separate no-login OS identities with no sudo,
+Docker group/socket, host terminal, file, code-execution, computer-use, cron
+administration, or Discord-administration toolsets. Root owns the runtime,
+managed policy, plugins, unit files, and policy checksums. Service startup
+fails closed on policy drift, missing Discord dependencies, nonempty Discord
+pairing grants, plugin mismatch, or absent live messaging. Systemd applies no
+capabilities, `NoNewPrivileges`, strict system/home protection, private devices
+and temporary storage, restricted namespaces and address families, and no FUSE
+or delegated cgroup authority.
+
+Astra alone receives two systemd credentials for fixed Docker boundaries. One
+returns schema-validated redacted inventory; the other can only read status or
+start the existing Ansible-selected updater on three hosts. Unscheduled runs
+require native approval bound to the current user turn. Dubble and Rigel receive
+neither credential. No agent receives controller SSH, Ansible vault, Git, human
+home, raw Health database, or Docker daemon access.
+
+The retained Health receiver remains an independent active `johnny` user
+service and was deliberately preserved because it is still in use. Hermes can
+consume only aggregate output, not its token or raw database. Moving this
+network-facing receiver to the already-designed no-login `openclaw-health`
+identity remains a separate hardening task; retaining it is not evidence that
+OpenClaw itself remains in production.
+
+## Historical OpenClaw Modernization Evidence
+
+The following canary and rehearsal record is retained for rollback analysis.
+It describes the superseded OpenClaw modernization path, not current production
+authority:
 
 - `playbooks/agents/openclaw-health-receiver.yml` stages and migrates Apple
   Health ingestion to the no-login `openclaw-health` service account.
@@ -898,18 +919,19 @@ future plugin cannot expand authority, or that arbitrary network exfiltration
 is impossible from data the executor is legitimately allowed to read. Those
 remain update, review, egress, and data-minimization responsibilities.
 
-## Required Trust Boundaries
+## Current Production Trust Boundaries
 
-The final deployment must keep these principals separate:
+The production deployment keeps these principals separate:
 
 | Principal | May access | Must not access |
 | --- | --- | --- |
-| Gateway service (`openclaw:openclaw`) | Root-deployed immutable runtime/provider/behavior, its own writable Gateway state, read-only project data, channel/provider SecretRefs, aggregate Health and Docker reports, the capability-token copy, and explicitly scoped non-execution tools | sudo, Docker socket/group, human home, Ansible vault/SSH/Git credentials, raw Health data, Codex OAuth/config state, workspace or executable-code writes, active source writes |
-| Codex service (`openclaw:openclaw-codex`) | Its own OpenAI auth/app-server state, read-only reviewed Codex runtime, classified mutable project-data workspace, its capability-token copy, and the private native-hook relay directory | Gateway config/state/SecretRefs, Discord/provider tokens, sudo, Docker socket/group, human home, controller repo, Ansible vault/SSH/Git credentials, raw Health data, bulk host data |
-| `openclaw-health` | Health token, receiver configuration, raw Health SQLite database, aggregate report output | OpenClaw sessions/tools, Docker, sudo, controller credentials, network destinations other than its listener |
-| `openclaw-health-report` | Generated `yesterday.json` and `yesterday.md` only | Token, database, row-level records, source-device names, write access |
+| `hermes-astra` | Astra profile state and credentials, reviewed managed data/skills, web/delegation, aggregate reports, fixed Docker report/status tools, and exact sudo to start the native updater or restart/reset named Hermes Gateways | General sudo, Docker socket/group, host shell/files through model tools, Dubble state, human home, controller credentials, raw Health data, free-form remote commands |
+| `hermes-dubble` | Dubble profile state and its own Discord/provider credentials plus non-execution conversation tools | Astra/Rigel state, delegation, web, Docker tools/credentials, host execution, controller data |
+| Dormant `hermes-rigel` profile | Root-managed archived profile data; no active Gateway or Discord token | Production delivery, Astra/Dubble state, Docker, host execution |
+| Astra native-update service context and `hermes-updater` | Astra profile state, native release discovery, writable reviewed runtime/binary locations, and exact named-Gateway restart sudo for the Astra-owned Hermes updater | Dubble credentials/state, Docker, arbitrary sudo, controller credentials, human home |
+| Retained `johnny` Health service | Health token, receiver code, and raw Health database | Hermes profile state and Docker credentials by design; this boundary still depends on the broader human account and is tracked below |
 | Docker reporter accounts | One fresh, redacted report through a forced SSH command | Docker socket, arbitrary SSH commands, environment/mount/log data, updates |
-| Docker update broker | One immutable approved plan at a time | Free-form Compose paths, image names, arguments, or self-approval by Astra |
+| Docker update-trigger accounts | `status` or start of one existing root-owned updater service, with lock and cooldown | Service/image/path selection, Compose arguments, Docker socket, interactive SSH, policy edits |
 
 An output or prompt rule is defense in depth. The OS identity, filesystem
 ownership, fixed command schema, and independent approval path are the actual
@@ -919,13 +941,13 @@ controls.
 
 | Severity | State | Risk and required closure |
 | --- | --- | --- |
-| Critical | Open in production | The live Gateway still runs as `johnny`, whose sudo and Docker access are root-equivalent. A prompt injection or process compromise can reach controller and homelab authority. Complete the dedicated-user cutover before describing the runtime as contained. |
-| High | Source-ready, not live | The split Gateway/executor units, service-namespace secret separation, Gateway OpenAI-auth rejection, and metadata-only auth-state audit exist in source but have not passed the live hostile-prompt rehearsal. Apply the isolated source, preserve fresh executor OAuth, and pass the channel-less behavior and security gates. |
-| High | Inherent residual | The Gateway must read its own Discord/provider credentials and the executor capability token. Both services deliberately share one unprivileged UID for native hook relay compatibility, so DAC ownership alone does not separate their files. A service escape into the host namespace could cross that boundary. Systemd mount namespaces, inaccessible paths, no privilege gain, no sudo/Docker access, and hostile-prompt rehearsal must cap host impact. Rotate affected credentials after any compromise. |
-| High | Cutover blocker | Three production file-backed recovery entries remain active, including two pending final replies. Reconcile or preserve them explicitly before stopped-state handoff so migration cannot replay or erase user-visible intent. |
-| Medium | Open | The executor needs outbound access for OpenAI and may read classified workspace data. Minimize that data, keep credentials out of the workspace, audit provider/plugin updates, and treat model/network isolation as incomplete rather than absolute. |
-| Medium | Compatibility debt | Lossless Claw and Mem0 remain reviewed compatibility components until native compaction and memory parity prove they can be replaced. Their code executes in the Gateway trust domain and must retain exact provenance and immutable deployment. |
-| Medium | Source-ready, disabled | Restricted Docker reporting and one-service update brokerage are implemented but undeployed. The Gateway receives neither Docker group membership nor socket access; deploy only after independent canary and revocation tests. |
+| High | Accepted owner requirement | Native Hermes and Tirith updates can replace code later executed by both Gateways. Their updater identities are unprivileged and have only exact restart sudo, but a compromised upstream release can still read each Gateway's own credentials after restart. Preserve native updates as requested, monitor provenance, retain backups, and treat provider/Discord credentials as rotation targets after any update compromise. |
+| High | Open separate hardening | The retained Health receiver is a network-facing `johnny` user service. Its authentication, source restriction, bounded parser, and separation from model tools reduce exposure, but a receiver-code exploit would inherit the broader human account. Migrate it to the prepared no-login `openclaw-health` service without changing the client endpoint contract. |
+| Medium | Inherent residual | Each active Gateway must read its own Discord and model-provider credentials; Astra also reads its two fixed Docker SSH keys. A native runtime/plugin compromise can steal that profile's credentials even though prompt-level tools cannot. Rotate the affected profile and Docker keys after any process compromise. |
+| Medium | Accepted operational tradeoff | Selected Docker services still auto-update as root-managed systemd work. A malicious image or ordinary bad release can cause availability or container-level supply-chain impact. Major-version and required-path guards remain, updater scripts are root-only, and the Docker socket proxy is excluded from blind updates. |
+| Medium | Open defense in depth | Gateway units have strong namespace, filesystem, device, capability, and address-family restrictions but no narrow `SystemCallFilter`. A runtime exploit retains the syscall surface of the unprivileged Python process. Add filtering only after compatibility tests prove Discord, provider TLS, SQLite, and native delegation remain functional. |
+| Medium | Inherent residual | Astra has outbound web/provider access and Dubble accepts messages in its public support channel. Prompt injection can influence allowed replies, consume provider budget, or exfiltrate data already visible to that profile, but current tool policy provides no path to sudo, Docker, human files, or controller credentials. Keep data minimization, channel allowlists, and per-profile credential rotation. |
+| Low | Retained rollback surface | Offline OpenClaw files still contain sensitive legacy state. Hermes cannot mount or read them, but compromise of `johnny` or root can. Keep OpenClaw services disabled and do not expose the archive through agent tools. |
 
 ## Self-Evolution Modernization
 
@@ -1257,11 +1279,11 @@ The audit now applies that provider boundary while retaining the `read`
 requirement for the Ollama-backed Antares reviewer and emits a fixed
 non-content reason code on future failures.
 
-The owner redirected the active project to a parallel Nous Research Hermes
-Agent replacement. OpenClaw remains the production system and is retained as
-the rollback implementation until Hermes passes explicit parity and security
-gates. The OpenClaw canary remains loopback-only and disabled at boot; do not
-connect it to production channels during the Hermes migration.
+The owner redirected the active project to a Nous Research Hermes Agent
+replacement. This paragraph records the former transition state: Hermes has
+since passed cutover and OpenClaw is now offline rollback material. The
+OpenClaw canary remains disabled and must not be connected to production
+channels while either Hermes consumer is active.
 
 ### Doctor Modernization Rehearsal
 

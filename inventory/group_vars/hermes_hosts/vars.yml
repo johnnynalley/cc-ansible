@@ -164,6 +164,49 @@ hermes_star_privacy_validator_source: >-
 hermes_star_privacy_validator_live: >-
   /usr/local/libexec/hermes-star-dispatch-privacy-validate
 
+# Root-owned native Astra tools for redacted estate-wide Docker inventory and
+# the fixed Ansible-managed updater trigger. Separate systemd credentials reach
+# only forced-command SSH boundaries; neither path grants a terminal, file
+# tool, Docker socket, Compose selection, or arbitrary command.
+hermes_docker_inventory_plugin_source: >-
+  files/hermes/plugins/agent-docker-inventory
+hermes_docker_inventory_plugin_managed_root: >-
+  /etc/hermes/astra/plugins/agent-docker-inventory
+hermes_docker_inventory_plugin_runtime_root: >-
+  /var/lib/hermes/astra/plugins/agent-docker-inventory
+hermes_docker_inventory_validator_source: >-
+  scripts/agents/hermes-agent-docker-inventory-validate.py
+hermes_docker_inventory_validator_live: >-
+  /usr/local/libexec/hermes-agent-docker-inventory-validate
+hermes_docker_inventory_private_root: /etc/hermes/private/docker-access
+hermes_docker_inventory_private_key: >-
+  /etc/hermes/private/docker-access/report_ed25519
+hermes_docker_update_private_key: >-
+  /etc/hermes/private/docker-access/update_ed25519
+hermes_docker_inventory_known_hosts: /etc/hermes/astra/docker-known-hosts
+hermes_docker_inventory_mode: disabled
+hermes_docker_inventory_approved: false
+hermes_docker_inventory_confirmation: ""
+hermes_docker_inventory_required_confirmation: >-
+  enable-hermes-docker-access-on-jn-t14s-lin
+hermes_docker_inventory_host_keys:
+  192.168.1.153: >-
+    ssh-ed25519
+    AAAAC3NzaC1lZDI1NTE5AAAAIJWZ8sNcINmltoWhEoe+kagWrltvsXB3h0FEZ9rQ36db
+  192.168.1.136: >-
+    ssh-ed25519
+    AAAAC3NzaC1lZDI1NTE5AAAAIIy1pZcC3KfU/2skADHJlSUo0cG8lGHdbbZvyEkw6ryg
+  192.168.1.78: >-
+    ssh-ed25519
+    AAAAC3NzaC1lZDI1NTE5AAAAIG6Be/AJgN/J+4z0srzlbRulBxvQKSWb6tCEVPPxZ8Z6
+  192.168.1.31: >-
+    ssh-ed25519
+    AAAAC3NzaC1lZDI1NTE5AAAAINjxi55jYExGWzjkMhtUQMxUQohrS90bEODPpg/XWfTQ
+hermes_docker_inventory_smoke_source: >-
+  scripts/agents/hermes-agent-docker-inventory-smoke.py
+hermes_docker_inventory_smoke_live: >-
+  /usr/local/libexec/hermes-agent-docker-inventory-smoke
+
 # Tirith bootstrap transaction provenance. These exact values authenticate the
 # first install only. The live binary then follows Tirith's native signed
 # self-update channel from a dedicated self-managed service identity.
@@ -242,8 +285,8 @@ hermes_native_update_randomized_delay: 6h
 # shared environment is rebuilt.
 hermes_native_post_setup_keys:
   - ddgs
-hermes_shadow_version_only_migration_from: 34
-hermes_shadow_config_version: 35
+hermes_shadow_version_only_migration_from: 36
+hermes_shadow_config_version: 37
 hermes_shadow_contract_source: files/hermes/shadow-target.json
 hermes_shadow_contract_live: /usr/local/share/hermes-shadow/shadow-target.json
 hermes_shadow_audit_live: /usr/local/libexec/hermes-shadow-target-audit
@@ -284,16 +327,36 @@ hermes_shadow_profiles:
     subid_start: 200000
     model_provider: openai-codex
     model_default: gpt-5.6-sol
-    discord_allowed_users: []
-    discord_allowed_channels: []
-    discord_free_response_channels: []
-    discord_ignored_channels: []
-    discord_channel_prompts: {}
-    discord_channel_skill_bindings: []
-    discord_admin_users: []
+    discord_allowed_users:
+      - "740687933803331726"
+    discord_allowed_channels:
+      - "1482585492330381343"
+      - "1488752822466904256"
+    discord_free_response_channels:
+      - "1482585492330381343"
+      - "1488752822466904256"
+    discord_ignored_channels:
+      - "1482589440663617638"
+    discord_channel_prompts:
+      "1488752822466904256": >-
+        This is the dedicated Rigel academic channel. Act as Johnny's
+        academic study and deadline assistant. Use verified course records,
+        calendar data, and explicit user facts only. Never infer an exam,
+        deadline, course, mastery claim, or alert from the channel name,
+        archived text, generated memory, or a prior alert. Interactive
+        tutoring remains available when a semester is inactive. Keep answers
+        concise and never emit control tokens, hidden reasoning, tool errors,
+        heartbeat acknowledgements, or all-clear summaries.
+    discord_channel_skill_bindings:
+      - id: "1488752822466904256"
+        skills:
+          - source-grounded-study
+    discord_admin_users:
+      - "740687933803331726"
     discord_slash_commands: false
     plugins_enabled:
       - star-dispatch-privacy
+      - agent-docker-inventory
     toolsets:
       - safe
       - skills
@@ -303,6 +366,7 @@ hermes_shadow_profiles:
       - clarify
       - delegation
       - web
+      - agent_docker
     disabled_toolsets:
       - terminal
       - file
@@ -321,12 +385,16 @@ hermes_shadow_profiles:
     model_provider: anthropic
     model_default: claude-sonnet-4-6
     discord_allowed_users: []
-    discord_allowed_channels: []
-    discord_free_response_channels: []
-    discord_ignored_channels: []
+    discord_allowed_channels:
+      - "1483229851350728784"
+    discord_free_response_channels:
+      - "1483229851350728784"
+    discord_ignored_channels:
+      - "1483229869079920741"
     discord_channel_prompts: {}
     discord_channel_skill_bindings: []
-    discord_admin_users: []
+    discord_admin_users:
+      - "740687933803331726"
     discord_slash_commands: false
     plugins_enabled: []
     toolsets:

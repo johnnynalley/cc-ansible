@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import importlib
+import json
 import os
 from pathlib import Path
 import sys
@@ -14,11 +15,34 @@ import time
 REQUIRED_MODULES = ("discord", "aiohttp", "brotlicffi")
 ESTABLISHED = "01"
 HTTPS_PORT_HEX = "01BB"
+PAIRING_RELATIVE_PATHS = (
+    Path("pairing/discord-approved.json"),
+    Path("platforms/pairing/discord-approved.json"),
+)
+MAX_PAIRING_BYTES = 64 * 1024
 
 
 def require_imports() -> None:
     for module in REQUIRED_MODULES:
         importlib.import_module(module)
+
+
+def require_no_discord_pairing_grants(home: Path) -> None:
+    if not home.is_absolute() or home.is_symlink() or not home.is_dir():
+        raise ValueError("invalid Hermes home")
+    for relative in PAIRING_RELATIVE_PATHS:
+        path = home / relative
+        if not path.exists():
+            continue
+        if path.is_symlink() or not path.is_file():
+            raise ValueError("invalid Discord pairing store")
+        if path.stat().st_size > MAX_PAIRING_BYTES:
+            raise ValueError("oversized Discord pairing store")
+        value = json.loads(path.read_text(encoding="utf-8"))
+        if not isinstance(value, dict):
+            raise ValueError("invalid Discord pairing store")
+        if value:
+            raise PermissionError("Discord pairing grants are not allowed")
 
 
 def socket_inodes(pid: int, proc_root: Path = Path("/proc")) -> set[str]:
@@ -75,6 +99,7 @@ def wait_for_established_tls(pid: int, timeout: float) -> None:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
+    parser.add_argument("--home", type=Path, required=True)
     parser.add_argument("--imports-only", action="store_true")
     parser.add_argument("--pid", type=int)
     parser.add_argument("--timeout", type=float, default=30.0)
@@ -92,6 +117,7 @@ def main() -> int:
     args = parse_args()
     try:
         require_imports()
+        require_no_discord_pairing_grants(args.home)
         if args.pid is not None:
             wait_for_established_tls(args.pid, args.timeout)
     except Exception as exc:
