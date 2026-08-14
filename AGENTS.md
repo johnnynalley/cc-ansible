@@ -96,6 +96,15 @@ the native path cannot meet the requirement. "The live agent must not have
 general root" is a privilege-boundary requirement, not permission to replace
 native self-update behavior.
 
+Treat a production chat Gateway as live user-facing infrastructure during
+convergence. Stage independent profile data, skills, policy, and runtime files
+without restarting the Gateway, then perform at most one required restart per
+consumer after all validated changes are ready. A zero-drift playbook run must
+not stop or restart a healthy Gateway. Use the runtime's supported planned-stop
+path so operator maintenance is not misclassified as an unexpected signal,
+and verify both that a changed transaction restarts exactly once and that an
+unchanged transaction produces no user-visible interruption.
+
 ### Session Naming
 
 When the user asks Codex to name a session, consider the full context of the session before proposing a title. Use a natural-language title that describes what the session was really about; do not force lowercase slugs or replace spaces with hyphens unless the user explicitly asks for a filename-safe form.
