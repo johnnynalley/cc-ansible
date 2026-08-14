@@ -1316,6 +1316,17 @@
         - files/hermes/discord-regressions.json
         - scripts/agents/openclaw-delivery-cutover-audit.py
 
+    - name: Deploy executable OpenClaw delivery cutover audit
+      ansible.builtin.copy:
+        src: >-
+          {{ playbook_dir
+             }}/../../scripts/agents/openclaw-delivery-cutover-audit.py
+        dest: /usr/local/libexec/openclaw-delivery-cutover-audit.py
+        owner: root
+        group: root
+        mode: "0755"
+        backup: true
+
     - name: Deploy pinned Hermes automation audit sources
       ansible.builtin.copy:
         src: "{{ playbook_dir }}/../../{{ item }}"

@@ -724,6 +724,9 @@ class HermesShadowPlaybookTests(unittest.TestCase):
         contract = self.task("Deploy Hermes Discord cutover contract")
         audit = self.task("Deploy Hermes Discord contract audit")
         sources = self.task("Deploy pinned Hermes Discord audit sources")
+        live_delivery_audit = self.task(
+            "Deploy executable OpenClaw delivery cutover audit"
+        )
         validation = self.task("Validate deployed Hermes Discord cutover contract")
         environment = self.task("Seed root-managed Hermes service environment once")
         local_environment = self.task(
@@ -733,6 +736,11 @@ class HermesShadowPlaybookTests(unittest.TestCase):
         self.assertIn("hermes_discord_audit_source", audit)
         self.assertIn("discord-regressions.json", sources)
         self.assertIn("openclaw-delivery-cutover-audit.py", sources)
+        self.assertIn(
+            "/usr/local/libexec/openclaw-delivery-cutover-audit.py",
+            live_delivery_audit,
+        )
+        self.assertIn('mode: "0755"', live_delivery_audit)
         self.assertIn("--repository-root", validation)
         self.assertIn("/etc/hermes/{{ item.name }}/.env", environment)
         self.assertIn("owner: root", environment)
