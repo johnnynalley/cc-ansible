@@ -794,10 +794,18 @@ The first live attempt exposed an Ansible transport issue: `become_user`
 could not create a module directory beneath the controller's root-only remote
 temporary path. The transaction restored all three stores before failing. The
 durable path now invokes the content-free validator through root-controlled
-`runuser`, and both identity execution and the complete retry passed. The live
-root-managed configs still carry the prior 4,000/2,500 character limits;
-converging the reviewed 2,200/1,375 template is a separate stopped-Gateway gate
-and remains required before model-backed behavior testing.
+`runuser`, and both identity execution and the complete retry passed.
+
+The subsequent stopped-Gateway convergence updated all three root-managed
+configs to 2,200/1,375 and regenerated their policy checksum manifests. Hermes
+native `config check` passed as each service identity, the manifests verify,
+and a complete second bootstrap run reported zero changes. Production OpenClaw
+and Health remained active and enabled; the Hermes Gateways remained inactive
+and disabled. The pre-change config rollback is
+`/srv/live-rollbacks/jn-t14s-lin/hermes-migration/20260814T000527Z-hermes-managed-memory-limits`.
+Check-mode safety probes now explicitly execute instead of returning empty
+Ansible placeholder results, and native merged-config validation occurs during
+every bootstrap before checksum promotion.
 
 ## Behavior And Self-Evolution
 

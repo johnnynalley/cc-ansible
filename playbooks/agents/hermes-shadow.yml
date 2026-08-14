@@ -120,6 +120,7 @@
           - getconf
           - _NPROCESSORS_ONLN
       register: hermes_shadow_host_cpus
+      check_mode: false
       changed_when: false
 
     - name: Read Hermes target available memory
@@ -129,6 +130,7 @@
           - /MemAvailable/ {print int($2 / 1024)}
           - /proc/meminfo
       register: hermes_shadow_host_available_memory
+      check_mode: false
       changed_when: false
 
     - name: Read Hermes target free root filesystem space
@@ -139,6 +141,7 @@
           - -BG
           - /
       register: hermes_shadow_host_free_disk
+      check_mode: false
       changed_when: false
 
     - name: Require reviewed same-host Hermes capacity
@@ -457,6 +460,7 @@
           - get-url
           - origin
       register: hermes_shadow_installed_origin
+      check_mode: false
       changed_when: false
 
     - name: Inspect Hermes source commit
@@ -468,6 +472,7 @@
           - rev-parse
           - HEAD
       register: hermes_shadow_installed_commit
+      check_mode: false
       changed_when: false
 
     - name: Inspect reviewed Hermes release tag object
@@ -479,6 +484,7 @@
           - rev-parse
           - "refs/tags/{{ hermes_shadow_install_ref }}"
       register: hermes_shadow_installed_tag_object
+      check_mode: false
       changed_when: false
 
     - name: Resolve reviewed Hermes release tag
@@ -492,6 +498,7 @@
           - "1"
           - "{{ hermes_shadow_install_ref }}"
       register: hermes_shadow_installed_tag_commit
+      check_mode: false
       changed_when: false
 
     - name: Inspect Hermes source modifications
@@ -504,6 +511,7 @@
           - --porcelain
           - --untracked-files=all
       register: hermes_shadow_installed_status
+      check_mode: false
       changed_when: false
 
     - name: Require exact Hermes source
@@ -635,6 +643,7 @@
         argv:
           - "{{ hermes_shadow_audit_live }}"
           - "{{ hermes_shadow_contract_live }}"
+      check_mode: false
       changed_when: false
 
     - name: Validate deployed Hermes Discord cutover contract
@@ -644,6 +653,7 @@
           - "{{ hermes_discord_contract_live }}"
           - --repository-root
           - /usr/local/share/hermes-shadow/repository
+      check_mode: false
       changed_when: false
 
     - name: Validate deployed Hermes automation contract
@@ -653,6 +663,7 @@
           - "{{ hermes_automation_contract_live }}"
           - --repository-root
           - /usr/local/share/hermes-shadow/repository
+      check_mode: false
       changed_when: false
 
     - name: Deploy per-profile Hermes managed policy
@@ -765,6 +776,28 @@
         label: "{{ item.item.name }}"
       no_log: true
 
+    - name: Validate merged Hermes config as each service identity
+      ansible.builtin.command:
+        argv:
+          - /usr/sbin/runuser
+          - --user
+          - "{{ item.user }}"
+          - --
+          - /usr/bin/env
+          - "HOME={{ item.home }}"
+          - "HERMES_HOME={{ item.home }}"
+          - "HERMES_MANAGED_DIR=/etc/hermes/{{ item.name }}"
+          - HERMES_DOCKER_BINARY=/usr/bin/podman
+          - "{{ hermes_shadow_runtime_binary }}"
+          - config
+          - check
+      loop: "{{ hermes_shadow_profiles }}"
+      loop_control:
+        label: "{{ item.name }}"
+      check_mode: false
+      changed_when: false
+      no_log: true
+
     - name: Hash root-managed Hermes policy and environment
       ansible.builtin.command:
         argv:
@@ -775,6 +808,7 @@
       loop_control:
         label: "{{ item.name }}"
       register: hermes_shadow_managed_policy_hashes
+      check_mode: false
       changed_when: false
       no_log: true
 
@@ -911,6 +945,7 @@
           - -H
           - -ltn
       register: hermes_shadow_legacy_listeners
+      check_mode: false
       changed_when: false
       when: hermes_shadow_mode == 'shadow'
 

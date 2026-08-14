@@ -91,6 +91,26 @@ class HermesShadowPlaybookTests(unittest.TestCase):
         self.assertIn("minimumAvailableMemoryMiB", gate)
         self.assertIn("minimumFreeDiskGiB", gate)
 
+    def test_read_only_safety_probes_execute_in_check_mode(self) -> None:
+        task_names = (
+            "Read Hermes target logical CPU capacity",
+            "Read Hermes target available memory",
+            "Read Hermes target free root filesystem space",
+            "Inspect Hermes source origin",
+            "Inspect Hermes source commit",
+            "Inspect reviewed Hermes release tag object",
+            "Resolve reviewed Hermes release tag",
+            "Inspect Hermes source modifications",
+            "Validate deployed Hermes shadow contract",
+            "Validate deployed Hermes Discord cutover contract",
+            "Validate deployed Hermes automation contract",
+            "Hash root-managed Hermes policy and environment",
+            "Inspect legacy OpenClaw listeners before Hermes start",
+        )
+        for name in task_names:
+            with self.subTest(task=name):
+                self.assertIn("check_mode: false", self.task(name))
+
     def test_every_managed_config_renders_with_fail_closed_policy(self) -> None:
         template = self.environment.from_string(self.config_template)
         for profile in self.variables["hermes_shadow_profiles"]:
@@ -241,12 +261,20 @@ class HermesShadowPlaybookTests(unittest.TestCase):
         seed = self.task("Seed mutable Hermes profile config once")
         repair = self.task("Stamp only newly seeded empty Hermes profile configs")
         schema = self.task("Require current mutable Hermes config schema")
+        native_check = self.task(
+            "Validate merged Hermes config as each service identity"
+        )
         hashes = self.task("Hash root-managed Hermes policy and environment")
         manifests = self.task("Deploy root-owned Hermes policy checksum manifests")
         self.assertIn("hermes_shadow_config_version", seed)
         self.assertIn("force: false", seed)
         self.assertIn("from_yaml) == {}", repair)
         self.assertIn("hermes_shadow_config_version", schema)
+        self.assertIn("/usr/sbin/runuser", native_check)
+        self.assertIn("HERMES_MANAGED_DIR=/etc/hermes/", native_check)
+        self.assertIn("- check", native_check)
+        self.assertIn("check_mode: false", native_check)
+        self.assertIn("no_log: true", native_check)
         self.assertIn("sha256sum", hashes)
         self.assertIn("config.yaml", hashes)
         self.assertIn(".env", hashes)

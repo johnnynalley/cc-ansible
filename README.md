@@ -1067,7 +1067,8 @@ production token, and is not imported by `site.yml`.
   `playbooks/agents/hermes-profile-memory.yml` validates four vault-encrypted
   Astra/Rigel seeds with the pinned native Hermes parser and threat scanner,
   backs up all three stores, installs atomically, and rolls back on any failed
-  checksum, identity, Dubble-isolation, or service-state proof
+  checksum, identity, Dubble-isolation, or service-state proof. The matching
+  compact managed limits are converged and natively validated on all profiles.
 - **Architecture and gates**: `docs/hermes-replacement.md`
 - **Discord handoff**: three credential-free profile declarations, silent
   unknown DMs, fail-closed allowlists, no replay/backfill, and an attended
