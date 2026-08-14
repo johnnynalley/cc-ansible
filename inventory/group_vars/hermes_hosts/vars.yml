@@ -274,9 +274,9 @@ hermes_native_update_service: hermes-native-update.service
 hermes_native_update_timer: hermes-native-update.timer
 hermes_tirith_update_service: hermes-tirith-native-update.service
 hermes_tirith_update_timer: hermes-tirith-native-update.timer
-# Timers remain staged while Hermes has no production route. The attended
-# cutover must set this true so both native updaters run automatically.
-hermes_native_updates_automatic: false
+# Hermes is the production route. Keep both vendor-native update timers
+# enabled during routine convergence.
+hermes_native_updates_automatic: true
 hermes_native_update_calendar: daily
 hermes_native_update_randomized_delay: 6h
 # Hermes ships DDGS as a supported native post-setup backend instead of a
@@ -316,6 +316,83 @@ hermes_automation_audit_live: >-
 hermes_rigel_schedule_source: scripts/agents/hermes-rigel-schedule.py
 hermes_rigel_schedule_manifest_source: >-
   files/hermes/jobs/rigel-academic-alerts.json
+
+# Production scheduled automation. This transaction is separate from the
+# original cutover so rescue never reactivates OpenClaw.
+hermes_automation_mode: disabled
+hermes_automation_approved: false
+hermes_automation_confirmation: ""
+hermes_automation_required_confirmation: >-
+  converge-hermes-production-automation-on-jn-t14s-lin
+hermes_automation_readers_group: hermes-automation-readers
+hermes_automation_output_root: /var/lib/hermes-automation
+hermes_automation_legacy_workspace: /home/johnny/.openclaw/workspace
+hermes_automation_manifest_source: astra-production-jobs.json.j2
+hermes_automation_manifest_live: /etc/hermes/astra/production-jobs.json
+hermes_automation_owner_user_id: "740687933803331726"
+hermes_automation_rigel_channel_id: "1488752822466904256"
+hermes_automation_logs_channel_id: "1501040629025865779"
+hermes_automation_social_channel_id: "1501040923042254970"
+hermes_automation_reconciliation_source: >-
+  files/hermes/production-automation-reconciliation.json
+hermes_automation_reconciliation_live: >-
+  /etc/hermes/astra/production-automation-reconciliation.json
+hermes_automation_gateway_dropin: >-
+  /etc/systemd/system/hermes-gateway-astra.service.d/production-automation.conf
+hermes_cron_reconcile_source: scripts/agents/hermes-cron-reconcile.py
+hermes_cron_reconcile_live: /usr/local/libexec/hermes-cron-reconcile
+hermes_retained_automation_source: scripts/agents/hermes-retained-automation.py
+hermes_retained_automation_live: /usr/local/libexec/hermes-retained-automation
+hermes_warframe_feed_source: scripts/agents/hermes-warframe-feed-collect.py
+hermes_warframe_feed_live: /usr/local/libexec/hermes-warframe-feed-collect
+hermes_fortnite_calendar_compat_source: >-
+  scripts/agents/hermes-fortnite-calendar-compat.py
+hermes_fortnite_calendar_compat_live: >-
+  /usr/local/libexec/hermes-fortnite-calendar-compat
+hermes_fortnite_calendar_fetch_source: >-
+  scripts/agents/hermes-fortnite-calendar-fetch.py
+hermes_fortnite_calendar_fetch_live: >-
+  /usr/local/libexec/hermes-fortnite-calendar-fetch
+hermes_fortnite_calendar_schedule_live: >-
+  /var/lib/hermes-automation/fortnite-schedule.json
+hermes_fortnite_geckodriver_path: /snap/bin/geckodriver
+hermes_automation_astra_scripts:
+  - source: scripts/agents/hermes_cron_delivery.py
+    destination: hermes_cron_delivery.py
+  - source: scripts/agents/hermes-stw-watch.py
+    destination: hermes-stw-watch.py
+  - source: scripts/agents/hermes-vbucks-check.py
+    destination: hermes-vbucks-check.py
+  - source: scripts/agents/hermes-shop-check.py
+    destination: hermes-shop-check.py
+  - source: scripts/agents/hermes-reddit-hdd-deals.py
+    destination: hermes-reddit-hdd-deals.py
+  - source: scripts/agents/hermes-daily-summary-input.py
+    destination: hermes-daily-summary-input.py
+  - source: scripts/agents/hermes-fortnite-progress-input.py
+    destination: hermes-fortnite-progress-input.py
+  - source: scripts/agents/hermes-warframe-reminder-watch.py
+    destination: hermes-warframe-reminder-watch.py
+hermes_automation_system_units:
+  - hermes-gateway-astra.service.d/production-automation.conf
+  - hermes-retained-automation@.service
+  - hermes-daily-summary-collect.timer
+  - hermes-fortnite-progress-collect.timer
+  - hermes-warframe-feed.service
+  - hermes-warframe-feed.timer
+  - hermes-fortnite-calendar-fetch.service
+  - hermes-fortnite-calendar.service
+  - hermes-fortnite-calendar.timer
+  - hermes-profile-backup@.service
+  - hermes-profile-backup@.timer
+hermes_automation_enabled_timers:
+  - hermes-daily-summary-collect.timer
+  - hermes-fortnite-progress-collect.timer
+  - hermes-warframe-feed.timer
+  - hermes-fortnite-calendar.timer
+  - hermes-profile-backup@astra.timer
+  - hermes-profile-backup@dubble.timer
+  - hermes-profile-backup@rigel.timer
 
 hermes_shadow_profiles:
   - name: astra

@@ -10,6 +10,7 @@ import errno
 import os
 import stat
 import tempfile
+import traceback
 from contextlib import contextmanager
 from datetime import date, datetime, timezone
 from pathlib import Path
@@ -410,6 +411,31 @@ def status_payload(
     }
 
 
+def unhandled_error_code(exc: BaseException) -> str:
+    """Return a private bounded classifier without exposing exception text."""
+    frames = traceback.extract_tb(exc.__traceback__)
+    local_frame = next(
+        (
+            frame
+            for frame in reversed(frames)
+            if Path(frame.filename).name == Path(__file__).name
+        ),
+        None,
+    )
+    values = [
+        type(exc).__name__,
+        local_frame.name if local_frame else "unknown",
+        str(local_frame.lineno) if local_frame else "0",
+    ]
+    parts = []
+    for value in values:
+        safe = "".join(
+            char.casefold() if char.isalnum() else "-" for char in value
+        ).strip("-")
+        parts.append(safe[:40] or "unknown")
+    return "unhandled-" + "-".join(parts)
+
+
 def run(home: Path, now: datetime) -> str:
     require(home.is_absolute(), "home-not-absolute")
     channel_source = home / "rigel-channel-state" / "academic-state.json"
@@ -527,7 +553,7 @@ def main() -> int:
     home = Path(home_value)
     try:
         output = run(home, datetime.now(timezone.utc))
-    except Exception:
+    except Exception as exc:
         try:
             if home.is_absolute():
                 now = datetime.now(timezone.utc)
@@ -537,7 +563,7 @@ def main() -> int:
                         now,
                         healthy=False,
                         status_value="evaluator-error",
-                        error_code="unhandled-evaluator-error",
+                        error_code=unhandled_error_code(exc),
                     ),
                 )
         except Exception:

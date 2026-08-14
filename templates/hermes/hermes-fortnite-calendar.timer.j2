@@ -1,0 +1,14 @@
+[Unit]
+Description=Synchronize the reviewed Fortnite calendar every six hours
+
+[Timer]
+OnCalendar=*-*-* 00:15:00
+OnCalendar=*-*-* 06:15:00
+OnCalendar=*-*-* 12:15:00
+OnCalendar=*-*-* 18:15:00
+Persistent=true
+RandomizedDelaySec=2m
+Unit=hermes-fortnite-calendar.service
+
+[Install]
+WantedBy=timers.target

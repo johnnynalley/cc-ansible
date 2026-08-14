@@ -1,0 +1,11 @@
+[Unit]
+Description=Create nightly native Hermes backup for profile %i
+
+[Timer]
+OnCalendar=*-*-* 23:55:00
+Persistent=true
+RandomizedDelaySec=20m
+Unit=hermes-profile-backup@%i.service
+
+[Install]
+WantedBy=timers.target

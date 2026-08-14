@@ -166,6 +166,26 @@
   drift, command/Gateway separation, no direct scheduled Discord delivery,
   fresh source reconciliation, one-shot expiry, Health/Siri boundaries, and
   aggregate-only audit output.
+- `hermes-cron-reconcile.py` validates the rendered seven-job manifest and
+  reconciles it through Hermes's native cron API without editing `jobs.json`.
+  `hermes_cron_delivery.py` maintains the private delivery ledger and treats
+  empty no-agent output as silent success.
+- `hermes-retained-automation.py`, `hermes-daily-summary-input.py`, and
+  `hermes-fortnite-progress-input.py` run or normalize the retained collectors
+  into bounded artifacts for the agent-backed summary jobs.
+- `hermes-stw-watch.py`, `hermes-vbucks-check.py`,
+  `hermes-warframe-feed-collect.py`, and
+  `hermes-warframe-reminder-watch.py` own deterministic game/feed evaluation;
+  normal no-result paths produce no Discord output.
+- `hermes-fortnite-calendar-fetch.py` and
+  `hermes-fortnite-calendar-compat.py` split public fetch from validated legacy
+  schedule application. `hermes-reddit-hdd-deals.py` and
+  `hermes-shop-check.py` produce bounded candidates for reviewed alerts.
+- `test_hermes_cron_reconcile.py`,
+  `test_hermes_production_automation.py`,
+  `test_hermes_fortnite_calendar_automation.py`, and
+  `test_hermes_warframe_automation.py` cover reconciliation, silent delivery,
+  transaction/rollback gates, feed idempotency, and calendar isolation.
 
 ## Health Receiver
 

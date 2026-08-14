@@ -1,72 +1,63 @@
-# OpenClaw Heartbeats
+# Agent Scheduling And Heartbeats
 
-The current production Astra heartbeat is still driven by the legacy
-human-owned workspace:
+## Current Production
 
-```text
-/home/johnny/.openclaw/workspace/HEARTBEAT.md
-```
+Hermes owns production scheduling on `jn-t14s-lin`. OpenClaw's Gateway and
+scheduler are stopped and disabled. Astra has seven native jobs:
 
-on the current OpenClaw host. That path remains production evidence only until
-the attended dedicated-user cutover. The modern source is
-`files/openclaw/workspace/HEARTBEAT.md`, with role-specific files for Dubble
-and Rigel. Vega and Antares are request-scoped and have no heartbeat file.
+- Rigel academic evaluation every 30 minutes, continuously;
+- STW and Warframe deterministic watches every minute;
+- the HDD deal review every hour;
+- Daily Summary at 07:08 America/Chicago;
+- Fortnite progress at 06:50 America/Chicago; and
+- weekly social-seed review Sunday at 09:00 America/Chicago.
 
-Do not model this as an OpenClaw cron unless exact timing or isolated delivery
-is the requirement. Heartbeat-owned policy belongs in the live heartbeat
-catalog, but checks run by cadence and cost rather than as one all-at-once
-batch.
+The source inventory contained 26 current OpenClaw cron rows, three logical
+heartbeats, and two historical completed one-shots. All 31 lanes have an
+explicit retained, replaced, collapsed, completed, or retired disposition in
+`files/hermes/production-automation-reconciliation.json`. OpenClaw-specific
+self-maintenance, session janitors, and generic all-clear heartbeats were not
+recreated. Root-managed systemd timers own retained data collectors, feed and
+calendar synchronization, profile backups, native updates, and service health.
 
-## Management Model
+## Production Contract
 
-In the modern runtime, heartbeat behavior is root-deployed, read-only source.
-Astra may write proposals and evidence but cannot mutate active heartbeat
-policy. Mutable cadence state and delivery receipts remain runtime data. This
-replaces the legacy model where Astra could edit live prompt policy in place.
+The scheduling source of truth is the credential-free template
+`templates/hermes/astra-production-jobs.json.j2`, rendered with private route
+values into `/etc/hermes/astra/production-jobs.json`. The convergence entrypoint
+is `playbooks/agents/hermes-automation.yml`. It backs up profile and runtime
+state, keeps check mode read-only, excludes active timers from the transaction,
+restores their prior state, reconciles through Hermes's native cron API, and
+rolls back on any failed assertion.
 
-When adding a heartbeat check:
+Rigel is never disabled merely because a semester is complete. Its script-only
+job reads structured canonical course state and an optional pending-calendar
+file after non-failing existence checks. No due event, a completed semester,
+an empty optional file, and an absent optional daily-memory file are normal
+successful states with empty output. Only source-backed due events reach
+`#rigel`; expected absence, control tokens, reasoning text, and command errors
+must never become Discord messages.
 
-1. Update the repo-owned role heartbeat source and the exact procedure under
-   the reviewed heartbeat catalog.
-2. Assign a stable check ID, cadence, owner, and execution lane.
-3. Run `scripts/agents/openclaw-bootstrap-audit.py` and the semantic heartbeat
-   regressions before promotion.
-4. Verify the exact command works as the dedicated identity without overlapping
-   another heavy or OpenClaw CLI check.
-5. Promote through the owner/Codex deployment path with rollback evidence.
+Agent-backed jobs receive bounded collector output and produce one concise
+message or `[SILENT]`. Deterministic jobs run without a model. A failed
+collector or malformed source is recorded in private state and owned by the
+service-health path; it is not reformatted into user-facing noise. The Gateway
+serializes native jobs to avoid the legacy unbounded heartbeat fan-out.
 
-## Scheduling And Resource Model
+When changing production scheduling:
 
-The heartbeat stays enabled continuously so it is ready when a check or alert
-becomes relevant. An idle heartbeat should produce no Discord message.
+1. Update the production job template or the owning systemd collector.
+2. Update the 31-lane reconciliation when ownership or disposition changes.
+3. Extend the relevant `test_hermes_*automation.py` regression.
+4. Run the automation playbook in check mode, then apply it transactionally.
+5. Prove native cron zero drift, expected idle silence, timer health, profile
+   backups, OpenClaw exclusion, and Health receiver continuity.
 
-The modern response contract uses OpenClaw's native structured
-`heartbeat_respond` tool. An idle run records `notify=false`; a real alert uses
-`notify=true` with one concise notification. `lightContext: true`,
-`isolatedSession: true`, and `includeReasoning: false` prevent old conversation
-history and hidden reasoning from becoming delivery input. This replaces the
-custom suffix-matching guard for heartbeat text. The guard is retired at
-cutover rather than expanded to match more truncated token variants.
+## Retained OpenClaw Historical Reference
 
-Rigel remains scheduled every 30 minutes around the clock. Its no-op path reads
-only the canonical semester source and an optional pending-calendar file after
-a non-failing existence check, then records `notify=false`. Empty semesters do
-not disable Rigel and do not produce a message, reasoning dump, or expected
-missing-file banner.
-
-Before production cutover, `playbooks/agents/openclaw-behavior-rehearsal.yml`
-proves this contract in the channel-less loopback canary. Its normal baseline
-sets every heartbeat to `0m`. The attended probe temporarily renders only
-Rigel at `24h`, triggers one targeted native system event, and requires a new
-isolated heartbeat transcript containing exactly one `heartbeat_respond` with
-`notify=false`, no visible assistant text or tool errors, and a silent
-structured heartbeat event with no channel or recipient. It then immediately
-restores the all-`0m` baseline and archives the synthetic sessions through
-OpenClaw's native session RPC. The required applied silent-canary data handoff
-is complete; this proof remains pending fresh isolated executor authentication
-and the attended behavior run.
-
-The legacy production sources remain:
+The remainder of this document records the source system, incidents, and
+migration rationale. It is not current production guidance. The retained
+legacy sources are:
 
 ```text
 /home/johnny/.openclaw/workspace/HEARTBEAT.md

@@ -1,0 +1,82 @@
+{
+  "schemaVersion": 1,
+  "profile": "astra",
+  "jobs": [
+    {
+      "key": "rigel-academic-alerts",
+      "name": "rigel-academic-alerts",
+      "schedule": "every 30m",
+      "prompt": "",
+      "deliver": "discord:{{ hermes_automation_rigel_channel_id }}",
+      "script": "hermes-rigel-schedule.py",
+      "noAgent": true,
+      "adoptExisting": true
+    },
+    {
+      "key": "stw-vbucks-shop-watch",
+      "name": "astra-stw-vbucks-shop-watch",
+      "schedule": "* * * * *",
+      "prompt": "",
+      "deliver": "discord:{{ hermes_automation_logs_channel_id }}",
+      "script": "hermes-stw-watch.py",
+      "noAgent": true
+    },
+    {
+      "key": "warframe-reminder-watch",
+      "name": "astra-warframe-reminder-watch",
+      "schedule": "* * * * *",
+      "prompt": "",
+      "deliver": "discord:{{ hermes_automation_logs_channel_id }}",
+      "script": "hermes-warframe-reminder-watch.py",
+      "noAgent": true
+    },
+    {
+      "key": "reddit-hdd-deal-watch",
+      "name": "astra-reddit-hdd-deal-watch",
+      "schedule": "every 1h",
+      "prompt": "Use only the injected candidate JSON plus current web evidence from each candidate URL. If there are no candidates, respond with only [SILENT]. Alert only for used or refurbished SATA HDDs in the US that are still available and either ship or are pickup-only in Texas. Hard per-drive limits: 4TB $40, 8TB $100, 12TB $130, 16TB $130; reject all prices above those ceilings, SSD/NVMe, whole servers, ambiguous prices, sold/pending items, and out-of-state pickup-only listings. Return one concise message under 1,500 characters only when at least one listing survives. Start with <@{{ hermes_automation_owner_user_id }}> **HDD Deal Alert** and give capacity, per-drive price, shipping or Texas pickup, and a link wrapped in angle brackets. Do not include research notes or rejected candidates.",
+      "deliver": "discord:{{ hermes_automation_logs_channel_id }}",
+      "script": "hermes-reddit-hdd-deals.py",
+      "noAgent": false,
+      "model": "gpt-5.6-sol",
+      "provider": "openai-codex",
+      "enabledToolsets": ["web"]
+    },
+    {
+      "key": "daily-summary",
+      "name": "astra-daily-summary",
+      "schedule": "8 7 * * *",
+      "prompt": "Use only the injected Daily Summary artifact. If STATUS is unavailable or there is nothing useful, respond with only [SILENT]. Otherwise return one Discord brief under 1,800 characters and 16 visible lines. Lead with actions, outages, security, money, health, or events due today; then include only genuinely useful lower-priority updates. Omit normal checks, repeated known warnings, raw dumps, tool chatter, implementation details, and coverage boilerplate unless a missing check materially changes a conclusion. Keep Fortnite separate when present. Never invent freshness or facts outside the artifact.",
+      "deliver": "discord:{{ hermes_automation_logs_channel_id }}",
+      "script": "hermes-daily-summary-input.py",
+      "noAgent": false,
+      "model": "gpt-5.6-sol",
+      "provider": "openai-codex",
+      "enabledToolsets": ["safe"]
+    },
+    {
+      "key": "fortnite-progress",
+      "name": "astra-fortnite-progress",
+      "schedule": "50 6 * * *",
+      "prompt": "Use only the injected Fortnite progress JSON. If STATUS is unavailable, status is not ok, there is no previous snapshot, or there were no new matches, kills, wins, rank movement, or milestones, respond with only [SILENT]. Otherwise return one compact update under 1,500 characters. State the snapshot window, lead with ranked activity and promotion movement, include only modes with activity, never infer deaths or K/D where absent, and end with one blunt evidence-based sentence. Do not include raw JSON or implementation notes.",
+      "deliver": "discord:{{ hermes_automation_logs_channel_id }}",
+      "script": "hermes-fortnite-progress-input.py",
+      "noAgent": false,
+      "model": "gpt-5.6-sol",
+      "provider": "openai-codex",
+      "enabledToolsets": ["safe"]
+    },
+    {
+      "key": "weekly-social-seeds",
+      "name": "astra-weekly-social-seeds",
+      "schedule": "0 9 * * 0",
+      "prompt": "Create at most three concise social-media idea seeds from durable non-sensitive memory and current web evidence. Reject private, medical, financial, credential, interpersonal, infrastructure-identifying, stale, repetitive, or weak material. Verify any current-status claim. Write idea seeds, not finished posts, and include one short reason each is worth developing. If nothing is safe and useful, respond with only [SILENT]. Do not expose research notes or internal reasoning.",
+      "deliver": "discord:{{ hermes_automation_social_channel_id }}",
+      "script": null,
+      "noAgent": false,
+      "model": "gpt-5.6-sol",
+      "provider": "openai-codex",
+      "enabledToolsets": ["web", "memory"]
+    }
+  ]
+}

@@ -46,8 +46,10 @@
   `hermes update --gateway --yes` command. Hermes retains ownership of
   Git selection, backup, dependency migration, rollback, and gateway restart.
   The unit runs as `hermes-astra`, loads no Gateway secret environment, has no
-  root capabilities, and gives the native updater write access only to the
-  checkout and Astra's private profile state. It reconciles Hermes's official
+  ambient capabilities, and bounds its setuid child to `CAP_SETUID` and
+  `CAP_SETGID` so exact sudoers-authorized Gateway restarts work. It gives the
+  native updater write access only to the checkout and Astra's private profile
+  state. It reconciles Hermes's official
   `messaging` extra after the native update because upstream intentionally
   excludes messaging from `all`, then normalizes the credential-free shared
   runtime group and restarts the two production consumers through the existing
@@ -66,11 +68,29 @@
   exact Hermes native update unit and to issue Hermes's exact `reset-failed`,
   `start`, and `restart` calls for the three enumerated Gateway units. It gets no
   shell or arbitrary systemctl authority; Dubble and Rigel get no sudo access.
+- `astra-production-jobs.json.j2`: renders the seven reviewed native Astra jobs
+  with route identifiers supplied from inventory. The committed template is
+  valid JSON and contains no production platform identifiers.
+- `hermes-gateway-astra-automation.conf.j2`: adds the production manifest and
+  native cron zero-drift preflight only to Astra's Gateway.
+- `hermes-retained-automation@.service.j2`,
+  `hermes-daily-summary-collect.timer.j2`, and
+  `hermes-fortnite-progress-collect.timer.j2`: run the bounded retained
+  collectors without exposing the legacy workspace to a model.
+- `hermes-warframe-feed.service.j2`, `hermes-warframe-feed.timer.j2`,
+  `hermes-fortnite-calendar-fetch.service.j2`,
+  `hermes-fortnite-calendar.service.j2`, and
+  `hermes-fortnite-calendar.timer.j2`: own feed/calendar fetch and apply lanes
+  with separate network and mutation boundaries.
+- `hermes-profile-backup@.service.j2` and
+  `hermes-profile-backup@.timer.j2`: run native per-profile backups under the
+  matching no-login identity with independent locks.
 
 ## Consumer
 
 - `playbooks/agents/hermes-shadow.yml`
 - `playbooks/agents/hermes-production-runtime.yml`
+- `playbooks/agents/hermes-automation.yml`
 
 ## Safety Notes
 

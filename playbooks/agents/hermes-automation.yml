@@ -1,0 +1,860 @@
+---
+# Purpose: Converge production Hermes schedules, collectors, and backups.
+# Hosts: hermes_hosts.
+# Key vars: hermes_automation_*, hermes_shadow_*, cutover variables.
+# Templates: Hermes automation, calendar, feed, and backup units.
+# Scripts: scripts/agents/hermes-*.py production automation helpers.
+# Validation: syntax-check this playbook before applying it.
+
+- name: Converge Hermes production automation
+  hosts: hermes_hosts
+  become: true
+  gather_facts: true
+  force_handlers: true
+
+  vars:
+    hermes_automation_backup_id: >-
+      {{ ansible_facts['date_time']['iso8601_basic_short'] }}-pre-automation
+    hermes_automation_backup_root: >-
+      {{ hermes_production_cutover_rollback_root
+         }}/{{ hermes_automation_backup_id }}
+    hermes_automation_user_environment:
+      XDG_RUNTIME_DIR: >-
+        /run/user/{{ hermes_production_cutover_user_uid }}
+      DBUS_SESSION_BUS_ADDRESS: >-
+        unix:path=/run/user/{{ hermes_production_cutover_user_uid }}/bus
+    hermes_automation_template_units:
+      - name: hermes-retained-automation@.service
+        source: hermes-retained-automation@.service.j2
+      - name: hermes-daily-summary-collect.timer
+        source: hermes-daily-summary-collect.timer.j2
+      - name: hermes-fortnite-progress-collect.timer
+        source: hermes-fortnite-progress-collect.timer.j2
+      - name: hermes-warframe-feed.service
+        source: hermes-warframe-feed.service.j2
+      - name: hermes-warframe-feed.timer
+        source: hermes-warframe-feed.timer.j2
+      - name: hermes-fortnite-calendar-fetch.service
+        source: hermes-fortnite-calendar-fetch.service.j2
+      - name: hermes-fortnite-calendar.service
+        source: hermes-fortnite-calendar.service.j2
+      - name: hermes-fortnite-calendar.timer
+        source: hermes-fortnite-calendar.timer.j2
+      - name: hermes-profile-backup@.service
+        source: hermes-profile-backup@.service.j2
+      - name: hermes-profile-backup@.timer
+        source: hermes-profile-backup@.timer.j2
+    hermes_automation_rollback_paths: >-
+      {{
+        [
+          '/var/lib/hermes/astra/cron/jobs.json',
+          hermes_automation_manifest_live,
+          hermes_automation_reconciliation_live,
+          '/etc/systemd/system/hermes-gateway-astra.service',
+          '/etc/systemd/system/' ~ hermes_native_update_service,
+          '/etc/sudoers.d/hermes-native-update',
+          hermes_cron_reconcile_live,
+          hermes_retained_automation_live,
+          hermes_warframe_feed_live,
+          hermes_fortnite_calendar_compat_live,
+          hermes_fortnite_calendar_fetch_live,
+          hermes_fortnite_calendar_schedule_live
+        ]
+        + hermes_shadow_profiles
+          | map(attribute='name')
+          | map('regex_replace', '^', '/etc/hermes/')
+          | map('regex_replace', '$', '/config.yaml')
+          | list
+        + hermes_shadow_profiles
+          | map(attribute='name')
+          | map('regex_replace', '^', '/etc/hermes/')
+          | map('regex_replace', '$', '/managed-policy.sha256')
+          | list
+        + hermes_shadow_profiles
+          | map(attribute='home')
+          | map('regex_replace', '$', '/.backup.lock')
+          | list
+        + hermes_automation_system_units
+          | map('regex_replace', '^', '/etc/systemd/system/')
+          | list
+        + hermes_automation_astra_scripts
+          | map(attribute='destination')
+          | map('regex_replace', '^', '/var/lib/hermes/astra/scripts/')
+          | list
+      }}
+
+  tasks:
+    - name: Validate Hermes automation mode
+      ansible.builtin.assert:
+        that:
+          - hermes_automation_mode in ['disabled', 'converge']
+        fail_msg: hermes_automation_mode must be disabled or converge.
+
+    - name: Skip hosts without Hermes automation approval
+      ansible.builtin.meta: end_host
+      when: hermes_automation_mode == 'disabled'
+
+    - name: Require exact Hermes automation authorization
+      ansible.builtin.assert:
+        that:
+          - hermes_automation_approved | bool
+          - >-
+            hermes_automation_confirmation
+            == hermes_automation_required_confirmation
+          - inventory_hostname == 'jn-t14s-lin'
+          - hermes_automation_output_root == '/var/lib/hermes-automation'
+          - >-
+            hermes_automation_legacy_workspace
+            == '/home/johnny/.openclaw/workspace'
+          - hermes_shadow_profiles | map(attribute='name') | list
+            == ['astra', 'dubble', 'rigel']
+        fail_msg: >-
+          Production automation requires host-specific approval and the exact
+          confirmation string.
+
+    - name: Check OpenClaw user Gateway before automation convergence
+      ansible.builtin.command:
+        argv:
+          - /usr/sbin/runuser
+          - --user
+          - "{{ hermes_production_cutover_user }}"
+          - --
+          - /usr/bin/systemctl
+          - --user
+          - is-active
+          - "{{ hermes_production_cutover_user_gateway }}"
+      environment: "{{ hermes_automation_user_environment }}"
+      register: hermes_automation_openclaw_state
+      changed_when: false
+      failed_when: false
+      check_mode: false
+
+    - name: Require the OpenClaw scheduler and delivery path offline
+      ansible.builtin.assert:
+        that:
+          - hermes_automation_openclaw_state.stdout != 'active'
+        fail_msg: >-
+          Refusing to activate Hermes automation while OpenClaw is active.
+
+    - name: Inspect retained automation prerequisites
+      ansible.builtin.stat:
+        path: "{{ item }}"
+        follow: false
+      loop:
+        - >-
+          {{ hermes_automation_legacy_workspace
+             }}/scripts/collect-media-summary.py
+        - >-
+          {{ hermes_automation_legacy_workspace
+             }}/scripts/daily_personal_collect.py
+        - >-
+          {{ hermes_automation_legacy_workspace
+             }}/scripts/daily-summary-assemble.py
+        - >-
+          {{ hermes_automation_legacy_workspace
+             }}/scripts/fortnite-progress-snapshot.py
+        - >-
+          {{ hermes_automation_legacy_workspace
+             }}/scripts/fortnite-tournament-calendar-sync.py
+        - >-
+          {{ hermes_automation_legacy_workspace
+             }}/scripts/warframe_drops_feed.py
+        - "{{ hermes_production_cutover_source_env }}"
+      register: hermes_automation_prerequisites
+      check_mode: false
+
+    - name: Resolve the managed Hermes Python prerequisite
+      ansible.builtin.stat:
+        path: "{{ hermes_shadow_runtime_venv }}/bin/python"
+        follow: true
+      register: hermes_automation_python_prerequisite
+      check_mode: false
+
+    - name: Resolve the Fortnite WebDriver prerequisite
+      ansible.builtin.stat:
+        path: "{{ hermes_fortnite_geckodriver_path }}"
+        follow: true
+      register: hermes_automation_geckodriver_prerequisite
+      check_mode: false
+
+    - name: Require complete retained automation prerequisites
+      ansible.builtin.assert:
+        that:
+          - >-
+            hermes_automation_prerequisites.results
+            | map(attribute='stat.exists')
+            | min
+          - >-
+            hermes_automation_prerequisites.results
+            | map(attribute='stat.isreg', default=false)
+            | min
+          - hermes_automation_python_prerequisite.stat.exists | default(false)
+          - hermes_automation_python_prerequisite.stat.isreg | default(false)
+          - >-
+            hermes_automation_geckodriver_prerequisite.stat.exists
+            | default(false)
+          - >-
+            hermes_automation_geckodriver_prerequisite.stat.isreg
+            | default(false)
+        fail_msg: >-
+          A reviewed retained collector, runtime, or private environment is
+          missing. No live automation changes were made.
+
+    - name: Load the complete production schedule reconciliation
+      ansible.builtin.set_fact:
+        hermes_automation_reconciliation: >-
+          {{
+            lookup(
+              'ansible.builtin.file',
+              ansible_config_file | dirname
+              ~ '/' ~ hermes_automation_reconciliation_source
+            ) | from_json
+          }}
+
+    - name: Require every historical scheduler lane reconciled
+      ansible.builtin.assert:
+        that:
+          - hermes_automation_reconciliation.schemaVersion == 1
+          - >-
+            hermes_automation_reconciliation.source.totalReconciledLanes == 31
+          - hermes_automation_reconciliation.lanes | length == 31
+          - hermes_automation_reconciliation.production.nativeCronJobs == 7
+          - >-
+            hermes_automation_reconciliation.production.openclawScheduler
+            == 'offline'
+          - >-
+            hermes_automation_reconciliation.pendingOneShots
+            ['cron-warframe-reminder-snootydeath'].sourceDueAt
+            == '2026-08-17T00:00:00Z'
+        fail_msg: >-
+          The production schedule reconciliation is incomplete or no longer
+          matches the approved migration boundary.
+
+    - name: Stop after read-only Hermes automation check-mode preflight
+      ansible.builtin.meta: end_host
+      when: ansible_check_mode
+
+    - name: Inspect pre-transaction timer load state
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/systemctl
+          - show
+          - "{{ item }}"
+          - --property=LoadState
+          - --value
+      loop: >-
+        {{ hermes_automation_enabled_timers
+           + [hermes_native_update_timer, hermes_tirith_update_timer] }}
+      register: hermes_automation_prior_timer_units
+      changed_when: false
+
+    - name: Inspect pre-transaction timer activity
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/systemctl
+          - is-active
+          - "{{ item }}"
+      loop: >-
+        {{ hermes_automation_enabled_timers
+           + [hermes_native_update_timer, hermes_tirith_update_timer] }}
+      register: hermes_automation_prior_timer_activity
+      changed_when: false
+      failed_when: false
+
+    - name: Inspect pre-transaction timer enablement
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/systemctl
+          - is-enabled
+          - "{{ item }}"
+      loop: >-
+        {{ hermes_automation_enabled_timers
+           + [hermes_native_update_timer, hermes_tirith_update_timer] }}
+      register: hermes_automation_prior_timer_enablement
+      changed_when: false
+      failed_when: false
+
+    - name: Record pre-transaction timer state
+      ansible.builtin.set_fact:
+        hermes_automation_prior_timers: >-
+          {{
+            (hermes_automation_prior_timers | default([]))
+            + [{
+              'name': item.item,
+              'exists': item.stdout == 'loaded',
+              'active': hermes_automation_prior_timer_activity.results[
+                timer_index
+              ].stdout,
+              'enabled': hermes_automation_prior_timer_enablement.results[
+                timer_index
+              ].stdout
+            }]
+          }}
+      loop: "{{ hermes_automation_prior_timer_units.results }}"
+      loop_control:
+        index_var: timer_index
+        label: "{{ item.item }}"
+
+    - name: Exclude existing timers from the automation transaction
+      ansible.builtin.systemd_service:
+        name: "{{ item.name }}"
+        state: stopped
+      loop: "{{ hermes_automation_prior_timers }}"
+      loop_control:
+        label: "{{ item.name }}"
+      when:
+        - item.exists
+        - item.active == 'active'
+      notify: Restore pre-transaction timer state
+
+    - name: Recheck native updater workers after timer exclusion
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/systemctl
+          - is-active
+          - "{{ item }}"
+      loop:
+        - "{{ hermes_native_update_service }}"
+        - "{{ hermes_tirith_update_service }}"
+      register: hermes_automation_updater_services
+      changed_when: false
+      failed_when: false
+
+    - name: Require both native updater workers idle after timer exclusion
+      ansible.builtin.assert:
+        that:
+          - item.stdout != 'active'
+        fail_msg: >-
+          A native updater is active after its timer was stopped. Wait for it
+          to finish before converging schedules or Gateway units.
+      loop: "{{ hermes_automation_updater_services.results }}"
+      loop_control:
+        label: "{{ item.item }}"
+
+    - name: Require unique rollback paths inside approved roots
+      ansible.builtin.assert:
+        that:
+          - >-
+            hermes_automation_rollback_paths | length
+            == hermes_automation_rollback_paths | unique | length
+          - >-
+            hermes_automation_rollback_paths
+            | reject('match', '^/(?:etc|usr|var)/')
+            | list
+            | length == 0
+        fail_msg: >-
+          The automation transaction produced duplicate or out-of-scope
+          rollback paths.
+
+    - name: Create targeted pre-automation rollback directory
+      ansible.builtin.file:
+        path: "{{ hermes_automation_backup_root }}"
+        state: directory
+        owner: root
+        group: root
+        mode: "0700"
+
+    - name: Inspect rollback source files
+      ansible.builtin.stat:
+        path: "{{ item }}"
+        follow: false
+      loop: "{{ hermes_automation_rollback_paths }}"
+      register: hermes_automation_rollback_stats
+      check_mode: false
+
+    - name: Back up existing automation, policy, and Gateway files
+      ansible.builtin.copy:
+        src: "{{ item.item }}"
+        dest: >-
+          {{ hermes_automation_backup_root
+             }}/{{ item.item | regex_replace('^/', '')
+                              | regex_replace('/', '__') }}
+        remote_src: true
+        owner: root
+        group: root
+        mode: "0600"
+      loop: "{{ hermes_automation_rollback_stats.results }}"
+      loop_control:
+        label: "{{ item.item }}"
+      when: item.stat.exists and item.stat.isreg
+
+    - name: Normalize existing native profile backup locks
+      ansible.builtin.file:
+        path: "{{ item.home }}/.backup.lock"
+        state: file
+        owner: "{{ item.user }}"
+        group: "{{ item.group }}"
+        mode: "0600"
+      loop: "{{ hermes_shadow_profiles }}"
+      loop_control:
+        label: "{{ item.name }}"
+      check_mode: false
+
+    - name: Create private native profile backup staging directories
+      ansible.builtin.file:
+        path: "{{ item.home }}/backups/{{ hermes_automation_backup_id }}"
+        state: directory
+        owner: "{{ item.user }}"
+        group: "{{ item.group }}"
+        mode: "0700"
+      loop: "{{ hermes_shadow_profiles }}"
+      loop_control:
+        label: "{{ item.name }}"
+      check_mode: false
+
+    - name: Create native pre-automation Hermes profile backups
+      ansible.builtin.command:
+        argv:
+          - /usr/sbin/runuser
+          - --user
+          - "{{ item.user }}"
+          - --
+          - /usr/bin/env
+          - "HOME={{ item.home }}"
+          - "HERMES_HOME={{ item.home }}"
+          - "{{ hermes_shadow_runtime_binary }}"
+          - backup
+          - --output
+          - >-
+            {{ item.home }}/backups/{{ hermes_automation_backup_id
+            }}/profile.zip
+      loop: "{{ hermes_shadow_profiles }}"
+      loop_control:
+        label: "{{ item.name }}"
+      changed_when: true
+      check_mode: false
+
+    - name: Preserve native profile backups in the rollback directory
+      ansible.builtin.copy:
+        src: >-
+          {{ item.home }}/backups/{{ hermes_automation_backup_id
+          }}/profile.zip
+        dest: "{{ hermes_automation_backup_root }}/hermes-{{ item.name }}.zip"
+        remote_src: true
+        owner: root
+        group: root
+        mode: "0600"
+      loop: "{{ hermes_shadow_profiles }}"
+      loop_control:
+        label: "{{ item.name }}"
+      check_mode: false
+
+    - name: Remove native profile backup staging directories
+      ansible.builtin.file:
+        path: "{{ item.home }}/backups/{{ hermes_automation_backup_id }}"
+        state: absent
+      loop: "{{ hermes_shadow_profiles }}"
+      loop_control:
+        label: "{{ item.name }}"
+      check_mode: false
+
+    - name: Converge Hermes automation transaction
+      block:
+        - name: Create bounded automation readers group
+          ansible.builtin.group:
+            name: "{{ hermes_automation_readers_group }}"
+            system: true
+            state: present
+
+        - name: Create bounded automation output directory
+          ansible.builtin.file:
+            path: "{{ hermes_automation_output_root }}"
+            state: directory
+            owner: "{{ hermes_production_cutover_user }}"
+            group: "{{ hermes_automation_readers_group }}"
+            mode: "2770"
+
+        - name: Create native profile backup directories
+          ansible.builtin.file:
+            path: "{{ item.home }}/backups"
+            state: directory
+            owner: "{{ item.user }}"
+            group: "{{ item.group }}"
+            mode: "0700"
+          loop: "{{ hermes_shadow_profiles }}"
+          loop_control:
+            label: "{{ item.name }}"
+
+        - name: Deploy root-owned automation helpers
+          ansible.builtin.copy:
+            src: "{{ playbook_dir }}/../../{{ item.source }}"
+            dest: "{{ item.destination }}"
+            owner: root
+            group: root
+            mode: "0755"
+            backup: true
+          loop:
+            - source: "{{ hermes_cron_reconcile_source }}"
+              destination: "{{ hermes_cron_reconcile_live }}"
+            - source: "{{ hermes_retained_automation_source }}"
+              destination: "{{ hermes_retained_automation_live }}"
+            - source: "{{ hermes_warframe_feed_source }}"
+              destination: "{{ hermes_warframe_feed_live }}"
+            - source: "{{ hermes_fortnite_calendar_compat_source }}"
+              destination: "{{ hermes_fortnite_calendar_compat_live }}"
+            - source: "{{ hermes_fortnite_calendar_fetch_source }}"
+              destination: "{{ hermes_fortnite_calendar_fetch_live }}"
+          loop_control:
+            label: "{{ item.destination }}"
+
+        - name: Deploy root-owned Astra cron scripts
+          ansible.builtin.copy:
+            src: "{{ playbook_dir }}/../../{{ item.source }}"
+            dest: "/var/lib/hermes/astra/scripts/{{ item.destination }}"
+            owner: root
+            group: hermes-astra
+            mode: "0550"
+            backup: true
+          loop: "{{ hermes_automation_astra_scripts }}"
+          loop_control:
+            label: "{{ item.destination }}"
+
+        - name: Deploy Astra production cron manifest
+          ansible.builtin.template:
+            src: >-
+              {{ playbook_dir ~ '/../../templates/hermes/'
+                 ~ hermes_automation_manifest_source }}
+            dest: "{{ hermes_automation_manifest_live }}"
+            owner: root
+            group: hermes-astra
+            mode: "0440"
+            backup: true
+
+        - name: Deploy the reviewed production schedule reconciliation
+          ansible.builtin.copy:
+            src: >-
+              {{ playbook_dir }}/../../{{
+                 hermes_automation_reconciliation_source }}
+            dest: "{{ hermes_automation_reconciliation_live }}"
+            owner: root
+            group: hermes-astra
+            mode: "0440"
+            backup: true
+
+        - name: Deploy bounded automation systemd units
+          ansible.builtin.template:
+            src: "{{ playbook_dir }}/../../templates/hermes/{{ item.source }}"
+            dest: "/etc/systemd/system/{{ item.name }}"
+            owner: root
+            group: root
+            mode: "0644"
+            backup: true
+          loop: "{{ hermes_automation_template_units }}"
+          loop_control:
+            label: "{{ item.name }}"
+
+        - name: Deploy corrected Hermes native update unit
+          ansible.builtin.template:
+            src: >-
+              {{ playbook_dir
+                 }}/../../templates/hermes/hermes-native-update.service.j2
+            dest: "/etc/systemd/system/{{ hermes_native_update_service }}"
+            owner: root
+            group: root
+            mode: "0644"
+            backup: true
+
+        - name: Deploy exact native Gateway update sudoers bridge
+          ansible.builtin.template:
+            src: >-
+              {{ playbook_dir
+                 }}/../../templates/hermes/hermes-native-update.sudoers.j2
+            dest: /etc/sudoers.d/hermes-native-update
+            owner: root
+            group: root
+            mode: "0440"
+            validate: /usr/sbin/visudo -cf %s
+            backup: true
+
+        - name: Deploy bounded Hermes managed policies
+          ansible.builtin.template:
+            src: >-
+              {{ playbook_dir
+                 }}/../../templates/hermes/hermes-managed-config.yaml.j2
+            dest: "/etc/hermes/{{ hermes_profile.name }}/config.yaml"
+            owner: root
+            group: "{{ hermes_profile.group }}"
+            mode: "0440"
+            backup: true
+          loop: "{{ hermes_shadow_profiles }}"
+          loop_control:
+            loop_var: hermes_profile
+            label: "{{ hermes_profile.name }}"
+
+        - name: Hash bounded Hermes policy and environment
+          ansible.builtin.command:
+            argv:
+              - /usr/bin/sha256sum
+              - "/etc/hermes/{{ item.name }}/config.yaml"
+              - "/etc/hermes/{{ item.name }}/.env"
+          loop: "{{ hermes_shadow_profiles }}"
+          loop_control:
+            label: "{{ item.name }}"
+          register: hermes_automation_policy_hashes
+          changed_when: false
+          no_log: true
+
+        - name: Deploy bounded Hermes policy checksum manifests
+          ansible.builtin.copy:
+            content: "{{ item.stdout }}\n"
+            dest: >-
+              /etc/hermes/{{ item.item.name }}/managed-policy.sha256
+            owner: root
+            group: "{{ item.item.group }}"
+            mode: "0440"
+          loop: "{{ hermes_automation_policy_hashes.results }}"
+          loop_control:
+            label: "{{ item.item.name }}"
+          no_log: true
+
+        - name: Deploy Astra Gateway automation read boundary
+          ansible.builtin.template:
+            src: >-
+              {{ playbook_dir
+                 }}/../../templates/hermes/hermes-gateway.service.j2
+            dest: /etc/systemd/system/hermes-gateway-astra.service
+            owner: root
+            group: root
+            mode: "0644"
+            backup: true
+          vars:
+            hermes_profile: "{{ hermes_shadow_profiles[0] }}"
+
+        - name: Create Astra Gateway systemd drop-in directory
+          ansible.builtin.file:
+            path: >-
+              {{ hermes_automation_gateway_dropin | dirname }}
+            state: directory
+            owner: root
+            group: root
+            mode: "0755"
+
+        - name: Deploy Astra live cron drift gate
+          ansible.builtin.template:
+            src: >-
+              {{ playbook_dir
+                 }}/../../templates/hermes/hermes-gateway-astra-automation.conf.j2
+            dest: "{{ hermes_automation_gateway_dropin }}"
+            owner: root
+            group: root
+            mode: "0644"
+            backup: true
+
+        - name: Reload Hermes automation systemd units
+          ansible.builtin.systemd_service:
+            daemon_reload: true
+
+        - name: Stop Astra briefly for atomic cron reconciliation
+          ansible.builtin.systemd_service:
+            name: hermes-gateway-astra.service
+            state: stopped
+
+        - name: Refresh the native cron backup with Astra stopped
+          ansible.builtin.copy:
+            src: /var/lib/hermes/astra/cron/jobs.json
+            dest: >-
+              {{ hermes_automation_backup_root
+                 }}/var__lib__hermes__astra__cron__jobs.json
+            remote_src: true
+            owner: root
+            group: root
+            mode: "0600"
+
+        - name: Reconcile Astra jobs through the native Hermes API
+          ansible.builtin.command:
+            argv:
+              - /usr/sbin/runuser
+              - --user
+              - hermes-astra
+              - --
+              - /usr/bin/env
+              - HOME=/var/lib/hermes/astra
+              - HERMES_HOME=/var/lib/hermes/astra
+              - "{{ hermes_shadow_runtime_venv }}/bin/python"
+              - "{{ hermes_cron_reconcile_live }}"
+              - --manifest
+              - "{{ hermes_automation_manifest_live }}"
+              - --home
+              - /var/lib/hermes/astra
+              - --profile
+              - astra
+              - --apply
+          register: hermes_automation_reconcile
+          changed_when: >-
+            (hermes_automation_reconcile.stdout | from_json).changes
+            | length > 0
+          check_mode: false
+
+        - name: Restart Astra with the bounded production schedule
+          ansible.builtin.systemd_service:
+            name: hermes-gateway-astra.service
+            state: started
+            enabled: true
+
+        - name: Enable production automation and backup timers
+          ansible.builtin.systemd_service:
+            name: "{{ item }}"
+            state: started
+            enabled: true
+          loop: "{{ hermes_automation_enabled_timers }}"
+
+        - name: Resume native update timers after convergence
+          ansible.builtin.systemd_service:
+            name: "{{ item }}"
+            state: started
+            enabled: true
+          loop:
+            - "{{ hermes_native_update_timer }}"
+            - "{{ hermes_tirith_update_timer }}"
+
+        - name: Verify zero Astra cron drift through the native API
+          ansible.builtin.command:
+            argv:
+              - /usr/sbin/runuser
+              - --user
+              - hermes-astra
+              - --
+              - /usr/bin/env
+              - HOME=/var/lib/hermes/astra
+              - HERMES_HOME=/var/lib/hermes/astra
+              - "{{ hermes_shadow_runtime_venv }}/bin/python"
+              - "{{ hermes_cron_reconcile_live }}"
+              - --manifest
+              - "{{ hermes_automation_manifest_live }}"
+              - --home
+              - /var/lib/hermes/astra
+              - --profile
+              - astra
+              - --check
+          register: hermes_automation_reconcile_check
+          changed_when: false
+          check_mode: false
+
+        - name: Require active production Hermes automation units
+          ansible.builtin.command:
+            argv:
+              - /usr/bin/systemctl
+              - is-active
+              - "{{ item }}"
+          loop: >-
+            {{ ['hermes-gateway-astra.service',
+                'hermes-gateway-dubble.service',
+                hermes_native_update_timer,
+                hermes_tirith_update_timer]
+               + hermes_automation_enabled_timers }}
+          register: hermes_automation_live_units
+          changed_when: false
+          check_mode: false
+
+        - name: Require every production automation unit active
+          ansible.builtin.assert:
+            that:
+              - item.stdout == 'active'
+          loop: "{{ hermes_automation_live_units.results }}"
+          loop_control:
+            label: "{{ item.item }}"
+
+        - name: Verify Health receiver remains active
+          ansible.builtin.command:
+            argv:
+              - /usr/sbin/runuser
+              - --user
+              - "{{ hermes_production_cutover_user }}"
+              - --
+              - /usr/bin/systemctl
+              - --user
+              - is-active
+              - "{{ hermes_production_cutover_health_service }}"
+          environment: "{{ hermes_automation_user_environment }}"
+          register: hermes_automation_health_state
+          changed_when: false
+          check_mode: false
+
+        - name: Require Health receiver continuity
+          ansible.builtin.assert:
+            that:
+              - hermes_automation_health_state.stdout == 'active'
+
+      rescue:
+        - name: Inspect automation timers available during rescue
+          ansible.builtin.command:
+            argv:
+              - /usr/bin/systemctl
+              - show
+              - "{{ item }}"
+              - --property=LoadState
+              - --value
+          loop: "{{ hermes_automation_enabled_timers }}"
+          register: hermes_automation_rescue_timer_units
+          changed_when: false
+
+        - name: Stop available Hermes automation timers before restore
+          ansible.builtin.systemd_service:
+            name: "{{ item.item }}"
+            state: stopped
+            enabled: false
+          loop: "{{ hermes_automation_rescue_timer_units.results }}"
+          loop_control:
+            label: "{{ item.item }}"
+          when: item.stdout == 'loaded'
+
+        - name: Stop Astra before restoring prior cron state
+          ansible.builtin.systemd_service:
+            name: hermes-gateway-astra.service
+            state: stopped
+
+        - name: Restore backed-up automation, policy, and Gateway files
+          ansible.builtin.copy:
+            src: >-
+              {{ hermes_automation_backup_root
+                 }}/{{ item.item | regex_replace('^/', '')
+                                  | regex_replace('/', '__') }}
+            dest: "{{ item.item }}"
+            remote_src: true
+            owner: "{{ item.stat.pw_name }}"
+            group: "{{ item.stat.gr_name }}"
+            mode: "{{ item.stat.mode }}"
+          loop: "{{ hermes_automation_rollback_stats.results }}"
+          loop_control:
+            label: "{{ item.item }}"
+          when: item.stat.exists and item.stat.isreg
+
+        - name: Remove files introduced by the failed transaction
+          ansible.builtin.file:
+            path: "{{ item.item }}"
+            state: absent
+          loop: "{{ hermes_automation_rollback_stats.results }}"
+          loop_control:
+            label: "{{ item.item }}"
+          when: not item.stat.exists
+
+        - name: Reload restored systemd units
+          ansible.builtin.systemd_service:
+            daemon_reload: true
+
+        - name: Restore Astra and Dubble availability after failure
+          ansible.builtin.systemd_service:
+            name: "{{ item }}"
+            state: started
+            enabled: true
+          loop:
+            - hermes-gateway-astra.service
+            - hermes-gateway-dubble.service
+
+        - name: Fail after restoring the pre-automation state
+          ansible.builtin.fail:
+            msg: >-
+              Hermes automation convergence failed. Prior jobs, managed
+              policies, and units were restored from
+              {{ hermes_automation_backup_root }}. OpenClaw remained offline.
+
+  handlers:
+    - name: Restore pre-transaction timer state
+      ansible.builtin.systemd_service:
+        name: "{{ item.name }}"
+        state: "{{ 'started' if item.active == 'active' else 'stopped' }}"
+        enabled: "{{ item.enabled == 'enabled' }}"
+      loop: "{{ hermes_automation_prior_timers | default([]) }}"
+      loop_control:
+        label: "{{ item.name }}"
+      when: item.exists

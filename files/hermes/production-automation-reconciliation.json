@@ -1,0 +1,61 @@
+{
+  "schemaVersion": 1,
+  "observedAt": "2026-08-14",
+  "source": {
+    "contract": "files/hermes/automation-contract.json",
+    "database": "/home/johnny/.openclaw/state/openclaw.sqlite",
+    "databaseSha256": "8e6c7e4601f9d484a23d095dea2b7f5193dcff6a08a063a52f6c9f36871934fd",
+    "databaseQuickCheck": "ok",
+    "currentCronRows": 26,
+    "logicalHeartbeats": 3,
+    "historicalCompletedOneShots": 2,
+    "totalReconciledLanes": 31
+  },
+  "production": {
+    "nativeCronManifest": "templates/hermes/astra-production-jobs.json.j2",
+    "nativeCronJobs": 7,
+    "idleDelivery": "silent",
+    "openclawScheduler": "offline"
+  },
+  "lanes": {
+    "cron-self-evolution-maintenance": {"disposition": "retired-runtime-specific", "target": "hermes-native-learning-and-reviewed-source-maintenance"},
+    "cron-reddit-hdd-deal-watch": {"disposition": "replaced", "target": "astra-reddit-hdd-deal-watch"},
+    "cron-release-advisor": {"disposition": "replaced", "target": "hermes-native-update.timer+hermes-tirith-native-update.timer"},
+    "cron-archive-astra-logs": {"disposition": "retired-unneeded", "target": "discord-native-retention"},
+    "cron-self-evolution-daily": {"disposition": "retired-runtime-specific", "target": "hermes-native-learning-and-reviewed-source-maintenance"},
+    "cron-warframe-drops-sync": {"disposition": "replaced", "target": "hermes-warframe-feed.timer"},
+    "cron-daily-summary-updates": {"disposition": "collapsed", "target": "hermes-retained-automation@daily-summary.service"},
+    "cron-fortnite-calendar-sync": {"disposition": "replaced", "target": "hermes-fortnite-calendar.timer"},
+    "cron-daily-summary-media": {"disposition": "collapsed", "target": "hermes-retained-automation@daily-summary.service"},
+    "cron-fortnite-progress": {"disposition": "replaced", "target": "astra-fortnite-progress"},
+    "cron-daily-summary-personal": {"disposition": "collapsed", "target": "hermes-retained-automation@daily-summary.service"},
+    "cron-daily-summary-scratch": {"disposition": "collapsed", "target": "hermes-retained-automation@daily-summary.service"},
+    "cron-daily-summary-compose": {"disposition": "replaced", "target": "astra-daily-summary"},
+    "cron-daily-summary-watchdog": {"disposition": "retired-obsolete", "target": "hermes-native-cron-delivery-ledger"},
+    "cron-session-janitor-scorecard": {"disposition": "retired-runtime-specific", "target": "none"},
+    "cron-warframe-reminder-prime-time-493": {"disposition": "completed-no-replay", "target": "none"},
+    "cron-warframe-reminder-prime-time-raid": {"disposition": "completed-no-replay", "target": "none"},
+    "cron-stw-0010": {"disposition": "collapsed", "target": "astra-stw-vbucks-shop-watch"},
+    "cron-stw-0035": {"disposition": "collapsed", "target": "astra-stw-vbucks-shop-watch"},
+    "cron-stw-0100": {"disposition": "collapsed", "target": "astra-stw-vbucks-shop-watch"},
+    "cron-nightly-memory-summary": {"disposition": "retired-runtime-specific", "target": "hermes-native-learning-and-memory"},
+    "cron-nightly-workspace-snapshot": {"disposition": "replaced", "target": "hermes-profile-backup@.timer"},
+    "cron-warframe-reminder-lunethae": {"disposition": "completed-no-replay", "target": "none"},
+    "cron-weekly-memory-promotion": {"disposition": "retired-runtime-specific", "target": "hermes-native-learning-and-memory"},
+    "cron-weekly-social-seeds": {"disposition": "replaced", "target": "astra-weekly-social-seeds"},
+    "cron-warframe-reminder-snootydeath": {"disposition": "replaced", "target": "astra-warframe-reminder-watch"},
+    "cron-ops-repo-drift": {"disposition": "retired-runtime-specific", "target": "repo-audit-at-managed-change-boundaries"},
+    "cron-session-janitor-stale": {"disposition": "retired-runtime-specific", "target": "none"},
+    "heartbeat-astra": {"disposition": "retired-noisy-generic", "target": "bounded-native-jobs-and-systemd-health"},
+    "heartbeat-dubble": {"disposition": "retired-no-user-value", "target": "systemd-watchdog"},
+    "heartbeat-rigel": {"disposition": "replaced", "target": "rigel-academic-alerts"}
+  },
+  "pendingOneShots": {
+    "cron-warframe-reminder-snootydeath": {
+      "sourceDueAt": "2026-08-17T00:00:00Z",
+      "stagedEventId": "20260816T2000-weekend-drop-snootydeath",
+      "stagedReminderAt": "2026-08-17T00:00:00+00:00",
+      "verifiedAt": "2026-08-14"
+    }
+  }
+}

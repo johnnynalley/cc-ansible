@@ -11,6 +11,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -243,6 +244,22 @@ class HermesRigelScheduleTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0)
         self.assertEqual(result.stdout, "")
         self.assertEqual(result.stderr, "")
+
+    def test_cli_records_bounded_exception_class_without_exception_text(self) -> None:
+        with (
+            mock.patch.dict(os.environ, {"HERMES_HOME": str(self.home)}),
+            mock.patch.object(
+                MODULE,
+                "run",
+                side_effect=PermissionError("private path must not leak"),
+            ),
+        ):
+            self.assertEqual(MODULE.main(), 0)
+        self.assertEqual(self.health()["status"], "evaluator-error")
+        self.assertTrue(
+            self.health()["errorCode"].startswith("unhandled-permissionerror-")
+        )
+        self.assertNotIn("private", json.dumps(self.health()))
 
     def test_delivery_stays_bounded_without_deduping_unsent_events(self) -> None:
         events = []

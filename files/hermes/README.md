@@ -87,13 +87,17 @@ reviewed Ansible Vault ciphertext seeds declared by
   `discord-regressions.json` contains 12 sanitized promotion cases for route
   isolation, authorization, DM silence, duplicate consumers, replay, hostile
   attachments, restart, rollback, and Rigel idle silence.
-- `automation-contract.json` inventories all 28 live cron jobs and the three
-  active profile heartbeats, assigns each one an agent-backed, external, or
-  deterministic-script-only target, preserves the Health receiver as an
-  external service, and keeps the absent Siri relay retired.
+- `automation-contract.json` preserves the historical source inventory of 28
+  observed cron declarations and three logical heartbeat lanes. It is design
+  evidence, not the production scheduler source of truth.
   `automation-regressions.json` contains 14 sanitized promotion cases for
   inventory drift, one-shot handling, ownership, delivery isolation, Health,
   Siri, scheduler overlap, and rollback.
+- `production-automation-reconciliation.json` gives every one of the 31 source
+  lanes an explicit retained, replaced, collapsed, completed, or retired
+  disposition. The seven current native jobs are rendered from
+  `templates/hermes/astra-production-jobs.json.j2`; route identifiers remain in
+  inventory and are never committed to this static-policy directory.
 - `profiles/*/AGENTS.md` contains each profile's root-owned operating contract.
   These files are always-on behavior policy, not keyword-triggered skills.
 - `scripts/agents/hermes-shadow-target-audit.py` is the fail-closed validator.

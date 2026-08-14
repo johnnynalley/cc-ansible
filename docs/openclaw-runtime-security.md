@@ -928,7 +928,7 @@ The production deployment keeps these principals separate:
 | `hermes-astra` | Astra profile state and credentials, reviewed managed data/skills, web/delegation, aggregate reports, fixed Docker report/status tools, and exact sudo to start the native updater or restart/reset named Hermes Gateways | General sudo, Docker socket/group, host shell/files through model tools, Dubble state, human home, controller credentials, raw Health data, free-form remote commands |
 | `hermes-dubble` | Dubble profile state and its own Discord/provider credentials plus non-execution conversation tools | Astra/Rigel state, delegation, web, Docker tools/credentials, host execution, controller data |
 | Dormant `hermes-rigel` profile | Root-managed archived profile data; no active Gateway or Discord token | Production delivery, Astra/Dubble state, Docker, host execution |
-| Astra native-update service context and `hermes-updater` | Astra profile state, native release discovery, writable reviewed runtime/binary locations, and exact named-Gateway restart sudo for the Astra-owned Hermes updater | Dubble credentials/state, Docker, arbitrary sudo, controller credentials, human home |
+| Astra native-update service context and `hermes-updater` | Astra profile state, native release discovery, writable reviewed runtime/binary locations, bounded `CAP_SETUID`/`CAP_SETGID` only inside the updater unit, and exact named-Gateway restart sudo for the Astra-owned Hermes updater | Ambient capabilities, Dubble credentials/state, Docker, arbitrary sudo, controller credentials, human home |
 | Retained `johnny` Health service | Health token, receiver code, and raw Health database | Hermes profile state and Docker credentials by design; this boundary still depends on the broader human account and is tracked below |
 | Docker reporter accounts | One fresh, redacted report through a forced SSH command | Docker socket, arbitrary SSH commands, environment/mount/log data, updates |
 | Docker update-trigger accounts | `status` or start of one existing root-owned updater service, with lock and cooldown | Service/image/path selection, Compose arguments, Docker socket, interactive SSH, policy edits |
@@ -936,6 +936,30 @@ The production deployment keeps these principals separate:
 An output or prompt rule is defense in depth. The OS identity, filesystem
 ownership, fixed command schema, and independent approval path are the actual
 controls.
+
+The 2026-08-14 live closeout measured `systemd-analyze security` exposure at
+3.0 for each Gateway, 4.5 for the Hermes updater, 4.0 for the Tirith updater,
+and 3.8 for the retained summary/feed/calendar services. Both Gateway process
+identities passed established Discord TLS-session audits. Astra had only the
+`hermes-astra` and `hermes-runtime-readers` groups, could not read the Docker
+socket, and could reach Docker inventory or updater status only through the
+fixed-schema forced-command identities. OpenClaw remained disabled and the
+independent Health receiver remained active throughout.
+
+The Hermes updater's bounded set-user-ID capabilities are required only
+because Hermes natively restarts its Gateways through sudo. An empty capability
+bounding set caused the host sudo implementation to fail while restoring user
+IDs even though the sudoers rule itself was correct. `CAP_SETUID` and
+`CAP_SETGID` repaired that mechanism; an empty ambient set and exact sudoers
+still prevent arbitrary capability use or arbitrary systemd control.
+
+A prompt injection can influence content Astra or Dubble is already allowed
+to read or send, trigger allowed web/provider activity, and consume model
+budget. It cannot use model-exposed terminal, file, code-execution, cron, or
+computer-use toolsets because those are disabled, and the service identities
+have no general sudo, Docker socket/group, human home, or controller secrets.
+This is a tested authority boundary, not a claim that Hermes, Python, systemd,
+or an upstream dependency has no exploitable implementation flaw.
 
 ### Current Risk Register
 

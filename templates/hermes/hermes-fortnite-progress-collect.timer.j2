@@ -1,0 +1,11 @@
+[Unit]
+Description=Collect bounded Fortnite progress for Hermes
+
+[Timer]
+OnCalendar=*-*-* 06:40:00
+Persistent=true
+RandomizedDelaySec=2m
+Unit=hermes-retained-automation@fortnite-progress.service
+
+[Install]
+WantedBy=timers.target

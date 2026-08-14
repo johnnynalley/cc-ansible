@@ -454,7 +454,7 @@ class HermesShadowPlaybookTests(unittest.TestCase):
                 rendered,
             )
             self.assertIn("hermes-discord-cutover-audit", rendered)
-            self.assertIn("hermes-automation-contract-audit", rendered)
+            self.assertNotIn("hermes-automation-contract-audit", rendered)
             self.assertIn("sha256sum --check --status --strict", rendered)
             self.assertIn("managed-policy.sha256", rendered)
             self.assertIn(
@@ -702,12 +702,14 @@ class HermesShadowPlaybookTests(unittest.TestCase):
         self.assertIn("tools post-setup ddgs", hermes_service)
         self.assertIn("[messaging]", hermes_service)
         self.assertIn("chgrp -R --no-dereference hermes-runtime-readers", hermes_service)
-        self.assertIn("restart hermes-gateway-astra.service", hermes_service)
-        self.assertIn("restart hermes-gateway-dubble.service", hermes_service)
+        self.assertNotIn("/usr/bin/sudo", hermes_service)
+        self.assertNotIn("RestrictSUIDSGID=true", hermes_service)
         self.assertNotIn("HERMES_MANAGED_DIR=", hermes_service)
         self.assertIn("UMask=0022", hermes_service)
         self.assertNotIn("UMask=0077", hermes_service)
-        self.assertIn("CapabilityBoundingSet=", hermes_service)
+        self.assertIn(
+            "CapabilityBoundingSet=CAP_SETUID CAP_SETGID", hermes_service
+        )
         self.assertNotIn("curl", hermes_service)
         self.assertNotIn("github.com/NousResearch", hermes_service)
         self.assertIn("tirith update --yes --format json", tirith_service)
@@ -732,9 +734,15 @@ class HermesShadowPlaybookTests(unittest.TestCase):
         self.assertNotIn("hermes-native-updater ALL=", sudoers)
         for profile in values["hermes_shadow_profiles"]:
             for verb in ("reset-failed", "start", "restart"):
+                short_unit = profile["unit"].removesuffix(".service")
                 self.assertIn(
                     f"/usr/bin/systemctl --no-ask-password {verb} "
                     f"{profile['unit']}",
+                    sudoers,
+                )
+                self.assertIn(
+                    f"/usr/bin/systemctl --no-ask-password {verb} "
+                    f"{short_unit}",
                     sudoers,
                 )
         self.assertNotIn("hermes-dubble ALL=", sudoers)

@@ -22,8 +22,10 @@ The existing OpenClaw documents remain authoritative for the source system.
   evidence, not a user-facing transcript or status wall.
 - Keep the Health receiver and its aggregate-only boundary. The retired Siri
   relay is not migrated.
-- Give Hermes no sudo, Docker socket, Docker group, human home, Ansible vault,
-  controller SSH keys, or unrestricted host shell.
+- Give Hermes no general sudo, Docker socket, Docker group, human home,
+  Ansible vault, controller SSH keys, or unrestricted host shell. Astra's only
+  sudo authority is the exact native-updater start and named-Gateway lifecycle
+  commands required by Hermes's own update flow.
 - Add Docker inventory, version reporting, and updates only through separate
   fixed-schema forced-command identities. Immediate updates require native
   turn-bound approval; the existing external systemd schedule remains automatic.
@@ -1163,3 +1165,34 @@ protects unscheduled runs, and scheduled systemd updates remain automatic.
 Docker group, socket, arbitrary SSH, general sudo, and free-form update access
 remain prohibited. The final risk analysis is maintained in
 `docs/openclaw-runtime-security.md` and `docs/agent-docker-access.md`.
+
+Production automation convergence also completed on 2026-08-14. The source
+inventory contained 26 current cron rows, three logical heartbeats, and two
+historical completed one-shots. All 31 lanes have an explicit final
+disposition in `files/hermes/production-automation-reconciliation.json`.
+Seven native Astra jobs are active: Rigel's 30-minute deterministic academic
+poll, the STW and Warframe minute watches, the hourly HDD deal watch, the
+07:08 Daily Summary, the 06:50 Fortnite progress report, and the Sunday 09:00
+social-seed review. Root-managed systemd timers own the retained collectors,
+Warframe feed, Fortnite calendar, and three profile backups. Completed
+one-shots were not replayed; OpenClaw-specific maintenance and generic noisy
+heartbeats were retired rather than emulated.
+
+The automation transaction is rollback-first. Check mode is read-only, active
+timers are excluded and restored around mutation, native profile backups run
+as each no-login profile through `runuser`, and rescue restores both files and
+the pre-transaction timer set. Missing optional Rigel files and an idle
+semester are successful silent states, not tool failures or Discord output.
+
+The first native Hermes update fetched upstream successfully but could not
+restart Dubble because an empty systemd capability bounding set prevented the
+host sudo implementation from restoring user IDs. The updater now bounds only
+`CAP_SETUID` and `CAP_SETGID`, keeps ambient capabilities empty, and still
+depends on exact-command sudoers for the three named Gateways. A second native
+Hermes update and the Tirith native updater both completed successfully.
+
+The final `systemd-analyze security` exposure scores were 3.0 for each Gateway,
+4.5 for the Hermes updater, 4.0 for the Tirith updater, and 3.8 for the retained
+summary/feed/calendar services. Identity-level Discord TLS audits, native cron
+reconciliation, Rigel idle health, Docker forced-command smoke tests, updater
+status, and direct Docker-socket denial all passed after convergence.

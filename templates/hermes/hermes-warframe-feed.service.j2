@@ -1,0 +1,38 @@
+[Unit]
+Description=Collect verified Warframe stream events for Hermes
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User={{ hermes_production_cutover_user }}
+Group={{ hermes_production_cutover_user }}
+SupplementaryGroups={{ hermes_automation_readers_group }}
+WorkingDirectory={{ hermes_automation_output_root }}
+Environment=HOME=/home/{{ hermes_production_cutover_user }}
+ExecStart=/usr/bin/python3 {{ hermes_warframe_feed_live }} --parser-root {{ hermes_automation_legacy_workspace }}/scripts --output {{ hermes_automation_output_root }}/warframe-events.json --state {{ hermes_automation_output_root }}/warframe-state.json --legacy-state {{ hermes_automation_legacy_workspace }}/memory/warframe-drops-state.json
+UMask=0027
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=tmpfs
+BindReadOnlyPaths={{ hermes_automation_legacy_workspace }}/scripts
+BindReadOnlyPaths=-{{ hermes_automation_legacy_workspace }}/memory/warframe-drops-state.json
+BindReadOnlyPaths=-/home/{{ hermes_production_cutover_user }}/.config/khal
+BindPaths=-/home/{{ hermes_production_cutover_user }}/.local/share/vdirsyncer/calendars
+ReadWritePaths={{ hermes_automation_output_root }}
+PrivateTmp=true
+PrivateDevices=true
+ProtectClock=true
+ProtectControlGroups=true
+ProtectHostname=true
+ProtectKernelLogs=true
+ProtectKernelModules=true
+ProtectKernelTunables=true
+ProtectProc=invisible
+LockPersonality=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+CapabilityBoundingSet=
+AmbientCapabilities=
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK
+TimeoutStartSec=10m

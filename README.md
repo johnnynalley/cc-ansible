@@ -299,6 +299,7 @@ Packages are merged from multiple sources (all applicable variables combined):
 | `hermes-shadow.yml` | `hermes_hosts` | Boot-disabled Hermes staging with signed offline command scanning and no production delivery |
 | `hermes-production-cutover.yml` | `hermes_hosts` | Disabled-by-default, rollback-capable OpenClaw-to-Hermes production handoff with two Discord consumers, native Rigel scheduling, Health continuity, and native updates |
 | `hermes-production-runtime.yml` | `hermes_hosts` | Disabled-by-default live Hermes runtime convergence with official messaging dependencies, functional Discord readiness, sequential restarts, rollback, and Health/OpenClaw gates |
+| `hermes-automation.yml` | `hermes_hosts` | Disabled-by-default transactional convergence of seven native jobs, retained collectors, calendar/feed timers, profile backups, and full legacy schedule reconciliation |
 | `hermes-docker-inventory.yml` | `hermes_hosts` | Approval-gated promotion of Astra's fixed Docker inventory/update tools, native per-turn update approval hook, credentials, validation, and rollback |
 | `hermes-openclaw-dry-run.yml` | `hermes_hosts` | Operator-approved, shape-only official importer inventory with no source content, activation, or service-state change |
 | `hermes-profile-memory.yml` | `hermes_hosts` | Disabled-by-default, transactional native memory seeding for Astra and Rigel; Dubble remains empty and all Gateways remain stopped |
@@ -1079,6 +1080,10 @@ created.
   `hermes-tirith-native-update.timer` are enabled. Hermes retains native
   release discovery, backup, Git update, and Gateway orchestration; the unit
   reconciles the official messaging extra excluded from upstream `all`
+- **Scheduled automation**: `playbooks/agents/hermes-automation.yml`
+  transactionally owns seven native jobs, the retained collectors and
+  feed/calendar timers, and native profile backups. All 31 historical
+  OpenClaw schedule/heartbeat lanes have explicit final dispositions
 - **Isolation**: Astra, Dubble, and Rigel retain separate no-login identities,
   homes, managed credentials, data, memory, and skills. A code-only
   `hermes-runtime-readers` group grants read access solely to the shared
