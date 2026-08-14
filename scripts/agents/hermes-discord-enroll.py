@@ -27,7 +27,7 @@ PROFILE_GROUPS = {
 }
 EXPECTED_CHANNELS = {
     "astra": ("astra", "astra-logs", "rigel"),
-    "dubble": ("dubble",),
+    "dubble": ("db", "db-logs"),
 }
 RIGEL_PROMPT = (
     "This is the dedicated Rigel academic channel. Act as Johnny's academic "
@@ -136,27 +136,31 @@ def api_json(token: str, path: str) -> Any:
         raise EnrollmentError("discord-api-invalid-json") from exc
 
 
-def bot_and_channels(token: str, names: tuple[str, ...]) -> tuple[str, dict[str, str]]:
+def bot_and_channels(
+    token: str,
+    names: tuple[str, ...],
+    source_channel_ids: set[str],
+) -> tuple[str, dict[str, str]]:
     identity = api_json(token, "/users/@me")
     require(isinstance(identity, dict), "discord-identity-invalid")
     bot_id = str(identity.get("id", ""))
     require(bot_id.isdigit(), "discord-identity-missing")
-    guilds = api_json(token, "/users/@me/guilds")
-    require(isinstance(guilds, list) and guilds, "discord-guilds-invalid")
+    require(source_channel_ids, "source-channel-set-empty")
+    require(
+        all(channel_id.isdigit() for channel_id in source_channel_ids),
+        "source-channel-id-invalid",
+    )
     matches: dict[str, list[str]] = {name: [] for name in names}
-    for guild in guilds:
-        require(isinstance(guild, dict), "discord-guild-invalid")
-        guild_id = str(guild.get("id", ""))
-        require(guild_id.isdigit(), "discord-guild-id-invalid")
-        channels = api_json(token, f"/guilds/{guild_id}/channels")
-        require(isinstance(channels, list), "discord-channels-invalid")
-        for channel in channels:
-            if not isinstance(channel, dict):
-                continue
-            channel_name = channel.get("name")
-            channel_id = str(channel.get("id", ""))
-            if channel_name in matches and channel_id.isdigit():
-                matches[channel_name].append(channel_id)
+    for source_channel_id in sorted(source_channel_ids):
+        channel = api_json(token, f"/channels/{source_channel_id}")
+        require(isinstance(channel, dict), "discord-channel-invalid")
+        channel_id = str(channel.get("id", ""))
+        guild_id = str(channel.get("guild_id", ""))
+        require(channel_id == source_channel_id, "discord-channel-id-mismatch")
+        require(guild_id.isdigit(), "discord-channel-guild-missing")
+        channel_name = channel.get("name")
+        if channel_name in matches:
+            matches[channel_name].append(channel_id)
     for name, ids in matches.items():
         require(len(ids) == 1, f"discord-channel-{name}-not-unique")
     resolved = {name: ids[0] for name, ids in matches.items()}
@@ -204,18 +208,27 @@ def build_enrollment(env: dict[str, str], config: dict[str, Any]) -> tuple[dict[
     astra_token = secret(env, "DISCORD_BOT_TOKEN")
     dubble_token = secret(env, "DISCORD_DUBBLE_BOT_TOKEN")
     anthropic_key = secret(env, "ANTHROPIC_API_KEY")
-    astra_bot, astra_channels = bot_and_channels(astra_token, EXPECTED_CHANNELS["astra"])
-    dubble_bot, dubble_channels = bot_and_channels(dubble_token, EXPECTED_CHANNELS["dubble"])
-    require(astra_bot != dubble_bot, "discord-bot-identities-not-distinct")
     astra_enabled = source_enabled_channels(config, "default")
     dubble_enabled = source_enabled_channels(config, "dubble")
+    astra_bot, astra_channels = bot_and_channels(
+        astra_token,
+        EXPECTED_CHANNELS["astra"],
+        astra_enabled,
+    )
+    dubble_bot, dubble_channels = bot_and_channels(
+        dubble_token,
+        EXPECTED_CHANNELS["dubble"],
+        dubble_enabled,
+    )
+    require(astra_bot != dubble_bot, "discord-bot-identities-not-distinct")
     require(set(astra_channels.values()) <= astra_enabled, "source-astra-route-mismatch")
     require(set(dubble_channels.values()) <= dubble_enabled, "source-dubble-route-mismatch")
     owner = source_owner(config)
     astra = astra_channels["astra"]
     logs = astra_channels["astra-logs"]
     rigel = astra_channels["rigel"]
-    dubble = dubble_channels["dubble"]
+    dubble = dubble_channels["db"]
+    dubble_logs = dubble_channels["db-logs"]
     enrollment = {
         "schemaVersion": SCHEMA_VERSION,
         "consumerCount": 2,
@@ -240,9 +253,9 @@ def build_enrollment(env: dict[str, str], config: dict[str, Any]) -> tuple[dict[
                 "adminUsers": [owner],
                 "allowedChannels": [dubble],
                 "freeResponseChannels": [dubble],
-                "ignoredChannels": [],
+                "ignoredChannels": [dubble_logs],
                 "homeChannel": dubble,
-                "logChannel": None,
+                "logChannel": dubble_logs,
                 "rigelChannel": None,
                 "channelPrompts": {},
                 "channelSkillBindings": [],

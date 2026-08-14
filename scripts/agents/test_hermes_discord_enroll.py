@@ -45,7 +45,8 @@ class HermesDiscordEnrollTests(unittest.TestCase):
                             "guilds": {
                                 "guild": {
                                     "channels": {
-                                        "1000000000000004": {"enabled": True}
+                                        "1000000000000004": {"enabled": True},
+                                        "1000000000000005": {"enabled": True},
                                     }
                                 }
                             }
@@ -66,7 +67,13 @@ class HermesDiscordEnrollTests(unittest.TestCase):
                     "rigel": "1000000000000003",
                 },
             ),
-            ("2000000000000002", {"dubble": "1000000000000004"}),
+            (
+                "2000000000000002",
+                {
+                    "db": "1000000000000004",
+                    "db-logs": "1000000000000005",
+                },
+            ),
         ]
 
     def test_build_preserves_two_consumers_and_three_logical_roles(self) -> None:
@@ -88,6 +95,10 @@ class HermesDiscordEnrollTests(unittest.TestCase):
         )
         self.assertIn("DISCORD_BOT_TOKEN=" + "a" * 64, credentials["astra"])
         self.assertIn("DISCORD_BOT_TOKEN=" + "b" * 64, credentials["dubble"])
+        self.assertEqual(
+            enrollment["profiles"]["dubble"]["ignoredChannels"],
+            ["1000000000000005"],
+        )
         self.assertNotIn("DISCORD_BOT_TOKEN", credentials["rigel"])
         self.assertNotIn("ANTHROPIC_API_KEY", credentials["astra"])
 
@@ -113,6 +124,41 @@ class HermesDiscordEnrollTests(unittest.TestCase):
                 MODULE.EnrollmentError, "source-astra-route-mismatch"
             ):
                 MODULE.build_enrollment(env, config)
+
+    def test_discovery_checks_only_source_enabled_channel_ids(self) -> None:
+        channel_names = {
+            "1000000000000001": "astra",
+            "1000000000000002": "astra-logs",
+            "1000000000000003": "rigel",
+        }
+
+        def api_json(_token: str, path: str):
+            if path == "/users/@me":
+                return {"id": "2000000000000001"}
+            channel_id = path.removeprefix("/channels/")
+            return {
+                "id": channel_id,
+                "guild_id": "3000000000000001",
+                "name": channel_names[channel_id],
+            }
+
+        with mock.patch.object(MODULE, "api_json", side_effect=api_json) as api:
+            identity, channels = MODULE.bot_and_channels(
+                "a" * 64,
+                MODULE.EXPECTED_CHANNELS["astra"],
+                set(channel_names),
+            )
+        self.assertEqual(identity, "2000000000000001")
+        self.assertEqual(channels, {name: channel for channel, name in channel_names.items()})
+        self.assertEqual(
+            [call.args[1] for call in api.call_args_list],
+            [
+                "/users/@me",
+                "/channels/1000000000000001",
+                "/channels/1000000000000002",
+                "/channels/1000000000000003",
+            ],
+        )
 
     def test_source_secret_file_must_not_be_group_readable(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
