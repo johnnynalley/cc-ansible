@@ -293,7 +293,9 @@ executable arguments after `-a`, or use a managed YAML task when structured
 `-a`; Ansible treats that text as the executable name and produces a false
 command failure. Keep expected-negative probes exit-clean and report the
 observed state as data so a denied permission or inactive unit is not emitted
-as a tooling error banner.
+as a tooling error banner. Before using a format, filtering, or status flag on
+an unfamiliar CLI, inspect that installed command's `--help` output instead of
+guessing an option from another tool's interface.
 
 If a package exists in the system repos, add it to the appropriate `packages_*` variable. If a service needs configuration, create or update the relevant playbook/task file.
 
