@@ -84,6 +84,17 @@ When self-updating `AGENTS.md` or another shared file, still follow the shared-f
 
 When working on Astra/OpenClaw behavior, Codex's role is to teach Astra how to reason and maintain itself, not to replace Astra's judgment with brittle hardcoded wrappers. Prefer updating Astra's heartbeat, skills, operating docs, memory, and approval rules so Astra performs the diagnosis, classification, backup, safe fix, approval request, and follow-up notification itself. Create or modify scripts only when the script is a justified tool for Astra to use repeatedly and safely, not as the default answer to a missing behavior. If a user correction reveals this rule was missed, persist the correction to `AGENTS.md` and Codex memory immediately.
 
+When the user supplies a transcript for Astra, OpenClaw, Hermes, Dubble,
+Rigel, or another related agent, preserve the complete owner-supplied text as
+a verbatim evidence artifact immediately, before analysis, implementation, or
+any operation likely to compact the conversation. Store it under the current
+private `.codex/work-plans/active/` task records with a unique timestamped
+`owner-supplied-...-transcript.txt` name, record its path and SHA-256 in the
+active plan, and retain the original timestamps and surrounding user notes.
+Do not rely on the chat session log, a compaction summary, or a paraphrase as
+the only copy. Transcript-derived regression and behavior audits must cite the
+archived artifact so later sessions can re-check for missed evidence.
+
 Do not call an OpenClaw-to-Hermes agent migration complete from retained data
 counts, healthy services, generic toolset presence, or a sample of matching
 skills. Maintain an exhaustive source-to-target parity contract covering every
