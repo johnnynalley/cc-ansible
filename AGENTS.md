@@ -106,6 +106,14 @@ use it is not parity. Record product-specific retirements explicitly with the
 replacement behavior and owner approval instead of silently treating them as
 complete.
 
+For OpenClaw-to-Hermes parity, the source boundary is the complete
+`/home/johnny/.openclaw` tree, not a curated workspace subset. Every source
+path must reconcile to active native behavior, an immutable read-only Astra
+evidence path, or sealed root-only evidence when its contents include
+credentials or authentication material. Preserve and index obsolete,
+generated, backup, malformed, and unsupported artifacts rather than omitting
+them based on perceived usefulness; no unclassified omission is allowed.
+
 Do not introduce or preserve policy-level exact-version pins for self-updating applications, external plugins, or model routes unless the user explicitly approves the pin after its compatibility and update tradeoffs are explained. Prefer the product's stable channel, release track, or unversioned package spec so native update mechanisms can advance normally. Distinguish an update-policy pin from a lockfile or install record that merely records the exact artifact currently resolved. When a migration converts `latest` or a channel into an exact requested spec, treat that as configuration drift: restore the intended tracking policy and audit sibling install records for the same damage.
 
 Preserve the user's subscription-backed model routing for primary, fallback,
