@@ -66,6 +66,7 @@ class HermesProfileSkillsTests(unittest.TestCase):
                 "consequential-recommendation",
                 "guided-operation",
                 "source-grounded-study",
+                "fortnite-tracker",
             },
             "dubble": {"public-support-triage"},
             "rigel": {"source-grounded-study"},
@@ -76,18 +77,26 @@ class HermesProfileSkillsTests(unittest.TestCase):
             profile = self.contract["profiles"][profile_name]
             self.assertEqual(profile["user"], f"hermes-{profile_name}")
             self.assertEqual(profile["group"], f"hermes-{profile_name}")
-            self.assertEqual(profile["home"], f"/var/lib/hermes/{profile_name}")
+            self.assertEqual(
+                profile["home"],
+                f"/var/lib/hermes/{profile_name}/.hermes/profiles/{profile_name}",
+            )
             self.assertEqual(
                 profile["managedRoot"], f"/etc/hermes/{profile_name}/skills"
             )
             self.assertEqual(
                 profile["runtimeRoot"],
-                f"/var/lib/hermes/{profile_name}/skills/managed",
+                f"/var/lib/hermes/{profile_name}/.hermes/profiles/"
+                f"{profile_name}/skills/managed",
             )
             self.assertEqual({skill["name"] for skill in profile["skills"]}, names)
             all_sources.extend(skill["source"] for skill in profile["skills"])
-        self.assertEqual(len(all_sources), 6)
-        self.assertEqual(len(set(all_sources)), 6)
+        self.assertEqual(len(all_sources), 7)
+        self.assertEqual(len(set(all_sources)), 7)
+        playbook = PLAYBOOK.read_text(encoding="utf-8")
+        self.assertIn("hermes_profile_skills_inventory | length == 7", playbook)
+        self.assertIn("'fortnite-tracker'", playbook)
+        self.assertNotIn("hermes_profile_skills_inventory | length == 5", playbook)
 
     def test_each_skill_is_hashed_declarative_and_semantically_described(self) -> None:
         source_root = ROOT / "files" / "hermes" / "profile-skills"
@@ -137,7 +146,7 @@ class HermesProfileSkillsTests(unittest.TestCase):
         self.assertIn("write_approval: true", template)
         self.assertNotIn("external_dirs:", template)
         unit = (
-            ROOT / "templates" / "hermes" / "hermes-gateway.service.j2"
+            ROOT / "templates" / "hermes" / "hermes-gateway-hardening.conf.j2"
         ).read_text(encoding="utf-8")
         self.assertIn("BindReadOnlyPaths=/etc/hermes/", unit)
         self.assertIn("/skills/managed", unit)
@@ -149,6 +158,8 @@ class HermesProfileSkillsTests(unittest.TestCase):
         self.assertEqual(variables["hermes_profile_skills_mode"], "disabled")
         self.assertFalse(variables["hermes_profile_skills_approved"])
         self.assertIn("Require every Hermes gateway stopped", playbook)
+        self.assertIn("UnitFileState=enabled", playbook)
+        self.assertIn("systemctl\n              - cat", playbook)
         self.assertIn("Back up current managed Hermes profile skills", playbook)
         self.assertIn("Restore managed Hermes profile skills", playbook)
         self.assertIn("Validate reviewed source skills with Hermes native parsers", playbook)

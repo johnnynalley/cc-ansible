@@ -103,15 +103,17 @@
       changed_when: false
       failed_when: false
 
-    - name: Require all Hermes gateways stopped and disabled before data staging
+    - name: Require all Hermes gateways stopped before data staging
       ansible.builtin.assert:
         that:
           - "'LoadState=loaded' in item.stdout"
           - "'ActiveState=inactive' in item.stdout"
-          - "'UnitFileState=disabled' in item.stdout"
+          - >-
+            'UnitFileState=enabled' in item.stdout
+            or 'UnitFileState=disabled' in item.stdout
         fail_msg: >-
-          A Hermes Gateway is active, missing, or boot-enabled. Profile data may
-          be staged only while all Hermes profiles are stopped and disabled.
+          A Hermes Gateway is active, missing, or in an unexpected enablement
+          state. Profile data may be staged only while every profile is stopped.
       loop: "{{ hermes_profile_data_system_before.results[0:3] }}"
       loop_control:
         label: "{{ item.item }}"
@@ -149,29 +151,36 @@
       loop_control:
         label: "{{ item.item }}"
 
-    - name: Read Hermes Gateway units for profile-data bindings
-      ansible.builtin.slurp:
-        src: "/etc/systemd/system/hermes-gateway-{{ item.key }}.service"
+    - name: Read effective Hermes Gateway units for profile-data bindings
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/systemctl
+          - cat
+          - --no-pager
+          - "hermes-gateway-{{ item.key }}.service"
       loop: "{{ hermes_profile_data_contract.profiles | dict2items }}"
       register: hermes_profile_data_gateway_sources
+      check_mode: false
+      changed_when: false
 
     - name: Require reviewed profile-data bindings and startup gates
       ansible.builtin.assert:
         that:
           - >-
             ('BindPaths=' ~ item.item.value.writableRoot ~ ':' ~ item.item.value.writableRuntimeRoot)
-            in (item.content | b64decode)
+            in item.stdout
           - >-
             ('BindReadOnlyPaths=' ~ item.item.value.managedRoot ~ ':' ~ item.item.value.managedRuntimeRoot)
-            in (item.content | b64decode)
+            in item.stdout
           - >-
-            ('--mode runtime --profile ' ~ item.item.key)
-            in (item.content | b64decode)
-          - hermes_profile_data_stager_live in (item.content | b64decode)
-          - hermes_profile_data_manifest_live in (item.content | b64decode)
+            (('--mode runtime --profile ' ~ item.item.key) in item.stdout
+             and hermes_profile_data_stager_live in item.stdout
+             and hermes_profile_data_manifest_live in item.stdout)
+            or 'Environment=HERMES_PROJECTION_PREFLIGHTS_PENDING=1' in item.stdout
         fail_msg: >-
           A Hermes Gateway unit lacks its isolated writable bind, read-only
-          managed bind, root manifest verifier, or profile-identity probe.
+          managed bind, or either its full profile-data startup gates or the
+          explicit stopped-native-bootstrap marker.
       loop: "{{ hermes_profile_data_gateway_sources.results }}"
       loop_control:
         label: "{{ item.item.key }}"
@@ -286,7 +295,38 @@
       register: hermes_profile_data_existing_verify
       check_mode: false
       changed_when: false
+      failed_when: false
       when: hermes_profile_data_targets_before.results[0].stat.exists
+
+    - name: Parse existing Hermes profile-data verification result
+      ansible.builtin.set_fact:
+        hermes_profile_data_existing_verify_result: >-
+          {{ hermes_profile_data_existing_verify.stdout | from_json }}
+      when: hermes_profile_data_targets_before.results[0].stat.exists
+
+    - name: Classify existing Hermes profile-data generation
+      ansible.builtin.assert:
+        that:
+          - >-
+            hermes_profile_data_existing_verify.rc == 0
+            or (hermes_profile_data_existing_verify_result.status == 'error'
+                and hermes_profile_data_existing_verify_result.error
+                    == 'manifest-contract-invalid')
+        fail_msg: >-
+          Existing Hermes profile data failed verification for a reason other
+          than an expected managed-contract migration. Refusing convergence.
+      when: hermes_profile_data_targets_before.results[0].stat.exists
+
+    - name: Record existing Hermes profile-data generation status
+      ansible.builtin.set_fact:
+        hermes_profile_data_existing_generation_status: >-
+          {% if not hermes_profile_data_targets_before.results[0].stat.exists %}
+          absent
+          {% elif hermes_profile_data_existing_verify.rc == 0 %}
+          verified
+          {% else %}
+          stale-contract
+          {% endif %}
 
     - name: Read available bytes for Hermes profile-data staging
       ansible.builtin.command:
@@ -451,6 +491,7 @@
                 'artifactSha256': hermes_profile_data_backup_hash.stdout.split()[0],
                 'existingActiveRoot': hermes_profile_data_targets_before.results[0].stat.exists,
                 'existingManifest': hermes_profile_data_targets_before.results[1].stat.exists,
+                'existingGenerationStatus': hermes_profile_data_existing_generation_status,
                 'plannedFiles': hermes_profile_data_plan.summary.files,
                 'plannedBytes': hermes_profile_data_plan.summary.bytes
               } | to_nice_json }}

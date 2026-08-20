@@ -4,11 +4,11 @@
   "sourcePins": {
     "shadowTarget": {
       "path": "files/hermes/shadow-target.json",
-      "sha256": "5ec9a9c50767b0f6447650f7aca8ac796b98ea72e968c8a593b9a1e68e6f2a79"
+      "sha256": "453fceb63798cec89be5e59af62f68da00f204421e23ca686fa854d5388c1366"
     },
     "stateMigration": {
       "path": "files/hermes/openclaw-state-migration-contract.json",
-      "sha256": "dc9887db3fafe562812b6781a14bd56582cd103a7ff94b851e49d72ffa4ddcae"
+      "sha256": "ace3d5f6b0f97abb15e523fad624175272962a4a04d5cc5cc8a125938da81cbd"
     },
     "sourceDeliveryAudit": {
       "path": "scripts/agents/openclaw-delivery-cutover-audit.py",
@@ -57,7 +57,7 @@
       "name": "astra",
       "deliveryOwner": "astra",
       "service": "hermes-gateway-astra.service",
-      "home": "/var/lib/hermes/astra",
+      "home": "/var/lib/hermes/astra/.hermes/profiles/astra",
       "managedDir": "/etc/hermes/astra",
       "credentialFile": "/etc/hermes/astra/.env",
       "applicationIdentityRef": "private-enrollment:discord/astra/application",
@@ -76,7 +76,7 @@
       "name": "dubble",
       "deliveryOwner": "dubble",
       "service": "hermes-gateway-dubble.service",
-      "home": "/var/lib/hermes/dubble",
+      "home": "/var/lib/hermes/dubble/.hermes/profiles/dubble",
       "managedDir": "/etc/hermes/dubble",
       "credentialFile": "/etc/hermes/dubble/.env",
       "applicationIdentityRef": "private-enrollment:discord/dubble/application",
@@ -95,7 +95,7 @@
       "name": "rigel",
       "deliveryOwner": "astra",
       "service": null,
-      "home": "/var/lib/hermes/rigel",
+      "home": "/var/lib/hermes/rigel/.hermes/profiles/rigel",
       "managedDir": "/etc/hermes/rigel",
       "credentialFile": null,
       "applicationIdentityRef": null,

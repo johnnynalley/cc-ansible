@@ -8,7 +8,7 @@
     },
     "stateMigration": {
       "path": "files/hermes/openclaw-state-migration-contract.json",
-      "sha256": "dc9887db3fafe562812b6781a14bd56582cd103a7ff94b851e49d72ffa4ddcae"
+      "sha256": "ace3d5f6b0f97abb15e523fad624175272962a4a04d5cc5cc8a125938da81cbd"
     }
   },
   "safety": {
@@ -25,17 +25,17 @@
   "profiles": {
     "astra": {
       "serviceUser": "hermes-astra",
-      "targetRoot": "/var/lib/hermes/astra",
+      "targetRoot": "/var/lib/hermes/astra/.hermes/profiles/astra",
       "behaviorSource": "files/hermes/profiles/astra/SOUL.md"
     },
     "dubble": {
       "serviceUser": "hermes-dubble",
-      "targetRoot": "/var/lib/hermes/dubble",
+      "targetRoot": "/var/lib/hermes/dubble/.hermes/profiles/dubble",
       "behaviorSource": "files/hermes/profiles/dubble/SOUL.md"
     },
     "rigel": {
       "serviceUser": "hermes-rigel",
-      "targetRoot": "/var/lib/hermes/rigel",
+      "targetRoot": "/var/lib/hermes/rigel/.hermes/profiles/rigel",
       "behaviorSource": "files/hermes/profiles/rigel/SOUL.md"
     }
   },

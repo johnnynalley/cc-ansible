@@ -5,11 +5,11 @@
   "sourcePins": {
     "stateMigration": {
       "path": "files/hermes/openclaw-state-migration-contract.json",
-      "sha256": "dc9887db3fafe562812b6781a14bd56582cd103a7ff94b851e49d72ffa4ddcae"
+      "sha256": "ace3d5f6b0f97abb15e523fad624175272962a4a04d5cc5cc8a125938da81cbd"
     },
     "discordCutover": {
       "path": "files/hermes/discord-cutover-contract.json",
-      "sha256": "49d54e99bfa8af4d9b07c9894f4fded27c251d885c691bbd21f3c4ce6da82790"
+      "sha256": "e9968bede240e7826455cc6b2e0ebb118a081e9776cb387586e78a36c95f5802"
     },
     "rigelJob": {
       "path": "files/hermes/jobs/rigel-academic-alerts.json",

@@ -30,6 +30,11 @@ The existing OpenClaw documents remain authoritative for the source system.
   fixed-schema forced-command identities. Immediate updates require native
   turn-bound approval; the existing external systemd schedule remains automatic.
 - Keep exactly one production messaging and scheduler path during cutover.
+- Let Hermes own Gateway service lifecycle through native named-profile units.
+  Ansible may add security/readiness drop-ins, but must not replace native
+  `ExecStart`, restart, watchdog, identity, `HOME`, or `HERMES_HOME` behavior.
+  The official v0.20.4 units do not define `ExecStop`; every operator stop must
+  use Hermes's planned-stop marker before systemd sends `SIGTERM`.
 - Preserve all OpenClaw source state, sessions, transcripts, secrets, runtime,
   and rollback instructions until Hermes has passed an attended rollback test.
 
@@ -55,9 +60,10 @@ other behavior-bearing state require manual reconciliation.
 
 Hermes command approval is a guardrail for an honest but mistaken agent, not a
 complete security boundary against prompt injection. File-write guards do not
-constrain shell commands. This deployment therefore disables host terminal and
-file execution for the Discord profiles and treats OS isolation plus narrow,
-fixed forced-command services as the authority boundary.
+constrain shell commands. Astra therefore runs native local tools as the
+dedicated no-login `hermes-astra` account, with no sudo, Docker socket/group, or
+Linux capabilities and with systemd restricting writes to its owned profile and
+reviewed work roots. Dubble and Rigel have no terminal, file, or code toolsets.
 
 ## Parity Matrix
 
@@ -71,7 +77,8 @@ fixed forced-command services as the authority boundary.
 | Antares's intentionally critical role | Distinct `goal` and `context` for the adversarial leaf; reviewer model inherits Astra's reviewed route without an exact-version pin | Native, one child-model route | Promotion proves Antares challenges rather than echoes while neither reviewer sees the other's output |
 | Long-running multi-agent work | Named profiles and Hermes Kanban for durable asynchronous work | Native | Task survives Gateway restart, retains owner/history, and cannot gain a wider toolset on handoff |
 | File memory and user preferences | Per-profile `MEMORY.md` and `USER.md`, plus FTS5 session search | Native with curated import | Exact user preferences and durable facts survive restart; no raw transcript dump is injected into every prompt |
-| Mem0/Qdrant knowledge | Start with built-in memory and preserved read-only OpenClaw archive; evaluate one external Hermes memory provider only after baseline behavior | Manual replacement | Retrieval quality and deletion/privacy behavior beat baseline before enabling a provider |
+| Lossless conversation context | Reviewed `hermes-lcm` plugin plus a source-preserving conversion from the stopped OpenClaw LCM database | Native plugin with conversion | SQLite integrity passes, eligible messages and summaries reconcile exactly, and source state remains unchanged |
+| Mem0/Qdrant knowledge | Hermes OSS Mem0 provider backed by a new Astra-only Qdrant collection converted from approved OpenClaw owner/main scopes | Native provider with conversion | Source and target counts/digests reconcile, other agent scopes stay excluded, and existing memories are recalled through Hermes |
 | Self-evolution | Hermes background review with `memory.write_approval: true` and `skills.write_approval: true` | Native with approval | A correction stages one general memory/skill diff, does not mutate policy directly, and can be approved, rejected, audited, and rolled back |
 | Astra root-cause learning | Root-owned behavior policy plus review-gated agent memory/skills and transcript regression tests | Manual policy port | Repeated incidents consolidate into a general rule; incident-specific rule accumulation is rejected |
 | OpenClaw sessions and trajectories | Preserve as offline searchable archive; new Hermes sessions live in each profile's SQLite state | Archive, not live migration | Archive manifest, sampled transcript restore, and Hermes access through a read-only search boundary if later required |
@@ -352,17 +359,23 @@ read-only to Hermes.
 
 Initial production policy:
 
-- Host terminal, file, and code-execution toolsets are disabled for every
-  Discord profile. The staged rootless Podman backend has no Docker socket,
-  host bind mounts, forwarded environment variables, or credential files and
-  is not exposed to the active profiles.
+- Astra uses Hermes's native `local` terminal plus file and code toolsets as
+  `hermes-astra`. That account has no sudo, Docker group/socket, Linux
+  capabilities, cross-profile access, or write access outside its private
+  profile and reviewed work roots. This is normal host tool access, not a
+  wrapper-per-action interface.
+- Dubble and Rigel have no terminal, file, or code-execution toolsets. Their
+  dormant Docker backend remains networkless and mountless but is not exposed
+  as an agent tool.
 - `computer_use` is explicitly disabled for every profile. Browser retrieval
   remains available for current-source research, but no agent receives desktop
   control merely because Hermes includes that tool in its built-in safe set.
-- Host facts and actions are exposed only through fixed-schema, allowlisted,
-  independently authenticated forced-command boundaries.
-- `approvals.mode: manual`, `approvals.cron_mode: deny`, empty permanent command
-  allowlist, and destructive session confirmations enabled.
+- Cross-host Docker facts and managed updates remain exposed through the
+  existing fixed-schema, independently authenticated forced-command boundary;
+  ordinary work on `jn-t14s-lin` uses Astra's native non-root tools.
+- `approvals.mode: manual`, an empty permanent command allowlist, and
+  destructive session confirmations are enabled. Astra cron uses manual
+  approval policy; Dubble and Rigel deny cron commands.
 - Explicit Discord allowlists; no allow-all mode.
 - `memory.write_approval: true` and `skills.write_approval: true`.
 - Agent-created skill scanning enabled; third-party skills are not installed
@@ -421,12 +434,15 @@ wholesale copy of the roughly 37.3-GB OpenClaw tree, and none is needed. Curated
 profile state is imported into the separate Hermes homes; the original tree
 stays in place as offline source evidence.
 
-Hermes uses three no-login service users, `/var/lib/hermes/*` profile homes,
-root-owned policy and secrets, and rootless Podman. `ProtectHome=true`, the
-absence of host mounts, and separate UIDs prevent Hermes from reading the raw
-OpenClaw tree or the controller user's home. If later migration needs another
-source fact, a root-controlled review/import step extracts only that approved
-item instead of mounting the legacy tree into an agent context.
+Hermes uses three no-login service users, separate account homes under
+`/var/lib/hermes/*`, native named-profile homes below each account's
+`.hermes/profiles/` directory, and root-owned policy and secrets. Astra uses the
+native local backend within the `hermes-astra` account and hardened systemd
+namespace; Dubble and Rigel expose no terminal tools. `ProtectHome=true`,
+separate UIDs, and the absence of raw-source mounts prevent Hermes from reading
+the OpenClaw tree or the controller user's home. Memory conversion runs as a
+separate attended root-controlled transaction against stopped source state and
+writes only new Hermes-owned stores.
 
 Installation may coexist only while Hermes is stopped and has no production
 credentials. Starting any Hermes gateway requires the production OpenClaw
@@ -441,13 +457,13 @@ for operator-controlled reference, not executable fallback authority.
 Use three separate no-login service accounts, not three writable profiles under
 one Unix identity:
 
-| Identity | Hermes home | Authority |
-| --- | --- | --- |
-| `hermes-astra` | `/var/lib/hermes/astra` | Primary conversation, web research, review synthesis, approved learning proposals, aggregate reports, fixed Docker tools, and the Rigel route/schedule |
-| `hermes-dubble` | `/var/lib/hermes/dubble` | Public support only; no terminal, host report, infrastructure, update, or cross-profile credential access |
-| `hermes-rigel` | `/var/lib/hermes/rigel` | Dormant retained study profile; no active Gateway, Discord credential, or production schedule |
+| Identity | Account home | Native profile home | Authority |
+| --- | --- | --- | --- |
+| `hermes-astra` | `/var/lib/hermes/astra` | `/var/lib/hermes/astra/.hermes/profiles/astra` | Primary conversation, native non-root local tools, web research, review synthesis, LCM/Mem0 recall, approved learning proposals, aggregate reports, fixed cross-host Docker tools, and the Rigel route/schedule |
+| `hermes-dubble` | `/var/lib/hermes/dubble` | `/var/lib/hermes/dubble/.hermes/profiles/dubble` | Public support only; no terminal, host report, infrastructure, update, or cross-profile credential access |
+| `hermes-rigel` | `/var/lib/hermes/rigel` | `/var/lib/hermes/rigel/.hermes/profiles/rigel` | Dormant retained study profile; no active Gateway, Discord credential, or production schedule |
 
-Each home has independent config, auth, state database, memory, skills,
+Each native profile home has independent config, auth, state database, memory, skills,
 sessions, cron, pending approvals, cache, sandbox metadata, and logs. Files are
 mode `0600` and directories `0700` unless a documented root-owned input needs a
 narrow group read. No service identity is a member of another profile's group.
@@ -487,7 +503,8 @@ runtime does not need. Instead, deploy official `uv` `0.12.4` from its reviewed
 archive with SHA-256
 `c8c60f47e6f88d18dbf6f33d7279fb1fbf7ae76631768152cf5578c3d65729b4`,
 check out the exact official Hermes commit, and require `uv sync --extra all
---locked` to succeed without fallback. Keep `uv`'s cache and managed Python
+--extra messaging --extra mem0 --locked` to succeed without fallback. Keep
+`uv`'s cache and managed Python
 under Hermes-owned `/var/cache/hermes` and `/usr/local/share/uv`, not root's
 home. Preserve the source tree's `[tool.uv]` settings because the committed
 lockfile includes that resolution policy; isolate user/system configuration
@@ -522,10 +539,10 @@ changes; the retained host migration backup protects the complete profile,
 checkout, and separately managed Dubble and Rigel profiles. Config checks and
 policy hashes remain startup gates, not a replacement update pipeline.
 
-Hermes intentionally excludes the optional `messaging` profile from `all`.
-Bootstrap therefore synchronizes both official extras from the reviewed lock,
-and the native update unit reconciles the current source tree's official
-`messaging` extra after Hermes completes its own update. The updater runs with
+Hermes intentionally excludes the optional `messaging` and `mem0` profiles from
+`all`. Bootstrap therefore synchronizes both official extras from the reviewed
+lock, and the native update unit reconciles the current source tree's official
+`messaging` and `mem0` extras after Hermes completes its own update. The updater runs with
 the code-only `hermes-runtime-readers` primary group, then normalizes that
 shared credential-free checkout and restarts Astra and Dubble through the same
 exact-command sudo boundary. This does not grant access to another profile's
@@ -592,43 +609,35 @@ The policy-schema transaction advances an existing profile-local config only
 when it is the exact prior one-key version stub. Any profile with additional
 mutable settings remains blocked for an explicit reviewed migration.
 
-### Terminal Sandbox
+### Native Local Tools
 
-Use Hermes's `docker` terminal backend with
-`HERMES_DOCKER_BINARY=/usr/bin/podman`. Podman runs rootless under the matching
-service account; there is no rootful Docker daemon, Docker group, or API socket
-available to Hermes. Hermes officially scopes persistent terminal containers
-by profile labels, and the separate Unix identities add a second boundary.
+Astra uses Hermes's native `local` terminal backend with
+`terminal.cwd=/var/lib/hermes/astra/imported-data`. Commands run as the same
+dedicated no-login `hermes-astra` identity as the Gateway. This is the intended
+native Hermes execution path and restores ordinary filesystem inspection,
+editing, diagnostics, and skill maintenance without building wrappers for each
+operation.
 
-Mandatory baseline for every role that has terminal tools:
+The authority boundary is Linux and systemd: no sudo rule, Docker group/socket,
+administrative SSH key, capabilities, setuid execution, or cross-profile group
+membership; `ProtectSystem=strict`, `ProtectHome=true`, private devices and
+temporary state, and explicit `ReadWritePaths` limited to Astra's profile and
+reviewed work roots. Host paths outside those roots may be inspected when Unix
+permissions and the systemd namespace permit, but cannot be modified. Material
+infrastructure changes still require the normal Hermes approval policy and an
+operator-controlled privileged path.
 
-```yaml
-terminal:
-  backend: docker
-  home_mode: profile
-  docker_mount_cwd_to_workspace: false
-  docker_volumes: []
-  docker_forward_env: []
-  docker_network: false
-  docker_run_as_host_user: false
-  container_persistent: true
-```
-
-Set CPU, memory, PID, and disk limits only after a live rootless-cgroup-v2 test
-proves Podman enforces them; a configured but ignored limit is a failed gate.
-The sandbox gets no host bind mounts, profile secrets, broker credentials, or
-network by default. Generated files cross the boundary only through a bounded
-export directory after extension, size, ownership, and path validation.
-
-Dubble and Rigel start without terminal or code-execution toolsets. Astra gets
-the rootless terminal only if transcript tests demonstrate a real need. Native
-web tools handle research; shell network access is not required for browsing.
+Dubble and Rigel expose no terminal, file, or code toolsets. Their retained
+Docker backend configuration stays rootless, networkless, and mountless only
+as inert defense in depth; it is not Astra's execution environment and does not
+need to replicate host access.
 
 ### Mandatory Hermes Policy
 
 Root-owned managed scope enforces at least:
 
-- manual command approvals and `cron_mode: deny`;
+- manual command approvals, with `cron_mode: manual` for Astra and `deny` for
+  Dubble and Rigel;
 - no permanent command allowlist;
 - memory and skill write approval enabled;
 - agent-created skill scanning enabled;
@@ -661,7 +670,8 @@ bytes is untrusted until re-audited.
 
 ### Systemd And Network
 
-Root owns one unit per role:
+Hermes's native system installer owns one base unit per role; Ansible owns only
+the hardened drop-ins and readiness gates:
 
 - `hermes-gateway-astra.service`
 - `hermes-gateway-dubble.service`
@@ -671,9 +681,12 @@ Each unit has one `User=`, one `Group=`, explicit `HERMES_HOME`, a minimal
 `PATH`, its own environment file, its own runtime directory, an event-loop
 watchdog, restart bounds, CPU/memory/task limits, and no capabilities. Apply
 `NoNewPrivileges`, strict system and home protection, private temporary state,
-kernel/control-group/module protections, and a restrictive umask. Keep the
-namespace operations rootless Podman needs; reject hardening that silently
-breaks the sandbox and causes fallback to local execution.
+kernel/control-group/module protections, and a restrictive umask. Preserve
+Hermes v0.20.4's official base units do not define `ExecStop`. Its CLI writes a
+planned-stop marker before asking systemd to stop a Gateway. Ansible uses the
+same native marker contract before an operator stop; a bare systemd stop sends
+an unmarked `SIGTERM`, which Hermes classifies as unexpected before the restart
+policy revives it.
 
 Hermes adds no administrative SSH path to the host and has no public inbound
 listener or dashboard route. Profile services receive only the outbound paths
@@ -734,17 +747,18 @@ boundaries without installing Hermes:
 
 1. The target is exactly `jn-t14s-lin`, its live CPU/RAM/disk preflight passes,
    and the contract rejects concurrent OpenClaw and Hermes gateways.
-2. Service identities, homes, groups, units, managed scope, secrets paths, and
-   rootless Podman prerequisites are explicit and lintable.
+2. Service identities, homes, groups, native units, managed scope, secrets
+   paths, and Astra's non-root local-tool boundary are explicit and lintable.
 3. Every profile's allowed tools, Discord scope, inputs, outputs, and forbidden
    paths are machine-readable.
 4. Shadow mode has no production token, scheduler delivery, dashboard, remote
    listener, host credential, or broker mutation authority.
 5. Backup, restore, cutover, and OpenClaw rollback procedures have explicit
    pass/fail checks.
-6. A static audit rejects Docker group/socket access, general sudoers, host
-   mounts, cross-profile secret reads, local-terminal fallback, and allow-all
-   Discord while requiring the exact Astra-only native-update trigger.
+6. A static audit rejects Docker group/socket access, general sudoers,
+   cross-profile secret reads, local tools for Dubble/Rigel, non-local terminal
+   execution for Astra, and allow-all Discord while requiring the exact
+   Astra-only native-update trigger.
 
 The credential-free machine-readable declaration is
 `files/hermes/shadow-target.json`. The fail-closed validator is
@@ -773,13 +787,12 @@ Its modes are explicit:
   scheduler delivery, route, dashboard, or API listener.
 
 Each profile has a distinct no-login OS identity, fixed home, subordinate-ID
-range, root-owned managed scope, and hardened system unit. Agent command/file
-execution remains disabled. The dormant terminal backend is rootless Podman
-with no Docker group/socket, host mounts, host user mapping, forwarded
-environment, forwarded credentials, or network. Managed-scope validation is
-not treated as the sandbox: official Hermes documentation says malformed
-managed YAML is ignored and filesystem ownership is its enforcement boundary.
-The systemd/OS/Podman controls therefore remain independently required.
+range, root-owned managed scope, and hardened system unit. Astra alone exposes
+native local terminal, file, and code tools; Dubble and Rigel expose none. The
+retained dormant Docker backend has no Docker group/socket, host mounts, host
+user mapping, forwarded environment, forwarded credentials, or network.
+Managed-scope validation is not treated as the sandbox: filesystem ownership,
+the dedicated identities, and systemd controls remain independently required.
 
 Validation on 2026-08-12 passed YAML lint, Ansible syntax, the structured target
 audit, and 21 contract/deployment regressions. `ansible-lint` did not inspect the
@@ -963,6 +976,67 @@ Check-mode safety probes now explicitly execute instead of returning empty
 Ansible placeholder results, and native merged-config validation occurs during
 every bootstrap before checksum promotion.
 
+### LCM And Mem0 Continuity
+
+The compact native seeds remain useful policy memory, but they are not a
+replacement for Astra's prior conversational continuity. The approved target
+therefore enables both reviewed continuity mechanisms:
+
+- `hermes-lcm` runs as Hermes's context engine and imports from a consistent
+  backup of the stopped OpenClaw LCM SQLite database. The source database and
+  historical sidecars remain unchanged and offline.
+- Hermes's native OSS Mem0 provider uses the existing OpenRouter route for its
+  LLM, Gemini `gemini-embedding-001` at 3,072 dimensions, and a new Qdrant
+  collection named `memories_hermes_astra_v1`.
+
+The attended transaction is
+`playbooks/agents/hermes-memory-continuity.yml`. It requires OpenClaw offline,
+Hermes-native system units plus the native planned-stop marker contract, exact
+owner approval, provider credentials already present in the encrypted
+inventory, and source/target backups before any write. It updates the official
+Hermes lock with `all`, `messaging`, and `mem0`; installs the reviewed LCM
+plugin from its stable upstream track; runs both importers in dry-run first;
+starts Astra only after SQLite, Qdrant, config, plugin, and native-tool policy
+checks pass; and restores prior files, plugin state, LCM database, target
+collection, services, and timers on failure.
+
+The accepted preflight against the offline source found 306 importable LCM
+conversations, 161,005 scanned messages, 139,435 eligible messages, 21,570
+empty messages, no invalid rows, 4,192 importable summaries, and 1,649
+unresolved summaries. The Mem0 source collection contained 4,435 points. The
+Astra conversion selects 4,148 general, main, and owner-scoped points and
+excludes 287 Dubble, Rigel, Vega, and Antares points. The source identity is
+retained as provenance while the target is normalized to Hermes's `user_id`
+and `agent_id` schema. Dry-run evidence contains counts and canonical digests,
+not memory text or vectors.
+
+The attended conversion completed on 2026-08-20. LCM imported all 139,435
+eligible messages and 4,192 resolved summaries with zero invalid rows; the
+21,570 empty messages and 1,649 unresolved summaries remained explicitly
+excluded. SQLite `quick_check` passed. Mem0 reconciled all 4,148 selected
+points into the target with canonical digest
+`c9894f1c1f5dde7dca7623ffb0f61de2f18228ab1a5863c4ed00ba6964dc6138`,
+while the 4,435-point source collection and its Qdrant snapshot remained
+unchanged. Native provider recall passed without emitting memory content.
+
+The first provider recall exposed a real optional-dependency gap in
+`mem0ai==2.0.10`: its Gemini embedder imports `google.genai`, but Hermes's
+official `mem0` extra does not install that provider package. The native
+runtime now installs `google-genai>=1.0.0,<2.13.0` without dependency
+re-resolution, then runs `uv pip check`. The upper bound preserves Hermes
+v0.20.4's locked `google-auth==2.55.1`; the accepted environment contains
+`google-genai==2.12.1`, and all 123 installed packages are compatible. The
+accepted conversion rollback is
+`/srv/live-rollbacks/jn-t14s-lin/hermes-migration/20260820T044531-pre-memory-continuity`;
+the final provider reconciliation rollback is
+`/srv/live-rollbacks/jn-t14s-lin/hermes-migration/20260820T045620-pre-mem0-provider-reconcile`.
+
+This is a source-preserving conversion, not a shared live store. The old LCM
+database, Mem0 history database, and Qdrant collection remain intact for
+rollback and for a later separately reviewed profile-specific import. Re-running
+the migration is idempotent only when the target count and digest match exactly;
+an inconsistent nonempty target is a hard failure.
+
 ## Reviewed Profile Skills And Data
 
 Five legacy procedural areas have been rebuilt as declarative Hermes-native
@@ -1130,6 +1204,29 @@ canonical academic state, and exact 30-minute no-model scheduler. The
 standalone Rigel Gateway remains disabled because the source installation has
 only two Discord applications.
 
+The Discord consumers were migrated to Hermes's official native named-profile
+base units on 2026-08-20. Astra and Dubble are active; the standalone Rigel
+Gateway remains disabled. The units run as their dedicated service identities
+with Ansible-owned hardening/readiness drop-ins, while Hermes retains ownership
+of the base lifecycle and command.
+
+The root cause of the earlier repeated shutdown notices was that the former
+handwritten units stopped Hermes with a bare `SIGTERM`. Hermes classified that
+unmarked signal as unexpected, exited nonzero, and the restart policy started
+it again. The official v0.20.4 unit also has no `ExecStop`; the native contract
+is the planned-stop marker written by `hermes gateway stop --system` before
+systemd sends `SIGTERM`. Managed maintenance now writes that marker through the
+shared planned-stop task before stopping a Gateway.
+
+`playbooks/agents/hermes-native-gateway-migration.yml` is the exact-approval
+transaction used for that repair. It pauses update and automation timers,
+marks the two stops as planned, stops each consumer once, refreshes the stopped
+file inventory, archives and copy-migrates profile state into native named
+profiles, invokes Hermes's native system installer, applies only hardened
+drop-ins, verifies Discord ownership, and retains the old roots and units for
+rollback. The follow-up runtime and automation playbooks converge all
+consumers and timers against the new paths.
+
 Gate 9 was not exercised against production during this closeout because it
 would deliberately interrupt the now-live Hermes Discord path and briefly
 reactivate the legacy delivery/scheduler path while the owner was relying on
@@ -1144,7 +1241,8 @@ proof of messaging. Both processes had stayed alive for cron after logging
 first repair. The corrected service now runs the dependency audit with the
 managed Hermes interpreter before startup and cannot become active until its
 main process owns an established TLS session. Production convergence restarts
-Astra and Dubble one at a time and rejects adapter, dependency, permission,
+Astra and Dubble sequentially through Hermes's native lifecycle and rejects
+adapter, dependency, permission,
 audit, or traceback journal patterns while treating an expected no-match as a
 successful probe.
 
@@ -1155,6 +1253,9 @@ Current rollback artifacts include:
 - `20260814T085809-pre-runtime-converge` for the failed-closed interpreter
   preflight and automatic unit restore
 - `20260814T090022-pre-runtime-converge` for the accepted live unit convergence
+- `20260820T050007-pre-automation` for native production automation convergence
+- `20260820T050342-pre-runtime-converge` for the final native runtime gates
+- `20260820T050753-pre-automation` for the managed schema-38 reconciliation
 
 The Docker/security closeout completed on 2026-08-14. The result-only Docker
 reporter is live on all four Docker hosts, while the fixed managed-updater
@@ -1166,7 +1267,8 @@ Docker group, socket, arbitrary SSH, general sudo, and free-form update access
 remain prohibited. The final risk analysis is maintained in
 `docs/openclaw-runtime-security.md` and `docs/agent-docker-access.md`.
 
-Production automation convergence also completed on 2026-08-14. The source
+Production automation first converged on 2026-08-14 and was re-converged after
+native profile and memory migration on 2026-08-20. The source
 inventory contained 26 current cron rows, three logical heartbeats, and two
 historical completed one-shots. All 31 lanes have an explicit final
 disposition in `files/hermes/production-automation-reconciliation.json`.
@@ -1177,6 +1279,30 @@ social-seed review. Root-managed systemd timers own the retained collectors,
 Warframe feed, Fortnite calendar, and three profile backups. Completed
 one-shots were not replayed; OpenClaw-specific maintenance and generic noisy
 heartbeats were retired rather than emulated.
+
+The 2026-08-16 through 2026-08-20 transcript exposed two post-cutover runtime
+regressions in that automation. This was not a generic Hermes capability gap:
+
+- the retained summary collector's `ProtectHome=tmpfs` namespace omitted the
+  existing Health database, SSH known-host/key files, and vdirsyncer/khal
+  configuration, so the summary falsely reported those inputs as missing;
+- the HDD collector's anonymous Reddit request returned HTTP 403, and the
+  semantic job converted the same upstream source failure into an hourly wall
+  of repetitive Discord diagnostics instead of one bounded source-health
+  state.
+
+The corrected retained service binds only those exact existing inputs
+read-only. The HDD collector evaluates Reddit and the already-credentialed eBay
+Browse API independently, records `ok`, `partial`, or `degraded` source health,
+deduplicates cross-source results, and exits successfully with an empty
+candidate set when every source is unavailable. A degraded run is silent in
+Discord; it is not misreported as "no deals" and does not spend a model turn
+restating the same repair advice. Live acceptance passed on 2026-08-20: an
+isolated run of the deployed collector authenticated to eBay and returned
+bounded candidates without touching the production delivery ledger, and a
+manual non-delivering Daily Summary collector run completed successfully,
+created a fresh artifact, and contained none of the prior false missing-Health,
+SSH-host-key, vdirsyncer, or khal signatures.
 
 The automation transaction is rollback-first. Check mode is read-only, active
 timers are excluded and restored around mutation, native profile backups run
@@ -1196,3 +1322,32 @@ The final `systemd-analyze security` exposure scores were 3.0 for each Gateway,
 summary/feed/calendar services. Identity-level Discord TLS audits, native cron
 reconciliation, Rigel idle health, Docker forced-command smoke tests, updater
 status, and direct Docker-socket denial all passed after convergence.
+
+Final capability acceptance completed on 2026-08-20. Astra runs as UID 62010
+with Hermes's native `local` terminal backend and direct terminal, file, code,
+vision, memory, context-engine, session-search, and cron toolsets on Discord.
+Its intended working directory is writable only inside the hardened service
+mount namespace; general sudo and direct Docker-socket access remain denied.
+The live namespace exposes five Astra managed skills, including
+`fortnite-tracker`, plus `hermes-lcm 0.21.0-rc2`; Mem0 reports installed and
+available. The managed config is schema 38, uses `openai-codex/gpt-5.6-sol`
+with an 8,192-token output ceiling, and has exactly one fallback,
+`ollama-cloud/glm-5.2`. A GLM-only exact-output smoke test and a direct local
+image Gemini vision test both passed without consuming GPT-5.6 or creating an
+Astra session. Astra and Dubble own established Discord TLS sessions, Rigel's
+standalone Gateway remains disabled, all seven production/backup timers and
+both update timers are active, Health remains active, OpenClaw remains stopped,
+and the post-convergence Gateway journals contain no adapter, dependency,
+audit, traceback, or permission failures.
+
+## Deferred Movie DJ Research
+
+After Astra's native tools, memory continuity, vision, skills, and scheduled
+automation are stable, research a separate Hermes-operated Discord movie-DJ
+agent that could remain in a voice channel and stream video continuously. This
+is deliberately deferred and no implementation is authorized by this note.
+The investigation must cover Discord API and Terms-of-Service constraints,
+whether screen sharing can be automated through a supported bot or requires an
+interactive user account, copyright and content-licensing boundaries, audio
+and video capture architecture, process/session isolation, operator controls,
+and 24/7 recovery behavior before recommending any design.

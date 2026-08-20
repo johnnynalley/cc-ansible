@@ -97,6 +97,10 @@ class ProductionAutomationTests(unittest.TestCase):
         self.assertNotIn("RestrictSUIDSGID=true", text)
         self.assertIn("CapabilityBoundingSet=CAP_SETUID CAP_SETGID", text)
         self.assertIn("AmbientCapabilities=", text)
+        self.assertIn("[messaging,mem0]", text)
+        self.assertIn("hermes_mem0_gemini_dependency", text)
+        self.assertIn("pip install --strict --no-deps", text)
+        self.assertIn("pip check --python", text)
 
     def test_snap_exception_is_public_fetch_only(self):
         fetch = (
@@ -121,7 +125,21 @@ class ProductionAutomationTests(unittest.TestCase):
         self.assertIn("progress_notices: false", text)
         self.assertIn("background_process_notifications: error", text)
 
-    def test_astra_has_native_glm_fallback_with_private_credential_rollout(self):
+    def test_daily_summary_collector_can_read_its_real_inputs(self):
+        text = (
+            ROOT / "templates/hermes/hermes-retained-automation@.service.j2"
+        ).read_text()
+        for path in (
+            ".config/vdirsyncer",
+            ".config/khal",
+            ".local/share/vdirsyncer/calendars",
+            ".ssh/known_hosts",
+            ".ssh/id_ed25519",
+            "data/health.db",
+        ):
+            self.assertIn(path, text)
+
+    def test_astra_has_native_providers_with_private_credential_rollout(self):
         variables = yaml.safe_load(
             (ROOT / "inventory/group_vars/hermes_hosts/vars.yml").read_text()
         )
@@ -140,21 +158,43 @@ class ProductionAutomationTests(unittest.TestCase):
         self.assertIn("fallback_providers:", template)
         self.assertIn("fallback.provider", template)
         playbook = (ROOT / "playbooks/agents/hermes-automation.yml").read_text()
-        self.assertIn("Read retained Ollama Cloud credential privately", playbook)
-        self.assertIn("Enroll Astra Ollama Cloud fallback credential", playbook)
+        self.assertIn(
+            "Read retained Astra provider credentials privately", playbook
+        )
+        self.assertIn(
+            "Enroll Astra provider credentials and compatibility aliases", playbook
+        )
         self.assertIn("'/etc/hermes/astra/.env'", playbook)
         self.assertIn("hermes_automation_astra_provider_environment.changed", playbook)
+        for name in (
+            "OLLAMA_API_KEY",
+            "GEMINI_API_KEY",
+            "GOOGLE_API_KEY",
+            "OPENROUTER_API_KEY",
+            "OPENAI_API_KEY",
+            "EBAY_APP_ID",
+            "EBAY_CERT_ID",
+        ):
+            self.assertIn(name, playbook)
 
-    def test_gateway_uses_live_manifest_instead_of_design_contract(self):
-        base = (ROOT / "templates/hermes/hermes-gateway.service.j2").read_text()
+    def test_astra_gateway_uses_live_manifest_instead_of_design_contract(self):
+        playbook = (ROOT / "playbooks/agents/hermes-automation.yml").read_text()
+        base = (
+            ROOT / "templates/hermes/hermes-gateway-hardening.conf.j2"
+        ).read_text()
         dropin = (
             ROOT
             / "templates/hermes/hermes-gateway-astra-automation.conf.j2"
         ).read_text()
-        self.assertNotIn("hermes_automation_audit_live", base)
+        self.assertIn("hermes_profile.name != 'astra'", base)
         self.assertIn("hermes_cron_reconcile_live", dropin)
         self.assertIn("--check", dropin)
         self.assertIn("hermes_automation_manifest_live", dropin)
+        self.assertIn(
+            "Remove temporary native-migration cron drift gate",
+            playbook,
+        )
+        self.assertIn("20-automation.conf", playbook)
 
     def test_retained_collector_has_no_conflicting_workspace_mount(self):
         text = (

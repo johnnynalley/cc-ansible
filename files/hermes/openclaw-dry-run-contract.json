@@ -16,7 +16,7 @@
   "paths": {
     "source": "/home/johnny/.openclaw",
     "workspace": "/home/johnny/.openclaw/workspace",
-    "astraConfig": "/var/lib/hermes/astra/config.yaml",
+    "astraConfig": "/var/lib/hermes/astra/.hermes/profiles/astra/config.yaml",
     "workRoot": "/var/lib/hermes-openclaw-dry-run",
     "evidenceRoot": "/var/backups/hermes-openclaw-dry-run"
   },

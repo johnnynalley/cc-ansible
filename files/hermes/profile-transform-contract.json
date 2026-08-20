@@ -5,7 +5,7 @@
   "sourcePins": {
     "profileImport": {
       "path": "files/hermes/profile-import-contract.json",
-      "sha256": "70407207f61fe511ea240eff22c19b313eb72de1873d2397456339df3c9ba349"
+      "sha256": "7e4953e9c08dae0380d761781c41ecae669fa9ff978b9fdd6e98b59ed14d5128"
     },
     "workspacePolicy": {
       "path": "files/openclaw/workspace-migration-policy.json",
@@ -18,24 +18,24 @@
       "gid": 62010,
       "writableRoot": "/var/lib/hermes/profile-transforms/astra/writable",
       "managedRoot": "/var/lib/hermes/profile-transforms/astra/managed",
-      "writableRuntimeRoot": "/var/lib/hermes/astra/transformed-data",
-      "managedRuntimeRoot": "/var/lib/hermes/astra/transformed-managed"
+      "writableRuntimeRoot": "/var/lib/hermes/astra/.hermes/profiles/astra/transformed-data",
+      "managedRuntimeRoot": "/var/lib/hermes/astra/.hermes/profiles/astra/transformed-managed"
     },
     "dubble": {
       "uid": 62011,
       "gid": 62011,
       "writableRoot": "/var/lib/hermes/profile-transforms/dubble/writable",
       "managedRoot": "/var/lib/hermes/profile-transforms/dubble/managed",
-      "writableRuntimeRoot": "/var/lib/hermes/dubble/transformed-data",
-      "managedRuntimeRoot": "/var/lib/hermes/dubble/transformed-managed"
+      "writableRuntimeRoot": "/var/lib/hermes/dubble/.hermes/profiles/dubble/transformed-data",
+      "managedRuntimeRoot": "/var/lib/hermes/dubble/.hermes/profiles/dubble/transformed-managed"
     },
     "rigel": {
       "uid": 62012,
       "gid": 62012,
       "writableRoot": "/var/lib/hermes/profile-transforms/rigel/writable",
       "managedRoot": "/var/lib/hermes/profile-transforms/rigel/managed",
-      "writableRuntimeRoot": "/var/lib/hermes/rigel/transformed-data",
-      "managedRuntimeRoot": "/var/lib/hermes/rigel/transformed-managed"
+      "writableRuntimeRoot": "/var/lib/hermes/rigel/.hermes/profiles/rigel/transformed-data",
+      "managedRuntimeRoot": "/var/lib/hermes/rigel/.hermes/profiles/rigel/transformed-managed"
     }
   },
   "ownership": {

@@ -78,6 +78,39 @@ def report(host: str = "docker-vm") -> dict:
 
 
 class AgentDockerInventoryTests(unittest.TestCase):
+    def test_validator_accepts_the_ordered_lcm_plugin_contract(self) -> None:
+        self.assertEqual(
+            VALIDATOR_MODULE.EXPECTED_ENABLED,
+            ["star-dispatch-privacy", "agent-docker-inventory", "hermes-lcm"],
+        )
+
+    def test_validator_accepts_native_tools_only_with_the_nonroot_policy(self) -> None:
+        config = """
+plugins:
+  enabled: [star-dispatch-privacy, agent-docker-inventory, hermes-lcm]
+  disabled: []
+toolsets: [agent_docker, terminal, file, code_execution, cronjob]
+agent:
+  disabled_toolsets: [computer_use, discord_admin, homeassistant]
+terminal:
+  backend: local
+  cwd: /var/lib/hermes/astra/.hermes/profiles/astra/imported-data
+approvals:
+  deny: ['*sudo*', '*docker*', '*podman*', '*curl*|*sh*']
+"""
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "config.yaml"
+            path.write_text(config, encoding="utf-8")
+            VALIDATOR_MODULE.validate_config(path)
+            path.write_text(
+                config.replace("backend: local", "backend: docker"),
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(
+                VALIDATOR_MODULE.ValidationError, "terminal-backend-not-local"
+            ):
+                VALIDATOR_MODULE.validate_config(path)
+
     def test_promotion_proves_live_rollback_mount(self) -> None:
         playbook = PLAYBOOK.read_text(encoding="utf-8")
         verify = playbook.index(

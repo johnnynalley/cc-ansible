@@ -12,6 +12,8 @@ reviewed Ansible Vault ciphertext seeds declared by
   required identities, paths, sandbox, approval, broker, backup, and rollback
   boundaries. It also requires a root-managed offline command scanner, disabled
   runtime lazy installs, blocked private URLs, and fail-closed Tirith behavior.
+  Astra's declared terminal is native local under its dedicated no-login
+  account; Dubble and Rigel expose no execution tools.
 - `profiles/*/SOUL.md` contains the root-owned baseline identity for Astra,
   Dubble, and Rigel. It encodes transcript-derived behavior boundaries without
   copying transcript content, user IDs, memories, or credentials.
@@ -20,8 +22,9 @@ reviewed Ansible Vault ciphertext seeds declared by
   through the Hermes CLI only after cutover approval; Ansible never edits
   Hermes `jobs.json` directly.
 - `openclaw-state-migration-contract.json` maps every current OpenClaw
-  state-root category to a curated import, disabled rebuild, cutover-only
-  credential re-enrollment, external owner, or sealed archive. It delegates
+  state-root category to a curated import, source-preserving LCM conversion,
+  disabled rebuild, cutover-only credential re-enrollment, external owner, or
+  sealed archive. It delegates
   workspace paths to the existing hashed workspace migration policy and grants
   no source mutation, archive, cleanup, live migration, delivery, or scheduler
   activation authority.
@@ -40,8 +43,8 @@ reviewed Ansible Vault ciphertext seeds declared by
   three-profile rollback archive, atomic install, and no service activation.
   `profile-memory/*/*.vault` is ciphertext only; decrypted staging is
   root-private under `/run` and removed after every transaction.
-- `profile-skills-contract.json` declares six reviewed Hermes-native,
-  declarative skill deployments: four for Astra, one for Dubble, and one for
+- `profile-skills-contract.json` declares seven reviewed Hermes-native,
+  declarative skill deployments: five for Astra, one for Dubble, and one for
   the preserved Rigel profile. The study skill is intentionally present under
   Astra because Astra is the production Discord consumer for `#rigel`.
   `profile-skills/*/*/SKILL.md` contains no legacy skill copy, executable,

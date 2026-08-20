@@ -12,12 +12,14 @@ Group={{ hermes_runtime_readers_group }}
 SupplementaryGroups={{ hermes_native_update_group }}
 WorkingDirectory={{ hermes_shadow_runtime_root }}
 Environment=HOME={{ hermes_native_update_home }}
-Environment=HERMES_HOME={{ hermes_native_update_home }}
-Environment=PATH={{ hermes_native_update_home }}/bin:{{ hermes_shadow_uv_bin_dir }}:{{ hermes_shadow_runtime_venv }}/bin:/usr/local/bin:/usr/bin:/bin
+Environment=HERMES_HOME={{ hermes_native_update_profile_home }}
+Environment=PATH={{ hermes_native_update_profile_home }}/bin:{{ hermes_shadow_uv_bin_dir }}:{{ hermes_shadow_runtime_venv }}/bin:/usr/local/bin:/usr/bin:/bin
 Environment=PYTHONUNBUFFERED=1
 Environment=UV_LINK_MODE=copy
 ExecStart={{ hermes_shadow_runtime_venv }}/bin/python {{ hermes_shadow_runtime_root }}/hermes update --gateway --yes
-ExecStartPost={{ hermes_shadow_uv_binary }} pip install --strict --python {{ hermes_shadow_runtime_venv }}/bin/python -e {{ hermes_shadow_runtime_root }}[messaging]
+ExecStartPost={{ hermes_shadow_uv_binary }} pip install --strict --python {{ hermes_shadow_runtime_venv }}/bin/python -e {{ hermes_shadow_runtime_root }}[messaging,mem0]
+ExecStartPost={{ hermes_shadow_uv_binary }} pip install --strict --no-deps --python {{ hermes_shadow_runtime_venv }}/bin/python {{ hermes_mem0_gemini_dependency }}
+ExecStartPost={{ hermes_shadow_uv_binary }} pip check --python {{ hermes_shadow_runtime_venv }}/bin/python
 ExecStartPost=/usr/bin/chgrp -R --no-dereference {{ hermes_runtime_readers_group }} {{ hermes_shadow_runtime_root }}
 {% for post_setup_key in hermes_native_post_setup_keys %}
 ExecStartPost={{ hermes_shadow_runtime_binary }} tools post-setup {{ post_setup_key }}
@@ -30,8 +32,8 @@ UMask=0022
 NoNewPrivileges=false
 ProtectSystem=strict
 ProtectHome=true
-ReadWritePaths={{ hermes_shadow_runtime_root }} {{ hermes_native_update_home }}
-ReadOnlyPaths={{ hermes_native_update_home }}/.no-bundled-skills {{ hermes_native_update_home }}/AGENTS.md {{ hermes_native_update_home }}/SOUL.md {{ hermes_native_update_home }}/imported-data {{ hermes_native_update_home }}/managed-data {{ hermes_native_update_home }}/plugins {{ hermes_native_update_home }}/scripts {{ hermes_native_update_home }}/skills/managed {{ hermes_native_update_home }}/transformed-data {{ hermes_native_update_home }}/transformed-managed
+ReadWritePaths={{ hermes_shadow_runtime_root }} {{ hermes_native_update_home }} {{ hermes_native_update_profile_home }}
+ReadOnlyPaths={{ hermes_native_update_profile_home }}/.no-bundled-skills {{ hermes_native_update_profile_home }}/AGENTS.md {{ hermes_native_update_profile_home }}/SOUL.md {{ hermes_native_update_profile_home }}/imported-data {{ hermes_native_update_profile_home }}/managed-data {{ hermes_native_update_profile_home }}/plugins {{ hermes_native_update_profile_home }}/scripts {{ hermes_native_update_profile_home }}/skills/managed {{ hermes_native_update_profile_home }}/transformed-data {{ hermes_native_update_profile_home }}/transformed-managed
 InaccessiblePaths=/etc/hermes/astra
 PrivateTmp=true
 PrivateDevices=true

@@ -170,6 +170,23 @@ class HermesOpenClawMigrationAuditTests(unittest.TestCase):
             ):
                 self.load(self.write_contract(root, payload))
 
+    def test_lcm_database_requires_source_preserving_conversion(self) -> None:
+        with tempfile.TemporaryDirectory() as directory_name:
+            root = Path(directory_name)
+            payload = copy.deepcopy(self.contract)
+            lcm_rule = next(
+                row
+                for row in payload["stateRoot"]["rules"]
+                if row["id"] == "lcm-database"
+            )
+            lcm_rule["action"] = "sealed-archive"
+            lcm_rule["activation"] = "offline-only"
+            with self.assertRaisesRegex(
+                audit_module.MigrationAuditError,
+                "lcm-database must use source-preserving-conversion",
+            ):
+                self.load(self.write_contract(root, payload))
+
     def test_delivery_queue_must_drain_without_replay(self) -> None:
         with tempfile.TemporaryDirectory() as directory_name:
             root = Path(directory_name)

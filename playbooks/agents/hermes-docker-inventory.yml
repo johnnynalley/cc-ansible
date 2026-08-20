@@ -2,8 +2,7 @@
 # Purpose: Promote Astra's forced-command Docker inventory tool.
 # Hosts: hermes_hosts.
 # Key vars: hermes_docker_inventory_*, agent_docker_report_*.
-# Templates: templates/hermes/hermes-managed-config.yaml.j2,
-#            templates/hermes/hermes-gateway.service.j2.
+# Templates: templates/hermes/hermes-managed-config.yaml.j2.
 # Scripts: scripts/agents/hermes-agent-docker-inventory-*.py.
 # Validation: ansible-playbook playbooks/agents/hermes-docker-inventory.yml
 #             --syntax-check.
@@ -31,9 +30,9 @@
       - /etc/hermes/astra/managed-policy.sha256
       - /etc/hermes/dubble/managed-policy.sha256
       - /etc/hermes/rigel/managed-policy.sha256
-      - /var/lib/hermes/astra/config.yaml
-      - /var/lib/hermes/dubble/config.yaml
-      - /var/lib/hermes/rigel/config.yaml
+      - /var/lib/hermes/astra/.hermes/profiles/astra/config.yaml
+      - /var/lib/hermes/dubble/.hermes/profiles/dubble/config.yaml
+      - /var/lib/hermes/rigel/.hermes/profiles/rigel/config.yaml
       - /etc/systemd/system/hermes-gateway-astra.service
       - /etc/systemd/system/hermes-gateway-dubble.service
       - /etc/systemd/system/hermes-gateway-rigel.service
@@ -475,7 +474,7 @@
               - "{{ item.user }}"
               - --
               - /usr/bin/env
-              - "HOME={{ item.home }}"
+              - "HOME={{ item.account_home }}"
               - "HERMES_HOME={{ item.home }}"
               - "HERMES_MANAGED_DIR=/etc/hermes/{{ item.name }}"
               - HERMES_DOCKER_BINARY=/usr/bin/podman
@@ -531,37 +530,34 @@
           loop: "{{ hermes_docker_inventory_policy_hashes.results }}"
           no_log: true
 
-        - name: Deploy promoted Hermes Gateway units
-          ansible.builtin.template:
-            src: >-
-              {{
-                playbook_dir
-                ~ '/../../templates/hermes/hermes-gateway.service.j2'
-              }}
-            dest: >-
-              {{
-                '/etc/systemd/system/hermes-gateway-'
-                ~ hermes_profile.name ~ '.service'
-              }}
-            owner: root
-            group: root
-            mode: "0644"
-          loop: "{{ hermes_shadow_profiles }}"
-          loop_control:
-            loop_var: hermes_profile
-
         - name: Reload promoted Hermes units
           ansible.builtin.systemd_service:
             daemon_reload: true
 
-        - name: Restart promoted Astra and Dubble consumers
-          ansible.builtin.systemd_service:
-            name: "hermes-gateway-{{ item }}.service"
-            state: restarted
-            enabled: true
-          loop:
-            - astra
-            - dubble
+        - name: Prepare service-owned markers for inventory promotion restarts
+          ansible.builtin.include_tasks:
+            file: ../../tasks/hermes-planned-stop-marker.yml
+          vars:
+            hermes_planned_stop_profile: "{{ item }}"
+          loop: "{{ hermes_shadow_profiles[:2] }}"
+          loop_control:
+            label: "{{ item.name }}"
+
+        - name: Restart promoted Astra and Dubble consumers natively
+          ansible.builtin.command:
+            argv:
+              - "{{ hermes_shadow_runtime_binary }}"
+              - gateway
+              - restart
+              - --system
+          environment:
+            HOME: "{{ item.account_home }}"
+            HERMES_HOME: "{{ item.home }}"
+            HERMES_MANAGED_DIR: "/etc/hermes/{{ item.name }}"
+          loop: "{{ hermes_shadow_profiles[:2] }}"
+          loop_control:
+            label: "{{ item.name }}"
+          changed_when: true
 
         - name: Keep standalone Rigel Gateway stopped and disabled
           ansible.builtin.systemd_service:
@@ -642,14 +638,31 @@
           ansible.builtin.systemd_service:
             daemon_reload: true
 
-        - name: Restore Astra and Dubble after promotion failure
-          ansible.builtin.systemd_service:
-            name: "hermes-gateway-{{ item }}.service"
-            state: restarted
-            enabled: true
-          loop:
-            - astra
-            - dubble
+        - name: Prepare best-effort markers for restored inventory restarts
+          ansible.builtin.include_tasks:
+            file: ../../tasks/hermes-planned-stop-marker.yml
+          vars:
+            hermes_planned_stop_profile: "{{ item }}"
+            hermes_planned_stop_strict: false
+          loop: "{{ hermes_shadow_profiles[:2] }}"
+          loop_control:
+            label: "{{ item.name }}"
+
+        - name: Restore Astra and Dubble natively after promotion failure
+          ansible.builtin.command:
+            argv:
+              - "{{ hermes_shadow_runtime_binary }}"
+              - gateway
+              - restart
+              - --system
+          environment:
+            HOME: "{{ item.account_home }}"
+            HERMES_HOME: "{{ item.home }}"
+            HERMES_MANAGED_DIR: "/etc/hermes/{{ item.name }}"
+          loop: "{{ hermes_shadow_profiles[:2] }}"
+          loop_control:
+            label: "{{ item.name }}"
+          changed_when: true
           failed_when: false
 
         - name: Fail after restoring pre-promotion Hermes state

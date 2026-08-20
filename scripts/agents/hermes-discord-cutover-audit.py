@@ -232,7 +232,7 @@ def _validate_profiles(rows: Any) -> dict[str, Any]:
         )
         if row["service"] != expected_service:
             raise DiscordCutoverAuditError(f"service drift for {name}")
-        if row["home"] != f"/var/lib/hermes/{name}":
+        if row["home"] != f"/var/lib/hermes/{name}/.hermes/profiles/{name}":
             raise DiscordCutoverAuditError(f"home drift for {name}")
         if row["managedDir"] != f"/etc/hermes/{name}":
             raise DiscordCutoverAuditError(f"managed directory drift for {name}")

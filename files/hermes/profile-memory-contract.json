@@ -12,7 +12,7 @@
     "astra": {
       "user": "hermes-astra",
       "group": "hermes-astra",
-      "home": "/var/lib/hermes/astra",
+      "home": "/var/lib/hermes/astra/.hermes/profiles/astra",
       "seeds": [
         {
           "name": "MEMORY.md",
@@ -29,14 +29,14 @@
     "dubble": {
       "user": "hermes-dubble",
       "group": "hermes-dubble",
-      "home": "/var/lib/hermes/dubble",
+      "home": "/var/lib/hermes/dubble/.hermes/profiles/dubble",
       "mustRemainEmpty": true,
       "seeds": []
     },
     "rigel": {
       "user": "hermes-rigel",
       "group": "hermes-rigel",
-      "home": "/var/lib/hermes/rigel",
+      "home": "/var/lib/hermes/rigel/.hermes/profiles/rigel",
       "seeds": [
         {
           "name": "MEMORY.md",

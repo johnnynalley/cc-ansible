@@ -71,10 +71,15 @@ class HermesShadowTargetAuditTests(unittest.TestCase):
         data["sandbox"]["dockerGroup"] = True
         self.assert_rejected(data, "unsafe-sandbox-dockerGroup")
 
-    def test_local_terminal_fallback_is_rejected(self) -> None:
+    def test_unscoped_local_terminal_fallback_is_rejected(self) -> None:
         data = copy.deepcopy(self.base)
         data["sandbox"]["localTerminalFallback"] = True
         self.assert_rejected(data, "unsafe-sandbox-localTerminalFallback")
+
+    def test_local_terminal_cannot_expand_beyond_astra(self) -> None:
+        data = copy.deepcopy(self.base)
+        data["sandbox"]["localProfiles"].append("dubble")
+        self.assert_rejected(data, "sandbox-local-profiles")
 
     def test_forwarded_secret_is_rejected(self) -> None:
         data = copy.deepcopy(self.base)
@@ -140,6 +145,11 @@ class HermesShadowTargetAuditTests(unittest.TestCase):
         data = copy.deepcopy(self.base)
         data["profiles"][1]["terminalEnabled"] = True
         self.assert_rejected(data, "profile-terminal-dubble")
+
+    def test_terminal_disabled_on_astra_is_rejected(self) -> None:
+        data = copy.deepcopy(self.base)
+        data["profiles"][0]["terminalEnabled"] = False
+        self.assert_rejected(data, "profile-terminal-astra")
 
     def test_agent_approval_of_docker_plan_is_rejected(self) -> None:
         data = copy.deepcopy(self.base)

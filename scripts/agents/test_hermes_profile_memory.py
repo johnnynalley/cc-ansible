@@ -36,9 +36,21 @@ class HermesProfileMemoryTests(unittest.TestCase):
 
     def test_profiles_are_isolated_and_seed_names_are_bounded(self) -> None:
         expected = {
-            "astra": ("hermes-astra", "/var/lib/hermes/astra", 2),
-            "dubble": ("hermes-dubble", "/var/lib/hermes/dubble", 0),
-            "rigel": ("hermes-rigel", "/var/lib/hermes/rigel", 2),
+            "astra": (
+                "hermes-astra",
+                "/var/lib/hermes/astra/.hermes/profiles/astra",
+                2,
+            ),
+            "dubble": (
+                "hermes-dubble",
+                "/var/lib/hermes/dubble/.hermes/profiles/dubble",
+                0,
+            ),
+            "rigel": (
+                "hermes-rigel",
+                "/var/lib/hermes/rigel/.hermes/profiles/rigel",
+                2,
+            ),
         }
         self.assertEqual(set(self.contract["profiles"]), set(expected))
         self.assertTrue(self.contract["profiles"]["dubble"]["mustRemainEmpty"])

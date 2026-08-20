@@ -554,7 +554,7 @@
               - "{{ item.user }}"
               - --
               - /usr/bin/env
-              - "HOME={{ item.home }}"
+              - "HOME={{ item.account_home }}"
               - "HERMES_HOME={{ item.home }}"
               - "HERMES_MANAGED_DIR=/etc/hermes/{{ item.name }}"
               - HERMES_DOCKER_BINARY=/usr/bin/podman
@@ -615,7 +615,11 @@
           ansible.builtin.copy:
             src: >-
               {{ playbook_dir }}/../../{{ hermes_rigel_schedule_source }}
-            dest: /var/lib/hermes/astra/scripts/hermes-rigel-schedule.py
+            dest: >-
+              {{
+                '/var/lib/hermes/astra/.hermes/profiles/astra/scripts/'
+                ~ 'hermes-rigel-schedule.py'
+              }}
             owner: root
             group: hermes-astra
             mode: "0550"
@@ -630,9 +634,9 @@
               - --
               - /usr/bin/env
               - HOME=/var/lib/hermes/astra
-              - HERMES_HOME=/var/lib/hermes/astra
+              - HERMES_HOME=/var/lib/hermes/astra/.hermes/profiles/astra
               - /usr/bin/python3
-              - /var/lib/hermes/astra/scripts/hermes-rigel-schedule.py
+              - /var/lib/hermes/astra/.hermes/profiles/astra/scripts/hermes-rigel-schedule.py
           register: hermes_cutover_rigel_idle
           changed_when: false
 
@@ -646,13 +650,13 @@
 
         - name: Inspect current Astra native cron store
           ansible.builtin.stat:
-            path: /var/lib/hermes/astra/cron/jobs.json
+            path: /var/lib/hermes/astra/.hermes/profiles/astra/cron/jobs.json
             follow: false
           register: hermes_cutover_cron_store
 
         - name: Read current Astra native cron store
           ansible.builtin.slurp:
-            src: /var/lib/hermes/astra/cron/jobs.json
+            src: /var/lib/hermes/astra/.hermes/profiles/astra/cron/jobs.json
           register: hermes_cutover_cron_store_content
           when: hermes_cutover_cron_store.stat.exists
 
@@ -702,7 +706,7 @@
               - --
               - /usr/bin/env
               - HOME=/var/lib/hermes/astra
-              - HERMES_HOME=/var/lib/hermes/astra
+              - HERMES_HOME=/var/lib/hermes/astra/.hermes/profiles/astra
               - HERMES_MANAGED_DIR=/etc/hermes/astra
               - "{{ hermes_shadow_runtime_binary }}"
               - cron
@@ -726,7 +730,7 @@
 
         - name: Read resulting Astra native cron store
           ansible.builtin.slurp:
-            src: /var/lib/hermes/astra/cron/jobs.json
+            src: /var/lib/hermes/astra/.hermes/profiles/astra/cron/jobs.json
           register: hermes_cutover_resulting_cron_store
           no_log: true
 
@@ -907,7 +911,7 @@
               - --
               - /usr/bin/env
               - HOME=/var/lib/hermes/astra
-              - HERMES_HOME=/var/lib/hermes/astra
+              - HERMES_HOME=/var/lib/hermes/astra/.hermes/profiles/astra
               - HERMES_MANAGED_DIR=/etc/hermes/astra
               - "{{ hermes_shadow_runtime_binary }}"
               - send

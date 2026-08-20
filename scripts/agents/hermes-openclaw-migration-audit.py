@@ -26,6 +26,7 @@ ACTIONS = {
     "retain-external",
     "review-rebuild",
     "sealed-archive",
+    "source-preserving-conversion",
 }
 ACTIVATIONS = {"cutover-only", "offline-only", "post-parity"}
 EXPECTED_SOURCE_PROTECTION = {
@@ -54,6 +55,7 @@ ACTION_ACTIVATIONS = {
     "retain-external": {"post-parity"},
     "review-rebuild": {"post-parity"},
     "sealed-archive": {"offline-only"},
+    "source-preserving-conversion": {"post-parity"},
 }
 REQUIRED_RULE_ACTIONS = {
     "active-environment": "re-enroll-secret",
@@ -65,6 +67,7 @@ REQUIRED_RULE_ACTIONS = {
     "discord-enrollment": "re-enroll-secret",
     "gateway-environment": "re-enroll-secret",
     "identity-state": "re-enroll-secret",
+    "lcm-database": "source-preserving-conversion",
     "openclaw-config": "re-enroll-secret",
     "primary-workspace": "delegate-workspace-policy",
     "secret-store": "re-enroll-secret",

@@ -103,10 +103,10 @@
       ansible.builtin.assert:
         that:
           - hermes_profile_skills_contract.profiles.keys() | list | sort == ['astra', 'dubble', 'rigel']
-          - hermes_profile_skills_inventory | length == 5
+          - hermes_profile_skills_inventory | length == 7
           - hermes_profile_skills_inventory | map(attribute='profile') | list | unique | sort == ['astra', 'dubble', 'rigel']
-          - hermes_profile_skills_inventory | map(attribute='name') | list | sort == ['consequential-recommendation', 'evidence-led-investigation', 'guided-operation', 'public-support-triage', 'source-grounded-study']
-          - hermes_profile_skills_inventory | map(attribute='source') | list | unique | length == 5
+          - hermes_profile_skills_inventory | map(attribute='name') | list | sort == ['consequential-recommendation', 'evidence-led-investigation', 'fortnite-tracker', 'guided-operation', 'public-support-triage', 'source-grounded-study', 'source-grounded-study']
+          - hermes_profile_skills_inventory | map(attribute='source') | list | unique | length == 7
         fail_msg: >-
           The reviewed profile-skill inventory is incomplete, duplicated, or
           assigned to an unexpected profile.
@@ -130,10 +130,12 @@
       ansible.builtin.assert:
         that:
           - "'ActiveState=inactive' in item.stdout"
-          - "'UnitFileState=disabled' in item.stdout"
+          - >-
+            'UnitFileState=enabled' in item.stdout
+            or 'UnitFileState=disabled' in item.stdout
         fail_msg: >-
-          A Hermes Gateway is active or boot-enabled. Profile skills may be
-          staged only while all Hermes profiles are stopped and disabled.
+          A Hermes Gateway is active or has an unexpected installation state.
+          Profile skills may be staged only while all profiles are stopped.
       loop: "{{ hermes_profile_skills_services_before.results[0:3] }}"
       loop_control:
         label: "{{ item.item }}"
@@ -262,23 +264,27 @@
           register: hermes_profile_skills_source_validation
           changed_when: false
 
-        - name: Read current Hermes Gateway units for native skill bindings
-          ansible.builtin.slurp:
-            src: "/etc/systemd/system/hermes-gateway-{{ item.key }}.service"
+        - name: Read effective Hermes Gateway units for native skill bindings
+          ansible.builtin.command:
+            argv:
+              - /usr/bin/systemctl
+              - cat
+              - "hermes-gateway-{{ item.key }}.service"
           loop: "{{ hermes_profile_skills_contract.profiles | dict2items }}"
           register: hermes_profile_skills_gateway_unit_sources
+          changed_when: false
 
         - name: Require native read-only skill bindings and startup validation
           ansible.builtin.assert:
             that:
               - >-
                 ('BindReadOnlyPaths=' ~ item.item.value.managedRoot ~ ':' ~ item.item.value.runtimeRoot)
-                in (item.content | b64decode)
+                in item.stdout
               - >-
                 ('--mode runtime --profile ' ~ item.item.key)
-                in (item.content | b64decode)
-              - hermes_profile_skills_validator_live in (item.content | b64decode)
-              - hermes_profile_skills_contract_live in (item.content | b64decode)
+                in item.stdout
+              - hermes_profile_skills_validator_live in item.stdout
+              - hermes_profile_skills_contract_live in item.stdout
             fail_msg: >-
               The deployed Hermes Gateway unit does not mount the reviewed
               root-owned skill source into the native profile skill tree and

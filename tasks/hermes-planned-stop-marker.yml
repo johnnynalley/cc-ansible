@@ -1,0 +1,111 @@
+---
+- name: Require a Hermes profile for planned-stop preparation
+  ansible.builtin.assert:
+    that:
+      - hermes_planned_stop_profile is mapping
+      - hermes_planned_stop_profile.name | length > 0
+      - hermes_planned_stop_profile.user | length > 0
+      - hermes_planned_stop_profile.group | length > 0
+      - hermes_planned_stop_profile.unit | length > 0
+      - hermes_planned_stop_profile.account_home | length > 0
+      - hermes_planned_stop_profile.home | length > 0
+
+- name: Prepare a service-owned Hermes planned-stop marker
+  block:
+    - name: Read the native Hermes Gateway PID
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/systemctl
+          - show
+          - "{{ hermes_planned_stop_profile.unit }}"
+          - --property=MainPID
+          - --value
+      register: hermes_planned_stop_pid
+      changed_when: false
+      check_mode: false
+
+    - name: Remove stale Hermes planned-stop markers
+      ansible.builtin.file:
+        path: "{{ hermes_planned_stop_marker_path }}"
+        state: absent
+      loop:
+        - "{{ hermes_planned_stop_profile.home }}/.gateway-planned-stop.json"
+        - >-
+          {{ hermes_planned_stop_profile.account_home
+             }}/.gateway-planned-stop.json
+      loop_control:
+        loop_var: hermes_planned_stop_marker_path
+      when:
+        - not ansible_check_mode
+        - hermes_planned_stop_pid.stdout | int > 0
+
+    # PID 1 is a valid, nonmatching marker that the Gateway watcher leaves in
+    # place. The root CLI atomically rewrites it while preserving ownership.
+    - name: Seed a service-owned Hermes planned-stop marker placeholder
+      ansible.builtin.command:
+        argv:
+          - /usr/sbin/runuser
+          - --user
+          - "{{ hermes_planned_stop_profile.user }}"
+          - --
+          - /usr/bin/env
+          - "HOME={{ hermes_planned_stop_profile.account_home }}"
+          - "HERMES_HOME={{ hermes_planned_stop_profile.home }}"
+          - >-
+            HERMES_MANAGED_DIR=/etc/hermes/{{
+            hermes_planned_stop_profile.name }}
+          - "{{ hermes_shadow_runtime_venv }}/bin/python"
+          - -c
+          - >-
+            import sys; from gateway.status import write_planned_stop_marker;
+            raise SystemExit(
+            0 if write_planned_stop_marker(int(sys.argv[1])) else 1)
+          - "1"
+      changed_when: true
+      when:
+        - not ansible_check_mode
+        - hermes_planned_stop_pid.stdout | int > 0
+
+    - name: Inspect the service-owned Hermes planned-stop marker
+      ansible.builtin.stat:
+        path: >-
+          {{ hermes_planned_stop_profile.home }}/.gateway-planned-stop.json
+        follow: false
+      register: hermes_planned_stop_marker
+      when:
+        - not ansible_check_mode
+        - hermes_planned_stop_pid.stdout | int > 0
+
+    - name: Require a private service-owned Hermes planned-stop marker
+      ansible.builtin.assert:
+        that:
+          - hermes_planned_stop_marker.stat.exists
+          - hermes_planned_stop_marker.stat.isreg
+          - not hermes_planned_stop_marker.stat.islnk
+          - >-
+            hermes_planned_stop_marker.stat.pw_name
+            == hermes_planned_stop_profile.user
+          - >-
+            hermes_planned_stop_marker.stat.gr_name
+            == hermes_planned_stop_profile.group
+          - hermes_planned_stop_marker.stat.mode == '0600'
+      when:
+        - not ansible_check_mode
+        - hermes_planned_stop_pid.stdout | int > 0
+
+  rescue:
+    - name: Fail when strict Hermes planned-stop preparation fails
+      ansible.builtin.fail:
+        msg: >-
+          Could not prepare a service-owned planned-stop marker for
+          {{ hermes_planned_stop_profile.name }}. Refusing to let root create
+          an unreadable marker that makes Hermes classify the stop as
+          unexpected.
+      when: hermes_planned_stop_strict | default(true) | bool
+
+    - name: Report best-effort Hermes planned-stop preparation failure
+      ansible.builtin.debug:
+        msg: >-
+          Best-effort planned-stop preparation failed for
+          {{ hermes_planned_stop_profile.name }} during rollback.
+      when: not (hermes_planned_stop_strict | default(true) | bool)

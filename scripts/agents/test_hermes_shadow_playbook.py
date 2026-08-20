@@ -13,7 +13,7 @@ ROOT = Path(__file__).parents[2]
 PLAYBOOK = ROOT / "playbooks" / "agents" / "hermes-shadow.yml"
 VARS = ROOT / "inventory" / "group_vars" / "hermes_hosts" / "vars.yml"
 CONFIG = ROOT / "templates" / "hermes" / "hermes-managed-config.yaml.j2"
-SERVICE = ROOT / "templates" / "hermes" / "hermes-gateway.service.j2"
+SERVICE = ROOT / "templates" / "hermes" / "hermes-gateway-hardening.conf.j2"
 LAUNCHER = ROOT / "templates" / "hermes" / "hermes-launcher.sh.j2"
 UPDATE_SERVICE = ROOT / "templates" / "hermes" / "hermes-native-update.service.j2"
 UPDATE_TIMER = ROOT / "templates" / "hermes" / "hermes-native-update.timer.j2"
@@ -92,7 +92,7 @@ class HermesShadowPlaybookTests(unittest.TestCase):
         self.assertEqual(members, ["jn-t14s-lin"])
         self.assertNotIn("hermes-shadow.yml", SITE.read_text(encoding="utf-8"))
 
-    def test_profiles_are_distinct_and_have_no_host_execution(self) -> None:
+    def test_profiles_are_distinct_and_only_astra_has_native_execution(self) -> None:
         profiles = self.variables["hermes_shadow_profiles"]
         self.assertEqual(
             [item["name"] for item in profiles], ["astra", "dubble", "rigel"]
@@ -102,20 +102,37 @@ class HermesShadowPlaybookTests(unittest.TestCase):
         self.assertEqual(len({item["subid_start"] for item in profiles}), 3)
         for profile in profiles:
             self.assertEqual(profile["user"], f"hermes-{profile['name']}")
-            self.assertEqual(profile["home"], f"/var/lib/hermes/{profile['name']}")
+            self.assertEqual(
+                profile["account_home"], f"/var/lib/hermes/{profile['name']}"
+            )
+            self.assertEqual(
+                profile["home"],
+                f"/var/lib/hermes/{profile['name']}/.hermes/profiles/"
+                f"{profile['name']}",
+            )
             self.assertEqual(
                 profile["unit"], f"hermes-gateway-{profile['name']}.service"
             )
+            self.assertIn("computer_use", profile["disabled_toolsets"])
+            self.assertIn("discord_admin", profile["disabled_toolsets"])
+        self.assertTrue(
+            {"terminal", "file", "code_execution", "cronjob"}
+            <= set(profiles[0]["toolsets"])
+        )
+        self.assertTrue(
+            {"terminal", "file", "code_execution", "cronjob"}.isdisjoint(
+                profiles[0]["disabled_toolsets"]
+            )
+        )
+        self.assertEqual(profiles[0]["terminal_backend"], "local")
+        self.assertEqual(profiles[0]["cron_approval_mode"], "manual")
+        for profile in profiles[1:]:
             self.assertTrue(
-                {
-                    "terminal",
-                    "file",
-                    "code_execution",
-                    "computer_use",
-                    "discord_admin",
-                }
+                {"terminal", "file", "code_execution", "cronjob"}
                 <= set(profile["disabled_toolsets"])
             )
+            self.assertEqual(profile["terminal_backend"], "docker")
+            self.assertEqual(profile["cron_approval_mode"], "deny")
         self.assertIn("web", profiles[0]["toolsets"])
         self.assertNotIn("web", profiles[1]["toolsets"])
         self.assertNotIn("web", profiles[2]["toolsets"])
@@ -208,7 +225,9 @@ class HermesShadowPlaybookTests(unittest.TestCase):
                 profile.get("fallback_providers", []),
             )
             self.assertEqual(config["approvals"]["mode"], "manual")
-            self.assertEqual(config["approvals"]["cron_mode"], "deny")
+            self.assertEqual(
+                config["approvals"]["cron_mode"], profile["cron_approval_mode"]
+            )
             if profile["name"] == "astra":
                 self.assertEqual(config["web"]["search_backend"], "ddgs")
             else:
@@ -226,17 +245,32 @@ class HermesShadowPlaybookTests(unittest.TestCase):
             )
             self.assertTrue(config["memory"]["write_approval"])
             self.assertTrue(config["skills"]["write_approval"])
-            self.assertFalse(config["terminal"]["docker_network"])
-            self.assertFalse(config["terminal"]["docker_mount_cwd_to_workspace"])
-            self.assertFalse(config["terminal"]["docker_run_as_host_user"])
-            self.assertEqual(config["terminal"]["docker_forward_env"], [])
-            self.assertEqual(config["terminal"]["docker_volumes"], [])
+            self.assertEqual(
+                config["terminal"]["backend"], profile["terminal_backend"]
+            )
+            if profile["name"] == "astra":
+                self.assertEqual(config["terminal"]["cwd"], profile["terminal_cwd"])
+                self.assertEqual(config["model"]["max_tokens"], 8192)
+                self.assertEqual(config["memory"]["provider"], "mem0")
+                self.assertEqual(config["context"]["engine"], "lcm")
+                self.assertEqual(
+                    config["auxiliary"]["vision"], profile["auxiliary_vision"]
+                )
+                self.assertNotIn("docker_network", config["terminal"])
+            else:
+                self.assertFalse(config["terminal"]["docker_network"])
+                self.assertFalse(
+                    config["terminal"]["docker_mount_cwd_to_workspace"]
+                )
+                self.assertFalse(config["terminal"]["docker_run_as_host_user"])
+                self.assertEqual(config["terminal"]["docker_forward_env"], [])
+                self.assertEqual(config["terminal"]["docker_volumes"], [])
             self.assertEqual(config["delegation"]["max_iterations"], 12)
             self.assertEqual(config["delegation"]["max_concurrent_children"], 2)
             self.assertEqual(config["delegation"]["max_spawn_depth"], 1)
             self.assertFalse(config["delegation"]["orchestrator_enabled"])
             expected_plugins = (
-                ["star-dispatch-privacy", "agent-docker-inventory"]
+                ["star-dispatch-privacy", "agent-docker-inventory", "hermes-lcm"]
                 if profile["name"] == "astra"
                 else []
             )
@@ -336,6 +370,9 @@ class HermesShadowPlaybookTests(unittest.TestCase):
             "hermes_shadow_runtime_venv": self.variables[
                 "hermes_shadow_runtime_venv"
             ],
+            "hermes_shadow_runtime_root": self.variables[
+                "hermes_shadow_runtime_root"
+            ],
             "hermes_discord_audit_live": self.variables["hermes_discord_audit_live"],
             "hermes_discord_contract_live": self.variables[
                 "hermes_discord_contract_live"
@@ -409,6 +446,9 @@ class HermesShadowPlaybookTests(unittest.TestCase):
             "hermes_docker_inventory_known_hosts": self.variables[
                 "hermes_docker_inventory_known_hosts"
             ],
+            "hermes_lcm_plugin_managed_root": self.variables[
+                "hermes_lcm_plugin_managed_root"
+            ],
             "hermes_tirith_binary": self.variables["hermes_tirith_binary"],
             "hermes_gateway_readiness_marker": self.variables[
                 "hermes_gateway_readiness_marker"
@@ -416,14 +456,20 @@ class HermesShadowPlaybookTests(unittest.TestCase):
         }
         for profile in self.variables["hermes_shadow_profiles"]:
             rendered = template.render(hermes_profile=profile, **common)
-            self.assertIn(f"User={profile['user']}", rendered)
-            self.assertIn(f"Group={profile['group']}", rendered)
+            self.assertNotIn("\nUser=", rendered)
+            self.assertNotIn("\nGroup=", rendered)
+            self.assertNotIn("\nExecStart=", rendered)
+            self.assertNotIn("\nExecStop=", rendered)
+            self.assertNotIn("\nRestart=", rendered)
             self.assertIn(
                 f"SupplementaryGroups={self.variables['hermes_runtime_readers_group']}",
                 rendered,
             )
-            self.assertIn(f"HERMES_HOME={profile['home']}", rendered)
-            self.assertIn("HERMES_DOCKER_BINARY=/usr/bin/podman", rendered)
+            self.assertNotIn("HERMES_HOME=", rendered)
+            if profile["name"] == "astra":
+                self.assertNotIn("HERMES_DOCKER_BINARY=", rendered)
+            else:
+                self.assertIn("HERMES_DOCKER_BINARY=/usr/bin/podman", rendered)
             self.assertIn("TIRITH_OFFLINE=1", rendered)
             self.assertIn("NoNewPrivileges=true", rendered)
             self.assertIn("ProtectSystem=strict", rendered)
@@ -458,7 +504,10 @@ class HermesShadowPlaybookTests(unittest.TestCase):
                 rendered,
             )
             self.assertIn("hermes-discord-cutover-audit", rendered)
-            self.assertNotIn("hermes-automation-contract-audit", rendered)
+            if profile["name"] == "astra":
+                self.assertNotIn("hermes-automation-contract-audit", rendered)
+            else:
+                self.assertIn("hermes-automation-contract-audit", rendered)
             self.assertIn("sha256sum --check --status --strict", rendered)
             self.assertIn("managed-policy.sha256", rendered)
             self.assertIn(
@@ -510,7 +559,8 @@ class HermesShadowPlaybookTests(unittest.TestCase):
                 self.assertIn("hermes-star-dispatch-privacy-validate", rendered)
                 self.assertIn(
                     "BindReadOnlyPaths=/etc/hermes/astra/plugins/"
-                    "star-dispatch-privacy:/var/lib/hermes/astra/plugins/"
+                    "star-dispatch-privacy:"
+                    "/var/lib/hermes/astra/.hermes/profiles/astra/plugins/"
                     "star-dispatch-privacy",
                     rendered,
                 )
@@ -552,6 +602,7 @@ class HermesShadowPlaybookTests(unittest.TestCase):
         self.assertIn("--locked", sync)
         self.assertIn("--extra", sync)
         self.assertIn("- messaging", sync)
+        self.assertIn("- mem0", sync)
         self.assertIn("UV_CACHE_DIR", sync)
         self.assertIn("hermes_shadow_uv_cache_dir", sync)
         self.assertIn("XDG_CONFIG_HOME", sync)
@@ -646,11 +697,13 @@ class HermesShadowPlaybookTests(unittest.TestCase):
                 "hermes_native_update_group",
                 "hermes_runtime_readers_group",
                 "hermes_native_update_home",
+                "hermes_native_update_profile_home",
                 "hermes_shadow_runtime_binary",
                 "hermes_shadow_runtime_root",
                 "hermes_shadow_runtime_venv",
                 "hermes_shadow_uv_bin_dir",
                 "hermes_shadow_uv_binary",
+                "hermes_mem0_gemini_dependency",
                 "hermes_native_post_setup_keys",
                 "hermes_tirith_binary",
                 "hermes_tirith_update_service",
@@ -704,7 +757,10 @@ class HermesShadowPlaybookTests(unittest.TestCase):
         self.assertIn("/var/lib/hermes/bootstrap/bin", hermes_service)
         self.assertIn("tools post-setup", hermes_service)
         self.assertIn("tools post-setup ddgs", hermes_service)
-        self.assertIn("[messaging]", hermes_service)
+        self.assertIn("[messaging,mem0]", hermes_service)
+        self.assertIn("google-genai>=1.0.0,<2.13.0", hermes_service)
+        self.assertIn("pip install --strict --no-deps", hermes_service)
+        self.assertIn("pip check --python", hermes_service)
         self.assertIn("chgrp -R --no-dereference hermes-runtime-readers", hermes_service)
         self.assertNotIn("/usr/bin/sudo", hermes_service)
         self.assertNotIn("RestrictSUIDSGID=true", hermes_service)
@@ -898,7 +954,7 @@ class HermesShadowPlaybookTests(unittest.TestCase):
     def test_rigel_schedule_is_root_owned_and_not_activated(self) -> None:
         script = self.task("Deploy deterministic Rigel academic schedule")
         declaration = self.task("Deploy paused Rigel academic job declaration")
-        self.assertIn("/var/lib/hermes/rigel/scripts", script)
+        self.assertIn("hermes_shadow_profiles[2].home", script)
         self.assertIn("owner: root", script)
         self.assertIn('mode: "0550"', script)
         self.assertIn("/etc/hermes/rigel", declaration)

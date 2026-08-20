@@ -26,17 +26,17 @@ EXPECTED_SAFETY = {
 EXPECTED_PROFILES = {
     "astra": {
         "serviceUser": "hermes-astra",
-        "targetRoot": "/var/lib/hermes/astra",
+        "targetRoot": "/var/lib/hermes/astra/.hermes/profiles/astra",
         "behaviorSource": "files/hermes/profiles/astra/SOUL.md",
     },
     "dubble": {
         "serviceUser": "hermes-dubble",
-        "targetRoot": "/var/lib/hermes/dubble",
+        "targetRoot": "/var/lib/hermes/dubble/.hermes/profiles/dubble",
         "behaviorSource": "files/hermes/profiles/dubble/SOUL.md",
     },
     "rigel": {
         "serviceUser": "hermes-rigel",
-        "targetRoot": "/var/lib/hermes/rigel",
+        "targetRoot": "/var/lib/hermes/rigel/.hermes/profiles/rigel",
         "behaviorSource": "files/hermes/profiles/rigel/SOUL.md",
     },
 }

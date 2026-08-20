@@ -3,9 +3,11 @@
 ## Templates
 
 - `hermes-managed-config.yaml.j2`: per-profile root-owned managed scope. It
-  pins manual approvals, deny-on-cron, review-gated memory/skills, quiet output,
-  suppressed background-learning chat notices, role-specific toolsets, and an
-  air-gapped rootless Podman backend. It disables lazy installs and private URL
+  pins manual approvals, profile-specific cron policy, review-gated
+  memory/skills, quiet output, suppressed background-learning chat notices,
+  and role-specific toolsets. Astra uses native non-root local terminal, file,
+  and code tools plus LCM/Mem0; Dubble and Rigel expose no execution tools and
+  retain an inert air-gapped rootless Podman backend. It disables lazy installs and private URL
   access, points Tirith at the absolute self-managed binary, requires scanner
   failures to deny the command, and makes full native pre-update backups the
   default. Delegation is flat, capped at two
@@ -16,12 +18,14 @@
   input, no history or missed-message backfill, per-user sessions, explicit
   thread mentions, bounded attachments, and no slash registration. It carries
   the reviewed Hermes config schema version.
-- `hermes-gateway.service.j2`: one hardened system service per OS identity. It
-  fixes `HERMES_HOME`, root-writable profile-scoped managed credentials, and
-  Podman paths; requires a root-owned shadow-ready marker; runs the shadow,
-  Discord, and automation/Health contract audits before startup; rejects any
-  managed config or environment checksum drift before Hermes's fail-open
-  managed-scope parser can run; and exposes no dashboard or API listener.
+- `hermes-gateway-hardening.conf.j2`: security and readiness drop-in for the
+  system unit created by Hermes's native `gateway install --system` command.
+  Ansible does not replace native lifecycle directives such as `ExecStart`,
+  `ExecStop`, restart policy, watchdog behavior, service identity, `HOME`, or
+  `HERMES_HOME`. The drop-in requires a root-owned readiness marker; runs the
+  shadow, Discord, and automation/Health contract audits before startup;
+  rejects managed config or environment checksum drift; and exposes no
+  dashboard or API listener.
   It also bind-mounts the profile's root-owned reviewed skill tree read-only
   under Hermes's native local skill root and requires the exact contract plus
   native skill-index validator to pass before the Gateway process starts. Its
@@ -35,7 +39,9 @@
   before Hermes starts and forces the scanner to operate offline. Each service
   also runs the Discord dependency audit through the managed Hermes interpreter
   and cannot become active until its main process owns an established TLS
-  session.
+  session. `hermes-native-gateway-migration.yml` copies legacy flat profile
+  state into Hermes's native named-profile layout before installing these
+  units and retains the old state for rollback.
 - `hermes-launcher.sh.j2`: the normal native Hermes launcher. Its only special
   branch recognizes the exact `update --gateway` argv emitted by Hermes's
   Discord `/update` command and lets only `hermes-astra` invoke the narrow
@@ -49,10 +55,13 @@
   ambient capabilities, and bounds its setuid child to `CAP_SETUID` and
   `CAP_SETGID` so exact sudoers-authorized Gateway restarts work. It gives the
   native updater write access only to the checkout and Astra's private profile
-  state. It reconciles Hermes's official
-  `messaging` extra after the native update because upstream intentionally
-  excludes messaging from `all`, then normalizes the credential-free shared
-  runtime group and restarts the two production consumers through the existing
+  state. It reconciles Hermes's official `messaging` and `mem0` extras after
+  the native update because upstream intentionally excludes them from `all`.
+  It also installs Mem0's declared `google-genai` provider dependency required
+  by the selected Gemini embedder on the release track compatible with
+  Hermes's lock, without pulling Mem0's broad `llms` extra,
+  then normalizes the credential-free shared runtime group and restarts the two
+  production consumers through the existing
   exact-command sudo boundary. The normal Discord Gateway unit
   keeps `/usr/local` read-only, so Astra can change program files only inside the
   dedicated update namespace. The root-managed Astra directory is entirely
@@ -85,18 +94,22 @@
 - `hermes-profile-backup@.service.j2` and
   `hermes-profile-backup@.timer.j2`: run native per-profile backups under the
   matching no-login identity with independent locks.
+- `hermes-mem0.json.j2`: renders Astra's mode-`0600` native OSS Mem0 provider
+  configuration with OpenRouter LLM, Gemini embeddings, the dedicated Hermes
+  Qdrant collection, and no embedded credentials.
 
 ## Consumer
 
 - `playbooks/agents/hermes-shadow.yml`
 - `playbooks/agents/hermes-production-runtime.yml`
+- `playbooks/agents/hermes-memory-continuity.yml`
 - `playbooks/agents/hermes-automation.yml`
 
 ## Safety Notes
 
 - These templates contain no provider credentials, bot tokens, user/channel
   IDs, memories, sessions, or transcript data.
-- Managed scope is not a sandbox. The OS identity, systemd boundary, and
-  rootless Podman backend remain required.
+- Managed scope is not a sandbox. Dedicated OS identities and systemd are the
+  authority boundary for Astra's local tools; Dubble and Rigel expose none.
 - The shadow services are boot-disabled and cannot start until an attended
   playbook run creates the per-profile root-owned readiness marker.

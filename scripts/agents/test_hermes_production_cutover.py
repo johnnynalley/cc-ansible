@@ -11,7 +11,7 @@ import yaml
 ROOT = Path(__file__).parents[2]
 PLAYBOOK = ROOT / "playbooks" / "agents" / "hermes-production-cutover.yml"
 VARS = ROOT / "inventory" / "group_vars" / "hermes_hosts" / "vars.yml"
-SERVICE = ROOT / "templates" / "hermes" / "hermes-gateway.service.j2"
+SERVICE = ROOT / "templates" / "hermes" / "hermes-gateway-hardening.conf.j2"
 
 
 class HermesProductionCutoverTests(unittest.TestCase):

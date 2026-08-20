@@ -22,7 +22,7 @@ PROFILE_IMPORT = ROOT / "files" / "hermes" / "profile-import-contract.json"
 WORKSPACE_POLICY = ROOT / "files" / "openclaw" / "workspace-migration-policy.json"
 PLAYBOOK = ROOT / "playbooks" / "agents" / "hermes-profile-transforms.yml"
 VARS = ROOT / "inventory" / "group_vars" / "hermes_hosts" / "vars.yml"
-UNIT = ROOT / "templates" / "hermes" / "hermes-gateway.service.j2"
+UNIT = ROOT / "templates" / "hermes" / "hermes-gateway-hardening.conf.j2"
 RIGEL_JOB = ROOT / "files" / "hermes" / "jobs" / "rigel-academic-alerts.json"
 SPEC = importlib.util.spec_from_file_location("hermes_profile_transform", SCRIPT)
 assert SPEC and SPEC.loader
@@ -364,8 +364,24 @@ class HermesProfileTransformTests(unittest.TestCase):
         self.assertFalse(variables["hermes_profile_transforms_approved"])
         self.assertIn("Back up current Hermes profile transforms", playbook)
         self.assertIn("Restore prior Hermes profile transforms", playbook)
+        self.assertIn(
+            "Classify existing Hermes profile-transform generation", playbook
+        )
+        self.assertIn("existing_verify.stdout | from_json", playbook)
+        self.assertIn("== 'manifest-contract-invalid'", playbook)
+        self.assertIn("existingGenerationStatus", playbook)
         self.assertNotIn("state: started", playbook)
         self.assertNotIn("state: restarted", playbook)
+        self.assertIn("Read effective Hermes Gateway units", playbook)
+        gateway_read = playbook.index(
+            "Read effective Hermes Gateway units for profile-transform bindings"
+        )
+        gateway_gate = playbook.index(
+            "Require reviewed transform bindings and startup gates"
+        )
+        self.assertIn("check_mode: false", playbook[gateway_read:gateway_gate])
+        self.assertIn("HERMES_PROJECTION_PREFLIGHTS_PENDING=1", playbook)
+        self.assertIn("HERMES_PROJECTION_PREFLIGHTS_PENDING=1", unit)
         self.assertIn("hermes_profile_transformer_live", unit)
         self.assertIn("BindPaths={{ hermes_profile_transforms_root }}", unit)
         self.assertIn("BindReadOnlyPaths={{ hermes_profile_transforms_root }}", unit)

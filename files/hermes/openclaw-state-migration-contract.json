@@ -325,11 +325,11 @@
         "scope": "exact",
         "pattern": "lcm.db",
         "expectedKind": "file",
-        "action": "sealed-archive",
-        "destination": "root-only OpenClaw database archive",
-        "activation": "offline-only",
+        "action": "source-preserving-conversion",
+        "destination": "Astra Hermes LCM database through reviewed importer",
+        "activation": "post-parity",
         "backupMethod": "sqlite-consistent-backup-after-openclaw-stop",
-        "reason": "Lossless-context state is preserved for rollback and offline search only."
+        "reason": "Conversation context is converted into a separate Hermes LCM store while the stopped source remains unchanged for rollback."
       },
       {
         "id": "lcm-database-sidecars",

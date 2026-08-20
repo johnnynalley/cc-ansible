@@ -1,0 +1,29 @@
+{
+  "mode": "oss",
+  "user_id": "{{ hermes_mem0_user_id }}",
+  "agent_id": "{{ hermes_mem0_agent_id }}",
+  "rerank": false,
+  "oss": {
+    "llm": {
+      "provider": "openai",
+      "config": {
+        "model": "google/gemini-2.5-flash",
+        "openai_base_url": "https://openrouter.ai/api/v1"
+      }
+    },
+    "embedder": {
+      "provider": "gemini",
+      "config": {
+        "model": "gemini-embedding-001",
+        "embedding_dims": 3072
+      }
+    },
+    "vector_store": {
+      "provider": "qdrant",
+      "config": {
+        "url": "http://127.0.0.1:6333",
+        "collection_name": "{{ hermes_mem0_target_collection }}"
+      }
+    }
+  }
+}

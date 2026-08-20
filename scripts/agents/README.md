@@ -5,13 +5,15 @@
 - `hermes-shadow-target-audit.py` validates the structured, credential-free
   Gate 3 target declaration. It fails closed on unknown top-level schema,
   production delivery/scheduling/listeners, pre-gate VM selection, Docker
-  group/socket access, local-terminal fallback, host mounts, forwarded secrets,
+  group/socket access, non-local Astra execution, any Dubble/Rigel execution,
+  host mounts, forwarded secrets,
   unsafe approvals, cross-profile identity reuse, broad Dubble/Rigel authority,
   broker self-approval, or missing backup/rollback controls.
 - `test_hermes_shadow_target_audit.py` covers the real policy plus negative
   regressions for those privilege and cutover boundaries.
 - `test_hermes_shadow_playbook.py` renders every managed profile config and
-  service unit, then rejects host execution, production authority, unreviewed
+  service unit, then proves Astra's dedicated non-root local tools while
+  rejecting execution for Dubble/Rigel, production authority, unreviewed
   installer input, unsafe startup, scanner supply-chain drift, runtime scanner
   downloads, private URL access, fail-open scanning, or a weakened Podman
   boundary.
@@ -59,6 +61,17 @@
   contract, profile isolation, intentionally empty Dubble store, compact
   config limits, transactional rollback, exact checksum verification, and
   absence of Gateway activation.
+- `hermes-mem0-qdrant-migrate.py` performs a dry-run-first, source-preserving
+  conversion from the existing OpenClaw Qdrant collection into a separate
+  Astra Hermes collection. It selects only approved owner/main scopes,
+  normalizes legacy identity fields, snapshots before apply, reconciles exact
+  counts and canonical digests, and never prints memory text or vectors.
+- `test_hermes_mem0_qdrant_migrate.py` covers scope selection, legacy identity
+  normalization, dry-run behavior, exact idempotency, inconsistent-target
+  rejection, and source immutability.
+- `test_hermes_memory_continuity.py` covers exact approval, OpenClaw-offline and
+  native-ExecStop gates, LCM/Mem0 dry-run-before-apply ordering, backups,
+  reconciliation, live recall, service sequencing, and rollback.
 - `hermes-profile-skills-validate.py` validates reviewed declarative profile
   skills with Hermes's pinned native frontmatter parser and threat scanner,
   exact source and installed hashes, exclusive root-owned inventories, and the
@@ -179,10 +192,14 @@
   normal no-result paths produce no Discord output.
 - `hermes-fortnite-calendar-fetch.py` and
   `hermes-fortnite-calendar-compat.py` split public fetch from validated legacy
-  schedule application. `hermes-reddit-hdd-deals.py` and
-  `hermes-shop-check.py` produce bounded candidates for reviewed alerts.
+  schedule application. `hermes-reddit-hdd-deals.py` evaluates Reddit and the
+  existing-credential eBay Browse API independently, records bounded source
+  health, deduplicates results, and returns silent degraded-empty success when
+  every source is unavailable. `hermes-shop-check.py` produces bounded
+  candidates for reviewed alerts.
 - `test_hermes_cron_reconcile.py`,
   `test_hermes_production_automation.py`,
+  `test_hermes_reddit_hdd_deals.py`,
   `test_hermes_fortnite_calendar_automation.py`, and
   `test_hermes_warframe_automation.py` cover reconciliation, silent delivery,
   transaction/rollback gates, feed idempotency, and calendar isolation.

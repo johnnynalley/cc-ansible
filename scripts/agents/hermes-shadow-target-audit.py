@@ -191,8 +191,10 @@ def validate_runtime(data: dict[str, Any]) -> None:
 def validate_sandbox(data: dict[str, Any]) -> None:
     sandbox = data["sandbox"]
     require(isinstance(sandbox, dict), "sandbox-not-object")
-    require(sandbox.get("backend") == "docker", "sandbox-backend")
+    require(sandbox.get("backend") == "profile-specific", "sandbox-backend")
     require(sandbox.get("binary") == "/usr/bin/podman", "sandbox-binary")
+    require(sandbox.get("localProfiles") == ["astra"], "sandbox-local-profiles")
+    require(sandbox.get("containerProfiles") == [], "sandbox-container-profiles")
     for key in (
         "rootless",
         "profileScopedContainers",
@@ -269,7 +271,11 @@ def validate_profiles(data: dict[str, Any]) -> None:
         name = profile["name"]
         require(profile["serviceUser"] == f"hermes-{name}", f"profile-user-{name}")
         require(profile["serviceGroup"] == f"hermes-{name}", f"profile-group-{name}")
-        require(profile["home"] == f"/var/lib/hermes/{name}", f"profile-home-{name}")
+        require(
+            profile["home"]
+            == f"/var/lib/hermes/{name}/.hermes/profiles/{name}",
+            f"profile-home-{name}",
+        )
         require(
             profile["unit"] == f"hermes-gateway-{name}.service",
             f"profile-unit-{name}",
@@ -279,7 +285,6 @@ def validate_profiles(data: dict[str, Any]) -> None:
             profile.get("productionCronDeliveryEnabled") is False,
             f"profile-cron-delivery-{name}",
         )
-        require(profile.get("terminalEnabled") is False, f"profile-terminal-{name}")
         required = profile.get("requiredCapabilities")
         forbidden = profile.get("forbiddenCapabilities")
         require(isinstance(required, list) and required, f"profile-required-{name}")
@@ -291,7 +296,28 @@ def validate_profiles(data: dict[str, Any]) -> None:
         require("docker-daemon" in forbidden, f"profile-docker-not-forbidden-{name}")
 
     by_name = {profile["name"]: profile for profile in profiles}
+    require(by_name["astra"].get("terminalEnabled") is True, "profile-terminal-astra")
+    require(
+        by_name["astra"].get("terminalBackend") == "local",
+        "profile-terminal-backend-astra",
+    )
+    require(
+        by_name["astra"].get("cronApprovalMode") == "manual",
+        "profile-cron-mode-astra",
+    )
     for name in ("dubble", "rigel"):
+        require(
+            by_name[name].get("terminalEnabled") is False,
+            f"profile-terminal-{name}",
+        )
+        require(
+            by_name[name].get("terminalBackend") == "disabled",
+            f"profile-terminal-backend-{name}",
+        )
+        require(
+            by_name[name].get("cronApprovalMode") == "deny",
+            f"profile-cron-mode-{name}",
+        )
         require(
             "terminal" in by_name[name]["forbiddenCapabilities"],
             f"terminal-not-forbidden-{name}",
@@ -333,7 +359,7 @@ def validate_brokers_and_backup(data: dict[str, Any]) -> None:
 
 def validate(path: Path) -> None:
     data = read_policy(path)
-    require(data["schemaVersion"] == 2, "schema-version")
+    require(data["schemaVersion"] == 3, "schema-version")
     validate_deployment(data)
     validate_host(data)
     validate_runtime(data)

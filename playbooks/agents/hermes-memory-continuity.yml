@@ -1,0 +1,1122 @@
+---
+# yamllint disable rule:line-length
+# Purpose: Convert OpenClaw LCM and Mem0 state into Astra's native Hermes profile.
+# Hosts: hermes_hosts.
+# Key vars: hermes_memory_continuity_*, hermes_lcm_*, hermes_mem0_*.
+# Templates: templates/hermes/hermes-mem0.json.j2 and native Gateway units.
+# Scripts: scripts/agents/hermes-mem0-qdrant-migrate.py.
+# Validation: ansible-playbook playbooks/agents/hermes-memory-continuity.yml --syntax-check.
+
+- name: Migrate Astra memory into native Hermes providers
+  hosts: hermes_hosts
+  become: true
+  gather_facts: true
+
+  vars:
+    hermes_memory_continuity_id: >-
+      {{ ansible_facts['date_time']['iso8601_basic_short'] }}-pre-memory-continuity
+    hermes_memory_continuity_backup_dir: >-
+      {{ hermes_memory_continuity_rollback_root }}/{{ hermes_memory_continuity_id }}
+    hermes_memory_continuity_profile_backup_stage: >-
+      /var/lib/hermes/astra/.{{ hermes_memory_continuity_id }}-astra-profile.zip
+    hermes_memory_continuity_backup_paths:
+      - /etc/hermes/astra/.env
+      - /etc/hermes/astra/config.yaml
+      - /etc/hermes/astra/managed-policy.sha256
+      - /etc/systemd/system/hermes-gateway-astra.service.d/10-managed.conf
+      - "/etc/systemd/system/{{ hermes_native_update_service }}"
+      - "{{ hermes_star_privacy_validator_live }}"
+      - "{{ hermes_docker_inventory_validator_live }}"
+      - "{{ hermes_shadow_contract_live }}"
+      - "{{ hermes_shadow_audit_live }}"
+      - "{{ hermes_discord_contract_live }}"
+      - "{{ hermes_discord_audit_live }}"
+      - "{{ hermes_automation_contract_live }}"
+      - "{{ hermes_automation_audit_live }}"
+      - "{{ hermes_profile_data_contract_live }}"
+      - "{{ hermes_profile_data_stager_live }}"
+      - "{{ hermes_profile_transforms_contract_live }}"
+      - "{{ hermes_profile_transformer_live }}"
+      - >-
+        /usr/local/share/hermes-shadow/repository/{{ hermes_shadow_contract_source }}
+      - >-
+        /usr/local/share/hermes-shadow/repository/files/hermes/openclaw-state-migration-contract.json
+      - >-
+        /usr/local/share/hermes-shadow/repository/{{ hermes_discord_contract_source }}
+      - >-
+        /usr/local/share/hermes-shadow/repository/files/hermes/profile-import-contract.json
+      - >-
+        /usr/local/share/hermes-shadow/repository/files/openclaw/workspace-migration-policy.json
+      - "{{ hermes_mem0_config_live }}"
+      - "{{ hermes_mem0_migrator_live }}"
+    hermes_memory_continuity_paused_timers: >-
+      {{ (hermes_automation_enabled_timers
+          + [hermes_native_update_timer, hermes_tirith_update_timer])
+         | unique
+         | list }}
+    hermes_memory_continuity_user_environment:
+      XDG_RUNTIME_DIR: /run/user/1000
+      DBUS_SESSION_BUS_ADDRESS: unix:path=/run/user/1000/bus
+
+  tasks:
+    - name: Validate Astra memory-continuity mode
+      ansible.builtin.assert:
+        that:
+          - hermes_memory_continuity_mode in ['disabled', 'migrate']
+        fail_msg: >-
+          hermes_memory_continuity_mode must be disabled or migrate.
+
+    - name: Skip hosts without Astra memory-continuity approval
+      ansible.builtin.meta: end_host
+      when: hermes_memory_continuity_mode == 'disabled'
+
+    - name: Require exact Astra memory-continuity authorization
+      ansible.builtin.assert:
+        that:
+          - hermes_memory_continuity_approved | bool
+          - >-
+            hermes_memory_continuity_confirmation
+            == hermes_memory_continuity_required_confirmation
+          - inventory_hostname == 'jn-t14s-lin'
+          - hermes_lcm_source_database != hermes_lcm_target_database
+          - hermes_mem0_source_collection != hermes_mem0_target_collection
+          - hermes_mem0_source_user_ids | length == 3
+          - hermes_mem0_user_id == 'johnny'
+          - hermes_mem0_agent_id == 'astra'
+        fail_msg: >-
+          Memory continuity requires the exact host-scoped, source-preserving
+          migration approval.
+
+    - name: Inspect native memory migration prerequisites
+      ansible.builtin.stat:
+        path: "{{ item }}"
+        follow: false
+      loop:
+        - "{{ hermes_lcm_source_database }}"
+        - "{{ hermes_mem0_source_history_database }}"
+        - "{{ hermes_shadow_runtime_root }}/pyproject.toml"
+        - "{{ hermes_shadow_runtime_root }}/uv.lock"
+        - "{{ hermes_shadow_uv_binary }}"
+        - /var/lib/hermes/astra/.hermes/profiles/astra/config.yaml
+        - /var/lib/hermes/dubble/.hermes/profiles/dubble/config.yaml
+      register: hermes_memory_continuity_prerequisites
+      check_mode: false
+
+    - name: Require complete native memory migration prerequisites
+      ansible.builtin.assert:
+        that:
+          - >-
+            hermes_memory_continuity_prerequisites.results
+            | map(attribute='stat.exists') | min
+          - >-
+            hermes_memory_continuity_prerequisites.results
+            | map(attribute='stat.isreg', default=false) | min
+        fail_msg: >-
+          Native profile state, a source memory database, SQLite, uv, or the
+          locked Hermes runtime is missing.
+
+    - name: Inspect native Gateway lifecycle ownership
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/systemctl
+          - show
+          - "{{ item.unit }}"
+          - --property=FragmentPath
+          - --property=ExecStart
+          - --property=Type
+          - --property=User
+      loop: "{{ hermes_shadow_profiles[:2] }}"
+      register: hermes_memory_continuity_native_units
+      changed_when: false
+      check_mode: false
+
+    - name: Require official native Hermes lifecycle units
+      ansible.builtin.assert:
+        that:
+          - >-
+            ('FragmentPath=/etc/systemd/system/' ~ item.item.unit)
+            in item.stdout
+          - "'Type=notify' in item.stdout"
+          - "('User=' ~ item.item.user) in item.stdout"
+          - "'hermes_cli.main' in item.stdout"
+          - "('--profile ' ~ item.item.name ~ ' gateway run') in item.stdout"
+        fail_msg: >-
+          {{ item.item }} is not an official native Hermes lifecycle unit.
+          Run the native Gateway migration first.
+      loop: "{{ hermes_memory_continuity_native_units.results }}"
+      loop_control:
+        label: "{{ item.item.name }}"
+
+    - name: Require OpenClaw system delivery units offline
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/systemctl
+          - is-active
+          - "{{ item.name }}"
+      loop: "{{ hermes_production_cutover_source_system_units }}"
+      register: hermes_memory_continuity_openclaw_system
+      changed_when: false
+      failed_when: false
+      check_mode: false
+
+    - name: Require OpenClaw user Gateway offline
+      ansible.builtin.command:
+        argv:
+          - /usr/sbin/runuser
+          - --user
+          - "{{ hermes_production_cutover_user }}"
+          - --
+          - /usr/bin/env
+          - XDG_RUNTIME_DIR=/run/user/1000
+          - DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus
+          - /usr/bin/systemctl
+          - --user
+          - is-active
+          - "{{ hermes_production_cutover_user_gateway }}"
+      register: hermes_memory_continuity_openclaw_user
+      changed_when: false
+      failed_when: false
+      check_mode: false
+
+    - name: Reject memory migration while OpenClaw can write source state
+      ansible.builtin.assert:
+        that:
+          - >-
+            hermes_memory_continuity_openclaw_system.results
+            | selectattr('stdout', 'equalto', 'active') | list | length == 0
+          - hermes_memory_continuity_openclaw_user.stdout != 'active'
+
+    - name: Inspect source and target Mem0 collections
+      ansible.builtin.uri:
+        url: >-
+          {{ hermes_mem0_qdrant_url }}/collections/{{ item }}
+        method: GET
+        return_content: false
+        status_code:
+          - 200
+          - 404
+      loop:
+        - "{{ hermes_mem0_source_collection }}"
+        - "{{ hermes_mem0_target_collection }}"
+      register: hermes_memory_continuity_qdrant_collections
+      changed_when: false
+      check_mode: false
+
+    - name: Require the OpenClaw Mem0 source collection
+      ansible.builtin.assert:
+        that:
+          - hermes_memory_continuity_qdrant_collections.results[0].status == 200
+
+    - name: Stop after read-only memory-continuity check-mode preflight
+      ansible.builtin.meta: end_host
+      when: ansible_check_mode
+
+    - name: Create private memory-continuity rollback directory
+      ansible.builtin.file:
+        path: "{{ hermes_memory_continuity_backup_dir }}/files"
+        state: directory
+        owner: root
+        group: root
+        mode: "0700"
+
+    - name: Inspect rollback-managed memory files
+      ansible.builtin.stat:
+        path: "{{ item }}"
+        follow: false
+      loop: "{{ hermes_memory_continuity_backup_paths }}"
+      register: hermes_memory_continuity_prior_files
+      check_mode: false
+
+    - name: Back up existing rollback-managed memory files
+      ansible.builtin.copy:
+        src: "{{ item.item }}"
+        dest: >-
+          {{ hermes_memory_continuity_backup_dir }}/files/{{ item.item | hash('sha256') }}
+        remote_src: true
+        owner: root
+        group: root
+        mode: "0600"
+      loop: "{{ hermes_memory_continuity_prior_files.results }}"
+      loop_control:
+        label: "{{ item.item }}"
+      when: item.stat.exists and item.stat.isreg
+
+    - name: Create consistent OpenClaw LCM source backup
+      ansible.builtin.command:
+        argv:
+          - "{{ hermes_shadow_runtime_venv }}/bin/python"
+          - -c
+          - >-
+            import sqlite3, sys;
+            source = sqlite3.connect('file:' + sys.argv[1] + '?mode=ro', uri=True);
+            target = sqlite3.connect(sys.argv[2]);
+            source.backup(target);
+            target.close(); source.close()
+          - "{{ hermes_lcm_source_database }}"
+          - "{{ hermes_memory_continuity_backup_dir }}/openclaw-lcm.db"
+      changed_when: true
+
+    - name: Create consistent OpenClaw Mem0 history backup
+      ansible.builtin.command:
+        argv:
+          - "{{ hermes_shadow_runtime_venv }}/bin/python"
+          - -c
+          - >-
+            import sqlite3, sys;
+            source = sqlite3.connect('file:' + sys.argv[1] + '?mode=ro', uri=True);
+            target = sqlite3.connect(sys.argv[2]);
+            source.backup(target);
+            target.close(); source.close()
+          - "{{ hermes_mem0_source_history_database }}"
+          - "{{ hermes_memory_continuity_backup_dir }}/openclaw-mem0-history.db"
+      changed_when: true
+
+    - name: Create native Astra profile backup before memory conversion
+      block:
+        - name: Inspect Astra-owned profile backup staging path
+          ansible.builtin.stat:
+            path: "{{ hermes_memory_continuity_profile_backup_stage }}"
+            follow: false
+          register: hermes_memory_continuity_profile_backup_prior
+
+        - name: Require unused Astra profile backup staging path
+          ansible.builtin.assert:
+            that:
+              - not hermes_memory_continuity_profile_backup_prior.stat.exists
+
+        - name: Create native backup in Astra-owned storage
+          ansible.builtin.command:
+            argv:
+              - /usr/sbin/runuser
+              - --user
+              - hermes-astra
+              - --
+              - /usr/bin/env
+              - HOME=/var/lib/hermes/astra
+              - HERMES_HOME=/var/lib/hermes/astra/.hermes/profiles/astra
+              - "{{ hermes_shadow_runtime_binary }}"
+              - backup
+              - --output
+              - "{{ hermes_memory_continuity_profile_backup_stage }}"
+          changed_when: true
+
+        - name: Move Astra profile backup into root-private rollback storage
+          ansible.builtin.command:
+            argv:
+              - /usr/bin/mv
+              - "{{ hermes_memory_continuity_profile_backup_stage }}"
+              - "{{ hermes_memory_continuity_backup_dir }}/astra-profile.zip"
+          changed_when: true
+
+        - name: Restrict retained Astra profile backup
+          ansible.builtin.file:
+            path: "{{ hermes_memory_continuity_backup_dir }}/astra-profile.zip"
+            owner: root
+            group: root
+            mode: "0600"
+
+      rescue:
+        - name: Remove incomplete Astra-owned profile backup staging file
+          ansible.builtin.file:
+            path: "{{ hermes_memory_continuity_profile_backup_stage }}"
+            state: absent
+
+        - name: Stop after native Astra profile backup failure
+          ansible.builtin.fail:
+            msg: >-
+              Native Astra profile backup failed before memory conversion.
+              The incomplete account-owned staging file was removed and the
+              root-private source database snapshots were preserved.
+
+    - name: Read retained Astra provider credentials privately
+      ansible.builtin.slurp:
+        src: "{{ hermes_production_cutover_source_env }}"
+      register: hermes_memory_continuity_source_environment
+      no_log: true
+
+    - name: Require complete retained Astra provider credentials
+      ansible.builtin.assert:
+        that:
+          - hermes_memory_continuity_credentials | length == 1
+          - hermes_memory_continuity_credentials[0] | length > 0
+      loop:
+        - OLLAMA_API_KEY
+        - GEMINI_API_KEY
+        - OPENROUTER_API_KEY
+        - EBAY_APP_ID
+        - EBAY_CERT_ID
+      vars:
+        hermes_memory_continuity_credentials: >-
+          {{
+            hermes_memory_continuity_source_environment.content
+            | b64decode
+            | regex_findall('(?m)^' ~ item ~ '=([^\r\n]+)$')
+          }}
+      no_log: true
+
+    - name: Inspect timer state before memory conversion
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/systemctl
+          - is-active
+          - "{{ item }}"
+      loop: "{{ hermes_memory_continuity_paused_timers }}"
+      register: hermes_memory_continuity_timer_state
+      changed_when: false
+      failed_when: false
+      check_mode: false
+
+    - name: Pause Hermes timers during memory conversion
+      ansible.builtin.systemd_service:
+        name: "{{ item.item }}"
+        state: stopped
+      loop: "{{ hermes_memory_continuity_timer_state.results }}"
+      loop_control:
+        label: "{{ item.item }}"
+      when: item.stdout == 'active'
+
+    - name: Prepare service-owned markers for memory conversion stops
+      ansible.builtin.include_tasks: ../../tasks/hermes-planned-stop-marker.yml
+      vars:
+        hermes_planned_stop_profile: "{{ item }}"
+      loop: "{{ hermes_shadow_profiles[:2] }}"
+      loop_control:
+        label: "{{ item.name }}"
+
+    - name: Stop native production Gateways once for shared runtime conversion
+      ansible.builtin.command:
+        argv:
+          - "{{ hermes_shadow_runtime_binary }}"
+          - gateway
+          - stop
+          - --system
+      environment:
+        HOME: "{{ item.account_home }}"
+        HERMES_HOME: "{{ item.home }}"
+        HERMES_MANAGED_DIR: "/etc/hermes/{{ item.name }}"
+      loop: "{{ hermes_shadow_profiles[:2] }}"
+      loop_control:
+        label: "{{ item.name }}"
+      changed_when: true
+
+    - name: Inspect prior LCM target database
+      ansible.builtin.stat:
+        path: "{{ hermes_lcm_target_database }}"
+        follow: false
+      register: hermes_memory_continuity_prior_lcm
+
+    - name: Inspect prior LCM externalized-output tree
+      ansible.builtin.stat:
+        path: "{{ hermes_lcm_externalized_output_root }}"
+        follow: false
+      register: hermes_memory_continuity_prior_lcm_outputs
+
+    - name: Reject orphaned LCM externalized-output state
+      ansible.builtin.assert:
+        that:
+          - >-
+            not hermes_memory_continuity_prior_lcm_outputs.stat.exists
+            or hermes_memory_continuity_prior_lcm.stat.exists
+        fail_msg: >-
+          The LCM externalized-output tree exists without its target database.
+          Preserve and remove the orphaned tree before retrying migration.
+
+    - name: Back up prior LCM target database
+      ansible.builtin.command:
+        argv:
+          - "{{ hermes_shadow_runtime_venv }}/bin/python"
+          - -c
+          - >-
+            import sqlite3, sys;
+            source = sqlite3.connect('file:' + sys.argv[1] + '?mode=ro', uri=True);
+            target = sqlite3.connect(sys.argv[2]);
+            source.backup(target);
+            target.close(); source.close()
+          - "{{ hermes_lcm_target_database }}"
+          - "{{ hermes_memory_continuity_backup_dir }}/prior-hermes-lcm.db"
+      changed_when: true
+      when: hermes_memory_continuity_prior_lcm.stat.exists
+
+    - name: Back up prior LCM externalized-output tree
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/tar
+          - -C
+          - "{{ hermes_lcm_externalized_output_root | dirname }}"
+          - -cpf
+          - >-
+            {{ hermes_memory_continuity_backup_dir
+               }}/prior-hermes-lcm-large-outputs.tar
+          - "{{ hermes_lcm_externalized_output_root | basename }}"
+      changed_when: true
+      when: hermes_memory_continuity_prior_lcm_outputs.stat.exists
+
+    - name: Inspect prior managed LCM plugin
+      ansible.builtin.stat:
+        path: "{{ hermes_lcm_plugin_managed_root }}"
+        follow: false
+      register: hermes_memory_continuity_prior_lcm_plugin
+
+    - name: Back up prior managed LCM plugin
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/tar
+          - -C
+          - "{{ hermes_lcm_plugin_managed_root | dirname }}"
+          - -cpf
+          - "{{ hermes_memory_continuity_backup_dir }}/prior-hermes-lcm-plugin.tar"
+          - "{{ hermes_lcm_plugin_managed_root | basename }}"
+      changed_when: true
+      when: hermes_memory_continuity_prior_lcm_plugin.stat.exists
+
+    - name: Convert Astra memory in one rollback transaction
+      block:
+        - name: Install or update managed Hermes LCM release track
+          ansible.builtin.git:
+            repo: "{{ hermes_lcm_repository }}"
+            dest: "{{ hermes_lcm_plugin_managed_root }}"
+            version: "{{ hermes_lcm_release_track }}"
+            update: true
+            force: false
+
+        - name: Read deployed Hermes LCM revision
+          ansible.builtin.command:
+            argv:
+              - /usr/bin/git
+              - -C
+              - "{{ hermes_lcm_plugin_managed_root }}"
+              - rev-parse
+              - HEAD
+          register: hermes_memory_continuity_lcm_revision
+          changed_when: false
+
+        - name: Require Hermes LCM plugin and importer entrypoints
+          ansible.builtin.stat:
+            path: "{{ item }}"
+            follow: false
+          loop:
+            - "{{ hermes_lcm_plugin_managed_root }}/plugin.yaml"
+            - >-
+              {{ hermes_lcm_plugin_managed_root }}/{{
+                hermes_lcm_external_importer_components | join('/') }}
+          register: hermes_memory_continuity_lcm_entrypoints
+          failed_when: >-
+            not hermes_memory_continuity_lcm_entrypoints.stat.exists
+            or not hermes_memory_continuity_lcm_entrypoints.stat.isreg
+
+        - name: Synchronize official locked Hermes Mem0 dependency
+          ansible.builtin.command:
+            argv:
+              - "{{ hermes_shadow_uv_binary }}"
+              - sync
+              - --extra
+              - all
+              - --extra
+              - messaging
+              - --extra
+              - mem0
+              - --locked
+          args:
+            chdir: "{{ hermes_shadow_runtime_root }}"
+          environment:
+            HOME: /var/lib/hermes/bootstrap
+            HERMES_HOME: /var/lib/hermes/bootstrap
+            XDG_CONFIG_HOME: "{{ hermes_shadow_uv_config_home }}"
+            XDG_CONFIG_DIRS: "{{ hermes_shadow_uv_config_dirs }}"
+            UV_CACHE_DIR: "{{ hermes_shadow_uv_cache_dir }}"
+            UV_NO_ENV_FILE: "1"
+            UV_PROJECT_ENVIRONMENT: "{{ hermes_shadow_runtime_venv }}"
+            UV_PYTHON_INSTALL_DIR: /usr/local/share/uv/python
+            UV_PYTHON_BIN_DIR: /usr/local/share/uv/bin
+          changed_when: true
+
+        - name: Install supported Mem0 Gemini provider dependency
+          ansible.builtin.command:
+            argv:
+              - "{{ hermes_shadow_uv_binary }}"
+              - pip
+              - install
+              - --strict
+              - --no-deps
+              - --python
+              - "{{ hermes_shadow_runtime_venv }}/bin/python"
+              - "{{ hermes_mem0_gemini_dependency }}"
+          environment:
+            HOME: /var/lib/hermes/bootstrap
+            XDG_CONFIG_HOME: "{{ hermes_shadow_uv_config_home }}"
+            XDG_CONFIG_DIRS: "{{ hermes_shadow_uv_config_dirs }}"
+            UV_CACHE_DIR: "{{ hermes_shadow_uv_cache_dir }}"
+            UV_NO_ENV_FILE: "1"
+          changed_when: true
+
+        - name: Validate Mem0 Gemini provider dependency before conversion
+          ansible.builtin.command:
+            argv:
+              - "{{ hermes_shadow_runtime_venv }}/bin/python"
+              - -c
+              - from google import genai
+          changed_when: false
+
+        - name: Validate Hermes Python package compatibility before conversion
+          ansible.builtin.command:
+            argv:
+              - "{{ hermes_shadow_uv_binary }}"
+              - pip
+              - check
+              - --python
+              - "{{ hermes_shadow_runtime_venv }}/bin/python"
+          changed_when: false
+
+        - name: Deploy source-preserving Mem0 Qdrant migrator
+          ansible.builtin.copy:
+            src: "{{ ansible_config_file | dirname }}/{{ hermes_mem0_migrator_source }}"
+            dest: "{{ hermes_mem0_migrator_live }}"
+            owner: root
+            group: root
+            mode: "0755"
+
+        - name: Create Astra runtime plugin mountpoint
+          ansible.builtin.file:
+            path: >-
+              /var/lib/hermes/astra/.hermes/profiles/astra/plugins/hermes-lcm
+            state: directory
+            owner: hermes-astra
+            group: hermes-astra
+            mode: "0700"
+
+        - name: Dry-run OpenClaw LCM conversion
+          ansible.builtin.command:
+            argv:
+              - "{{ hermes_shadow_runtime_venv }}/bin/python"
+              - >-
+                {{ hermes_lcm_plugin_managed_root }}/{{
+                  hermes_lcm_external_importer_components | join('/') }}
+              - --source-db
+              - "{{ hermes_memory_continuity_backup_dir }}/openclaw-lcm.db"
+              - --target-db
+              - "{{ hermes_lcm_target_database }}"
+              - --namespace
+              - openclaw-lcm
+              - --agent
+              - astra
+              - --include-summaries
+              - --json
+          register: hermes_memory_continuity_lcm_dry_run
+          changed_when: false
+
+        - name: Require clean and useful LCM dry-run conversion
+          ansible.builtin.assert:
+            that:
+              - >-
+                (hermes_memory_continuity_lcm_dry_run.stdout | from_json)
+                .invalid_rows == 0
+              - >-
+                (hermes_memory_continuity_lcm_dry_run.stdout | from_json)
+                .warnings | length == 0
+              - >-
+                (hermes_memory_continuity_lcm_dry_run.stdout | from_json)
+                .eligible > 100000
+              - >-
+                (hermes_memory_continuity_lcm_dry_run.stdout | from_json)
+                .summaries_would_import > 4000
+
+        - name: Apply idempotent OpenClaw LCM conversion
+          ansible.builtin.command:
+            argv:
+              - "{{ hermes_shadow_runtime_venv }}/bin/python"
+              - >-
+                {{ hermes_lcm_plugin_managed_root }}/{{
+                  hermes_lcm_external_importer_components | join('/') }}
+              - --source-db
+              - "{{ hermes_memory_continuity_backup_dir }}/openclaw-lcm.db"
+              - --target-db
+              - "{{ hermes_lcm_target_database }}"
+              - --namespace
+              - openclaw-lcm
+              - --agent
+              - astra
+              - --include-summaries
+              - --json
+              - --apply
+          register: hermes_memory_continuity_lcm_apply
+          changed_when: >-
+            (hermes_memory_continuity_lcm_apply.stdout | from_json).imported > 0
+            or
+            (hermes_memory_continuity_lcm_apply.stdout | from_json)
+            .summaries_imported > 0
+
+        - name: Secure imported Hermes LCM database
+          ansible.builtin.file:
+            path: "{{ hermes_lcm_target_database }}"
+            owner: hermes-astra
+            group: hermes-astra
+            mode: "0600"
+
+        - name: Secure imported Hermes LCM externalized outputs
+          ansible.builtin.file:
+            path: "{{ hermes_lcm_externalized_output_root }}"
+            state: directory
+            owner: hermes-astra
+            group: hermes-astra
+            mode: "0700"
+            recurse: true
+
+        - name: Dry-run Astra-only Mem0 vector conversion
+          ansible.builtin.command:
+            argv: >-
+              {{
+                [hermes_mem0_migrator_live,
+                 '--qdrant-url', hermes_mem0_qdrant_url,
+                 '--source', hermes_mem0_source_collection,
+                 '--target', hermes_mem0_target_collection,
+                 '--user-id', hermes_mem0_user_id,
+                 '--agent-id', hermes_mem0_agent_id]
+                + (hermes_mem0_source_user_ids
+                   | map('regex_replace', '^', '--include-user-id=')
+                   | list)
+              }}
+          register: hermes_memory_continuity_mem0_dry_run
+          changed_when: false
+
+        - name: Require exact Astra-only Mem0 conversion boundary
+          ansible.builtin.assert:
+            that:
+              - >-
+                (hermes_memory_continuity_mem0_dry_run.stdout | from_json).status
+                in ['ready', 'already-migrated']
+              - >-
+                (hermes_memory_continuity_mem0_dry_run.stdout | from_json)
+                .sourceCount == 4435
+              - >-
+                (hermes_memory_continuity_mem0_dry_run.stdout | from_json)
+                .selectedCount == 4148
+              - >-
+                (hermes_memory_continuity_mem0_dry_run.stdout | from_json)
+                .excludedCount == 287
+
+        - name: Apply source-preserving Astra Mem0 vector conversion
+          ansible.builtin.command:
+            argv: >-
+              {{
+                [hermes_mem0_migrator_live,
+                 '--qdrant-url', hermes_mem0_qdrant_url,
+                 '--source', hermes_mem0_source_collection,
+                 '--target', hermes_mem0_target_collection,
+                 '--user-id', hermes_mem0_user_id,
+                 '--agent-id', hermes_mem0_agent_id,
+                 '--apply']
+                + (hermes_mem0_source_user_ids
+                   | map('regex_replace', '^', '--include-user-id=')
+                   | list)
+              }}
+          register: hermes_memory_continuity_mem0_apply
+          changed_when: >-
+            (hermes_memory_continuity_mem0_apply.stdout | from_json).status
+            == 'migrated'
+
+        - name: Render Astra Mem0 OSS configuration
+          ansible.builtin.template:
+            src: >-
+              {{ playbook_dir }}/../../templates/hermes/{{ hermes_mem0_config_template }}
+            dest: "{{ hermes_mem0_config_live }}"
+            owner: hermes-astra
+            group: hermes-astra
+            mode: "0600"
+
+        - name: Enroll Astra provider credentials and compatibility aliases
+          ansible.builtin.lineinfile:
+            path: /etc/hermes/astra/.env
+            regexp: "^{{ item.target }}="
+            line: >-
+              {{ item.target }}={{
+                (
+                  hermes_memory_continuity_source_environment.content
+                  | b64decode
+                  | regex_findall('(?m)^' ~ item.source ~ '=([^\r\n]+)$')
+                )[0]
+              }}
+            owner: root
+            group: hermes-astra
+            mode: "0440"
+          loop:
+            - {target: OLLAMA_API_KEY, source: OLLAMA_API_KEY}
+            - {target: GEMINI_API_KEY, source: GEMINI_API_KEY}
+            - {target: GOOGLE_API_KEY, source: GEMINI_API_KEY}
+            - {target: OPENROUTER_API_KEY, source: OPENROUTER_API_KEY}
+            - {target: OPENAI_API_KEY, source: OPENROUTER_API_KEY}
+            - {target: EBAY_APP_ID, source: EBAY_APP_ID}
+            - {target: EBAY_CERT_ID, source: EBAY_CERT_ID}
+          no_log: true
+
+        - name: Deploy current memory-dependent Hermes policy graph
+          ansible.builtin.copy:
+            src: "{{ playbook_dir }}/../../{{ item.source }}"
+            dest: "{{ item.destination }}"
+            owner: root
+            group: root
+            mode: "{{ item.mode }}"
+          loop: "{{ hermes_memory_continuity_policy_files }}"
+          loop_control:
+            label: "{{ item.destination }}"
+
+        - name: Validate deployed Hermes target policy
+          ansible.builtin.command:
+            argv:
+              - "{{ hermes_shadow_audit_live }}"
+              - "{{ hermes_shadow_contract_live }}"
+          changed_when: false
+
+        - name: Validate deployed Hermes Discord policy graph
+          ansible.builtin.command:
+            argv:
+              - "{{ hermes_discord_audit_live }}"
+              - "{{ hermes_discord_contract_live }}"
+              - --repository-root
+              - /usr/local/share/hermes-shadow/repository
+          changed_when: false
+
+        - name: Validate deployed Hermes automation policy graph
+          ansible.builtin.command:
+            argv:
+              - "{{ hermes_automation_audit_live }}"
+              - "{{ hermes_automation_contract_live }}"
+              - --repository-root
+              - /usr/local/share/hermes-shadow/repository
+          changed_when: false
+
+        - name: Deploy Astra native local-tool and memory policy
+          ansible.builtin.template:
+            src: >-
+              {{ playbook_dir }}/../../templates/hermes/hermes-managed-config.yaml.j2
+            dest: /etc/hermes/astra/config.yaml
+            owner: root
+            group: hermes-astra
+            mode: "0440"
+          vars:
+            hermes_profile: "{{ hermes_shadow_profiles[0] }}"
+
+        - name: Refresh Astra managed-policy checksum
+          ansible.builtin.command:
+            argv:
+              - /usr/bin/sha256sum
+              - /etc/hermes/astra/config.yaml
+              - /etc/hermes/astra/.env
+          register: hermes_memory_continuity_managed_checksum
+          changed_when: false
+          no_log: true
+
+        - name: Install Astra managed-policy checksum
+          ansible.builtin.copy:
+            content: "{{ hermes_memory_continuity_managed_checksum.stdout }}\n"
+            dest: /etc/hermes/astra/managed-policy.sha256
+            owner: root
+            group: hermes-astra
+            mode: "0440"
+          no_log: true
+
+        - name: Deploy memory-aware native Gateway hardening
+          ansible.builtin.template:
+            src: >-
+              {{ playbook_dir }}/../../templates/hermes/hermes-gateway-hardening.conf.j2
+            dest: >-
+              /etc/systemd/system/hermes-gateway-astra.service.d/10-managed.conf
+            owner: root
+            group: root
+            mode: "0644"
+          vars:
+            hermes_profile: "{{ hermes_shadow_profiles[0] }}"
+
+        - name: Deploy Mem0-preserving native update unit
+          ansible.builtin.template:
+            src: >-
+              {{ playbook_dir }}/../../templates/hermes/hermes-native-update.service.j2
+            dest: "/etc/systemd/system/{{ hermes_native_update_service }}"
+            owner: root
+            group: root
+            mode: "0644"
+
+        - name: Reload memory-aware native units
+          ansible.builtin.systemd_service:
+            daemon_reload: true
+
+        - name: Start production Gateways after one memory conversion outage
+          ansible.builtin.command:
+            argv:
+              - "{{ hermes_shadow_runtime_binary }}"
+              - gateway
+              - start
+              - --system
+          environment:
+            HOME: "{{ item.account_home }}"
+            HERMES_HOME: "{{ item.home }}"
+            HERMES_MANAGED_DIR: "/etc/hermes/{{ item.name }}"
+          loop: "{{ hermes_shadow_profiles[:2] }}"
+          loop_control:
+            label: "{{ item.name }}"
+          changed_when: true
+
+        - name: Require both native production Gateways active
+          ansible.builtin.command:
+            argv:
+              - /usr/bin/systemctl
+              - is-active
+              - "{{ item.unit }}"
+          loop: "{{ hermes_shadow_profiles[:2] }}"
+          loop_control:
+            label: "{{ item.name }}"
+          changed_when: false
+
+        - name: Verify imported Hermes LCM database integrity
+          ansible.builtin.command:
+            argv:
+              - "{{ hermes_shadow_runtime_venv }}/bin/python"
+              - -c
+              - >-
+                import sqlite3, sys;
+                database = sqlite3.connect(
+                'file:' + sys.argv[1] + '?mode=ro', uri=True);
+                result = database.execute('PRAGMA quick_check').fetchone()[0];
+                database.close(); print(result);
+                raise SystemExit(0 if result == 'ok' else 1)
+              - "{{ hermes_lcm_target_database }}"
+          register: hermes_memory_continuity_lcm_integrity
+          changed_when: false
+          failed_when: hermes_memory_continuity_lcm_integrity.stdout != 'ok'
+
+        - name: Reconcile final Mem0 source and target digests
+          ansible.builtin.command:
+            argv: >-
+              {{
+                [hermes_mem0_migrator_live,
+                 '--qdrant-url', hermes_mem0_qdrant_url,
+                 '--source', hermes_mem0_source_collection,
+                 '--target', hermes_mem0_target_collection,
+                 '--user-id', hermes_mem0_user_id,
+                 '--agent-id', hermes_mem0_agent_id]
+                + (hermes_mem0_source_user_ids
+                   | map('regex_replace', '^', '--include-user-id=')
+                   | list)
+              }}
+          register: hermes_memory_continuity_mem0_final
+          changed_when: false
+          failed_when: >-
+            (hermes_memory_continuity_mem0_final.stdout | from_json).status
+            != 'already-migrated'
+
+        - name: Validate Astra Mem0 provider recall without exposing results
+          ansible.builtin.command:
+            argv:
+              - /usr/sbin/runuser
+              - --user
+              - hermes-astra
+              - --
+              - /usr/bin/env
+              - HOME=/var/lib/hermes/astra
+              - HERMES_HOME=/var/lib/hermes/astra/.hermes/profiles/astra
+              - HERMES_MANAGED_DIR=/etc/hermes/astra
+              - "{{ hermes_shadow_runtime_venv }}/bin/python"
+              - -c
+              - >-
+                from plugins.memory.mem0 import Mem0MemoryProvider;
+                p=Mem0MemoryProvider(); p.initialize('continuity-check', user_id='johnny', platform='discord');
+                assert p.is_available() and p._backend is not None;
+                assert p._backend.search('Johnny preferences', filters={'user_id':'johnny'}, top_k=1)
+          environment:
+            GEMINI_API_KEY: >-
+              {{
+                (hermes_memory_continuity_source_environment.content | b64decode
+                 | regex_findall('(?m)^GEMINI_API_KEY=([^\r\n]+)$'))[0]
+              }}
+            GOOGLE_API_KEY: >-
+              {{
+                (hermes_memory_continuity_source_environment.content | b64decode
+                 | regex_findall('(?m)^GEMINI_API_KEY=([^\r\n]+)$'))[0]
+              }}
+            OPENAI_API_KEY: >-
+              {{
+                (hermes_memory_continuity_source_environment.content | b64decode
+                 | regex_findall('(?m)^OPENROUTER_API_KEY=([^\r\n]+)$'))[0]
+              }}
+          changed_when: false
+          no_log: true
+
+        - name: Resume timers that were active before memory conversion
+          ansible.builtin.systemd_service:
+            name: "{{ item.item }}"
+            state: started
+            enabled: true
+          loop: "{{ hermes_memory_continuity_timer_state.results }}"
+          loop_control:
+            label: "{{ item.item }}"
+          when: item.stdout == 'active'
+
+        - name: Record source-preserving memory conversion evidence
+          ansible.builtin.copy:
+            content: |
+              LCM revision: {{ hermes_memory_continuity_lcm_revision.stdout }}
+              LCM source backup: {{ hermes_memory_continuity_backup_dir }}/openclaw-lcm.db
+              Mem0 history backup: {{ hermes_memory_continuity_backup_dir }}/openclaw-mem0-history.db
+              Mem0 source collection: {{ hermes_mem0_source_collection }}
+              Mem0 target collection: {{ hermes_mem0_target_collection }}
+              Mem0 selected: {{ (hermes_memory_continuity_mem0_final.stdout | from_json).selectedCount }}
+              Mem0 excluded other-agent points: {{ (hermes_memory_continuity_mem0_final.stdout | from_json).excludedCount }}
+            dest: "{{ hermes_memory_continuity_backup_dir }}/RESULT.txt"
+            owner: root
+            group: root
+            mode: "0600"
+
+      rescue:
+        - name: Record failed memory-conversion task privately
+          ansible.builtin.copy:
+            content: |
+              task={{ ansible_failed_task.name | default('unknown') }}
+              action={{ ansible_failed_task.action | default('unknown') }}
+              rc={{ ansible_failed_result.rc | default('') }}
+              msg={{ ansible_failed_result.msg | default('') }}
+              stderr={{ ansible_failed_result.stderr | default('') }}
+              exception={{ ansible_failed_result.exception | default('') }}
+            dest: "{{ hermes_memory_continuity_backup_dir }}/FAILED.txt"
+            owner: root
+            group: root
+            mode: "0600"
+          no_log: true
+
+        - name: Prepare best-effort markers for failed memory conversion stops
+          ansible.builtin.include_tasks: ../../tasks/hermes-planned-stop-marker.yml
+          vars:
+            hermes_planned_stop_profile: "{{ item }}"
+            hermes_planned_stop_strict: false
+          loop: "{{ hermes_shadow_profiles[:2] }}"
+          loop_control:
+            label: "{{ item.name }}"
+
+        - name: Stop failed native production Gateways before memory rollback
+          ansible.builtin.command:
+            argv:
+              - "{{ hermes_shadow_runtime_binary }}"
+              - gateway
+              - stop
+              - --system
+          environment:
+            HOME: "{{ item.account_home }}"
+            HERMES_HOME: "{{ item.home }}"
+            HERMES_MANAGED_DIR: "/etc/hermes/{{ item.name }}"
+          loop: "{{ hermes_shadow_profiles[:2] }}"
+          loop_control:
+            label: "{{ item.name }}"
+          changed_when: true
+          failed_when: false
+
+        - name: Remove files introduced by failed memory conversion
+          ansible.builtin.file:
+            path: "{{ item.item }}"
+            state: absent
+          loop: "{{ hermes_memory_continuity_prior_files.results }}"
+          loop_control:
+            label: "{{ item.item }}"
+          when: not item.stat.exists
+
+        - name: Restore prior rollback-managed memory files
+          ansible.builtin.copy:
+            src: >-
+              {{ hermes_memory_continuity_backup_dir }}/files/{{ item.item | hash('sha256') }}
+            dest: "{{ item.item }}"
+            remote_src: true
+            owner: "{{ item.stat.pw_name }}"
+            group: "{{ item.stat.gr_name }}"
+            mode: "{{ item.stat.mode }}"
+          loop: "{{ hermes_memory_continuity_prior_files.results }}"
+          loop_control:
+            label: "{{ item.item }}"
+          when: item.stat.exists and item.stat.isreg
+
+        - name: Remove failed Hermes LCM target
+          ansible.builtin.file:
+            path: "{{ hermes_lcm_target_database }}"
+            state: absent
+
+        - name: Remove failed LCM externalized-output tree
+          ansible.builtin.file:
+            path: "{{ hermes_lcm_externalized_output_root }}"
+            state: absent
+
+        - name: Restore prior Hermes LCM target
+          ansible.builtin.copy:
+            src: "{{ hermes_memory_continuity_backup_dir }}/prior-hermes-lcm.db"
+            dest: "{{ hermes_lcm_target_database }}"
+            remote_src: true
+            owner: hermes-astra
+            group: hermes-astra
+            mode: "0600"
+          when: hermes_memory_continuity_prior_lcm.stat.exists
+
+        - name: Restore prior LCM externalized-output tree
+          ansible.builtin.unarchive:
+            src: >-
+              {{ hermes_memory_continuity_backup_dir
+                 }}/prior-hermes-lcm-large-outputs.tar
+            dest: "{{ hermes_lcm_externalized_output_root | dirname }}"
+            remote_src: true
+            owner: hermes-astra
+            group: hermes-astra
+          when: hermes_memory_continuity_prior_lcm_outputs.stat.exists
+
+        - name: Remove failed managed Hermes LCM plugin
+          ansible.builtin.file:
+            path: "{{ hermes_lcm_plugin_managed_root }}"
+            state: absent
+
+        - name: Restore prior managed Hermes LCM plugin
+          ansible.builtin.unarchive:
+            src: "{{ hermes_memory_continuity_backup_dir }}/prior-hermes-lcm-plugin.tar"
+            dest: "{{ hermes_lcm_plugin_managed_root | dirname }}"
+            remote_src: true
+          when: hermes_memory_continuity_prior_lcm_plugin.stat.exists
+
+        - name: Remove newly created Mem0 target after failed conversion
+          ansible.builtin.uri:
+            url: >-
+              {{ hermes_mem0_qdrant_url }}/collections/{{ hermes_mem0_target_collection }}
+            method: DELETE
+            status_code:
+              - 200
+              - 404
+          when: hermes_memory_continuity_qdrant_collections.results[1].status == 404
+
+        - name: Reload restored native units after memory rollback
+          ansible.builtin.systemd_service:
+            daemon_reload: true
+
+        - name: Restore native production Gateway availability
+          ansible.builtin.command:
+            argv:
+              - "{{ hermes_shadow_runtime_binary }}"
+              - gateway
+              - start
+              - --system
+          environment:
+            HOME: "{{ item.account_home }}"
+            HERMES_HOME: "{{ item.home }}"
+            HERMES_MANAGED_DIR: "/etc/hermes/{{ item.name }}"
+          loop: "{{ hermes_shadow_profiles[:2] }}"
+          loop_control:
+            label: "{{ item.name }}"
+          changed_when: true
+
+        - name: Resume timers after failed memory conversion
+          ansible.builtin.systemd_service:
+            name: "{{ item.item }}"
+            state: started
+            enabled: true
+          loop: "{{ hermes_memory_continuity_timer_state.results }}"
+          loop_control:
+            label: "{{ item.item }}"
+          when: item.stdout == 'active'
+
+        - name: Fail after restoring pre-conversion memory state
+          ansible.builtin.fail:
+            msg: >-
+              Astra memory conversion failed. Prior files and LCM state were
+              restored from {{ hermes_memory_continuity_backup_dir }}; the
+              OpenClaw SQLite sources and Mem0 source collection were not
+              modified.

@@ -11,6 +11,9 @@ command_allowlist: []
 model:
   provider: {{ hermes_profile.model_provider }}
   default: {{ hermes_profile.model_default }}
+{% if hermes_profile.model_max_tokens is defined %}
+  max_tokens: {{ hermes_profile.model_max_tokens }}
+{% endif %}
 {% if hermes_profile.fallback_providers | default([]) %}
 
 fallback_providers:
@@ -18,6 +21,14 @@ fallback_providers:
   - provider: {{ fallback.provider }}
     model: {{ fallback.model }}
 {% endfor %}
+{% endif %}
+
+{% if hermes_profile.auxiliary_vision is defined %}
+auxiliary:
+  vision:
+    provider: {{ hermes_profile.auxiliary_vision.provider }}
+    model: {{ hermes_profile.auxiliary_vision.model }}
+    reasoning_effort: {{ hermes_profile.auxiliary_vision.reasoning_effort }}
 {% endif %}
 
 runtime:
@@ -64,6 +75,11 @@ plugins:
 {% endif %}
   disabled: []
 
+{% if hermes_profile.context_engine is defined %}
+context:
+  engine: {{ hermes_profile.context_engine }}
+{% endif %}
+
 {% if 'web' in hermes_profile.toolsets %}
 web:
   search_backend: ddgs
@@ -90,7 +106,10 @@ delegation:
   orchestrator_enabled: false
 
 terminal:
-  backend: docker
+  backend: {{ hermes_profile.terminal_backend | default('docker') }}
+{% if (hermes_profile.terminal_backend | default('docker')) == 'local' %}
+  cwd: {{ hermes_profile.terminal_cwd }}
+{% else %}
   docker_network: false
   docker_mount_cwd_to_workspace: false
   docker_run_as_host_user: false
@@ -103,21 +122,20 @@ terminal:
   container_cpu: 1
   container_memory: 2048
   container_disk: 8192
+{% endif %}
   timeout: 180
 
 approvals:
   mode: manual
   timeout: 300
-  cron_mode: deny
+  cron_mode: {{ hermes_profile.cron_approval_mode | default('deny') }}
   mcp_reload_confirm: true
   destructive_slash_confirm: true
   denial_breaker_threshold: 3
   deny:
-    - '*sudo*'
-    - '*docker*'
-    - '*podman*'
-    - '*systemctl*'
-    - '*curl*|*sh*'
+{% for pattern in hermes_profile.approval_deny %}
+    - '{{ pattern }}'
+{% endfor %}
 
 security:
   redact_secrets: true
@@ -132,6 +150,9 @@ updates:
   non_interactive_local_changes: discard
 
 memory:
+{% if hermes_profile.memory_provider is defined %}
+  provider: {{ hermes_profile.memory_provider }}
+{% endif %}
   memory_enabled: true
   user_profile_enabled: true
   memory_char_limit: 2200

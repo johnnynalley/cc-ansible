@@ -10,10 +10,17 @@ from pathlib import Path
 
 ROOT = Path(__file__).parents[2]
 PLUGIN = ROOT / "files/hermes/plugins/star-dispatch-privacy/__init__.py"
+VALIDATOR = ROOT / "scripts/agents/hermes-star-dispatch-privacy-validate.py"
 SPEC = importlib.util.spec_from_file_location("star_dispatch_privacy", PLUGIN)
 MODULE = importlib.util.module_from_spec(SPEC)
 assert SPEC and SPEC.loader
 SPEC.loader.exec_module(MODULE)
+VALIDATOR_SPEC = importlib.util.spec_from_file_location(
+    "star_dispatch_privacy_validator", VALIDATOR
+)
+VALIDATOR_MODULE = importlib.util.module_from_spec(VALIDATOR_SPEC)
+assert VALIDATOR_SPEC and VALIDATOR_SPEC.loader
+VALIDATOR_SPEC.loader.exec_module(VALIDATOR_MODULE)
 
 
 class Context:
@@ -53,6 +60,12 @@ class StarDispatchPrivacyTests(unittest.TestCase):
             MODULE._completion_sessions.clear()
             MODULE._trusted_completion_turns.clear()
             MODULE._retry_used.clear()
+
+    def test_validator_accepts_the_ordered_lcm_plugin_contract(self) -> None:
+        self.assertEqual(
+            VALIDATOR_MODULE.ENABLED_PLUGINS,
+            ["star-dispatch-privacy", "agent-docker-inventory", "hermes-lcm"],
+        )
 
     def test_plugin_is_hook_only(self) -> None:
         self.assertEqual(self.context.tools, [])

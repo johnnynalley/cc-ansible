@@ -144,7 +144,10 @@
         that:
           - item.user == 'hermes-' + item.name
           - item.group == item.user
-          - item.home == '/var/lib/hermes/' + item.name
+          - item.account_home == '/var/lib/hermes/' + item.name
+          - >-
+            item.home
+            == item.account_home + '/.hermes/profiles/' + item.name
           - item.uid | int >= 62010
           - item.uid | int <= 62012
           - item.subid_start | int >= 200000
@@ -154,26 +157,53 @@
           - >-
             item.model_default
             == ('gpt-5.6-sol' if item.name == 'astra' else 'claude-sonnet-4-6')
-          - item.discord_allowed_users | length == 0
-          - item.discord_allowed_channels | length == 0
-          - item.discord_free_response_channels | length == 0
-          - item.discord_channel_prompts | length == 0
-          - item.discord_channel_skill_bindings | length == 0
-          - item.discord_admin_users | length == 0
+          - item.discord_allowed_users is iterable
+          - item.discord_allowed_channels is iterable
+          - item.discord_free_response_channels is iterable
+          - item.discord_channel_prompts is mapping
+          - item.discord_channel_skill_bindings is iterable
+          - item.discord_admin_users is iterable
           - not item.discord_slash_commands | bool
           - >-
             item.plugins_enabled
             == (
-              ['star-dispatch-privacy', 'agent-docker-inventory']
+              ['star-dispatch-privacy', 'agent-docker-inventory', 'hermes-lcm']
               if item.name == 'astra' else []
             )
           - >-
             ('agent_docker' in item.toolsets)
             == (item.name == 'astra')
           - item.toolsets | length > 0
-          - "'terminal' in item.disabled_toolsets"
-          - "'file' in item.disabled_toolsets"
-          - "'code_execution' in item.disabled_toolsets"
+          - >-
+            ('terminal' in item.toolsets)
+            == (item.name == 'astra')
+          - >-
+            ('file' in item.toolsets)
+            == (item.name == 'astra')
+          - >-
+            ('code_execution' in item.toolsets)
+            == (item.name == 'astra')
+          - >-
+            ('cronjob' in item.toolsets)
+            == (item.name == 'astra')
+          - >-
+            ('terminal' in item.disabled_toolsets)
+            == (item.name != 'astra')
+          - >-
+            ('file' in item.disabled_toolsets)
+            == (item.name != 'astra')
+          - >-
+            ('code_execution' in item.disabled_toolsets)
+            == (item.name != 'astra')
+          - >-
+            ('cronjob' in item.disabled_toolsets)
+            == (item.name != 'astra')
+          - >-
+            item.terminal_backend
+            == ('local' if item.name == 'astra' else 'docker')
+          - >-
+            item.cron_approval_mode
+            == ('manual' if item.name == 'astra' else 'deny')
           - "'computer_use' in item.disabled_toolsets"
           - "'discord_admin' in item.disabled_toolsets"
         fail_msg: >-
@@ -329,7 +359,7 @@
         name: "{{ item.user }}"
         uid: "{{ item.uid }}"
         group: "{{ item.group }}"
-        home: "{{ item.home }}"
+        home: "{{ item.account_home }}"
         shell: /usr/sbin/nologin
         create_home: true
         system: true
@@ -705,7 +735,7 @@
       loop:
         - /etc/hermes/astra/plugins
         - "{{ hermes_star_privacy_plugin_managed_root }}"
-        - /var/lib/hermes/astra/plugins
+        - /var/lib/hermes/astra/.hermes/profiles/astra/plugins
         - "{{ hermes_star_privacy_plugin_runtime_root }}"
       register: hermes_star_privacy_plugin_directories
 
@@ -730,7 +760,7 @@
       loop:
         - /etc/hermes/astra/plugins
         - "{{ hermes_star_privacy_plugin_managed_root }}"
-        - /var/lib/hermes/astra/plugins
+        - /var/lib/hermes/astra/.hermes/profiles/astra/plugins
         - "{{ hermes_star_privacy_plugin_runtime_root }}"
 
     - name: Inspect Astra Docker inventory plugin directories
@@ -967,6 +997,8 @@
           - all
           - --extra
           - messaging
+          - --extra
+          - mem0
           - --locked
         chdir: "{{ hermes_shadow_runtime_root }}"
         creates: "{{ hermes_shadow_runtime_venv }}/bin/hermes"
@@ -1678,7 +1710,7 @@
           - "{{ item.user }}"
           - --
           - /usr/bin/env
-          - "HOME={{ item.home }}"
+          - "HOME={{ item.account_home }}"
           - "HERMES_HOME={{ item.home }}"
           - "HERMES_MANAGED_DIR=/etc/hermes/{{ item.name }}"
           - HERMES_DOCKER_BINARY=/usr/bin/podman
@@ -1762,14 +1794,14 @@
         group: hermes-astra
         mode: u=rwX,go=
       loop:
-        - /var/lib/hermes/astra/bin
-        - /var/lib/hermes/astra/backups
-        - /var/lib/hermes/astra/cache
-        - /var/lib/hermes/astra/state-snapshots
+        - /var/lib/hermes/astra/.hermes/profiles/astra/bin
+        - /var/lib/hermes/astra/.hermes/profiles/astra/backups
+        - /var/lib/hermes/astra/.hermes/profiles/astra/cache
+        - /var/lib/hermes/astra/.hermes/profiles/astra/state-snapshots
 
     - name: Find native update root state files
       ansible.builtin.find:
-        paths: /var/lib/hermes/astra
+        paths: /var/lib/hermes/astra/.hermes/profiles/astra
         recurse: false
         file_type: file
         hidden: true
@@ -1817,7 +1849,9 @@
       ansible.builtin.copy:
         src: >-
           {{ playbook_dir }}/../../{{ hermes_rigel_schedule_source }}
-        dest: /var/lib/hermes/rigel/scripts/hermes-rigel-schedule.py
+        dest: >-
+          {{ hermes_shadow_profiles[2].home
+             }}/scripts/hermes-rigel-schedule.py
         owner: root
         group: hermes-rigel
         mode: "0550"
@@ -1855,13 +1889,49 @@
         label: "{{ item.unit }}"
       register: hermes_native_update_unit_changes
 
-    - name: Deploy Hermes shadow gateway units
+    - name: Install native Hermes shadow gateway units
+      ansible.builtin.command:
+        argv:
+          - "{{ hermes_shadow_runtime_binary }}"
+          - gateway
+          - install
+          - --system
+          - --run-as-user
+          - "{{ hermes_profile.user }}"
+          - --no-start-now
+          - --no-start-on-login
+      environment:
+        HOME: "{{ hermes_profile.account_home }}"
+        HERMES_HOME: "{{ hermes_profile.home }}"
+        HERMES_MANAGED_DIR: "/etc/hermes/{{ hermes_profile.name }}"
+      changed_when: >-
+        hermes_native_gateway_install.stdout is search(
+          'installed|updated|Repairing outdated'
+        )
+      loop: "{{ hermes_shadow_profiles }}"
+      loop_control:
+        loop_var: hermes_profile
+        label: "{{ hermes_profile.name }}"
+      register: hermes_native_gateway_install
+
+    - name: Create native Hermes gateway drop-in directories
+      ansible.builtin.file:
+        path: "/etc/systemd/system/{{ hermes_profile.unit }}.d"
+        state: directory
+        owner: root
+        group: root
+        mode: "0755"
+      loop: "{{ hermes_shadow_profiles }}"
+      loop_control:
+        loop_var: hermes_profile
+        label: "{{ hermes_profile.name }}"
+
+    - name: Deploy hardened native Hermes gateway drop-ins
       ansible.builtin.template:
         src: >-
           {{ playbook_dir
-             }}/../../templates/hermes/hermes-gateway.service.j2
-        dest: >-
-          /etc/systemd/system/hermes-gateway-{{ hermes_profile.name }}.service
+             }}/../../templates/hermes/hermes-gateway-hardening.conf.j2
+        dest: "/etc/systemd/system/{{ hermes_profile.unit }}.d/10-managed.conf"
         owner: root
         group: root
         mode: "0644"
@@ -1870,13 +1940,14 @@
       loop_control:
         loop_var: hermes_profile
         label: "{{ hermes_profile.name }}"
-      register: hermes_shadow_unit_changes
+      register: hermes_shadow_dropin_changes
 
     - name: Reload systemd for Hermes shadow units
       ansible.builtin.systemd_service:
         daemon_reload: true
       when: >-
-        hermes_shadow_unit_changes.changed
+        hermes_native_gateway_install.changed
+        or hermes_shadow_dropin_changes.changed
         or hermes_native_update_unit_changes.changed
 
     - name: Keep native update timers staged before cutover

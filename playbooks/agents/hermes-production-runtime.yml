@@ -2,7 +2,7 @@
 # Purpose: Converge the live Hermes shared runtime and Gateway units safely.
 # Hosts: hermes_hosts.
 # Key vars: hermes_production_runtime_*, hermes_shadow_*, hermes_runtime_*.
-# Templates: templates/hermes/hermes-gateway.service.j2,
+# Templates: templates/hermes/hermes-gateway-hardening.conf.j2,
 #            templates/hermes/hermes-native-update.service.j2.
 # Scripts: scripts/agents/hermes-discord-runtime-audit.py.
 # Validation: ansible-playbook playbooks/agents/hermes-production-runtime.yml
@@ -65,6 +65,10 @@
         follow: false
       loop: >-
         {{ hermes_runtime_unit_paths
+           + (hermes_shadow_profiles
+              | map(attribute='home')
+              | map('regex_replace', '$', '/config.yaml')
+              | list)
            + [hermes_shadow_runtime_root,
               hermes_shadow_runtime_venv ~ '/bin/python'] }}
       register: hermes_runtime_required_files
@@ -149,6 +153,7 @@
             name: "{{ hermes_runtime_readers_group }}"
             system: true
             state: present
+          register: hermes_runtime_reader_group
 
         - name: Enroll isolated Hermes identities as runtime readers
           ansible.builtin.user:
@@ -159,6 +164,7 @@
           loop: "{{ hermes_shadow_profiles }}"
           loop_control:
             label: "{{ item.name }}"
+          register: hermes_runtime_reader_memberships
 
         - name: Normalize shared Hermes runtime ownership
           ansible.builtin.file:
@@ -182,6 +188,22 @@
             group: "{{ hermes_runtime_readers_group }}"
             mode: "0550"
             backup: true
+          register: hermes_runtime_audit_deployment
+
+        - name: Deploy production Hermes operating contracts
+          ansible.builtin.copy:
+            src: >-
+              {{ playbook_dir
+                 }}/../../files/hermes/profiles/{{ item.name }}/AGENTS.md
+            dest: "{{ item.home }}/AGENTS.md"
+            owner: root
+            group: "{{ item.group }}"
+            mode: "0440"
+            backup: true
+          loop: "{{ hermes_shadow_profiles }}"
+          loop_control:
+            label: "{{ item.name }}"
+          register: hermes_runtime_operating_contracts
 
         - name: Deploy production Hermes update unit
           ansible.builtin.template:
@@ -193,17 +215,73 @@
             group: root
             mode: "0644"
             backup: true
+          register: hermes_runtime_update_unit
 
-        - name: Deploy production Hermes Gateway units
+        - name: Install native production Hermes Gateway units
+          ansible.builtin.command:
+            argv:
+              - "{{ hermes_shadow_runtime_binary }}"
+              - gateway
+              - install
+              - --system
+              - --run-as-user
+              - "{{ hermes_profile.user }}"
+              - --no-start-now
+              - --start-on-login
+          environment:
+            HOME: "{{ hermes_profile.account_home }}"
+            HERMES_HOME: "{{ hermes_profile.home }}"
+            HERMES_MANAGED_DIR: "/etc/hermes/{{ hermes_profile.name }}"
+          changed_when: >-
+            hermes_runtime_gateway_units.stdout is search(
+              'installed|updated|Repairing outdated'
+            )
+          loop: "{{ hermes_shadow_profiles[:2] }}"
+          loop_control:
+            loop_var: hermes_profile
+            label: "{{ hermes_profile.name }}"
+          register: hermes_runtime_gateway_units
+
+        - name: Install native standalone Rigel Gateway unit
+          ansible.builtin.command:
+            argv:
+              - "{{ hermes_shadow_runtime_binary }}"
+              - gateway
+              - install
+              - --system
+              - --run-as-user
+              - "{{ hermes_shadow_profiles[2].user }}"
+              - --no-start-now
+              - --no-start-on-login
+          environment:
+            HOME: "{{ hermes_shadow_profiles[2].account_home }}"
+            HERMES_HOME: "{{ hermes_shadow_profiles[2].home }}"
+            HERMES_MANAGED_DIR: /etc/hermes/rigel
+          register: hermes_runtime_rigel_gateway_unit
+          changed_when: >-
+            hermes_runtime_rigel_gateway_unit.stdout is search(
+              'installed|updated|Repairing outdated'
+            )
+
+        - name: Create native production Gateway drop-in directories
+          ansible.builtin.file:
+            path: "/etc/systemd/system/{{ hermes_profile.unit }}.d"
+            state: directory
+            owner: root
+            group: root
+            mode: "0755"
+          loop: "{{ hermes_shadow_profiles }}"
+          loop_control:
+            loop_var: hermes_profile
+            label: "{{ hermes_profile.name }}"
+
+        - name: Deploy hardened native production Gateway drop-ins
           ansible.builtin.template:
             src: >-
               {{ playbook_dir
-                 }}/../../templates/hermes/hermes-gateway.service.j2
+                 }}/../../templates/hermes/hermes-gateway-hardening.conf.j2
             dest: >-
-              {{
-                '/etc/systemd/system/hermes-gateway-'
-                ~ hermes_profile.name ~ '.service'
-              }}
+              /etc/systemd/system/{{ hermes_profile.unit }}.d/10-managed.conf
             owner: root
             group: root
             mode: "0644"
@@ -212,6 +290,7 @@
           loop_control:
             loop_var: hermes_profile
             label: "{{ hermes_profile.name }}"
+          register: hermes_runtime_gateway_dropins
 
         - name: Reload production Hermes systemd units
           ansible.builtin.systemd_service:
@@ -240,17 +319,53 @@
             state: stopped
             enabled: false
 
-        - name: Restart and verify Astra Discord consumer
-          ansible.builtin.systemd_service:
-            name: hermes-gateway-astra.service
-            state: restarted
-            enabled: true
+        - name: Prepare service-owned markers for runtime restarts
+          ansible.builtin.include_tasks:
+            file: ../../tasks/hermes-planned-stop-marker.yml
+          vars:
+            hermes_planned_stop_profile: "{{ item }}"
+          loop: "{{ hermes_shadow_profiles[:2] }}"
+          loop_control:
+            label: "{{ item.name }}"
+          when: >-
+            hermes_runtime_reader_group.changed
+            or hermes_runtime_reader_memberships.changed
+            or hermes_runtime_operating_contracts.changed
+            or hermes_runtime_gateway_units.changed
+            or hermes_runtime_rigel_gateway_unit.changed
+            or hermes_runtime_gateway_dropins.changed
 
-        - name: Restart and verify Dubble Discord consumer
+        - name: Restart production consumers natively for runtime changes
+          ansible.builtin.command:
+            argv:
+              - "{{ hermes_shadow_runtime_binary }}"
+              - gateway
+              - restart
+              - --system
+          environment:
+            HOME: "{{ item.account_home }}"
+            HERMES_HOME: "{{ item.home }}"
+            HERMES_MANAGED_DIR: "/etc/hermes/{{ item.name }}"
+          loop: "{{ hermes_shadow_profiles[:2] }}"
+          loop_control:
+            label: "{{ item.name }}"
+          changed_when: true
+          when: >-
+            hermes_runtime_reader_group.changed
+            or hermes_runtime_reader_memberships.changed
+            or hermes_runtime_operating_contracts.changed
+            or hermes_runtime_gateway_units.changed
+            or hermes_runtime_rigel_gateway_unit.changed
+            or hermes_runtime_gateway_dropins.changed
+
+        - name: Ensure production Discord consumers remain active
           ansible.builtin.systemd_service:
-            name: hermes-gateway-dubble.service
-            state: restarted
+            name: "hermes-gateway-{{ item }}.service"
+            state: started
             enabled: true
+          loop:
+            - astra
+            - dubble
 
         - name: Require live Hermes consumers and native update timers
           ansible.builtin.command:
@@ -275,7 +390,7 @@
           loop_control:
             label: "{{ item.item }}"
 
-        - name: Scan restarted Hermes consumers for adapter failures
+        - name: Scan production Hermes consumers for adapter failures
           ansible.builtin.command:
             argv:
               - /usr/bin/journalctl
@@ -297,7 +412,7 @@
           failed_when: hermes_runtime_failure_scan.rc not in [0, 1]
           check_mode: false
 
-        - name: Require clean post-restart Hermes journals
+        - name: Require clean production Hermes journals
           ansible.builtin.assert:
             that:
               - hermes_runtime_failure_scan.stdout | length == 0
@@ -341,14 +456,31 @@
           ansible.builtin.systemd_service:
             daemon_reload: true
 
-        - name: Restore Astra and Dubble consumers after convergence failure
-          ansible.builtin.systemd_service:
-            name: "{{ item }}"
-            state: restarted
-            enabled: true
-          loop:
-            - hermes-gateway-astra.service
-            - hermes-gateway-dubble.service
+        - name: Prepare best-effort markers for restored consumer restarts
+          ansible.builtin.include_tasks:
+            file: ../../tasks/hermes-planned-stop-marker.yml
+          vars:
+            hermes_planned_stop_profile: "{{ item }}"
+            hermes_planned_stop_strict: false
+          loop: "{{ hermes_shadow_profiles[:2] }}"
+          loop_control:
+            label: "{{ item.name }}"
+
+        - name: Restore consumers natively after convergence failure
+          ansible.builtin.command:
+            argv:
+              - "{{ hermes_shadow_runtime_binary }}"
+              - gateway
+              - restart
+              - --system
+          environment:
+            HOME: "{{ item.account_home }}"
+            HERMES_HOME: "{{ item.home }}"
+            HERMES_MANAGED_DIR: "/etc/hermes/{{ item.name }}"
+          loop: "{{ hermes_shadow_profiles[:2] }}"
+          loop_control:
+            label: "{{ item.name }}"
+          changed_when: true
           failed_when: false
 
         - name: Fail after restoring pre-convergence units

@@ -1,20 +1,20 @@
 [Unit]
 Description=Create native Hermes backup for profile %i
-ConditionPathIsDirectory=/var/lib/hermes/%i
+ConditionPathIsDirectory=/var/lib/hermes/%i/.hermes/profiles/%i
 
 [Service]
 Type=oneshot
 User=hermes-%i
 Group=hermes-%i
-WorkingDirectory=/var/lib/hermes/%i
+WorkingDirectory=/var/lib/hermes/%i/.hermes/profiles/%i
 Environment=HOME=/var/lib/hermes/%i
-Environment=HERMES_HOME=/var/lib/hermes/%i
-ExecStart={{ hermes_shadow_runtime_binary }} backup --output /var/lib/hermes/%i/backups/nightly.zip
+Environment=HERMES_HOME=/var/lib/hermes/%i/.hermes/profiles/%i
+ExecStart={{ hermes_shadow_runtime_binary }} backup --output /var/lib/hermes/%i/.hermes/profiles/%i/backups/nightly.zip
 UMask=0077
 NoNewPrivileges=true
 ProtectSystem=strict
 ProtectHome=true
-ReadWritePaths=/var/lib/hermes/%i
+ReadWritePaths=/var/lib/hermes/%i/.hermes/profiles/%i
 PrivateTmp=true
 PrivateDevices=true
 ProtectClock=true

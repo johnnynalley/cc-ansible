@@ -61,24 +61,30 @@ class HermesProductionRuntimeTests(unittest.TestCase):
         self.assertNotIn("docker.sock", self.playbook)
         self.assertNotIn("group: docker", self.playbook)
 
-    def test_consumers_restart_one_at_a_time_after_import_proof(self) -> None:
+    def test_consumers_restart_natively_after_import_proof(self) -> None:
         imports = self.offset("Validate Discord imports as every isolated identity")
-        astra = self.offset("Restart and verify Astra Discord consumer")
-        dubble = self.offset("Restart and verify Dubble Discord consumer")
-        self.assertLess(imports, astra)
-        self.assertLess(astra, dubble)
+        restart = self.offset(
+            "Restart production consumers natively for runtime changes"
+        )
+        active = self.offset("Ensure production Discord consumers remain active")
+        self.assertLess(imports, restart)
+        self.assertLess(restart, active)
         self.assertIn("--imports-only", self.playbook)
         self.assertIn('"{{ item.home }}"', self.playbook[imports:])
-        self.assertIn("hermes_shadow_runtime_venv", self.playbook[imports:astra])
+        self.assertIn("hermes_shadow_runtime_venv", self.playbook[imports:restart])
+        self.assertIn("gateway\n              - restart\n              - --system", self.playbook[restart:active])
+        self.assertIn("hermes_shadow_profiles[:2]", self.playbook[restart:active])
         self.assertIn("state: stopped", self.playbook[self.offset(
             "Keep standalone Rigel Gateway stopped and disabled"
-        ):astra])
+        ):restart])
 
     def test_failure_restores_units_and_consumers(self) -> None:
         rescue = self.playbook.index("      rescue:")
         tail = self.playbook[rescue:]
         self.assertIn("Restore pre-convergence Hermes systemd units", tail)
-        self.assertIn("Restore Astra and Dubble consumers", tail)
+        self.assertIn(
+            "Restore consumers natively after convergence failure", tail
+        )
         self.assertIn("ansible.builtin.fail", tail)
 
     def test_dry_run_uses_real_read_only_service_state(self) -> None:
@@ -90,8 +96,8 @@ class HermesProductionRuntimeTests(unittest.TestCase):
         self.assertIn("check_mode: false", self.playbook[health:health_assert])
 
     def test_no_match_journal_scan_is_success_not_probe_noise(self) -> None:
-        scan = self.offset("Scan restarted Hermes consumers for adapter failures")
-        clean = self.offset("Require clean post-restart Hermes journals")
+        scan = self.offset("Scan production Hermes consumers for adapter failures")
+        clean = self.offset("Require clean production Hermes journals")
         task = self.playbook[scan:clean]
         self.assertIn("failed_when: hermes_runtime_failure_scan.rc not in [0, 1]", task)
         self.assertIn("--grep=No adapter", task)

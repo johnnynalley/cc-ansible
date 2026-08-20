@@ -1,48 +1,44 @@
 [Unit]
-Description=Hermes gateway ({{ hermes_profile.name }})
-After=network-online.target
-Wants=network-online.target
 ConditionPathExists=/etc/hermes/{{ hermes_profile.name }}/{{ hermes_gateway_readiness_marker }}
 
 [Service]
-Type=notify
-NotifyAccess=main
-User={{ hermes_profile.user }}
-Group={{ hermes_profile.group }}
 SupplementaryGroups={{ hermes_runtime_readers_group }}
-WorkingDirectory={{ hermes_profile.home }}
-Environment=HOME={{ hermes_profile.home }}
-Environment=HERMES_HOME={{ hermes_profile.home }}
 Environment=HERMES_MANAGED_DIR=/etc/hermes/{{ hermes_profile.name }}
+{% if (hermes_profile.terminal_backend | default('docker')) == 'docker' %}
 Environment=HERMES_DOCKER_BINARY=/usr/bin/podman
+{% endif %}
 Environment=TIRITH_OFFLINE=1
 Environment=XDG_RUNTIME_DIR=/run/hermes-{{ hermes_profile.name }}
 EnvironmentFile=/etc/hermes/{{ hermes_profile.name }}/.env
 {% if hermes_profile.name == 'astra' %}
+Environment=MEM0_DIR={{ hermes_profile.home }}/mem0
+Environment=LCM_DATABASE_PATH={{ hermes_profile.home }}/lcm.db
 LoadCredential=agent-docker-report-key:{{ hermes_docker_inventory_private_key }}
 LoadCredential=agent-docker-update-key:{{ hermes_docker_update_private_key }}
 {% endif %}
 ExecStartPre={{ hermes_shadow_audit_live }} {{ hermes_shadow_contract_live }}
 ExecStartPre={{ hermes_discord_audit_live }} {{ hermes_discord_contract_live }} --repository-root /usr/local/share/hermes-shadow/repository
+{% if hermes_profile.name != 'astra' %}
+ExecStartPre={{ hermes_automation_audit_live }} {{ hermes_automation_contract_live }} --repository-root /usr/local/share/hermes-shadow/repository
+{% endif %}
 ExecStartPre=/usr/bin/sha256sum --check --status --strict /etc/hermes/{{ hermes_profile.name }}/managed-policy.sha256
 ExecStartPre={{ hermes_tirith_binary }} --version
 ExecStartPre={{ hermes_shadow_runtime_binary }} config check
 ExecStartPre={{ hermes_shadow_runtime_venv }}/bin/python {{ hermes_discord_runtime_audit_live }} --home={{ hermes_profile.home }} --imports-only
-ExecStartPre=/usr/local/lib/hermes-agent/venv/bin/python {{ hermes_profile_skills_validator_live }} --contract {{ hermes_profile_skills_contract_live }} --mode runtime --profile {{ hermes_profile.name }} --hermes-source /usr/local/lib/hermes-agent
+ExecStartPre={{ hermes_shadow_runtime_venv }}/bin/python {{ hermes_profile_skills_validator_live }} --contract {{ hermes_profile_skills_contract_live }} --mode runtime --profile {{ hermes_profile.name }} --hermes-source {{ hermes_shadow_runtime_root }}
+{% if hermes_gateway_bootstrap_skip_projection_preflights | default(false) %}
+Environment=HERMES_PROJECTION_PREFLIGHTS_PENDING=1
+{% else %}
 ExecStartPre=+{{ hermes_profile_data_stager_live }} --contract {{ hermes_profile_data_contract_live }} --repository-root /usr/local/share/hermes-shadow/repository --target-root {{ hermes_profile_data_root }} --manifest {{ hermes_profile_data_manifest_live }} --mode verify --allow-writable-drift
 ExecStartPre={{ hermes_profile_data_stager_live }} --contract {{ hermes_profile_data_contract_live }} --repository-root /usr/local/share/hermes-shadow/repository --mode runtime --profile {{ hermes_profile.name }}
 ExecStartPre=+{{ hermes_profile_transformer_live }} --contract {{ hermes_profile_transforms_contract_live }} --repository-root /usr/local/share/hermes-shadow/repository --target-root {{ hermes_profile_transforms_root }} --manifest {{ hermes_profile_transforms_manifest_live }} --mode verify --allow-writable-drift
 ExecStartPre={{ hermes_profile_transformer_live }} --contract {{ hermes_profile_transforms_contract_live }} --repository-root /usr/local/share/hermes-shadow/repository --mode runtime --profile {{ hermes_profile.name }}
-{% if hermes_profile.name == 'astra' %}
-ExecStartPre=/usr/local/lib/hermes-agent/venv/bin/python {{ hermes_star_privacy_validator_live }} --source-root {{ hermes_star_privacy_plugin_managed_root }} --runtime-root {{ hermes_star_privacy_plugin_runtime_root }} --config /etc/hermes/astra/config.yaml
-ExecStartPre=/usr/local/lib/hermes-agent/venv/bin/python {{ hermes_docker_inventory_validator_live }} --source-root {{ hermes_docker_inventory_plugin_managed_root }} --runtime-root {{ hermes_docker_inventory_plugin_runtime_root }} --config /etc/hermes/astra/config.yaml --known-hosts {{ hermes_docker_inventory_known_hosts }}
 {% endif %}
-ExecStart={{ hermes_shadow_runtime_binary }} gateway run --external-supervisor
+{% if hermes_profile.name == 'astra' %}
+ExecStartPre={{ hermes_shadow_runtime_venv }}/bin/python {{ hermes_star_privacy_validator_live }} --source-root {{ hermes_star_privacy_plugin_managed_root }} --runtime-root {{ hermes_star_privacy_plugin_runtime_root }} --config /etc/hermes/astra/config.yaml
+ExecStartPre={{ hermes_shadow_runtime_venv }}/bin/python {{ hermes_docker_inventory_validator_live }} --source-root {{ hermes_docker_inventory_plugin_managed_root }} --runtime-root {{ hermes_docker_inventory_plugin_runtime_root }} --config /etc/hermes/astra/config.yaml --known-hosts {{ hermes_docker_inventory_known_hosts }}
+{% endif %}
 ExecStartPost={{ hermes_shadow_runtime_venv }}/bin/python {{ hermes_discord_runtime_audit_live }} --home={{ hermes_profile.home }} --pid=${MAINPID} --timeout=30
-Restart=on-failure
-RestartSec=10s
-TimeoutStopSec=90s
-WatchdogSec=120s
 RuntimeDirectory=hermes-{{ hermes_profile.name }}
 RuntimeDirectoryMode=0700
 UMask=0077
@@ -57,9 +53,10 @@ BindReadOnlyPaths={{ hermes_profile_transforms_root }}/{{ hermes_profile.name }}
 {% if hermes_profile.name == 'astra' %}
 BindReadOnlyPaths={{ hermes_star_privacy_plugin_managed_root }}:{{ hermes_star_privacy_plugin_runtime_root }}
 BindReadOnlyPaths={{ hermes_docker_inventory_plugin_managed_root }}:{{ hermes_docker_inventory_plugin_runtime_root }}
+BindReadOnlyPaths=-{{ hermes_lcm_plugin_managed_root }}:{{ hermes_profile.home }}/plugins/hermes-lcm
 BindReadOnlyPaths=/var/lib/hermes/rigel-channel-state:{{ hermes_profile.home }}/rigel-channel-state
 {% endif %}
-ReadWritePaths={{ hermes_profile.home }} /run/hermes-{{ hermes_profile.name }} {{ hermes_profile_data_root }}/{{ hermes_profile.name }}/writable {{ hermes_profile_transforms_root }}/{{ hermes_profile.name }}/writable
+ReadWritePaths={{ hermes_profile.account_home }} /run/hermes-{{ hermes_profile.name }} {{ hermes_profile_data_root }}/{{ hermes_profile.name }}/writable {{ hermes_profile_transforms_root }}/{{ hermes_profile.name }}/writable
 PrivateTmp=true
 ProtectClock=true
 ProtectControlGroups=true
@@ -82,7 +79,3 @@ DeviceAllow=/dev/null rw
 DeviceAllow=/dev/urandom r
 DeviceAllow=/dev/random r
 TasksMax=1024
-KillMode=mixed
-
-[Install]
-WantedBy=multi-user.target

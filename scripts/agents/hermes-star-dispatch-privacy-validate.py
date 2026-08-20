@@ -17,7 +17,7 @@ import yaml
 sys.dont_write_bytecode = True
 
 PLUGIN = "star-dispatch-privacy"
-ENABLED_PLUGINS = [PLUGIN, "agent-docker-inventory"]
+ENABLED_PLUGINS = [PLUGIN, "agent-docker-inventory", "hermes-lcm"]
 EXPECTED_FILES = ("__init__.py", "plugin.yaml")
 EXPECTED_HOOKS = {
     "on_session_finalize",

@@ -21,7 +21,7 @@ CONTRACT = ROOT / "files" / "hermes" / "profile-data-stage-contract.json"
 PROFILE_IMPORT = ROOT / "files" / "hermes" / "profile-import-contract.json"
 PLAYBOOK = ROOT / "playbooks" / "agents" / "hermes-profile-data.yml"
 VARS = ROOT / "inventory" / "group_vars" / "hermes_hosts" / "vars.yml"
-UNIT = ROOT / "templates" / "hermes" / "hermes-gateway.service.j2"
+UNIT = ROOT / "templates" / "hermes" / "hermes-gateway-hardening.conf.j2"
 SPEC = importlib.util.spec_from_file_location("hermes_profile_data_stage", SCRIPT)
 assert SPEC and SPEC.loader
 MODULE = importlib.util.module_from_spec(SPEC)
@@ -194,6 +194,10 @@ class HermesProfileDataStageTests(unittest.TestCase):
             "Verify existing Hermes profile-data generation before convergence",
             playbook,
         )
+        self.assertIn("Classify existing Hermes profile-data generation", playbook)
+        self.assertIn("existing_verify.stdout | from_json", playbook)
+        self.assertIn("== 'manifest-contract-invalid'", playbook)
+        self.assertIn("existingGenerationStatus", playbook)
         self.assertIn(
             "results[0].stat.exists\n            == hermes_profile_data_targets_before.results[1].stat.exists",
             playbook,
@@ -202,6 +206,16 @@ class HermesProfileDataStageTests(unittest.TestCase):
         self.assertIn("source-root", playbook)
         self.assertNotIn("state: started", playbook)
         self.assertNotIn("state: restarted", playbook)
+        self.assertIn("Read effective Hermes Gateway units", playbook)
+        gateway_read = playbook.index(
+            "Read effective Hermes Gateway units for profile-data bindings"
+        )
+        gateway_gate = playbook.index(
+            "Require reviewed profile-data bindings and startup gates"
+        )
+        self.assertIn("check_mode: false", playbook[gateway_read:gateway_gate])
+        self.assertIn("HERMES_PROJECTION_PREFLIGHTS_PENDING=1", playbook)
+        self.assertIn("HERMES_PROJECTION_PREFLIGHTS_PENDING=1", unit)
         self.assertIn("ExecStartPre=+{{ hermes_profile_data_stager_live }}", unit)
         self.assertIn("--mode runtime --profile {{ hermes_profile.name }}", unit)
         self.assertIn("BindPaths={{ hermes_profile_data_root }}", unit)

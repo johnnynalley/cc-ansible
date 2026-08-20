@@ -40,9 +40,9 @@
     "astra": {
       "user": "hermes-astra",
       "group": "hermes-astra",
-      "home": "/var/lib/hermes/astra",
+      "home": "/var/lib/hermes/astra/.hermes/profiles/astra",
       "managedRoot": "/etc/hermes/astra/skills",
-      "runtimeRoot": "/var/lib/hermes/astra/skills/managed",
+      "runtimeRoot": "/var/lib/hermes/astra/.hermes/profiles/astra/skills/managed",
       "skills": [
         {
           "name": "evidence-led-investigation",
@@ -62,20 +62,26 @@
           "source": "files/hermes/profile-skills/astra/guided-operation/SKILL.md",
           "sha256": "3f209da0a5be141f4161fe160da2c44f6bf7bbb7e6bbfd2de172ba71d88c1939"
         },
-        {
-          "name": "source-grounded-study",
-          "description": "Use for tutoring and verified academic event tracking.",
-          "source": "files/hermes/profile-skills/astra/source-grounded-study/SKILL.md",
-          "sha256": "41b3ab47505bf845303fbdca8d75c4f928505e8ae97812b5a2a9ceea4fca9b7c"
-        }
+      {
+        "name": "source-grounded-study",
+        "description": "Use for tutoring and verified academic event tracking.",
+        "source": "files/hermes/profile-skills/astra/source-grounded-study/SKILL.md",
+        "sha256": "41b3ab47505bf845303fbdca8d75c4f928505e8ae97812b5a2a9ceea4fca9b7c"
+      },
+      {
+        "name": "fortnite-tracker",
+        "description": "Use for Fortnite progress, events, locker, and UEFN.",
+        "source": "files/hermes/profile-skills/astra/fortnite-tracker/SKILL.md",
+        "sha256": "2e95dae05a08b4ce09b0f1e64575f18418a56ddcc7e032a0a49989eaba6385cc"
+      }
       ]
     },
     "dubble": {
       "user": "hermes-dubble",
       "group": "hermes-dubble",
-      "home": "/var/lib/hermes/dubble",
+      "home": "/var/lib/hermes/dubble/.hermes/profiles/dubble",
       "managedRoot": "/etc/hermes/dubble/skills",
-      "runtimeRoot": "/var/lib/hermes/dubble/skills/managed",
+      "runtimeRoot": "/var/lib/hermes/dubble/.hermes/profiles/dubble/skills/managed",
       "skills": [
         {
           "name": "public-support-triage",
@@ -88,9 +94,9 @@
     "rigel": {
       "user": "hermes-rigel",
       "group": "hermes-rigel",
-      "home": "/var/lib/hermes/rigel",
+      "home": "/var/lib/hermes/rigel/.hermes/profiles/rigel",
       "managedRoot": "/etc/hermes/rigel/skills",
-      "runtimeRoot": "/var/lib/hermes/rigel/skills/managed",
+      "runtimeRoot": "/var/lib/hermes/rigel/.hermes/profiles/rigel/skills/managed",
       "skills": [
         {
           "name": "source-grounded-study",

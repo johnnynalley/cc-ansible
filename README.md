@@ -299,11 +299,13 @@ Packages are merged from multiple sources (all applicable variables combined):
 | `hermes-shadow.yml` | `hermes_hosts` | Boot-disabled Hermes staging with signed offline command scanning and no production delivery |
 | `hermes-production-cutover.yml` | `hermes_hosts` | Disabled-by-default, rollback-capable OpenClaw-to-Hermes production handoff with two Discord consumers, native Rigel scheduling, Health continuity, and native updates |
 | `hermes-production-runtime.yml` | `hermes_hosts` | Disabled-by-default live Hermes runtime convergence with official messaging dependencies, functional Discord readiness, sequential restarts, rollback, and Health/OpenClaw gates |
+| `hermes-native-gateway-migration.yml` | `hermes_hosts` | Exact-approval migration from handwritten Gateway units and flat profile state to Hermes-native named-profile system units, with copy-first rollback |
+| `hermes-memory-continuity.yml` | `hermes_hosts` | Exact-approval, source-preserving conversion of OpenClaw LCM and approved Astra Mem0 scopes into native Hermes LCM/Mem0 stores, with dry runs, backups, exact reconciliation, and rollback |
 | `hermes-automation.yml` | `hermes_hosts` | Disabled-by-default transactional convergence of seven native jobs, retained collectors, calendar/feed timers, profile backups, and full legacy schedule reconciliation |
 | `hermes-docker-inventory.yml` | `hermes_hosts` | Approval-gated promotion of Astra's fixed Docker inventory/update tools, native per-turn update approval hook, credentials, validation, and rollback |
 | `hermes-openclaw-dry-run.yml` | `hermes_hosts` | Operator-approved, shape-only official importer inventory with no source content, activation, or service-state change |
 | `hermes-profile-memory.yml` | `hermes_hosts` | Disabled-by-default, transactional native memory seeding for Astra and Rigel; Dubble remains empty and all Gateways remain stopped |
-| `hermes-profile-skills.yml` | `hermes_hosts` | Disabled-by-default, transactional staging of six native skill deployments with exact hashes, root-owned per-profile sources, and read-only runtime discovery proof |
+| `hermes-profile-skills.yml` | `hermes_hosts` | Disabled-by-default, transactional staging of seven native skill deployments with exact hashes, root-owned per-profile sources, and read-only runtime discovery proof |
 | `hermes-profile-data.yml` | `hermes_hosts` | Disabled-by-default, copy-only staging of reviewed project data and read-only operator references into isolated Hermes profile roots; memory, credentials, transforms, and activation remain excluded |
 | `hermes-profile-transforms.yml` | `hermes_hosts` | Disabled-by-default, transactional schema normalization of six reviewed legacy state sources into isolated Hermes writable/read-only roots; raw source and activation remain excluded |
 | `openclaw-health-receiver.yml` | `openclaw_hosts` | Isolated Health receiver and aggregate-only report publisher (disabled by default) |
@@ -1071,15 +1073,28 @@ created.
   `hermes-gateway-dubble.service`
 - **Runtime convergence**:
   `playbooks/agents/hermes-production-runtime.yml` is disabled by default,
-  backs up live units, requires OpenClaw offline, restarts one consumer at a
-  time, and preserves Health
+  backs up live units, requires OpenClaw offline, uses Hermes's native Gateway
+  lifecycle, and preserves Health
+- **Native service ownership**:
+  `playbooks/agents/hermes-native-gateway-migration.yml` copy-migrates profile
+  state into native named-profile homes and uses `hermes gateway install
+  --system`; Ansible owns only security/readiness drop-ins around those units
+- **Native Astra tools**: Astra uses Hermes's local terminal, file, and code
+  toolsets as the dedicated no-login `hermes-astra` account. It has no sudo,
+  Docker group/socket, Linux capabilities, or cross-profile access; Dubble and
+  Rigel expose no host-execution tools
+- **Memory continuity**: `playbooks/agents/hermes-memory-continuity.yml`
+  transactionally installs the reviewed LCM context engine and native OSS Mem0
+  provider, converts existing approved OpenClaw memories into separate
+  Hermes-owned stores, and leaves all source stores intact
 - **Discord readiness**: service startup requires the official messaging
   dependencies plus an established TLS session owned by the Gateway process;
   a cron-only process cannot report healthy messaging
 - **Native updates**: `hermes-native-update.timer` and
   `hermes-tirith-native-update.timer` are enabled. Hermes retains native
   release discovery, backup, Git update, and Gateway orchestration; the unit
-  reconciles the official messaging extra excluded from upstream `all`
+  reconciles the official messaging and Mem0 extras excluded from upstream
+  `all`
 - **Scheduled automation**: `playbooks/agents/hermes-automation.yml`
   transactionally owns seven native jobs, the retained collectors and
   feed/calendar timers, and native profile backups. All 31 historical

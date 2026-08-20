@@ -173,7 +173,7 @@
 
     - name: Inspect Dubble memory before curated staging
       ansible.builtin.find:
-        paths: /var/lib/hermes/dubble/memories
+        paths: /var/lib/hermes/dubble/.hermes/profiles/dubble/memories
         file_type: any
         hidden: true
         recurse: true
@@ -399,7 +399,7 @@
 
             - name: Inspect Dubble memory after curated staging
               ansible.builtin.find:
-                paths: /var/lib/hermes/dubble/memories
+                paths: /var/lib/hermes/dubble/.hermes/profiles/dubble/memories
                 file_type: any
                 hidden: true
                 recurse: true

@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 2,
+  "schemaVersion": 3,
   "deployment": {
     "mode": "shadow",
     "targetHost": "jn-t14s-lin",
@@ -61,12 +61,16 @@
     "bundledSkillsEnabled": false
   },
   "sandbox": {
-    "backend": "docker",
+    "backend": "profile-specific",
     "binary": "/usr/bin/podman",
     "rootless": true,
     "dockerGroup": false,
     "dockerSocket": false,
     "localTerminalFallback": false,
+    "localProfiles": [
+      "astra"
+    ],
+    "containerProfiles": [],
     "mountCwd": false,
     "hostVolumes": [],
     "forwardEnvironment": [],
@@ -101,11 +105,13 @@
       "name": "astra",
       "serviceUser": "hermes-astra",
       "serviceGroup": "hermes-astra",
-      "home": "/var/lib/hermes/astra",
+      "home": "/var/lib/hermes/astra/.hermes/profiles/astra",
       "unit": "hermes-gateway-astra.service",
       "productionTokenPresent": false,
       "productionCronDeliveryEnabled": false,
-      "terminalEnabled": false,
+      "terminalEnabled": true,
+      "terminalBackend": "local",
+      "cronApprovalMode": "manual",
       "requiredCapabilities": [
         "discord",
         "web-research",
@@ -116,7 +122,11 @@
         "cron-declarations",
         "aggregate-report-read",
         "broker-proposal",
-        "native-self-update-trigger"
+        "native-self-update-trigger",
+        "native-nonroot-terminal",
+        "native-profile-file-access",
+        "native-code-execution",
+        "native-cron-management"
       ],
       "forbiddenCapabilities": [
         "sudo",
@@ -132,11 +142,13 @@
       "name": "dubble",
       "serviceUser": "hermes-dubble",
       "serviceGroup": "hermes-dubble",
-      "home": "/var/lib/hermes/dubble",
+      "home": "/var/lib/hermes/dubble/.hermes/profiles/dubble",
       "unit": "hermes-gateway-dubble.service",
       "productionTokenPresent": false,
       "productionCronDeliveryEnabled": false,
       "terminalEnabled": false,
+      "terminalBackend": "disabled",
+      "cronApprovalMode": "deny",
       "requiredCapabilities": [
         "discord",
         "public-support",
@@ -158,11 +170,13 @@
       "name": "rigel",
       "serviceUser": "hermes-rigel",
       "serviceGroup": "hermes-rigel",
-      "home": "/var/lib/hermes/rigel",
+      "home": "/var/lib/hermes/rigel/.hermes/profiles/rigel",
       "unit": "hermes-gateway-rigel.service",
       "productionTokenPresent": false,
       "productionCronDeliveryEnabled": false,
       "terminalEnabled": false,
+      "terminalBackend": "disabled",
+      "cronApprovalMode": "deny",
       "requiredCapabilities": [
         "discord",
         "study-context",

@@ -19,7 +19,7 @@ sys.dont_write_bytecode = True
 
 PLUGIN = "agent-docker-inventory"
 EXPECTED_FILES = ("__init__.py", "plugin.yaml")
-EXPECTED_ENABLED = ["star-dispatch-privacy", PLUGIN]
+EXPECTED_ENABLED = ["star-dispatch-privacy", PLUGIN, "hermes-lcm"]
 EXPECTED_REPORT_ENDPOINTS = {
     "192.168.1.153",
     "192.168.1.136",
@@ -139,10 +139,27 @@ def validate_config(path: Path) -> None:
     require(isinstance(plugins, dict), "plugins-config-missing")
     require(plugins.get("enabled") == EXPECTED_ENABLED, "plugin-set-or-order-drift")
     require(plugins.get("disabled") == [], "plugin-disabled-drift")
-    require("agent_docker" in config.get("toolsets", []), "toolset-not-enabled")
+    toolsets = config.get("toolsets", [])
+    require(isinstance(toolsets, list), "toolsets-config-invalid")
+    for toolset in ("agent_docker", "terminal", "file", "code_execution", "cronjob"):
+        require(toolset in toolsets, f"toolset-not-enabled:{toolset}")
     disabled = config.get("agent", {}).get("disabled_toolsets", [])
-    for toolset in ("terminal", "file", "code_execution", "computer_use"):
-        require(toolset in disabled, f"privileged-toolset-enabled:{toolset}")
+    require(isinstance(disabled, list), "disabled-toolsets-config-invalid")
+    for toolset in ("computer_use", "discord_admin", "homeassistant"):
+        require(toolset in disabled, f"restricted-toolset-enabled:{toolset}")
+    for toolset in ("terminal", "file", "code_execution", "cronjob"):
+        require(toolset not in disabled, f"native-toolset-disabled:{toolset}")
+    terminal = config.get("terminal", {})
+    require(terminal.get("backend") == "local", "terminal-backend-not-local")
+    require(
+        terminal.get("cwd")
+        == "/var/lib/hermes/astra/.hermes/profiles/astra/imported-data",
+        "terminal-cwd-drift",
+    )
+    deny = config.get("approvals", {}).get("deny", [])
+    require(isinstance(deny, list), "approval-deny-config-invalid")
+    for pattern in ("*sudo*", "*docker*", "*podman*", "*curl*|*sh*"):
+        require(pattern in deny, f"approval-deny-missing:{pattern}")
 
 
 def validate_known_hosts(path: Path) -> None:

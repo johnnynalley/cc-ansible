@@ -1,0 +1,998 @@
+---
+# Purpose: Replace handwritten Gateway units with native named-profile units.
+# Hosts: hermes_hosts.
+# Key vars: hermes_native_gateway_migration_*, hermes_shadow_profiles.
+# Templates: templates/hermes/hermes-gateway-hardening.conf.j2.
+# Validation: ansible-playbook
+#             playbooks/agents/hermes-native-gateway-migration.yml
+#             --syntax-check.
+
+- name: Migrate Hermes Gateways to native service ownership
+  hosts: hermes_hosts
+  become: true
+  gather_facts: true
+
+  vars:
+    hermes_native_migration_profile_skills_contract_path: >-
+      {{ playbook_dir }}/../../{{ hermes_profile_skills_contract_source }}
+    hermes_native_migration_profile_skills_contract: >-
+      {{ lookup('ansible.builtin.file',
+                hermes_native_migration_profile_skills_contract_path)
+         | from_json }}
+    hermes_native_migration_id: >-
+      {{ ansible_facts['date_time']['iso8601_basic_short']
+         }}-pre-native-gateway-migration
+    hermes_native_migration_backup_root: >-
+      {{ hermes_production_cutover_rollback_root
+         }}/{{ hermes_native_migration_id }}
+    hermes_native_migration_guard_services:
+      - hermes-native-update.service
+      - hermes-tirith-native-update.service
+      - hermes-retained-automation@daily-summary.service
+      - hermes-retained-automation@fortnite-progress.service
+      - hermes-warframe-feed.service
+      - hermes-fortnite-calendar-fetch.service
+      - hermes-fortnite-calendar.service
+      - hermes-profile-backup@astra.service
+      - hermes-profile-backup@dubble.service
+      - hermes-profile-backup@rigel.service
+    hermes_native_migration_timers: >-
+      {{ (hermes_automation_enabled_timers
+          + [hermes_native_update_timer, hermes_tirith_update_timer])
+         | unique
+         | list }}
+
+  tasks:
+    - name: Validate native Gateway migration mode
+      ansible.builtin.assert:
+        that:
+          - hermes_native_gateway_migration_mode in ['disabled', 'migrate']
+        fail_msg: >-
+          hermes_native_gateway_migration_mode must be disabled or migrate.
+
+    - name: Skip hosts without native Gateway migration approval
+      ansible.builtin.meta: end_host
+      when: hermes_native_gateway_migration_mode == 'disabled'
+
+    - name: Require exact native Gateway migration authorization
+      ansible.builtin.assert:
+        that:
+          - hermes_native_gateway_migration_approved | bool
+          - >-
+            hermes_native_gateway_migration_confirmation
+            == hermes_native_gateway_migration_required_confirmation
+          - inventory_hostname == 'jn-t14s-lin'
+          - hermes_shadow_profiles | map(attribute='name') | list
+            == ['astra', 'dubble', 'rigel']
+          - hermes_shadow_profiles | map(attribute='unit') | list
+            == ['hermes-gateway-astra.service',
+                'hermes-gateway-dubble.service',
+                'hermes-gateway-rigel.service']
+        fail_msg: >-
+          Native Gateway migration requires the exact host-scoped approval.
+
+    - name: Build native migration profile-skill inventory
+      ansible.builtin.set_fact:
+        hermes_native_migration_profile_skills_inventory: >-
+          {{
+            (hermes_native_migration_profile_skills_inventory | default([])) + [
+            item.1 | combine({
+              'profile': item.0.key,
+              'user': item.0.value.user,
+              'group': item.0.value.group,
+              'managedRoot': item.0.value.managedRoot
+            })
+          ] }}
+      loop: >-
+        {{ hermes_native_migration_profile_skills_contract.profiles
+           | dict2items
+           | subelements('value.skills') }}
+
+    - name: Require complete native migration profile-skill inventory
+      ansible.builtin.assert:
+        that:
+          - hermes_native_migration_profile_skills_inventory | length == 7
+          - >-
+            hermes_native_migration_profile_skills_inventory
+            | map(attribute='profile') | unique | sort
+            == ['astra', 'dubble', 'rigel']
+          - >-
+            hermes_native_migration_profile_skills_inventory
+            | map(attribute='source') | unique | length == 7
+        fail_msg: >-
+          Native Gateway migration requires the complete reviewed profile-skill
+          inventory because the native startup preflight validates it.
+
+    - name: Inspect legacy profile configuration roots
+      ansible.builtin.stat:
+        path: "{{ item.account_home }}/config.yaml"
+        follow: false
+      loop: "{{ hermes_shadow_profiles }}"
+      loop_control:
+        label: "{{ item.name }}"
+      register: hermes_native_migration_legacy_configs
+      check_mode: false
+
+    - name: Inspect native profile configuration roots
+      ansible.builtin.stat:
+        path: "{{ item.home }}/config.yaml"
+        follow: false
+      loop: "{{ hermes_shadow_profiles }}"
+      loop_control:
+        label: "{{ item.name }}"
+      register: hermes_native_migration_native_configs
+      check_mode: false
+
+    - name: Classify native profile layout state
+      ansible.builtin.set_fact:
+        hermes_native_migration_required: >-
+          {{
+            (hermes_native_migration_legacy_configs.results
+             | selectattr('stat.exists')
+             | list
+             | length == 3)
+            and
+            (hermes_native_migration_native_configs.results
+             | selectattr('stat.exists')
+             | list
+             | length == 0)
+          }}
+        hermes_native_migration_complete: >-
+          {{
+            (hermes_native_migration_native_configs.results
+             | selectattr('stat.exists')
+             | list
+             | length == 3)
+          }}
+
+    - name: Reject mixed or incomplete Hermes profile layouts
+      ansible.builtin.assert:
+        that:
+          - >-
+            hermes_native_migration_required
+            or hermes_native_migration_complete
+        fail_msg: >-
+          Hermes profile roots are in a mixed state. Refusing to guess which
+          copy owns live state.
+
+    - name: Stop when native Hermes profile layout is already complete
+      ansible.builtin.meta: end_host
+      when: hermes_native_migration_complete | bool
+
+    - name: Require OpenClaw delivery to remain offline
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/systemctl
+          - is-active
+          - "{{ item.name }}"
+      loop: "{{ hermes_production_cutover_source_system_units }}"
+      register: hermes_native_migration_openclaw_units
+      changed_when: false
+      failed_when: false
+      check_mode: false
+
+    - name: Reject migration while an OpenClaw delivery unit is active
+      ansible.builtin.assert:
+        that:
+          - >-
+            hermes_native_migration_openclaw_units.results
+            | selectattr('stdout', 'equalto', 'active')
+            | list
+            | length == 0
+
+    - name: Create native Gateway migration rollback root
+      ansible.builtin.file:
+        path: "{{ hermes_native_migration_backup_root }}"
+        state: directory
+        owner: root
+        group: root
+        mode: "0700"
+
+    - name: Back up handwritten Gateway base units
+      ansible.builtin.copy:
+        src: "/etc/systemd/system/{{ item.unit }}"
+        dest: "{{ hermes_native_migration_backup_root }}/{{ item.unit }}"
+        remote_src: true
+        owner: root
+        group: root
+        mode: "0600"
+      loop: "{{ hermes_shadow_profiles }}"
+      loop_control:
+        label: "{{ item.name }}"
+      when: not ansible_check_mode
+
+    - name: Inspect currently managed profile-skill state
+      ansible.builtin.stat:
+        path: "{{ item }}"
+        follow: false
+      loop:
+        - "{{ hermes_profile_skills_contract_live }}"
+        - /etc/hermes/astra/skills
+        - /etc/hermes/dubble/skills
+        - /etc/hermes/rigel/skills
+      register: hermes_native_migration_profile_skill_state
+      check_mode: false
+
+    - name: Require complete current profile-skill state before backup
+      ansible.builtin.assert:
+        that:
+          - item.stat.exists
+          - not item.stat.islnk
+        fail_msg: >-
+          Refusing native migration because profile-skill state is incomplete
+          or symlinked at {{ item.item }}.
+      loop: "{{ hermes_native_migration_profile_skill_state.results }}"
+      loop_control:
+        label: "{{ item.item }}"
+
+    - name: Back up current managed profile-skill state
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/tar
+          - --acls
+          - --xattrs
+          - --numeric-owner
+          - -C
+          - /
+          - -cpf
+          - "{{ hermes_native_migration_backup_root }}/profile-skills.tar"
+          - etc/hermes/profile-skills-contract.json
+          - etc/hermes/astra/skills
+          - etc/hermes/dubble/skills
+          - etc/hermes/rigel/skills
+      when: not ansible_check_mode
+      changed_when: true
+
+    - name: Create native policy rollback directory
+      ansible.builtin.file:
+        path: "{{ hermes_native_migration_backup_root }}/policy-files"
+        state: directory
+        owner: root
+        group: root
+        mode: "0700"
+
+    - name: Inspect native policy files before migration
+      ansible.builtin.stat:
+        path: "{{ item.destination }}"
+        follow: false
+      loop: "{{ hermes_memory_continuity_policy_files }}"
+      loop_control:
+        label: "{{ item.destination }}"
+      register: hermes_native_migration_prior_policy_files
+      check_mode: false
+
+    - name: Require safe existing native policy files
+      ansible.builtin.assert:
+        that:
+          - not item.stat.exists or (item.stat.isreg and not item.stat.islnk)
+        fail_msg: >-
+          Refusing native migration because policy state is unsafe at
+          {{ item.item.destination }}.
+      loop: "{{ hermes_native_migration_prior_policy_files.results }}"
+      loop_control:
+        label: "{{ item.item.destination }}"
+
+    - name: Back up existing native policy files
+      ansible.builtin.copy:
+        src: "{{ item.item.destination }}"
+        dest: >-
+          {{ hermes_native_migration_backup_root ~ '/policy-files/'
+             ~ (item.item.destination | hash('sha256')) }}
+        remote_src: true
+        owner: root
+        group: root
+        mode: "0600"
+      loop: "{{ hermes_native_migration_prior_policy_files.results }}"
+      loop_control:
+        label: "{{ item.item.destination }}"
+      when:
+        - not ansible_check_mode
+        - item.stat.exists
+
+    - name: Inspect legacy profile top-level entries
+      ansible.builtin.find:
+        paths: "{{ item.account_home }}"
+        recurse: false
+        hidden: true
+        file_type: any
+      loop: "{{ hermes_shadow_profiles }}"
+      loop_control:
+        label: "{{ item.name }}"
+      register: hermes_native_migration_layout
+      changed_when: false
+      check_mode: false
+
+    - name: Reject symlinked legacy profile state
+      ansible.builtin.assert:
+        that:
+          - not item.1.islnk
+        fail_msg: >-
+          Refusing to migrate symlinked profile state at {{ item.1.path }}.
+      loop: >-
+        {{ query('subelements', hermes_native_migration_layout.results,
+                 'files') }}
+      loop_control:
+        label: "{{ item.1.path }}"
+      when: >-
+        (item.1.path | basename)
+        not in hermes_native_gateway_migration_preserved_account_entries
+
+    - name: Write exact legacy profile backup manifests
+      ansible.builtin.copy:
+        content: |
+          {% for entry in item.files %}
+          {% if (entry.path | basename) not in
+                hermes_native_gateway_migration_preserved_account_entries %}
+          {{ entry.path | basename }}
+          {% endif %}
+          {% endfor %}
+        dest: >-
+          {{ hermes_native_migration_backup_root }}/{{ item.item.name }}.files
+        owner: root
+        group: root
+        mode: "0600"
+      loop: "{{ hermes_native_migration_layout.results }}"
+      loop_control:
+        label: "{{ item.item.name }}"
+      when: not ansible_check_mode
+
+    - name: Pause Hermes automation during native layout migration
+      ansible.builtin.systemd_service:
+        name: "{{ item }}"
+        state: stopped
+      loop: "{{ hermes_native_migration_timers }}"
+      when: not ansible_check_mode
+
+    - name: Wait for timer-owned Hermes operations to become idle
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/systemctl
+          - is-active
+          - "{{ item }}"
+      loop: "{{ hermes_native_migration_guard_services }}"
+      register: hermes_native_migration_guard_state
+      changed_when: false
+      failed_when: false
+      retries: 30
+      delay: 2
+      until: hermes_native_migration_guard_state.stdout != 'active'
+      check_mode: false
+
+    - name: Prepare service-owned markers for handwritten Gateway stops
+      ansible.builtin.include_tasks: ../../tasks/hermes-planned-stop-marker.yml
+      vars:
+        hermes_planned_stop_profile: "{{ item }}"
+      loop: "{{ hermes_shadow_profiles[:2] }}"
+      loop_control:
+        label: "{{ item.name }}"
+      when: not ansible_check_mode
+
+    - name: Stop handwritten production Gateways once
+      ansible.builtin.systemd_service:
+        name: "{{ item.unit }}"
+        state: stopped
+      loop: "{{ hermes_shadow_profiles[:2] }}"
+      loop_control:
+        label: "{{ item.name }}"
+      when: not ansible_check_mode
+
+    - name: Require handwritten production Gateways stopped
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/systemctl
+          - is-active
+          - "{{ item.unit }}"
+      loop: "{{ hermes_shadow_profiles[:2] }}"
+      loop_control:
+        label: "{{ item.name }}"
+      register: hermes_native_migration_stopped_gateways
+      changed_when: false
+      failed_when: >-
+        hermes_native_migration_stopped_gateways.stdout
+        not in ['inactive', 'failed']
+      check_mode: false
+      when: not ansible_check_mode
+
+    - name: Refresh stopped legacy profile top-level entries
+      ansible.builtin.find:
+        paths: "{{ item.account_home }}"
+        recurse: false
+        hidden: true
+        file_type: any
+      loop: "{{ hermes_shadow_profiles }}"
+      loop_control:
+        label: "{{ item.name }}"
+      register: hermes_native_migration_layout
+      changed_when: false
+      check_mode: false
+
+    - name: Reject symlinked stopped legacy profile state
+      ansible.builtin.assert:
+        that:
+          - not item.1.islnk
+        fail_msg: >-
+          Refusing to migrate symlinked profile state at {{ item.1.path }}.
+      loop: >-
+        {{ query('subelements', hermes_native_migration_layout.results,
+                 'files') }}
+      loop_control:
+        label: "{{ item.1.path }}"
+      when: >-
+        (item.1.path | basename)
+        not in hermes_native_gateway_migration_preserved_account_entries
+
+    - name: Rewrite exact stopped profile backup manifests
+      ansible.builtin.copy:
+        content: |
+          {% for entry in item.files %}
+          {% if (entry.path | basename) not in
+                hermes_native_gateway_migration_preserved_account_entries %}
+          {{ entry.path | basename }}
+          {% endif %}
+          {% endfor %}
+        dest: >-
+          {{ hermes_native_migration_backup_root }}/{{ item.item.name }}.files
+        owner: root
+        group: root
+        mode: "0600"
+      loop: "{{ hermes_native_migration_layout.results }}"
+      loop_control:
+        label: "{{ item.item.name }}"
+      when: not ansible_check_mode
+
+    - name: Back up stopped legacy profile state
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/tar
+          - --acls
+          - --xattrs
+          - --numeric-owner
+          - -C
+          - "{{ item.account_home }}"
+          - -cpf
+          - "{{ hermes_native_migration_backup_root }}/{{ item.name }}.tar"
+          - --files-from
+          - "{{ hermes_native_migration_backup_root }}/{{ item.name }}.files"
+      loop: "{{ hermes_shadow_profiles }}"
+      loop_control:
+        label: "{{ item.name }}"
+      when: not ansible_check_mode
+      changed_when: true
+
+    - name: Converge native Hermes profile layout and services
+      block:
+        - name: Create native Hermes profile roots
+          ansible.builtin.file:
+            path: "{{ item.home }}"
+            state: directory
+            owner: "{{ item.user }}"
+            group: "{{ item.group }}"
+            mode: "0700"
+          loop: "{{ hermes_shadow_profiles }}"
+          loop_control:
+            label: "{{ item.name }}"
+
+        - name: Require empty native Hermes profile roots
+          ansible.builtin.find:
+            paths: "{{ item.home }}"
+            recurse: false
+            hidden: true
+            file_type: any
+          loop: "{{ hermes_shadow_profiles }}"
+          loop_control:
+            label: "{{ item.name }}"
+          register: hermes_native_migration_empty_roots
+          failed_when: hermes_native_migration_empty_roots.matched != 0
+          changed_when: false
+          check_mode: false
+
+        - name: Copy stopped Hermes state into native profile roots
+          ansible.builtin.command:
+            argv:
+              - /usr/bin/cp
+              - -a
+              - --reflink=auto
+              - --
+              - "{{ item.1.path }}"
+              - "{{ item.0.item.home }}/"
+          loop: >-
+            {{ query('subelements', hermes_native_migration_layout.results,
+                     'files') }}
+          loop_control:
+            label: "{{ item.0.item.name }}:{{ item.1.path | basename }}"
+          when:
+            - not ansible_check_mode
+            - >-
+              (item.1.path | basename)
+              not in hermes_native_gateway_migration_preserved_account_entries
+          changed_when: true
+
+        - name: Compare legacy and native profile state copies
+          ansible.builtin.command:
+            argv:
+              - /usr/bin/diff
+              - --brief
+              - --recursive
+              - --no-dereference
+              - "{{ item.1.path }}"
+              - "{{ item.0.item.home }}/{{ item.1.path | basename }}"
+          loop: >-
+            {{ query('subelements', hermes_native_migration_layout.results,
+                     'files') }}
+          loop_control:
+            label: "{{ item.0.item.name }}:{{ item.1.path | basename }}"
+          when:
+            - not ansible_check_mode
+            - >-
+              (item.1.path | basename)
+              not in hermes_native_gateway_migration_preserved_account_entries
+          changed_when: false
+
+        - name: Remove handwritten Hermes Gateway base units
+          ansible.builtin.file:
+            path: "/etc/systemd/system/{{ item.unit }}"
+            state: absent
+          loop: "{{ hermes_shadow_profiles }}"
+          loop_control:
+            label: "{{ item.name }}"
+
+        - name: Install native named-profile Hermes Gateway units
+          ansible.builtin.command:
+            argv:
+              - "{{ hermes_shadow_runtime_binary }}"
+              - gateway
+              - install
+              - --system
+              - --run-as-user
+              - "{{ item.user }}"
+              - --no-start-now
+              - >-
+                {{ '--start-on-login'
+                   if item.name in ['astra', 'dubble']
+                   else '--no-start-on-login' }}
+          environment:
+            HOME: "{{ item.account_home }}"
+            HERMES_HOME: "{{ item.home }}"
+            HERMES_MANAGED_DIR: "/etc/hermes/{{ item.name }}"
+          loop: "{{ hermes_shadow_profiles }}"
+          loop_control:
+            label: "{{ item.name }}"
+          register: hermes_native_migration_installs
+          changed_when: true
+
+        - name: Create native Gateway hardening drop-in directories
+          ansible.builtin.file:
+            path: "/etc/systemd/system/{{ item.unit }}.d"
+            state: directory
+            owner: root
+            group: root
+            mode: "0755"
+          loop: "{{ hermes_shadow_profiles }}"
+          loop_control:
+            label: "{{ item.name }}"
+
+        - name: Deploy hardened native Gateway drop-ins
+          ansible.builtin.template:
+            src: >-
+              {{ playbook_dir
+                 }}/../../templates/hermes/hermes-gateway-hardening.conf.j2
+            dest: "/etc/systemd/system/{{ item.unit }}.d/10-managed.conf"
+            owner: root
+            group: root
+            mode: "0644"
+            backup: true
+          vars:
+            hermes_profile: "{{ item }}"
+            hermes_gateway_bootstrap_skip_projection_preflights: true
+          loop: "{{ hermes_shadow_profiles }}"
+          loop_control:
+            label: "{{ item.name }}"
+
+        - name: Deploy native Astra automation preflight drop-in
+          ansible.builtin.template:
+            src: >-
+              {{ playbook_dir
+                 }}/../../templates/hermes/hermes-gateway-astra-automation.conf.j2
+            dest: >-
+              /etc/systemd/system/hermes-gateway-astra.service.d/20-automation.conf
+            owner: root
+            group: root
+            mode: "0644"
+            backup: true
+
+        - name: Stage reviewed profile skills required by native startup
+          when: not ansible_check_mode
+          block:
+            - name: Deploy native profile-skills validator for migration
+              ansible.builtin.copy:
+                src: >-
+                  {{ ansible_config_file | dirname
+                     }}/{{ hermes_profile_skills_validator_source }}
+                dest: "{{ hermes_profile_skills_validator_live }}"
+                owner: root
+                group: root
+                mode: "0755"
+
+            - name: Remove prior exclusive managed profile-skill roots
+              ansible.builtin.file:
+                path: "{{ item.value.managedRoot }}"
+                state: absent
+              loop: >-
+                {{ hermes_native_migration_profile_skills_contract.profiles
+                   | dict2items }}
+              loop_control:
+                label: "{{ item.key }}"
+
+            - name: Create exclusive native managed profile-skill roots
+              ansible.builtin.file:
+                path: "{{ item.value.managedRoot }}"
+                state: directory
+                owner: root
+                group: "{{ item.value.group }}"
+                mode: "0750"
+              loop: >-
+                {{ hermes_native_migration_profile_skills_contract.profiles
+                   | dict2items }}
+              loop_control:
+                label: "{{ item.key }}"
+
+            - name: Create native managed profile-skill directories
+              ansible.builtin.file:
+                path: "{{ item.managedRoot }}/{{ item.name }}"
+                state: directory
+                owner: root
+                group: "{{ item.group }}"
+                mode: "0750"
+              loop: >-
+                {{ hermes_native_migration_profile_skills_inventory }}
+              loop_control:
+                label: "{{ item.profile }}/{{ item.name }}"
+
+            - name: Install reviewed profile skills for native startup
+              ansible.builtin.copy:
+                src: >-
+                  {{ ansible_config_file | dirname }}/{{ item.source }}
+                dest: "{{ item.managedRoot }}/{{ item.name }}/SKILL.md"
+                owner: root
+                group: "{{ item.group }}"
+                mode: "0440"
+              loop: >-
+                {{ hermes_native_migration_profile_skills_inventory }}
+              loop_control:
+                label: "{{ item.profile }}/{{ item.name }}"
+
+            - name: Install native profile-skills contract
+              ansible.builtin.copy:
+                src: >-
+                  {{ hermes_native_migration_profile_skills_contract_path }}
+                dest: "{{ hermes_profile_skills_contract_live }}"
+                owner: root
+                group: root
+                mode: "0444"
+
+            - name: Validate installed native profile skills before startup
+              ansible.builtin.command:
+                argv:
+                  - "{{ hermes_shadow_runtime_venv }}/bin/python"
+                  - "{{ hermes_profile_skills_validator_live }}"
+                  - --contract
+                  - "{{ hermes_profile_skills_contract_live }}"
+                  - --mode
+                  - installed
+                  - --hermes-source
+                  - "{{ hermes_shadow_runtime_root }}"
+              changed_when: false
+
+        - name: Deploy current native policy graph before bootstrap start
+          ansible.builtin.copy:
+            src: "{{ playbook_dir }}/../../{{ item.source }}"
+            dest: "{{ item.destination }}"
+            owner: root
+            group: root
+            mode: "{{ item.mode }}"
+          loop: "{{ hermes_memory_continuity_policy_files }}"
+          loop_control:
+            label: "{{ item.destination }}"
+          when: not ansible_check_mode
+
+        - name: Validate bootstrap Hermes target policy
+          ansible.builtin.command:
+            argv:
+              - "{{ hermes_shadow_audit_live }}"
+              - "{{ hermes_shadow_contract_live }}"
+          changed_when: false
+          when: not ansible_check_mode
+
+        - name: Validate bootstrap Hermes Discord policy graph
+          ansible.builtin.command:
+            argv:
+              - "{{ hermes_discord_audit_live }}"
+              - "{{ hermes_discord_contract_live }}"
+              - --repository-root
+              - /usr/local/share/hermes-shadow/repository
+          changed_when: false
+          when: not ansible_check_mode
+
+        - name: Validate bootstrap Hermes automation policy graph
+          ansible.builtin.command:
+            argv:
+              - "{{ hermes_automation_audit_live }}"
+              - "{{ hermes_automation_contract_live }}"
+              - --repository-root
+              - /usr/local/share/hermes-shadow/repository
+          changed_when: false
+          when: not ansible_check_mode
+
+        - name: Reload native Hermes Gateway units
+          ansible.builtin.systemd_service:
+            daemon_reload: true
+
+        - name: Verify native Hermes Gateway unit definitions
+          ansible.builtin.command:
+            argv:
+              - /usr/bin/systemd-analyze
+              - verify
+              - "/etc/systemd/system/{{ item.unit }}"
+          loop: "{{ hermes_shadow_profiles }}"
+          loop_control:
+            label: "{{ item.name }}"
+          changed_when: false
+          check_mode: false
+
+        - name: Start production Gateways through native Hermes lifecycle
+          ansible.builtin.command:
+            argv:
+              - "{{ hermes_shadow_runtime_binary }}"
+              - gateway
+              - start
+              - --system
+          environment:
+            HOME: "{{ item.account_home }}"
+            HERMES_HOME: "{{ item.home }}"
+            HERMES_MANAGED_DIR: "/etc/hermes/{{ item.name }}"
+          loop: "{{ hermes_shadow_profiles[:2] }}"
+          loop_control:
+            label: "{{ item.name }}"
+          changed_when: true
+          when: not ansible_check_mode
+
+        - name: Keep standalone Rigel Gateway disabled
+          ansible.builtin.systemd_service:
+            name: hermes-gateway-rigel.service
+            state: stopped
+            enabled: false
+
+        - name: Require native production Gateways active
+          ansible.builtin.command:
+            argv:
+              - /usr/bin/systemctl
+              - is-active
+              - "{{ item.unit }}"
+          loop: "{{ hermes_shadow_profiles[:2] }}"
+          loop_control:
+            label: "{{ item.name }}"
+          register: hermes_native_migration_active_gateways
+          changed_when: false
+          check_mode: false
+
+        - name: Read native production Gateway PIDs
+          ansible.builtin.command:
+            argv:
+              - /usr/bin/systemctl
+              - show
+              - "{{ item.unit }}"
+              - --property=MainPID
+              - --value
+          loop: "{{ hermes_shadow_profiles[:2] }}"
+          loop_control:
+            label: "{{ item.name }}"
+          register: hermes_native_migration_native_pids
+          changed_when: false
+          check_mode: false
+
+        - name: Verify Discord sessions from native profile roots
+          ansible.builtin.command:
+            argv:
+              - /usr/sbin/runuser
+              - --user
+              - "{{ item.user }}"
+              - --
+              - "{{ hermes_shadow_runtime_venv }}/bin/python"
+              - "{{ hermes_discord_runtime_audit_live }}"
+              - --home
+              - "{{ item.home }}"
+              - --pid
+              - >-
+                {{
+                  hermes_native_migration_native_pids
+                  .results[index].stdout
+                }}
+              - --timeout
+              - "30"
+          loop: "{{ hermes_shadow_profiles[:2] }}"
+          loop_control:
+            index_var: index
+            label: "{{ item.name }}"
+          changed_when: false
+          check_mode: false
+          when: not ansible_check_mode
+
+        - name: Record paused-timer handoff for automation convergence
+          ansible.builtin.copy:
+            content: |
+              Native Gateway migration completed at
+              {{ ansible_facts['date_time']['iso8601'] }}.
+              Hermes automation and native update timers remain paused until
+              playbooks/agents/hermes-automation.yml and
+              playbooks/agents/hermes-production-runtime.yml converge the new
+              profile paths.
+            dest: "{{ hermes_native_migration_backup_root }}/NEXT_STEP.txt"
+            owner: root
+            group: root
+            mode: "0600"
+          when: not ansible_check_mode
+
+      rescue:
+        - name: Capture failed native Gateway startup journals
+          ansible.builtin.command:
+            argv:
+              - /usr/bin/journalctl
+              - --no-pager
+              - -n
+              - "1000"
+              - -u
+              - "{{ item.unit }}"
+          loop: "{{ hermes_shadow_profiles[:2] }}"
+          loop_control:
+            label: "{{ item.name }}"
+          register: hermes_native_migration_failure_journals
+          changed_when: false
+          failed_when: false
+
+        - name: Preserve failed native Gateway startup journals
+          ansible.builtin.copy:
+            content: "{{ item.stdout }}\n"
+            dest: >-
+              {{ hermes_native_migration_backup_root }}/native-start-failure-
+              {{ item.item.name }}.journal
+            owner: root
+            group: root
+            mode: "0600"
+          loop: "{{ hermes_native_migration_failure_journals.results }}"
+          loop_control:
+            label: "{{ item.item.name }}"
+          when: item.stdout | length > 0
+
+        - name: Prepare best-effort markers for partial native Gateway stops
+          ansible.builtin.include_tasks:
+            file: ../../tasks/hermes-planned-stop-marker.yml
+          vars:
+            hermes_planned_stop_profile: "{{ item }}"
+            hermes_planned_stop_strict: false
+          loop: "{{ hermes_shadow_profiles[:2] }}"
+          loop_control:
+            label: "{{ item.name }}"
+
+        - name: Stop partially migrated native Gateways
+          ansible.builtin.command:
+            argv:
+              - "{{ hermes_shadow_runtime_binary }}"
+              - gateway
+              - stop
+              - --system
+          environment:
+            HOME: "{{ item.account_home }}"
+            HERMES_HOME: "{{ item.home }}"
+            HERMES_MANAGED_DIR: "/etc/hermes/{{ item.name }}"
+          loop: "{{ hermes_shadow_profiles[:2] }}"
+          loop_control:
+            label: "{{ item.name }}"
+          changed_when: true
+          failed_when: false
+
+        - name: Remove partially migrated native Gateway units
+          ansible.builtin.file:
+            path: "/etc/systemd/system/{{ item.unit }}"
+            state: absent
+          loop: "{{ hermes_shadow_profiles }}"
+
+        - name: Remove partially migrated hardening drop-ins
+          ansible.builtin.file:
+            path: "/etc/systemd/system/{{ item.unit }}.d/10-managed.conf"
+            state: absent
+          loop: "{{ hermes_shadow_profiles }}"
+
+        - name: Remove partially migrated Astra automation drop-in
+          ansible.builtin.file:
+            path: >-
+              /etc/systemd/system/hermes-gateway-astra.service.d/20-automation.conf
+            state: absent
+
+        - name: Restore handwritten Gateway base units
+          ansible.builtin.copy:
+            src: "{{ hermes_native_migration_backup_root }}/{{ item.unit }}"
+            dest: "/etc/systemd/system/{{ item.unit }}"
+            remote_src: true
+            owner: root
+            group: root
+            mode: "0644"
+          loop: "{{ hermes_shadow_profiles }}"
+
+        - name: Remove copied native profile roots
+          ansible.builtin.file:
+            path: "{{ item.home }}"
+            state: absent
+          loop: "{{ hermes_shadow_profiles }}"
+
+        - name: Remove failed native profile-skill state
+          ansible.builtin.file:
+            path: "{{ item }}"
+            state: absent
+          loop:
+            - "{{ hermes_profile_skills_contract_live }}"
+            - /etc/hermes/astra/skills
+            - /etc/hermes/dubble/skills
+            - /etc/hermes/rigel/skills
+
+        - name: Restore pre-migration managed profile-skill state
+          ansible.builtin.command:
+            argv:
+              - /usr/bin/tar
+              - --acls
+              - --xattrs
+              - --numeric-owner
+              - -C
+              - /
+              - -xpf
+              - "{{ hermes_native_migration_backup_root }}/profile-skills.tar"
+          changed_when: true
+
+        - name: Remove policy files introduced by failed native migration
+          ansible.builtin.file:
+            path: "{{ item.item.destination }}"
+            state: absent
+          loop: "{{ hermes_native_migration_prior_policy_files.results }}"
+          loop_control:
+            label: "{{ item.item.destination }}"
+          when: not item.stat.exists
+
+        - name: Restore pre-migration native policy files
+          ansible.builtin.copy:
+            src: >-
+              {{ hermes_native_migration_backup_root ~ '/policy-files/'
+                 ~ (item.item.destination | hash('sha256')) }}
+            dest: "{{ item.item.destination }}"
+            remote_src: true
+            owner: "{{ item.stat.pw_name }}"
+            group: "{{ item.stat.gr_name }}"
+            mode: "{{ item.stat.mode }}"
+          loop: "{{ hermes_native_migration_prior_policy_files.results }}"
+          loop_control:
+            label: "{{ item.item.destination }}"
+          when: item.stat.exists
+
+        - name: Reload restored handwritten Gateway units
+          ansible.builtin.systemd_service:
+            daemon_reload: true
+
+        - name: Restart prior production Gateways
+          ansible.builtin.systemd_service:
+            name: "{{ item.unit }}"
+            state: started
+            enabled: true
+          loop: "{{ hermes_shadow_profiles[:2] }}"
+
+        - name: Resume pre-migration Hermes timers
+          ansible.builtin.systemd_service:
+            name: "{{ item }}"
+            state: started
+            enabled: true
+          loop: "{{ hermes_native_migration_timers }}"
+          failed_when: false
+
+        - name: Fail after restoring handwritten Gateway ownership
+          ansible.builtin.fail:
+            msg: >-
+              Native Gateway migration failed. The handwritten units and old
+              profile roots were restored from
+              {{ hermes_native_migration_backup_root }}.
