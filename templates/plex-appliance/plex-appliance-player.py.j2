@@ -476,6 +476,14 @@ def plex_get(path: str, params: Optional[Dict[str, object]] = None, timeout: int
     return ET.fromstring(response.content)
 
 
+def plex_metadata_not_found(exc: object) -> bool:
+    return (
+        isinstance(exc, requests.HTTPError)
+        and exc.response is not None
+        and exc.response.status_code == 404
+    )
+
+
 def wait_for_server() -> None:
     attempt = 1
     failed_once = False
@@ -613,6 +621,24 @@ def item_key(item: ET.Element) -> str:
     return item.attrib.get("ratingKey") or item.attrib.get("key") or item_title(item)
 
 
+def item_identity(item: ET.Element) -> str:
+    guid = item.attrib.get("guid", "").strip()
+    if guid:
+        return f"guid:{guid}"
+
+    if item.attrib.get("type") == "episode":
+        episode_identity = [
+            item.attrib.get("grandparentTitle", "").strip().casefold(),
+            item.attrib.get("parentIndex", "").strip(),
+            item.attrib.get("index", "").strip(),
+        ]
+        if all(episode_identity):
+            return "episode:" + json.dumps(episode_identity, separators=(",", ":"))
+
+    title = item_title(item).strip().casefold()
+    return f"title:{title}" if title else ""
+
+
 def items_by_key(items: List[ET.Element]) -> Dict[str, ET.Element]:
     keyed: Dict[str, ET.Element] = {}
     for item in items:
@@ -620,6 +646,70 @@ def items_by_key(items: List[ET.Element]) -> Dict[str, ET.Element]:
         if key and key not in keyed:
             keyed[key] = item
     return keyed
+
+
+def replacement_item_for_active(
+    active: Dict[str, Any],
+    item_map: Dict[str, ET.Element],
+    unplayable_keys: Set[str],
+) -> Optional[ET.Element]:
+    candidates = [
+        item for key, item in item_map.items()
+        if key not in unplayable_keys
+    ]
+
+    identity = str(active.get("identity") or "")
+    if identity:
+        identity_matches = [item for item in candidates if item_identity(item) == identity]
+        if len(identity_matches) == 1:
+            return identity_matches[0]
+        if len(identity_matches) > 1:
+            return None
+
+    title = str(active.get("title") or "")
+    if title:
+        title_matches = [item for item in candidates if item_title(item) == title]
+        if len(title_matches) == 1:
+            return title_matches[0]
+    return None
+
+
+def reconcile_active_metadata(
+    active: Optional[Dict[str, Any]],
+    item_map: Dict[str, ET.Element],
+    unplayable_keys: Set[str],
+) -> Optional[Dict[str, Any]]:
+    current_key = active_item_key(active)
+    if not current_key:
+        return None
+    if current_key in unplayable_keys:
+        return None
+
+    current_item = item_map.get(current_key)
+    if current_item is not None:
+        normalized = dict(active or {})
+        normalized["title"] = item_title(current_item)
+        normalized["identity"] = item_identity(current_item)
+        return normalized
+
+    replacement = replacement_item_for_active(active or {}, item_map, unplayable_keys)
+    if replacement is None:
+        log(
+            f"Active Plex metadata ID {current_key} disappeared without a unique replacement; "
+            "keeping the replacement eligible in the refreshed queue"
+        )
+        return None
+
+    replacement_key = item_key(replacement)
+    rebound = dict(active or {})
+    rebound["key"] = replacement_key
+    rebound["title"] = item_title(replacement)
+    rebound["identity"] = item_identity(replacement)
+    rebound["updated_at"] = int(time.time())
+    for retry_key in RETRY_STATE_KEYS:
+        rebound.pop(retry_key, None)
+    log(f"Rebound active Plex metadata ID {current_key} to replacement ID {replacement_key}")
+    return rebound
 
 
 def shuffled_keys(keys: Iterable[str]) -> List[str]:
@@ -777,6 +867,7 @@ def active_checkpoint(
     checkpoint = {
         "key": item_key_to_play,
         "title": item_title(item),
+        "identity": item_identity(item),
         "position": max(0.0, position),
         "duration": max(0.0, duration),
         "updated_at": int(time.time()),
@@ -1601,11 +1692,7 @@ def main() -> int:
                 item_map = items_by_key(load_collection_items())
                 if not item_map:
                     raise RuntimeError(f"No playable items found in collection: {COLLECTION}")
-                if active_item_key(active) and (
-                    active_item_key(active) not in item_map
-                    or active_item_key(active) in set(unplayable_keys)
-                ):
-                    active = None
+                active = reconcile_active_metadata(active, item_map, set(unplayable_keys))
                 queue_keys, played_keys, unplayable_keys = reconcile_shuffle_state(
                     queue_keys,
                     played_keys,
@@ -1641,6 +1728,16 @@ def main() -> int:
             try:
                 item = fetch_metadata(item_key_to_play)
             except Exception as exc:
+                if plex_metadata_not_found(exc):
+                    if popped_from_queue:
+                        queue_keys.insert(0, item_key_to_play)
+                        save_shuffle_state(queue_keys, played_keys, unplayable_keys)
+                    next_refresh = 0.0
+                    log(
+                        f"Plex metadata ID {item_key_to_play} no longer exists; "
+                        "refreshing the collection immediately"
+                    )
+                    continue
                 if popped_from_queue and queue_keys:
                     active = None
                     insert_randomly_after_current(queue_keys, [item_key_to_play], active_item_key(active))

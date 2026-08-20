@@ -3,7 +3,10 @@
 ## Templates
 
 - `plex-appliance.env.j2`: Plex appliance environment file.
-- `plex-appliance-player.py.j2`: Player controller.
+- `plex-appliance-player.py.j2`: Player controller. Saved checkpoints include
+  stable media identity so a Plex rating-key replacement triggers an immediate
+  collection refresh and safe active-item rebind instead of an endless `404`
+  retry loop.
 - `plex-appliance-corrupt-media-report.py.j2`: Corrupt-media report helper.
 - `plex-appliance-tailscale-keepalive.sh.j2`: Warms and verifies the Plex
   server Tailscale path used by the appliance.
@@ -24,5 +27,8 @@
 
 ## Safety Notes
 
-- These templates affect the living-room Plex appliance. Preserve visible
-  session behavior and validate service/user context before applying changes.
+- These templates affect both Plex appliances. Preserve visible session
+  behavior and validate service/user context before applying changes.
+- Missing Plex metadata IDs must trigger collection reconciliation. Never mark
+  a stale ID watched or corrupt; rebind only on one unique identity/title match,
+  otherwise leave current replacements eligible in the refreshed queue.

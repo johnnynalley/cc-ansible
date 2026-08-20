@@ -1,6 +1,6 @@
 # Plex Appliance Operations
 
-Last updated: 2026-06-08
+Last updated: 2026-08-20
 
 Use this doc for quick operator actions on the managed Plex TV appliances.
 
@@ -126,6 +126,24 @@ collection mid-cycle are inserted at a random position after the current
 playback position. If no item is actively playing but a queued item is about
 to start, the queued head is treated as the current position so new items do
 not jump ahead of it. Bedroom and Mercury keep separate cycles.
+
+Plex rating keys are not stable across every Sonarr replacement. On 2026-08-20,
+Sonarr replaced Rick and Morty Season 2 at 03:07 CDT, Plex changed S02E08 from
+rating key `19219` to `44368` at 03:08, and Bedroom reached the old queued key
+at 03:29. The server correctly returned `404`, but the player retained the old
+active key and retried it every 10 seconds even though Plex, storage, HDMI, and
+the network path were healthy. This is stale queue identity, not corruption or
+a Plex outage.
+
+Checkpoints now retain a stable Plex GUID or episode coordinate identity. An
+authenticated metadata `404` forces an immediate full collection refresh. The
+player rebinds the active checkpoint only when the refreshed collection has one
+unique identity or full-title match, preserving its playback position and
+clearing obsolete retry counters. If no unique match exists, it clears only the
+stale active reference; reconciliation keeps any replacement eligible in the
+queue and never marks the missing key played or unplayable. Transient HTTP or
+transport failures continue to retry the same active item without forcing an
+expensive refresh.
 
 Plex HTTP stream interruptions are not file-corruption proof. If ffmpeg is
 checking a Plex URL and Plex returns `503`, resets the stream, or ends the HTTP

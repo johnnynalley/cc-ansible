@@ -13,6 +13,8 @@
   overnight window.
 - `plex-library-nightly-scan`: Refreshes Plex library sections through the
   local Plex API during the controlled overnight maintenance window.
+- `test_plex_appliance_player.py`: Regression tests for Plex appliance saved
+  identity and stale-rating-key reconciliation after media replacements.
 
 ## Safety Notes
 
