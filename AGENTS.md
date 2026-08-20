@@ -108,6 +108,14 @@ complete.
 
 Do not introduce or preserve policy-level exact-version pins for self-updating applications, external plugins, or model routes unless the user explicitly approves the pin after its compatibility and update tradeoffs are explained. Prefer the product's stable channel, release track, or unversioned package spec so native update mechanisms can advance normally. Distinguish an update-policy pin from a lockfile or install record that merely records the exact artifact currently resolved. When a migration converts `latest` or a channel into an exact requested spec, treat that as configuration drift: restore the intended tracking policy and audit sibling install records for the same damage.
 
+Preserve the user's subscription-backed model routing for primary, fallback,
+reviewer, guardian, compression, and other auxiliary model work. The presence
+of an API key does not authorize a new metered per-token route. Before adding
+or changing an auxiliary provider, verify its credential source and billing
+path; prefer the existing subscription/OAuth route or inheritance from the
+main model. A usage-billed API provider requires explicit informed approval
+after the recurring-cost and data-boundary tradeoffs are stated.
+
 For managed agent runtimes and their first-party components, inspect and
 preserve the product's supported native update lifecycle before designing
 custom update automation. A least-privilege wrapper may authorize or invoke
