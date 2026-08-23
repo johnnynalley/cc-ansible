@@ -14,9 +14,19 @@
   continues into lobby/sleep mode after gameplay has ended.
   Run locally on fetched capture output, for example
   `python3 scripts/gaming/analyze-gaming-capture.py <path>`.
+- `capture-wasapi-endpoint.ps1`: Records a short diagnostic WAV directly from
+  one explicit Windows capture-endpoint ID by using shared-mode WASAPI. It does
+  not change the default device or install an audio package. For privacy, use
+  it only with the system owner's approval, write to a narrow temporary path,
+  and remove the remote recording after the required analysis artifact has
+  been fetched.
 
 ## Safety Notes
 
-- Read-only; it analyzes supplied capture files and prints metrics.
+- `analyze-gaming-capture.py` is read-only; it analyzes supplied capture files
+  and prints metrics.
 - Prefer running locally on the controller instead of broad remote Windows
   analysis when the gaming PC is in use.
+- Microphone capture records room audio and speech. Obtain explicit approval,
+  bound the duration, keep the artifact private, and delete temporary remote
+  copies after analysis.
