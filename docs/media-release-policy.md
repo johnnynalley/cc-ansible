@@ -1,6 +1,6 @@
 # Media Release Policy
 
-Last updated: 2026-06-05
+Last updated: 2026-08-23
 
 This documents the current Sonarr/Radarr release selection policy on `docker-vm`.
 The goal is better grabbed releases, not just smaller files. Anime is handled as
@@ -60,6 +60,54 @@ a separate policy because dual audio is the highest priority there.
 - Media-stack container library bind: `/srv/media/plex:/data`, backed by the single
   `/srv/media` NFS parent mount from TS440. Completed downloads and libraries
   stay under `/data` inside the containers so hardlinks still work.
+
+## Download Source Preference
+
+Sonarr and Radarr prefer Usenet when candidate quality and custom-format score
+are equal. This preserves the existing quality/CF policy: a Seedpool torrent
+with a genuinely better quality or CF score still wins, while an equal-scored
+candidate uses the faster, non-seeding Usenet path.
+
+Prowlarr uses these indexer priority tie-breaker bands:
+
+- Usenet indexers: `1`
+- Seedpool: `10`
+- Nyaa and AnimeTosho specialist anime sources: `15`
+- Generic public torrent trackers: `25`
+
+Lower numbers are preferred. Indexer priority remains below quality, custom
+format score, and preferred protocol in the Arr comparison order; it does not
+allow a lower-quality release from a preferred indexer to override a better
+candidate.
+
+Seedpool Query Limit and Grab Limit remain blank. Its current Prowlarr
+definition declares no account quota, while Prowlarr's fields are hard usage
+caps rather than request pacing. The other reviewed defaults remain unchanged:
+Apps Minimum Seeders inherits `1`, freeleech-only is disabled, TMDB-only search
+and single-file filename titles are enabled, results sort newest first, and
+torrent-file links are preferred over magnets.
+
+Seedpool's definition supplies `minimumseedtime=864000` (10 days) on Torznab
+results. The user also wants to seed for at least 20 days and until ratio `5`,
+even when reaching that ratio takes months. That combined policy is not yet
+applied: qBittorrent `5.2.1` uses match-any share limits, so entering both
+values would stop at the first reached limit rather than require both. Keep
+this as an explicit pending decision until qBittorrent's Match All behavior is
+available in a stable release or a separately reviewed managed cleanup gate is
+approved. Do not describe the current ratio/time settings as an AND policy.
+
+Manage and audit the implemented source-order policy with
+`scripts/media-release/arr_indexer_preference_policy.py`. Apply requires a
+marked Sanoid-backed rollback path:
+
+```bash
+ansible docker-vm -b -m script -a \
+  "scripts/media-release/arr_indexer_preference_policy.py"
+
+ansible docker-vm -b -m script -a \
+  "scripts/media-release/arr_indexer_preference_policy.py --apply \
+  --backup-path /srv/live-rollbacks/docker-vm/arr-policy/<artifact>"
+```
 
 Recyclarr is no longer part of the active release-policy path. Local custom
 formats created directly in Sonarr/Radarr are still valid, but they must be

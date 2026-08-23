@@ -49,6 +49,13 @@
   were recorded in the native OnGrab event; active downloads, unexpected pack
   files, current-better candidates, and downloads without exact context are
   never selected. The deployed service can run in dry-run mode before apply.
+- `arr_indexer_preference_policy.py`: Dry-run by default policy helper for the
+  approved source ordering. It sets Usenet indexers to priority `1`, Seedpool
+  to `10`, Nyaa/AnimeTosho specialists to `15`, generic public torrents to
+  `25`, and Sonarr/Radarr preferred protocol to Usenet. `--apply` requires an
+  existing marked Sanoid-backed rollback path and verifies every downstream
+  Prowlarr indexer copy in both Arr applications. It deliberately does not
+  alter seeding limits.
 - `arr_profile_assignment_check.py`: Read-only Sonarr/Radarr and Seerr check
   that fails if any media assignment or request default uses balanced, test,
   old, or unknown profiles instead of efficient profiles.
@@ -243,3 +250,6 @@
 - Run `python3 scripts/media-release/test_arr_import_reconciler.py` after
   changing queue eligibility, exact-target selection, or native manual-import
   command construction.
+- Run `python3 scripts/media-release/test_arr_indexer_preference_policy.py`
+  after changing source-priority bands, name normalization, or downstream
+  convergence behavior.
