@@ -260,6 +260,17 @@ user explicitly requests work on that platform in the current task.
 
 For live Windows gaming PC diagnostics, especially on `lj-gaming-pc` while the user is gaming or streaming, use narrow, bounded probes only. Do not run broad PowerShell/Ansible inspections that enumerate large process/log/state data and serialize deep JSON, and do not leave diagnostic probes running. If a probe hangs or looks expensive, stop it and verify no stale remote PowerShell workers remain before continuing. Ask first before any broad inspection that could consume noticeable CPU, memory, disk, or foreground responsiveness.
 
+For Windows virtual-audio failures after sleep, do not infer the complete
+media-path cause from a GUI input meter, a saved endpoint ID, a matching release
+note, or improvement after one routing change. Treat the meter as proof only of
+the path up to that meter, and treat an off/on cycle as evidence that graph
+reconstruction recovers the symptom, not as root cause. Before declaring the
+cause, compare the same broken state against the recovered state at the actual
+consumer-visible virtual endpoint, including endpoint identity and format,
+APO/driver state, application logs, and USB/audio resume timing. A change that
+only improves the symptom is contributory until the failure is eliminated in a
+controlled sleep/resume test.
+
 For Fortnite/Windows gaming performance work, treat `docs/fortnite-performance-investigation.md` as the running source of truth. Before suggesting a tweak or A/B test, check that document and the saved benchmark state so you do not repeat already-tested ideas or confuse untested candidates with proven wins. After every meaningful benchmark, setting change, driver/BIOS/chipset change, or conclusion, update that document in the same turn with the capture label/path, conditions, key metrics, interpretation, and next action.
 
 When a benchmark telemetry source is wrong, degraded, or internally inconsistent, treat that as an active diagnostic failure before downgrading it to a caveat. First identify the mechanism and possible mitigations that could restore the source, such as presentation mode, overlay/capture hooks, compositor state, registry graphics tweaks, process privilege, or tool invocation flags. Only suppress, ignore, or replace that telemetry after the root cause is classified, the mitigation path is documented, and a better source has been proven for the current capture.
