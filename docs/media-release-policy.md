@@ -2051,6 +2051,18 @@ All queue removals used `removeFromClient=true` and `blocklist=false`.
   `-955000` to `45000`, and the obsolete 720p queue row was removed without
   blocklisting.
 
+## Future Astra Arr Management Evaluation
+
+Evaluate giving Astra narrowly scoped Sonarr/Radarr management capabilities;
+this is a future design item, not current authorization or a deployed feature.
+The evaluation should start with read-only queue, history, grab/import score,
+payload-language, release-group, profile-math, and hardlink evidence. Any write
+capability must use managed repository tools, exact download/media identities,
+targeted live rollback backups, dry-run output, explicit approval boundaries,
+and post-action verification. Queue removal must remain non-blocklisting by
+default, ambiguous imports must remain review-only, and Astra must not gain a
+generic Arr API or shell credential merely to implement these workflows.
+
 Reference links:
 
 - <https://github.com/Dictionarry-Hub/profilarr>
