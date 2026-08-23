@@ -249,16 +249,16 @@ check_container_path_spec() {
   local output
 
   IFS='|' read -r container path <<< "$spec"
-  [[ -n "$container" && -n "$path" ]] || return
+  [[ -n "$container" && -n "$path" ]] || return 0
 
   # A stopped or missing application is not by itself a storage
   # classification. The normal health check owns that condition. This probe
   # specifically detects a running container whose private bind-mount
   # namespace retained stale NFS handles after the host automount recovered.
   running="$(docker inspect "$container" 2>/dev/null | jq -r '.[0].State.Running // false' 2>/dev/null || printf 'false')"
-  [[ "$running" == "true" ]] || return
+  [[ "$running" == "true" ]] || return 0
 
-  output="$(timeout "$PATH_PROBE_TIMEOUT" docker exec "$container" stat -c '%F' "$path" 2>&1)" && return
+  output="$(timeout "$PATH_PROBE_TIMEOUT" docker exec "$container" stat -c '%F' "$path" 2>&1)" && return 0
   unhealthy_container_reasons+=("$container:$path: ${output:-unreadable or stale}")
 }
 
@@ -269,6 +269,7 @@ collect_unhealthy_container_paths() {
   for spec in "${CONTAINER_PATH_SPECS[@]}"; do
     check_container_path_spec "$spec"
   done
+  return 0
 }
 
 verify_recovered_paths() {
@@ -415,6 +416,21 @@ run_self_test() {
   [[ "$(classify_recovery_action 0 1 2)" == "resume" ]] || failures=$((failures + 1))
   [[ "$(classify_recovery_action 0 0 2)" == "restart" ]] || failures=$((failures + 1))
   [[ "$(classify_recovery_action 0 0 0)" == "none" ]] || failures=$((failures + 1))
+
+  # A recovery retry necessarily sees stopped containers. That is a normal
+  # skip, not an error: returning non-zero here trips `set -e` before main can
+  # evaluate STACK_STOPPED_FILE and select the pending resume action.
+  docker() {
+    if [[ "${1:-}" == "inspect" ]]; then
+      printf '[{"State":{"Running":false}}]\n'
+      return 0
+    fi
+    return 99
+  }
+  unhealthy_container_reasons=()
+  check_container_path_spec 'self-test-stopped|/data'
+  [[ "{% raw %}${#unhealthy_container_reasons[@]}{% endraw %}" -eq 0 ]] || failures=$((failures + 1))
+  unset -f docker
 
   if (( failures > 0 )); then
     printf 'media-stack-storage-recover self-test failed: %s case(s)\n' "$failures" >&2

@@ -18,7 +18,8 @@
   provider/write-path checks for subtitle fulfillment.
 - `media-stack-storage-recover.sh.j2`: Classified stale-NFS and stale
   container-bind recovery for the docker-vm media stack, with bounded
-  post-restart health retries.
+  post-restart health retries. Stopped containers are a successful bind-probe
+  skip so strict shell mode cannot abort a pending post-storage resume.
 - `media-stack.yml`: media-vm Plex-side media compose file.
 - `profilarr.yml`: Profilarr compose file.
 - `qdrant.yml`: Qdrant compose file.
