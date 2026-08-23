@@ -34,6 +34,6 @@ service units, scripts, Docker Compose files, and host-side helper files.
 - `storage/`: NFS, ZFS, Sanoid, and MergerFS templates.
 - `streaming/`: Stream relay, MediaMTX, and VOD mover templates.
 - `ups/`: APC UPS daemon and notification templates.
-- `windows/`: Windows gaming, performance, and SignalRGB templates.
+- `windows/`: Windows gaming and performance templates.
 
 Start with the relevant directory README before adding or changing a template.

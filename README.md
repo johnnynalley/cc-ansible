@@ -263,7 +263,7 @@ Packages are merged from multiple sources (all applicable variables combined):
 | `wifi.yml` | `linux_hosts` | WiFi powersave disable, optional PCI FLR or module reload resume fix |
 | `cloudflare-ddns.yml` | `cloudflare_ddns_hosts` | DNS-only Cloudflare DDNS records for fixed external endpoints with dynamic WAN IPs |
 | `tailscale-peer-relay-endpoint.yml` | `tailscale_peer_relay_endpoint_hosts` | Sync Tailscale peer-relay static endpoints to the current WAN IP |
-| `windows-signalrgb.yml` | `windows_hosts` | SignalRGB logon/lock/unlock lighting automation on lj-gaming-pc |
+| `windows-signalrgb.yml` | `windows_hosts` | Retire legacy SignalRGB lock/unlock automation while preserving ordinary startup on lj-gaming-pc |
 | `windows-gaming-tuning.yml` | `windows_hosts` | Low-latency Realtek NIC tuning for the Windows gaming PC |
 | `windows-windows-performance-mode.yml` | `windows_hosts` | Windows performance mode triggers for competitive games and OBS streaming/recording |
 | `restic.yml` | `backup_clients` | B2 offsite backup with systemd timer |

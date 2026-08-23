@@ -59,7 +59,7 @@
 
 ## 2026-06-13 Optimization Rollback Audit
 
-Context: after the 5800X3D install and A-XMP restore, the best real-round capture averaged roughly 194 FPS by RTSS with a 199.8 FPS p50 in round 2. That changes the cleanup priority. The old broad background-app shutdown was useful while diagnosing the 3900X-era ceiling, but it is no longer proven necessary and now has real workflow costs: launcher relaunch friction, Xbox/Game Bar chat breakage, and possible SignalRGB lock/unlock interference.
+Context: after the 5800X3D install and A-XMP restore, the best real-round capture averaged roughly 194 FPS by RTSS with a 199.8 FPS p50 in round 2. That changes the cleanup priority. The old broad background-app shutdown was useful while diagnosing the 3900X-era ceiling, but it is no longer proven necessary and now has real workflow costs: launcher relaunch friction and Xbox/Game Bar chat breakage. The separate custom SignalRGB lock/unlock automation was retired on 2026-08-23 after the workstation moved to sleep for idle periods.
 
 Treat these as the current one-by-one decisions:
 
@@ -78,7 +78,7 @@ Treat these as the current one-by-one decisions:
 | Performance Mode auto watcher | Rolled back 2026-06-13 | Live watcher task is removed, no watcher process was present after verification, and manual shortcuts/scripts remain available for future experiments. |
 | OBS Performance Mode trigger | Rolled back 2026-06-13 | OBS no longer references the trigger in the active scene collection, and the old trigger file was replaced with a disabled stub so future OBS launches cannot silently enter Performance Mode. |
 | Launcher/app close rules | Rolled back 2026-06-13 | The active process close list is now empty. Epic, Steam, Rockstar, Xbox, Nextcloud, SignalRGB, and other normal clients should no longer be killed by Performance Mode. |
-| SignalRGB close rule | Rolled back 2026-06-13 | SignalRGB is no longer in a Performance Mode close list, which matches the lock/unlock automation requirement that SignalRGB stay resident in the user session. |
+| SignalRGB session-state automation | Retired 2026-08-23 | The custom logon-on, lock-off, and unlock-on tasks were removed. SignalRGB remains resident for colors through its ordinary user startup entry. |
 | SysMain / Delivery Optimization / Windows Search / BITS stop rules | Rolled back 2026-06-13 | The active service stop list is now empty. Re-add only if a benchmark identifies a specific service as a stutter source. |
 | Xbox Game Bar / Game DVR settings | Unmanaged by Ansible 2026-06-13 | `inventory/host_vars/lj-gaming-pc/gamebar.yml` was removed so Windows Settings/Xbox UI owns Game Bar. The old Ansible-managed disabling values were removed live as a one-time cleanup rather than replaced with new managed values. |
 | Fortnite process priority | A/B test later | Low-risk, but do not bake it in without a capture showing better RTSS/MAHM FPS or lows. |

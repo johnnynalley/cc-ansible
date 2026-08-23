@@ -1,17 +1,12 @@
 ---
-# lj-gaming-pc - SignalRGB lock/unlock lighting automation
+# lj-gaming-pc - SignalRGB native startup and legacy automation cleanup
 
-signalrgb_task_user: 'LJ-GAMING-PC\jn'
 signalrgb_script_dir: 'C:\ProgramData\Johnny\SignalRGB'
-signalrgb_legacy_script_dirs:
-  - 'C:\Users\jn\Nextcloud\Scripts\SignalRGB'
-
-# Keep SignalRGB resident in the user session outside performance mode. Its API
-# is not reliably usable when the app is launched only after the session is
-# already locked, so the lock/unlock tasks depend on a resident session process.
-signalrgb_close_after_action: false
-signalrgb_disable_persistent_startup: true
-signalrgb_api_port: 16038
-signalrgb_launch_timeout_seconds: 30
-signalrgb_post_apply_settle_seconds: 2
-signalrgb_process_priority: BelowNormal
+signalrgb_launcher_path: >-
+  C:\Users\jn\AppData\Local\VortxEngine\SignalRgbLauncher.exe
+signalrgb_startup_command: >-
+  "C:\Users\jn\AppData\Local\VortxEngine\SignalRgbLauncher.exe" --silent
+signalrgb_legacy_task_names:
+  - SignalRGB - Lights On On Logon
+  - SignalRGB - Lights Off On Lock
+  - SignalRGB - Lights On On Unlock

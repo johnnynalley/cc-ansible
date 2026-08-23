@@ -89,7 +89,7 @@
   ansible.builtin.import_playbook: playbooks/windows/windows-performance-mode.yml
   tags: [windows, gaming, performance-mode]
 
-- name: Configure Windows SignalRGB lock and unlock automation
+- name: Retire legacy Windows SignalRGB lock and unlock automation
   ansible.builtin.import_playbook: playbooks/windows/windows-signalrgb.yml
   tags: [windows, signalrgb]
 
