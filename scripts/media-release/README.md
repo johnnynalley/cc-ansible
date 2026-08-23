@@ -2,6 +2,16 @@
 
 ## Scripts
 
+- `arr_grab_context.py`: Internal HTTP ledger for exact Sonarr/Radarr `OnGrab`
+  context. It stores canonical media identity, alternate titles, original
+  language, expected episodes, release title, release group, quality, and
+  grab-time custom formats by exact download ID so download-client stampers do
+  not depend on fuzzy queue-title matching at completion time. It also marks
+  release-title/media-title conflicts instead of allowing canonical prefixing
+  to hide a wrong-series payload.
+- `arr_grab_context_configure.py`: Dry-run by default, idempotent Sonarr/Radarr
+  webhook configurator for the exact-ID ledger. `--apply` backs up each Arr
+  notification set before creating or updating the OnGrab-only webhook.
 - `arr_anime_source_rank_policy.py`: Adds or updates the legacy anime Bluray
   source ranking custom format in Sonarr/Radarr balanced anime profiles, with
   backups.
@@ -33,6 +43,12 @@
   Dictionarry tier stacks, bounded TRaSH fallback tiers, Bluray/WEB source
   ordering, regular enabled-quality grouping, service/repack tiebreakers,
   legacy tier drift, and the CF limit.
+- `arr_import_reconciler.py`: Exact-ledger import fallback for completed
+  Sonarr/Radarr downloads blocked only because the release was matched by ID.
+  It imports only rejection-free, missing candidates whose episode/movie IDs
+  were recorded in the native OnGrab event; active downloads, unexpected pack
+  files, current-better candidates, and downloads without exact context are
+  never selected. The deployed service can run in dry-run mode before apply.
 - `arr_profile_assignment_check.py`: Read-only Sonarr/Radarr and Seerr check
   that fails if any media assignment or request default uses balanced, test,
   old, or unknown profiles instead of efficient profiles.
@@ -44,8 +60,11 @@
   quality-profile groups, useful for checking whether profile quality order is
   still blocking custom-format upgrades.
 - `arr_queue_remove.py`: Dry-run by default Sonarr/Radarr queue-row removal
-  helper with status/title/message filters. `--apply` requires an existing live
-  rollback backup path and supports non-blocklisting cleanup.
+  helper with status/tracked-status/title/message filters. `--summary-only`
+  keeps large-queue evidence bounded while retaining aggregate operation
+  results. Client-removing cleanup operates once per exact download ID so pack
+  rows cannot churn queue IDs during removal. `--apply` requires an existing
+  live rollback backup path and supports non-blocklisting cleanup.
 - `arr_import_status_snapshot.py`: Read-only Sonarr/Radarr import-recovery
   snapshot that fully paginates queues, summarizes blocked import reasons,
   active commands, and recent grab/import/delete history.
@@ -96,6 +115,9 @@
   and optional tracker messages. Cleanup is opt-in only: `--apply-delete`
   requires `--delete-states` plus a manifest path, deletes through the
   qBittorrent API with files, and skips finished/seeding torrents by default.
+  `--preserve-files` changes an explicit applied removal to retain payload
+  files, which is intended for a backed-up recheck canary rather than routine
+  queue cleanup.
 - `sab_queue_status.py`: Read-only SABnzbd queue and incomplete-folder summary
   for Arr import incidents. Reads SAB's local config on `docker-vm`, queries the
   API without printing secrets, compares active queue items with `/incomplete`
@@ -211,3 +233,13 @@
   otherwise; prefer dry-run flags first.
 - Use `ansible docker-vm -m script -a "scripts/media-release/<script> ..."` for
   one-off execution so the source remains repo-managed.
+- Run `python3 scripts/media-release/test_arr_grab_context.py` after changing
+  the grab-context schema or identity matching.
+- Run `python3 scripts/media-release/test_release_stampers.py` after changing
+  exact-ID lookup or canonical-title prefix behavior in either download-client
+  stamper.
+- Run `python3 scripts/media-release/test_arr_grab_context_configure.py` after
+  changing notification payload construction.
+- Run `python3 scripts/media-release/test_arr_import_reconciler.py` after
+  changing queue eligibility, exact-target selection, or native manual-import
+  command construction.

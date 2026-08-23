@@ -3,6 +3,10 @@
 ## Templates
 
 - `Caddyfile.j2`: Internal HTTPS routes and reverse proxies.
+- `arr-grab-context.yml.j2`: Private exact-download-ID OnGrab context ledger
+  plus exact-target import reconciler, joined to the media-stack network for
+  Sonarr/Radarr and download-client stampers. They publish no host port and
+  persist only the SQLite ledger and one-hour reconciliation-attempt state.
 - `caddy.yml`: Caddy Docker Compose stack.
 - `caddy.Dockerfile`: Caddy image build with Cloudflare DNS support.
 - `diun.yml.j2`: Diun update-monitor configuration.

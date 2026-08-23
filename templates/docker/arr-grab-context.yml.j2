@@ -1,0 +1,84 @@
+services:
+  arr-grab-context:
+    image: python:3-alpine
+    container_name: arr-grab-context
+    command:
+      - python3
+      - /app/arr_grab_context.py
+      - --db
+      - /data/arr-grab-context.db
+      - --retention-days
+      - "{{ media_release_stamper_context_retention_days | default(120) }}"
+    user: "{{ media_release_stamper_container_uid | default('1000') }}:{{ media_release_stamper_container_gid | default('1000') }}"
+    environment:
+      PYTHONDONTWRITEBYTECODE: "1"
+      SONARR_API: "{{ media_release_stamper_sonarr_api }}"
+      SONARR_API_KEY: "{{ media_release_stamper_sonarr_api_key }}"
+      RADARR_API: "{{ media_release_stamper_radarr_api }}"
+      RADARR_API_KEY: "{{ media_release_stamper_radarr_api_key }}"
+    volumes:
+      - ./arr_grab_context.py:/app/arr_grab_context.py:ro
+      - ./data:/data
+    networks:
+      - media-stack
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /tmp:size=16m,mode=1777
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:9899/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    restart: unless-stopped
+
+  arr-import-reconciler:
+    image: python:3-alpine
+    container_name: arr-import-reconciler
+    command:
+      - python3
+      - /app/arr_import_reconciler.py
+      - --interval
+      - "{{ media_release_stamper_reconciler_interval | default(60) }}"
+{% if not (media_release_stamper_reconciler_apply | default(false) | bool) %}
+      - --dry-run
+{% endif %}
+    user: "{{ media_release_stamper_container_uid | default('1000') }}:{{ media_release_stamper_container_gid | default('1000') }}"
+    environment:
+      PYTHONDONTWRITEBYTECODE: "1"
+      ARR_GRAB_CONTEXT_API: http://arr-grab-context:9899
+      SONARR_API: "{{ media_release_stamper_sonarr_api }}"
+      SONARR_API_KEY: "{{ media_release_stamper_sonarr_api_key }}"
+      RADARR_API: "{{ media_release_stamper_radarr_api }}"
+      RADARR_API_KEY: "{{ media_release_stamper_radarr_api_key }}"
+    volumes:
+      - ./arr_import_reconciler.py:/app/arr_import_reconciler.py:ro
+      - ./data:/data
+    networks:
+      - media-stack
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /tmp:size=16m,mode=1777
+    healthcheck:
+      test: ["CMD", "python3", "/app/arr_import_reconciler.py", "--check-health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    depends_on:
+      arr-grab-context:
+        condition: service_healthy
+    restart: unless-stopped
+
+networks:
+  media-stack:
+    external: true
+    name: "{{ media_release_stamper_context_network | default('media-stack_default') }}"

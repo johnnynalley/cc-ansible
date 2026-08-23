@@ -17,6 +17,16 @@ media_release_stamper_sonarr_config_path: /opt/media-stack/sonarr/config.xml
 media_release_stamper_radarr_config_path: /opt/media-stack/radarr/config.xml
 media_release_stamper_sonarr_api: http://sonarr:8989/api/v3
 media_release_stamper_radarr_api: http://radarr:7878/api/v3
+media_release_stamper_backup_root: /srv/live-rollbacks/docker-vm/media-release
+
+media_release_stamper_context_enabled: true
+media_release_stamper_context_dir: /opt/arr-grab-context
+media_release_stamper_context_network: media-stack_default
+media_release_stamper_context_api: http://arr-grab-context:9899
+media_release_stamper_context_webhook_url: http://arr-grab-context:9899/v1/events
+media_release_stamper_context_retention_days: 120
+media_release_stamper_reconciler_apply: true
+media_release_stamper_reconciler_interval: 60
 media_release_stamper_qbit_categories:
   - tv-sonarr
   - sonarr

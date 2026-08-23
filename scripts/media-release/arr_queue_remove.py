@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+from collections import Counter
 import json
 from pathlib import Path
 import re
@@ -134,6 +135,8 @@ def matches(record: dict[str, Any], args: argparse.Namespace) -> bool:
         return False
     if args.tracked_state and record.get("trackedDownloadState") != args.tracked_state:
         return False
+    if args.tracked_status and record.get("trackedDownloadStatus") != args.tracked_status:
+        return False
     if args.download_client is not None:
         client = record.get("downloadClient")
         client_name = str(client or "")
@@ -151,11 +154,30 @@ def matches(record: dict[str, Any], args: argparse.Namespace) -> bool:
     return True
 
 
+def cleanup_records(
+    records: list[dict[str, Any]],
+    remove_from_client: bool,
+) -> list[dict[str, Any]]:
+    if not remove_from_client:
+        return records
+    selected: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for record in records:
+        download_id = str(record.get("downloadId") or "").strip().casefold()
+        key = f"download:{download_id}" if download_id else f"queue:{record.get('id')}"
+        if key in seen:
+            continue
+        seen.add(key)
+        selected.append(record)
+    return selected
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--app", required=True, choices=sorted(APPS))
     parser.add_argument("--status")
     parser.add_argument("--tracked-state")
+    parser.add_argument("--tracked-status")
     parser.add_argument(
         "--download-client",
         help="Download client name to match, or 'none' for null/unavailable rows.",
@@ -165,6 +187,11 @@ def main() -> int:
     parser.add_argument("--limit", type=int)
     parser.add_argument("--page-size", type=int, default=1000)
     parser.add_argument("--max-pages", type=int, default=10)
+    parser.add_argument(
+        "--summary-only",
+        action="store_true",
+        help="omit per-row matches while retaining counts and cleanup settings",
+    )
     parser.add_argument("--apply", action="store_true")
     parser.add_argument("--backup-path", help="Existing rollback backup path. Required with --apply.")
     parser.add_argument(
@@ -198,9 +225,10 @@ def main() -> int:
     selected = [record for record in records if matches(record, args)]
     if args.limit is not None:
         selected = selected[: args.limit]
+    operations = cleanup_records(selected, args.remove_from_client)
 
     removals: list[dict[str, Any]] = []
-    for record in selected:
+    for record in operations:
         queue_id = record.get("id")
         summary = {
             "id": queue_id,
@@ -233,6 +261,7 @@ def main() -> int:
                         raise
                     summary["result"] = "already_missing"
         removals.append(summary)
+    result_counts = Counter(str(item.get("result") or "dry_run") for item in removals)
 
     print(
         json.dumps(
@@ -241,9 +270,11 @@ def main() -> int:
                 "apply": args.apply,
                 "queue_records": len(records),
                 "matched_rows": len(selected),
+                "matched_downloads": len(operations),
                 "remove_from_client": args.remove_from_client,
                 "blocklist": args.blocklist,
-                "matches": removals,
+                "result_counts": dict(sorted(result_counts.items())),
+                "matches": [] if args.summary_only else removals,
             },
             indent=2,
             sort_keys=True,

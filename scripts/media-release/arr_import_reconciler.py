@@ -1,0 +1,392 @@
+#!/usr/bin/env python3
+"""Reconcile exact ledger-backed Arr downloads blocked only by ID matching."""
+
+from __future__ import annotations
+
+import argparse
+import datetime as dt
+import json
+import os
+from pathlib import Path
+import sys
+import time
+from typing import Any
+import urllib.error
+import urllib.parse
+import urllib.request
+
+
+DEFAULT_INTERVAL = 60
+DEFAULT_SUCCESS_SUPPRESSION = 3600
+DEFAULT_HEARTBEAT = Path("/tmp/arr-import-reconciler.heartbeat")
+DEFAULT_STATE = Path("/data/arr-import-reconciler-state.json")
+ID_MATCH_MARKERS = {
+    "sonarr": "matched to series by id",
+    "radarr": "matched to movie by id",
+}
+
+
+def iso_utc() -> str:
+    return dt.datetime.now(dt.UTC).isoformat(timespec="seconds").replace("+00:00", "Z")
+
+
+def normalize_download_id(value: object) -> str:
+    return str(value or "").strip().casefold()
+
+
+def status_messages(record: dict[str, Any]) -> list[str]:
+    messages: list[str] = []
+    for status in record.get("statusMessages") or []:
+        messages.extend(str(message) for message in status.get("messages") or [])
+    if record.get("errorMessage"):
+        messages.append(str(record["errorMessage"]))
+    return messages
+
+
+def is_exact_id_match_block(record: dict[str, Any], app: str) -> bool:
+    if str(record.get("status") or "").casefold() != "completed":
+        return False
+    if str(record.get("trackedDownloadState") or "").casefold() != "importblocked":
+        return False
+    return ID_MATCH_MARKERS[app] in "\n".join(status_messages(record)).casefold()
+
+
+def rejection_reasons(candidate: dict[str, Any]) -> list[str]:
+    return [
+        str(item.get("reason") or item) if isinstance(item, dict) else str(item)
+        for item in candidate.get("rejections") or []
+    ]
+
+
+def expected_episode_ids(context: dict[str, Any]) -> set[int]:
+    return {
+        int(episode["id"])
+        for episode in context.get("expected_episodes") or []
+        if isinstance(episode, dict) and isinstance(episode.get("id"), int)
+    }
+
+
+def candidate_target_ids(app: str, candidate: dict[str, Any]) -> set[int]:
+    if app == "sonarr":
+        return {
+            int(episode["id"])
+            for episode in candidate.get("episodes") or []
+            if isinstance(episode, dict) and isinstance(episode.get("id"), int)
+        }
+    movie = candidate.get("movie") or {}
+    movie_id = movie.get("id")
+    return {int(movie_id)} if isinstance(movie_id, int) else set()
+
+
+def candidate_is_missing(app: str, candidate: dict[str, Any]) -> bool:
+    if app == "sonarr":
+        episodes = candidate.get("episodes") or []
+        return bool(episodes) and all(
+            bool(episode.get("monitored")) and not bool(episode.get("hasFile"))
+            for episode in episodes
+        )
+    return (candidate.get("movie") or {}).get("hasFile") is False
+
+
+def select_candidates(
+    app: str,
+    context: dict[str, Any],
+    candidates: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    if context.get("app") != app or context.get("identity_conflict"):
+        return []
+    media_id = (context.get("media") or {}).get("id")
+    if not isinstance(media_id, int):
+        return []
+    expected = expected_episode_ids(context) if app == "sonarr" else {media_id}
+    if not expected:
+        return []
+
+    selected: list[dict[str, Any]] = []
+    for candidate in candidates:
+        if rejection_reasons(candidate) or not candidate.get("path"):
+            continue
+        owner = candidate.get("series") if app == "sonarr" else candidate.get("movie")
+        if not isinstance(owner, dict) or owner.get("id") != media_id:
+            continue
+        targets = candidate_target_ids(app, candidate)
+        if not targets or not targets.issubset(expected):
+            continue
+        if not candidate_is_missing(app, candidate):
+            continue
+        selected.append(candidate)
+    target_counts: dict[int, int] = {}
+    for candidate in selected:
+        for target in candidate_target_ids(app, candidate):
+            target_counts[target] = target_counts.get(target, 0) + 1
+    if any(count > 1 for count in target_counts.values()):
+        return []
+    return selected
+
+
+def import_file(app: str, candidate: dict[str, Any], download_id: str) -> dict[str, Any]:
+    common = {
+        "path": candidate["path"],
+        "folderName": candidate.get("folderName"),
+        "quality": candidate.get("quality"),
+        "languages": candidate.get("languages") or [],
+        "releaseGroup": candidate.get("releaseGroup"),
+        "indexerFlags": candidate.get("indexerFlags", 0),
+        "downloadId": candidate.get("downloadId") or download_id,
+    }
+    if app == "sonarr":
+        common.update(
+            {
+                "seriesId": candidate["series"]["id"],
+                "episodeIds": sorted(candidate_target_ids(app, candidate)),
+                "episodeFileId": candidate.get("episodeFileId") or 0,
+                "releaseType": candidate.get("releaseType"),
+            }
+        )
+    else:
+        common.update(
+            {
+                "movieId": candidate["movie"]["id"],
+                "movieFileId": candidate.get("movieFileId") or 0,
+            }
+        )
+    return common
+
+
+class JsonClient:
+    def __init__(self, base_url: str, api_key: str = "", timeout: int = 30):
+        self.base_url = base_url.rstrip("/")
+        self.api_key = api_key
+        self.timeout = timeout
+
+    def request(
+        self,
+        method: str,
+        path: str,
+        params: dict[str, Any] | None = None,
+        body: dict[str, Any] | None = None,
+    ) -> Any:
+        query = "?" + urllib.parse.urlencode(params, doseq=True) if params else ""
+        data = json.dumps(body).encode("utf-8") if body is not None else None
+        headers = {"Accept": "application/json"}
+        if self.api_key:
+            headers["X-Api-Key"] = self.api_key
+        if body is not None:
+            headers["Content-Type"] = "application/json"
+        request = urllib.request.Request(
+            f"{self.base_url}/{path.lstrip('/')}{query}",
+            data=data,
+            headers=headers,
+            method=method,
+        )
+        with urllib.request.urlopen(request, timeout=self.timeout) as response:
+            payload = response.read()
+        return json.loads(payload.decode("utf-8")) if payload else None
+
+
+class ReconcileState:
+    def __init__(self, path: Path):
+        self.path = path
+        self.data: dict[str, str] = {}
+        try:
+            loaded = json.loads(path.read_text(encoding="utf-8"))
+            if isinstance(loaded, dict):
+                self.data = {str(key): str(value) for key, value in loaded.items()}
+        except (FileNotFoundError, json.JSONDecodeError, OSError):
+            pass
+
+    def has(self, app: str, download_id: str) -> bool:
+        value = self.data.get(f"{app}:{normalize_download_id(download_id)}")
+        if not value:
+            return False
+        try:
+            observed = dt.datetime.fromisoformat(value.replace("Z", "+00:00"))
+        except ValueError:
+            return False
+        return (dt.datetime.now(dt.UTC) - observed).total_seconds() <= DEFAULT_SUCCESS_SUPPRESSION
+
+    def mark(self, app: str, download_id: str) -> None:
+        self.data[f"{app}:{normalize_download_id(download_id)}"] = iso_utc()
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        temporary = self.path.with_suffix(self.path.suffix + ".tmp")
+        temporary.write_text(json.dumps(self.data, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        temporary.replace(self.path)
+
+
+def ledger_context(ledger: JsonClient, download_id: str) -> dict[str, Any] | None:
+    try:
+        payload = ledger.request("GET", f"/v1/context/{urllib.parse.quote(download_id, safe='')}")
+    except urllib.error.HTTPError as exc:
+        if exc.code == 404:
+            return None
+        raise
+    return payload.get("context") if isinstance(payload, dict) else None
+
+
+def wait_for_command(client: JsonClient, command_id: int, timeout: int = 180) -> dict[str, Any]:
+    deadline = time.monotonic() + timeout
+    last: dict[str, Any] = {}
+    while time.monotonic() < deadline:
+        last = client.request("GET", f"/command/{command_id}") or {}
+        if str(last.get("status") or "").casefold() in {"completed", "failed"}:
+            return last
+        time.sleep(2)
+    return last
+
+
+def reconcile_app(
+    app: str,
+    client: JsonClient,
+    ledger: JsonClient,
+    state: ReconcileState,
+    dry_run: bool,
+) -> list[dict[str, Any]]:
+    queue_params: dict[str, Any] = {"pageSize": 1000}
+    queue_params.update(
+        {"includeSeries": "true", "includeEpisode": "true"}
+        if app == "sonarr"
+        else {"includeMovie": "true"}
+    )
+    records: list[dict[str, Any]] = []
+    for page in range(1, 21):
+        payload = client.request("GET", "/queue", {**queue_params, "page": page}) or {}
+        page_records = payload.get("records", payload if isinstance(payload, list) else [])
+        records.extend(page_records)
+        total = payload.get("totalRecords") if isinstance(payload, dict) else None
+        if (isinstance(total, int) and len(records) >= total) or len(page_records) < 1000:
+            break
+    results: list[dict[str, Any]] = []
+    seen_download_ids: set[str] = set()
+    for record in records:
+        if not is_exact_id_match_block(record, app):
+            continue
+        download_id = str(record.get("downloadId") or "")
+        normalized_download_id = normalize_download_id(download_id)
+        if (
+            not normalized_download_id
+            or normalized_download_id in seen_download_ids
+            or state.has(app, download_id)
+        ):
+            continue
+        seen_download_ids.add(normalized_download_id)
+        context = ledger_context(ledger, download_id)
+        if not context:
+            continue
+        media_id = (context.get("media") or {}).get("id")
+        params: dict[str, Any] = {
+            "downloadId": download_id,
+            "filterExistingFiles": "false",
+        }
+        if app == "radarr" and isinstance(media_id, int):
+            params["movieId"] = media_id
+        candidates = client.request("GET", "/manualimport", params) or []
+        selected = select_candidates(app, context, candidates)
+        result = {
+            "app": app,
+            "download_id": normalized_download_id,
+            "media_id": media_id,
+            "selected": len(selected),
+            "paths": [candidate.get("path") for candidate in selected],
+            "dry_run": dry_run,
+        }
+        if not selected:
+            result["result"] = "no_safe_candidate"
+            results.append(result)
+            continue
+        if dry_run:
+            result["result"] = "would_import"
+            results.append(result)
+            continue
+        # Persist before the request so an accepted command with a lost API
+        # response cannot be submitted again on the next reconciliation pass.
+        state.mark(app, download_id)
+        command = client.request(
+            "POST",
+            "/command",
+            body={
+                "name": "ManualImport",
+                "files": [import_file(app, candidate, download_id) for candidate in selected],
+                "importMode": "Auto",
+            },
+        ) or {}
+        command_id = command.get("id")
+        final = wait_for_command(client, int(command_id)) if isinstance(command_id, int) else command
+        result.update(
+            {
+                "command_id": command_id,
+                "command_status": final.get("status"),
+                "command_message": final.get("message"),
+            }
+        )
+        if str(final.get("status") or "").casefold() == "completed":
+            result["result"] = "imported"
+        else:
+            result["result"] = "command_failed"
+        results.append(result)
+    return results
+
+
+def write_heartbeat(path: Path) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(iso_utc() + "\n", encoding="utf-8")
+
+
+def heartbeat_is_fresh(path: Path, max_age: int) -> bool:
+    try:
+        age = time.time() - path.stat().st_mtime
+    except OSError:
+        return False
+    return age <= max_age
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--interval", type=int, default=DEFAULT_INTERVAL)
+    parser.add_argument("--heartbeat", type=Path, default=DEFAULT_HEARTBEAT)
+    parser.add_argument("--state", type=Path, default=DEFAULT_STATE)
+    parser.add_argument("--once", action="store_true")
+    parser.add_argument("--dry-run", action="store_true")
+    parser.add_argument("--check-health", action="store_true")
+    parser.add_argument("--max-heartbeat-age", type=int, default=180)
+    return parser.parse_args()
+
+
+def main() -> int:
+    args = parse_args()
+    if args.check_health:
+        return 0 if heartbeat_is_fresh(args.heartbeat, args.max_heartbeat_age) else 1
+
+    ledger = JsonClient(os.environ.get("ARR_GRAB_CONTEXT_API", "http://arr-grab-context:9899"))
+    clients = {
+        "sonarr": JsonClient(os.environ.get("SONARR_API", ""), os.environ.get("SONARR_API_KEY", "")),
+        "radarr": JsonClient(os.environ.get("RADARR_API", ""), os.environ.get("RADARR_API_KEY", "")),
+    }
+    state = ReconcileState(args.state)
+    while True:
+        for app, client in clients.items():
+            try:
+                results = reconcile_app(app, client, ledger, state, args.dry_run)
+                for result in results:
+                    print(json.dumps({"observed_at": iso_utc(), **result}, sort_keys=True), flush=True)
+            except (OSError, TimeoutError, ValueError, urllib.error.URLError) as exc:
+                print(
+                    json.dumps(
+                        {
+                            "observed_at": iso_utc(),
+                            "app": app,
+                            "result": "error",
+                            "error": str(exc),
+                        },
+                        sort_keys=True,
+                    ),
+                    file=sys.stderr,
+                    flush=True,
+                )
+        write_heartbeat(args.heartbeat)
+        if args.once:
+            return 0
+        time.sleep(max(args.interval, 5))
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

@@ -727,6 +727,25 @@ def arr_queue_record_by_download_id(
     return None
 
 
+def grab_context_by_download_id(context_api_url: str, download_id: str) -> dict | None:
+    if not context_api_url or not download_id:
+        return None
+    url = context_api_url.rstrip("/") + "/v1/context/" + urllib.parse.quote(download_id, safe="")
+    request = urllib.request.Request(url, headers={"Accept": "application/json"})
+    try:
+        with urllib.request.urlopen(request, timeout=5) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+    except urllib.error.HTTPError as exc:
+        if exc.code != 404:
+            log(f"optional grab-context lookup failed: HTTP {exc.code}")
+        return None
+    except Exception as exc:  # noqa: BLE001 - persisted context is optional.
+        log(f"optional grab-context lookup failed: {exc}")
+        return None
+    context = payload.get("context") if isinstance(payload, dict) else None
+    return context if isinstance(context, dict) else None
+
+
 def original_languages_from_arr_record(record: dict | None) -> set[str]:
     if not record:
         return set()
@@ -759,31 +778,42 @@ def comparable_title_words(value: str) -> list[str]:
 
 def title_words_present(series_title: str, basename: str) -> bool:
     needle = comparable_title_words(series_title)
-    haystack = comparable_title_words(title_without_extension(basename))
+    candidate = re.sub(r"^(?:\[[^\]]+\]\s*)+", "", title_without_extension(basename))
+    haystack = comparable_title_words(candidate)
     if not needle:
         return True
-    for index in range(0, len(haystack) - len(needle) + 1):
-        if haystack[index : index + len(needle)] == needle:
-            return True
-    return False
+    return haystack[: len(needle)] == needle
 
 
-def path_with_episode_title_prefix(path: str, series_title: str | None) -> str:
+def path_with_episode_title_prefix(
+    path: str,
+    series_title: str | None,
+    aliases: list[str] | None = None,
+) -> str:
     if not series_title:
         return path
     posix_path = PurePosixPath(path)
     basename = posix_path.name
-    if not EPISODE_TOKEN_RE.search(basename) or title_words_present(series_title, basename):
+    if not EPISODE_TOKEN_RE.search(basename):
+        return path
+    if title_words_present(series_title, basename):
+        return path
+    alias_present = any(
+        title_words_present(alias, basename)
+        for alias in (aliases or [])
+        if alias and alias.casefold() != series_title.casefold()
+    )
+    if not alias_present and not BARE_EPISODE_RE.search(basename):
         return path
     title = safe_title_component(series_title)
     if not title:
         return path
     episode_match = EPISODE_PREFIX_RE.match(basename)
-    if episode_match:
-        leading_group = episode_match.group("group") or ""
-        remainder = episode_match.group("episode").lstrip(" ._-")
-        return str(posix_path.with_name(f"{leading_group}{title} - {remainder}"))
-    return str(posix_path.with_name(f"{title} - {basename}"))
+    if not episode_match:
+        return path
+    leading_group = episode_match.group("group") or ""
+    remainder = episode_match.group("episode").lstrip(" ._-")
+    return str(posix_path.with_name(f"{leading_group}{title} - {remainder}"))
 
 
 def parent_title_from_values(*values: str | None) -> str:
@@ -979,8 +1009,9 @@ def rename_with_tags(
     tags: list[str],
     release_group: str | None,
     series_title: str | None,
+    aliases: list[str] | None = None,
 ) -> str:
-    posix_path = PurePosixPath(path_with_episode_title_prefix(path, series_title))
+    posix_path = PurePosixPath(path_with_episode_title_prefix(path, series_title, aliases))
     stem = posix_path.stem
     if tags:
         stem = f"{stem} {' '.join(tags)}"
@@ -996,18 +1027,19 @@ def rename_file_with_alternatives(
     tags: list[str],
     release_group: str | None,
     series_title: str | None,
+    aliases: list[str] | None,
     alternatives: list[str],
 ) -> tuple[str, str, str | None]:
     attempts = [old_path, *alternatives]
     errors: list[str] = []
     for candidate in attempts:
-        candidate_new_path = rename_with_tags(candidate, tags, release_group, series_title)
+        candidate_new_path = rename_with_tags(candidate, tags, release_group, series_title, aliases)
         try:
             client.rename_file(torrent_hash, candidate, candidate_new_path)
             return candidate, candidate_new_path, None
         except Exception as exc:  # noqa: BLE001 - try alternate qBit path forms.
             errors.append(f"{candidate}: {exc}")
-    return old_path, rename_with_tags(old_path, tags, release_group, series_title), "; ".join(errors[:3])
+    return old_path, rename_with_tags(old_path, tags, release_group, series_title, aliases), "; ".join(errors[:3])
 
 
 def parse_categories(value: str) -> set[str]:
@@ -1079,6 +1111,10 @@ def main() -> int:
             return 0
 
         torrent_hash = torrent.get("hash") or args.hash
+        grab_context = grab_context_by_download_id(
+            os.environ.get("ARR_GRAB_CONTEXT_API", ""),
+            torrent_hash,
+        )
         sonarr_record = arr_queue_record_by_download_id(
             os.environ.get("SONARR_API", ""),
             os.environ.get("SONARR_API_KEY", ""),
@@ -1092,13 +1128,29 @@ def main() -> int:
                 torrent_hash,
             )
         arr_record = sonarr_record or radarr_record
+        context_languages = {
+            language
+            for value in (grab_context or {}).get("original_languages", [])
+            if (language := normalize_language(str(value)))
+        }
         original_languages = (
-            original_languages_from_arr_record(arr_record)
+            context_languages
+            or original_languages_from_arr_record(arr_record)
             or parse_languages(os.environ.get("DA_ORIGINAL_LANGUAGES", ""))
             or DEFAULT_DUAL_AUDIO_ORIGINAL_LANGUAGES
         )
-        series_title = args.series_title.strip() or series_title_from_arr_record(arr_record)
+        identity_conflict = bool((grab_context or {}).get("identity_conflict"))
+        context_title = str((grab_context or {}).get("canonical_title") or "").strip()
+        series_title = args.series_title.strip() or (
+            None if identity_conflict else context_title or series_title_from_arr_record(arr_record)
+        )
+        aliases = [
+            str(value).strip()
+            for value in (grab_context or {}).get("aliases", [])
+            if str(value).strip()
+        ]
         parent_title = parent_title_from_values(
+            (grab_context or {}).get("source_title"),
             torrent.get("name"),
             args.name,
             arr_record.get("title") if arr_record else None,
@@ -1106,9 +1158,12 @@ def main() -> int:
         )
         log(
             "processing torrent={torrent!r} category={category!r} "
+            "context={context} identity_conflict={conflict} "
             "original_language(s)={languages} parent_title={parent!r}".format(
                 torrent=torrent.get("name", ""),
                 category=category,
+                context="ledger" if grab_context else "exact_queue" if arr_record else "fallback",
+                conflict=identity_conflict,
                 languages=", ".join(sorted(original_languages)),
                 parent=parent_title,
             )
@@ -1160,7 +1215,7 @@ def main() -> int:
                 parent_title,
             )
             if not tags and not release_group:
-                prefixed_path = path_with_episode_title_prefix(old_path, series_title)
+                prefixed_path = path_with_episode_title_prefix(old_path, series_title, aliases)
                 if prefixed_path == old_path:
                     skipped_no_stamp += 1
                     if not reasons:
@@ -1177,7 +1232,7 @@ def main() -> int:
                     log(f"no stamp needed for {old_path!r}; reasons={','.join(reasons)}")
                     continue
 
-            new_path = rename_with_tags(old_path, tags, release_group, series_title)
+            new_path = rename_with_tags(old_path, tags, release_group, series_title, aliases)
             if new_path == old_path:
                 continue
 
@@ -1194,6 +1249,7 @@ def main() -> int:
                     tags,
                     release_group,
                     series_title,
+                    aliases,
                     [
                         str(name)
                         for name in torrent_file.get("alternative_names", [])
@@ -1226,6 +1282,8 @@ def main() -> int:
                 **event,
                 "result": "completed",
                 "parent_title": parent_title,
+                "context_source": "ledger" if grab_context else "exact_queue" if arr_record else "fallback",
+                "identity_conflict": identity_conflict,
                 "original_languages": sorted(original_languages),
                 "changes": changes,
                 "videos_scanned": videos_scanned,

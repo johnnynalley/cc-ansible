@@ -139,6 +139,7 @@ def delete_torrents(
     base_url: str,
     opener: urllib.request.OpenerDirector,
     torrents: list[dict[str, Any]],
+    delete_files: bool,
 ) -> None:
     hashes = [str(torrent.get("hash")) for torrent in torrents if torrent.get("hash")]
     if not hashes:
@@ -149,7 +150,7 @@ def delete_torrents(
         "/torrents/delete",
         {
             "hashes": "|".join(hashes),
-            "deleteFiles": "true",
+            "deleteFiles": str(delete_files).lower(),
         },
     )
 
@@ -201,6 +202,11 @@ def main() -> int:
     parser.add_argument("--keep-finished", action="store_true", default=True)
     parser.add_argument("--include-finished", action="store_false", dest="keep_finished")
     parser.add_argument("--apply-delete", action="store_true")
+    parser.add_argument(
+        "--preserve-files",
+        action="store_true",
+        help="remove matching torrent metadata but retain payload files",
+    )
     parser.add_argument("--manifest")
     parser.add_argument("--include-trackers", action="store_true")
     parser.add_argument("--sample-limit", type=int, default=8)
@@ -253,6 +259,7 @@ def main() -> int:
 
     result = {
         "apply_delete": args.apply_delete,
+        "delete_files": not args.preserve_files,
         "delete_states": sorted(delete_states),
         "delete_candidate_count": len(delete_candidates),
         "delete_candidate_amount_left": delete_bytes_left,
@@ -272,7 +279,12 @@ def main() -> int:
         if not args.manifest:
             raise RuntimeError("--apply-delete requires --manifest")
         result["manifest"] = write_manifest(args.manifest, result)
-        delete_torrents(base_url, opener, delete_candidates)
+        delete_torrents(
+            base_url,
+            opener,
+            delete_candidates,
+            delete_files=not args.preserve_files,
+        )
         result["deleted_count"] = len(delete_candidates)
     elif args.manifest:
         result["manifest"] = write_manifest(args.manifest, result)

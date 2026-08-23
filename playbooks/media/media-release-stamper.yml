@@ -19,6 +19,174 @@
   gather_facts: false
 
   tasks:
+    - name: Read Sonarr config for media release stamping
+      ansible.builtin.slurp:
+        src: "{{ media_release_stamper_sonarr_config_path | default('/opt/media-stack/sonarr/config.xml') }}"
+      register: media_release_stamper_sonarr_config
+      no_log: true
+      check_mode: false
+      when: media_release_stamper_enabled | default(false)
+
+    - name: Read Radarr config for media release stamping
+      ansible.builtin.slurp:
+        src: "{{ media_release_stamper_radarr_config_path | default('/opt/media-stack/radarr/config.xml') }}"
+      register: media_release_stamper_radarr_config
+      no_log: true
+      check_mode: false
+      when: media_release_stamper_enabled | default(false)
+
+    - name: Extract Arr API keys for media release stamping
+      ansible.builtin.set_fact:
+        media_release_stamper_sonarr_api_key: >-
+          {{
+            (
+              media_release_stamper_sonarr_config.content
+              | b64decode
+              | regex_search('<ApiKey>([^<]+)</ApiKey>', '\1')
+            )[0]
+          }}
+        media_release_stamper_radarr_api_key: >-
+          {{
+            (
+              media_release_stamper_radarr_config.content
+              | b64decode
+              | regex_search('<ApiKey>([^<]+)</ApiKey>', '\1')
+            )[0]
+          }}
+      no_log: true
+      when: media_release_stamper_enabled | default(false)
+
+    - name: Configure exact Arr grab-context ledger
+      when:
+        - media_release_stamper_enabled | default(false)
+        - media_release_stamper_context_enabled | default(false)
+      block:
+        - name: Ensure Arr grab-context directories exist
+          ansible.builtin.file:
+            path: "{{ item.path }}"
+            state: directory
+            owner: "{{ item.owner }}"
+            group: "{{ item.group }}"
+            mode: "{{ item.mode }}"
+          loop:
+            - path: "{{ media_release_stamper_context_dir }}"
+              owner: root
+              group: root
+              mode: "0755"
+            - path: "{{ media_release_stamper_context_dir }}/data"
+              owner: "{{ media_release_stamper_container_uid | default('1000') }}"
+              group: "{{ media_release_stamper_container_gid | default('1000') }}"
+              mode: "0750"
+
+        - name: Deploy Arr grab-context service
+          ansible.builtin.copy:
+            src: ../../scripts/media-release/arr_grab_context.py
+            dest: "{{ media_release_stamper_context_dir }}/arr_grab_context.py"
+            owner: root
+            group: root
+            mode: "0755"
+          register: media_release_stamper_context_script
+
+        - name: Deploy Arr grab-context webhook configurator
+          ansible.builtin.copy:
+            src: ../../scripts/media-release/arr_grab_context_configure.py
+            dest: "{{ media_release_stamper_context_dir }}/arr_grab_context_configure.py"
+            owner: root
+            group: root
+            mode: "0755"
+
+        - name: Deploy exact-target Arr import reconciler
+          ansible.builtin.copy:
+            src: ../../scripts/media-release/arr_import_reconciler.py
+            dest: "{{ media_release_stamper_context_dir }}/arr_import_reconciler.py"
+            owner: root
+            group: root
+            mode: "0755"
+          register: media_release_stamper_reconciler_script
+
+        - name: Render Arr grab-context Compose project
+          ansible.builtin.template:
+            src: ../../templates/docker/arr-grab-context.yml.j2
+            dest: "{{ media_release_stamper_context_dir }}/compose.yml"
+            owner: root
+            group: root
+            mode: "0600"
+          no_log: true
+
+        - name: Validate Arr grab-context Compose project
+          ansible.builtin.command:
+            cmd: docker compose -f compose.yml config --quiet
+            chdir: "{{ media_release_stamper_context_dir }}"
+          changed_when: false
+          when: not ansible_check_mode
+
+        - name: Reload changed Arr grab-context service code
+          ansible.builtin.command:
+            cmd: docker compose -f compose.yml up -d --wait --force-recreate arr-grab-context
+            chdir: "{{ media_release_stamper_context_dir }}"
+          changed_when: true
+          when:
+            - not ansible_check_mode
+            - media_release_stamper_context_script.changed
+
+        - name: Reload changed exact-target Arr import reconciler code
+          ansible.builtin.command:
+            cmd: docker compose -f compose.yml up -d --wait --force-recreate arr-import-reconciler
+            chdir: "{{ media_release_stamper_context_dir }}"
+          changed_when: true
+          when:
+            - not ansible_check_mode
+            - >-
+              media_release_stamper_reconciler_script.changed
+              or media_release_stamper_force_reconciler_reload | default(false) | bool
+
+        - name: Start Arr grab-context service
+          ansible.builtin.command:
+            cmd: docker compose -f compose.yml up -d --wait
+            chdir: "{{ media_release_stamper_context_dir }}"
+          register: media_release_stamper_context_compose
+          changed_when: >-
+            'Created' in media_release_stamper_context_compose.stderr
+            or 'Recreated' in media_release_stamper_context_compose.stderr
+            or 'Started' in media_release_stamper_context_compose.stderr
+          when: not ansible_check_mode
+
+        - name: Verify Arr grab-context service health
+          ansible.builtin.command:
+            cmd: docker exec arr-grab-context wget -q -O - http://127.0.0.1:9899/health
+          register: media_release_stamper_context_health
+          changed_when: false
+          retries: 10
+          delay: 2
+          until: media_release_stamper_context_health is succeeded
+          when: not ansible_check_mode
+
+        - name: Audit Arr grab-context webhooks
+          ansible.builtin.command:
+            cmd: >-
+              {{ media_release_stamper_context_dir }}/arr_grab_context_configure.py
+              --webhook-url {{ media_release_stamper_context_webhook_url | quote }}
+              --backup-root {{ media_release_stamper_backup_root | quote }}
+          register: media_release_stamper_context_webhook_audit
+          changed_when: false
+          no_log: true
+          when: not ansible_check_mode
+
+        - name: Configure Arr grab-context webhooks
+          ansible.builtin.command:
+            cmd: >-
+              {{ media_release_stamper_context_dir }}/arr_grab_context_configure.py
+              --apply
+              --webhook-url {{ media_release_stamper_context_webhook_url | quote }}
+              --backup-root {{ media_release_stamper_backup_root | quote }}
+          register: media_release_stamper_context_webhook_apply
+          changed_when: >-
+            (media_release_stamper_context_webhook_apply.stdout | from_json).changed | default(false)
+          no_log: true
+          when:
+            - not ansible_check_mode
+            - (media_release_stamper_context_webhook_audit.stdout | from_json).needs_change | default(false)
+
     - name: Configure qBittorrent release stamper
       when:
         - media_release_stamper_enabled | default(false)
@@ -50,40 +218,6 @@
             group: "{{ media_release_stamper_container_gid | default('1000') }}"
             mode: "0755"
 
-        - name: Read Sonarr config for qBittorrent release stamper
-          ansible.builtin.slurp:
-            src: "{{ media_release_stamper_sonarr_config_path | default('/opt/media-stack/sonarr/config.xml') }}"
-          register: media_release_stamper_sonarr_config
-          no_log: true
-          check_mode: false
-
-        - name: Read Radarr config for qBittorrent release stamper
-          ansible.builtin.slurp:
-            src: "{{ media_release_stamper_radarr_config_path | default('/opt/media-stack/radarr/config.xml') }}"
-          register: media_release_stamper_radarr_config
-          no_log: true
-          check_mode: false
-
-        - name: Extract Arr API keys for qBittorrent release stamper
-          ansible.builtin.set_fact:
-            media_release_stamper_sonarr_api_key: >-
-              {{
-                (
-                  media_release_stamper_sonarr_config.content
-                  | b64decode
-                  | regex_search('<ApiKey>([^<]+)</ApiKey>', '\1')
-                )[0]
-              }}
-            media_release_stamper_radarr_api_key: >-
-              {{
-                (
-                  media_release_stamper_radarr_config.content
-                  | b64decode
-                  | regex_search('<ApiKey>([^<]+)</ApiKey>', '\1')
-                )[0]
-              }}
-          no_log: true
-
         - name: Deploy qBittorrent release stamper environment
           ansible.builtin.copy:
             dest: "{{ media_release_stamper_qbit_env_path }}"
@@ -107,6 +241,7 @@
               SONARR_API_KEY={{ media_release_stamper_sonarr_api_key }}
               RADARR_API={{ media_release_stamper_radarr_api }}
               RADARR_API_KEY={{ media_release_stamper_radarr_api_key }}
+              ARR_GRAB_CONTEXT_API={{ media_release_stamper_context_api | default('') }}
           no_log: true
 
         - name: Log in to qBittorrent API
@@ -215,6 +350,7 @@
               SONARR_API_KEY={{ media_release_stamper_sonarr_api_key }}
               RADARR_API={{ media_release_stamper_radarr_api }}
               RADARR_API_KEY={{ media_release_stamper_radarr_api_key }}
+              ARR_GRAB_CONTEXT_API={{ media_release_stamper_context_api | default('') }}
           no_log: true
 
         - name: Read SABnzbd config

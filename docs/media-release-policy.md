@@ -1424,12 +1424,93 @@ for SABnzbd and qBittorrent on `docker-vm`.
 - SABnzbd event log:
   `/opt/media-stack/sabnzbd/scripts/release-stamper-events.jsonl`
 - SABnzbd categories using the stamper: `shows`, `movies`
+- Exact grab-context service: `/opt/arr-grab-context/compose.yml`
+- Exact grab-context database:
+  `/opt/arr-grab-context/data/arr-grab-context.db`
+- Sonarr/Radarr notification: `Arr Grab Context`, with only `onGrab` enabled,
+  posting to `http://arr-grab-context:9899/v1/events`
 - Stamper script directories and executable scripts under the linuxserver
   `/config` bind mounts are owned by UID/GID `1000`, matching the media
   containers' `PUID=1000` / `PGID=1000`. The env files are also UID/GID `1000`
   with mode `0600`, and event logs are UID/GID `1000` with mode `0640`. Do not
   force these `/config` paths back to `root:root`; container startup and normal
   app writes expect the configured media user.
+
+### Exact Grab Context
+
+The stampers must not infer Arr ownership from similar queue titles. Sonarr and
+Radarr now write a persistent `OnGrab` record keyed by the exact download-client
+ID before the payload completes. The record contains the canonical media title,
+alternate titles, original language, expected episode IDs, source release title,
+release group, indexer, quality, and grab-time custom formats/score.
+
+- qBittorrent looks up the torrent hash exactly.
+- SABnzbd looks up `SAB_NZO_ID` exactly. Its former title/substring queue
+  matcher was removed, not merely tightened.
+- If no persisted record exists, a stamper may use an exact Sonarr/Radarr queue
+  `downloadId` match. It must never fall back to fuzzy title association.
+- The ledger preserves English as an explicit original language. That prevents
+  an English-original series such as Family Guy from falling through to the
+  legacy Japanese default and receiving a false foreign dual-audio stamp.
+- Completion remains non-fatal if the ledger or Arr APIs are unavailable. The
+  stamper uses conservative fallback language handling and logs
+  `context_source=fallback` instead of blocking the client.
+- The ledger is private to `media-stack_default`, publishes no host port, runs
+  without Linux capabilities on a read-only container root, and retains rows
+  for 120 days.
+- A release title that does not match the canonical or any alternate media title
+  is stored with `identity_conflict=true`. That context cannot enable canonical
+  title rewriting. Payload filenames using a verified alternate title are
+  rewritten to the canonical title, and bare episode filenames are prefixed
+  with it. A clearly different title such as `L.A.Law.S01E01` must not be
+  rewritten into She-Hulk.
+
+The managed sources are `scripts/media-release/arr_grab_context.py`,
+`scripts/media-release/arr_grab_context_configure.py`,
+`templates/docker/arr-grab-context.yml.j2`, and
+`playbooks/media/media-release-stamper.yml`. Regression coverage is in
+`test_arr_grab_context.py`, `test_arr_grab_context_configure.py`, and
+`test_release_stampers.py` under `scripts/media-release/`.
+
+### Exact Target Import Reconciliation
+
+Sonarr may accept an anime-style season pack by indexer ID but later refuse
+automatic import with `release was matched to series by ID`, even when an
+individual payload filename parses cleanly. The private
+`arr-import-reconciler` service handles only that exact failure mode:
+
+- The completed queue row must be `importBlocked` and contain Arr's explicit
+  ID-match rejection.
+- The exact download ID must have a non-conflicting native OnGrab ledger row.
+- Sonarr/Radarr's own manual-import endpoint must return a rejection-free,
+  missing, monitored candidate owned by the same series/movie.
+- Every selected Sonarr episode ID must be a subset of the episode IDs recorded
+  in that grab event. Duplicate candidates for one expected target are treated
+  as ambiguous and skipped.
+- Active downloads, current-better candidates, unexpected season-pack files,
+  identity conflicts, and downloads without exact ledger context are never
+  imported by the reconciler.
+
+The reconciler uses Arr's native `ManualImport` command with `importMode=Auto`,
+so normal hardlink/copy decisions remain Arr-owned. Import-attempt download IDs
+are suppressed for one hour to prevent duplicate commands during queue
+convergence or after an ambiguous API timeout. The state is written immediately
+before submitting Arr's native command; this favors a delayed retry over a
+duplicate import when the response is lost. Nothing is permanently blocklisted.
+Run it with `--dry-run` before enabling apply on a new deployment.
+
+A season search materially changes the operational cost. Sonarr first evaluates
+season packs and can choose one pack because only one episode is missing, then
+downloads and moves the entire payload before import-time episode evaluation.
+Files for episodes that already have better copies are pack collateral. The
+exact-target reconciler keeps that collateral out of the library and queue, but
+it does not prevent the pack bandwidth, SSD writes, completed-tree move, or
+temporary storage use. Preventing those costs would require a pre-download
+search/queue gate, which is intentionally outside the current approved design.
+
+Managed sources are `scripts/media-release/arr_import_reconciler.py` and
+`templates/docker/arr-grab-context.yml.j2`; regression coverage is in
+`scripts/media-release/test_arr_import_reconciler.py`.
 
 ## Download Client Storage Layout
 
@@ -1538,29 +1619,33 @@ Stamping rules:
 
 - Language-combo tags are file-by-file only. The scripts parse individual
   MKV/MP4 audio-track language metadata and require English plus the configured
-  original language. qBittorrent first tries optional Sonarr/Radarr queue lookup
-  by torrent hash/download ID; SABnzbd tries optional Sonarr/Radarr queue lookup
-  by release/job title. If Arr lookup fails, times out, or finds no match, both
-  scripts fall back to the configured default `jpn`, so `eng+jpn` becomes
-  `[JA+EN]` and `eng+kor` gets no language-combo tag. A release/job/torrent
-  title saying `Dual-Audio` is not enough by itself. English is never treated
-  as the original-language side of a DA tag, so English-original content does
-  not get a duplicate `[EN+EN]` marker.
+  original language. At grab time, Sonarr and Radarr persist the decision under
+  the exact qBittorrent hash or SAB job ID. The completion script reads that
+  exact ledger record first and may fall back only to an exact Arr queue
+  download ID; it never guesses SAB context by release-title similarity. If
+  exact context is unavailable, both scripts fall back to the configured
+  default `jpn`, so `eng+jpn` becomes `[JA+EN]` and `eng+kor` gets no
+  language-combo tag. A release/job/torrent title saying `Dual-Audio` is not
+  enough by itself. English is never treated as the original-language side of
+  a DA tag, so English-original content does not get a duplicate `[EN+EN]`
+  marker.
 - `[x265]` is file-by-file only. The scripts scan the individual video file for
   HEVC markers (`V_MPEGH/ISO/HEVC`, `hvc1`, `hev1`, `x265`, `HEVC`) and MKV
   video-track `CodecID` data, and only stamp that specific file when the
   payload itself looks like HEVC.
 - Mixed or mislabeled packs should not be bulk-labeled. Each video file must
   qualify for each tag independently.
-- When Sonarr context is available, TV payload names with an episode token but
-  without the canonical series title are rewritten to use the canonical title
-  prefix before DA/x265/release-context tags are appended. A leading release
-  group such as `[Judas]` is preserved. This covers both bare `SxxEyy` names and
-  ambiguous short-title names such as `[Judas] JoJo - S06E01`.
-- Exact per-series/per-movie original-language matching depends on optional
-  Sonarr/Radarr context. That context is an enhancement, not a dependency; if
-  Sonarr/Radarr is down, download completion must continue and use the safe
-  fallback language.
+- When exact persisted Sonarr context is available, TV payload names with an
+  episode token but without the canonical series title are rewritten to use
+  the canonical title prefix before DA/x265/release-context tags are appended.
+  A leading release group such as `[Judas]` is preserved. This covers bare
+  `SxxEyy` names and verified alternate titles such as `[Judas] JoJo - S06E01`.
+  An unrelated title is never rewritten merely because it contains an episode
+  token.
+- Exact per-series/per-movie original-language matching normally comes from the
+  persisted grab-context ledger and does not require Sonarr/Radarr to remain up
+  at completion time. If the ledger record is missing and Arr is also down,
+  download completion still continues with the safe fallback language.
 - The scripts are intentionally non-fatal. If stamping fails, they log the
   error and exit successfully so they do not block SABnzbd or qBittorrent
   completion/import flows.
@@ -1619,17 +1704,16 @@ Additional grab/import parity rules added on 2026-05-23:
 - Existing-tag checks use the payload basename only. qBittorrent paths include
   the parent torrent directory, and that directory can contain `x265`, service
   tags, or release-group text that is missing from the actual payload filename.
-- If `ffprobe` is available where the script runs, it is used as an
-  audio-language fallback before the lightweight MKV/MP4 parser. This is
-  especially useful for SABnzbd, which runs on the media-vm host and has
-  `/usr/bin/ffprobe`.
-- If optional Sonarr context is available and a TV payload basename starts with
-  only a bare episode token such as `S01E01-...`, the scripts prefix the
-  canonical Sonarr series title before adding tags. Example:
+- If `ffprobe` is available in the download-client runtime, it is used as an
+  audio-language fallback before the lightweight MKV/MP4 parser.
+- If exact persisted Sonarr context is available and a TV payload basename
+  starts with a bare episode token or a verified alternate series title, the
+  scripts replace the title portion with the canonical Sonarr series title
+  before adding tags. Example:
   `S01E01-Title [JA+EN].mkv` becomes
   `Welcome to Demon School! Iruma-kun - S01E01-Title [JA+EN] [x265] -EMBER.mkv`.
   This is intentionally narrow: it fixes packs where Sonarr ignores the parent
-  torrent/job folder during import, but it does not rewrite arbitrary filenames
+  torrent/job folder during import, but it does not rewrite unrelated filenames
   or invent DA/x265 evidence.
 - The intended result is that Sonarr's search-time custom-format score and its
   import-time custom-format score are based on the same practical evidence.
@@ -1637,14 +1721,11 @@ Additional grab/import parity rules added on 2026-05-23:
   [Dual-Audio]` with a generic payload `Example - 01.mkv` can import as
   `Example - 01 [JA+EN] [x265] [NF] -EMBER.mkv` only when that individual file
   actually has qualifying audio tracks and HEVC markers.
-- Live deployment backups from this rollout are under
-  `/opt/media-stack/arr-policy-backups/`:
-  `20260523T220942Z-release-stamper-v2`,
-  `20260523T222640Z-release-stamper-pre-codec-parser`,
-  `20260523T223520Z-release-stamper-pre-basename-fix`, and
-  `20260523T224208Z-release-stamper-pre-ffprobe-fallback`,
-  `20260523T225125Z-release-stamper-pre-title-prefix`. Clean these up after
-  the new stamper behavior has survived normal search/import traffic.
+- Historical rollout backups that once lived directly under
+  `/opt/media-stack/arr-policy-backups/` were temporary artifacts. Current live
+  mutations use `live-rollback-backup` and the Sanoid-managed location described
+  in **Live Rollback Backup Location**; do not recreate local-root backup
+  directories from the old examples.
 
 ## Profilarr Evaluation
 
@@ -1829,13 +1910,12 @@ against the live queue. The current bad rows are not one single CF math bug:
   existing file is `+35441`, so Sonarr correctly refused import at that point.
   This is grab-time versus import-time metadata drift: the media language cannot
   be fully known before download unless the release title exposes it.
-- The SAB release stamper's Arr queue matcher is too loose: it includes all SAB
-  script arguments as match terms and accepts substring matches. Short terms
-  such as `0` can match unrelated queued releases containing `1080p`, which
-  explains contaminated `parent_title` telemetry such as Spider-Noir inheriting
-  context from The Seven Deadly Sins and Paris inheriting context from JoJo. The
-  2026-05-31 stamper update now filters tiny/generic terms and only accepts
-  exact or long-title containment matches.
+- The historical SAB release stamper queue matcher was too loose: it included
+  SAB script arguments as title terms and accepted substring matches. Short
+  terms such as `0` could match unrelated `1080p` releases, which caused
+  contaminated Spider-Noir and Paris telemetry. The 2026-08-23 prevention
+  removes fuzzy matching entirely and uses the persisted exact `SAB_NZO_ID`
+  record, with exact Arr queue `downloadId` as the only fallback.
 - The qBittorrent stamper needs retry/backoff around API calls and a repair path
   for completed queue items whose first stamp timed out. The 2026-05-31 stamper
   update added bounded qBittorrent Web API retries and endpoint-specific retry
@@ -1847,6 +1927,65 @@ Open prevention work:
 - Decide whether to add a negative CF for anime season-pack titles with
   separated `10 bits`/`8 bits` tokens that Sonarr parses as absolute episodes,
   or handle these as manual/blocklist exceptions per release.
+
+2026-08-23 rollout evidence:
+
+- Pre-change Sonarr/Radarr database, config, and stamper rollback artifact:
+  `/srv/live-rollbacks/docker-vm/media-release/20260823T051830Z-arr-grab-context-predeploy`.
+- Both native Arr webhook tests returned HTTP 200 with only `onGrab` enabled.
+  Sonarr, Radarr, SABnzbd, and the Gluetun/qBittorrent network namespace all
+  reached the private ledger health endpoint.
+- The idempotence audit reported `needs_change=false` for both Arr instances
+  after deployment.
+- All six efficient profiles passed score-band math. Every cutoff equaled its
+  exact positive-CF ceiling; no TRaSH LQ format remained scored in an efficient
+  profile. Sonarr remained at the 100-CF limit and Radarr at 82, so this rollout
+  added no custom formats.
+- The Dragon Ball DAIMA S01E01 season search selected the Judas S01 pack at
+  `145000`. The qBittorrent hook consumed exact ledger context with
+  `identity_conflict=false` and renamed all 20 files with verified `[JA+EN]`
+  and `[x265]` evidence. This proved exact stamping and the cost of season-pack
+  collateral, but reusing the same torrent hash after cleanup did not create a
+  fresh queue row and therefore was not accepted as proof of automatic
+  reconciliation.
+- The automatic reconciliation canary used an existing Dragon Ball Kai pack
+  with exact historical grab context. After backing up and removing only
+  S01E01, dry-run selected exactly episode ID `11063`. Apply submitted one
+  native Sonarr `ManualImport` command, which completed successfully and
+  imported file ID `45896` at score `140096`, Japanese+English, group `SoM`,
+  and Bluray-1080p. On TS440's real `/srv/media-01/media` backing branch, source
+  and library paths had device `49`, inode `7983`, and link count `2`, proving
+  the normal hardlink path. The canary torrent payload was then removed, leaving
+  the library link intact.
+- DAIMA S01E01 was also reconciled from its still-present completed pack with
+  the managed manual-import helper. Sonarr selected only the missing episode;
+  it imported as file ID `45897` at `145000`, Japanese+English, Judas, and x265.
+  The real `/srv/nas-zfs/media` backing paths shared device `62`, inode `2091`,
+  and link count `2` before the backed-up canary torrent payload was removed.
+- Before terminal queue cleanup, Sonarr had `318` rows: `280` completed
+  `importBlocked`, `18` completed `importPending`, and `20` active/delayed rows.
+  Radarr had `15` completed terminal rows. The exact pre-cleanup JSON and
+  app-native backups are under
+  `/srv/live-rollbacks/docker-vm/media-release/20260823T092552Z-arr-terminal-queue-cleanup`.
+  Cleanup used `removeFromClient=true` and `blocklist=false` only for completed
+  terminal rows at least three days old. The helper was then corrected to
+  operate once per exact download ID so deleting one season-pack job cannot
+  churn sibling queue row IDs during the same pass.
+- Two post-cleanup polls showed Sonarr at only the `20` active/delayed download
+  rows and zero terminal warnings; Radarr remained at zero rows. Neither Arr
+  instance created a blocklist record during cleanup.
+- A diagnostic command exposed the previous Prowlarr API key in captured
+  output, so it was immediately rotated through Prowlarr's native
+  `ResetApiKey` command. The old key returns HTTP 401, the replacement returns
+  HTTP 200, and native application-indexer sync completed. Sonarr and Radarr
+  each pass all seven available Prowlarr-managed indexer tests; the only
+  residual test failure is TorrentGalaxyClone's pre-existing HTTP 429 cooldown,
+  not authentication. The rollback artifact is
+  `/srv/live-rollbacks/docker-vm/media-release/20260823T090252Z-prowlarr-api-key-rotation`.
+- The reconciler is now live in apply mode with a 60-second interval. Thirty
+  ledger/configurator/reconciler/queue-cleanup/stamper regression tests pass,
+  including English-original no-false-DA behavior and suppression after a
+  simulated lost `ManualImport` API response.
 
 ## Queue Cleanup and False-Grab RCA - 2026-07-27
 

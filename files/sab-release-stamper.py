@@ -10,6 +10,7 @@ import re
 import shutil
 import subprocess
 import sys
+import urllib.error
 import urllib.parse
 import urllib.request
 from pathlib import Path
@@ -247,62 +248,13 @@ def parent_title_from_values(*values: str | None) -> str:
     return " || ".join(titles)
 
 
-def normalized_match_text(value: str) -> str:
-    candidate = str(value or "").strip()
-    if not candidate:
-        return ""
-    if "/" in candidate or "\\" in candidate:
-        candidate = Path(candidate).name
-    candidate = title_without_extension(candidate)
-    candidate = re.sub(r"[\s._-]+", " ", candidate)
-    candidate = re.sub(r"[^A-Za-z0-9+ ]+", " ", candidate)
-    candidate = re.sub(r"\s+", " ", candidate)
-    return candidate.strip().casefold()
-
-
-def useful_match_terms(values: list[str]) -> list[str]:
-    terms: list[str] = []
-    seen: set[str] = set()
-    for value in values:
-        for candidate in (value, Path(value).name if value and ("/" in value or "\\" in value) else ""):
-            term = normalized_match_text(candidate)
-            if len(term) < 8 or not re.search(r"[a-z]", term):
-                continue
-            if term in {"movies", "shows", "movie", "show", "complete", "completed"}:
-                continue
-            if term in seen:
-                continue
-            seen.add(term)
-            terms.append(term)
-    return terms
-
-
-def queue_record_matches_terms(record: dict, normalized_terms: list[str]) -> bool:
-    record_terms = useful_match_terms(
-        [
-            str(record.get("title") or ""),
-            str(record.get("downloadTitle") or ""),
-        ]
-    )
-    for record_term in record_terms:
-        for match_term in normalized_terms:
-            if record_term == match_term:
-                return True
-            if len(record_term) >= 16 and record_term in match_term:
-                return True
-            if len(match_term) >= 16 and match_term in record_term:
-                return True
-    return False
-
-
-def arr_queue_record_from_terms(
+def arr_queue_record_by_download_id(
     arr_api_url: str,
     arr_api_key: str,
-    match_terms: list[str],
+    download_id: str,
 ) -> dict | None:
-    if not arr_api_url or not arr_api_key:
+    if not arr_api_url or not arr_api_key or not download_id:
         return None
-
     url = (
         arr_api_url.rstrip("/")
         + "/queue?"
@@ -323,16 +275,30 @@ def arr_queue_record_from_terms(
     except Exception as exc:  # noqa: BLE001 - Arr context must be optional.
         log(f"optional Arr lookup failed for {arr_api_url}: {exc}")
         return None
-
-    normalized_terms = useful_match_terms(match_terms)
-    if not normalized_terms:
-        return None
+    expected_download_id = download_id.casefold()
     for record in queue.get("records", []):
-        if not queue_record_matches_terms(record, normalized_terms):
-            continue
-        return record
-
+        if str(record.get("downloadId") or "").casefold() == expected_download_id:
+            return record
     return None
+
+
+def grab_context_by_download_id(context_api_url: str, download_id: str) -> dict | None:
+    if not context_api_url or not download_id:
+        return None
+    url = context_api_url.rstrip("/") + "/v1/context/" + urllib.parse.quote(download_id, safe="")
+    request = urllib.request.Request(url, headers={"Accept": "application/json"})
+    try:
+        with urllib.request.urlopen(request, timeout=5) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+    except urllib.error.HTTPError as exc:
+        if exc.code != 404:
+            log(f"optional grab-context lookup failed: HTTP {exc.code}")
+        return None
+    except Exception as exc:  # noqa: BLE001 - persisted context is optional.
+        log(f"optional grab-context lookup failed: {exc}")
+        return None
+    context = payload.get("context") if isinstance(payload, dict) else None
+    return context if isinstance(context, dict) else None
 
 
 def original_languages_from_arr_record(record: dict | None) -> set[str]:
@@ -367,29 +333,40 @@ def comparable_title_words(value: str) -> list[str]:
 
 def title_words_present(series_title: str, basename: str) -> bool:
     needle = comparable_title_words(series_title)
-    haystack = comparable_title_words(title_without_extension(basename))
+    candidate = re.sub(r"^(?:\[[^\]]+\]\s*)+", "", title_without_extension(basename))
+    haystack = comparable_title_words(candidate)
     if not needle:
         return True
-    for index in range(0, len(haystack) - len(needle) + 1):
-        if haystack[index : index + len(needle)] == needle:
-            return True
-    return False
+    return haystack[: len(needle)] == needle
 
 
-def path_with_episode_title_prefix(path: Path, series_title: str | None) -> Path:
+def path_with_episode_title_prefix(
+    path: Path,
+    series_title: str | None,
+    aliases: list[str] | None = None,
+) -> Path:
     if not series_title:
         return path
-    if not EPISODE_TOKEN_RE.search(path.name) or title_words_present(series_title, path.name):
+    if not EPISODE_TOKEN_RE.search(path.name):
+        return path
+    if title_words_present(series_title, path.name):
+        return path
+    alias_present = any(
+        title_words_present(alias, path.name)
+        for alias in (aliases or [])
+        if alias and alias.casefold() != series_title.casefold()
+    )
+    if not alias_present and not BARE_EPISODE_RE.search(path.name):
         return path
     title = safe_title_component(series_title)
     if not title:
         return path
     episode_match = EPISODE_PREFIX_RE.match(path.name)
-    if episode_match:
-        leading_group = episode_match.group("group") or ""
-        remainder = episode_match.group("episode").lstrip(" ._-")
-        return path.with_name(f"{leading_group}{title} - {remainder}")
-    return path.with_name(f"{title} - {path.name}")
+    if not episode_match:
+        return path
+    leading_group = episode_match.group("group") or ""
+    remainder = episode_match.group("episode").lstrip(" ._-")
+    return path.with_name(f"{leading_group}{title} - {remainder}")
 
 
 def file_has_hevc_marker(path: Path) -> bool:
@@ -749,8 +726,9 @@ def stamped_path(
     tags: list[str],
     release_group: str | None,
     series_title: str | None,
+    aliases: list[str] | None = None,
 ) -> Path:
-    stamped = path_with_episode_title_prefix(path, series_title)
+    stamped = path_with_episode_title_prefix(path, series_title, aliases)
     stem = stamped.stem
     if tags:
         stem = f"{stem} {' '.join(tags)}"
@@ -764,6 +742,7 @@ def stamp_tree(
     original_languages: set[str],
     parent_title: str,
     series_title: str | None,
+    aliases: list[str] | None,
     dry_run: bool,
 ) -> tuple[int, int, int]:
     changes = 0
@@ -776,13 +755,13 @@ def stamp_tree(
 
         tags, release_group = wanted_tags(path.name, path, original_languages, parent_title)
         if not tags and not release_group:
-            prefixed_path = path_with_episode_title_prefix(path, series_title)
+            prefixed_path = path_with_episode_title_prefix(path, series_title, aliases)
             if prefixed_path == path:
                 skipped_no_stamp += 1
                 log(f"no stamp needed for {path.name!r}")
                 continue
 
-        new_path = stamped_path(path, tags, release_group, series_title)
+        new_path = stamped_path(path, tags, release_group, series_title, aliases)
         if new_path == path or new_path.exists():
             continue
 
@@ -841,26 +820,45 @@ def main() -> int:
             argv[1] if len(argv) > 1 else "",
             argv[2] if len(argv) > 2 else "",
         ]
-        sonarr_record = arr_queue_record_from_terms(
+        download_id = os.environ.get("SAB_NZO_ID", "").strip()
+        grab_context = grab_context_by_download_id(
+            os.environ.get("ARR_GRAB_CONTEXT_API", ""),
+            download_id,
+        )
+        sonarr_record = arr_queue_record_by_download_id(
             os.environ.get("SONARR_API", ""),
             os.environ.get("SONARR_API_KEY", ""),
-            raw_match_terms,
+            download_id,
         )
         radarr_record = None
         if not sonarr_record:
-            radarr_record = arr_queue_record_from_terms(
+            radarr_record = arr_queue_record_by_download_id(
                 os.environ.get("RADARR_API", ""),
                 os.environ.get("RADARR_API_KEY", ""),
-                raw_match_terms,
+                download_id,
             )
         arr_record = sonarr_record or radarr_record
+        context_languages = {
+            language
+            for value in (grab_context or {}).get("original_languages", [])
+            if (language := normalize_language(str(value)))
+        }
         original_languages = (
-            original_languages_from_arr_record(arr_record)
+            context_languages
+            or original_languages_from_arr_record(arr_record)
             or parse_languages(os.environ.get("DA_ORIGINAL_LANGUAGES", ""))
             or DEFAULT_DUAL_AUDIO_ORIGINAL_LANGUAGES
         )
-        series_title = series_title_from_arr_record(arr_record)
+        identity_conflict = bool((grab_context or {}).get("identity_conflict"))
+        context_title = str((grab_context or {}).get("canonical_title") or "").strip()
+        series_title = None if identity_conflict else context_title or series_title_from_arr_record(arr_record)
+        aliases = [
+            str(value).strip()
+            for value in (grab_context or {}).get("aliases", [])
+            if str(value).strip()
+        ]
         parent_title = parent_title_from_values(
+            (grab_context or {}).get("source_title"),
             os.environ.get("SAB_FINAL_NAME", ""),
             os.environ.get("SAB_FILENAME", ""),
             path.name,
@@ -870,15 +868,19 @@ def main() -> int:
         )
         log(
             "processing download_dir={download_dir!r} category={category!r} "
+            "download_id={download_id!r} context={context} identity_conflict={conflict} "
             "original_language(s)={languages} parent_title={parent!r}".format(
                 download_dir=str(path),
                 category=category,
+                download_id=download_id,
+                context="ledger" if grab_context else "exact_queue" if arr_record else "fallback",
+                conflict=identity_conflict,
                 languages=", ".join(sorted(original_languages)),
                 parent=parent_title,
             )
         )
         changes, videos_scanned, skipped_no_stamp = stamp_tree(
-            path, original_languages, parent_title, series_title, dry_run
+            path, original_languages, parent_title, series_title, aliases, dry_run
         )
         action = "candidate rename(s)" if dry_run else "rename(s)"
         log(
@@ -890,6 +892,9 @@ def main() -> int:
                 **event,
                 "result": "completed",
                 "parent_title": parent_title,
+                "download_id": download_id,
+                "context_source": "ledger" if grab_context else "exact_queue" if arr_record else "fallback",
+                "identity_conflict": identity_conflict,
                 "original_languages": sorted(original_languages),
                 "changes": changes,
                 "videos_scanned": videos_scanned,
