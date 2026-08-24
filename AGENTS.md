@@ -95,6 +95,13 @@ validation, approval boundaries, and audit evidence explicit so Astra can work
 on the system safely while Codex remains an escalation path instead of the
 default operator.
 
+When a behavior skill is intended to govern every agent, maintain one canonical
+shared source and project that exact reviewed content into each eligible
+profile. `self-evolution` is a fleet-wide shared skill for Astra, Dubble, and
+Rigel; do not fork profile-specific copies that can drift. Keep per-profile
+runtime roots and permissions isolated, but require the same source path and
+content hash so one reviewed improvement advances every agent together.
+
 When the user supplies a transcript for Astra, OpenClaw, Hermes, Dubble,
 Rigel, or another related agent, preserve the complete owner-supplied text as
 a verbatim evidence artifact immediately, before analysis, implementation, or
