@@ -67,6 +67,7 @@
         group: root
         # The rendered script contains the notification credential.
         mode: "0700"
+      diff: false
 
     - name: Create docker-auto-update.service
       ansible.builtin.copy:
