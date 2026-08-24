@@ -84,6 +84,17 @@ When self-updating `AGENTS.md` or another shared file, still follow the shared-f
 
 When working on Astra/OpenClaw behavior, Codex's role is to teach Astra how to reason and maintain itself, not to replace Astra's judgment with brittle hardcoded wrappers. Prefer updating Astra's heartbeat, skills, operating docs, memory, and approval rules so Astra performs the diagnosis, classification, backup, safe fix, approval request, and follow-up notification itself. Create or modify scripts only when the script is a justified tool for Astra to use repeatedly and safely, not as the default answer to a missing behavior. If a user correction reveals this rule was missed, persist the correction to `AGENTS.md` and Codex memory immediately.
 
+Compute Corner is Astra-centric. Prefer implementing new managed functionality
+so Astra can discover its current state, operate it, diagnose drift, and make
+approved durable changes without requiring Codex for routine recovery or
+maintenance. Expose those capabilities through Hermes-native tools, skills,
+operating guidance, and narrowly scoped least-privilege brokers rather than
+general root, Docker-group membership, unrestricted repository mutation, or
+opaque Codex-only procedures. Keep source-of-truth ownership, backups,
+validation, approval boundaries, and audit evidence explicit so Astra can work
+on the system safely while Codex remains an escalation path instead of the
+default operator.
+
 When the user supplies a transcript for Astra, OpenClaw, Hermes, Dubble,
 Rigel, or another related agent, preserve the complete owner-supplied text as
 a verbatim evidence artifact immediately, before analysis, implementation, or
