@@ -45,10 +45,14 @@
   legacy tier drift, and the CF limit.
 - `arr_import_reconciler.py`: Exact-ledger import fallback for completed
   Sonarr/Radarr downloads blocked only because the release was matched by ID.
-  It imports only rejection-free, missing candidates whose episode/movie IDs
-  were recorded in the native OnGrab event; active downloads, unexpected pack
-  files, current-better candidates, and downloads without exact context are
-  never selected. The deployed service can run in dry-run mode before apply.
+  It imports only rejection-free monitored candidates whose episode/movie IDs
+  were recorded in the native OnGrab event. Existing-file candidates are
+  eligible only when Arr's own manual-import evaluation says they are valid
+  upgrades; active downloads, unexpected pack files, current-better
+  candidates, and downloads without exact context are never selected. Its
+  structured output compares grab-time and import-time scores/formats and
+  classifies identity conflicts, CF drift, current-better rows, and other
+  native rejections. The deployed service can run in dry-run mode before apply.
 - `arr_indexer_preference_policy.py`: Dry-run by default policy helper for the
   approved source ordering. It sets Usenet indexers to priority `1`, Seedpool
   to `10`, Nyaa/AnimeTosho specialists to `15`, generic public torrents to
@@ -224,7 +228,8 @@
 - `sonarr_series_audit.py`: Read-only summary of one Sonarr series' monitoring,
   files, queue, and grab history.
 - `sonarr_transaction_audit.py`: Read-only summary of Sonarr transaction-monitor
-  history, storage snapshots, release-stamper events, and current queue state.
+  history, storage snapshots, release-stamper events, exact-ID reconciler
+  decisions, and current queue state.
 - `sonarr_transaction_log_sanitize.py`: Redacts secret-looking fields and URL
   query parameters from Sonarr transaction-monitor JSONL logs.
 - `subtitle_language_mismatch_audit.py`: Read-only media-file subtitle audit
@@ -250,6 +255,8 @@
 - Run `python3 scripts/media-release/test_arr_import_reconciler.py` after
   changing queue eligibility, exact-target selection, or native manual-import
   command construction.
+- Run `python3 scripts/media-release/test_sonarr_transaction_audit.py` after
+  changing persistent reconciler-event parsing or summary classifications.
 - Run `python3 scripts/media-release/test_arr_indexer_preference_policy.py`
   after changing source-priority bands, name normalization, or downstream
   convergence behavior.

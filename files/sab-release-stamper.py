@@ -211,7 +211,7 @@ def file_has_release_group(file_name: str, release_group: str) -> bool:
     escaped = re.escape(release_group)
     return bool(
         re.search(rf"(?i)^\[{escaped}\]", stem)
-        or re.search(rf"(?i)(?<![A-Za-z0-9])-{escaped}$", stem)
+        or re.search(rf"(?i)-{escaped}$", stem)
     )
 
 
@@ -706,6 +706,7 @@ def wanted_tags(
     media_path: Path,
     original_languages: set[str],
     parent_title: str,
+    trusted_release_group: str | None = None,
 ) -> tuple[list[str], str | None]:
     basename = Path(file_name).name
     tags: list[str] = []
@@ -715,7 +716,9 @@ def wanted_tags(
     if file_has_hevc_marker(media_path) and not X265_RE.search(basename):
         tags.append("[x265]")
     tags.extend(context_tags_from_title(parent_title, basename))
-    release_group = release_group_from_title(parent_title)
+    release_group = release_group_candidate(trusted_release_group) or release_group_from_title(
+        parent_title
+    )
     if release_group and file_has_release_group(basename, release_group):
         release_group = None
     return tags, release_group
@@ -743,6 +746,7 @@ def stamp_tree(
     parent_title: str,
     series_title: str | None,
     aliases: list[str] | None,
+    trusted_release_group: str | None,
     dry_run: bool,
 ) -> tuple[int, int, int]:
     changes = 0
@@ -753,7 +757,13 @@ def stamp_tree(
             continue
         videos_scanned += 1
 
-        tags, release_group = wanted_tags(path.name, path, original_languages, parent_title)
+        tags, release_group = wanted_tags(
+            path.name,
+            path,
+            original_languages,
+            parent_title,
+            trusted_release_group,
+        )
         if not tags and not release_group:
             prefixed_path = path_with_episode_title_prefix(path, series_title, aliases)
             if prefixed_path == path:
@@ -857,6 +867,9 @@ def main() -> int:
             for value in (grab_context or {}).get("aliases", [])
             if str(value).strip()
         ]
+        trusted_release_group = release_group_candidate(
+            str((grab_context or {}).get("release_group") or "")
+        )
         parent_title = parent_title_from_values(
             (grab_context or {}).get("source_title"),
             os.environ.get("SAB_FINAL_NAME", ""),
@@ -880,7 +893,13 @@ def main() -> int:
             )
         )
         changes, videos_scanned, skipped_no_stamp = stamp_tree(
-            path, original_languages, parent_title, series_title, aliases, dry_run
+            path,
+            original_languages,
+            parent_title,
+            series_title,
+            aliases,
+            trusted_release_group,
+            dry_run,
         )
         action = "candidate rename(s)" if dry_run else "rename(s)"
         log(
@@ -895,6 +914,7 @@ def main() -> int:
                 "download_id": download_id,
                 "context_source": "ledger" if grab_context else "exact_queue" if arr_record else "fallback",
                 "identity_conflict": identity_conflict,
+                "trusted_release_group": trusted_release_group,
                 "original_languages": sorted(original_languages),
                 "changes": changes,
                 "videos_scanned": videos_scanned,

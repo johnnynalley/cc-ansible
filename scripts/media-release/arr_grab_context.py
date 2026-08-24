@@ -105,6 +105,19 @@ def normalized_words(value: object) -> list[str]:
     return [word for word in words if word not in TECHNICAL_WORDS]
 
 
+def primary_title_alias(value: str) -> str | None:
+    """Return a distinctive title prefix before an explicit subtitle separator."""
+    prefix = re.split(r"(?:\s+[-\u2013\u2014]\s+|:\s+)", str(value or ""), maxsplit=1)[0].strip()
+    if not prefix or prefix == str(value or "").strip():
+        return None
+    words = normalized_words(prefix)
+    if not words or sum(len(word) for word in words) < 5:
+        return None
+    if len(words) == 1 and len(words[0]) < 5:
+        return None
+    return prefix
+
+
 def alias_matches_source(alias: str, source_title: str) -> bool:
     alias_words = normalized_words(alias)
     source_words = normalized_words(source_title)
@@ -123,6 +136,9 @@ def identity_evidence(canonical_title: str, aliases: list[str], source_title: st
         value = str(value or "").strip()
         if value and value.casefold() not in {item.casefold() for item in candidates}:
             candidates.append(value)
+        primary = primary_title_alias(value)
+        if primary and primary.casefold() not in {item.casefold() for item in candidates}:
+            candidates.append(primary)
     candidates.sort(key=lambda alias: len(normalized_words(alias)), reverse=True)
     matched_alias = next((alias for alias in candidates if alias_matches_source(alias, source_title)), None)
     return {
@@ -325,7 +341,23 @@ class ContextStore:
                 "SELECT payload FROM grab_context WHERE download_id = ?",
                 (normalized,),
             ).fetchone()
-        return json.loads(row["payload"]) if row else None
+        if not row:
+            return None
+        context = json.loads(row["payload"])
+        canonical_title = str(context.get("canonical_title") or "").strip()
+        source_title = str(context.get("source_title") or "").strip()
+        identity = identity_evidence(canonical_title, context.get("aliases") or [], source_title)
+        context.update(
+            {
+                "aliases": identity["aliases"],
+                "identity_match": identity["identity_match"],
+                "identity_conflict": bool(
+                    source_title and canonical_title and not identity["identity_match"]
+                ),
+                "matched_alias": identity["matched_alias"],
+            }
+        )
+        return context
 
     def prune(self) -> int:
         cutoff = iso_utc(utc_now() - dt.timedelta(days=self.retention_days))

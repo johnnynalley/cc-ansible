@@ -43,6 +43,23 @@ class GrabContextTests(unittest.TestCase):
         )
         self.assertFalse(result["identity_match"])
 
+    def test_distinctive_primary_title_before_subtitle_separator_matches(self) -> None:
+        result = MODULE.identity_evidence(
+            "KonoSuba – God's Blessing on This Wonderful World!!",
+            [],
+            "[Arid] KonoSuba S2 1080p BluRay Dual Audio x265",
+        )
+        self.assertTrue(result["identity_match"])
+        self.assertEqual(result["matched_alias"], "KonoSuba")
+
+    def test_short_generic_primary_title_is_not_derived(self) -> None:
+        result = MODULE.identity_evidence(
+            "It: Welcome to Derry",
+            [],
+            "Welcome.to.Derry.S01E01.1080p.x265-GROUP",
+        )
+        self.assertFalse(result["identity_match"])
+
     def test_short_alias_must_be_a_whole_token(self) -> None:
         self.assertTrue(MODULE.alias_matches_source("DBZ", "DBZ S01E01 1080p"))
         self.assertFalse(MODULE.alias_matches_source("DBZ", "SomeDBZLikeTitle S01E01"))
@@ -129,6 +146,26 @@ class GrabContextTests(unittest.TestCase):
             store.upsert(context)
             self.assertEqual(store.get("ABC123")["canonical_title"], "Dragon Ball Kai")
             self.assertIsNone(store.get("abc12"))
+
+    def test_existing_context_identity_is_recomputed_on_lookup(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            store = MODULE.ContextStore(Path(directory) / "context.db")
+            store.upsert(
+                {
+                    "download_id": "konosuba",
+                    "app": "sonarr",
+                    "captured_at": MODULE.iso_utc(),
+                    "canonical_title": "KonoSuba – God's Blessing on This Wonderful World!!",
+                    "aliases": ["KonoSuba – God's Blessing on This Wonderful World!!"],
+                    "source_title": "[Arid] KonoSuba S2 1080p Dual Audio x265",
+                    "identity_match": False,
+                    "identity_conflict": True,
+                }
+            )
+            context = store.get("konosuba")
+            self.assertTrue(context["identity_match"])
+            self.assertFalse(context["identity_conflict"])
+            self.assertEqual(context["matched_alias"], "KonoSuba")
 
 
 if __name__ == "__main__":

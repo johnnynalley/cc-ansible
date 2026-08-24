@@ -1,6 +1,6 @@
 # Media Release Policy
 
-Last updated: 2026-08-23
+Last updated: 2026-08-24
 
 This documents the current Sonarr/Radarr release selection policy on `docker-vm`.
 The goal is better grabbed releases, not just smaller files. Anime is handled as
@@ -1512,6 +1512,20 @@ release group, indexer, quality, and grab-time custom formats/score.
   rewritten to the canonical title, and bare episode filenames are prefixed
   with it. A clearly different title such as `L.A.Law.S01E01` must not be
   rewritten into She-Hulk.
+- Identity matching also derives a guarded primary-title alias before an
+  explicit spaced dash or subtitle colon. The prefix must remain distinctive;
+  this allows `KonoSuba` to match a canonical title with a long subtitle while
+  short generic prefixes remain unusable and wrong-series payloads remain
+  conflicts.
+- When the exact ledger contains a release group, both download-client
+  stampers prefer that trusted value over reparsing punctuation in the release
+  title. The group must be a terminal filename token before import so payloads
+  with ambiguous suffix punctuation retain the advertised group during Arr's
+  file-level reparse. A normal terminal form such as `x265-DarQ` is recognized
+  and is not duplicated. This does not erase contradictory payload metadata:
+  a file containing `HONE` still fails a tier that explicitly requires
+  `Not HONE`, and the reconciler records that score loss instead of forcing an
+  import.
 
 The managed sources are `scripts/media-release/arr_grab_context.py`,
 `scripts/media-release/arr_grab_context_configure.py`,
@@ -1531,13 +1545,28 @@ individual payload filename parses cleanly. The private
   ID-match rejection.
 - The exact download ID must have a non-conflicting native OnGrab ledger row.
 - Sonarr/Radarr's own manual-import endpoint must return a rejection-free,
-  missing, monitored candidate owned by the same series/movie.
+  monitored candidate owned by the same series/movie. A target may already
+  have a file only when Arr's native candidate evaluation has no current-better,
+  quality, language, or other import rejection; this permits safe ID-matched
+  upgrades without recreating Arr's score math in the reconciler.
 - Every selected Sonarr episode ID must be a subset of the episode IDs recorded
   in that grab event. Duplicate candidates for one expected target are treated
   as ambiguous and skipped.
 - Active downloads, current-better candidates, unexpected season-pack files,
   identity conflicts, and downloads without exact ledger context are never
   imported by the reconciler.
+- Every evaluated exact-target candidate emits bounded structured diagnostics
+  containing grab/import scores, lost and gained custom formats, native
+  rejection reasons, and a classification such as `eligible_upgrade`,
+  `grab_import_cf_drift`, `current_better`, or `identity_conflict`. This is the
+  source for proactive release-policy monitoring; it does not bypass native
+  import decisions.
+- Changed reconciler decisions are persisted privately at
+  `/opt/arr-grab-context/data/arr-import-reconciler-events.jsonl`, rotated
+  daily for 14 generations, and summarized by
+  `scripts/media-release/sonarr_transaction_audit.py` alongside the stamper
+  event logs. Unchanged blocked decisions are deduplicated for the lifetime of
+  the reconciler process so one unresolved item does not flood the log.
 
 The reconciler uses Arr's native `ManualImport` command with `importMode=Auto`,
 so normal hardlink/copy decisions remain Arr-owned. Import-attempt download IDs

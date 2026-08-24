@@ -667,7 +667,7 @@ def file_has_release_group(file_name: str, release_group: str) -> bool:
     escaped = re.escape(release_group)
     return bool(
         re.search(rf"(?i)^\[{escaped}\]", stem)
-        or re.search(rf"(?i)(?<![A-Za-z0-9])-{escaped}$", stem)
+        or re.search(rf"(?i)-{escaped}$", stem)
     )
 
 
@@ -961,6 +961,7 @@ def wanted_tags(
     media_path: Path | None,
     original_languages: set[str],
     parent_title: str,
+    trusted_release_group: str | None = None,
 ) -> tuple[list[str], str | None, list[str]]:
     basename = PurePosixPath(file_name).name
     tags: list[str] = []
@@ -994,7 +995,9 @@ def wanted_tags(
     elif any(pattern.search(parent_title) for _, pattern in PLATFORM_TAG_PATTERNS):
         reasons.append("platform_already_present_or_unneeded")
 
-    release_group = release_group_from_title(parent_title)
+    release_group = release_group_candidate(trusted_release_group) or release_group_from_title(
+        parent_title
+    )
     if release_group and file_has_release_group(basename, release_group):
         release_group = None
         reasons.append("release_group_already_present")
@@ -1149,6 +1152,9 @@ def main() -> int:
             for value in (grab_context or {}).get("aliases", [])
             if str(value).strip()
         ]
+        trusted_release_group = release_group_candidate(
+            str((grab_context or {}).get("release_group") or "")
+        )
         parent_title = parent_title_from_values(
             (grab_context or {}).get("source_title"),
             torrent.get("name"),
@@ -1213,6 +1219,7 @@ def main() -> int:
                 media_path,
                 original_languages,
                 parent_title,
+                trusted_release_group,
             )
             if not tags and not release_group:
                 prefixed_path = path_with_episode_title_prefix(old_path, series_title, aliases)
@@ -1284,6 +1291,7 @@ def main() -> int:
                 "parent_title": parent_title,
                 "context_source": "ledger" if grab_context else "exact_queue" if arr_record else "fallback",
                 "identity_conflict": identity_conflict,
+                "trusted_release_group": trusted_release_group,
                 "original_languages": sorted(original_languages),
                 "changes": changes,
                 "videos_scanned": videos_scanned,

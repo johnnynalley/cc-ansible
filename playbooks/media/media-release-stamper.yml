@@ -104,6 +104,23 @@
             mode: "0755"
           register: media_release_stamper_reconciler_script
 
+        - name: Deploy Arr import reconciler log rotation
+          ansible.builtin.copy:
+            dest: /etc/logrotate.d/arr-import-reconciler
+            owner: root
+            group: root
+            mode: "0644"
+            content: |
+              {{ media_release_stamper_context_dir }}/data/arr-import-reconciler-events.jsonl {
+                  daily
+                  rotate 14
+                  compress
+                  delaycompress
+                  missingok
+                  notifempty
+                  create 0640 {{ media_release_stamper_container_uid | default('1000') }} {{ media_release_stamper_container_gid | default('1000') }}
+              }
+
         - name: Render Arr grab-context Compose project
           ansible.builtin.template:
             src: ../../templates/docker/arr-grab-context.yml.j2

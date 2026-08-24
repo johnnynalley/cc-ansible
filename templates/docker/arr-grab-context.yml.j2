@@ -44,6 +44,8 @@ services:
       - /app/arr_import_reconciler.py
       - --interval
       - "{{ media_release_stamper_reconciler_interval | default(60) }}"
+      - --event-log
+      - /data/arr-import-reconciler-events.jsonl
 {% if not (media_release_stamper_reconciler_apply | default(false) | bool) %}
       - --dry-run
 {% endif %}

@@ -20,6 +20,7 @@ DEFAULT_INTERVAL = 60
 DEFAULT_SUCCESS_SUPPRESSION = 3600
 DEFAULT_HEARTBEAT = Path("/tmp/arr-import-reconciler.heartbeat")
 DEFAULT_STATE = Path("/data/arr-import-reconciler-state.json")
+DEFAULT_EVENT_LOG = Path("/data/arr-import-reconciler-events.jsonl")
 ID_MATCH_MARKERS = {
     "sonarr": "matched to series by id",
     "radarr": "matched to movie by id",
@@ -28,6 +29,14 @@ ID_MATCH_MARKERS = {
 
 def iso_utc() -> str:
     return dt.datetime.now(dt.UTC).isoformat(timespec="seconds").replace("+00:00", "Z")
+
+
+def append_event(path: Path, event: dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a", encoding="utf-8") as handle:
+        json.dump(event, handle, sort_keys=True, separators=(",", ":"))
+        handle.write("\n")
+    path.chmod(0o640)
 
 
 def normalize_download_id(value: object) -> str:
@@ -78,14 +87,82 @@ def candidate_target_ids(app: str, candidate: dict[str, Any]) -> set[int]:
     return {int(movie_id)} if isinstance(movie_id, int) else set()
 
 
-def candidate_is_missing(app: str, candidate: dict[str, Any]) -> bool:
+def candidate_is_monitored(app: str, candidate: dict[str, Any]) -> bool:
     if app == "sonarr":
         episodes = candidate.get("episodes") or []
-        return bool(episodes) and all(
-            bool(episode.get("monitored")) and not bool(episode.get("hasFile"))
-            for episode in episodes
+        return bool(episodes) and all(bool(episode.get("monitored")) for episode in episodes)
+    return (candidate.get("movie") or {}).get("monitored") is not False
+
+
+def custom_format_names(values: object) -> list[str]:
+    result: list[str] = []
+    for value in values or []:
+        name = value.get("name") if isinstance(value, dict) else value
+        name = str(name or "").strip()
+        if name and name not in result:
+            result.append(name)
+    return result
+
+
+def candidate_diagnostics(
+    app: str,
+    context: dict[str, Any],
+    candidates: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    media_id = (context.get("media") or {}).get("id")
+    expected = expected_episode_ids(context) if app == "sonarr" else {media_id}
+    grabbed_formats = set(custom_format_names(context.get("custom_formats")))
+    diagnostics: list[dict[str, Any]] = []
+    for candidate in candidates:
+        owner = candidate.get("series") if app == "sonarr" else candidate.get("movie")
+        targets = candidate_target_ids(app, candidate)
+        if (
+            not isinstance(owner, dict)
+            or owner.get("id") != media_id
+            or not targets
+            or not targets.issubset(expected)
+        ):
+            continue
+        reasons = rejection_reasons(candidate)
+        import_formats = set(custom_format_names(candidate.get("customFormats")))
+        lost_formats = sorted(grabbed_formats - import_formats) if "customFormats" in candidate else []
+        grab_score = context.get("custom_format_score")
+        import_score = candidate.get("customFormatScore")
+        score_changed = (
+            isinstance(grab_score, int)
+            and isinstance(import_score, int)
+            and import_score != grab_score
         )
-    return (candidate.get("movie") or {}).get("hasFile") is False
+        reason_text = "\n".join(reasons).casefold()
+        if context.get("identity_conflict"):
+            classification = "identity_conflict"
+        elif "not a custom format upgrade" in reason_text or "existing file" in reason_text:
+            classification = "current_better"
+        elif lost_formats and score_changed:
+            classification = "grab_import_cf_drift"
+        elif reasons:
+            classification = "native_rejection"
+        elif any(bool(item.get("hasFile")) for item in candidate.get("episodes") or []):
+            classification = "eligible_upgrade"
+        elif app == "radarr" and bool((candidate.get("movie") or {}).get("hasFile")):
+            classification = "eligible_upgrade"
+        else:
+            classification = "eligible_missing"
+        diagnostics.append(
+            {
+                "path": candidate.get("path"),
+                "target_ids": sorted(targets),
+                "classification": classification,
+                "grab_score": grab_score,
+                "import_score": import_score,
+                "lost_formats": lost_formats,
+                "gained_formats": sorted(import_formats - grabbed_formats)
+                if "customFormats" in candidate
+                else [],
+                "rejections": reasons,
+            }
+        )
+    return diagnostics
 
 
 def select_candidates(
@@ -112,7 +189,7 @@ def select_candidates(
         targets = candidate_target_ids(app, candidate)
         if not targets or not targets.issubset(expected):
             continue
-        if not candidate_is_missing(app, candidate):
+        if not candidate_is_monitored(app, candidate):
             continue
         selected.append(candidate)
     target_counts: dict[int, int] = {}
@@ -288,6 +365,8 @@ def reconcile_app(
             "selected": len(selected),
             "paths": [candidate.get("path") for candidate in selected],
             "dry_run": dry_run,
+            "identity_conflict": bool(context.get("identity_conflict")),
+            "candidate_diagnostics": candidate_diagnostics(app, context, candidates),
         }
         if not selected:
             result["result"] = "no_safe_candidate"
@@ -344,6 +423,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--interval", type=int, default=DEFAULT_INTERVAL)
     parser.add_argument("--heartbeat", type=Path, default=DEFAULT_HEARTBEAT)
     parser.add_argument("--state", type=Path, default=DEFAULT_STATE)
+    parser.add_argument("--event-log", type=Path, default=DEFAULT_EVENT_LOG)
     parser.add_argument("--once", action="store_true")
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--check-health", action="store_true")
@@ -362,26 +442,32 @@ def main() -> int:
         "radarr": JsonClient(os.environ.get("RADARR_API", ""), os.environ.get("RADARR_API_KEY", "")),
     }
     state = ReconcileState(args.state)
+    last_emitted: dict[str, str] = {}
     while True:
         for app, client in clients.items():
             try:
                 results = reconcile_app(app, client, ledger, state, args.dry_run)
                 for result in results:
-                    print(json.dumps({"observed_at": iso_utc(), **result}, sort_keys=True), flush=True)
+                    fingerprint = json.dumps(result, sort_keys=True, separators=(",", ":"))
+                    key = f"{app}:{result.get('download_id') or result.get('result')}"
+                    if last_emitted.get(key) == fingerprint:
+                        continue
+                    last_emitted[key] = fingerprint
+                    event = {"observed_at": iso_utc(), **result}
+                    append_event(args.event_log, event)
+                    print(json.dumps(event, sort_keys=True), flush=True)
             except (OSError, TimeoutError, ValueError, urllib.error.URLError) as exc:
-                print(
-                    json.dumps(
-                        {
-                            "observed_at": iso_utc(),
-                            "app": app,
-                            "result": "error",
-                            "error": str(exc),
-                        },
-                        sort_keys=True,
-                    ),
-                    file=sys.stderr,
-                    flush=True,
-                )
+                event = {
+                    "observed_at": iso_utc(),
+                    "app": app,
+                    "result": "error",
+                    "error": str(exc),
+                }
+                fingerprint = json.dumps(event | {"observed_at": None}, sort_keys=True)
+                if last_emitted.get(f"{app}:error") != fingerprint:
+                    last_emitted[f"{app}:error"] = fingerprint
+                    append_event(args.event_log, event)
+                    print(json.dumps(event, sort_keys=True), file=sys.stderr, flush=True)
         write_heartbeat(args.heartbeat)
         if args.once:
             return 0

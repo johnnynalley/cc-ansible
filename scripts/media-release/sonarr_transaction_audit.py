@@ -27,6 +27,7 @@ DEFAULT_STAMPER_LOGS = (
     Path("/opt/media-stack/qbittorrent/scripts/release-stamper-events.jsonl"),
     Path("/opt/media-stack/sabnzbd/scripts/release-stamper-events.jsonl"),
 )
+DEFAULT_RECONCILER_LOG = Path("/opt/arr-grab-context/data/arr-import-reconciler-events.jsonl")
 
 DA_RE = re.compile(
     r"(?i)\b(?:dual[ ._-]?audio|multi[ ._-]?audio|"
@@ -353,6 +354,57 @@ def summarize_stamper_events(events: list[dict[str, Any]], limit: int) -> dict[s
                 "skip_reasons": event.get("skip_reasons"),
                 "file_list_source": event.get("file_list_source"),
                 "download_name": event.get("download_name"),
+            }
+            for event in recent
+        ],
+    }
+
+
+def reconciler_events(path: Path, since: dt.datetime) -> list[dict[str, Any]]:
+    events: list[dict[str, Any]] = []
+    if not path.exists():
+        return events
+    with path.open("r", encoding="utf-8") as handle:
+        for line_number, line in enumerate(handle, start=1):
+            try:
+                event = json.loads(line)
+            except json.JSONDecodeError as exc:
+                print(f"warning: skipped malformed reconciler log {path}:{line_number}: {exc}", file=sys.stderr)
+                continue
+            observed_at = parse_time(event.get("observed_at"))
+            if observed_at and observed_at >= since:
+                events.append(event)
+    return events
+
+
+def summarize_reconciler_events(events: list[dict[str, Any]], limit: int) -> dict[str, Any]:
+    classifications = collections.Counter()
+    for event in events:
+        for candidate in event.get("candidate_diagnostics") or []:
+            classifications[str(candidate.get("classification") or "unknown")] += 1
+    recent = sorted(
+        events,
+        key=lambda item: parse_time(item.get("observed_at"))
+        or dt.datetime.min.replace(tzinfo=dt.UTC),
+        reverse=True,
+    )[:limit]
+    return {
+        "count": len(events),
+        "results": dict(sorted(collections.Counter(str(event.get("result") or "unknown") for event in events).items())),
+        "classifications": dict(sorted(classifications.items())),
+        "recent": [
+            {
+                "observed_at": event.get("observed_at"),
+                "app": event.get("app"),
+                "download_id": event.get("download_id"),
+                "result": event.get("result"),
+                "selected": event.get("selected"),
+                "classifications": sorted(
+                    {
+                        str(candidate.get("classification") or "unknown")
+                        for candidate in event.get("candidate_diagnostics") or []
+                    }
+                ),
             }
             for event in recent
         ],
@@ -779,6 +831,19 @@ def print_text(report: dict[str, Any]) -> None:
             "skip_reasons={skip_reasons} {download_name}".format(**event)
         )
 
+    reconciler = report["reconciler"]
+    print()
+    print(
+        "reconciler events: count={count} results={results} classifications={classifications}".format(
+            **reconciler
+        )
+    )
+    for event in reconciler["recent"]:
+        print(
+            "  - {observed_at} {app} {result} selected={selected} classifications={classifications} "
+            "download_id={download_id}".format(**event)
+        )
+
     print()
     print("recent grabbed/import groups:")
     if not history["recent_groups"]:
@@ -847,6 +912,12 @@ def parse_args() -> argparse.Namespace:
         default=list(DEFAULT_STAMPER_LOGS),
         help="release stamper event JSONL path; may be repeated",
     )
+    parser.add_argument(
+        "--reconciler-log",
+        type=Path,
+        default=DEFAULT_RECONCILER_LOG,
+        help="exact-ID reconciler event JSONL path",
+    )
     return parser.parse_args()
 
 
@@ -856,6 +927,7 @@ def main() -> int:
     since = checked_at - dt.timedelta(hours=args.hours)
     events = monitor_events(args.log, since)
     stampers = stamper_events(args.stamper_log, since)
+    reconciler = reconciler_events(args.reconciler_log, since)
     report: dict[str, Any] = {
         "checked_at": checked_at.isoformat().replace("+00:00", "Z"),
         "since": since.isoformat().replace("+00:00", "Z"),
@@ -864,6 +936,7 @@ def main() -> int:
         "snapshots": summarize_snapshots(events),
         "storage": summarize_storage_snapshots(events),
         "stamper": summarize_stamper_events(stampers, args.limit),
+        "reconciler": summarize_reconciler_events(reconciler, args.limit),
     }
     if not args.no_live:
         api_key = read_api_key(args.config)

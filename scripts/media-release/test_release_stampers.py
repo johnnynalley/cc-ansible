@@ -83,6 +83,44 @@ class PrefixSafetyTests(unittest.TestCase):
     def test_english_original_never_gets_foreign_dual_audio_tag(self) -> None:
         self.assertIsNone(QBIT.language_combo_tag_from_languages({"eng", "jpn"}, {"eng"}))
 
+    def test_trusted_ledger_group_is_appended_for_ambiguous_payload_suffix(self) -> None:
+        qbit_tags, qbit_group, _ = QBIT.wanted_tags(
+            "Shelter.2026.1080p.x265.-.DarQ.HONE.mkv",
+            None,
+            {"eng"},
+            "Shelter.2026.1080p.x265.-.DarQ",
+            "DarQ",
+        )
+        sab_tags, sab_group = SAB.wanted_tags(
+            "Shelter.2026.1080p.x265.-.DarQ.HONE.mkv",
+            Path("/nonexistent/Shelter.mkv"),
+            {"eng"},
+            "Shelter.2026.1080p.x265.-.DarQ",
+            "DarQ",
+        )
+        self.assertEqual(qbit_tags, [])
+        self.assertEqual(sab_tags, [])
+        self.assertEqual(qbit_group, "DarQ")
+        self.assertEqual(sab_group, "DarQ")
+
+    def test_trusted_ledger_group_is_not_duplicated_when_terminal(self) -> None:
+        _, qbit_group, _ = QBIT.wanted_tags(
+            "Shelter.2026.1080p.x265-DarQ.mkv",
+            None,
+            {"eng"},
+            "Shelter.2026.1080p.x265-DarQ",
+            "DarQ",
+        )
+        _, sab_group = SAB.wanted_tags(
+            "Shelter.2026.1080p.x265-DarQ.mkv",
+            Path("/nonexistent/Shelter.mkv"),
+            {"eng"},
+            "Shelter.2026.1080p.x265-DarQ",
+            "DarQ",
+        )
+        self.assertIsNone(qbit_group)
+        self.assertIsNone(sab_group)
+
     def test_sab_exact_download_id_does_not_accept_partial_match(self) -> None:
         class Response:
             def __enter__(self):
