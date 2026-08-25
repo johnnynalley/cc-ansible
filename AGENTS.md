@@ -110,6 +110,16 @@ and beneficial across the fleet. Do not route ordinary course or community
 work through Astra, and do not make routine agent evolution a Codex-only
 procedure.
 
+Astra also has owner-delegated fleet-administrator authority over Dubble and
+Rigel. From the authenticated owner context, Astra must be able to inspect,
+verify, back up, repair, or override either agent's workspace and runtime
+without routing the request through that agent or waiting for it to respond.
+This is an explicit administrative override, not the default ownership model.
+Never expose that cross-agent authority to Dubble/Rigel sessions or their
+users, and never let those agents use Astra as a confused deputy to retrieve
+private cross-profile information. Require scoped backup, audit evidence, and
+post-change target-agent validation for Astra-initiated mutations.
+
 Do not equate durable management with continuous Ansible ownership of mutable
 agent state. Ansible owns the rebuildable platform boundary: accounts,
 packages, service units, filesystem and mount layout, least-privilege brokers,
