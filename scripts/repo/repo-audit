@@ -66,7 +66,11 @@ def tracked_files() -> list[Path]:
         text=True,
         stdout=subprocess.PIPE,
     )
-    skipped = {"CLAUDE.md", "scripts/repo/repo-audit"}
+    skipped = {
+        "CLAUDE.md",
+        "scripts/repo/repo-audit",
+        "scripts/repo/test_repo_audit.py",
+    }
     return [
         ROOT / line
         for line in result.stdout.splitlines()
