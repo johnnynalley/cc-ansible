@@ -110,6 +110,19 @@ bootstrap seed, or mutable native state and document why Ansible ownership is
 required; default to mutable native ownership when the behavior is expected to
 evolve during normal agent use.
 
+Hermes recovery requires two independent backup layers with different failure
+domains. Product-native profile backups are short-horizon operational rollback
+artifacts for quickly undoing a bad agent or configuration change; they are not
+disaster recovery when stored on the same node. Separately, regularly scheduled
+encrypted Restic backups must copy the complete recoverable Hermes estate to
+`nas-zfs`, with retention, failure alerting, and restore validation. The node-loss
+recovery contract is: use Ansible to rebuild the platform and bootstrap on a
+replacement node, then restore mutable profiles, skills, schedules, memory,
+LCM, Mem0/Qdrant state, enrollment/runtime data, and required root-owned Hermes
+state from the off-host `nas-zfs` backup. Do not claim Hermes is fully backed up
+until both a local rollback test and an off-host replacement-node restore test
+have passed.
+
 When a behavior skill is intended to govern every agent, maintain one canonical
 shared source and project that exact reviewed content into each eligible
 profile. `self-evolution` is a fleet-wide shared skill for Astra, Dubble, and
