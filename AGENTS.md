@@ -95,6 +95,21 @@ validation, approval boundaries, and audit evidence explicit so Astra can work
 on the system safely while Codex remains an escalation path instead of the
 default operator.
 
+Astra-centric orchestration does not make Dubble or Rigel subordinate
+workspaces owned by Astra. Astra, Dubble, and Rigel are independent first-class
+agents. Each directly owns its ordinary domain work: for example, Rigel writes
+course folders, notes, assignments, and code, while Dubble writes its community
+work products. Changes to agent runtime state, including bootstrap guidance,
+durable memory, schedules, configuration, and profile skill evolution, are
+instead proposed by the owning agent and verified/applied by Astra without
+requiring routine owner or Codex intervention. Astra must preserve that agent's
+intent and privacy; verification authority is not content ownership. The
+canonical fleet-wide `self-evolution` skill remains Astra-maintained, while
+Dubble and Rigel may propose changes for Astra to accept only when necessary
+and beneficial across the fleet. Do not route ordinary course or community
+work through Astra, and do not make routine agent evolution a Codex-only
+procedure.
+
 Do not equate durable management with continuous Ansible ownership of mutable
 agent state. Ansible owns the rebuildable platform boundary: accounts,
 packages, service units, filesystem and mount layout, least-privilege brokers,
