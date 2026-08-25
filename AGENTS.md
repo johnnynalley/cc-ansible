@@ -209,6 +209,14 @@ Write YAML with two-space indentation and descriptive task names. Keep playbooks
 
 There is no dedicated unit-test suite. Validate changes with full-playbook Ansible dry runs before applying them: `ansible-playbook <playbook> --check --diff`. Do not use `--limit`; playbooks should be safe across their configured `hosts:` target, and if a full run is not safe, fix the playbook or inventory instead of narrowing execution. For YAML and Ansible quality checks, use `yamllint` and `ansible-lint` when available. For shell helpers or shell templates, run `shellcheck` on the rendered or source script when practical.
 
+Do not describe an Ansible `--check` run as non-mutating until every reachable
+task that sets `check_mode: false` has been inspected and proven read-only for
+the exact variable and tag shape being run. Check mode does not override those
+tasks, and commands or lifecycle operations inside them can still change live
+state. When that proof is absent, validate with focused regressions, syntax and
+task-list parsing, or an explicitly check-safe execution path; do not use a
+production playbook dry run as the first experiment.
+
 Before a live playbook run, follow `--syntax-check` with `--list-tasks` using
 the same inventory and extra-variable shape. Ansible's syntax check can miss a
 task-level conflicting-action error, such as an action parameter indented as a
