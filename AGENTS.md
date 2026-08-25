@@ -95,6 +95,21 @@ validation, approval boundaries, and audit evidence explicit so Astra can work
 on the system safely while Codex remains an escalation path instead of the
 default operator.
 
+Do not equate durable management with continuous Ansible ownership of mutable
+agent state. Ansible owns the rebuildable platform boundary: accounts,
+packages, service units, filesystem and mount layout, least-privilege brokers,
+secret placement, backup/restore machinery, and an initial Hermes bootstrap.
+After bootstrap, Hermes-native profile configuration, skills, schedules,
+operating guidance, memory, and agent-authored state should remain writable and
+operable through the owning agent's reviewed native workflow, then be protected
+by complete versioned backups and tested restore procedures. Ansible may seed
+or restore that state, but normal convergence must not overwrite valid
+agent-maintained changes or force routine Astra operations back through Codex.
+Before declaratively managing a new Hermes file, classify it as platform state,
+bootstrap seed, or mutable native state and document why Ansible ownership is
+required; default to mutable native ownership when the behavior is expected to
+evolve during normal agent use.
+
 When a behavior skill is intended to govern every agent, maintain one canonical
 shared source and project that exact reviewed content into each eligible
 profile. `self-evolution` is a fleet-wide shared skill for Astra, Dubble, and
