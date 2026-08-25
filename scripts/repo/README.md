@@ -7,9 +7,12 @@ cross-reference health rather than a single infrastructure service.
 
 - `repo-audit`: Static repository organization audit. It checks for flat
   template/script/playbook drift, stale playbook/template/script references,
-  missing source-of-truth doc pointers, divergent per-host agent npm prefixes,
-  and plaintext secret exposure. It calls `secrets-scan` by default, so this
-  remains the single required audit command.
+  skill-relative supporting-file references, missing source-of-truth doc
+  pointers, divergent per-host agent npm prefixes, and plaintext secret
+  exposure. It calls `secrets-scan` by default, so this remains the single
+  required audit command.
+- `test_repo_audit.py`: Focused regression coverage for repository and
+  skill-relative reference resolution.
 - `secrets-scan`: Built-in tracked-file secret scanner with optional Gitleaks
   integration. Local runs fall back to the built-in scanner when Gitleaks is not
   installed; CI uses `repo-audit --require-gitleaks` so the Gitleaks layer is
@@ -35,4 +38,7 @@ scripts/repo/secrets-scan --root ~/.openclaw/workspace --external off
 
 # Scanner heuristic regression checks.
 scripts/repo/secrets-scan --self-test
+
+# Repository-audit reference regressions.
+python3 scripts/repo/test_repo_audit.py
 ```

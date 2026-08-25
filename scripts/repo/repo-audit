@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import json
 import re
 import subprocess
 import sys
@@ -86,14 +87,72 @@ def clean_ref(value: str) -> str:
     return value.strip().strip("`'\"),.;:")
 
 
-def reference_errors(files: list[Path], prefix: str, pattern: re.Pattern[str]) -> list[str]:
+def profile_skill_contract_reference_errors(
+    files: list[Path],
+) -> tuple[list[str], set[tuple[str, str]]]:
+    """Validate skill-relative support files and identify generic-scan aliases."""
     errors: list[str] = []
+    ignored_generic_refs: set[tuple[str, str]] = set()
+    contract_path = ROOT / "files" / "hermes" / "profile-skills-contract.json"
+    if contract_path not in files:
+        return errors, ignored_generic_refs
+
+    try:
+        contract = json.loads(contract_path.read_text())
+    except (OSError, json.JSONDecodeError) as exc:
+        return [f"{contract_path.relative_to(ROOT)} is invalid: {exc}"], ignored_generic_refs
+
+    contract_relative = contract_path.relative_to(ROOT).as_posix()
+    for profile_name, profile in (contract.get("profiles") or {}).items():
+        for skill in profile.get("skills") or []:
+            source_value = skill.get("source")
+            if not isinstance(source_value, str):
+                errors.append(
+                    f"{contract_relative} has invalid source for {profile_name}/"
+                    f"{skill.get('name', 'unknown')}"
+                )
+                continue
+            source_path = ROOT / source_value
+            if not source_path.is_file():
+                errors.append(f"{contract_relative} references missing {source_value}")
+                continue
+            for supporting_file in skill.get("supportingFiles") or []:
+                relative_value = supporting_file.get("path")
+                if not isinstance(relative_value, str):
+                    errors.append(
+                        f"{contract_relative} has invalid supporting file for "
+                        f"{profile_name}/{skill.get('name', 'unknown')}"
+                    )
+                    continue
+                target = source_path.parent / relative_value
+                if not target.is_file():
+                    errors.append(
+                        f"{contract_relative} references missing skill support "
+                        f"{target.relative_to(ROOT)}"
+                    )
+                if relative_value.startswith("templates/"):
+                    ignored_generic_refs.add((contract_relative, relative_value))
+
+    return errors, ignored_generic_refs
+
+
+def reference_errors(
+    files: list[Path],
+    prefix: str,
+    pattern: re.Pattern[str],
+    ignored_references: set[tuple[str, str]] | None = None,
+) -> list[str]:
+    errors: list[str] = []
+    ignored_references = ignored_references or set()
     for path in files:
         text = read_text(path)
         if text is None:
             continue
         for match in pattern.finditer(text):
             ref = clean_ref(match.group(1))
+            reference = f"{prefix}/{ref}"
+            if (path.relative_to(ROOT).as_posix(), reference) in ignored_references:
+                continue
             if any(token in ref for token in ("{{", "{%", "*", "<", ">")):
                 continue
             if "/" not in ref and "." not in ref and not (ROOT / prefix / ref).exists():
@@ -158,11 +217,17 @@ def main() -> int:
 
     errors.extend(host_agent_npm_prefix_errors())
 
+    skill_contract_errors, skill_contract_relative_refs = (
+        profile_skill_contract_reference_errors(files)
+    )
+    errors.extend(skill_contract_errors)
+
     errors.extend(
         reference_errors(
             files,
             "templates",
             re.compile(r"(?:templates/|\.\./templates/)([^\s`'\")\]\(]+)"),
+            ignored_references=skill_contract_relative_refs,
         )
     )
     errors.extend(
