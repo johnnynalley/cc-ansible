@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Start the Plex TV player on a dedicated VT while HDMI is connected."""
+"""Select graphical-session or dedicated-VT Plex playback for HDMI."""
 
 import os
 import pwd
@@ -7,12 +7,15 @@ import re
 import signal
 import shlex
 import subprocess
+import sys
 import time
 from typing import Dict, Optional
 
 
 ENV_FILE = "/etc/plex-appliance/plex-appliance.env"
 PLAYER_SERVICE = "plex-appliance-tv.service"
+SESSION_PLAYER_SERVICE = "plex-appliance-hdmi.service"
+SELF_TEST_MODE = "--self-test" in sys.argv
 
 
 def log(message: str) -> None:
@@ -26,13 +29,17 @@ def parse_env_value(value: str) -> str:
 
 def load_env_file(path: str = ENV_FILE) -> Dict[str, str]:
     values: Dict[str, str] = {}
-    with open(path, "r", encoding="utf-8") as env_file:
-        for raw_line in env_file:
-            line = raw_line.strip()
-            if not line or line.startswith("#") or "=" not in line:
-                continue
-            key, value = line.split("=", 1)
-            values[key.strip()] = parse_env_value(value.strip())
+    try:
+        with open(path, "r", encoding="utf-8") as env_file:
+            for raw_line in env_file:
+                line = raw_line.strip()
+                if not line or line.startswith("#") or "=" not in line:
+                    continue
+                key, value = line.split("=", 1)
+                values[key.strip()] = parse_env_value(value.strip())
+    except FileNotFoundError:
+        if not SELF_TEST_MODE:
+            raise
     return values
 
 
@@ -51,6 +58,7 @@ ENV = load_env_file()
 os.environ.update({key: value for key, value in ENV.items() if key not in os.environ})
 
 POLL_SECONDS = int(os.environ.get("PLEX_APPLIANCE_HDMI_POLL_SECONDS", "5"))
+HDMI_BACKEND = os.environ.get("PLEX_APPLIANCE_HDMI_BACKEND", "vt").strip().lower()
 HDMI_TTY = os.environ.get("PLEX_APPLIANCE_HDMI_TTY", "/dev/tty3")
 FALLBACK_RETURN_TTY = os.environ.get("PLEX_APPLIANCE_HDMI_RETURN_TTY", "/dev/tty1")
 SYSFS_CONNECTOR = os.environ.get("PLEX_APPLIANCE_HDMI_SYSFS_CONNECTOR", "").strip()
@@ -66,6 +74,7 @@ STOP_DISPLAY_MANAGER_DURING_PLAYBACK = (
 RESET_PLASMA_USER_SERVICES = os.environ.get("PLEX_APPLIANCE_HDMI_RESET_PLASMA_USER_SERVICES", "false").lower() == "true"
 SKIP_WHEN_LOCAL_USER_ACTIVE = os.environ.get("PLEX_APPLIANCE_HDMI_SKIP_WHEN_LOCAL_USER_ACTIVE", "false").lower() == "true"
 APPLIANCE_USER = os.environ.get("PLEX_APPLIANCE_USER", "").strip()
+SESSION_PLAYBACK_ENABLED = HDMI_BACKEND == "hybrid"
 
 TV_VT = tty_number(HDMI_TTY)
 FALLBACK_RETURN_VT = tty_number(FALLBACK_RETURN_TTY)
@@ -76,7 +85,7 @@ was_connected = False
 display_manager_stopped = False
 
 
-def hdmi_connected() -> bool:
+def hdmi_connected(require_audio: bool = True) -> bool:
     connector_connected = False
 
     if CONNECTOR_STATUS:
@@ -100,7 +109,7 @@ def hdmi_connected() -> bool:
     if EDID_PATH and not edid_present():
         return False
 
-    if ELD_PATH:
+    if require_audio and ELD_PATH:
         return eld_valid()
 
     return True
@@ -151,32 +160,88 @@ def restore_getty() -> None:
         run(["systemctl", "start", GETTY_SERVICE], timeout=10)
 
 
+def classify_session_properties(properties: Dict[str, str], appliance_uid: str) -> tuple[bool, bool]:
+    session_class = properties.get("Class", "")
+    session_state = properties.get("State", "")
+    session_type = properties.get("Type", "")
+    session_tty = properties.get("TTY", "")
+    session_uid = properties.get("User", "")
+
+    local_active = (
+        session_state != "closing"
+        and session_class != "greeter"
+        and session_tty != f"tty{TV_VT}"
+    )
+    graphical_active = (
+        local_active
+        and session_class == "user"
+        and session_uid == appliance_uid
+        and session_type in {"wayland", "x11"}
+    )
+    return local_active, graphical_active
+
+
+def local_user_session_state() -> tuple[bool, bool]:
+    completed = run(
+        ["loginctl", "show-seat", "seat0", "--property=ActiveSession", "--value"],
+        timeout=10,
+    )
+    if completed.returncode != 0:
+        return True, False
+
+    session_id = completed.stdout.strip()
+    if not session_id or session_id == "n/a":
+        return False, False
+
+    completed = run(
+        [
+            "loginctl",
+            "show-session",
+            session_id,
+            "--property=User",
+            "--property=Class",
+            "--property=Type",
+            "--property=State",
+            "--property=TTY",
+        ],
+        timeout=10,
+    )
+    if completed.returncode != 0:
+        return True, False
+
+    properties = {
+        key: value
+        for line in completed.stdout.splitlines()
+        if "=" in line
+        for key, value in [line.split("=", 1)]
+    }
+
+    try:
+        appliance_uid = str(pwd.getpwnam(APPLIANCE_USER).pw_uid)
+    except KeyError:
+        return True, False
+    return classify_session_properties(properties, appliance_uid)
+
+
 def local_user_seat_active() -> bool:
-    completed = run(["loginctl", "list-sessions", "--no-legend"], timeout=10)
-    if completed.returncode != 0:
-        return True
-
-    for line in completed.stdout.splitlines():
-        fields = line.split()
-        if len(fields) < 7:
-            continue
-        session_id = fields[0]
-        seat = fields[3]
-        session_class = fields[5]
-        tty = fields[6]
-        if session_state(session_id) == "closing":
-            continue
-        if seat == "seat0" and session_class != "greeter" and tty != f"tty{TV_VT}":
-            return True
-
-    return False
+    local_active, _graphical_active = local_user_session_state()
+    return local_active
 
 
-def session_state(session_id: str) -> str:
-    completed = run(["loginctl", "show-session", session_id, "-p", "State", "--value"], timeout=10)
-    if completed.returncode != 0:
-        return ""
-    return completed.stdout.strip()
+def select_playback_mode(
+    connected: bool,
+    local_active: bool,
+    graphical_active: bool,
+    session_playback_enabled: bool,
+    skip_when_local_active: bool,
+) -> str:
+    if not connected:
+        return "none"
+    if session_playback_enabled and graphical_active:
+        return "session"
+    if local_active and skip_when_local_active:
+        return "skip"
+    return "vt"
 
 
 def restart_display_manager_if_safe() -> None:
@@ -221,24 +286,48 @@ def stop_display_manager_for_playback() -> bool:
 
 
 def run_user_systemctl(arguments: list[str], timeout: int = 20) -> subprocess.CompletedProcess[str]:
-    user_info = pwd.getpwnam(APPLIANCE_USER)
-    runtime_dir = f"/run/user/{user_info.pw_uid}"
-    bus_address = f"unix:path={runtime_dir}/bus"
     return run(
         [
-            "runuser",
-            "-u",
-            APPLIANCE_USER,
-            "--",
-            "env",
-            f"XDG_RUNTIME_DIR={runtime_dir}",
-            f"DBUS_SESSION_BUS_ADDRESS={bus_address}",
             "systemctl",
             "--user",
+            f"--machine={APPLIANCE_USER}@.host",
             *arguments,
         ],
         timeout=timeout,
     )
+
+
+def user_service_active(name: str) -> bool:
+    return run_user_systemctl(["is-active", "--quiet", name], timeout=10).returncode == 0
+
+
+def start_session_player() -> bool:
+    completed = run_user_systemctl(["daemon-reload"], timeout=20)
+    if completed.returncode != 0:
+        log(f"Failed to reload the user service manager: {completed.stderr.strip()}")
+        return False
+
+    completed = run_user_systemctl(["start", SESSION_PLAYER_SERVICE], timeout=30)
+    if completed.returncode != 0:
+        log(f"Failed to start {SESSION_PLAYER_SERVICE}: {completed.stderr.strip()}")
+        return False
+    return True
+
+
+def stop_session_player() -> None:
+    if not SESSION_PLAYBACK_ENABLED or not APPLIANCE_USER:
+        return
+    try:
+        user_info = pwd.getpwnam(APPLIANCE_USER)
+    except KeyError:
+        return
+    if not os.path.exists(f"/run/user/{user_info.pw_uid}/bus"):
+        return
+    if not user_service_active(SESSION_PLAYER_SERVICE):
+        return
+    completed = run_user_systemctl(["stop", SESSION_PLAYER_SERVICE], timeout=30)
+    if completed.returncode != 0:
+        log(f"Failed to stop {SESSION_PLAYER_SERVICE}: {completed.stderr.strip()}")
 
 
 def reset_plasma_user_services() -> None:
@@ -286,8 +375,11 @@ def stop_player() -> None:
         log(f"Failed to stop {PLAYER_SERVICE}: {completed.stderr.strip()}")
 
 
-def cleanup_display(recover_display: bool = False) -> None:
+def cleanup_display(recover_display: bool = False, stop_session: bool = True) -> None:
     global return_vt, was_connected, display_manager_stopped
+
+    if stop_session:
+        stop_session_player()
 
     had_player = service_active(PLAYER_SERVICE)
     if service_active(PLAYER_SERVICE):
@@ -317,25 +409,54 @@ def main() -> int:
 
     signal.signal(signal.SIGINT, handle_shutdown)
     signal.signal(signal.SIGTERM, handle_shutdown)
-    skipped_for_local_user = False
+    last_mode = ""
 
     while True:
-        connected = hdmi_connected()
+        local_active, graphical_active = local_user_session_state()
+        connected = hdmi_connected(
+            require_audio=not (SESSION_PLAYBACK_ENABLED and graphical_active)
+        )
+        mode = select_playback_mode(
+            connected,
+            local_active,
+            graphical_active,
+            SESSION_PLAYBACK_ENABLED,
+            SKIP_WHEN_LOCAL_USER_ACTIVE,
+        )
 
-        if connected and SKIP_WHEN_LOCAL_USER_ACTIVE and local_user_seat_active():
+        if mode == "session":
             if was_connected or service_active(PLAYER_SERVICE):
-                log("HDMI connected while local user seat is active; stopping Plex TV playback")
-                cleanup_display(recover_display=False)
-            elif not skipped_for_local_user:
-                log("HDMI connected while local user seat is active; leaving Plasma session alone")
-            skipped_for_local_user = True
+                log("Graphical session became active; stopping direct-DRM Plex playback")
+                cleanup_display(recover_display=False, stop_session=False)
+            if last_mode != "session":
+                log("HDMI connected with Plasma active; using graphical-session Plex playback")
+            if not user_service_active(SESSION_PLAYER_SERVICE):
+                start_session_player()
             was_connected = False
+            last_mode = mode
             time.sleep(POLL_SECONDS)
             continue
 
-        skipped_for_local_user = False
+        if (
+            SESSION_PLAYBACK_ENABLED
+            and last_mode in {"", "session"}
+            and user_service_active(SESSION_PLAYER_SERVICE)
+        ):
+            log("Leaving graphical-session Plex playback")
+            stop_session_player()
 
-        if connected:
+        if mode == "skip":
+            if was_connected or service_active(PLAYER_SERVICE):
+                log("HDMI connected while a non-graphical local seat is active; stopping Plex TV playback")
+                cleanup_display(recover_display=False)
+            elif last_mode != "skip":
+                log("HDMI connected while a non-graphical local seat is active; leaving the session alone")
+            was_connected = False
+            last_mode = mode
+            time.sleep(POLL_SECONDS)
+            continue
+
+        if mode == "vt":
             if not was_connected:
                 current_vt = active_vt()
                 if current_vt and current_vt != TV_VT:
@@ -361,8 +482,31 @@ def main() -> int:
             cleanup_display(recover_display=True)
 
         was_connected = connected
+        last_mode = mode
         time.sleep(POLL_SECONDS)
 
 
+def run_self_test() -> int:
+    active, graphical = classify_session_properties(
+        {"User": "1000", "Class": "user", "Type": "wayland", "State": "active", "TTY": "tty2"},
+        "1000",
+    )
+    assert (active, graphical) == (True, True)
+    assert classify_session_properties(
+        {"User": "1000", "Class": "greeter", "Type": "wayland", "State": "active", "TTY": "tty1"},
+        "1000",
+    ) == (False, False)
+    assert classify_session_properties(
+        {"User": "1000", "Class": "user", "Type": "tty", "State": "active", "TTY": "tty2"},
+        "1000",
+    ) == (True, False)
+    assert select_playback_mode(True, True, True, True, True) == "session"
+    assert select_playback_mode(True, True, False, True, True) == "skip"
+    assert select_playback_mode(True, False, False, True, True) == "vt"
+    assert select_playback_mode(False, True, True, True, True) == "none"
+    print("plex-appliance-hdmi-vt-watcher self-test: PASS")
+    return 0
+
+
 if __name__ == "__main__":
-    raise SystemExit(main())
+    raise SystemExit(run_self_test() if SELF_TEST_MODE else main())

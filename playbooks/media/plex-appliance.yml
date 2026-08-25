@@ -48,6 +48,21 @@
         daemon_reload: true
       when: not ansible_check_mode
 
+    - name: Reload Plex HDMI user manager
+      ansible.builtin.command:
+        argv:
+          - systemctl
+          - --user
+          - "--machine={{ plex_appliance_user }}@.host"
+          - daemon-reload
+      changed_when: true
+      failed_when: false
+      when:
+        - not ansible_check_mode
+        - plex_appliance_enabled | default(false)
+        - (plex_appliance_effective_mode | default(plex_appliance_mode | default('dedicated'))) == "hdmi"
+        - (plex_appliance_hdmi_effective_backend | default(plex_appliance_hdmi_backend | default('kscreen'))) in ["kscreen", "hybrid"]
+
     - name: Restart plex appliance
       ansible.builtin.systemd:
         name: plex-appliance.service
@@ -65,7 +80,7 @@
       when:
         - plex_appliance_enabled | default(false)
         - (plex_appliance_effective_mode | default(plex_appliance_mode | default('dedicated'))) == "hdmi"
-        - (plex_appliance_hdmi_effective_backend | default(plex_appliance_hdmi_backend | default('kscreen'))) == "vt"
+        - (plex_appliance_hdmi_effective_backend | default(plex_appliance_hdmi_backend | default('kscreen'))) in ["vt", "hybrid"]
         - plex_appliance_hdmi_autostart_enabled | default(true)
         - not ansible_check_mode
 
@@ -112,8 +127,8 @@
     - name: Assert supported Plex HDMI appliance backend
       ansible.builtin.assert:
         that:
-          - plex_appliance_hdmi_effective_backend in ["kscreen", "vt"]
-        fail_msg: "plex_appliance_hdmi_backend must be kscreen or vt."
+          - plex_appliance_hdmi_effective_backend in ["kscreen", "vt", "hybrid"]
+        fail_msg: "plex_appliance_hdmi_backend must be kscreen, vt, or hybrid."
       when: plex_appliance_effective_mode == "hdmi"
 
     - name: Assert Plex appliance token is configured
@@ -191,7 +206,7 @@
         - plex_appliance_effective_mode != "dedicated"
       failed_when: false
 
-    - name: Stop direct HDMI Plex appliance services outside VT backend
+    - name: Stop direct HDMI Plex appliance services outside direct-DRM backends
       ansible.builtin.systemd:
         name: "{{ item }}"
         enabled: false
@@ -202,7 +217,7 @@
         - plex-appliance-hdmi-vt-watcher.service
       when:
         - not ansible_check_mode
-        - plex_appliance_effective_mode != "hdmi" or plex_appliance_hdmi_effective_backend != "vt"
+        - plex_appliance_effective_mode != "hdmi" or plex_appliance_hdmi_effective_backend not in ["vt", "hybrid"]
       failed_when: false
 
     - name: Create Plex appliance config directory
@@ -350,8 +365,19 @@
         mode: "0755"
       when:
         - plex_appliance_effective_mode == "hdmi"
-        - plex_appliance_hdmi_effective_backend == "vt"
+        - plex_appliance_hdmi_effective_backend in ["vt", "hybrid"]
       notify: Restart Plex HDMI VT watcher
+
+    - name: Validate deployed Plex HDMI controller regressions
+      ansible.builtin.command:
+        argv:
+          - python3
+          - /usr/local/bin/plex-appliance-hdmi-vt-watcher
+          - --self-test
+      changed_when: false
+      when:
+        - plex_appliance_effective_mode == "hdmi"
+        - plex_appliance_hdmi_effective_backend in ["vt", "hybrid"]
 
     - name: Deploy Plex HDMI autostart helper
       ansible.builtin.template:
@@ -364,7 +390,18 @@
         - plex_appliance_effective_mode == "hdmi"
         - plex_appliance_hdmi_effective_backend == "kscreen"
 
-    - name: Create user systemd directory for Plex HDMI watcher
+    - name: Remove legacy Plex HDMI KScreen helpers outside KScreen backend
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: absent
+      loop:
+        - /usr/local/bin/plex-appliance-hdmi-watcher
+        - /usr/local/bin/plex-appliance-hdmi-autostart
+      when:
+        - plex_appliance_effective_mode == "hdmi"
+        - plex_appliance_hdmi_effective_backend != "kscreen"
+
+    - name: Create user systemd directory for Plex HDMI services
       ansible.builtin.file:
         path: "/home/{{ plex_appliance_user }}/.config/systemd/user"
         state: directory
@@ -372,7 +409,7 @@
         group: "{{ plex_appliance_user }}"
       when:
         - plex_appliance_effective_mode == "hdmi"
-        - plex_appliance_hdmi_effective_backend == "kscreen"
+        - plex_appliance_hdmi_effective_backend in ["kscreen", "hybrid"]
 
     - name: Create KDE autostart directory for Plex HDMI watcher
       ansible.builtin.file:
@@ -384,16 +421,46 @@
         - plex_appliance_effective_mode == "hdmi"
         - plex_appliance_hdmi_effective_backend == "kscreen"
 
-    - name: Deploy Plex HDMI watcher user service
+    - name: Deploy Plex HDMI graphical user service
       ansible.builtin.template:
         src: "{{ ansible_config_file | dirname }}/templates/plex-appliance/plex-appliance-hdmi.service.j2"
         dest: "/home/{{ plex_appliance_user }}/.config/systemd/user/plex-appliance-hdmi.service"
         owner: "{{ plex_appliance_user }}"
         group: "{{ plex_appliance_user }}"
         mode: "0644"
+      register: plex_appliance_hdmi_user_service_unit
+      notify:
+        - Reload Plex HDMI user manager
+        - Restart Plex HDMI VT watcher
       when:
         - plex_appliance_effective_mode == "hdmi"
-        - plex_appliance_hdmi_effective_backend == "kscreen"
+        - plex_appliance_hdmi_effective_backend in ["kscreen", "hybrid"]
+
+    - name: Validate Plex HDMI graphical user service unit
+      ansible.builtin.command:
+        argv:
+          - systemd-analyze
+          - verify
+          - "/home/{{ plex_appliance_user }}/.config/systemd/user/plex-appliance-hdmi.service"
+      changed_when: false
+      when:
+        - plex_appliance_effective_mode == "hdmi"
+        - plex_appliance_hdmi_effective_backend == "hybrid"
+
+    - name: Stop changed Plex HDMI graphical service before activating its new unit
+      ansible.builtin.command:
+        argv:
+          - systemctl
+          - --user
+          - "--machine={{ plex_appliance_user }}@.host"
+          - stop
+          - plex-appliance-hdmi.service
+      changed_when: true
+      failed_when: false
+      when:
+        - not ansible_check_mode
+        - plex_appliance_hdmi_effective_backend == "hybrid"
+        - plex_appliance_hdmi_user_service_unit.changed | default(false)
 
     - name: Deploy Plex HDMI watcher KDE autostart
       ansible.builtin.template:
@@ -415,13 +482,13 @@
         - plex_appliance_effective_mode == "hdmi"
         - plex_appliance_hdmi_effective_backend != "kscreen" or not (plex_appliance_hdmi_autostart_enabled | default(true))
 
-    - name: Remove Plex HDMI watcher user service outside KScreen backend
+    - name: Remove Plex HDMI user service outside graphical-session backends
       ansible.builtin.file:
         path: "/home/{{ plex_appliance_user }}/.config/systemd/user/plex-appliance-hdmi.service"
         state: absent
       when:
         - plex_appliance_effective_mode == "hdmi"
-        - plex_appliance_hdmi_effective_backend != "kscreen"
+        - plex_appliance_hdmi_effective_backend not in ["kscreen", "hybrid"]
 
     - name: Deploy Plex HDMI TV player service
       ansible.builtin.template:
@@ -435,7 +502,7 @@
         - Restart Plex HDMI VT watcher
       when:
         - plex_appliance_effective_mode == "hdmi"
-        - plex_appliance_hdmi_effective_backend == "vt"
+        - plex_appliance_hdmi_effective_backend in ["vt", "hybrid"]
 
     - name: Deploy Plex HDMI VT watcher service
       ansible.builtin.template:
@@ -449,7 +516,7 @@
         - Restart Plex HDMI VT watcher
       when:
         - plex_appliance_effective_mode == "hdmi"
-        - plex_appliance_hdmi_effective_backend == "vt"
+        - plex_appliance_hdmi_effective_backend in ["vt", "hybrid"]
 
     - name: Enable and start Plex HDMI VT watcher
       ansible.builtin.systemd:
@@ -460,7 +527,7 @@
       when:
         - not ansible_check_mode
         - plex_appliance_effective_mode == "hdmi"
-        - plex_appliance_hdmi_effective_backend == "vt"
+        - plex_appliance_hdmi_effective_backend in ["vt", "hybrid"]
         - plex_appliance_hdmi_autostart_enabled | default(true)
 
     - name: Disable Plex HDMI VT watcher when autostart is disabled
@@ -472,7 +539,7 @@
       when:
         - not ansible_check_mode
         - plex_appliance_effective_mode == "hdmi"
-        - plex_appliance_hdmi_effective_backend == "vt"
+        - plex_appliance_hdmi_effective_backend in ["vt", "hybrid"]
         - not (plex_appliance_hdmi_autostart_enabled | default(true))
 
     - name: Deploy Plex appliance systemd service

@@ -1,6 +1,6 @@
 # Plex Appliance Operations
 
-Last updated: 2026-08-20
+Last updated: 2026-08-25
 
 Use this doc for quick operator actions on the managed Plex TV appliances.
 
@@ -174,12 +174,36 @@ decodes or Plex transport failures as watched.
 
 ## Bedroom HDMI Display Ownership
 
-The T14s HDMI appliance uses mpv with direct DRM on VT8. When no real local
-seat session is active, the HDMI watcher stops `sddm.service` before starting
-playback and starts it again when HDMI appliance mode exits.
+The T14s HDMI appliance has one queue/player and two display paths selected by
+the root HDMI watcher:
 
-This prevents the SDDM Wayland greeter/KWin on VT1 from contending with mpv for
-the same AMD DRM device. The failure signature that led to this rule was:
+- With Johnny's Plasma Wayland session active, the watcher starts
+  `plex-appliance-hdmi.service` in the existing user service manager. That unit
+  runs the normal `plex-appliance-player` fullscreen on `HDMI-A-1`; the internal
+  eDP panel and its Plasma desktop stay enabled and usable. Plug detection comes
+  from `/sys/class/drm/card1-HDMI-A-1`, so this path does not depend on
+  `kscreen-doctor` successfully parsing Plasma's display configuration. This
+  graphical path accepts a connected output with valid EDID even while the
+  kernel HDMI-audio ELD is temporarily stale; the no-login direct-DRM path still
+  requires valid ELD before it claims the display.
+- With no real local seat session active, the watcher keeps the established
+  direct-DRM path: it stops `sddm.service`, switches to VT8, and starts
+  `plex-appliance-tv.service`. It starts SDDM again when appliance mode exits.
+
+Both paths run the same player against the same shuffle state and Plex session
+identity. They must never run simultaneously. Logging out with HDMI connected
+transitions from the graphical service to VT8; logging in before attaching HDMI
+uses the graphical service. Unplugging HDMI stops whichever player owns it.
+
+Do not replace the hybrid controller with the old KScreen polling backend on
+the T14s. On 2026-08-25, `kscreen-doctor -j` hung after rejecting Plasma's
+`brightness` output key even though Plasma had enabled the TV normally. The
+hybrid graphical path needs only the user manager's imported Wayland variables
+and the configured `HDMI-A-1` output name.
+
+Stopping SDDM for the no-login path prevents the Wayland greeter/KWin on VT1
+from contending with direct-DRM mpv for the same AMD DRM device. The failure
+signature that led to this rule was:
 
 - TV shows the login screen or black video while HDMI audio continues.
 - `sddm.service` repeatedly logs `Using VT 1`, `Jumping to VT 1`, or greeter
@@ -236,13 +260,19 @@ print(json.dumps({
 }, indent=2))
 PY
 
-journalctl -t plex-appliance-tv --since '30 min ago' --no-pager
+systemctl show plex-appliance-tv.service \
+  -p ActiveState -p SubState -p Result -p NRestarts
+systemctl --user --machine=johnny@.host show plex-appliance-hdmi.service \
+  -p ActiveState -p SubState -p Result -p NRestarts
+journalctl -t plex-appliance-tv -t plex-appliance-session \
+  --since '30 min ago' --no-pager
 pgrep -a -f '[p]lex-appliance|[m]pv'
 ```
 
-Use `journalctl -t plex-appliance-tv`, not only
-`journalctl -u plex-appliance-tv.service`; recent player logs may be easiest to
-find by the service's `SyslogIdentifier`.
+The direct-DRM path logs as `plex-appliance-tv`; the logged-in graphical path
+logs as `plex-appliance-session`. Check both syslog identifiers rather than only
+`journalctl -u plex-appliance-tv.service`, because the active path depends on
+whether a real Plasma seat session is active.
 
 If `active` is empty, `queue_count` is still nonzero, no `mpv` process exists,
 and the log repeats `Plex unavailable` with connection timeouts to

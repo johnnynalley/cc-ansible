@@ -1,12 +1,21 @@
 [Unit]
-Description=Plex HDMI appliance watcher
+Description=Plex HDMI {{ 'graphical-session player' if (plex_appliance_hdmi_backend | default('kscreen')) == 'hybrid' else 'appliance watcher' }}
 PartOf=graphical-session.target
 After=graphical-session.target
 
 [Service]
 Type=simple
+{% if (plex_appliance_hdmi_backend | default('kscreen')) == 'hybrid' %}
+EnvironmentFile=/etc/plex-appliance/plex-appliance.env
+WorkingDirectory=/var/lib/plex-appliance
+ExecStart=/usr/bin/env {{ 'PLEX_APPLIANCE_STATUS_SCREEN=false' | to_json }} {{ ('PLEX_APPLIANCE_MPV_SCREEN_NAME=' ~ (plex_appliance_hdmi_session_output | default(plex_appliance_hdmi_drm_connector | default('HDMI-A-1')))) | to_json }} {{ ('PLEX_APPLIANCE_MPV_ARGS=' ~ (plex_appliance_mpv_session_args | default(plex_appliance_mpv_args) | join(' '))) | to_json }} /usr/local/bin/plex-appliance-player
+Restart=on-failure
+TimeoutStopSec=15
+SyslogIdentifier=plex-appliance-session
+{% else %}
 ExecStart=/usr/local/bin/plex-appliance-hdmi-watcher
 Restart=always
+{% endif %}
 RestartSec=5
 Environment=PYTHONUNBUFFERED=1
 

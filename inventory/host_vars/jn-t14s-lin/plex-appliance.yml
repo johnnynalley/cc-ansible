@@ -9,9 +9,9 @@ plex_appliance_server_url: "http://100.66.6.113:32400"
 plex_appliance_library: "Shows"
 plex_appliance_collection: "Adult Swim Collection"
 
-# T14s TV mode runs from the greeter on a dedicated VT so it does not require
-# opening the laptop or logging in. Skip takeover if a real Plasma session is
-# already active; unplug HDMI and log out to return it to appliance mode.
+# T14s uses the existing appliance player in two display contexts. A logged-in
+# Plasma session launches it fullscreen on HDMI while leaving eDP usable. With
+# no local session, the root watcher retains the no-login direct-DRM VT8 path.
 plex_appliance_audio_languages:
   - eng
 plex_appliance_subtitle_languages:
@@ -36,7 +36,7 @@ plex_appliance_hdmi_ignore_patterns:
   - eDP
   - LVDS
   - DSI
-plex_appliance_hdmi_backend: vt
+plex_appliance_hdmi_backend: hybrid
 plex_appliance_hdmi_tty: /dev/tty8
 plex_appliance_hdmi_return_tty: /dev/tty1
 plex_appliance_hdmi_drm_connector: HDMI-A-1
@@ -51,8 +51,8 @@ plex_appliance_hdmi_reset_plasma_user_services: true
 plex_appliance_hdmi_skip_when_local_user_active: true
 plex_appliance_hdmi_poll_seconds: 5
 plex_appliance_hdmi_configure_display: true
-plex_appliance_hdmi_make_primary: true
-plex_appliance_hdmi_tv_only: true
+plex_appliance_hdmi_make_primary: false
+plex_appliance_hdmi_tv_only: false
 plex_appliance_hdmi_autostart_enabled: true
 plex_appliance_audio_device: "alsa/hdmi:CARD=Generic,DEV=1"
 plex_appliance_page_size: 100
@@ -83,6 +83,20 @@ plex_appliance_mpv_args:
   - --drm-mode=1920x1080@60
   - --ao=alsa
   - --hwdec=auto-safe
+  - --af=lavfi=[dynaudnorm=f=250:g=15:p=0.95:m=8]
+  - --volume-max=200
+  - --volume=100
+  - --keep-open=no
+plex_appliance_mpv_session_args:
+  - --fs
+  - --no-terminal
+  - --no-osc
+  - --no-input-default-bindings
+  - --really-quiet
+  - --profile=fast
+  - --vo=gpu
+  - --hwdec=auto-safe
+  - --ao=alsa
   - --af=lavfi=[dynaudnorm=f=250:g=15:p=0.95:m=8]
   - --volume-max=200
   - --volume=100
