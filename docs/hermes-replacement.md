@@ -149,7 +149,10 @@ contract path. The mount is rebuildable platform state in
 `inventory/host_vars/jn-t14s-lin/mounts.yml`, while the image is retained data
 owned by nas-zfs snapshots rather than Ansible. Restore `/srv/live-rollbacks`
 first, run the filesystem-mount playbook second, and converge the Hermes
-OpenClaw evidence playbook third. Local Restic excludes the loopback view
+OpenClaw evidence playbook third. The projection unit must create its volatile
+`/run/hermes-openclaw-evidence` tree with `RuntimeDirectory=` and recreate the
+Astra-only `view` mountpoint before each bindfs start; never rely on a
+pre-reboot directory under `/run`. Local Restic excludes the loopback view
 because its immutable backing image is already on nas-zfs; normal offsite
 backup policy for `/home/johnny` remains independent.
 
@@ -1296,10 +1299,12 @@ Hermes-native sources. The exact root-owned projection is parser-, scanner-,
 hash-, identity-, discovery-, and namespace-validated and remains available for
 read-only audit or explicit rollback restore. It is not routine ownership.
 Rigel's academic baseline includes 13 hash-pinned Markdown/JSON protocols and
-course-state templates. The pending native-ownership transaction will seed
-ordinary skills once into profile-owned local roots and promote
+course-state templates. The completed native-ownership transaction seeded
+ordinary skills once into profile-owned local roots and promoted
 `self-evolution` into one Astra-writable shared tree consumed read-only by
-Dubble and Rigel, while profile memory and durable state remain isolated.
+Dubble and Rigel. Profile memory and durable state remain isolated, all three
+profile owners can maintain their own native skill roots, and normal
+convergence does not overwrite those agent-authored changes.
 
 Normal project data is a separate boundary from memory and skills.
 `files/hermes/profile-data-stage-contract.json` permits exactly the 24 mappings
