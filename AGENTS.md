@@ -264,6 +264,13 @@ Critical shared-file rule: any scoped edit to `AGENTS.md` or `site.yml` must be 
 
 Before closing any repo-mutating session, run `git status --short --branch`. If the branch is ahead or has completed local changes, commit and push the scoped work; if anything remains dirty, explicitly identify it as generated junk, unrelated in-progress work, or a concrete blocker.
 
+A path-limited commit is not a path-limited push. If the branch was already
+ahead of its upstream before the current task, list those pre-existing commits
+and obtain explicit owner approval before pushing them with the scoped commit.
+Do not describe the push as scoped merely because the newest commit captured
+only the intended paths. If an unapproved mixed-history push is discovered
+afterward, do not rewrite the remote; report the exact pushed range and paths.
+
 This repository is frequently shared by concurrent agent sessions, so a staged
 file check can become stale before `git commit` runs. After validating the
 intended paths, use a path-limited commit such as
