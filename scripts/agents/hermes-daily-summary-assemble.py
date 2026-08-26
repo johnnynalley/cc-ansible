@@ -4,7 +4,6 @@ from __future__ import annotations
 import json
 import os
 import re
-import subprocess
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -15,7 +14,18 @@ OUTPUT = Path(os.environ.get('DAILY_SUMMARY_SCRATCH_OUT', WORKSPACE / 'memory' /
 FRESH_SECONDS = int(os.environ.get('DAILY_SUMMARY_FRESH_SECONDS', '5400'))  # 90 minutes
 LOCAL_TZ = ZoneInfo('America/Chicago')
 FORTNITE_TOURNAMENT_STATE = WORKSPACE / 'fortnite-progress' / 'tournaments' / 'calendar-sync-state.json'
-HEALTH_SUMMARY = Path(os.environ.get('HERMES_HEALTH_SUMMARY', '/usr/local/libexec/hermes-health-summary'))
+HEALTH_REPORT_JSON = Path(
+    os.environ.get(
+        'HERMES_HEALTH_REPORT_JSON',
+        '/var/lib/hermes/health/reports/yesterday.json',
+    )
+)
+HEALTH_REPORT_MARKDOWN = Path(
+    os.environ.get(
+        'HERMES_HEALTH_REPORT_MARKDOWN',
+        '/var/lib/hermes/health/reports/yesterday.md',
+    )
+)
 
 
 def parse_now() -> datetime:
@@ -44,24 +54,29 @@ def replace_section(text: str, heading: str, replacement: str) -> str:
 
 def deterministic_health_section(now: datetime) -> str:
     local_yesterday = (now.astimezone(LOCAL_TZ).date() - timedelta(days=1)).isoformat()
-    cmd = [
-        'python3',
-        str(HEALTH_SUMMARY),
-        '--date',
-        local_yesterday,
-        '--format',
-        'markdown',
-    ]
     try:
-        proc = subprocess.run(cmd, text=True, capture_output=True, timeout=45, check=False)
+        if HEALTH_REPORT_JSON.stat().st_size > 1_048_576:
+            raise ValueError('aggregate JSON exceeds size limit')
+        if HEALTH_REPORT_MARKDOWN.stat().st_size > 65_536:
+            raise ValueError('aggregate Markdown exceeds size limit')
+        report = json.loads(HEALTH_REPORT_JSON.read_text(encoding='utf-8'))
+        markdown = HEALTH_REPORT_MARKDOWN.read_text(encoding='utf-8').strip()
     except Exception as exc:
-        return f'## Health\n\n- ⚠️ Health data unavailable - health summary script failed: {exc}.'
+        return (
+            '## Health\n\n'
+            f'- ⚠️ Health data unavailable - aggregate report failed validation: '
+            f'{type(exc).__name__}.'
+        )
 
-    if proc.returncode != 0 or not proc.stdout.strip():
-        detail = (proc.stderr or proc.stdout or 'no output').strip().replace('\n', ' ')[:300]
-        return f'## Health\n\n- ⚠️ Health data unavailable - health summary script returned rc={proc.returncode}: {detail}.'
+    if report.get('ok') is not True or report.get('date') != local_yesterday:
+        return (
+            '## Health\n\n'
+            '- ⚠️ Health data unavailable - aggregate report is stale or invalid.'
+        )
+    if not markdown:
+        return '## Health\n\n- ⚠️ Health data unavailable - aggregate report is empty.'
 
-    return proc.stdout.strip()
+    return f'## Health\n\n{markdown}'
 
 
 def deterministic_weather_section(now: datetime) -> str:
@@ -205,6 +220,7 @@ def main() -> int:
     ]
     sections: list[str] = []
     fresh_input_count = 0
+    health_section_added = False
 
     for label, path in inputs:
         if not path.exists():
@@ -230,8 +246,11 @@ def main() -> int:
                 if label == 'personal.md':
                     text = replace_section(text, 'Health', deterministic_health_section(now))
                     text = replace_section(text, 'Weather', deterministic_weather_section(now))
+                    health_section_added = True
                 sections.append(text)
 
+    if not health_section_added:
+        sections.append(deterministic_health_section(now))
     sections.append(deterministic_fortnite_section(now))
 
     content = '\n'.join(coverage) + '\n\n'
@@ -240,7 +259,7 @@ def main() -> int:
     OUTPUT.write_text(content)
     print(
         f'Wrote {OUTPUT} ({OUTPUT.stat().st_size} bytes), '
-        f'fresh_sections={fresh_input_count}/{len(inputs)}, deterministic_sections=1'
+        f'fresh_sections={fresh_input_count}/{len(inputs)}, deterministic_sections=2'
     )
     return 0
 

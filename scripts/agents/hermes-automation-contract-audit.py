@@ -46,7 +46,7 @@ EXPECTED_SOURCE_PINS = {
     "stateMigration": "files/hermes/openclaw-state-migration-contract.json",
     "discordCutover": "files/hermes/discord-cutover-contract.json",
     "rigelJob": "files/hermes/jobs/rigel-academic-alerts.json",
-    "healthReceiverPlaybook": "playbooks/agents/openclaw-health-receiver.yml",
+    "healthReceiverPlaybook": "playbooks/agents/hermes-health-receiver.yml",
     "controlPlaneInventory": "scripts/agents/openclaw-control-plane-inventory.py",
 }
 EXPECTED_SCHEDULE_IDS = {
@@ -96,9 +96,9 @@ EXPECTED_SUMMARY = {
 }
 EXPECTED_HEALTH = {
     "disposition": "external",
-    "currentState": "legacy-user-service-active",
-    "cutoverState": "dedicated-system-service-active",
-    "targetPlaybook": "playbooks/agents/openclaw-health-receiver.yml",
+    "currentState": "hermes-native-system-service-active",
+    "cutoverState": "hermes-native-system-service-active",
+    "targetPlaybook": "playbooks/agents/hermes-health-receiver.yml",
     "continuity": "keep-running-through-hermes-cutover",
     "rawDatabaseOwner": "health-receiver-only",
     "modelAccess": "aggregate-report-only",

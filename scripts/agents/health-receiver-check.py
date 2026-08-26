@@ -32,6 +32,11 @@ def main() -> int:
     parser.add_argument("--url", type=validated_url, required=True)
     parser.add_argument("--token-file", type=Path, required=True)
     parser.add_argument("--require-metrics", action="store_true")
+    parser.add_argument(
+        "--write-probe",
+        action="store_true",
+        help="submit an empty authenticated payload to prove the write path",
+    )
     args = parser.parse_args()
 
     token_stat = args.token_file.stat()
@@ -43,14 +48,20 @@ def main() -> int:
         print("ERROR: token file is invalid", file=sys.stderr)
         return 1
 
-    request = urllib.request.Request(
-        args.url,
-        headers={"Authorization": f"Bearer {token}"},
-        method="GET",
-    )
+    headers = {"Authorization": f"Bearer {token}"}
     try:
+        request = urllib.request.Request(args.url, headers=headers, method="GET")
         with urllib.request.urlopen(request, timeout=5) as response:
             body = response.read(65537)
+        if args.write_probe:
+            write_request = urllib.request.Request(
+                args.url,
+                data=b"[]",
+                headers={**headers, "Content-Type": "application/json"},
+                method="POST",
+            )
+            with urllib.request.urlopen(write_request, timeout=5) as response:
+                write_body = response.read(65537)
     except (OSError, urllib.error.URLError) as exc:
         print(f"ERROR: receiver request failed: {type(exc).__name__}", file=sys.stderr)
         return 1
@@ -72,6 +83,18 @@ def main() -> int:
     if args.require_metrics and (not isinstance(metrics, int) or metrics < 1):
         print("ERROR: receiver database has no metrics", file=sys.stderr)
         return 1
+    if args.write_probe:
+        if len(write_body) > 65536:
+            print("ERROR: write-probe response is too large", file=sys.stderr)
+            return 1
+        try:
+            write_payload = json.loads(write_body)
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            print("ERROR: receiver returned invalid write-probe JSON", file=sys.stderr)
+            return 1
+        if write_payload.get("ok") is not True:
+            print("ERROR: receiver write probe failed", file=sys.stderr)
+            return 1
 
     print("OK: isolated Health receiver passed authenticated validation")
     return 0

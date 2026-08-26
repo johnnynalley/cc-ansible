@@ -406,17 +406,24 @@
 - `health-summary.py` reads the database in SQLite query-only mode and publishes
   fixed aggregate JSON and Markdown reports. It never emits raw payloads,
   source-device names, database paths, or row-level values.
+- `hermes-daily-summary-assemble.py` consumes only those bounded aggregate
+  reports. The Astra Gateway and retained Daily Summary collector receive
+  read-only report-directory access while the raw database and receiver token
+  remain inaccessible; Dubble and Rigel receive no Health access.
 - `health-receiver-check.py` performs the authenticated cutover/canary probe by
   reading the token from a protected file; the token never enters command-line
-  arguments, Ansible output, or the process environment.
+  arguments, Ansible output, or the process environment. Its bounded
+  `--write-probe` submits an empty payload so cutover proves the SQLite write
+  path without adding synthetic Health records.
 - `test_health_receiver.py` covers authentication, path/body/rate controls,
   payload bounds, malformed record rejection, and duplicate prevention.
 - `test_health_summary.py` covers duplicate collapse, aggregate-only output,
-  atomic report permissions, and generic missing-database errors.
+  atomic report permissions, generic missing-database errors, current-report
+  enforcement, and the retained collector's raw-state exclusion.
 
 The repo is the source of truth for both scripts. The legacy copies under the
 OpenClaw workspace are migration inputs only and must be retired after the
-dedicated `openclaw-health` system service passes cutover validation.
+dedicated `hermes-health` system service passes cutover validation.
 
 ## Isolated Gateway
 

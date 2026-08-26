@@ -1207,15 +1207,9 @@
         - name: Verify Health receiver remains active
           ansible.builtin.command:
             argv:
-              - /usr/sbin/runuser
-              - --user
-              - "{{ hermes_production_cutover_user }}"
-              - --
               - /usr/bin/systemctl
-              - --user
               - is-active
-              - "{{ hermes_production_cutover_health_service }}"
-          environment: "{{ hermes_runtime_user_environment }}"
+              - "{{ hermes_health_receiver_service }}"
           register: hermes_runtime_health_state
           changed_when: false
           check_mode: false

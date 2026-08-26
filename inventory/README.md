@@ -54,7 +54,7 @@ settings into a broad catch-all file when a concern-specific file exists.
 | Immich media inbox | `host_vars/docker-vm/immich-media-inbox.yml` | `playbooks/media/immich-media-inbox.yml` | `docs/immich-media-inbox.md`, Astra skill, `templates/media-inbox/`, `scripts/media-inbox/` |
 | Media release policy | `host_vars/docker-vm/*release*`, `host_vars/docker-vm/nightly-media-maintenance.yml` | `playbooks/media/media-release-stamper.yml`, `playbooks/media/nightly-media-maintenance.yml` | `docs/media-release-policy.md`, `scripts/media-release/` |
 | Storage pools and shares | `group_vars/nas_server/`, `host_vars/ts440/` | `playbooks/storage/` | `templates/storage/`, `templates/samba/`, `scripts/storage/` |
-| Agent services | `host_vars/*/codex.yml`, `host_vars/*/openclaw.yml`, `group_vars/hermes_hosts/` | `playbooks/agents/` | `templates/openclaw/`, `templates/hermes/`, `docs/openclaw-heartbeats.md`, `docs/hermes-replacement.md` |
+| Agent services | `host_vars/*/codex.yml`, `host_vars/*/hermes.yml`, historical `host_vars/*/openclaw.yml`, `group_vars/hermes_hosts/` | `playbooks/agents/` | `templates/openclaw/`, `templates/hermes/`, `docs/openclaw-heartbeats.md`, `docs/hermes-replacement.md` |
 
 ## Operating Rules
 

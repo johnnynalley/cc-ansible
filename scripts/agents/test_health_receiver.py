@@ -14,6 +14,14 @@ from unittest import mock
 
 SCRIPT = Path(__file__).with_name("health-receiver.py")
 CHECK_SCRIPT = Path(__file__).with_name("health-receiver-check.py")
+REPOSITORY = Path(__file__).resolve().parents[2]
+PLAYBOOK = REPOSITORY / "playbooks/agents/hermes-health-receiver.yml"
+HOST_VARS = REPOSITORY / "inventory/host_vars/jn-t14s-lin/hermes.yml"
+GROUP_VARS = REPOSITORY / "inventory/group_vars/hermes_hosts/vars.yml"
+SITE = REPOSITORY / "site.yml"
+GATEWAY_HARDENING = (
+    REPOSITORY / "templates/hermes/hermes-gateway-hardening.conf.j2"
+)
 TOKEN = "dummy" * 8
 
 
@@ -134,6 +142,7 @@ class HealthReceiverSecurityTests(unittest.TestCase):
                     "--token-file",
                     str(token_file),
                     "--require-metrics",
+                    "--write-probe",
                 ],
                 capture_output=True,
                 text=True,
@@ -191,6 +200,82 @@ class HealthReceiverSecurityTests(unittest.TestCase):
             self.assertEqual(request(port, "GET", "/health", token=TOKEN)[0], 200)
             self.assertEqual(request(port, "GET", "/health", token=TOKEN)[0], 200)
             self.assertEqual(request(port, "GET", "/health", token=TOKEN)[0], 429)
+
+
+class HermesHealthDeploymentTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.playbook = PLAYBOOK.read_text(encoding="utf-8")
+        cls.host_vars = HOST_VARS.read_text(encoding="utf-8")
+        cls.group_vars = GROUP_VARS.read_text(encoding="utf-8")
+        cls.site = SITE.read_text(encoding="utf-8")
+        cls.gateway_hardening = GATEWAY_HARDENING.read_text(encoding="utf-8")
+
+    def test_live_runtime_is_hermes_native(self):
+        self.assertIn("playbooks/agents/hermes-health-receiver.yml", self.site)
+        self.assertIn("hermes-health-receiver.service", self.playbook)
+        self.assertIn("hermes-health-summary.timer", self.playbook)
+        self.assertIn("/usr/local/libexec/hermes-health", self.playbook)
+        self.assertIn("/var/lib/hermes/health", self.host_vars)
+        inventory = self.group_vars + self.host_vars
+        self.assertIn("/etc/hermes/health", inventory)
+        self.assertNotIn("/var/lib/openclaw-health", self.playbook + inventory)
+        self.assertNotIn("/etc/openclaw-health", self.playbook + inventory)
+        self.assertNotIn("openclaw_health_receiver", self.playbook + inventory)
+
+    def test_cutover_is_rollback_backed_and_write_validated(self):
+        self.assertIn("Require expected Tailscale NFS rollback origin", self.playbook)
+        self.assertIn("/srv/live-rollbacks/jn-t14s-lin/hermes-health", self.host_vars)
+        self.assertIn("Back up final legacy Health database consistently", self.playbook)
+        self.assertIn("Back up pre-cutover Hermes Health database consistently", self.playbook)
+        self.assertIn("Verify final Hermes Health database integrity", self.playbook)
+        self.assertGreaterEqual(self.playbook.count("--write-probe"), 2)
+
+    def test_old_user_service_is_disabled_only_after_validation(self):
+        verified = self.playbook.index("Verify authenticated production Health receiver")
+        disabled = self.playbook.index("Disable legacy user Health receiver after validation")
+        self.assertLess(verified, disabled)
+
+    def test_routine_production_does_not_read_migration_sources(self):
+        self.assertIn("hermes_health_receiver_migration_inputs_required", self.playbook)
+        for task in (
+            "Resolve legacy Health receiver account",
+            "Inspect legacy Health token source",
+            "Inspect legacy Health database",
+            "Verify retained Health source database integrity",
+            "Copy Health receiver token without exposing it to Ansible output",
+        ):
+            block = self.playbook.split(f"- name: {task}", 1)[1].split("\n    - name:", 1)[0]
+            self.assertIn(
+                "when: hermes_health_receiver_migration_inputs_required | bool",
+                block,
+            )
+        self.assertIn("Require protected Hermes Health token", self.playbook)
+
+    def test_only_astra_receives_aggregate_report_access(self):
+        self.assertIn(
+            "{% if hermes_profile.name == 'astra' %} "
+            "{{ hermes_health_report_group }}{% endif %}",
+            self.gateway_hardening,
+        )
+        self.assertIn(
+            "BindReadOnlyPaths={{ hermes_health_receiver_report_dir }}",
+            self.gateway_hardening,
+        )
+        self.assertIn(
+            "InaccessiblePaths={{ hermes_health_receiver_db }} "
+            "{{ hermes_health_receiver_config_dir }}",
+            self.gateway_hardening,
+        )
+        self.assertIn(
+            "{% if hermes_profile.name == 'astra' %}\n"
+            "BindReadOnlyPaths={{ hermes_star_privacy_plugin_managed_root }}:"
+            "{{ hermes_star_privacy_plugin_runtime_root }}\n"
+            "BindReadOnlyPaths={{ hermes_health_receiver_report_dir }}\n"
+            "InaccessiblePaths={{ hermes_health_receiver_db }} "
+            "{{ hermes_health_receiver_config_dir }}",
+            self.gateway_hardening,
+        )
 
 
 if __name__ == "__main__":

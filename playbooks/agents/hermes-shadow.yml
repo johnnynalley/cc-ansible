@@ -2221,7 +2221,7 @@
         - files/hermes/discord-cutover-contract.json
         - files/hermes/jobs/rigel-academic-alerts.json
         - files/hermes/automation-regressions.json
-        - playbooks/agents/openclaw-health-receiver.yml
+        - playbooks/agents/hermes-health-receiver.yml
         - scripts/agents/openclaw-control-plane-inventory.py
 
     - name: Deploy pinned Hermes profile-data source contracts

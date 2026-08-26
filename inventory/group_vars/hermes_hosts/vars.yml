@@ -53,6 +53,11 @@ hermes_production_cutover_user: johnny
 hermes_production_cutover_user_uid: 1000
 hermes_production_cutover_user_gateway: openclaw-gateway.service
 hermes_production_cutover_health_service: health-receiver.service
+hermes_health_receiver_service: hermes-health-receiver.service
+hermes_health_report_group: hermes-health-report
+hermes_health_receiver_db: /var/lib/hermes/health/health.db
+hermes_health_receiver_report_dir: /var/lib/hermes/health/reports
+hermes_health_receiver_config_dir: /etc/hermes/health
 hermes_production_cutover_source_system_units:
   - name: openclaw-isolated-gateway.service
     restore: started-disabled
@@ -1142,8 +1147,6 @@ hermes_daily_personal_source: scripts/agents/hermes-daily-personal-collect.py
 hermes_daily_personal_live: /usr/local/libexec/hermes-daily-personal-collect
 hermes_daily_summary_assemble_source: scripts/agents/hermes-daily-summary-assemble.py
 hermes_daily_summary_assemble_live: /usr/local/libexec/hermes-daily-summary-assemble
-hermes_health_summary_source: scripts/agents/hermes-health-summary.py
-hermes_health_summary_live: /usr/local/libexec/hermes-health-summary
 hermes_fortnite_progress_source: scripts/agents/hermes-fortnite-progress-snapshot.py
 hermes_fortnite_progress_live: /usr/local/libexec/hermes-fortnite-progress-snapshot
 hermes_fortnite_normalize_source: scripts/agents/hermes-fortnite-progress-normalize.py

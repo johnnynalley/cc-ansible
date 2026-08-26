@@ -17,7 +17,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
-DEFAULT_DB_PATH = Path("/var/lib/openclaw-health/health.db")
+DEFAULT_DB_PATH = Path("/var/lib/hermes/health/health.db")
 TZ = ZoneInfo("America/Chicago")
 
 

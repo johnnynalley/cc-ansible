@@ -16,7 +16,7 @@ SuccessExitStatus=75
 WorkingDirectory={{ hermes_profile.gateway_working_directory }}
 Environment=TERMINAL_CWD={{ hermes_profile.terminal_cwd }}
 {% endif %}
-SupplementaryGroups={{ hermes_runtime_readers_group }}
+SupplementaryGroups={{ hermes_runtime_readers_group }}{% if hermes_profile.name == 'astra' %} {{ hermes_health_report_group }}{% endif %}
 Environment=HERMES_MANAGED_DIR=/etc/hermes/{{ hermes_profile.name }}
 {% if (hermes_profile.terminal_backend | default('docker')) == 'docker' %}
 Environment=HERMES_DOCKER_BINARY=/usr/bin/podman
@@ -103,6 +103,8 @@ BindPaths={{ hermes_profile_transforms_root }}/{{ hermes_profile.name }}/writabl
 BindReadOnlyPaths={{ hermes_profile_transforms_root }}/{{ hermes_profile.name }}/managed:{{ hermes_profile.home }}/transformed-managed
 {% if hermes_profile.name == 'astra' %}
 BindReadOnlyPaths={{ hermes_star_privacy_plugin_managed_root }}:{{ hermes_star_privacy_plugin_runtime_root }}
+BindReadOnlyPaths={{ hermes_health_receiver_report_dir }}
+InaccessiblePaths={{ hermes_health_receiver_db }} {{ hermes_health_receiver_config_dir }}
 BindReadOnlyPaths={{ hermes_docker_inventory_plugin_managed_root }}:{{ hermes_docker_inventory_plugin_runtime_root }}
 BindReadOnlyPaths={{ hermes_arr_api_plugin_managed_root }}:{{ hermes_arr_api_plugin_runtime_root }}
 BindReadOnlyPaths={{ hermes_arr_api_runtime_dir }}

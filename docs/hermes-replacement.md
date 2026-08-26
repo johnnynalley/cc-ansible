@@ -448,13 +448,13 @@ compared with the contract. A new job, changed schedule, or missing recurring
 lane blocks promotion; an absent delete-after-run reminder is allowed only as
 expired source history.
 
-The current `health-receiver.service` remains an active user service while the
-Hermes runtime is designed and tested. It stays running through messaging and
-scheduler handoff. Its separate attended modernization uses
-`playbooks/agents/openclaw-health-receiver.yml` to move ingestion to a dedicated
-system identity while exposing only aggregate reports to models; raw Health
-rows and the upload token remain outside Hermes. No Siri relay unit is active,
-and migration is forbidden from recreating one.
+The retired `health-receiver.service` user unit was preserved through messaging
+and scheduler handoff, then replaced by `hermes-health-receiver.service` after
+an authenticated canary and rollback-backed cutover. The supported rebuild path
+is `playbooks/agents/hermes-health-receiver.yml`; raw Health rows and the upload
+token remain isolated from model-visible Hermes profiles while aggregate-only
+reports remain available. No Siri relay unit is active, and migration is
+forbidden from recreating one.
 
 The shadow deployment installs only the root-owned contract and audit. It does
 not create `hermes-automation`, systemd timers, publishers, one-shot jobs, or

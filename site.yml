@@ -197,9 +197,9 @@
   ansible.builtin.import_playbook: playbooks/docker/agent-docker-update-trigger.yml
   tags: [docker, agents, agent-docker-update]
 
-- name: Configure isolated OpenClaw Health receiver
-  ansible.builtin.import_playbook: playbooks/agents/openclaw-health-receiver.yml
-  tags: [openclaw, openclaw-health, health-receiver]
+- name: Configure isolated Hermes Health receiver
+  ansible.builtin.import_playbook: playbooks/agents/hermes-health-receiver.yml
+  tags: [hermes, hermes-health, health-receiver]
 
 - name: Configure isolated OpenClaw Gateway canary
   ansible.builtin.import_playbook: playbooks/agents/openclaw-isolated-gateway.yml

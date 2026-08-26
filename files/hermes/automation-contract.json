@@ -16,8 +16,8 @@
       "sha256": "e4ccc6aa5b7eccd5f8730b4ad5abdec68b1ad401d8013c8b86cc6c320de4ff0a"
     },
     "healthReceiverPlaybook": {
-      "path": "playbooks/agents/openclaw-health-receiver.yml",
-      "sha256": "eb338fb3bc4b615ebb3f7ab453b2e4830cbede85073e555a8bcf9fc7da360898"
+      "path": "playbooks/agents/hermes-health-receiver.yml",
+      "sha256": "460795d54eee702b0f1bd113566cfa2580fcbd311f55d48e8a235a6ec0d5b813"
     },
     "controlPlaneInventory": {
       "path": "scripts/agents/openclaw-control-plane-inventory.py",
@@ -259,9 +259,9 @@
   "integrations": {
     "healthReceiver": {
       "disposition": "external",
-      "currentState": "legacy-user-service-active",
-      "cutoverState": "dedicated-system-service-active",
-      "targetPlaybook": "playbooks/agents/openclaw-health-receiver.yml",
+      "currentState": "hermes-native-system-service-active",
+      "cutoverState": "hermes-native-system-service-active",
+      "targetPlaybook": "playbooks/agents/hermes-health-receiver.yml",
       "continuity": "keep-running-through-hermes-cutover",
       "rawDatabaseOwner": "health-receiver-only",
       "modelAccess": "aggregate-report-only",

@@ -28,12 +28,11 @@ require native approval bound to the current user turn. Dubble and Rigel receive
 neither credential. No agent receives controller SSH, Ansible vault, Git, human
 home, raw Health database, or Docker daemon access.
 
-The retained Health receiver remains an independent active `johnny` user
-service and was deliberately preserved because it is still in use. Hermes can
-consume only aggregate output, not its token or raw database. Moving this
-network-facing receiver to the already-designed no-login `openclaw-health`
-identity remains a separate hardening task; retaining it is not evidence that
-OpenClaw itself remains in production.
+The retained Health receiver now runs as the independent no-login
+`hermes-health` system identity. Hermes profiles can consume only aggregate
+output, not its token or raw database. The receiver's writable state is under
+`/var/lib/hermes/health`; it has no runtime dependency on the immutable
+OpenClaw evidence mount.
 
 ## Historical OpenClaw Modernization Evidence
 
@@ -41,8 +40,8 @@ The following canary and rehearsal record is retained for rollback analysis.
 It describes the superseded OpenClaw modernization path, not current production
 authority:
 
-- `playbooks/agents/openclaw-health-receiver.yml` stages and migrates Apple
-  Health ingestion to the no-login `openclaw-health` service account.
+- `playbooks/agents/hermes-health-receiver.yml` stages and migrates Apple
+  Health ingestion to the no-login `hermes-health` service account.
 - `scripts/agents/health-receiver.py` accepts bounded authenticated JSON and
   stores raw records in an isolated SQLite database.
 - `scripts/agents/health-summary.py` publishes only fixed daily aggregates.
@@ -136,9 +135,11 @@ authority:
   has no channels, cron, or heartbeat delivery, archives its exact synthetic
   session through native RPC, and restores both services. It has not been
   applied, so it is a proof gate rather than a current protection claim.
-- The future `openclaw` Gateway identity will receive membership only in
-  `openclaw-health-report`, which can read generated reports but cannot read the
-  database, token, receiver configuration, or raw payloads.
+- Astra is the only model-visible profile in `hermes-health-report`. The Astra
+  Gateway and retained Daily Summary collector can read generated aggregate
+  reports, while their systemd sandboxes explicitly hide the raw database and
+  receiver configuration/token. Dubble and Rigel are not members of the report
+  group and receive no Health path.
 
 Two initial attended canary attempts were rolled back automatically on
 2026-08-10: the first exposed and fixed the current file-provider ownership
@@ -413,30 +414,27 @@ artifacts are migration inputs, not the target design:
 | Restic REST listener, credential, and timer dedicated to `openclaw-vm` | **Retire after archive proof** | Confirm no current client, revoke the old credential, disable the endpoint, and keep archive maintenance only if explicitly required |
 | Retired VM Portainer edge and firewall rules | **Retire after live-reference proof** | Confirm no live VM/listener or operator dependency, then remove managed endpoint/rules with a rollback snapshot |
 | Direct tailnet Gateway bind plus remote Caddy origin | **Replace at cutover** | Keep the Gateway on loopback and expose it through a root-managed named Tailscale Serve service; preserve `openclaw.jnalley.me` only after Caddy-to-Service DNS, TLS/SNI, WebSocket, token/device-auth, and rollback tests pass |
-| Direct tailnet Health receiver bind | **Replace at cutover** | Keep the receiver on loopback behind root-managed Tailscale Serve path routing; preserve the authenticated typed receiver and prove a real Health upload plus aggregate-only report access |
+| Direct tailnet Health receiver bind | **Open follow-up** | The no-login Hermes receiver still preserves the existing authenticated endpoint on `100.73.46.86:18791`. Move it to loopback behind root-managed Tailscale Serve path routing only after a real Health upload, Caddy compatibility, and rollback are proven. |
 | Legacy `/nct-main`, `/nct-rigel`, and `/nct-dubble` bridges | **Retire unless a current owner is proven** | Repository search found only the Caddy routes after the Nextcloud Talk plugin retirement; require a live listener, current consumer, and named owner before carrying any route forward |
 | Retired `/ask` and `/alerts` ingress paths | **Retain as edge tombstones** | Caddy must continue returning `404`; no model-facing compatibility receiver may be restored |
 
-The current Caddy routes to `jn-t14s-lin:18789` and `:18791` are retained only
-as production compatibility inputs until the attended single-Gateway cutover;
-they are not the target architecture. The modern target keeps both services on
-loopback and gives the no-login `openclaw` and `openclaw-health` accounts no
-Tailscale operator authority. Root owns a named Tailscale Serve configuration,
-while OpenClaw keeps `gateway.tailscale.mode=off`,
-`gateway.auth.allowTailscale=false`, and explicit token plus device auth. This
-prevents Caddy's tailnet node identity from becoming a tokenless human identity
-inside OpenClaw. Caddy may continue serving `openclaw.jnalley.me`, but its
-upstream changes to the named Service only after the Docker bridge can resolve
-and reach that Service and an authenticated WebSocket survives the full proxy
-chain. The legacy user-Gateway Tailscale wait drop-in and direct-bind Doctor
-warning retire only after that proof.
+The current Caddy routes to `jn-t14s-lin:18789` and `:18791` remain production
+compatibility inputs and are not the target architecture. The eventual target
+keeps both services on loopback, gives the no-login Hermes identities no
+Tailscale operator authority, and exposes each service through a root-managed
+named Tailscale Serve configuration. Caddy may continue serving
+`openclaw.jnalley.me`, but its upstream changes only after the Docker bridge can
+resolve and reach the named Service and authenticated traffic survives the full
+proxy chain.
 
-Health ingestion is replaced by the dedicated `openclaw-health` service, then
-moved behind the same root-owned private ingress boundary without changing its
-authenticated typed schema. Siri relay and unsafe Apprise prompt ingress remain
-retired. These dispositions do not authorize live cleanup by themselves; each
-destructive retirement still requires current host evidence, a targeted backup,
-and its row's exit proof.
+Health ingestion now runs as `hermes-health`, independently of every Gateway,
+without changing its authenticated typed schema. The receiver writes only its
+mode-`0600` database and publishes bounded aggregate reports through
+`hermes-health-summary.timer`. The retained Daily Summary assembler consumes
+those reports without a raw-database helper. Siri relay and unsafe Apprise
+prompt ingress remain retired. Moving the listener behind Tailscale Serve is a
+separate rollback-backed ingress change, not part of the completed identity and
+storage cutover.
 
 Stable `2026.7.1-2` is a hybrid runtime, not a completely database-first one.
 The shared SQLite database is authoritative for cron, tasks, plugin state,
@@ -969,7 +967,7 @@ implementation flaw.
 | Severity | State | Risk and required closure |
 | --- | --- | --- |
 | High | Accepted owner requirement | Native Hermes and Tirith updates can replace code later executed by all three Gateways. Hermes uses its bounded updater transaction; Tirith's signed 0.4+ pair requires a capability-empty root unit whose writable paths are limited to Tirith state and `/usr/local/libexec`. A compromised signed upstream release can still become trusted code. Preserve native provenance checks and rollback backups, and treat provider/Discord credentials as rotation targets after any update compromise. |
-| High | Open separate hardening | The retained Health receiver is a network-facing `johnny` user service. Its authentication, source restriction, bounded parser, and separation from model tools reduce exposure, but a receiver-code exploit would inherit the broader human account. Migrate it to the prepared no-login `openclaw-health` service without changing the client endpoint contract. |
+| Medium | Open ingress follow-up | Health ingestion now runs as the dedicated no-login `hermes-health` service with a bounded parser, source allowlist, protected token, mode-`0600` database, aggregate-only publisher, and Astra-only report access. The remaining exposure is the direct tailnet listener; move it behind root-managed Tailscale Serve after a real-client upload and Caddy rollback test. |
 | Medium | Inherent residual | Each active Gateway must read its own Discord and model-provider credentials; Astra also reads its two fixed Docker SSH keys. A native runtime/plugin compromise can steal that profile's credentials even though prompt-level tools cannot. Rotate the affected profile and Docker keys after any process compromise. |
 | Medium | Accepted operational tradeoff | Selected Docker services still auto-update as root-managed systemd work. A malicious image or ordinary bad release can cause availability or container-level supply-chain impact. Major-version and required-path guards remain, updater scripts are root-only, and the Docker socket proxy is excluded from blind updates. |
 | Medium | Open defense in depth | Gateway units have strong namespace, filesystem, device, capability, and address-family restrictions but no narrow `SystemCallFilter`. A runtime exploit retains the syscall surface of the unprivileged Python process. Add filtering only after compatibility tests prove Discord, provider TLS, SQLite, and native delegation remain functional. |
@@ -1384,10 +1382,10 @@ cutover.
 
 ### Disabled
 
-`openclaw_health_receiver_mode: disabled` is the normal current state. A full
-site run does not create the new users, copy the token/database, or touch the
-legacy user service. If a previously deployed isolated unit exists, disabled
-mode stops it without modifying the legacy receiver.
+`hermes_health_receiver_mode: production` is the normal post-cutover state.
+The variable namespace is retained only as migration compatibility; deployed
+accounts, paths, and units are Hermes-native. Disabled mode remains available
+to stop the isolated receiver without modifying retained source evidence.
 
 ### Canary
 
@@ -1409,9 +1407,9 @@ does not enable the new receiver at boot.
 First production activation requires all three settings in the attended run:
 
 ```yaml
-openclaw_health_receiver_mode: production
-openclaw_health_receiver_cutover_requested: true
-openclaw_health_receiver_cutover_approved: true
+hermes_health_receiver_mode: production
+hermes_health_receiver_cutover_requested: true
+hermes_health_receiver_cutover_approved: true
 ```
 
 The playbook then:
@@ -1419,7 +1417,7 @@ The playbook then:
 1. Creates a root-only timestamped backup of the legacy unit, nonsecret
    environment, token, and a consistent SQLite database copy.
 2. Stops both receiver processes before the final SQLite backup.
-3. Atomically promotes the final database under `openclaw-health` ownership.
+3. Atomically promotes the final database under `hermes-health` ownership.
 4. Starts the production system service on `100.73.46.86:18791`.
 5. Performs an authenticated result-only check and requires retained metrics.
 6. Disables the old user unit and writes a root-owned completion marker.
@@ -1429,9 +1427,9 @@ the legacy user service is restarted. After success, set both one-time cutover
 booleans back to `false`; subsequent `production` runs require the completion
 marker and converge the stable service normally.
 
-The iPhone Health Auto Export client still needs the current rotated token and
-a real post-rotation export. Server health alone does not prove that client
-path is restored.
+The iPhone Health Auto Export client still needs one real post-cutover export.
+Server health, database parity, and the authenticated write probe do not prove
+that the phone's saved endpoint and token still work.
 
 ## Gateway Migration Gate
 
@@ -1683,8 +1681,8 @@ PYTHONDONTWRITEBYTECODE=1 python3 -m unittest scripts/agents/test_openclaw_behav
 PYTHONDONTWRITEBYTECODE=1 python3 -m unittest scripts/agents/test_openclaw_behavior_rehearsal.py -v
 PYTHONDONTWRITEBYTECODE=1 python3 -m unittest scripts/agents/test_openclaw_doctor_rehearsal.py -v
 black --check scripts/agents
-ansible-playbook playbooks/agents/openclaw-health-receiver.yml --syntax-check
-ansible-playbook playbooks/agents/openclaw-health-receiver.yml --check --diff
+ansible-playbook playbooks/agents/hermes-health-receiver.yml --syntax-check
+ansible-playbook playbooks/agents/hermes-health-receiver.yml --check --diff
 ansible-playbook playbooks/agents/openclaw-isolated-gateway.yml --syntax-check
 ansible-playbook playbooks/agents/openclaw-isolated-gateway.yml --check --diff
 ansible-playbook playbooks/agents/openclaw-isolated-gateway.yml --check --diff -e openclaw_isolated_gateway_mode=canary-bootstrap -e openclaw_isolated_gateway_canary_approved=true

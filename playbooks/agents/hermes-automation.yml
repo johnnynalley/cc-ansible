@@ -1542,8 +1542,6 @@
               destination: "{{ hermes_daily_personal_live }}"
             - source: "{{ hermes_daily_summary_assemble_source }}"
               destination: "{{ hermes_daily_summary_assemble_live }}"
-            - source: "{{ hermes_health_summary_source }}"
-              destination: "{{ hermes_health_summary_live }}"
             - source: "{{ hermes_fortnite_progress_source }}"
               destination: "{{ hermes_fortnite_progress_live }}"
             - source: "{{ hermes_fortnite_normalize_source }}"
@@ -3149,15 +3147,9 @@
         - name: Verify Health receiver remains active
           ansible.builtin.command:
             argv:
-              - /usr/sbin/runuser
-              - --user
-              - "{{ hermes_production_cutover_user }}"
-              - --
               - /usr/bin/systemctl
-              - --user
               - is-active
-              - "{{ hermes_production_cutover_health_service }}"
-          environment: "{{ hermes_automation_user_environment }}"
+              - "{{ hermes_health_receiver_service }}"
           register: hermes_automation_health_state
           changed_when: false
           check_mode: false

@@ -509,8 +509,16 @@ class ProductionAutomationTests(unittest.TestCase):
         text = (
             ROOT / "templates/hermes/hermes-retained-automation@.service.j2"
         ).read_text()
-        for path in ("hermes_astra_calendar_live_root", "data/health.db"):
+        for path in (
+            "hermes_astra_calendar_live_root",
+            "HERMES_HEALTH_REPORT_JSON",
+            "HERMES_HEALTH_REPORT_MARKDOWN",
+            "hermes_health_receiver_report_dir",
+        ):
             self.assertIn(path, text)
+        self.assertIn("InaccessiblePaths={{ hermes_health_receiver_db }}", text)
+        self.assertNotIn("HERMES_HEALTH_DB=", text)
+        self.assertNotIn("HERMES_HEALTH_SUMMARY=", text)
         self.assertIn("Environment=HOME=/var/lib/hermes/astra", text)
         self.assertIn("EnvironmentFile=", text)
         self.assertIn("hermes_automation_native_workspace", text)

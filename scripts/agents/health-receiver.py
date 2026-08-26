@@ -50,7 +50,7 @@ MAX_COLLECTION_ITEMS = int(
     os.environ.get("HEALTH_RECEIVER_MAX_COLLECTION_ITEMS", "200000")
 )
 MAX_STRING_BYTES = int(os.environ.get("HEALTH_RECEIVER_MAX_STRING_BYTES", "1048576"))
-DB_PATH = os.environ.get("HEALTH_DB_PATH", "/var/lib/openclaw-health/health.db")
+DB_PATH = os.environ.get("HEALTH_DB_PATH", "/var/lib/hermes/health/health.db")
 REQUEST_TIMES = defaultdict(deque)
 REQUEST_TIMES_LOCK = Lock()
 

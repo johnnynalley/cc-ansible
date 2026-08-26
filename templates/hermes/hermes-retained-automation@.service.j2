@@ -7,7 +7,7 @@ Wants=network-online.target
 Type=oneshot
 User=hermes-astra
 Group=hermes-astra
-SupplementaryGroups={{ hermes_automation_readers_group }}
+SupplementaryGroups={{ hermes_automation_readers_group }} {{ hermes_health_report_group }}
 WorkingDirectory={{ hermes_automation_native_workspace }}
 ExecStart=/usr/bin/python3 {{ hermes_retained_automation_live }} %i --workspace {{ hermes_automation_native_workspace }} --output-root {{ hermes_automation_output_root }} --freshrss-root {{ hermes_astra_freshrss_live_root }}
 Environment=HOME=/var/lib/hermes/astra
@@ -16,8 +16,8 @@ Environment=HERMES_MANAGED_DIR=/etc/hermes/astra
 Environment=HERMES_AUTOMATION_WORKSPACE={{ hermes_automation_native_workspace }}
 Environment=HERMES_CALENDAR_ROOT={{ hermes_astra_calendar_live_root }}/calendars
 Environment=HERMES_OPS_REPOSITORY={{ hermes_astra_workspace_live }}
-Environment=HERMES_HEALTH_DB={{ hermes_profile_data_root }}/astra/writable/data/health.db
-Environment=HERMES_HEALTH_SUMMARY={{ hermes_health_summary_live }}
+Environment=HERMES_HEALTH_REPORT_JSON={{ hermes_health_receiver_report_dir }}/yesterday.json
+Environment=HERMES_HEALTH_REPORT_MARKDOWN={{ hermes_health_receiver_report_dir }}/yesterday.md
 Environment=HERMES_FORTNITE_NORMALIZER={{ hermes_fortnite_normalize_live }}
 EnvironmentFile={{ hermes_retained_collector_environment_live }}
 UMask=0027
@@ -28,6 +28,8 @@ BindReadOnlyPaths=-/home/{{ hermes_production_cutover_user }}/cc-ansible
 BindPaths={{ hermes_automation_output_root }}/daily-summary-sections:{{ hermes_automation_native_workspace }}/memory/daily-summary-sections
 BindPaths={{ hermes_profile_data_root }}/astra/writable/data/fortnite-progress:{{ hermes_automation_native_workspace }}/fortnite-progress
 ReadOnlyPaths=-/opt/seerr/config/settings.json
+ReadOnlyPaths={{ hermes_health_receiver_report_dir }}
+InaccessiblePaths={{ hermes_health_receiver_db }} {{ hermes_health_receiver_config_dir }}
 ReadWritePaths={{ hermes_automation_output_root }}
 ReadWritePaths={{ hermes_astra_freshrss_live_root }}
 ReadWritePaths={{ hermes_profile_data_root }}/astra/writable/data/fortnite-progress

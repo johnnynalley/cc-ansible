@@ -878,6 +878,10 @@ class HermesShadowPlaybookTests(unittest.TestCase):
                     "hermes_lcm_embedding_backfill_timeout_s",
                     "hermes_lcm_proactive_recall_enabled",
                     "hermes_lcm_temporal_rollups_enabled",
+                    "hermes_health_report_group",
+                    "hermes_health_receiver_report_dir",
+                    "hermes_health_receiver_db",
+                    "hermes_health_receiver_config_dir",
                     "hermes_rigel_astra_liaison_group",
                     "hermes_rigel_astra_liaison_plugin_managed_root",
                     "hermes_rigel_astra_liaison_plugin_runtime_root",
@@ -1680,7 +1684,7 @@ class HermesShadowPlaybookTests(unittest.TestCase):
         self.assertIn("hermes_automation_audit_source", audit)
         self.assertIn("automation-regressions.json", sources)
         self.assertIn("openclaw-control-plane-inventory.py", sources)
-        self.assertIn("openclaw-health-receiver.yml", sources)
+        self.assertIn("hermes-health-receiver.yml", sources)
         self.assertIn("--repository-root", validation)
         self.assertNotIn("hermes cron create", self.playbook)
         self.assertNotIn(

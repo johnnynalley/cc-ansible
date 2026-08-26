@@ -20,7 +20,7 @@
       - hermes-gateway-astra.service
       - hermes-gateway-dubble.service
       - hermes-gateway-rigel.service
-      - openclaw-health-receiver.service
+      - hermes-health-receiver.service
       - openclaw-isolated-codex.service
       - openclaw-isolated-gateway.service
 
