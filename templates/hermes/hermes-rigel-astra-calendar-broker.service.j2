@@ -5,7 +5,8 @@ Wants=network-online.target
 Before=hermes-gateway-rigel.service
 
 [Service]
-Type=simple
+Type=notify
+NotifyAccess=main
 User={{ hermes_rigel_astra_liaison_user }}
 Group={{ hermes_rigel_astra_liaison_group }}
 WorkingDirectory={{ hermes_rigel_astra_liaison_home }}

@@ -487,6 +487,15 @@
                    | selectattr('changed') | list | length > 0
               }}
 
+        - name: Prepare Rigel planned-stop marker before liaison broker replacement
+          ansible.builtin.include_tasks:
+            file: ../../tasks/hermes-planned-stop-marker.yml
+          vars:
+            hermes_planned_stop_profile: "{{ hermes_rigel_profile }}"
+          when:
+            - hermes_rigel_astra_liaison_broker_restart_attempted | bool
+            - hermes_rigel_astra_liaison_prior_gateway_state.stdout == 'active'
+
         - name: Restart changed liaison broker or ensure it is active
           ansible.builtin.systemd_service:
             name: hermes-rigel-astra-calendar-broker.service
@@ -578,11 +587,14 @@
           ansible.builtin.set_fact:
             hermes_rigel_astra_liaison_restart_required: >-
               {{
-                hermes_rigel_astra_liaison_managed_policy.changed
-                or hermes_rigel_astra_liaison_dropin_copy.changed
-                or hermes_rigel_astra_liaison_policy_checksum.changed
-                or hermes_rigel_astra_liaison_plugin_copies.results
-                   | selectattr('changed') | list | length > 0
+                not hermes_rigel_astra_liaison_broker_restart_attempted | bool
+                and (
+                  hermes_rigel_astra_liaison_managed_policy.changed
+                  or hermes_rigel_astra_liaison_dropin_copy.changed
+                  or hermes_rigel_astra_liaison_policy_checksum.changed
+                  or hermes_rigel_astra_liaison_plugin_copies.results
+                     | selectattr('changed') | list | length > 0
+                )
               }}
 
         - name: Prepare Rigel planned-stop marker for liaison promotion

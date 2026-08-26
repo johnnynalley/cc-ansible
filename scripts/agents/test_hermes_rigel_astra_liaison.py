@@ -49,6 +49,19 @@ def event(**updates):
 
 
 class BrokerTests(unittest.TestCase):
+    def test_systemd_readiness_is_sent_over_notify_socket(self):
+        client = mock.MagicMock()
+        socket_factory = mock.MagicMock()
+        socket_factory.return_value.__enter__.return_value = client
+        with (
+            mock.patch.object(BROKER.socket, "socket", socket_factory),
+            mock.patch.dict(os.environ, {"NOTIFY_SOCKET": "@rigel-ready"}),
+        ):
+            BROKER.notify_systemd_ready()
+        socket_factory.assert_called_once_with(socket.AF_UNIX, socket.SOCK_DGRAM)
+        client.connect.assert_called_once_with("\0rigel-ready")
+        client.sendall.assert_called_once_with(b"READY=1")
+
     def test_subprocess_failures_are_fixed_categories(self):
         result = subprocess.CompletedProcess([], 1, "", "Permission denied: hidden")
         self.assertEqual(BROKER.failure_category(result), "permission")
@@ -220,6 +233,8 @@ class SourceContractTests(unittest.TestCase):
 
     def test_service_denies_agent_profiles_and_docker(self):
         service = (ROOT / "templates/hermes/hermes-rigel-astra-calendar-broker.service.j2").read_text()
+        self.assertIn("Type=notify", service)
+        self.assertIn("NotifyAccess=main", service)
         self.assertIn("User={{ hermes_rigel_astra_liaison_user }}", service)
         self.assertIn("LoadCredential=caldav-password:", service)
         self.assertIn("/var/lib/hermes/astra /var/lib/hermes/dubble /var/lib/hermes/rigel", service)
@@ -273,6 +288,28 @@ class SourceContractTests(unittest.TestCase):
         )[0]
         self.assertIn("hermes_rigel_astra_liaison_broker_restart_attempted", restore)
         self.assertIn("else 'started'", restore)
+
+    def test_broker_replacement_marks_rigel_before_dependency_cycle(self):
+        playbook = (ROOT / "playbooks/agents/hermes-rigel-astra-liaison.yml").read_text()
+        marker = playbook.index(
+            "Prepare Rigel planned-stop marker before liaison broker replacement"
+        )
+        replacement = playbook.index(
+            "Restart changed liaison broker or ensure it is active"
+        )
+        self.assertLess(marker, replacement)
+        block = playbook[marker:replacement]
+        self.assertIn(
+            "hermes_rigel_astra_liaison_broker_restart_attempted | bool",
+            block,
+        )
+        restart_decision = playbook.split(
+            "Determine whether Rigel needs one planned liaison restart", 1
+        )[1].split("Prepare Rigel planned-stop marker for liaison promotion", 1)[0]
+        self.assertIn(
+            "not hermes_rigel_astra_liaison_broker_restart_attempted | bool",
+            restart_decision,
+        )
 
     def test_check_mode_stops_before_credential_extraction(self):
         playbook = (ROOT / "playbooks/agents/hermes-rigel-astra-liaison.yml").read_text()

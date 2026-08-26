@@ -359,6 +359,16 @@ class LiaisonServer(socketserver.ThreadingUnixStreamServer):
     allow_reuse_address = False
 
 
+def notify_systemd_ready() -> None:
+    notify_socket = os.environ.get("NOTIFY_SOCKET", "")
+    if not notify_socket:
+        return
+    address = f"\0{notify_socket[1:]}" if notify_socket.startswith("@") else notify_socket
+    with socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM) as client:
+        client.connect(address)
+        client.sendall(b"READY=1")
+
+
 def serve(path: Path, allowed_uid: int) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     if path.exists() or path.is_symlink():
@@ -369,6 +379,7 @@ def serve(path: Path, allowed_uid: int) -> None:
     with LiaisonServer(str(path), LiaisonHandler) as server:
         server.allowed_uid = allowed_uid  # type: ignore[attr-defined]
         os.chmod(path, 0o660)
+        notify_systemd_ready()
         server.serve_forever(poll_interval=0.5)
 
 
