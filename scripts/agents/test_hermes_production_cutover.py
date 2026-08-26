@@ -52,7 +52,7 @@ class HermesProductionCutoverTests(unittest.TestCase):
         )
         stop = self.task_offset("Stop and disable production OpenClaw user gateway")
         enroll = self.task_offset(
-            "Enroll existing Discord identities only after source stop proof"
+            "Enroll three Discord identities only after source stop proof"
         )
         self.assertLess(backup, stop)
         self.assertLess(stop, enroll)
@@ -77,29 +77,37 @@ class HermesProductionCutoverTests(unittest.TestCase):
             [],
         )
 
-    def test_break_before_make_and_two_consumer_topology(self) -> None:
+    def test_break_before_make_and_three_consumer_topology(self) -> None:
         source_stop = self.task_offset(
             "Stop and disable production OpenClaw user gateway"
         )
         astra_start = self.task_offset("Start and enable Astra Discord consumer")
         dubble_start = self.task_offset("Start and enable Dubble Discord consumer")
+        rigel_start = self.task_offset("Start and enable Rigel Discord consumer")
         self.assertLess(source_stop, astra_start)
         self.assertLess(astra_start, dubble_start)
-        rigel = self.playbook[self.task_offset(
-            "Keep preserved Rigel gateway stopped and disabled"
-        ):]
-        self.assertIn("hermes-gateway-rigel.service", rigel)
-        self.assertIn("state: stopped", rigel)
-        self.assertIn("enabled: false", rigel)
+        self.assertLess(dubble_start, rigel_start)
+        self.assertIn("hermes-gateway-rigel.service", self.playbook[rigel_start:])
+        self.assertIn("state: started", self.playbook[rigel_start:])
+        self.assertIn("enabled: true", self.playbook[rigel_start:])
+        self.assertIn("--rigel-token-file", self.playbook)
+        self.assertIn("consumerCount == 3", self.playbook)
+        self.assertIn("discordConsumer\n                == 'rigel'", self.playbook)
         self.assertNotIn("DISCORD_BOT_TOKEN=", self.playbook)
 
-    def test_rigel_uses_native_no_agent_schedule_and_stays_silent(self) -> None:
+    def test_rigel_uses_its_own_native_no_agent_schedule_and_stays_silent(self) -> None:
         self.assertIn("hermes-rigel-schedule.py", self.playbook)
         self.assertIn("- --no-agent", self.playbook)
         self.assertIn("- every 30m", self.playbook)
         self.assertIn("stdout | length == 0", self.playbook)
         self.assertIn("stderr | length == 0", self.playbook)
         self.assertIn("schedule_display", self.playbook)
+        self.assertIn("--user\n              - hermes-rigel", self.playbook)
+        self.assertIn(
+            "HERMES_HOME=/var/lib/hermes/rigel/.hermes/profiles/rigel",
+            self.playbook,
+        )
+        self.assertNotIn("Deploy Rigel deterministic scheduler under Astra", self.playbook)
 
     def test_health_is_proven_before_after_and_during_rescue(self) -> None:
         self.assertGreaterEqual(

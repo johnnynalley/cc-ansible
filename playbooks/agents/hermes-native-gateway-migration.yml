@@ -28,7 +28,10 @@
     hermes_native_migration_guard_services:
       - hermes-native-update.service
       - hermes-tirith-native-update.service
-      - hermes-retained-automation@daily-summary.service
+      - hermes-retained-automation@daily-updates.service
+      - hermes-retained-automation@daily-media.service
+      - hermes-retained-automation@daily-personal.service
+      - hermes-retained-automation@daily-assemble.service
       - hermes-retained-automation@fortnite-progress.service
       - hermes-warframe-feed.service
       - hermes-fortnite-calendar-fetch.service
@@ -362,7 +365,7 @@
       ansible.builtin.include_tasks: ../../tasks/hermes-planned-stop-marker.yml
       vars:
         hermes_planned_stop_profile: "{{ item }}"
-      loop: "{{ hermes_shadow_profiles[:2] }}"
+      loop: "{{ hermes_production_consumer_profiles }}"
       loop_control:
         label: "{{ item.name }}"
       when: not ansible_check_mode
@@ -371,7 +374,7 @@
       ansible.builtin.systemd_service:
         name: "{{ item.unit }}"
         state: stopped
-      loop: "{{ hermes_shadow_profiles[:2] }}"
+      loop: "{{ hermes_production_consumer_profiles }}"
       loop_control:
         label: "{{ item.name }}"
       when: not ansible_check_mode
@@ -382,7 +385,7 @@
           - /usr/bin/systemctl
           - is-active
           - "{{ item.unit }}"
-      loop: "{{ hermes_shadow_profiles[:2] }}"
+      loop: "{{ hermes_production_consumer_profiles }}"
       loop_control:
         label: "{{ item.name }}"
       register: hermes_native_migration_stopped_gateways
@@ -750,17 +753,18 @@
             HOME: "{{ item.account_home }}"
             HERMES_HOME: "{{ item.home }}"
             HERMES_MANAGED_DIR: "/etc/hermes/{{ item.name }}"
-          loop: "{{ hermes_shadow_profiles[:2] }}"
+          loop: "{{ hermes_production_consumer_profiles }}"
           loop_control:
             label: "{{ item.name }}"
           changed_when: true
           when: not ansible_check_mode
 
-        - name: Keep standalone Rigel Gateway disabled
+        - name: Keep transitional Rigel Gateway disabled
           ansible.builtin.systemd_service:
             name: hermes-gateway-rigel.service
             state: stopped
             enabled: false
+          when: not hermes_rigel_dedicated_discord_enabled | bool
 
         - name: Require native production Gateways active
           ansible.builtin.command:
@@ -768,7 +772,7 @@
               - /usr/bin/systemctl
               - is-active
               - "{{ item.unit }}"
-          loop: "{{ hermes_shadow_profiles[:2] }}"
+          loop: "{{ hermes_production_consumer_profiles }}"
           loop_control:
             label: "{{ item.name }}"
           register: hermes_native_migration_active_gateways
@@ -783,7 +787,7 @@
               - "{{ item.unit }}"
               - --property=MainPID
               - --value
-          loop: "{{ hermes_shadow_profiles[:2] }}"
+          loop: "{{ hermes_production_consumer_profiles }}"
           loop_control:
             label: "{{ item.name }}"
           register: hermes_native_migration_native_pids
@@ -809,7 +813,7 @@
                 }}
               - --timeout
               - "30"
-          loop: "{{ hermes_shadow_profiles[:2] }}"
+          loop: "{{ hermes_production_consumer_profiles }}"
           loop_control:
             index_var: index
             label: "{{ item.name }}"
@@ -842,7 +846,7 @@
               - "1000"
               - -u
               - "{{ item.unit }}"
-          loop: "{{ hermes_shadow_profiles[:2] }}"
+          loop: "{{ hermes_production_consumer_profiles }}"
           loop_control:
             label: "{{ item.name }}"
           register: hermes_native_migration_failure_journals
@@ -869,7 +873,7 @@
           vars:
             hermes_planned_stop_profile: "{{ item }}"
             hermes_planned_stop_strict: false
-          loop: "{{ hermes_shadow_profiles[:2] }}"
+          loop: "{{ hermes_production_consumer_profiles }}"
           loop_control:
             label: "{{ item.name }}"
 
@@ -884,7 +888,7 @@
             HOME: "{{ item.account_home }}"
             HERMES_HOME: "{{ item.home }}"
             HERMES_MANAGED_DIR: "/etc/hermes/{{ item.name }}"
-          loop: "{{ hermes_shadow_profiles[:2] }}"
+          loop: "{{ hermes_production_consumer_profiles }}"
           loop_control:
             label: "{{ item.name }}"
           changed_when: true
@@ -980,7 +984,7 @@
             name: "{{ item.unit }}"
             state: started
             enabled: true
-          loop: "{{ hermes_shadow_profiles[:2] }}"
+          loop: "{{ hermes_production_consumer_profiles }}"
 
         - name: Resume pre-migration Hermes timers
           ansible.builtin.systemd_service:

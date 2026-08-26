@@ -1,0 +1,465 @@
+{
+  "schemaVersion": 1,
+  "mode": "complete-openclaw-bootstrap-reference-parity",
+  "sourceRoot": "/home/johnny/.openclaw/workspace",
+  "nativeLoader": {
+    "profileRoot": "/var/lib/hermes/astra/.hermes/profiles/astra",
+    "terminalCwd": "/var/lib/hermes/astra/.hermes/profiles/astra",
+    "SOUL.md": "profile-root",
+    "AGENTS.md": "terminal-cwd-profile-root",
+    "MEMORY.md": "native-memory-store",
+    "USER.md": "native-memory-store"
+  },
+  "managedTargetPins": [
+    {
+      "id": "astra-agents",
+      "kind": "plain",
+      "sourcePath": "files/hermes/profiles/astra/AGENTS.md",
+      "sha256": "982d99f122f44ad3ee4aff0c42aa41ee491e29af4672a29900d8286263a8566f",
+      "runtimePolicy": "exact",
+      "runtimePath": "AGENTS.md"
+    },
+    {
+      "id": "astra-soul",
+      "kind": "plain",
+      "sourcePath": "files/hermes/profiles/astra/SOUL.md",
+      "sha256": "c111465bacf198b997934429e03ded902c9868171d5fa41a0b60b738b30d7e33",
+      "runtimePolicy": "exact",
+      "runtimePath": "SOUL.md"
+    },
+    {
+      "id": "astra-operational-heartbeat",
+      "kind": "plain",
+      "sourcePath": "files/hermes/profile-skills/astra/operational-heartbeat/SKILL.md",
+      "sha256": "f0f8704cdb48c78df27b32c28f5cb8fcfa9802d5c986d18a74445261f13850c0",
+      "runtimePolicy": "seeded-mutable",
+      "runtimePath": "skills/operational-heartbeat/SKILL.md"
+    },
+    {
+      "id": "astra-memory",
+      "kind": "ansible-vault-plaintext",
+      "sourcePath": "files/hermes/profile-memory/astra/MEMORY.md.vault",
+      "sha256": "0a54ff9110cf32537ac3955a3db56347e2b5ac349f96edff32359c83f76e0c2b",
+      "runtimePolicy": "seeded-mutable",
+      "runtimePath": "memories/MEMORY.md"
+    },
+    {
+      "id": "astra-user",
+      "kind": "ansible-vault-plaintext",
+      "sourcePath": "files/hermes/profile-memory/astra/USER.md.vault",
+      "sha256": "b7a9c7ff399999b76b6cc1f925207a95ea10ac3738f7f88c3f7838d027786a23",
+      "runtimePolicy": "seeded-mutable",
+      "runtimePath": "memories/USER.md"
+    }
+  ],
+  "bootstrapSummary": {
+    "files": 11,
+    "bytes": 19640,
+    "lines": 370
+  },
+  "bootstrapFiles": [
+    {
+      "sourcePath": "AGENTS.md",
+      "sha256": "9f277bc290cc7ef21ab8c20bf301d3f2a6b537296f6d07c1026b032c378601f6",
+      "bytes": 7678,
+      "lines": 125,
+      "disposition": "native-merged-and-evidence",
+      "nativeTargetIds": ["astra-agents"],
+      "runtimeEvidence": "legacy-openclaw/workspace/AGENTS.md"
+    },
+    {
+      "sourcePath": "CHARTER.md",
+      "sha256": "260a948aa8a0cd9c1aedcb6a897eddda5f570515051797bf301bf5104dafbd9e",
+      "bytes": 764,
+      "lines": 15,
+      "disposition": "native-merged-and-evidence",
+      "nativeTargetIds": ["astra-agents", "astra-soul"],
+      "runtimeEvidence": "legacy-openclaw/workspace/CHARTER.md"
+    },
+    {
+      "sourcePath": "COMMS.md",
+      "sha256": "d4b4ca825e4df9963d41e7f8ecff176c3a068fdf655d6725a85c925585a8470f",
+      "bytes": 1966,
+      "lines": 39,
+      "disposition": "native-merged-and-evidence",
+      "nativeTargetIds": ["astra-agents"],
+      "runtimeEvidence": "legacy-openclaw/workspace/COMMS.md"
+    },
+    {
+      "sourcePath": "HEARTBEAT.md",
+      "sha256": "f47d02018de7ed83ce932b409a94ad132e896ed1bf1eed88f3bcd46ba89a331f",
+      "bytes": 1613,
+      "lines": 31,
+      "disposition": "native-merged-and-evidence",
+      "nativeTargetIds": ["astra-agents", "astra-operational-heartbeat"],
+      "runtimeEvidence": "legacy-openclaw/workspace/HEARTBEAT.md"
+    },
+    {
+      "sourcePath": "IDENTITY.md",
+      "sha256": "b3dfd99cf1a5b14d9ade6d8c5a9d2f9cba5e538db8d570abd55abb6662827410",
+      "bytes": 419,
+      "lines": 11,
+      "disposition": "native-merged-and-evidence",
+      "nativeTargetIds": ["astra-soul"],
+      "runtimeEvidence": "legacy-openclaw/workspace/IDENTITY.md"
+    },
+    {
+      "sourcePath": "JOB.md",
+      "sha256": "35964d31d848cbf545c7a005c1f9da8554c9404bd729f03b4952dddddc5fd43d",
+      "bytes": 576,
+      "lines": 14,
+      "disposition": "native-merged-and-evidence",
+      "nativeTargetIds": ["astra-soul"],
+      "runtimeEvidence": "legacy-openclaw/workspace/JOB.md"
+    },
+    {
+      "sourcePath": "MEMORY.md",
+      "sha256": "1e58acddb16bc002e60b1f1dee8e97ad7f2934ea7f32d2fc195f27edd8ae9b13",
+      "bytes": 2148,
+      "lines": 45,
+      "disposition": "native-seeded-and-evidence",
+      "nativeTargetIds": ["astra-memory"],
+      "runtimeEvidence": "legacy-openclaw/workspace/MEMORY.md"
+    },
+    {
+      "sourcePath": "MOTIVATIONS.md",
+      "sha256": "98e9967a63631015fae646ac6bafb33b07c48186342642aac71dad902e14849c",
+      "bytes": 509,
+      "lines": 13,
+      "disposition": "native-merged-and-evidence",
+      "nativeTargetIds": ["astra-soul"],
+      "runtimeEvidence": "legacy-openclaw/workspace/MOTIVATIONS.md"
+    },
+    {
+      "sourcePath": "SOUL.md",
+      "sha256": "fad5dece484a82253151437c5641f160c8a4afbaa1c290bf8c44da13c6c597f3",
+      "bytes": 1214,
+      "lines": 26,
+      "disposition": "native-merged-and-evidence",
+      "nativeTargetIds": ["astra-soul"],
+      "runtimeEvidence": "legacy-openclaw/workspace/SOUL.md"
+    },
+    {
+      "sourcePath": "TOOLS.md",
+      "sha256": "bc2ab626063b3674313f003ec8e2ea0414802f55e07ce91e76a99ba2a96802e7",
+      "bytes": 812,
+      "lines": 17,
+      "disposition": "native-merged-and-evidence",
+      "nativeTargetIds": ["astra-agents"],
+      "runtimeEvidence": "legacy-openclaw/workspace/TOOLS.md"
+    },
+    {
+      "sourcePath": "USER.md",
+      "sha256": "24d49146139f0b9f588b63b87fa784cae82cbb228dec62274dc723d5684d5002",
+      "bytes": 1941,
+      "lines": 34,
+      "disposition": "native-seeded-and-evidence",
+      "nativeTargetIds": ["astra-user"],
+      "runtimeEvidence": "legacy-openclaw/workspace/USER.md"
+    }
+  ],
+  "referenceSummary": {
+    "files": 42,
+    "bytes": 425807,
+    "semanticReferences": 24,
+    "archivalEvidence": 18,
+    "aggregateSha256": "6b94a91e4412fd552902b074be6443497789a154f61c91c91b81d5e5fe7127d4",
+    "aggregateAlgorithm": "sha256 of sorted '<file-sha256>  <path-within-references>\\n' rows"
+  },
+  "referenceFiles": [
+    {
+      "sourcePath": "references/academic-coach-claude-chat.md",
+      "sha256": "66590d865542b9b5281666f2f657a07dfc2e61a52cdfd37f21f40af0dbd527cd",
+      "bytes": 10858,
+      "disposition": "archival-evidence",
+      "runtimeEvidence": "legacy-openclaw/workspace/references/academic-coach-claude-chat.md"
+    },
+    {
+      "sourcePath": "references/agent-rule-history.md",
+      "sha256": "e7ab7dd525f03d4e076044316a09acb441cb038c278a47d65bcb93f1e0808bb8",
+      "bytes": 28176,
+      "disposition": "semantic-reference",
+      "runtimeEvidence": "legacy-openclaw/workspace/references/agent-rule-history.md"
+    },
+    {
+      "sourcePath": "references/agentic-cognitive-architecture.md",
+      "sha256": "4940a631782e75c6201bde1457f06d1128850cda4a065f2b631ad792bed28b2a",
+      "bytes": 6047,
+      "disposition": "semantic-reference",
+      "runtimeEvidence": "legacy-openclaw/workspace/references/agentic-cognitive-architecture.md"
+    },
+    {
+      "sourcePath": "references/announce-bug-diagnosis.md",
+      "sha256": "c9fbbd6fa03457cc6f0308c946829d5de571436ec36833d7cce279b7502f34d4",
+      "bytes": 4957,
+      "disposition": "archival-evidence",
+      "runtimeEvidence": "legacy-openclaw/workspace/references/announce-bug-diagnosis.md"
+    },
+    {
+      "sourcePath": "references/apprise-dbc-tag-rollout.md",
+      "sha256": "e53e4c7ec9888e3dfee4d35a411a9ffbe0b7c4a8b492ccdf9680a94a998a42ba",
+      "bytes": 2274,
+      "disposition": "archival-evidence",
+      "runtimeEvidence": "legacy-openclaw/workspace/references/apprise-dbc-tag-rollout.md"
+    },
+    {
+      "sourcePath": "references/car-refinance-plan.md",
+      "sha256": "50ddbc45bda74699e6418850db552a330129e40a02cb39f48f9a01a7b2bea9b1",
+      "bytes": 26785,
+      "disposition": "archival-evidence",
+      "runtimeEvidence": "legacy-openclaw/workspace/references/car-refinance-plan.md"
+    },
+    {
+      "sourcePath": "references/cooking-and-recipes.md",
+      "sha256": "3fa5769ae8aa7fe7aa2f48ac90d4a84108cccaa7f5358dc4578302b38545e738",
+      "bytes": 4869,
+      "disposition": "semantic-reference",
+      "runtimeEvidence": "legacy-openclaw/workspace/references/cooking-and-recipes.md"
+    },
+    {
+      "sourcePath": "references/cron-ai-judgment-repair-plan.md",
+      "sha256": "00711a5381a65155835562ef22a39fee2ae510ada276594e0cb583dcff20e671",
+      "bytes": 10838,
+      "disposition": "archival-evidence",
+      "runtimeEvidence": "legacy-openclaw/workspace/references/cron-ai-judgment-repair-plan.md"
+    },
+    {
+      "sourcePath": "references/cron-standards.md",
+      "sha256": "2590bbf091ad9bb0f79809ee4b96f2cfaa5b93183bf53ff5413b6ae3be24c514",
+      "bytes": 14020,
+      "disposition": "semantic-reference",
+      "runtimeEvidence": "legacy-openclaw/workspace/references/cron-standards.md"
+    },
+    {
+      "sourcePath": "references/cron-standards.md.bak.1777776564",
+      "sha256": "c611fb9a433955a1ce574cbd3ea5469da70bbc264c6c83e100fc65a0e6d5e0e0",
+      "bytes": 2427,
+      "disposition": "archival-evidence",
+      "runtimeEvidence": "legacy-openclaw/workspace/references/cron-standards.md.bak.1777776564"
+    },
+    {
+      "sourcePath": "references/cron-standards.md.bak.20260505-002551",
+      "sha256": "13fb7ddc35fca6b87e6409390b6e25fea2e84de4c6472acd0b91cadd0c9816f9",
+      "bytes": 2431,
+      "disposition": "archival-evidence",
+      "runtimeEvidence": "legacy-openclaw/workspace/references/cron-standards.md.bak.20260505-002551"
+    },
+    {
+      "sourcePath": "references/dubble-escalation.md",
+      "sha256": "61504a5f90b1c7c95fbd31d27b70165fd688ad65f37a6be2e644e9259f370a72",
+      "bytes": 2010,
+      "disposition": "semantic-reference",
+      "runtimeEvidence": "legacy-openclaw/workspace/references/dubble-escalation.md"
+    },
+    {
+      "sourcePath": "references/fleet-charter.md",
+      "sha256": "531e87a4d821c2b66ae5e1b4dec75f6396bae4d460b1dff383bb6db84b06ad98",
+      "bytes": 7884,
+      "disposition": "semantic-reference",
+      "runtimeEvidence": "legacy-openclaw/workspace/references/fleet-charter.md"
+    },
+    {
+      "sourcePath": "references/fleet-protocol.md",
+      "sha256": "73f570227a936a53042bc9438b56016bca439cb966a3f8a27457e03745a766af",
+      "bytes": 12638,
+      "disposition": "semantic-reference",
+      "runtimeEvidence": "legacy-openclaw/workspace/references/fleet-protocol.md"
+    },
+    {
+      "sourcePath": "references/fleet-protocol.md.bak-20260512-120221",
+      "sha256": "8d116d7d4d8d107260e30e25933e0d63c5d6e3d3e8f8856e266bb65d349b76d0",
+      "bytes": 18587,
+      "disposition": "archival-evidence",
+      "runtimeEvidence": "legacy-openclaw/workspace/references/fleet-protocol.md.bak-20260512-120221"
+    },
+    {
+      "sourcePath": "references/fleet-protocol.md.bak.1777776564",
+      "sha256": "4202fafb34f924d9c24121073d33dc3dd683e489e92f0720d6e2ae55689fce9f",
+      "bytes": 18448,
+      "disposition": "archival-evidence",
+      "runtimeEvidence": "legacy-openclaw/workspace/references/fleet-protocol.md.bak.1777776564"
+    },
+    {
+      "sourcePath": "references/fleet-protocol.md.bak.1777776999",
+      "sha256": "8d116d7d4d8d107260e30e25933e0d63c5d6e3d3e8f8856e266bb65d349b76d0",
+      "bytes": 18587,
+      "disposition": "archival-evidence",
+      "runtimeEvidence": "legacy-openclaw/workspace/references/fleet-protocol.md.bak.1777776999"
+    },
+    {
+      "sourcePath": "references/fleet-protocol.md.bak.no-clean-room-20260520-194755",
+      "sha256": "cddc44d5447bbfa0a97a27c4c401b2591c5bf7b5cda305e394f2106761ee06f2",
+      "bytes": 20052,
+      "disposition": "archival-evidence",
+      "runtimeEvidence": "legacy-openclaw/workspace/references/fleet-protocol.md.bak.no-clean-room-20260520-194755"
+    },
+    {
+      "sourcePath": "references/heartbeat-checks.md",
+      "sha256": "f4dee269dc8d62223fd910f8c8ed33b876e6536d5e2d265a3f01581c1347637b",
+      "bytes": 32933,
+      "disposition": "semantic-reference",
+      "runtimeEvidence": "legacy-openclaw/workspace/references/heartbeat-checks.md"
+    },
+    {
+      "sourcePath": "references/heartbeat-procedures.md",
+      "sha256": "db011d559cd86fe3429efecd914d9338b4bd14d79f685b97cb22de20b3ab7e6b",
+      "bytes": 6369,
+      "disposition": "semantic-reference",
+      "runtimeEvidence": "legacy-openclaw/workspace/references/heartbeat-procedures.md"
+    },
+    {
+      "sourcePath": "references/home-assistant-admin.md",
+      "sha256": "04d8cbc80ad3d5aa00c6d03c168ba79587c77c92eebefc58895b2e38d70f5ec9",
+      "bytes": 4915,
+      "disposition": "semantic-reference",
+      "runtimeEvidence": "legacy-openclaw/workspace/references/home-assistant-admin.md"
+    },
+    {
+      "sourcePath": "references/living-docs-and-skills.md",
+      "sha256": "d5e3b11d58a4ee763391f479d3b313c91ed1848c02e21eff4620a878e747ca81",
+      "bytes": 13037,
+      "disposition": "semantic-reference",
+      "runtimeEvidence": "legacy-openclaw/workspace/references/living-docs-and-skills.md"
+    },
+    {
+      "sourcePath": "references/marvel-release-order.md",
+      "sha256": "38a94bbac43b5f5c7f9a7f29405a547f8ee5e1c0b7da4de45df9db20fd7f32f5",
+      "bytes": 7756,
+      "disposition": "semantic-reference",
+      "runtimeEvidence": "legacy-openclaw/workspace/references/marvel-release-order.md"
+    },
+    {
+      "sourcePath": "references/memory-operational-history.md",
+      "sha256": "6a6afeb6c705bb4eb0eccad4b12420fb97a92c2bff795e9b821fa89f125845e6",
+      "bytes": 24629,
+      "disposition": "semantic-reference",
+      "runtimeEvidence": "legacy-openclaw/workspace/references/memory-operational-history.md"
+    },
+    {
+      "sourcePath": "references/meshcore-plan.md",
+      "sha256": "263656db51b94509c04c7fe95f02569ee2b6c7a4a467b7418ec1f5cfa9582e43",
+      "bytes": 24426,
+      "disposition": "semantic-reference",
+      "runtimeEvidence": "legacy-openclaw/workspace/references/meshcore-plan.md"
+    },
+    {
+      "sourcePath": "references/model-fallback-investigation.md",
+      "sha256": "9dee562994e846d0d5633446b2477b083a7cdf713ea29b00d0ca9bb61713243b",
+      "bytes": 553,
+      "disposition": "archival-evidence",
+      "runtimeEvidence": "legacy-openclaw/workspace/references/model-fallback-investigation.md"
+    },
+    {
+      "sourcePath": "references/model-routing.md",
+      "sha256": "159e5dbcfffc8e09b4e49fc98f657dc6c5e04a8c37532ef10cf7996a9d8239e9",
+      "bytes": 9541,
+      "disposition": "semantic-reference",
+      "runtimeEvidence": "legacy-openclaw/workspace/references/model-routing.md"
+    },
+    {
+      "sourcePath": "references/model-routing.md.bak.1777395397",
+      "sha256": "b42eb3c34abab76ac2d1423a7857d4f1dce614f330b15a253b6277d090633058",
+      "bytes": 5794,
+      "disposition": "archival-evidence",
+      "runtimeEvidence": "legacy-openclaw/workspace/references/model-routing.md.bak.1777395397"
+    },
+    {
+      "sourcePath": "references/model-routing.md.bak.1777496349",
+      "sha256": "ba86f28d0d2a6ad87cab30a9bd7ac508c640c49cc9032e3682dbd24aeba065a4",
+      "bytes": 5953,
+      "disposition": "archival-evidence",
+      "runtimeEvidence": "legacy-openclaw/workspace/references/model-routing.md.bak.1777496349"
+    },
+    {
+      "sourcePath": "references/model-routing.md.bak.1777776564",
+      "sha256": "dab0263685746f98836c86156ef3e3f66c8489d742688369c00b06543ad9c226",
+      "bytes": 6076,
+      "disposition": "archival-evidence",
+      "runtimeEvidence": "legacy-openclaw/workspace/references/model-routing.md.bak.1777776564"
+    },
+    {
+      "sourcePath": "references/model-routing.md.bak.1777776999",
+      "sha256": "2c512bd6f346182d87aba61b02708751d3affe89427d9acbf4e3f6ebe7112322",
+      "bytes": 5563,
+      "disposition": "archival-evidence",
+      "runtimeEvidence": "legacy-openclaw/workspace/references/model-routing.md.bak.1777776999"
+    },
+    {
+      "sourcePath": "references/openclaw-fork-maintenance.md",
+      "sha256": "3151ee89659f7a9312e350b1a880f1f019c9cb78b749a8aceddc37a0b92fb7d9",
+      "bytes": 5199,
+      "disposition": "semantic-reference",
+      "runtimeEvidence": "legacy-openclaw/workspace/references/openclaw-fork-maintenance.md"
+    },
+    {
+      "sourcePath": "references/openclaw-security-review-plan.md",
+      "sha256": "54db56af26528a8ce42b0c67fe83beacef6af96ddba4eaa227a5497d77e80080",
+      "bytes": 3451,
+      "disposition": "semantic-reference",
+      "runtimeEvidence": "legacy-openclaw/workspace/references/openclaw-security-review-plan.md"
+    },
+    {
+      "sourcePath": "references/plans-protocol.md",
+      "sha256": "3f69b68ef2e1c27ab73a25bc181110f22f98ae5132af2cca06f9ec9572473e21",
+      "bytes": 2290,
+      "disposition": "semantic-reference",
+      "runtimeEvidence": "legacy-openclaw/workspace/references/plans-protocol.md"
+    },
+    {
+      "sourcePath": "references/reference-manifest.json",
+      "sha256": "2189bc60e910d60f29000fcfcd9697ce8b122882d293387f82eb1fba72719306",
+      "bytes": 9426,
+      "disposition": "semantic-reference",
+      "runtimeEvidence": "legacy-openclaw/workspace/references/reference-manifest.json"
+    },
+    {
+      "sourcePath": "references/self-evolution.md",
+      "sha256": "ea7858ade21b0ae78a0ccf01cdb080a2c2eb093c578b552ae0c533d7a9bbc7fb",
+      "bytes": 10400,
+      "disposition": "semantic-reference",
+      "runtimeEvidence": "legacy-openclaw/workspace/references/self-evolution.md"
+    },
+    {
+      "sourcePath": "references/session-continuity.md",
+      "sha256": "3750cda8b522258ddaef5e8c649f35776a016eaeb20c5a458e17431f25d0da4f",
+      "bytes": 2563,
+      "disposition": "semantic-reference",
+      "runtimeEvidence": "legacy-openclaw/workspace/references/session-continuity.md"
+    },
+    {
+      "sourcePath": "references/tandem-protocol.md",
+      "sha256": "344ed938a7cb28bbcbfaff167c82c776086d80f4f22ea66035396fe3cbd572d4",
+      "bytes": 2928,
+      "disposition": "semantic-reference",
+      "runtimeEvidence": "legacy-openclaw/workspace/references/tandem-protocol.md"
+    },
+    {
+      "sourcePath": "references/tandem-protocol.md.bak.1777776564",
+      "sha256": "e6288559a5babb7464b35385474abe830a782ad6af5592f555820243a7ea7a4f",
+      "bytes": 5611,
+      "disposition": "archival-evidence",
+      "runtimeEvidence": "legacy-openclaw/workspace/references/tandem-protocol.md.bak.1777776564"
+    },
+    {
+      "sourcePath": "references/tandem-protocol.md.bak.1777776999",
+      "sha256": "352b0ad20ad2641971c37641a17711c9a3c7cb6771cf5d915a015dc2183fabb0",
+      "bytes": 5376,
+      "disposition": "archival-evidence",
+      "runtimeEvidence": "legacy-openclaw/workspace/references/tandem-protocol.md.bak.1777776999"
+    },
+    {
+      "sourcePath": "references/tools-and-services.md",
+      "sha256": "c1aafa3d4a8b9dac4199e514866e94061f29207dc2a9aa33af2eb848f80b85ba",
+      "bytes": 14408,
+      "disposition": "semantic-reference",
+      "runtimeEvidence": "legacy-openclaw/workspace/references/tools-and-services.md"
+    },
+    {
+      "sourcePath": "references/workspace-hygiene.md",
+      "sha256": "a05362e495f106b80656be8a8b6953c26e15069acb313f6e4839d131a00c7ebf",
+      "bytes": 4722,
+      "disposition": "semantic-reference",
+      "runtimeEvidence": "legacy-openclaw/workspace/references/workspace-hygiene.md"
+    }
+  ]
+}

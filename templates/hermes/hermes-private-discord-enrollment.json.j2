@@ -1,0 +1,50 @@
+{
+  "schemaVersion": 1,
+  "consumerCount": 3,
+  "logicalProfiles": ["astra", "dubble", "rigel"],
+  "profiles": {
+    "astra": {
+      "allowedUsers": ["{{ hermes_automation_owner_user_id }}"],
+      "adminUsers": ["{{ hermes_automation_owner_user_id }}"],
+      "allowedChannels": ["{{ hermes_astra_discord_channel_id }}"],
+      "freeResponseChannels": ["{{ hermes_astra_discord_channel_id }}"],
+      "ignoredChannels": ["{{ hermes_astra_logs_channel_id }}"],
+      "homeChannel": "{{ hermes_astra_discord_channel_id }}",
+      "logChannel": "{{ hermes_astra_logs_channel_id }}",
+      "rigelChannel": null,
+      "channelPrompts": {},
+      "channelSkillBindings": []
+    },
+    "dubble": {
+      "allowedUsers": [],
+      "adminUsers": ["{{ hermes_automation_owner_user_id }}"],
+      "allowedChannels": ["{{ hermes_dubble_parent_channel_id }}"],
+      "freeResponseChannels": ["{{ hermes_dubble_parent_channel_id }}"],
+      "ignoredChannels": ["{{ hermes_dubble_logs_channel_id }}"],
+      "homeChannel": "{{ hermes_dubble_parent_channel_id }}",
+      "logChannel": "{{ hermes_dubble_logs_channel_id }}",
+      "rigelChannel": null,
+      "channelPrompts": {},
+      "channelSkillBindings": []
+    },
+    "rigel": {
+      "allowedUsers": ["{{ hermes_automation_owner_user_id }}"],
+      "adminUsers": ["{{ hermes_automation_owner_user_id }}"],
+      "allowedChannels": ["{{ hermes_rigel_discord_channel_id }}"],
+      "freeResponseChannels": ["{{ hermes_rigel_discord_channel_id }}"],
+      "ignoredChannels": [],
+      "homeChannel": "{{ hermes_rigel_discord_channel_id }}",
+      "logChannel": null,
+      "rigelChannel": "{{ hermes_rigel_discord_channel_id }}",
+      "channelPrompts": {},
+      "channelSkillBindings": [],
+      "discordConsumer": "rigel",
+      "schedulerDeliveryChannel": "{{ hermes_rigel_discord_channel_id }}"
+    }
+  },
+  "botIdentityFingerprints": [
+    "{{ hermes_automation_astra_discord_identity.json.id | string | hash('sha256') }}",
+    "{{ hermes_automation_dubble_discord_identity.json.id | string | hash('sha256') }}",
+    "{{ hermes_automation_rigel_discord_identity.json.id | string | hash('sha256') }}"
+  ]
+}

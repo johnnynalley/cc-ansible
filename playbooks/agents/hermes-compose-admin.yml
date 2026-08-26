@@ -1,0 +1,783 @@
+---
+# Purpose: Enroll Docker hosts in Astra's typed Compose transaction boundary.
+# Hosts: hermes_hosts, docker_hosts, then hermes_hosts for controller promotion.
+# Key vars: hermes_compose_admin_* and hermes_shadow_profiles.
+# Files: files/hermes/plugins/compose-admin.
+# Scripts: scripts/docker/agent-compose-transaction.py and agent validation probes.
+# Validation: focused tests, syntax/list/check, live status/plan, and zero drift.
+
+- name: Prepare Astra's dedicated Compose administration identity
+  hosts: hermes_hosts
+  become: true
+  gather_facts: false
+
+  tasks:
+    - name: Validate Compose administration rollout mode
+      ansible.builtin.assert:
+        that:
+          - hermes_compose_admin_mode in ['disabled', 'converge']
+
+    - name: Skip Compose administration when disabled
+      ansible.builtin.meta: end_host
+      when: hermes_compose_admin_mode == 'disabled'
+
+    - name: Require exact Compose administration authorization
+      ansible.builtin.assert:
+        that:
+          - hermes_compose_admin_approved | bool
+          - hermes_compose_admin_confirmation == hermes_compose_admin_required_confirmation
+          - inventory_hostname == 'jn-t14s-lin'
+
+    - name: Require OpenClaw delivery to remain offline
+      ansible.builtin.command:
+        argv: [/usr/bin/systemctl, is-active, openclaw-isolated-gateway.service]
+      register: hermes_compose_admin_openclaw_state
+      check_mode: false
+      changed_when: false
+      failed_when: hermes_compose_admin_openclaw_state.stdout not in ['inactive', 'failed', 'unknown']
+
+    - name: Stop after Compose credential read-only check-mode preflight
+      ansible.builtin.meta: end_play
+      when: ansible_check_mode
+
+    - name: Inspect dedicated Compose credential paths
+      ansible.builtin.stat:
+        path: "{{ item }}"
+        follow: false
+      loop:
+        - "{{ hermes_compose_admin_private_root }}"
+        - "{{ hermes_compose_admin_private_key }}"
+        - "{{ hermes_compose_admin_private_key }}.pub"
+      register: hermes_compose_admin_credential_paths
+      no_log: true
+
+    - name: Reject linked Compose credential paths
+      ansible.builtin.assert:
+        that:
+          - not item.stat.exists or not item.stat.islnk
+      loop: "{{ hermes_compose_admin_credential_paths.results }}"
+      no_log: true
+
+    - name: Create root-private Compose credential directory
+      ansible.builtin.file:
+        path: "{{ hermes_compose_admin_private_root }}"
+        state: directory
+        owner: root
+        group: root
+        mode: "0700"
+
+    - name: Generate dedicated Compose administration key
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/ssh-keygen
+          - -q
+          - -t
+          - ed25519
+          - -N
+          - ""
+          - -C
+          - hermes-astra-compose-admin
+          - -f
+          - "{{ hermes_compose_admin_private_key }}"
+        creates: "{{ hermes_compose_admin_private_key }}"
+      no_log: true
+
+    - name: Read dedicated Compose administration public key
+      ansible.builtin.slurp:
+        src: "{{ hermes_compose_admin_private_key }}.pub"
+      register: hermes_compose_admin_public_key
+      no_log: true
+
+    - name: Require one valid dedicated Compose public key
+      ansible.builtin.assert:
+        that:
+          - >-
+            hermes_compose_admin_public_key.content | b64decode | trim
+            is match('^ssh-ed25519 [A-Za-z0-9+/]+={0,3} hermes-astra-compose-admin$')
+      no_log: true
+
+- name: Enroll every managed Docker host in typed Compose administration
+  hosts: docker_hosts
+  become: true
+  gather_facts: false
+  serial: 4
+
+  vars:
+    hermes_compose_admin_target_rollback_root: >-
+      /var/backups/hermes-compose-admin/{{ hermes_compose_admin_target_transaction_id }}
+    hermes_compose_admin_target_rollback_archive: >-
+      {{ hermes_compose_admin_target_rollback_root }}/target-state.tar
+    hermes_compose_admin_target_paths:
+      - "{{ hermes_compose_admin_target_live }}"
+      - "{{ hermes_compose_admin_target_identity }}"
+      - "{{ hermes_compose_admin_sudoers }}"
+      - "{{ hermes_compose_admin_home }}"
+      - "{{ hermes_compose_admin_stack_root }}"
+      - "{{ hermes_compose_admin_audit_log }}"
+
+  pre_tasks:
+    - name: Probe Docker host reachability
+      ansible.builtin.ping:
+      register: hermes_compose_admin_connection_probe
+      check_mode: false
+      ignore_unreachable: true
+      ignore_errors: true
+
+    - name: Fail closed when an enrolled Docker host is offline
+      ansible.builtin.assert:
+        that:
+          - hermes_compose_admin_connection_probe is not failed
+          - not (hermes_compose_admin_connection_probe.unreachable | default(false) | bool)
+
+    - name: Freeze one rollback identifier for this Docker host
+      ansible.builtin.set_fact:
+        hermes_compose_admin_target_transaction_id: >-
+          {{ now(utc=true, fmt='%Y%m%dT%H%M%SZ') }}
+
+    - name: Discover the Docker host LAN endpoint
+      ansible.builtin.setup:
+        filter: ansible_default_ipv4
+        gather_subset:
+          - '!all'
+          - '!min'
+          - network
+      check_mode: false
+
+    - name: Require the Docker endpoint on the managed LAN
+      ansible.builtin.assert:
+        that:
+          - ansible_facts.default_ipv4.address is string
+          - ansible_facts.default_ipv4.network == hermes_compose_admin_endpoint_network
+          - ansible_facts.default_ipv4.prefix | string == hermes_compose_admin_endpoint_prefix
+
+  tasks:
+    - name: Require exact target enrollment authorization
+      ansible.builtin.assert:
+        that:
+          - hermes_compose_admin_mode == 'converge'
+          - hermes_compose_admin_approved | bool
+          - hermes_compose_admin_confirmation == hermes_compose_admin_required_confirmation
+
+    - name: Require supported Docker Compose runtime
+      ansible.builtin.command:
+        argv: [/usr/bin/docker, compose, version, --short]
+      register: hermes_compose_admin_compose_version
+      check_mode: false
+      changed_when: false
+
+    - name: Reject prerelease or malformed Compose versions
+      ansible.builtin.assert:
+        that:
+          - hermes_compose_admin_compose_version.stdout is match('^[0-9]+\.[0-9]+\.[0-9]+$')
+
+    - name: Stop after target read-only check-mode preflight
+      ansible.builtin.meta: end_host
+      when: ansible_check_mode
+
+    - name: Inspect prior Compose administration account
+      ansible.builtin.getent:
+        database: passwd
+        key: "{{ hermes_compose_admin_user }}"
+        fail_key: false
+      register: hermes_compose_admin_prior_user
+
+    - name: Inspect prior Compose administration group
+      ansible.builtin.getent:
+        database: group
+        key: "{{ hermes_compose_admin_group }}"
+        fail_key: false
+      register: hermes_compose_admin_prior_group
+
+    - name: Inspect prior Compose target paths
+      ansible.builtin.stat:
+        path: "{{ item }}"
+        follow: false
+      loop: "{{ hermes_compose_admin_target_paths }}"
+      register: hermes_compose_admin_prior_target_paths
+
+    - name: Reject linked Compose target paths
+      ansible.builtin.assert:
+        that:
+          - not item.stat.exists or not item.stat.islnk
+      loop: "{{ hermes_compose_admin_prior_target_paths.results }}"
+
+    - name: Select prior and newly created Compose target paths
+      ansible.builtin.set_fact:
+        hermes_compose_admin_existing_target_paths: >-
+          {{ hermes_compose_admin_prior_target_paths.results | selectattr('stat.exists') | map(attribute='item') | list }}
+        hermes_compose_admin_new_target_paths: >-
+          {{ hermes_compose_admin_prior_target_paths.results | rejectattr('stat.exists') | map(attribute='item') | list }}
+
+    - name: Create local Compose target rollback directory
+      ansible.builtin.file:
+        path: "{{ hermes_compose_admin_target_rollback_root }}"
+        state: directory
+        owner: root
+        group: root
+        mode: "0700"
+
+    - name: Back up prior Compose target paths
+      ansible.builtin.command:
+        argv: >-
+          {{
+            ['/usr/bin/tar', '--acls', '--xattrs', '-C', '/', '-cpf',
+             hermes_compose_admin_target_rollback_archive]
+            + (hermes_compose_admin_existing_target_paths | map('regex_replace', '^/', '') | list)
+          }}
+      when: hermes_compose_admin_existing_target_paths | length > 0
+      changed_when: true
+
+    - name: Verify Compose target rollback archive readability
+      ansible.builtin.command:
+        argv: [/usr/bin/tar, -tf, "{{ hermes_compose_admin_target_rollback_archive }}"]
+      when: hermes_compose_admin_existing_target_paths | length > 0
+      changed_when: false
+
+    - name: Promote bounded Compose target
+      block:
+        - name: Create dedicated Compose administration group
+          ansible.builtin.group:
+            name: "{{ hermes_compose_admin_group }}"
+            system: true
+            state: present
+
+        - name: Create dedicated Compose administration account
+          ansible.builtin.user:
+            name: "{{ hermes_compose_admin_user }}"
+            group: "{{ hermes_compose_admin_group }}"
+            home: "{{ hermes_compose_admin_home }}"
+            shell: /bin/sh
+            system: true
+            create_home: false
+            password_lock: true
+            state: present
+
+        - name: Create root-owned Compose SSH directory
+          ansible.builtin.file:
+            path: "{{ hermes_compose_admin_home }}/.ssh"
+            state: directory
+            owner: root
+            group: "{{ hermes_compose_admin_group }}"
+            mode: "0750"
+
+        - name: Create private managed Compose stack root
+          ansible.builtin.file:
+            path: "{{ hermes_compose_admin_stack_root }}"
+            state: directory
+            owner: root
+            group: root
+            mode: "0700"
+
+        - name: Create private Compose rollback root
+          ansible.builtin.file:
+            path: "{{ hermes_compose_admin_backup_root }}"
+            state: directory
+            owner: root
+            group: root
+            mode: "0700"
+
+        - name: Create private Compose audit log
+          ansible.builtin.file:
+            path: "{{ hermes_compose_admin_audit_log }}"
+            state: touch
+            owner: root
+            group: root
+            mode: "0600"
+            access_time: preserve
+            modification_time: preserve
+
+        - name: Deploy root-owned Compose transaction target
+          ansible.builtin.copy:
+            src: "{{ playbook_dir }}/../../{{ hermes_compose_admin_target_source }}"
+            dest: "{{ hermes_compose_admin_target_live }}"
+            owner: root
+            group: root
+            mode: "0555"
+
+        - name: Deploy root-owned canonical Compose identity
+          ansible.builtin.copy:
+            content: >-
+              {{ {'schemaVersion': 1, 'host': inventory_hostname, 'lanAddress': ansible_facts.default_ipv4.address} | to_nice_json }}
+            dest: "{{ hermes_compose_admin_target_identity }}"
+            owner: root
+            group: root
+            mode: "0444"
+
+        - name: Install no-argument Compose administration sudo boundary
+          ansible.builtin.copy:
+            content: |
+              {{ hermes_compose_admin_user }} ALL=(root) NOPASSWD: {{ hermes_compose_admin_target_live }} ""
+            dest: "{{ hermes_compose_admin_sudoers }}"
+            owner: root
+            group: root
+            mode: "0440"
+            validate: /usr/sbin/visudo -cf %s
+
+        - name: Install sole forced-command Compose administration key
+          ansible.builtin.copy:
+            content: >-
+              restrict,command="/usr/bin/sudo -n {{ hermes_compose_admin_target_live }}",from="{{ hermes_compose_admin_source_cidrs | join(',') }}"
+              {{ hostvars[groups['hermes_hosts'][0]].hermes_compose_admin_public_key.content | b64decode | trim }}
+            dest: "{{ hermes_compose_admin_home }}/.ssh/authorized_keys"
+            owner: root
+            group: "{{ hermes_compose_admin_group }}"
+            mode: "0440"
+          no_log: true
+
+        - name: Smoke-test local Compose status boundary
+          ansible.builtin.command:
+            argv: ["{{ hermes_compose_admin_target_live }}"]
+            stdin: '{"schemaVersion":1,"action":"status"}'
+          register: hermes_compose_admin_target_smoke
+          changed_when: false
+
+        - name: Require successful local Compose status
+          ansible.builtin.assert:
+            that:
+              - (hermes_compose_admin_target_smoke.stdout | from_json).status == 'ok'
+              - (hermes_compose_admin_target_smoke.stdout | from_json).host == inventory_hostname
+              - (hermes_compose_admin_target_smoke.stdout | from_json).action == 'status'
+
+        - name: Read Docker host Ed25519 host key
+          ansible.builtin.slurp:
+            src: /etc/ssh/ssh_host_ed25519_key.pub
+          register: hermes_compose_admin_target_host_key
+          no_log: true
+
+        - name: Record successful Compose target enrollment
+          ansible.builtin.set_fact:
+            hermes_compose_admin_enrolled: true
+            hermes_compose_admin_endpoint_address: "{{ ansible_facts.default_ipv4.address }}"
+            hermes_compose_admin_endpoint_host_key: >-
+              {{ (hermes_compose_admin_target_host_key.content | b64decode | trim).split()[0:2] | join(' ') }}
+          no_log: true
+
+      rescue:
+        - name: Remove mutated prior Compose target paths before restore
+          ansible.builtin.file:
+            path: "{{ item }}"
+            state: absent
+          loop: "{{ hermes_compose_admin_existing_target_paths | default([]) }}"
+          failed_when: false
+
+        - name: Restore prior Compose target archive
+          ansible.builtin.command:
+            argv: [/usr/bin/tar, --acls, --xattrs, -C, /, -xpf, "{{ hermes_compose_admin_target_rollback_archive }}"]
+          when: hermes_compose_admin_existing_target_paths | length > 0
+          changed_when: true
+          failed_when: false
+
+        - name: Remove paths created only by failed Compose enrollment
+          ansible.builtin.file:
+            path: "{{ item }}"
+            state: absent
+          loop: "{{ hermes_compose_admin_new_target_paths | default([]) }}"
+          failed_when: false
+
+        - name: Remove newly created Compose administration account
+          ansible.builtin.user:
+            name: "{{ hermes_compose_admin_user }}"
+            state: absent
+          when: hermes_compose_admin_prior_user.ansible_facts.getent_passwd.get(hermes_compose_admin_user) is none
+          failed_when: false
+
+        - name: Remove newly created Compose administration group
+          ansible.builtin.group:
+            name: "{{ hermes_compose_admin_group }}"
+            state: absent
+          when: hermes_compose_admin_prior_group.ansible_facts.getent_group.get(hermes_compose_admin_group) is none
+          failed_when: false
+
+        - name: Fail after Compose target rollback
+          ansible.builtin.fail:
+            msg: Compose target enrollment failed and prior state was restored.
+
+- name: Promote Astra's native Compose administration plugin
+  hosts: hermes_hosts
+  become: true
+  gather_facts: true
+
+  vars:
+    hermes_compose_admin_astra_profile: >-
+      {{ hermes_shadow_profiles | selectattr('name', 'equalto', 'astra') | first }}
+    hermes_compose_admin_controller_backup_root: >-
+      /srv/live-rollbacks/{{ inventory_hostname }}/hermes-migration/{{ ansible_facts.date_time.iso8601_basic_short }}-pre-compose-admin
+    hermes_compose_admin_controller_backup_archive: >-
+      {{ hermes_compose_admin_controller_backup_root }}/compose-admin.tar
+    hermes_compose_admin_dropin: /etc/systemd/system/hermes-gateway-astra.service.d/10-managed.conf
+    hermes_compose_admin_controller_paths:
+      - "{{ hermes_compose_admin_known_hosts }}"
+      - "{{ hermes_compose_admin_endpoints }}"
+      - "{{ hermes_compose_admin_validator_live }}"
+      - "{{ hermes_compose_admin_smoke_live }}"
+      - "{{ hermes_compose_admin_plugin_managed_root }}"
+      - "{{ hermes_compose_admin_plugin_runtime_root }}"
+      - /etc/hermes/astra/config.yaml
+      - /etc/hermes/astra/managed-policy.sha256
+      - "{{ hermes_compose_admin_dropin }}"
+
+  tasks:
+    - name: Require exact Compose controller promotion authorization
+      ansible.builtin.assert:
+        that:
+          - hermes_compose_admin_mode == 'converge'
+          - hermes_compose_admin_approved | bool
+          - hermes_compose_admin_confirmation == hermes_compose_admin_required_confirmation
+
+    - name: Stop after Compose promotion read-only check-mode preflight
+      ansible.builtin.meta: end_play
+      when: ansible_check_mode
+
+    - name: Build enrolled Compose endpoint records
+      ansible.builtin.set_fact:
+        hermes_compose_admin_endpoint_records: >-
+          {{ (hermes_compose_admin_endpoint_records | default([])) + [{'name': item, 'address': hostvars[item].hermes_compose_admin_endpoint_address}] }}
+        hermes_compose_admin_host_key_records: >-
+          {{ (hermes_compose_admin_host_key_records | default({})) | combine({item: hostvars[item].hermes_compose_admin_endpoint_host_key}) }}
+      loop: "{{ groups['docker_hosts'] | sort }}"
+      when: hostvars[item].hermes_compose_admin_enrolled | default(false) | bool
+      no_log: true
+
+    - name: Require complete current Docker host coverage
+      ansible.builtin.assert:
+        that:
+          - hermes_compose_admin_endpoint_records | map(attribute='name') | sort == groups['docker_hosts'] | sort
+          - hermes_compose_admin_host_key_records.keys() | length == groups['docker_hosts'] | length
+
+    - name: Inspect prior Compose controller paths
+      ansible.builtin.stat:
+        path: "{{ item }}"
+        follow: false
+      loop: "{{ hermes_compose_admin_controller_paths }}"
+      register: hermes_compose_admin_prior_controller_paths
+
+    - name: Reject linked Compose controller paths
+      ansible.builtin.assert:
+        that:
+          - not item.stat.exists or not item.stat.islnk
+      loop: "{{ hermes_compose_admin_prior_controller_paths.results }}"
+
+    - name: Select prior and new Compose controller paths
+      ansible.builtin.set_fact:
+        hermes_compose_admin_existing_controller_paths: >-
+          {{ hermes_compose_admin_prior_controller_paths.results | selectattr('stat.exists') | map(attribute='item') | list }}
+        hermes_compose_admin_new_controller_paths: >-
+          {{ hermes_compose_admin_prior_controller_paths.results | rejectattr('stat.exists') | map(attribute='item') | list }}
+        hermes_compose_admin_restart_attempted: false
+
+    - name: Verify live rollback storage before Compose promotion
+      ansible.builtin.command:
+        argv: [/usr/bin/mountpoint, -q, /srv/live-rollbacks]
+      changed_when: false
+
+    - name: Create Compose controller rollback directory
+      ansible.builtin.file:
+        path: "{{ hermes_compose_admin_controller_backup_root }}"
+        state: directory
+        owner: root
+        group: root
+        mode: "0700"
+
+    - name: Back up prior Compose controller paths
+      ansible.builtin.command:
+        argv: >-
+          {{
+            ['/usr/bin/tar', '--acls', '--xattrs', '-C', '/', '-cpf',
+             hermes_compose_admin_controller_backup_archive]
+            + (hermes_compose_admin_existing_controller_paths | map('regex_replace', '^/', '') | list)
+          }}
+      changed_when: true
+
+    - name: Verify Compose controller rollback archive readability
+      ansible.builtin.command:
+        argv: [/usr/bin/tar, -tf, "{{ hermes_compose_admin_controller_backup_archive }}"]
+      changed_when: false
+
+    - name: Read prior Astra Gateway state
+      ansible.builtin.command:
+        argv: [/usr/bin/systemctl, is-active, hermes-gateway-astra.service]
+      register: hermes_compose_admin_prior_astra_state
+      changed_when: false
+      failed_when: false
+
+    - name: Promote Compose administration controller state
+      block:
+        - name: Publish enrolled Compose endpoint manifest
+          ansible.builtin.copy:
+            content: >-
+              {{ {'schemaVersion': 1, 'hosts': hermes_compose_admin_endpoint_records | sort(attribute='name')} | to_nice_json }}
+            dest: "{{ hermes_compose_admin_endpoints }}"
+            owner: root
+            group: hermes-astra
+            mode: "0440"
+          register: hermes_compose_admin_endpoints_copy
+
+        - name: Publish pinned Compose known hosts
+          ansible.builtin.copy:
+            content: |
+              {% for item in hermes_compose_admin_endpoint_records | sort(attribute='name') %}
+              {{ item.address }} {{ hermes_compose_admin_host_key_records[item.name] }}
+              {% endfor %}
+            dest: "{{ hermes_compose_admin_known_hosts }}"
+            owner: root
+            group: hermes-astra
+            mode: "0440"
+          register: hermes_compose_admin_known_hosts_copy
+          no_log: true
+
+        - name: Create root-owned Compose plugin directories
+          ansible.builtin.file:
+            path: "{{ item }}"
+            state: directory
+            owner: root
+            group: hermes-astra
+            mode: "0750"
+          loop:
+            - "{{ hermes_compose_admin_plugin_managed_root }}"
+            - "{{ hermes_compose_admin_plugin_runtime_root }}"
+
+        - name: Deploy root-owned Compose plugin copies
+          ansible.builtin.copy:
+            src: "{{ playbook_dir }}/../../{{ hermes_compose_admin_plugin_source }}/{{ item.1 }}"
+            dest: "{{ item.0 }}/{{ item.1 }}"
+            owner: root
+            group: hermes-astra
+            mode: "0440"
+          loop: >-
+            {{ [hermes_compose_admin_plugin_managed_root, hermes_compose_admin_plugin_runtime_root] | product(['__init__.py', 'plugin.yaml']) | list }}
+          register: hermes_compose_admin_plugin_copies
+
+        - name: Deploy Compose validator and smoke probe
+          ansible.builtin.copy:
+            src: "{{ playbook_dir }}/../../{{ item.source }}"
+            dest: "{{ item.destination }}"
+            owner: root
+            group: root
+            mode: "0555"
+          loop:
+            - source: "{{ hermes_compose_admin_validator_source }}"
+              destination: "{{ hermes_compose_admin_validator_live }}"
+            - source: "{{ hermes_compose_admin_smoke_source }}"
+              destination: "{{ hermes_compose_admin_smoke_live }}"
+          register: hermes_compose_admin_script_copies
+
+        - name: Remove Compose plugin bytecode drift
+          ansible.builtin.file:
+            path: "{{ item }}/__pycache__"
+            state: absent
+          loop:
+            - "{{ hermes_compose_admin_plugin_managed_root }}"
+            - "{{ hermes_compose_admin_plugin_runtime_root }}"
+
+        - name: Render Astra policy with Compose administration toolset
+          ansible.builtin.template:
+            src: "{{ playbook_dir }}/../../templates/hermes/hermes-managed-config.yaml.j2"
+            dest: /etc/hermes/astra/config.yaml
+            owner: root
+            group: hermes-astra
+            mode: "0440"
+          vars:
+            hermes_profile: "{{ hermes_compose_admin_astra_profile }}"
+          register: hermes_compose_admin_policy_copy
+
+        - name: Deploy Astra drop-in with Compose credential and plugin
+          ansible.builtin.template:
+            src: "{{ playbook_dir }}/../../templates/hermes/hermes-gateway-hardening.conf.j2"
+            dest: "{{ hermes_compose_admin_dropin }}"
+            owner: root
+            group: root
+            mode: "0644"
+          vars:
+            hermes_profile: "{{ hermes_compose_admin_astra_profile }}"
+          register: hermes_compose_admin_dropin_copy
+
+        - name: Hash Astra policy and environment
+          ansible.builtin.command:
+            argv: [/usr/bin/sha256sum, /etc/hermes/astra/config.yaml, /etc/hermes/astra/.env]
+          register: hermes_compose_admin_policy_hash
+          changed_when: false
+          no_log: true
+
+        - name: Publish Astra managed policy checksum
+          ansible.builtin.copy:
+            content: "{{ hermes_compose_admin_policy_hash.stdout }}\n"
+            dest: /etc/hermes/astra/managed-policy.sha256
+            owner: root
+            group: hermes-astra
+            mode: "0440"
+          register: hermes_compose_admin_checksum_copy
+          no_log: true
+
+        - name: Reload systemd after Compose administration promotion
+          ansible.builtin.systemd_service:
+            daemon_reload: true
+
+        - name: Validate merged Astra config as its service identity
+          ansible.builtin.command:
+            argv:
+              - /usr/sbin/runuser
+              - --user
+              - hermes-astra
+              - --
+              - /usr/bin/env
+              - HOME=/var/lib/hermes/astra
+              - HERMES_HOME=/var/lib/hermes/astra/.hermes/profiles/astra
+              - HERMES_MANAGED_DIR=/etc/hermes/astra
+              - HERMES_DOCKER_BINARY=/usr/bin/podman
+              - "{{ hermes_shadow_runtime_binary }}"
+              - config
+              - check
+          changed_when: false
+          no_log: true
+
+        - name: Validate promoted Compose administration boundary
+          ansible.builtin.command:
+            argv:
+              - "{{ hermes_shadow_runtime_venv }}/bin/python"
+              - "{{ hermes_compose_admin_validator_live }}"
+              - --source-root
+              - "{{ hermes_compose_admin_plugin_managed_root }}"
+              - --runtime-root
+              - "{{ hermes_compose_admin_plugin_runtime_root }}"
+              - --config
+              - /etc/hermes/astra/config.yaml
+              - --endpoints
+              - "{{ hermes_compose_admin_endpoints }}"
+              - --known-hosts
+              - "{{ hermes_compose_admin_known_hosts }}"
+          changed_when: false
+
+        - name: Determine whether Astra needs one Compose administration restart
+          ansible.builtin.set_fact:
+            hermes_compose_admin_restart_required: >-
+              {{
+                hermes_compose_admin_endpoints_copy.changed
+                or hermes_compose_admin_known_hosts_copy.changed
+                or hermes_compose_admin_policy_copy.changed
+                or hermes_compose_admin_dropin_copy.changed
+                or hermes_compose_admin_checksum_copy.changed
+                or hermes_compose_admin_plugin_copies.results | selectattr('changed') | list | length > 0
+              }}
+
+        - name: Prepare Astra planned-stop marker for Compose administration
+          ansible.builtin.include_tasks:
+            file: ../../tasks/hermes-planned-stop-marker.yml
+          vars:
+            hermes_planned_stop_profile: "{{ hermes_compose_admin_astra_profile }}"
+          when: hermes_compose_admin_restart_required | bool
+
+        - name: Record Compose administration restart attempt
+          ansible.builtin.set_fact:
+            hermes_compose_admin_restart_attempted: true
+          when: hermes_compose_admin_restart_required | bool
+
+        - name: Restart only Astra for Compose administration promotion
+          ansible.builtin.systemd_service:
+            name: hermes-gateway-astra.service
+            state: restarted
+          when: hermes_compose_admin_restart_required | bool
+
+        - name: Wait for Astra readiness after Compose administration
+          ansible.builtin.command:
+            argv: [/usr/bin/systemctl, is-active, hermes-gateway-astra.service]
+          register: hermes_compose_admin_astra_state
+          retries: 45
+          delay: 2
+          until:
+            - hermes_compose_admin_astra_state.rc == 0
+            - hermes_compose_admin_astra_state.stdout == 'active'
+          changed_when: false
+
+        - name: Exercise every Compose host as the real Astra identity
+          ansible.builtin.command:
+            argv:
+              - /usr/bin/systemd-run
+              - --quiet
+              - --wait
+              - --pipe
+              - --collect
+              - --unit=hermes-compose-admin-smoke
+              - --property=User=hermes-astra
+              - --property=Group=hermes-astra
+              - >-
+                --property=LoadCredential=agent-compose-key:{{ hermes_compose_admin_private_key }}
+              - "{{ hermes_shadow_runtime_venv }}/bin/python"
+              - "{{ hermes_compose_admin_smoke_live }}"
+              - --plugin
+              - "{{ hermes_compose_admin_plugin_runtime_root }}"
+          register: hermes_compose_admin_live_smoke
+          changed_when: false
+
+        - name: Require exact Compose host smoke coverage
+          ansible.builtin.assert:
+            that:
+              - (hermes_compose_admin_live_smoke.stdout | from_json).status == 'ok'
+              - >-
+                (hermes_compose_admin_live_smoke.stdout | from_json).results | map(attribute='host') | sort
+                == groups['docker_hosts'] | sort
+
+        - name: Remove validation bytecode after Compose acceptance
+          ansible.builtin.file:
+            path: "{{ item }}/__pycache__"
+            state: absent
+          loop:
+            - "{{ hermes_compose_admin_plugin_managed_root }}"
+            - "{{ hermes_compose_admin_plugin_runtime_root }}"
+
+      rescue:
+        - name: Remove mutated prior Compose controller paths before restore
+          ansible.builtin.file:
+            path: "{{ item }}"
+            state: absent
+          loop: "{{ hermes_compose_admin_existing_controller_paths | default([]) }}"
+          failed_when: false
+
+        - name: Restore prior Compose controller archive
+          ansible.builtin.command:
+            argv: [/usr/bin/tar, --acls, --xattrs, -C, /, -xpf, "{{ hermes_compose_admin_controller_backup_archive }}"]
+          changed_when: true
+          failed_when: false
+
+        - name: Remove paths created only by failed Compose controller promotion
+          ansible.builtin.file:
+            path: "{{ item }}"
+            state: absent
+          loop: "{{ hermes_compose_admin_new_controller_paths | default([]) }}"
+          failed_when: false
+
+        - name: Reload restored systemd state
+          ansible.builtin.systemd_service:
+            daemon_reload: true
+          failed_when: false
+
+        - name: Restart Astra after changed Compose rollback
+          ansible.builtin.systemd_service:
+            name: hermes-gateway-astra.service
+            state: restarted
+          when:
+            - hermes_compose_admin_restart_attempted | default(false) | bool
+            - hermes_compose_admin_prior_astra_state.stdout == 'active'
+          failed_when: false
+
+        - name: Restore Astra if dependency propagation stopped it
+          ansible.builtin.systemd_service:
+            name: hermes-gateway-astra.service
+            state: started
+          when: hermes_compose_admin_prior_astra_state.stdout == 'active'
+          failed_when: false
+
+        - name: Wait for prior active Astra state after Compose rollback
+          ansible.builtin.command:
+            argv: [/usr/bin/systemctl, is-active, hermes-gateway-astra.service]
+          register: hermes_compose_admin_restored_astra_state
+          retries: 45
+          delay: 2
+          until:
+            - hermes_compose_admin_restored_astra_state.rc == 0
+            - hermes_compose_admin_restored_astra_state.stdout == 'active'
+          when: hermes_compose_admin_prior_astra_state.stdout == 'active'
+          changed_when: false
+
+        - name: Fail after Compose administration controller rollback
+          ansible.builtin.fail:
+            msg: Compose administration promotion failed and prior Astra state was restored.

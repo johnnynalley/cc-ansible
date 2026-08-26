@@ -54,9 +54,7 @@ class HermesRigelScheduleTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temporary = tempfile.TemporaryDirectory()
         self.home = Path(self.temporary.name)
-        self.source_root = (
-            self.home / "transformed-managed" / "imports" / "courses"
-        )
+        self.source_root = self.home / "imported-data" / "courses"
         self.source_root.mkdir(parents=True)
         (self.home / "state").mkdir()
 
@@ -112,10 +110,24 @@ class HermesRigelScheduleTests(unittest.TestCase):
             )
         )
 
-    def test_missing_source_is_silent_and_records_health_error(self) -> None:
+    def test_missing_source_is_healthy_silent_uninitialized_state(self) -> None:
         self.assertEqual(MODULE.run(self.home, NOW), "")
-        self.assertFalse(self.health()["healthy"])
-        self.assertEqual(self.health()["errorCode"], "source-missing")
+        self.assertTrue(self.health()["healthy"])
+        self.assertEqual(self.health()["status"], "idle-uninitialized")
+        self.assertEqual(self.health()["errorCode"], "")
+
+    def test_retired_transform_source_is_not_runtime_authority(self) -> None:
+        transformed = (
+            self.home
+            / "transformed-managed"
+            / "imports"
+            / "courses"
+            / "academic-state.json"
+        )
+        transformed.parent.mkdir(parents=True)
+        transformed.write_text(json.dumps(source(events=[event()])), encoding="utf-8")
+        self.assertEqual(MODULE.run(self.home, NOW), "")
+        self.assertEqual(self.health()["status"], "idle-uninitialized")
 
     def test_empty_active_semester_is_silent(self) -> None:
         self.write_source(source())

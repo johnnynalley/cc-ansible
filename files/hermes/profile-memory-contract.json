@@ -17,12 +17,12 @@
         {
           "name": "MEMORY.md",
           "source": "files/hermes/profile-memory/astra/MEMORY.md.vault",
-          "charLimit": 2200
+          "charLimit": 6000
         },
         {
           "name": "USER.md",
           "source": "files/hermes/profile-memory/astra/USER.md.vault",
-          "charLimit": 1375
+          "charLimit": 6000
         }
       ]
     },
@@ -68,7 +68,7 @@
     "messagingActivationAllowed": false,
     "providerCredentialRequired": false,
     "modelInvocationAllowed": false,
-    "automaticMemoryApprovalAllowed": false,
+    "automaticMemoryApprovalAllowed": true,
     "sourceMutationAllowed": false
   }
 }

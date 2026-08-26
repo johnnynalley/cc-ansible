@@ -18,14 +18,72 @@
     state: present
   when: ansible_facts.os_family == "Archlinux"
 
-- name: Create mount point directories
-  ansible.builtin.file:
-    path: "{{ item.path }}"
-    state: directory
-    owner: "{{ item.owner | default('root') }}"
-    group: "{{ item.group | default('root') }}"
-    mode: "{{ item.mode | default('0755') }}"
+- name: Probe NFS mount point readability
+  ansible.builtin.command:
+    argv:
+      - /usr/bin/stat
+      - --format=%d:%i
+      - "{{ item.path }}"
   loop: "{{ nfs_mounts | default([]) }}"
+  loop_control:
+    label: "{{ item.path }}"
+  register: nfs_mount_point_probes
+  changed_when: false
+  failed_when: false
+  check_mode: false
+
+- name: Resolve generated units for stale NFS mounts
+  ansible.builtin.command:
+    argv:
+      - /usr/bin/systemd-escape
+      - --path
+      - --suffix=mount
+      - "{{ item.item.path }}"
+  loop: "{{ nfs_mount_point_probes.results }}"
+  loop_control:
+    label: "{{ item.item.path }}"
+  when:
+    - item.rc != 0
+    - "'Stale file handle' in item.stderr"
+  register: nfs_stale_mount_units
+  changed_when: false
+
+- name: Reconnect stale NFS mounts
+  ansible.builtin.systemd_service:
+    name: "{{ item.stdout }}"
+    state: restarted
+  loop: "{{ nfs_stale_mount_units.results }}"
+  loop_control:
+    label: "{{ item.item.item.path }}"
+  when: not (item.skipped | default(false))
+
+- name: Verify recovered NFS mount points
+  ansible.builtin.command:
+    argv:
+      - /usr/bin/stat
+      - --format=%d:%i
+      - "{{ item.item.item.path }}"
+  loop: "{{ nfs_stale_mount_units.results }}"
+  loop_control:
+    label: "{{ item.item.item.path }}"
+  when:
+    - not ansible_check_mode
+    - not (item.skipped | default(false))
+  changed_when: false
+
+- name: Create missing mount point directories
+  ansible.builtin.file:
+    path: "{{ item.item.path }}"
+    state: directory
+    owner: "{{ item.item.owner | default('root') }}"
+    group: "{{ item.item.group | default('root') }}"
+    mode: "{{ item.item.mode | default('0755') }}"
+  loop: "{{ nfs_mount_point_probes.results }}"
+  loop_control:
+    label: "{{ item.item.path }}"
+  when:
+    - item.rc != 0
+    - "'Stale file handle' not in item.stderr"
 
 - name: Mount NFS shares
   ansible.posix.mount:
@@ -34,6 +92,15 @@
     fstype: nfs4
     opts: "{{ item.opts | default('defaults,_netdev,nofail,soft,timeo=50,retrans=3') }}"
     state: mounted
+  loop: "{{ nfs_mounts | default([]) }}"
+
+- name: Reconcile NFS mount point ownership
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    state: directory
+    owner: "{{ item.owner | default('root') }}"
+    group: "{{ item.group | default('root') }}"
+    mode: "{{ item.mode | default('0755') }}"
   loop: "{{ nfs_mounts | default([]) }}"
 
 - name: Deploy live rollback backup helper

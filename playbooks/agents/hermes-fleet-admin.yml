@@ -1,0 +1,917 @@
+---
+# Purpose: Promote Astra's owner-only native profile administration boundary.
+# Hosts: hermes_hosts.
+# Key vars: hermes_fleet_admin_*.
+# Validation: focused tests, syntax/list/check, provenance and boundary smokes.
+
+- name: Promote owner-only Astra fleet administration
+  hosts: hermes_hosts
+  become: true
+  gather_facts: true
+
+  vars:
+    hermes_fleet_admin_astra_profile: >-
+      {{ hermes_shadow_profiles | selectattr('name', 'equalto', 'astra') | first }}
+    hermes_fleet_admin_backup_id: >-
+      {{ ansible_facts.date_time.iso8601_basic_short }}-pre-fleet-admin
+    hermes_fleet_admin_backup_dir: >-
+      {{ hermes_fleet_admin_rollback_root }}/{{ hermes_fleet_admin_backup_id }}
+    hermes_fleet_admin_backup_archive: >-
+      {{ hermes_fleet_admin_backup_dir }}/files.tar
+    hermes_fleet_admin_dropin: >-
+      /etc/systemd/system/hermes-gateway-astra.service.d/40-fleet-admin.conf
+    hermes_fleet_admin_candidate_paths:
+      - "{{ hermes_fleet_admin_private_root }}"
+      - "{{ hermes_fleet_admin_broker_live }}"
+      - "{{ hermes_fleet_admin_validator_live }}"
+      - "{{ hermes_fleet_admin_smoke_live }}"
+      - "{{ hermes_fleet_admin_service_unit }}"
+      - "{{ hermes_fleet_admin_policy_live }}"
+      - "{{ hermes_fleet_admin_plugin_managed_root }}"
+      - "{{ hermes_fleet_admin_plugin_runtime_root }}"
+      - /etc/hermes/astra/config.yaml
+      - /etc/hermes/astra/managed-policy.sha256
+      - "{{ hermes_fleet_admin_dropin }}"
+
+  tasks:
+    - name: Validate fleet administration rollout mode
+      ansible.builtin.assert:
+        that:
+          - hermes_fleet_admin_mode in ['disabled', 'converge']
+
+    - name: Skip fleet administration promotion when disabled
+      ansible.builtin.meta: end_host
+      when: hermes_fleet_admin_mode == 'disabled'
+
+    - name: Require exact fleet administration authorization
+      ansible.builtin.assert:
+        that:
+          - hermes_fleet_admin_approved | bool
+          - hermes_fleet_admin_confirmation == hermes_fleet_admin_required_confirmation
+          - inventory_hostname == 'jn-t14s-lin'
+          - hermes_automation_owner_user_id is match('^[0-9]+$')
+          - hermes_rigel_discord_guild_id is match('^[0-9]+$')
+          - hermes_astra_discord_channel_id is match('^[0-9]+$')
+          - hermes_fleet_admin_astra_profile.name == 'astra'
+          - hermes_fleet_admin_astra_profile.user == 'hermes-astra'
+          - "'fleet-admin' in hermes_fleet_admin_astra_profile.plugins_enabled"
+          - "'fleet_admin' in hermes_fleet_admin_astra_profile.toolsets"
+        fail_msg: Fleet administration requires exact owner-provenance policy and authorization.
+
+    - name: Inspect fleet administration dependencies
+      ansible.builtin.stat:
+        path: "{{ item.path }}"
+        follow: false
+      loop:
+        - path: /etc/hermes/astra
+          kind: directory
+          owner: root
+          group: hermes-astra
+        - path: /etc/hermes/astra/.env
+          kind: file
+        - path: /etc/hermes/astra/config.yaml
+          kind: file
+        - path: /var/lib/hermes/astra/.hermes/profiles/astra/state.db
+          kind: file
+        - path: /var/lib/hermes/astra/.hermes/profiles/astra/config.yaml
+          kind: file
+        - path: /var/lib/hermes/dubble/.hermes/profiles/dubble
+          kind: directory
+        - path: /var/lib/hermes/dubble/.hermes/profiles/dubble/config.yaml
+          kind: file
+        - path: /var/lib/hermes/rigel/.hermes/profiles/rigel
+          kind: directory
+        - path: /var/lib/hermes/rigel/.hermes/profiles/rigel/config.yaml
+          kind: file
+        - path: /var/lib/hermes/profile-data/astra/writable
+          kind: directory
+        - path: /var/lib/hermes/profile-data/dubble/writable
+          kind: directory
+        - path: /var/lib/hermes/profile-data/rigel/writable
+          kind: directory
+        - path: /etc/hermes/dubble/config.yaml
+          kind: file
+        - path: /etc/hermes/rigel/config.yaml
+          kind: file
+      register: hermes_fleet_admin_dependencies
+
+    - name: Require safe fleet administration dependencies
+      ansible.builtin.assert:
+        quiet: true
+        that:
+          - item.stat.exists | default(false)
+          - not (item.stat.islnk | default(false))
+          - >-
+            (item.item.kind == 'file' and item.stat.isreg | default(false))
+            or (item.item.kind == 'directory' and item.stat.isdir | default(false))
+          - item.item.owner is not defined or item.stat.pw_name == item.item.owner
+          - item.item.group is not defined or item.stat.gr_name == item.item.group
+          - item.item.mode is not defined or item.stat.mode == item.item.mode
+      loop: "{{ hermes_fleet_admin_dependencies.results }}"
+      loop_control:
+        label: "{{ item.item.path }}"
+
+    - name: Require OpenClaw delivery to remain offline
+      ansible.builtin.command:
+        argv: [/usr/bin/systemctl, is-active, openclaw-isolated-gateway.service]
+      register: hermes_fleet_admin_openclaw_state
+      changed_when: false
+      check_mode: false
+      failed_when: >-
+        hermes_fleet_admin_openclaw_state.stdout not in ['inactive', 'failed', 'unknown']
+
+    - name: Inspect prior fleet administration group
+      ansible.builtin.getent:
+        database: group
+        key: "{{ hermes_fleet_admin_group }}"
+        fail_key: false
+      register: hermes_fleet_admin_prior_group
+
+    - name: Read prior fleet broker state
+      ansible.builtin.command:
+        argv: [/usr/bin/systemctl, is-active, hermes-fleet-admin.service]
+      register: hermes_fleet_admin_prior_broker_state
+      changed_when: false
+      check_mode: false
+      failed_when: false
+
+    - name: Read prior Astra Gateway state
+      ansible.builtin.command:
+        argv: [/usr/bin/systemctl, is-active, hermes-gateway-astra.service]
+      register: hermes_fleet_admin_prior_astra_state
+      changed_when: false
+      check_mode: false
+      failed_when: false
+
+    - name: Inspect fleet administration promotion paths
+      ansible.builtin.stat:
+        path: "{{ item }}"
+        follow: false
+      loop: "{{ hermes_fleet_admin_candidate_paths }}"
+      register: hermes_fleet_admin_prior_paths
+
+    - name: Inspect prior fleet key material
+      ansible.builtin.stat:
+        path: "{{ item }}"
+        follow: false
+      loop:
+        - "{{ hermes_fleet_admin_key }}"
+        - "{{ hermes_fleet_admin_gateway_environment }}"
+      register: hermes_fleet_admin_prior_key_paths
+      no_log: true
+
+    - name: Require safe retained fleet key material
+      ansible.builtin.assert:
+        that:
+          - not (item.stat.exists | default(false)) or (item.stat.isreg | default(false))
+          - not (item.stat.exists | default(false)) or not (item.stat.islnk | default(false))
+          - not (item.stat.exists | default(false)) or item.stat.pw_name == 'root'
+          - not (item.stat.exists | default(false)) or item.stat.gr_name == 'root'
+          - not (item.stat.exists | default(false)) or item.stat.mode == '0400'
+      loop: "{{ hermes_fleet_admin_prior_key_paths.results }}"
+      loop_control:
+        label: "{{ item.item }}"
+      no_log: true
+
+    - name: Classify existing fleet administration paths
+      ansible.builtin.set_fact:
+        hermes_fleet_admin_existing_paths: >-
+          {{ hermes_fleet_admin_prior_paths.results
+             | selectattr('stat.exists') | map(attribute='item') | list }}
+        hermes_fleet_admin_new_paths: >-
+          {{ hermes_fleet_admin_prior_paths.results
+             | rejectattr('stat.exists') | map(attribute='item') | list }}
+        hermes_fleet_admin_restart_attempted: false
+
+    - name: Verify off-host rollback mount before fleet promotion
+      ansible.builtin.command:
+        argv: [/usr/bin/mountpoint, -q, /srv/live-rollbacks]
+      changed_when: false
+      check_mode: false
+
+    - name: Create targeted fleet administration rollback directory
+      ansible.builtin.file:
+        path: "{{ hermes_fleet_admin_backup_dir }}"
+        state: directory
+        owner: root
+        group: root
+        mode: "0700"
+
+    - name: Back up current fleet administration and Astra policy paths
+      ansible.builtin.command:
+        argv: >-
+          {{ ['/usr/bin/tar', '--acls', '--xattrs', '-C', '/', '-cpf',
+              hermes_fleet_admin_backup_archive]
+             + (hermes_fleet_admin_existing_paths
+                | map('regex_replace', '^/', '') | list) }}
+      when: hermes_fleet_admin_existing_paths | length > 0
+      changed_when: true
+      no_log: true
+
+    - name: Restore platform-owned Astra managed scope traversal
+      ansible.builtin.file:
+        path: /etc/hermes/astra
+        state: directory
+        owner: root
+        group: hermes-astra
+        mode: "0750"
+      register: hermes_fleet_admin_scope_permissions
+
+    - name: Read current Astra native configuration
+      ansible.builtin.slurp:
+        path: /etc/hermes/astra/config.yaml
+      register: hermes_fleet_admin_current_config_raw
+      no_log: true
+
+    - name: Derive append-only Astra fleet configuration
+      ansible.builtin.set_fact:
+        hermes_fleet_admin_current_config: >-
+          {{ hermes_fleet_admin_current_config_raw.content | b64decode | from_yaml }}
+        hermes_fleet_admin_current_plugins: >-
+          {{ (hermes_fleet_admin_current_config_raw.content | b64decode | from_yaml)
+             .plugins.enabled }}
+        hermes_fleet_admin_current_toolsets: >-
+          {{ (hermes_fleet_admin_current_config_raw.content | b64decode | from_yaml)
+             .toolsets }}
+        hermes_fleet_admin_target_plugins: >-
+          {{ ((hermes_fleet_admin_current_config_raw.content | b64decode | from_yaml)
+              .plugins.enabled + ['fleet-admin']) | unique | list }}
+        hermes_fleet_admin_target_toolsets: >-
+          {{ ((hermes_fleet_admin_current_config_raw.content | b64decode | from_yaml)
+              .toolsets + ['fleet_admin']) | unique | list }}
+      no_log: true
+
+    - name: Require list-typed Astra plugin and toolset configuration
+      ansible.builtin.assert:
+        quiet: true
+        that:
+          - hermes_fleet_admin_current_config is mapping
+          - hermes_fleet_admin_current_config.plugins is mapping
+          - hermes_fleet_admin_current_plugins is sequence
+          - hermes_fleet_admin_current_plugins is not string
+          - hermes_fleet_admin_current_toolsets is sequence
+          - hermes_fleet_admin_current_toolsets is not string
+      no_log: true
+
+    - name: Read retained fleet HMAC key
+      ansible.builtin.slurp:
+        path: "{{ hermes_fleet_admin_key }}"
+      register: hermes_fleet_admin_existing_key
+      when: hermes_fleet_admin_prior_key_paths.results[0].stat.exists | default(false)
+      no_log: true
+
+    - name: Read retained fleet Gateway environment
+      ansible.builtin.slurp:
+        path: "{{ hermes_fleet_admin_gateway_environment }}"
+      register: hermes_fleet_admin_existing_environment
+      when: hermes_fleet_admin_prior_key_paths.results[1].stat.exists | default(false)
+      no_log: true
+
+    - name: Parse retained fleet Gateway environment key
+      ansible.builtin.set_fact:
+        hermes_fleet_admin_environment_key_value: >-
+          {{ hermes_fleet_admin_existing_environment.content | b64decode
+             | regex_findall('(?m)^GATEWAY_RELAY_FLEET_ADMIN_KEY=([^\r\n]+)$')
+             | first }}
+      when: hermes_fleet_admin_prior_key_paths.results[1].stat.exists | default(false)
+      no_log: true
+
+    - name: Reject conflicting retained fleet HMAC copies
+      ansible.builtin.assert:
+        that:
+          - >-
+            hermes_fleet_admin_existing_key.content | b64decode | trim
+            == hermes_fleet_admin_environment_key_value
+      when:
+        - hermes_fleet_admin_prior_key_paths.results[0].stat.exists | default(false)
+        - hermes_fleet_admin_prior_key_paths.results[1].stat.exists | default(false)
+      no_log: true
+
+    - name: Generate initial fleet HMAC key
+      ansible.builtin.command:
+        argv: [/usr/bin/openssl, rand, -hex, '32']
+      register: hermes_fleet_admin_generated_key
+      when:
+        - not (hermes_fleet_admin_prior_key_paths.results[0].stat.exists | default(false))
+        - not (hermes_fleet_admin_prior_key_paths.results[1].stat.exists | default(false))
+      check_mode: false
+      changed_when: false
+      no_log: true
+
+    - name: Retain authoritative fleet HMAC key file
+      ansible.builtin.set_fact:
+        hermes_fleet_admin_key_value: >-
+          {{ hermes_fleet_admin_existing_key.content | b64decode | trim }}
+      when: hermes_fleet_admin_prior_key_paths.results[0].stat.exists | default(false)
+      no_log: true
+
+    - name: Recover authoritative fleet HMAC key from Gateway environment
+      ansible.builtin.set_fact:
+        hermes_fleet_admin_key_value: "{{ hermes_fleet_admin_environment_key_value }}"
+      when:
+        - not (hermes_fleet_admin_prior_key_paths.results[0].stat.exists | default(false))
+        - hermes_fleet_admin_prior_key_paths.results[1].stat.exists | default(false)
+      no_log: true
+
+    - name: Adopt newly generated fleet HMAC key
+      ansible.builtin.set_fact:
+        hermes_fleet_admin_key_value: "{{ hermes_fleet_admin_generated_key.stdout | trim }}"
+      when:
+        - not (hermes_fleet_admin_prior_key_paths.results[0].stat.exists | default(false))
+        - not (hermes_fleet_admin_prior_key_paths.results[1].stat.exists | default(false))
+      no_log: true
+
+    - name: Require a bounded fleet HMAC key
+      ansible.builtin.assert:
+        that:
+          - hermes_fleet_admin_key_value is match('^[a-f0-9]{64}$')
+      no_log: true
+
+    - name: Promote owner-only fleet administration
+      block:
+        - name: Create fleet administration socket group
+          ansible.builtin.group:
+            name: "{{ hermes_fleet_admin_group }}"
+            system: true
+            state: present
+
+        - name: Create fleet administration private and runtime data roots
+          ansible.builtin.file:
+            path: "{{ item.path }}"
+            state: directory
+            owner: root
+            group: "{{ item.group }}"
+            mode: "{{ item.mode }}"
+          loop:
+            - path: "{{ hermes_fleet_admin_private_root }}"
+              group: root
+              mode: "0700"
+            - path: "{{ hermes_fleet_admin_plugin_managed_root }}"
+              group: hermes-astra
+              mode: "0750"
+            - path: "{{ hermes_fleet_admin_plugin_runtime_root }}"
+              group: hermes-astra
+              mode: "0750"
+            - path: "{{ hermes_fleet_admin_rollback_root }}"
+              group: root
+              mode: "0700"
+            - path: /var/log/hermes
+              group: root
+              mode: "0750"
+
+        - name: Install root-only fleet HMAC key
+          ansible.builtin.copy:
+            content: "{{ hermes_fleet_admin_key_value }}\n"
+            dest: "{{ hermes_fleet_admin_key }}"
+            owner: root
+            group: root
+            mode: "0400"
+          register: hermes_fleet_admin_key_copy
+          no_log: true
+
+        - name: Install root-only Astra fleet environment
+          ansible.builtin.copy:
+            content: "GATEWAY_RELAY_FLEET_ADMIN_KEY={{ hermes_fleet_admin_key_value }}\n"
+            dest: "{{ hermes_fleet_admin_gateway_environment }}"
+            owner: root
+            group: root
+            mode: "0400"
+          register: hermes_fleet_admin_environment_copy
+          no_log: true
+
+        - name: Deploy fleet administration broker and validators
+          ansible.builtin.copy:
+            src: "{{ playbook_dir }}/../../{{ item.source }}"
+            dest: "{{ item.destination }}"
+            owner: root
+            group: root
+            mode: "0755"
+          loop:
+            - source: "{{ hermes_fleet_admin_broker_source }}"
+              destination: "{{ hermes_fleet_admin_broker_live }}"
+            - source: "{{ hermes_fleet_admin_validator_source }}"
+              destination: "{{ hermes_fleet_admin_validator_live }}"
+            - source: "{{ hermes_fleet_admin_smoke_source }}"
+              destination: "{{ hermes_fleet_admin_smoke_live }}"
+          register: hermes_fleet_admin_script_copies
+
+        - name: Deploy root-owned fleet administration plugin copies
+          ansible.builtin.copy:
+            src: >-
+              {{ playbook_dir }}/../../{{ hermes_fleet_admin_plugin_source }}/{{ item.1 }}
+            dest: "{{ item.0 }}/{{ item.1 }}"
+            owner: root
+            group: hermes-astra
+            mode: "0440"
+          loop: >-
+            {{ [hermes_fleet_admin_plugin_managed_root,
+                hermes_fleet_admin_plugin_runtime_root]
+               | product(['__init__.py', 'plugin.yaml']) | list }}
+          register: hermes_fleet_admin_plugin_copies
+
+        - name: Remove stale fleet administration plugin bytecode
+          ansible.builtin.file:
+            path: "{{ item }}/__pycache__"
+            state: absent
+          loop:
+            - "{{ hermes_fleet_admin_plugin_managed_root }}"
+            - "{{ hermes_fleet_admin_plugin_runtime_root }}"
+
+        - name: Deploy owner-provenance fleet policy
+          ansible.builtin.template:
+            src: >-
+              {{ playbook_dir }}/../../templates/hermes/hermes-fleet-admin-policy.json.j2
+            dest: "{{ hermes_fleet_admin_policy_live }}"
+            owner: root
+            group: hermes-astra
+            mode: "0440"
+          register: hermes_fleet_admin_policy_copy
+
+        - name: Deploy hardened fleet administration broker service
+          ansible.builtin.template:
+            src: >-
+              {{ playbook_dir }}/../../templates/hermes/hermes-fleet-admin.service.j2
+            dest: "{{ hermes_fleet_admin_service_unit }}"
+            owner: root
+            group: root
+            mode: "0644"
+          register: hermes_fleet_admin_service_copy
+
+        - name: Append fleet plugin through Hermes native configuration
+          ansible.builtin.command:
+            argv:
+              - /usr/bin/env
+              - --unset=HERMES_MANAGED
+              - --unset=HERMES_MANAGED_DIR
+              - HOME=/etc/hermes/astra
+              - HERMES_HOME=/etc/hermes/astra
+              - "{{ hermes_shadow_runtime_binary }}"
+              - config
+              - set
+              - plugins.enabled
+              - "{{ hermes_fleet_admin_target_plugins | to_json }}"
+          register: hermes_fleet_admin_plugin_config
+          changed_when: true
+          when:
+            - not ansible_check_mode
+            - hermes_fleet_admin_current_plugins != hermes_fleet_admin_target_plugins
+
+        - name: Append fleet toolset through Hermes native configuration
+          ansible.builtin.command:
+            argv:
+              - /usr/bin/env
+              - --unset=HERMES_MANAGED
+              - --unset=HERMES_MANAGED_DIR
+              - HOME=/etc/hermes/astra
+              - HERMES_HOME=/etc/hermes/astra
+              - "{{ hermes_shadow_runtime_binary }}"
+              - config
+              - set
+              - toolsets
+              - "{{ hermes_fleet_admin_target_toolsets | to_json }}"
+          register: hermes_fleet_admin_toolset_config
+          changed_when: true
+          when:
+            - not ansible_check_mode
+            - hermes_fleet_admin_current_toolsets != hermes_fleet_admin_target_toolsets
+
+        - name: Preserve Astra native configuration ownership
+          ansible.builtin.file:
+            path: /etc/hermes/astra/config.yaml
+            state: file
+            owner: root
+            group: hermes-astra
+            mode: "0440"
+          register: hermes_fleet_admin_config_permissions
+
+        - name: Reassert platform traversal after Hermes native configuration
+          ansible.builtin.file:
+            path: /etc/hermes/astra
+            state: directory
+            owner: root
+            group: hermes-astra
+            mode: "0750"
+          register: hermes_fleet_admin_post_config_scope_permissions
+
+        - name: Read Astra configuration after native fleet append
+          ansible.builtin.slurp:
+            path: /etc/hermes/astra/config.yaml
+          register: hermes_fleet_admin_updated_config_raw
+          when: not ansible_check_mode
+          no_log: true
+
+        - name: Prove native fleet append preserved unrelated Astra configuration
+          ansible.builtin.assert:
+            quiet: true
+            that:
+              - >-
+                (hermes_fleet_admin_updated_config_raw.content | b64decode | from_yaml)
+                == hermes_fleet_admin_current_config
+                   | combine({
+                       'plugins': hermes_fleet_admin_current_config.plugins
+                         | combine({'enabled': hermes_fleet_admin_target_plugins}),
+                       'toolsets': hermes_fleet_admin_target_toolsets
+                     }, recursive=true)
+          when: not ansible_check_mode
+          no_log: true
+
+        - name: Deploy Astra drop-in with fleet administration boundary
+          ansible.builtin.template:
+            src: >-
+              {{ playbook_dir }}/../../templates/hermes/hermes-gateway-fleet-admin.conf.j2
+            dest: "{{ hermes_fleet_admin_dropin }}"
+            owner: root
+            group: root
+            mode: "0644"
+          vars:
+            hermes_profile: "{{ hermes_fleet_admin_astra_profile }}"
+          register: hermes_fleet_admin_dropin_copy
+
+        - name: Hash Astra managed policy and primary environment
+          ansible.builtin.command:
+            argv:
+              - /usr/bin/sha256sum
+              - /etc/hermes/astra/config.yaml
+              - /etc/hermes/astra/.env
+          register: hermes_fleet_admin_policy_hash
+          changed_when: false
+          when: not ansible_check_mode
+          no_log: true
+
+        - name: Publish Astra managed policy checksum
+          ansible.builtin.copy:
+            content: "{{ hermes_fleet_admin_policy_hash.stdout }}\n"
+            dest: /etc/hermes/astra/managed-policy.sha256
+            owner: root
+            group: hermes-astra
+            mode: "0440"
+          register: hermes_fleet_admin_policy_checksum
+          when: not ansible_check_mode
+          no_log: true
+
+        - name: Reload systemd for fleet administration
+          ansible.builtin.systemd_service:
+            daemon_reload: true
+
+        - name: Restart changed fleet broker or ensure it is active
+          ansible.builtin.systemd_service:
+            name: hermes-fleet-admin.service
+            state: >-
+              {{ 'restarted'
+                 if (hermes_fleet_admin_service_copy.changed
+                     or hermes_fleet_admin_key_copy.changed
+                     or hermes_fleet_admin_script_copies.results
+                        | selectattr('changed') | list | length > 0)
+                 else 'started' }}
+            enabled: true
+          when: not ansible_check_mode
+
+        - name: Wait for fleet administration broker socket
+          ansible.builtin.wait_for:
+            path: "{{ hermes_fleet_admin_socket }}"
+            state: present
+            timeout: 30
+          when: not ansible_check_mode
+
+        - name: Validate merged Astra config as its service identity
+          ansible.builtin.command:
+            argv:
+              - /usr/bin/systemd-run
+              - --quiet
+              - --wait
+              - --collect
+              - --pipe
+              - --service-type=exec
+              - --uid=hermes-astra
+              - --gid=hermes-astra
+              - --property=SupplementaryGroups=hermes-runtime-readers
+              - --property=SupplementaryGroups={{ hermes_fleet_admin_group }}
+              - --property=EnvironmentFile=/etc/hermes/astra/.env
+              - --property=EnvironmentFile={{ hermes_fleet_admin_gateway_environment }}
+              - --setenv=HOME=/var/lib/hermes/astra
+              - --setenv=HERMES_HOME=/var/lib/hermes/astra/.hermes/profiles/astra
+              - --setenv=HERMES_MANAGED_DIR=/etc/hermes/astra
+              - "{{ hermes_shadow_runtime_binary }}"
+              - config
+              - check
+          changed_when: false
+          when: not ansible_check_mode
+          no_log: true
+
+        - name: Validate fleet administration plugin and broker boundary
+          ansible.builtin.command:
+            argv:
+              - "{{ hermes_shadow_runtime_venv }}/bin/python"
+              - "{{ hermes_fleet_admin_validator_live }}"
+              - --source-root
+              - "{{ hermes_fleet_admin_plugin_managed_root }}"
+              - --runtime-root
+              - "{{ hermes_fleet_admin_plugin_runtime_root }}"
+              - --config
+              - /etc/hermes/astra/config.yaml
+              - --policy
+              - "{{ hermes_fleet_admin_policy_live }}"
+              - --socket
+              - "{{ hermes_fleet_admin_socket }}"
+              - --socket-group
+              - "{{ hermes_fleet_admin_group }}"
+              - --environment
+              - "{{ hermes_fleet_admin_gateway_environment }}"
+              - --state-db
+              - /var/lib/hermes/astra/.hermes/profiles/astra/state.db
+          changed_when: false
+          when: not ansible_check_mode
+
+        - name: Determine whether Astra needs one planned fleet administration restart
+          ansible.builtin.set_fact:
+            hermes_fleet_admin_restart_required: >-
+              {{ hermes_fleet_admin_plugin_config.changed
+                 or hermes_fleet_admin_toolset_config.changed
+                 or hermes_fleet_admin_config_permissions.changed
+                 or hermes_fleet_admin_scope_permissions.changed
+                 or hermes_fleet_admin_post_config_scope_permissions.changed
+                 or hermes_fleet_admin_dropin_copy.changed
+                 or hermes_fleet_admin_policy_checksum.changed
+                 or hermes_fleet_admin_policy_copy.changed
+                 or hermes_fleet_admin_environment_copy.changed
+                 or hermes_fleet_admin_plugin_copies.results
+                    | selectattr('changed') | list | length > 0 }}
+          when: not ansible_check_mode
+
+        - name: Prepare Astra planned-stop marker for fleet administration
+          ansible.builtin.include_tasks:
+            file: ../../tasks/hermes-planned-stop-marker.yml
+          vars:
+            hermes_planned_stop_profile: "{{ hermes_fleet_admin_astra_profile }}"
+          when:
+            - not ansible_check_mode
+            - hermes_fleet_admin_restart_required | bool
+
+        - name: Record Astra fleet administration restart attempt
+          ansible.builtin.set_fact:
+            hermes_fleet_admin_restart_attempted: true
+          when:
+            - not ansible_check_mode
+            - hermes_fleet_admin_restart_required | bool
+
+        - name: Restart Astra once for fleet administration
+          ansible.builtin.systemd_service:
+            name: hermes-gateway-astra.service
+            state: restarted
+          when:
+            - not ansible_check_mode
+            - hermes_fleet_admin_restart_required | bool
+
+        - name: Wait for Astra readiness after fleet administration promotion
+          ansible.builtin.command:
+            argv: [/usr/bin/systemctl, is-active, hermes-gateway-astra.service]
+          register: hermes_fleet_admin_promoted_astra_state
+          retries: 45
+          delay: 2
+          until:
+            - hermes_fleet_admin_promoted_astra_state.rc == 0
+            - hermes_fleet_admin_promoted_astra_state.stdout == 'active'
+          changed_when: false
+          when: not ansible_check_mode
+
+        - name: Exercise owner-provenance fleet inspection as Astra
+          ansible.builtin.command:
+            argv:
+              - /usr/bin/systemd-run
+              - --quiet
+              - --wait
+              - --collect
+              - --pipe
+              - --service-type=exec
+              - --uid=hermes-astra
+              - --gid=hermes-astra
+              - --property=SupplementaryGroups={{ hermes_fleet_admin_group }}
+              - --property=EnvironmentFile=/etc/hermes/astra/.env
+              - --property=EnvironmentFile={{ hermes_fleet_admin_gateway_environment }}
+              - --setenv=HOME=/var/lib/hermes/astra
+              - --setenv=HERMES_HOME=/var/lib/hermes/astra/.hermes/profiles/astra
+              - --setenv=HERMES_MANAGED_DIR=/etc/hermes/astra
+              - "{{ hermes_shadow_runtime_venv }}/bin/python"
+              - "{{ hermes_fleet_admin_smoke_live }}"
+              - --plugin-root
+              - "{{ hermes_fleet_admin_plugin_runtime_root }}"
+              - --target
+              - "{{ item }}"
+          loop: [astra, dubble, rigel]
+          register: hermes_fleet_admin_smokes
+          changed_when: false
+          when: not ansible_check_mode
+          no_log: true
+
+        - name: Require exact fleet inspection smoke coverage
+          ansible.builtin.assert:
+            that:
+              - item.rc == 0
+              - (item.stdout | from_json).status == 'ok'
+              - (item.stdout | from_json).target == item.item
+              - (item.stdout | from_json).serviceActive | bool
+          loop: "{{ hermes_fleet_admin_smokes.results }}"
+          loop_control:
+            label: "{{ item.item }}"
+          when: not ansible_check_mode
+
+        - name: Exercise one owner-provenance fleet mutation round trip as Astra
+          ansible.builtin.command:
+            argv:
+              - /usr/bin/systemd-run
+              - --quiet
+              - --wait
+              - --collect
+              - --pipe
+              - --service-type=exec
+              - --uid=hermes-astra
+              - --gid=hermes-astra
+              - --property=SupplementaryGroups={{ hermes_fleet_admin_group }}
+              - --property=EnvironmentFile=/etc/hermes/astra/.env
+              - --property=EnvironmentFile={{ hermes_fleet_admin_gateway_environment }}
+              - --setenv=HOME=/var/lib/hermes/astra
+              - --setenv=HERMES_HOME=/var/lib/hermes/astra/.hermes/profiles/astra
+              - --setenv=HERMES_MANAGED_DIR=/etc/hermes/astra
+              - "{{ hermes_shadow_runtime_venv }}/bin/python"
+              - "{{ hermes_fleet_admin_smoke_live }}"
+              - --plugin-root
+              - "{{ hermes_fleet_admin_plugin_runtime_root }}"
+              - --target
+              - "{{ item }}"
+              - --mutation-check
+          loop: [astra, dubble, rigel]
+          register: hermes_fleet_admin_mutation_smokes
+          changed_when: false
+          when:
+            - not ansible_check_mode
+            - hermes_fleet_admin_mutation_acceptance | bool
+          no_log: true
+
+        - name: Require exact fleet mutation round-trip coverage
+          ansible.builtin.assert:
+            that:
+              - item.rc == 0
+              - (item.stdout | from_json).status == 'ok'
+              - (item.stdout | from_json).target == item.item
+              - (item.stdout | from_json).mutationRoundTrip | bool
+          loop: "{{ hermes_fleet_admin_mutation_smokes.results }}"
+          loop_control:
+            label: "{{ item.item }}"
+          when:
+            - not ansible_check_mode
+            - hermes_fleet_admin_mutation_acceptance | bool
+
+        - name: Prove agent users cannot read root-only fleet key material
+          ansible.builtin.command:
+            argv:
+              - /usr/sbin/runuser
+              - --user
+              - "{{ item }}"
+              - --
+              - /usr/bin/test
+              - -r
+              - "{{ hermes_fleet_admin_gateway_environment }}"
+          loop: [hermes-astra, hermes-dubble, hermes-rigel]
+          register: hermes_fleet_admin_secret_probes
+          changed_when: false
+          failed_when: hermes_fleet_admin_secret_probes.rc == 0
+          when: not ansible_check_mode
+
+        - name: Prove target agents cannot write the fleet broker socket
+          ansible.builtin.command:
+            argv:
+              - /usr/sbin/runuser
+              - --user
+              - "{{ item }}"
+              - --
+              - /usr/bin/test
+              - -w
+              - "{{ hermes_fleet_admin_socket }}"
+          loop: [hermes-dubble, hermes-rigel]
+          register: hermes_fleet_admin_socket_probes
+          changed_when: false
+          failed_when: hermes_fleet_admin_socket_probes.rc == 0
+          when: not ansible_check_mode
+
+        - name: Require Astra, Dubble, Rigel, and fleet broker active
+          ansible.builtin.command:
+            argv: [/usr/bin/systemctl, is-active, "{{ item }}"]
+          loop:
+            - hermes-fleet-admin.service
+            - hermes-gateway-astra.service
+            - hermes-gateway-dubble.service
+            - hermes-gateway-rigel.service
+          changed_when: false
+          when: not ansible_check_mode
+
+      rescue:
+        - name: Restore prior fleet administration and Astra policy archive
+          ansible.builtin.command:
+            argv:
+              - /usr/bin/tar
+              - --acls
+              - --xattrs
+              - -C
+              - /
+              - -xpf
+              - "{{ hermes_fleet_admin_backup_archive }}"
+          when: hermes_fleet_admin_existing_paths | default([]) | length > 0
+          changed_when: true
+          no_log: true
+
+        - name: Stop newly introduced fleet broker
+          ansible.builtin.systemd_service:
+            name: hermes-fleet-admin.service
+            state: stopped
+          when: hermes_fleet_admin_prior_broker_state.stdout != 'active'
+          failed_when: false
+
+        - name: Remove paths created only by failed fleet administration promotion
+          ansible.builtin.file:
+            path: "{{ item }}"
+            state: absent
+          loop: "{{ hermes_fleet_admin_new_paths | default([]) }}"
+          failed_when: false
+
+        - name: Remove newly created fleet administration group
+          ansible.builtin.group:
+            name: "{{ hermes_fleet_admin_group }}"
+            state: absent
+          when: >-
+            hermes_fleet_admin_prior_group.ansible_facts.getent_group
+            .get(hermes_fleet_admin_group) is none
+          failed_when: false
+
+        - name: Reload restored systemd state
+          ansible.builtin.systemd_service:
+            daemon_reload: true
+          failed_when: false
+
+        - name: Restore prior fleet broker activity
+          ansible.builtin.systemd_service:
+            name: hermes-fleet-admin.service
+            state: restarted
+            enabled: true
+          when: hermes_fleet_admin_prior_broker_state.stdout == 'active'
+          failed_when: false
+
+        - name: Inspect Astra state after fleet administration rollback
+          ansible.builtin.command:
+            argv: [/usr/bin/systemctl, is-active, hermes-gateway-astra.service]
+          register: hermes_fleet_admin_rollback_astra_state
+          changed_when: false
+          failed_when: false
+
+        - name: Prepare marker before Astra fleet administration rollback restart
+          ansible.builtin.include_tasks:
+            file: ../../tasks/hermes-planned-stop-marker.yml
+          vars:
+            hermes_planned_stop_profile: "{{ hermes_fleet_admin_astra_profile }}"
+            hermes_planned_stop_strict: false
+          when:
+            - hermes_fleet_admin_restart_attempted | default(false) | bool
+            - hermes_fleet_admin_prior_astra_state.stdout == 'active'
+            - hermes_fleet_admin_rollback_astra_state.stdout == 'active'
+
+        - name: Restart Astra after fleet administration rollback
+          ansible.builtin.systemd_service:
+            name: hermes-gateway-astra.service
+            state: restarted
+          when:
+            - hermes_fleet_admin_restart_attempted | default(false) | bool
+            - hermes_fleet_admin_prior_astra_state.stdout == 'active'
+            - hermes_fleet_admin_rollback_astra_state.stdout == 'active'
+          failed_when: false
+
+        - name: Restore Astra when fleet promotion stopped it
+          ansible.builtin.systemd_service:
+            name: hermes-gateway-astra.service
+            state: started
+            enabled: true
+          when:
+            - hermes_fleet_admin_prior_astra_state.stdout == 'active'
+            - hermes_fleet_admin_rollback_astra_state.stdout != 'active'
+          failed_when: false
+
+        - name: Preserve a previously inactive Astra state
+          ansible.builtin.systemd_service:
+            name: hermes-gateway-astra.service
+            state: stopped
+          when: hermes_fleet_admin_prior_astra_state.stdout != 'active'
+          failed_when: false
+
+        - name: Require prior active Astra state restored
+          ansible.builtin.command:
+            argv: [/usr/bin/systemctl, is-active, hermes-gateway-astra.service]
+          register: hermes_fleet_admin_restored_astra_state
+          retries: 45
+          delay: 2
+          until:
+            - hermes_fleet_admin_restored_astra_state.rc == 0
+            - hermes_fleet_admin_restored_astra_state.stdout == 'active'
+          when: hermes_fleet_admin_prior_astra_state.stdout == 'active'
+          changed_when: false
+
+        - name: Fail after fleet administration rollback
+          ansible.builtin.fail:
+            msg: Fleet administration promotion failed and prior state was restored.

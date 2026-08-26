@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Privately enroll the existing OpenClaw Discord identities into Hermes."""
+"""Privately enroll Astra, Dubble, and a dedicated Rigel Discord identity."""
 
 from __future__ import annotations
 
@@ -28,19 +28,8 @@ PROFILE_GROUPS = {
 EXPECTED_CHANNELS = {
     "astra": ("astra", "astra-logs", "rigel"),
     "dubble": ("db", "db-logs"),
+    "rigel": ("rigel",),
 }
-RIGEL_PROMPT = (
-    "This is the dedicated Rigel academic channel. Act as Johnny's academic "
-    "study and deadline assistant. Use verified course records, calendar data, "
-    "and explicit user facts only. Never infer an exam, deadline, course, "
-    "mastery claim, or alert from the channel name, archived text, generated "
-    "memory, or a prior alert. Interactive tutoring remains available when a "
-    "semester is inactive. Keep answers concise and never emit control tokens, "
-    "hidden reasoning, tool errors, heartbeat acknowledgements, or all-clear "
-    "summaries."
-)
-
-
 class EnrollmentError(RuntimeError):
     """A fail-closed enrollment precondition or write failure."""
 
@@ -204,10 +193,14 @@ def source_owner(config: dict[str, Any]) -> str:
     return next(iter(candidates))
 
 
-def build_enrollment(env: dict[str, str], config: dict[str, Any]) -> tuple[dict[str, Any], dict[str, str]]:
+def build_enrollment(
+    env: dict[str, str],
+    config: dict[str, Any],
+    rigel_token: str,
+) -> tuple[dict[str, Any], dict[str, str]]:
     astra_token = secret(env, "DISCORD_BOT_TOKEN")
     dubble_token = secret(env, "DISCORD_DUBBLE_BOT_TOKEN")
-    anthropic_key = secret(env, "ANTHROPIC_API_KEY")
+    require(20 <= len(rigel_token) <= 4096, "missing-discord_rigel_bot_token")
     ollama_key = secret(env, "OLLAMA_API_KEY")
     astra_enabled = source_enabled_channels(config, "default")
     dubble_enabled = source_enabled_channels(config, "dubble")
@@ -221,33 +214,41 @@ def build_enrollment(env: dict[str, str], config: dict[str, Any]) -> tuple[dict[
         EXPECTED_CHANNELS["dubble"],
         dubble_enabled,
     )
-    require(astra_bot != dubble_bot, "discord-bot-identities-not-distinct")
+    rigel_channel = astra_channels["rigel"]
+    rigel_bot, rigel_channels = bot_and_channels(
+        rigel_token,
+        EXPECTED_CHANNELS["rigel"],
+        {rigel_channel},
+    )
+    require(
+        len({astra_bot, dubble_bot, rigel_bot}) == 3,
+        "discord-bot-identities-not-distinct",
+    )
     require(set(astra_channels.values()) <= astra_enabled, "source-astra-route-mismatch")
     require(set(dubble_channels.values()) <= dubble_enabled, "source-dubble-route-mismatch")
+    require(rigel_channels["rigel"] == rigel_channel, "source-rigel-route-mismatch")
     owner = source_owner(config)
     astra = astra_channels["astra"]
     logs = astra_channels["astra-logs"]
-    rigel = astra_channels["rigel"]
+    rigel = rigel_channels["rigel"]
     dubble = dubble_channels["db"]
     dubble_logs = dubble_channels["db-logs"]
     enrollment = {
         "schemaVersion": SCHEMA_VERSION,
-        "consumerCount": 2,
+        "consumerCount": 3,
         "logicalProfiles": ["astra", "dubble", "rigel"],
         "profiles": {
             "astra": {
                 "allowedUsers": [owner],
                 "adminUsers": [owner],
-                "allowedChannels": [astra, rigel],
-                "freeResponseChannels": [astra, rigel],
+                "allowedChannels": [astra],
+                "freeResponseChannels": [astra],
                 "ignoredChannels": [logs],
                 "homeChannel": astra,
                 "logChannel": logs,
-                "rigelChannel": rigel,
-                "channelPrompts": {rigel: RIGEL_PROMPT},
-                "channelSkillBindings": [
-                    {"id": rigel, "skills": ["source-grounded-study"]}
-                ],
+                "rigelChannel": None,
+                "channelPrompts": {},
+                "channelSkillBindings": [],
             },
             "dubble": {
                 "allowedUsers": [],
@@ -262,12 +263,23 @@ def build_enrollment(env: dict[str, str], config: dict[str, Any]) -> tuple[dict[
                 "channelSkillBindings": [],
             },
             "rigel": {
-                "discordConsumer": "astra",
+                "allowedUsers": [owner],
+                "adminUsers": [owner],
+                "allowedChannels": [rigel],
+                "freeResponseChannels": [rigel],
+                "ignoredChannels": [],
+                "homeChannel": rigel,
+                "logChannel": None,
+                "rigelChannel": rigel,
+                "channelPrompts": {},
+                "channelSkillBindings": [],
+                "discordConsumer": "rigel",
                 "schedulerDeliveryChannel": rigel,
             },
         },
         "botIdentityFingerprints": sorted(
-            hashlib.sha256(value.encode("ascii")).hexdigest() for value in (astra_bot, dubble_bot)
+            hashlib.sha256(value.encode("ascii")).hexdigest()
+            for value in (astra_bot, dubble_bot, rigel_bot)
         ),
     }
     credentials = {
@@ -283,14 +295,23 @@ def build_enrollment(env: dict[str, str], config: dict[str, Any]) -> tuple[dict[
         ),
         "dubble": "\n".join(
             (
-                f"ANTHROPIC_API_KEY={anthropic_key}",
                 f"DISCORD_BOT_TOKEN={dubble_token}",
                 f"DISCORD_HOME_CHANNEL={dubble}",
                 "DISCORD_HOME_CHANNEL_NAME=Dubble",
+                f"OLLAMA_API_KEY={ollama_key}",
                 "",
             )
         ),
-        "rigel": f"ANTHROPIC_API_KEY={anthropic_key}\n",
+        "rigel": "\n".join(
+            (
+                f"DISCORD_BOT_TOKEN={rigel_token}",
+                f"DISCORD_ALLOWED_USERS={owner}",
+                f"DISCORD_HOME_CHANNEL={rigel}",
+                "DISCORD_HOME_CHANNEL_NAME=Rigel",
+                f"OLLAMA_API_KEY={ollama_key}",
+                "",
+            )
+        ),
     }
     return enrollment, credentials
 
@@ -326,10 +347,10 @@ def backup_existing(paths: list[Path], backup_dir: Path) -> None:
 def verify_target(target_root: Path, enrollment_path: Path) -> dict[str, Any]:
     enrollment = read_json(enrollment_path, "target-enrollment")
     require(enrollment.get("schemaVersion") == SCHEMA_VERSION, "target-enrollment-version")
-    require(enrollment.get("consumerCount") == 2, "target-consumer-count")
+    require(enrollment.get("consumerCount") == 3, "target-consumer-count")
     require(enrollment.get("logicalProfiles") == ["astra", "dubble", "rigel"], "target-profiles")
     fingerprints = enrollment.get("botIdentityFingerprints")
-    require(isinstance(fingerprints, list) and len(set(fingerprints)) == 2, "target-bot-distinctness")
+    require(isinstance(fingerprints, list) and len(set(fingerprints)) == 3, "target-bot-distinctness")
     for profile, group in PROFILE_GROUPS.items():
         path = target_root / profile / ".env"
         metadata = path.lstat()
@@ -337,10 +358,17 @@ def verify_target(target_root: Path, enrollment_path: Path) -> dict[str, Any]:
         require(stat.S_IMODE(metadata.st_mode) == 0o440, "target-env-mode")
         require(metadata.st_uid == 0 and metadata.st_gid == grp.getgrnam(group).gr_gid, "target-env-owner")
         env = read_dotenv(path, allow_group_read=True)
-        require("DISCORD_BOT_TOKEN" in env if profile != "rigel" else "DISCORD_BOT_TOKEN" not in env, f"target-{profile}-discord")
-        require("ANTHROPIC_API_KEY" in env if profile != "astra" else "ANTHROPIC_API_KEY" not in env, f"target-{profile}-provider")
-        require("OLLAMA_API_KEY" in env if profile == "astra" else "OLLAMA_API_KEY" not in env, f"target-{profile}-fallback")
-    return {"status": "ok", "consumers": 2, "profiles": 3, "channels": 4}
+        require("DISCORD_BOT_TOKEN" in env, f"target-{profile}-discord")
+        require("ANTHROPIC_API_KEY" not in env, f"target-{profile}-retired-provider")
+        require("OLLAMA_API_KEY" in env, f"target-{profile}-ollama-fallback")
+        for key in (
+            "OPENROUTER_API_KEY",
+            "OPENAI_API_KEY",
+            "GEMINI_API_KEY",
+            "GOOGLE_API_KEY",
+        ):
+            require(key not in env, f"target-{profile}-metered-provider")
+    return {"status": "ok", "consumers": 3, "profiles": 3, "channels": 5}
 
 
 def enroll(
@@ -349,11 +377,13 @@ def enroll(
     target_root: Path,
     enrollment_path: Path,
     backup_dir: Path,
+    rigel_token_file: Path,
 ) -> dict[str, Any]:
     require(os.geteuid() == 0, "root-required")
     env = read_dotenv(source_env)
     config = read_json(source_config, "source-config")
-    enrollment, credentials = build_enrollment(env, config)
+    rigel_token = read_text(rigel_token_file, "rigel-token").strip()
+    enrollment, credentials = build_enrollment(env, config, rigel_token)
     paths = [enrollment_path, *(target_root / profile / ".env" for profile in PROFILE_GROUPS)]
     backup_existing(paths, backup_dir)
     for profile, content in credentials.items():
@@ -384,6 +414,7 @@ def parser() -> argparse.ArgumentParser:
         default=Path("/etc/hermes/private-discord-enrollment.json"),
     )
     value.add_argument("--backup-dir", type=Path)
+    value.add_argument("--rigel-token-file", type=Path)
     return value
 
 
@@ -392,12 +423,14 @@ def main() -> int:
     try:
         if arguments.mode == "enroll":
             require(arguments.backup_dir is not None, "backup-dir-required")
+            require(arguments.rigel_token_file is not None, "rigel-token-file-required")
             result = enroll(
                 arguments.source_env,
                 arguments.source_config,
                 arguments.target_root,
                 arguments.enrollment,
                 arguments.backup_dir,
+                arguments.rigel_token_file,
             )
         else:
             result = verify_target(arguments.target_root, arguments.enrollment)

@@ -1,0 +1,1006 @@
+---
+# yamllint disable rule:line-length
+# Purpose: Activate isolated native LCM and Mem0 for one reviewed Hermes profile.
+# Hosts: hermes_hosts.
+# Key vars: hermes_profile_memory_continuity_*; hermes_lcm_*; hermes_mem0_*.
+# Scripts: scripts/agents/hermes-profile-lcm-import.py.
+# Validation: ansible-playbook playbooks/agents/hermes-profile-memory-continuity.yml --syntax-check.
+
+- name: Activate isolated Hermes profile memory
+  hosts: hermes_hosts
+  become: true
+  gather_facts: false
+
+  vars:
+    hermes_profile_memory_continuity_profile_contract: >-
+      {{ hermes_profile_memory_continuity_profiles[
+           hermes_profile_memory_continuity_profile
+         ] }}
+    hermes_profile_memory_continuity_consumer: >-
+      {{ (hermes_production_consumer_profiles
+          | selectattr('name', 'equalto', hermes_profile_memory_continuity_profile)
+          | list | first) }}
+    hermes_profile_memory_continuity_config: >-
+      /etc/hermes/{{ hermes_profile_memory_continuity_profile }}/config.yaml
+    hermes_profile_memory_continuity_dropin: >-
+      /etc/systemd/system/{{ hermes_profile_memory_continuity_consumer.unit }}.d/10-managed.conf
+    hermes_profile_memory_continuity_managed_policy: >-
+      /etc/hermes/{{ hermes_profile_memory_continuity_profile }}/managed-policy.sha256
+    hermes_profile_memory_continuity_environment_file: >-
+      {{ hermes_profile_memory_continuity_consumer.environment_file
+         | default('/etc/hermes/' + hermes_profile_memory_continuity_profile + '/.env') }}
+    hermes_profile_memory_continuity_mem0_config: >-
+      {{ hermes_profile_memory_continuity_consumer.home }}/mem0.json
+    hermes_profile_memory_continuity_plugin_mount: >-
+      {{ hermes_profile_memory_continuity_consumer.home }}/plugins/hermes-lcm
+    hermes_profile_memory_continuity_fastembed_cache: >-
+      {{ hermes_profile_memory_continuity_consumer.home }}/mem0/fastembed-cache
+    hermes_profile_memory_continuity_importer_source_path: >-
+      {{ ansible_config_file | dirname }}/{{
+        hermes_profile_memory_continuity_importer_source }}
+    hermes_profile_memory_continuity_privacy_auditor_source_path: >-
+      {{ ansible_config_file | dirname }}/{{
+        hermes_profile_memory_privacy_auditor_source }}
+    hermes_profile_memory_continuity_mem0_smoke_source_path: >-
+      {{ ansible_config_file | dirname }}/{{
+        hermes_profile_mem0_smoke_source }}
+    hermes_profile_memory_continuity_mem0_migrator_source_path: >-
+      {{ ansible_config_file | dirname }}/{{ hermes_mem0_migrator_source }}
+    hermes_profile_memory_continuity_handoff_validator_source_path: >-
+      {{ ansible_config_file | dirname }}/{{
+        hermes_astra_handoff_validator_source }}
+    hermes_profile_memory_continuity_selection_manifest: >-
+      /run/hermes-{{ hermes_profile_memory_continuity_profile }}-public-memory-selection.json
+    hermes_profile_memory_continuity_external_importer: >-
+      {{ hermes_lcm_plugin_managed_root }}/{{
+        hermes_lcm_external_importer_components | join('/') }}
+    hermes_profile_memory_continuity_lcm_import_argv:
+      - /usr/local/lib/hermes-agent/venv/bin/python
+      - "{{ hermes_profile_memory_continuity_importer_live }}"
+      - --importer
+      - "{{ hermes_profile_memory_continuity_external_importer }}"
+      - --source-dir
+      - "{{ hermes_profile_memory_continuity_profile_contract.source_dir }}"
+      - --target-db
+      - "{{ hermes_profile_memory_continuity_profile_contract.target_db }}"
+      - --namespace
+      - "{{ hermes_profile_memory_continuity_profile_contract.namespace }}"
+      - --agent
+      - "{{ hermes_profile_memory_continuity_profile }}"
+      - --import-id
+      - "{{ hermes_profile_memory_continuity_profile_contract.import_id }}"
+    hermes_profile_memory_continuity_lcm_selection_argv: >-
+      {{
+        ['--include-manifest', hermes_profile_memory_continuity_selection_manifest]
+        if hermes_profile_memory_continuity_profile_contract.privacy_policy is defined
+        else []
+      }}
+    hermes_profile_memory_continuity_mem0_argv: >-
+      {{
+        [hermes_shadow_runtime_venv + '/bin/python', hermes_mem0_migrator_live,
+         '--qdrant-url', hermes_mem0_qdrant_url,
+         '--target', hermes_profile_memory_continuity_profile_contract.mem0_target_collection,
+         '--user-id', hermes_profile_memory_continuity_profile_contract.mem0_user_id,
+         '--agent-id', hermes_profile_memory_continuity_profile_contract.mem0_agent_id,
+         '--reembed', '--hybrid', '--sparse-model', 'Qdrant/bm25',
+         '--ollama-url', hermes_mem0_ollama_url,
+         '--embedding-model', hermes_mem0_ollama_embedding_model,
+         '--embedding-dimensions', hermes_mem0_ollama_embedding_dimensions | string]
+        + (
+          ['--empty-target']
+          if hermes_profile_memory_continuity_profile_contract.mem0_empty_target | bool
+          else ['--source', hermes_profile_memory_continuity_profile_contract.mem0_source_collection]
+               + (hermes_profile_memory_continuity_profile_contract.mem0_source_user_ids
+                  | map('regex_replace', '^', '--include-user-id=') | list)
+        )
+      }}
+
+  tasks:
+    - name: Validate isolated Hermes profile-memory mode
+      ansible.builtin.assert:
+        that:
+          - hermes_profile_memory_continuity_mode in ['disabled', 'audit', 'migrate']
+          - >-
+            hermes_profile_memory_continuity_profile
+            in hermes_profile_memory_continuity_profiles
+        fail_msg: >-
+          Profile memory mode must be disabled, audit, or migrate and select a
+          reviewed profile contract.
+
+    - name: Skip isolated Hermes profile memory when disabled
+      ansible.builtin.meta: end_host
+      when: hermes_profile_memory_continuity_mode == 'disabled'
+
+    - name: Require exact isolated profile-memory authorization
+      ansible.builtin.assert:
+        that:
+          - inventory_hostname == 'jn-t14s-lin'
+          - >-
+            hermes_profile_memory_continuity_mode != 'migrate'
+            or (
+              hermes_profile_memory_continuity_approved | bool
+              and hermes_profile_memory_continuity_confirmation
+                  == hermes_profile_memory_continuity_profile_contract.required_confirmation
+            )
+          - hermes_profile_memory_continuity_profile in ['rigel', 'dubble']
+          - hermes_profile_memory_continuity_consumer.context_engine == 'lcm'
+          - hermes_profile_memory_continuity_consumer.memory_provider == 'mem0'
+          - not hermes_profile_memory_continuity_consumer.memory_write_approval
+          - >-
+            'hermes-lcm'
+            in hermes_profile_memory_continuity_consumer.plugins_enabled
+          - hermes_lcm_release_track == 'stable'
+          - >-
+            hermes_profile_memory_continuity_profile_contract.mem0_agent_id
+            == hermes_profile_memory_continuity_profile
+          - >-
+            (
+              hermes_profile_memory_continuity_profile_contract.mem0_empty_target | bool
+              and hermes_profile_memory_continuity_profile_contract.mem0_source_user_ids == []
+            ) or (
+              not hermes_profile_memory_continuity_profile_contract.mem0_empty_target | bool
+              and hermes_profile_memory_continuity_profile == 'rigel'
+              and hermes_profile_memory_continuity_profile_contract.mem0_source_user_ids
+                  == ['johnny:agent:rigel']
+            )
+          - >-
+            hermes_profile_memory_continuity_profile_contract.mem0_target_collection
+            == 'memories_hermes_' + hermes_profile_memory_continuity_profile + '_v3'
+        fail_msg: >-
+          This transaction is authorized only for the selected isolated stable
+          profile LCM and Mem0 v3 target. Astra memory is outside its scope.
+
+    - name: Inspect preserved profile LCM source directory
+      ansible.builtin.stat:
+        path: "{{ hermes_profile_memory_continuity_profile_contract.source_dir }}"
+        follow: false
+      register: hermes_profile_memory_continuity_source
+
+    - name: Inspect stable LCM importer
+      ansible.builtin.stat:
+        path: >-
+          {{ hermes_profile_memory_continuity_external_importer }}
+        follow: false
+      register: hermes_profile_memory_continuity_lcm_importer
+
+    - name: Require regular immutable migration sources
+      ansible.builtin.assert:
+        that:
+          - hermes_profile_memory_continuity_source.stat.exists
+          - hermes_profile_memory_continuity_source.stat.isdir | default(false)
+          - not (hermes_profile_memory_continuity_source.stat.islnk | default(false))
+          - hermes_profile_memory_continuity_lcm_importer.stat.exists
+          - hermes_profile_memory_continuity_lcm_importer.stat.isreg | default(false)
+          - not (hermes_profile_memory_continuity_lcm_importer.stat.islnk | default(false))
+
+    - name: Inspect OpenClaw system writers
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/systemctl
+          - is-active
+          - "{{ item }}"
+      loop:
+        - openclaw-isolated-gateway.service
+        - openclaw-isolated-codex.service
+      register: hermes_profile_memory_continuity_openclaw_system
+      changed_when: false
+      failed_when: false
+
+    - name: Inspect OpenClaw user writer
+      ansible.builtin.command:
+        argv:
+          - /usr/sbin/runuser
+          - --user
+          - johnny
+          - --
+          - /usr/bin/env
+          - XDG_RUNTIME_DIR=/run/user/1000
+          - DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus
+          - /usr/bin/systemctl
+          - --user
+          - is-active
+          - openclaw-gateway.service
+      register: hermes_profile_memory_continuity_openclaw_user
+      changed_when: false
+      failed_when: false
+
+    - name: Reject profile migration while OpenClaw can write source sessions
+      ansible.builtin.assert:
+        that:
+          - >-
+            hermes_profile_memory_continuity_openclaw_system.results
+            | map(attribute='stdout') | select('equalto', 'active') | list
+            | length == 0
+          - hermes_profile_memory_continuity_openclaw_user.stdout != 'active'
+
+    - name: Verify current profile managed-policy integrity
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/sha256sum
+          - --check
+          - --status
+          - --strict
+          - "{{ hermes_profile_memory_continuity_managed_policy }}"
+      changed_when: false
+
+    - name: Derive public-only profile LCM selection from retained route evidence
+      ansible.builtin.script:
+        cmd: >-
+          {{ hermes_profile_memory_continuity_privacy_auditor_source_path | quote }}
+          --source-dir {{ hermes_profile_memory_continuity_profile_contract.source_dir | quote }}
+          {% for index in hermes_profile_memory_continuity_profile_contract.privacy_session_indexes %}
+          --session-index {{ index | quote }}
+          {% endfor %}
+          --policy {{ hermes_profile_memory_continuity_profile_contract.privacy_policy | quote }}
+          --approved-manifest {{ hermes_profile_memory_continuity_selection_manifest | quote }}
+        executable: /usr/bin/python3
+      register: hermes_profile_memory_continuity_privacy_audit
+      changed_when: false
+      failed_when: hermes_profile_memory_continuity_privacy_audit.rc not in [0, 2]
+      when: hermes_profile_memory_continuity_profile_contract.privacy_policy is defined
+
+    - name: Require exact public-only profile LCM selection boundary
+      ansible.builtin.assert:
+        that:
+          - (hermes_profile_memory_continuity_privacy_audit.stdout | from_json).status == 'blocked'
+          - (hermes_profile_memory_continuity_privacy_audit.stdout | from_json).sourceFiles == hermes_profile_memory_continuity_profile_contract.expected_source_files
+          - (hermes_profile_memory_continuity_privacy_audit.stdout | from_json).sourceBytes == hermes_profile_memory_continuity_profile_contract.expected_source_bytes
+          - (hermes_profile_memory_continuity_privacy_audit.stdout | from_json).sourceManifestSha256 == hermes_profile_memory_continuity_profile_contract.expected_source_sha256
+          - (hermes_profile_memory_continuity_privacy_audit.stdout | from_json).policySha256 == hermes_profile_memory_continuity_profile_contract.expected_privacy_policy_sha256
+          - (hermes_profile_memory_continuity_privacy_audit.stdout | from_json).sessionIndexManifestSha256 == hermes_profile_memory_continuity_profile_contract.expected_privacy_index_sha256
+          - (hermes_profile_memory_continuity_privacy_audit.stdout | from_json).sourceClassifications == hermes_profile_memory_continuity_profile_contract.expected_privacy_classes
+          - (hermes_profile_memory_continuity_privacy_audit.stdout | from_json).approvedSelectionSha256 == hermes_profile_memory_continuity_profile_contract.expected_selection_manifest_sha256
+          - (hermes_profile_memory_continuity_privacy_audit.stdout | from_json).sourceClassifications.direct == 0
+          - (hermes_profile_memory_continuity_privacy_audit.stdout | from_json).sourceClassifications['other-channel'] == 0
+          - (hermes_profile_memory_continuity_privacy_audit.stdout | from_json).sourceClassifications['conflicting-route-evidence'] == 0
+      when: hermes_profile_memory_continuity_profile_contract.privacy_policy is defined
+
+    - name: Dry-run canonical profile LCM import
+      ansible.builtin.script:
+        cmd: >-
+          {{ hermes_profile_memory_continuity_importer_source_path | quote }}
+          --importer {{ hermes_profile_memory_continuity_external_importer | quote }}
+          --source-dir {{ hermes_profile_memory_continuity_profile_contract.source_dir | quote }}
+          --target-db {{ hermes_profile_memory_continuity_profile_contract.target_db | quote }}
+          --namespace {{ hermes_profile_memory_continuity_profile_contract.namespace | quote }}
+          --agent {{ hermes_profile_memory_continuity_profile | quote }}
+          --import-id {{ hermes_profile_memory_continuity_profile_contract.import_id | quote }}
+          {% if hermes_profile_memory_continuity_profile_contract.privacy_policy is defined %}
+          --include-manifest {{ hermes_profile_memory_continuity_selection_manifest | quote }}
+          {% endif %}
+        executable: /usr/local/lib/hermes-agent/venv/bin/python
+      register: hermes_profile_memory_continuity_lcm_dry_run
+      changed_when: false
+
+    - name: Require exact clean profile LCM import boundary
+      ansible.builtin.assert:
+        that:
+          - (hermes_profile_memory_continuity_lcm_dry_run.stdout | from_json).status in ['ready', 'already-migrated']
+          - (hermes_profile_memory_continuity_lcm_dry_run.stdout | from_json).compatibility in ['native', 'content-tool-call-id-fallback']
+          - (hermes_profile_memory_continuity_lcm_dry_run.stdout | from_json).sourceFileCount == hermes_profile_memory_continuity_profile_contract.expected_source_files
+          - (hermes_profile_memory_continuity_lcm_dry_run.stdout | from_json).trajectoryFileCount == hermes_profile_memory_continuity_profile_contract.expected_trajectory_files
+          - (hermes_profile_memory_continuity_lcm_dry_run.stdout | from_json).sourceBytes == hermes_profile_memory_continuity_profile_contract.expected_source_bytes
+          - (hermes_profile_memory_continuity_lcm_dry_run.stdout | from_json).sourceManifestSha256 == hermes_profile_memory_continuity_profile_contract.expected_source_sha256
+          - (hermes_profile_memory_continuity_lcm_dry_run.stdout | from_json).selectedFileCount == hermes_profile_memory_continuity_profile_contract.expected_selected_files
+          - (hermes_profile_memory_continuity_lcm_dry_run.stdout | from_json).selectedSourceManifestSha256 == hermes_profile_memory_continuity_profile_contract.expected_selected_sha256
+          - >-
+            hermes_profile_memory_continuity_profile_contract.privacy_policy is not defined
+            or (hermes_profile_memory_continuity_lcm_dry_run.stdout | from_json).includeManifestSha256
+               == hermes_profile_memory_continuity_profile_contract.expected_selection_manifest_sha256
+          - (hermes_profile_memory_continuity_lcm_dry_run.stdout | from_json).conversations == hermes_profile_memory_continuity_profile_contract.expected_conversations
+          - (hermes_profile_memory_continuity_lcm_dry_run.stdout | from_json).scanned == hermes_profile_memory_continuity_profile_contract.expected_scanned
+          - (hermes_profile_memory_continuity_lcm_dry_run.stdout | from_json).eligible == hermes_profile_memory_continuity_profile_contract.expected_eligible
+          - >-
+            (
+              (hermes_profile_memory_continuity_lcm_dry_run.stdout | from_json).wouldImport
+              == hermes_profile_memory_continuity_profile_contract.expected_eligible
+              and
+              (hermes_profile_memory_continuity_lcm_dry_run.stdout | from_json).skippedExisting
+              == 0
+            ) or (
+              (hermes_profile_memory_continuity_lcm_dry_run.stdout | from_json).wouldImport
+              == 0
+              and
+              (hermes_profile_memory_continuity_lcm_dry_run.stdout | from_json).skippedExisting
+              == hermes_profile_memory_continuity_profile_contract.expected_eligible
+            )
+          - (hermes_profile_memory_continuity_lcm_dry_run.stdout | from_json).invalidRows == 0
+          - (hermes_profile_memory_continuity_lcm_dry_run.stdout | from_json).warningCount == 0
+
+    - name: Dry-run isolated profile Mem0 v3 migration
+      ansible.builtin.script:
+        cmd: >-
+          {{ hermes_profile_memory_continuity_mem0_migrator_source_path | quote }}
+          --qdrant-url {{ hermes_mem0_qdrant_url | quote }}
+          --target {{ hermes_profile_memory_continuity_profile_contract.mem0_target_collection | quote }}
+          --user-id {{ hermes_profile_memory_continuity_profile_contract.mem0_user_id | quote }}
+          --agent-id {{ hermes_profile_memory_continuity_profile_contract.mem0_agent_id | quote }}
+          --reembed --hybrid --sparse-model Qdrant/bm25
+          --ollama-url {{ hermes_mem0_ollama_url | quote }}
+          --embedding-model {{ hermes_mem0_ollama_embedding_model | quote }}
+          --embedding-dimensions {{ hermes_mem0_ollama_embedding_dimensions }}
+          {% if hermes_profile_memory_continuity_profile_contract.mem0_empty_target | bool %}
+          --empty-target
+          {% else %}
+          --source {{ hermes_profile_memory_continuity_profile_contract.mem0_source_collection | quote }}
+          {% for user_id in hermes_profile_memory_continuity_profile_contract.mem0_source_user_ids %}
+          --include-user-id {{ user_id | quote }}
+          {% endfor %}
+          {% endif %}
+        executable: "{{ hermes_shadow_runtime_venv }}/bin/python"
+      register: hermes_profile_memory_continuity_mem0_dry_run
+      changed_when: false
+
+    - name: Require exact isolated profile Mem0 boundary
+      ansible.builtin.assert:
+        that:
+          - (hermes_profile_memory_continuity_mem0_dry_run.stdout | from_json).status in ['ready', 'already-migrated', 'already-initialized']
+          - (hermes_profile_memory_continuity_mem0_dry_run.stdout | from_json).sourceCount == hermes_profile_memory_continuity_profile_contract.expected_mem0_source
+          - (hermes_profile_memory_continuity_mem0_dry_run.stdout | from_json).selectedCount == hermes_profile_memory_continuity_profile_contract.expected_mem0_selected
+          - (hermes_profile_memory_continuity_mem0_dry_run.stdout | from_json).excludedCount == hermes_profile_memory_continuity_profile_contract.expected_mem0_excluded
+          - (hermes_profile_memory_continuity_mem0_dry_run.stdout | from_json).digest == hermes_profile_memory_continuity_profile_contract.expected_mem0_digest
+          - (hermes_profile_memory_continuity_mem0_dry_run.stdout | from_json).hybrid
+          - (hermes_profile_memory_continuity_mem0_dry_run.stdout | from_json).sparseModel == 'Qdrant/bm25'
+
+    - name: Report isolated profile memory audit
+      ansible.builtin.debug:
+        msg: >-
+          Profile memory audit passed exact source, LCM, and Mem0 boundaries.
+          No target, config, service, timer, or source state changed.
+      when: hermes_profile_memory_continuity_mode == 'audit'
+
+    - name: Remove transient public-memory selection after audit
+      ansible.builtin.file:
+        path: "{{ hermes_profile_memory_continuity_selection_manifest }}"
+        state: absent
+      when:
+        - hermes_profile_memory_continuity_mode == 'audit'
+        - hermes_profile_memory_continuity_profile_contract.privacy_policy is defined
+
+    - name: Stop isolated profile memory after audit
+      ansible.builtin.meta: end_host
+      when: hermes_profile_memory_continuity_mode == 'audit'
+
+    - name: Read profile-memory transaction timestamp
+      ansible.builtin.command:
+        argv: [/usr/bin/date, -u, +%Y%m%dT%H%M%SZ]
+      register: hermes_profile_memory_continuity_timestamp
+      changed_when: false
+
+    - name: Require off-host profile-memory rollback mount
+      ansible.builtin.command:
+        argv: [/usr/bin/mountpoint, -q, /srv/live-rollbacks]
+      changed_when: false
+
+    - name: Set profile-memory transaction paths
+      ansible.builtin.set_fact:
+        hermes_profile_memory_continuity_run_id: >-
+          {{ hermes_profile_memory_continuity_timestamp.stdout }}-pre-{{
+            hermes_profile_memory_continuity_profile }}-memory
+        hermes_profile_memory_continuity_local_stage: >-
+          /var/lib/hermes/bootstrap/profile-memory/{{
+            hermes_profile_memory_continuity_timestamp.stdout }}
+        hermes_profile_memory_continuity_backup_dir: >-
+          {{ hermes_profile_memory_continuity_rollback_root }}/{{
+            hermes_profile_memory_continuity_timestamp.stdout }}-pre-{{
+            hermes_profile_memory_continuity_profile }}-memory
+        hermes_profile_memory_continuity_restart_required: false
+        hermes_profile_memory_continuity_gateway_stopped: false
+
+    - name: Inspect prior profile-memory target files
+      ansible.builtin.stat:
+        path: "{{ item }}"
+        follow: false
+      loop: >-
+        {{ [
+             hermes_profile_memory_continuity_profile_contract.target_db,
+             hermes_profile_memory_continuity_mem0_config,
+             hermes_profile_memory_continuity_config,
+             hermes_profile_memory_continuity_dropin,
+             hermes_profile_memory_continuity_managed_policy,
+             hermes_profile_memory_continuity_importer_live,
+             hermes_profile_memory_privacy_auditor_live,
+             hermes_profile_mem0_smoke_live,
+             hermes_mem0_migrator_live
+           ]
+           + ([hermes_astra_handoff_validator_live]
+              if hermes_profile_memory_continuity_profile == 'dubble'
+              else []) }}
+      register: hermes_profile_memory_continuity_prior_files
+
+    - name: Reject unsafe prior profile-memory target files
+      ansible.builtin.assert:
+        that:
+          - not item.stat.exists or (item.stat.isreg | default(false))
+          - not (item.stat.islnk | default(false))
+      loop: "{{ hermes_profile_memory_continuity_prior_files.results }}"
+      loop_control:
+        label: "{{ item.item }}"
+
+    - name: Reject unprotected incremental profile LCM import
+      ansible.builtin.assert:
+        that:
+          - >-
+            not (
+              hermes_profile_memory_continuity_prior_files.results
+              | selectattr('item', 'equalto',
+                  hermes_profile_memory_continuity_profile_contract.target_db)
+              | map(attribute='stat.exists') | first | default(false)
+            )
+            or (hermes_profile_memory_continuity_lcm_dry_run.stdout | from_json).wouldImport == 0
+        fail_msg: >-
+          Incremental LCM import into an existing profile database requires a
+          stopped-writer SQLite online backup transaction and is not authorized
+          by this first-initialization path.
+
+    - name: Inspect prior profile-memory runtime directories
+      ansible.builtin.stat:
+        path: "{{ item }}"
+        follow: false
+      loop:
+        - "{{ hermes_profile_memory_continuity_plugin_mount }}"
+        - "{{ hermes_profile_memory_continuity_consumer.home }}/mem0"
+        - "{{ hermes_profile_memory_continuity_fastembed_cache }}"
+      register: hermes_profile_memory_continuity_prior_directories
+
+    - name: Reject unsafe prior profile-memory runtime directories
+      ansible.builtin.assert:
+        that:
+          - not item.stat.exists or (item.stat.isdir | default(false))
+          - not (item.stat.islnk | default(false))
+      loop: "{{ hermes_profile_memory_continuity_prior_directories.results }}"
+      loop_control:
+        label: "{{ item.item }}"
+
+    - name: Inspect prior profile Gateway state
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/systemctl
+          - is-active
+          - "{{ hermes_profile_memory_continuity_consumer.unit }}"
+      register: hermes_profile_memory_continuity_gateway_before
+      changed_when: false
+      failed_when: hermes_profile_memory_continuity_gateway_before.rc not in [0, 3]
+
+    - name: Inspect prior profile Mem0 collections
+      ansible.builtin.uri:
+        url: >-
+          {{ hermes_mem0_qdrant_url }}/collections/{{ item }}
+        method: GET
+        return_content: true
+        status_code: [200, 404]
+      loop:
+        - "{{ hermes_profile_memory_continuity_profile_contract.mem0_target_collection }}"
+        - "{{ hermes_profile_memory_continuity_profile_contract.mem0_target_collection }}_entities"
+      register: hermes_profile_memory_continuity_collections_before
+      changed_when: false
+
+    - name: Build exact prior file backup list
+      ansible.builtin.set_fact:
+        hermes_profile_memory_continuity_existing_files: >-
+          {{ hermes_profile_memory_continuity_prior_files.results
+             | selectattr('stat.exists', 'defined')
+             | selectattr('stat.exists')
+             | rejectattr('item', 'equalto',
+                 hermes_profile_memory_continuity_profile_contract.target_db)
+             | map(attribute='item') | list }}
+
+    - name: Prepare local and managed profile-memory rollback directories
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: directory
+        owner: root
+        group: root
+        mode: "0700"
+      loop:
+        - "{{ hermes_profile_memory_continuity_local_stage }}"
+        - "{{ hermes_profile_memory_continuity_backup_dir }}"
+
+    - name: Back up exact prior profile-memory files on local ext4
+      ansible.builtin.command:
+        argv: >-
+          {{ ['/usr/bin/tar', '--create', '--file',
+              hermes_profile_memory_continuity_local_stage + '/prior-files.tar',
+              '--absolute-names']
+             + hermes_profile_memory_continuity_existing_files }}
+      changed_when: true
+
+    - name: Hash local profile-memory rollback archive
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/sha256sum
+          - "{{ hermes_profile_memory_continuity_local_stage }}/prior-files.tar"
+      register: hermes_profile_memory_continuity_local_hash
+      changed_when: false
+
+    - name: Publish profile-memory rollback archive without NFS metadata preservation
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/cp
+          - "{{ hermes_profile_memory_continuity_local_stage }}/prior-files.tar"
+          - "{{ hermes_profile_memory_continuity_backup_dir }}/prior-files.tar.partial"
+      changed_when: true
+
+    - name: Flush profile-memory rollback archive
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/sync
+          - "{{ hermes_profile_memory_continuity_backup_dir }}/prior-files.tar.partial"
+      changed_when: false
+
+    - name: Hash published profile-memory rollback archive
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/sha256sum
+          - "{{ hermes_profile_memory_continuity_backup_dir }}/prior-files.tar.partial"
+      register: hermes_profile_memory_continuity_remote_hash
+      changed_when: false
+
+    - name: Require hash-equal profile-memory rollback archive
+      ansible.builtin.assert:
+        that:
+          - >-
+            hermes_profile_memory_continuity_local_hash.stdout.split()[0]
+            == hermes_profile_memory_continuity_remote_hash.stdout.split()[0]
+
+    - name: Publish verified profile-memory rollback archive atomically
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/mv
+          - "{{ hermes_profile_memory_continuity_backup_dir }}/prior-files.tar.partial"
+          - "{{ hermes_profile_memory_continuity_backup_dir }}/prior-files.tar"
+      changed_when: true
+
+    - name: Record content-free profile-memory rollback manifest
+      ansible.builtin.copy:
+        dest: "{{ hermes_profile_memory_continuity_backup_dir }}/manifest.json"
+        owner: root
+        group: root
+        mode: "0600"
+        content: >-
+          {{ {
+            'schemaVersion': 1,
+            'createdAt': hermes_profile_memory_continuity_timestamp.stdout,
+            'profile': hermes_profile_memory_continuity_profile,
+            'artifact': 'prior-files.tar',
+            'artifactSha256': hermes_profile_memory_continuity_local_hash.stdout.split()[0],
+            'priorFileCount': hermes_profile_memory_continuity_existing_files | length,
+            'gatewayActive': hermes_profile_memory_continuity_gateway_before.stdout == 'active',
+            'mainCollectionExisted': hermes_profile_memory_continuity_collections_before.results[0].status == 200,
+            'entityCollectionExisted': hermes_profile_memory_continuity_collections_before.results[1].status == 200
+          } | to_nice_json }}
+
+    - name: Apply isolated profile-memory transaction
+      block:
+        - name: Deploy isolated profile memory helpers
+          ansible.builtin.copy:
+            src: "{{ item.source }}"
+            dest: "{{ item.target }}"
+            owner: root
+            group: root
+            mode: "0755"
+          loop: >-
+            {{ [
+                 {
+                   'source': hermes_profile_memory_continuity_importer_source_path,
+                   'target': hermes_profile_memory_continuity_importer_live
+                 },
+                 {
+                   'source': hermes_profile_memory_continuity_privacy_auditor_source_path,
+                   'target': hermes_profile_memory_privacy_auditor_live
+                 },
+                 {
+                   'source': hermes_profile_memory_continuity_mem0_smoke_source_path,
+                   'target': hermes_profile_mem0_smoke_live
+                 },
+                 {
+                   'source': hermes_profile_memory_continuity_mem0_migrator_source_path,
+                   'target': hermes_mem0_migrator_live
+                 }
+               ]
+               + ([{
+                    'source': hermes_profile_memory_continuity_handoff_validator_source_path,
+                    'target': hermes_astra_handoff_validator_live
+                  }]
+                  if hermes_profile_memory_continuity_profile == 'dubble'
+                  else []) }}
+
+        - name: Create profile LCM plugin mountpoint
+          ansible.builtin.file:
+            path: "{{ hermes_profile_memory_continuity_plugin_mount }}"
+            state: directory
+            owner: "{{ hermes_profile_memory_continuity_consumer.user }}"
+            group: "{{ hermes_profile_memory_continuity_consumer.group }}"
+            mode: "0700"
+
+        - name: Create profile Mem0 runtime directories
+          ansible.builtin.file:
+            path: "{{ item }}"
+            state: directory
+            owner: "{{ hermes_profile_memory_continuity_consumer.user }}"
+            group: "{{ hermes_profile_memory_continuity_consumer.group }}"
+            mode: "0700"
+          loop:
+            - "{{ hermes_profile_memory_continuity_consumer.home }}/mem0"
+            - "{{ hermes_profile_memory_continuity_fastembed_cache }}"
+
+        - name: Apply canonical profile LCM import
+          ansible.builtin.command:
+            argv: >-
+              {{ hermes_profile_memory_continuity_lcm_import_argv
+                 + hermes_profile_memory_continuity_lcm_selection_argv
+                 + ['--apply'] }}
+          register: hermes_profile_memory_continuity_lcm_apply
+          when: >-
+            (hermes_profile_memory_continuity_lcm_dry_run.stdout | from_json).wouldImport
+            == hermes_profile_memory_continuity_profile_contract.expected_eligible
+          changed_when: >-
+            (hermes_profile_memory_continuity_lcm_apply.stdout | from_json).status
+            == 'migrated'
+
+        - name: Require exact applied profile LCM import
+          ansible.builtin.assert:
+            that:
+              - (hermes_profile_memory_continuity_lcm_apply.stdout | from_json).status in ['migrated', 'already-migrated']
+              - (hermes_profile_memory_continuity_lcm_apply.stdout | from_json).sourceManifestSha256 == hermes_profile_memory_continuity_profile_contract.expected_source_sha256
+              - (hermes_profile_memory_continuity_lcm_apply.stdout | from_json).eligible == hermes_profile_memory_continuity_profile_contract.expected_eligible
+              - (hermes_profile_memory_continuity_lcm_apply.stdout | from_json).invalidRows == 0
+              - (hermes_profile_memory_continuity_lcm_apply.stdout | from_json).quickCheck == 'ok'
+          when: not (hermes_profile_memory_continuity_lcm_apply.skipped | default(false))
+
+        - name: Secure imported profile LCM database
+          ansible.builtin.file:
+            path: "{{ hermes_profile_memory_continuity_profile_contract.target_db }}"
+            owner: "{{ hermes_profile_memory_continuity_consumer.user }}"
+            group: "{{ hermes_profile_memory_continuity_consumer.group }}"
+            mode: "0600"
+
+        - name: Apply isolated profile Mem0 v3 migration
+          ansible.builtin.command:
+            argv: >-
+              {{ ['/usr/sbin/runuser', '--user',
+                   hermes_profile_memory_continuity_consumer.user, '--',
+                   '/usr/bin/env',
+                   'HOME=' + hermes_profile_memory_continuity_consumer.account_home,
+                   'MEM0_TELEMETRY=false',
+                   'FASTEMBED_CACHE_PATH=' + hermes_profile_memory_continuity_fastembed_cache]
+                 + hermes_profile_memory_continuity_mem0_argv + ['--apply'] }}
+          register: hermes_profile_memory_continuity_mem0_apply
+          when: >-
+            (hermes_profile_memory_continuity_mem0_dry_run.stdout | from_json).status
+            == 'ready'
+          changed_when: >-
+            (hermes_profile_memory_continuity_mem0_apply.stdout | from_json).status
+            == 'migrated'
+
+        - name: Require exact applied profile Mem0 migration
+          ansible.builtin.assert:
+            that:
+              - (hermes_profile_memory_continuity_mem0_apply.stdout | from_json).status in ['migrated', 'already-migrated', 'initialized', 'already-initialized']
+              - (hermes_profile_memory_continuity_mem0_apply.stdout | from_json).selectedCount == hermes_profile_memory_continuity_profile_contract.expected_mem0_selected
+              - (hermes_profile_memory_continuity_mem0_apply.stdout | from_json).digest == hermes_profile_memory_continuity_profile_contract.expected_mem0_digest
+              - (hermes_profile_memory_continuity_mem0_apply.stdout | from_json).hybrid
+          when: not (hermes_profile_memory_continuity_mem0_apply.skipped | default(false))
+
+        - name: Render isolated profile Mem0 configuration
+          ansible.builtin.template:
+            src: >-
+              {{ playbook_dir }}/../../templates/hermes/{{
+                hermes_mem0_config_template }}
+            dest: "{{ hermes_profile_memory_continuity_mem0_config }}"
+            owner: "{{ hermes_profile_memory_continuity_consumer.user }}"
+            group: "{{ hermes_profile_memory_continuity_consumer.group }}"
+            mode: "0600"
+          vars:
+            hermes_mem0_user_id: >-
+              {{ hermes_profile_memory_continuity_profile_contract.mem0_user_id }}
+            hermes_mem0_agent_id: >-
+              {{ hermes_profile_memory_continuity_profile_contract.mem0_agent_id }}
+            hermes_mem0_render_collection: >-
+              {{ hermes_profile_memory_continuity_profile_contract.mem0_target_collection }}
+          register: hermes_profile_memory_continuity_mem0_config_change
+
+        - name: Render isolated profile managed config
+          ansible.builtin.template:
+            src: >-
+              {{ playbook_dir }}/../../templates/hermes/hermes-managed-config.yaml.j2
+            dest: "{{ hermes_profile_memory_continuity_config }}"
+            owner: root
+            group: "{{ hermes_profile_memory_continuity_consumer.group }}"
+            mode: "0440"
+          vars:
+            hermes_profile: "{{ hermes_profile_memory_continuity_consumer }}"
+          register: hermes_profile_memory_continuity_config_change
+
+        - name: Hash isolated profile managed policy and environment
+          ansible.builtin.command:
+            argv:
+              - /usr/bin/sha256sum
+              - "{{ hermes_profile_memory_continuity_config }}"
+              - "{{ hermes_profile_memory_continuity_environment_file }}"
+          register: hermes_profile_memory_continuity_policy_hash
+          changed_when: false
+          no_log: true
+
+        - name: Publish isolated profile managed-policy checksum
+          ansible.builtin.copy:
+            content: "{{ hermes_profile_memory_continuity_policy_hash.stdout }}\n"
+            dest: "{{ hermes_profile_memory_continuity_managed_policy }}"
+            owner: root
+            group: "{{ hermes_profile_memory_continuity_consumer.group }}"
+            mode: "0440"
+          register: hermes_profile_memory_continuity_policy_change
+          no_log: true
+
+        - name: Render isolated profile Gateway hardening
+          ansible.builtin.template:
+            src: >-
+              {{ playbook_dir }}/../../templates/hermes/hermes-gateway-hardening.conf.j2
+            dest: "{{ hermes_profile_memory_continuity_dropin }}"
+            owner: root
+            group: root
+            mode: "0644"
+          vars:
+            hermes_profile: "{{ hermes_profile_memory_continuity_consumer }}"
+          register: hermes_profile_memory_continuity_dropin_change
+
+        - name: Determine whether profile Gateway restart is required
+          ansible.builtin.set_fact:
+            hermes_profile_memory_continuity_restart_required: >-
+              {{
+                hermes_profile_memory_continuity_mem0_config_change.changed
+                or hermes_profile_memory_continuity_config_change.changed
+                or hermes_profile_memory_continuity_policy_change.changed
+                or hermes_profile_memory_continuity_dropin_change.changed
+              }}
+
+        - name: Validate changed profile config before restart
+          ansible.builtin.command:
+            argv:
+              - /usr/bin/systemd-run
+              - --quiet
+              - --wait
+              - --collect
+              - --pipe
+              - --service-type=exec
+              - --uid={{ hermes_profile_memory_continuity_consumer.user }}
+              - --gid={{ hermes_profile_memory_continuity_consumer.group }}
+              - --property=EnvironmentFile={{ hermes_profile_memory_continuity_environment_file }}
+              - --setenv=HOME={{ hermes_profile_memory_continuity_consumer.account_home }}
+              - --setenv=HERMES_HOME={{ hermes_profile_memory_continuity_consumer.home }}
+              - --setenv=HERMES_MANAGED_DIR=/etc/hermes/{{ hermes_profile_memory_continuity_profile }}
+              - "{{ hermes_shadow_runtime_binary }}"
+              - config
+              - check
+          changed_when: false
+
+        - name: Stop active profile Gateway through native planned lifecycle
+          ansible.builtin.command:
+            argv:
+              - "{{ hermes_shadow_runtime_binary }}"
+              - gateway
+              - stop
+              - --system
+          environment:
+            HOME: "{{ hermes_profile_memory_continuity_consumer.account_home }}"
+            HERMES_HOME: "{{ hermes_profile_memory_continuity_consumer.home }}"
+            HERMES_MANAGED_DIR: >-
+              /etc/hermes/{{ hermes_profile_memory_continuity_profile }}
+          when:
+            - hermes_profile_memory_continuity_restart_required | bool
+            - hermes_profile_memory_continuity_gateway_before.stdout == 'active'
+          changed_when: true
+
+        - name: Mark profile Gateway stopped for memory activation
+          ansible.builtin.set_fact:
+            hermes_profile_memory_continuity_gateway_stopped: true
+          when:
+            - hermes_profile_memory_continuity_restart_required | bool
+            - hermes_profile_memory_continuity_gateway_before.stdout == 'active'
+
+        - name: Reload changed profile unit definition
+          ansible.builtin.systemd_service:
+            daemon_reload: true
+          when: hermes_profile_memory_continuity_dropin_change.changed
+
+        - name: Start changed profile Gateway through native systemd readiness
+          ansible.builtin.systemd_service:
+            name: "{{ hermes_profile_memory_continuity_consumer.unit }}"
+            state: started
+          when:
+            - hermes_profile_memory_continuity_restart_required | bool
+            - hermes_profile_memory_continuity_gateway_before.stdout == 'active'
+
+        - name: Mark profile Gateway restored after memory activation
+          ansible.builtin.set_fact:
+            hermes_profile_memory_continuity_gateway_stopped: false
+
+        - name: Require active profile Gateway after memory activation
+          ansible.builtin.command:
+            argv:
+              - /usr/bin/systemctl
+              - is-active
+              - "{{ hermes_profile_memory_continuity_consumer.unit }}"
+          register: hermes_profile_memory_continuity_gateway_after
+          changed_when: false
+          when: hermes_profile_memory_continuity_gateway_before.stdout == 'active'
+
+        - name: Inspect activated profile Mem0 collection
+          ansible.builtin.uri:
+            url: >-
+              {{ hermes_mem0_qdrant_url }}/collections/{{
+                hermes_profile_memory_continuity_profile_contract.mem0_target_collection }}
+            method: GET
+            return_content: true
+            status_code: 200
+          register: hermes_profile_memory_continuity_collection_after
+          changed_when: false
+
+        - name: Require isolated profile Mem0 v3 schema and count
+          ansible.builtin.assert:
+            that:
+              - hermes_profile_memory_continuity_collection_after.json.result.points_count == hermes_profile_memory_continuity_profile_contract.expected_mem0_selected
+              - hermes_profile_memory_continuity_collection_after.json.result.config.params.vectors.size == hermes_mem0_ollama_embedding_dimensions
+              - hermes_profile_memory_continuity_collection_after.json.result.config.params.sparse_vectors.bm25.modifier | lower == 'idf'
+              - hermes_profile_memory_continuity_collection_after.json.result.payload_schema.user_id.data_type == 'keyword'
+              - hermes_profile_memory_continuity_collection_after.json.result.payload_schema.agent_id.data_type == 'keyword'
+
+        - name: Validate profile Mem0 recall without exposing memory text
+          ansible.builtin.command:
+            argv:
+              - /usr/sbin/runuser
+              - --user
+              - "{{ hermes_profile_memory_continuity_consumer.user }}"
+              - --
+              - /usr/bin/env
+              - "HOME={{ hermes_profile_memory_continuity_consumer.account_home }}"
+              - MEM0_TELEMETRY=false
+              - "MEM0_DIR={{ hermes_profile_memory_continuity_consumer.home }}/mem0"
+              - "FASTEMBED_CACHE_PATH={{ hermes_profile_memory_continuity_fastembed_cache }}"
+              - "{{ hermes_shadow_runtime_venv }}/bin/python"
+              - "{{ hermes_profile_mem0_smoke_live }}"
+              - --config
+              - "{{ hermes_profile_memory_continuity_mem0_config }}"
+              - --user-id
+              - "{{ hermes_profile_memory_continuity_profile_contract.mem0_user_id }}"
+              - --agent-id
+              - "{{ hermes_profile_memory_continuity_profile_contract.mem0_agent_id }}"
+              - --mode
+              - >-
+                {{ 'empty-roundtrip'
+                   if hermes_profile_memory_continuity_profile_contract.mem0_empty_target | bool
+                   else 'existing' }}
+          register: hermes_profile_memory_continuity_mem0_smoke
+          changed_when: false
+
+        - name: Require successful isolated profile Mem0 acceptance
+          ansible.builtin.assert:
+            that:
+              - (hermes_profile_memory_continuity_mem0_smoke.stdout | from_json).status == 'ok'
+              - >-
+                not hermes_profile_memory_continuity_profile_contract.mem0_empty_target | bool
+                or (hermes_profile_memory_continuity_mem0_smoke.stdout | from_json).after == 0
+
+        - name: Validate profile LCM database inventory
+          ansible.builtin.command:
+            argv:
+              - /usr/sbin/runuser
+              - --user
+              - "{{ hermes_profile_memory_continuity_consumer.user }}"
+              - --
+              - /usr/bin/env
+              - "HOME={{ hermes_profile_memory_continuity_consumer.account_home }}"
+              - "HERMES_HOME={{ hermes_profile_memory_continuity_consumer.home }}"
+              - "LCM_DATABASE_PATH={{ hermes_profile_memory_continuity_profile_contract.target_db }}"
+              - "{{ hermes_shadow_runtime_venv }}/bin/python"
+              - "{{ hermes_lcm_native_maintenance_live }}"
+              - inventory
+              - --plugin-root
+              - "{{ hermes_lcm_plugin_managed_root }}"
+              - --hermes-home
+              - "{{ hermes_profile_memory_continuity_consumer.home }}"
+              - --database
+              - "{{ hermes_profile_memory_continuity_profile_contract.target_db }}"
+              - --state-database
+              - "{{ hermes_profile_memory_continuity_consumer.home }}/state.db"
+          register: hermes_profile_memory_continuity_lcm_inventory
+          changed_when: false
+
+        - name: Require healthy isolated profile LCM database
+          ansible.builtin.assert:
+            that:
+              - (hermes_profile_memory_continuity_lcm_inventory.stdout | from_json).quick_check == 'ok'
+              - (hermes_profile_memory_continuity_lcm_inventory.stdout | from_json).tables.messages >= hermes_profile_memory_continuity_profile_contract.expected_eligible
+
+        - name: Verify imported OpenClaw sources remained unchanged
+          ansible.builtin.command:
+            argv: >-
+              {{ hermes_profile_memory_continuity_lcm_import_argv
+                 + hermes_profile_memory_continuity_lcm_selection_argv }}
+          register: hermes_profile_memory_continuity_final_dry_run
+          changed_when: false
+
+        - name: Require idempotent final profile-memory import
+          ansible.builtin.assert:
+            that:
+              - (hermes_profile_memory_continuity_final_dry_run.stdout | from_json).sourceManifestSha256 == hermes_profile_memory_continuity_profile_contract.expected_source_sha256
+              - (hermes_profile_memory_continuity_final_dry_run.stdout | from_json).selectedSourceManifestSha256 == hermes_profile_memory_continuity_profile_contract.expected_selected_sha256
+              - (hermes_profile_memory_continuity_final_dry_run.stdout | from_json).wouldImport == 0
+              - (hermes_profile_memory_continuity_final_dry_run.stdout | from_json).skippedExisting == hermes_profile_memory_continuity_profile_contract.expected_eligible
+      rescue:
+        - name: Stop profile Gateway before memory rollback
+          ansible.builtin.systemd_service:
+            name: "{{ hermes_profile_memory_continuity_consumer.unit }}"
+            state: stopped
+          when: hermes_profile_memory_continuity_gateway_before.stdout == 'active'
+          failed_when: false
+
+        - name: Remove failed profile-memory target files
+          ansible.builtin.file:
+            path: "{{ item.item }}"
+            state: absent
+          loop: "{{ hermes_profile_memory_continuity_prior_files.results }}"
+          when: not (item.stat.exists | default(false))
+          loop_control:
+            label: "{{ item.item }}"
+
+        - name: Restore exact prior profile-memory files
+          ansible.builtin.command:
+            argv:
+              - /usr/bin/tar
+              - --extract
+              - --file
+              - "{{ hermes_profile_memory_continuity_backup_dir }}/prior-files.tar"
+              - --absolute-names
+          changed_when: true
+
+        - name: Remove newly created profile Mem0 collections
+          ansible.builtin.uri:
+            url: >-
+              {{ hermes_mem0_qdrant_url }}/collections/{{ item.item }}
+            method: DELETE
+            status_code: [200, 404]
+          loop: "{{ hermes_profile_memory_continuity_collections_before.results }}"
+          when: item.status == 404
+          failed_when: false
+
+        - name: Remove newly created profile-memory runtime directories
+          ansible.builtin.file:
+            path: "{{ item.item }}"
+            state: absent
+          loop: >-
+            {{ hermes_profile_memory_continuity_prior_directories.results
+               | reverse | list }}
+          when: not (item.stat.exists | default(false))
+          loop_control:
+            label: "{{ item.item }}"
+          failed_when: false
+
+        - name: Reload profile units after memory rollback
+          ansible.builtin.systemd_service:
+            daemon_reload: true
+
+        - name: Restore prior profile Gateway availability
+          ansible.builtin.systemd_service:
+            name: "{{ hermes_profile_memory_continuity_consumer.unit }}"
+            state: started
+          when: hermes_profile_memory_continuity_gateway_before.stdout == 'active'
+
+        - name: Fail after restoring isolated profile-memory state
+          ansible.builtin.fail:
+            msg: >-
+              Isolated profile-memory activation failed. Prior files and
+              Gateway availability were restored; newly created Qdrant targets
+              were removed.
+      always:
+        - name: Remove transient public-memory selection manifest
+          ansible.builtin.file:
+            path: "{{ hermes_profile_memory_continuity_selection_manifest }}"
+            state: absent
+          failed_when: false
+
+        - name: Remove local profile-memory staging
+          ansible.builtin.file:
+            path: "{{ hermes_profile_memory_continuity_local_stage }}"
+            state: absent
+          failed_when: false

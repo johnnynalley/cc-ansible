@@ -147,6 +147,7 @@ def calendar_add(event: dict[str, Any]) -> None:
 
 def calendar_contains(event: dict[str, Any]) -> bool:
     marker = f"Managed-ID: {event['eventId']}"
+    search_key = event["eventId"].split("-", 1)[0]
     result = subprocess.run(
         [
             KHAL,
@@ -155,7 +156,7 @@ def calendar_contains(event: dict[str, Any]) -> bool:
             "personal",
             "--format",
             "{description}",
-            marker,
+            search_key,
         ],
         check=False,
         stdout=subprocess.PIPE,
@@ -172,34 +173,51 @@ def calendar_contains(event: dict[str, Any]) -> bool:
         )
     if len(result.stdout.encode("utf-8")) > MAX_CALENDAR_SEARCH_BYTES:
         raise FeedError("calendar-search-too-large")
-    return marker in result.stdout
+    compact_output = re.sub(r"\s+", "", result.stdout)
+    compact_marker = re.sub(r"\s+", "", marker)
+    return compact_marker in compact_output
 
 
 def synchronize_calendars(
     events: list[dict[str, Any]],
     state: dict[str, Any],
     now: datetime,
-    state_path: Path,
-) -> None:
+    _state_path: Path,
+) -> list[str]:
     records = state["events"]
+    pending: list[str] = []
     for event in events:
         record = records.setdefault(event["eventId"], {})
-        if record.get("calendarSyncedAt"):
-            continue
         if datetime.fromisoformat(event["startsAtCt"]) <= now:
             continue
         if not calendar_contains(event):
             calendar_add(event)
-        record["calendarSyncedAt"] = datetime.now(timezone.utc).isoformat()
-        state["events"] = records
-        atomic_json(state_path, state, mode=0o600)
+            pending.append(event["eventId"])
+        elif not record.get("calendarSyncedAt"):
+            pending.append(event["eventId"])
+    return pending
 
 
-def migrated_state(path: Path, legacy_path: Path) -> dict[str, Any]:
+def sync_native_calendar() -> None:
+    result = subprocess.run(
+        ["/usr/bin/vdirsyncer", "sync", "personal"],
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        timeout=120,
+        check=False,
+    )
+    if result.returncode != 0:
+        detail = (result.stderr or result.stdout or "sync-failed").strip()
+        raise FeedError(f"vdirsyncer:{result.returncode}:{detail[:240]}")
+
+
+def migrated_state(path: Path, import_path: Path | None) -> dict[str, Any]:
     current = load_json(path)
     if current.get("schemaVersion") == 1 and isinstance(current.get("events"), dict):
         return current
-    legacy = load_json(legacy_path)
+    legacy = load_json(import_path) if import_path is not None else {}
     events: dict[str, Any] = {}
     for key, value in (legacy.get("events") or {}).items():
         if isinstance(key, str) and isinstance(value, dict) and value.get("calendar_synced_at"):
@@ -212,7 +230,7 @@ def main() -> int:
     parser.add_argument("--parser-root", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--state", type=Path, required=True)
-    parser.add_argument("--legacy-state", type=Path, required=True)
+    parser.add_argument("--import-state", type=Path)
     args = parser.parse_args()
     sys.path.insert(0, str(args.parser_root))
     try:
@@ -224,9 +242,14 @@ def main() -> int:
         events = [normalize(event, now) for event in raw_events]
         if len({event["eventId"] for event in events}) != len(events):
             raise FeedError("duplicate-event")
-        state = migrated_state(args.state, args.legacy_state)
+        state = migrated_state(args.state, args.import_state)
         records = state["events"]
-        synchronize_calendars(events, state, now, args.state)
+        pending = synchronize_calendars(events, state, now, args.state)
+        if pending:
+            sync_native_calendar()
+            synced_at = datetime.now(timezone.utc).isoformat()
+            for event_id in pending:
+                records[event_id]["calendarSyncedAt"] = synced_at
         keep_after = now - timedelta(days=14)
         active_ids = {
             event["eventId"]

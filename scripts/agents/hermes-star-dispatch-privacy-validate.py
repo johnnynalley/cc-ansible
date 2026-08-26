@@ -17,7 +17,6 @@ import yaml
 sys.dont_write_bytecode = True
 
 PLUGIN = "star-dispatch-privacy"
-ENABLED_PLUGINS = [PLUGIN, "agent-docker-inventory", "hermes-lcm"]
 EXPECTED_FILES = ("__init__.py", "plugin.yaml")
 EXPECTED_HOOKS = {
     "on_session_finalize",
@@ -49,8 +48,35 @@ def validate_tree(root: Path) -> dict[str, str]:
     require(not stat.S_ISLNK(root_stat.st_mode), "plugin-root-symlink")
     require(root_stat.st_uid == 0, "plugin-root-owner")
     require(stat.S_IMODE(root_stat.st_mode) == 0o750, "plugin-root-mode")
-    names = sorted(entry.name for entry in os.scandir(root))
-    require(names == list(EXPECTED_FILES), "plugin-inventory-drift")
+    with os.scandir(root) as entries:
+        names = sorted(entry.name for entry in entries)
+    source_names = sorted(name for name in names if name != "__pycache__")
+    require(source_names == list(EXPECTED_FILES), "plugin-inventory-drift")
+    if "__pycache__" in names:
+        cache = root / "__pycache__"
+        cache_stat = os.lstat(cache)
+        require(stat.S_ISDIR(cache_stat.st_mode), "plugin-cache-not-directory")
+        require(not stat.S_ISLNK(cache_stat.st_mode), "plugin-cache-symlink")
+        require(cache_stat.st_uid == 0, "plugin-cache-owner")
+        require(cache_stat.st_mode & 0o022 == 0, "plugin-cache-writable")
+        with os.scandir(cache) as entries:
+            for entry in entries:
+                path = cache / entry.name
+                path_stat = os.lstat(path)
+                require(
+                    entry.name.endswith(".pyc")
+                    and stat.S_ISREG(path_stat.st_mode)
+                    and not stat.S_ISLNK(path_stat.st_mode),
+                    f"plugin-cache-inventory:{entry.name}",
+                )
+                require(
+                    path_stat.st_uid == 0,
+                    f"plugin-cache-owner:{entry.name}",
+                )
+                require(
+                    path_stat.st_mode & 0o022 == 0,
+                    f"plugin-cache-writable:{entry.name}",
+                )
     result = {}
     for name in EXPECTED_FILES:
         path = root / name
@@ -96,9 +122,13 @@ def validate_config(path: Path) -> None:
     require(isinstance(config, dict), "config-invalid")
     plugins = config.get("plugins")
     require(isinstance(plugins, dict), "plugins-config-missing")
+    enabled = plugins.get("enabled")
     require(
-        plugins.get("enabled") == ENABLED_PLUGINS,
-        "plugin-set-or-order-drift",
+        isinstance(enabled, list)
+        and all(isinstance(item, str) for item in enabled)
+        and len(enabled) == len(set(enabled))
+        and PLUGIN in enabled,
+        "plugin-enable-state-drift",
     )
     disabled = plugins.get("disabled", [])
     require(isinstance(disabled, list) and PLUGIN not in disabled, "plugin-disabled")

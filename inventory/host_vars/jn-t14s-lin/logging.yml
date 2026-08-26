@@ -3,3 +3,4 @@
 # remains enabled, so crash evidence is still retained for coredumpctl.
 drkonqi_coredump_recursion_guard: true
 drkonqi_coredump_guard_review_version: "6.6.4-0ubuntu1"
+drkonqi_crash_cache_retention_days: 14

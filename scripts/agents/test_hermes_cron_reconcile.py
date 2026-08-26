@@ -52,7 +52,6 @@ class FakeCron:
         job = {
             "id": f"job-{len(self.jobs) + 1}",
             **values,
-            "workdir": None,
             "enabled": True,
             "state": "scheduled",
             "schedule": parsed_schedule,
@@ -112,13 +111,14 @@ class ReconcileTests(unittest.TestCase):
     def tearDown(self):
         self.temporary.cleanup()
 
-    def args(self, apply: bool):
+    def args(self, apply: bool, operation: str | None = None):
         return SimpleNamespace(
             home=self.home,
             manifest=self.manifest,
             profile="astra",
             apply=apply,
             check=not apply,
+            operation=operation,
         )
 
     def write_manifest(self, jobs=None):
@@ -215,6 +215,130 @@ class ReconcileTests(unittest.TestCase):
             [{"key": "test-alert", "action": "create"}],
         )
         self.assertEqual(api.jobs, [])
+
+    def test_seed_preserves_native_edits(self):
+        self.write_manifest()
+        edited = {
+            "id": "native-edit",
+            "name": "test-alert",
+            "prompt": "",
+            "deliver": "discord:1488752822466904256",
+            "script": "task.py",
+            "no_agent": True,
+            "model": None,
+            "provider": None,
+            "skills": [],
+            "enabled_toolsets": None,
+            "context_from": None,
+            "workdir": None,
+            "schedule_display": "every 2h",
+            "enabled": True,
+            "state": "scheduled",
+            "origin": RECONCILE.origin_for(self.job, "astra"),
+        }
+        api = FakeCron([edited])
+        RECONCILE.native_api = lambda: api
+        self.assertEqual(RECONCILE.reconcile(self.args(False, "seed")), [])
+        self.assertEqual(api.jobs[0]["schedule_display"], "every 2h")
+
+    def test_seed_creates_a_missing_job(self):
+        self.write_manifest()
+        api = FakeCron()
+        RECONCILE.native_api = lambda: api
+        self.assertEqual(
+            RECONCILE.reconcile(self.args(False, "seed")),
+            [{"key": "test-alert", "action": "create"}],
+        )
+        self.assertEqual(len(api.jobs), 1)
+
+    def test_seed_refuses_to_adopt_an_unmanaged_name_collision(self):
+        adopted = dict(self.job)
+        adopted["adoptExisting"] = True
+        self.write_manifest([adopted])
+        api = FakeCron([{"id": "native", "name": "test-alert", "origin": None}])
+        RECONCILE.native_api = lambda: api
+        with self.assertRaisesRegex(RECONCILE.ReconcileError, "seed-name-collision"):
+            RECONCILE.reconcile(self.args(False, "seed"))
+
+    def test_agent_job_requires_profile_workdir_and_preserves_continuity(self):
+        agent = {
+            "key": "daily-brief",
+            "name": "daily-brief",
+            "schedule": "0 7 * * *",
+            "prompt": "Compose the brief.",
+            "deliver": "local",
+            "script": "task.py",
+            "noAgent": False,
+            "continuity": True,
+            "workdir": str(self.home),
+        }
+        self.write_manifest([agent])
+        api = FakeCron()
+        RECONCILE.native_api = lambda: api
+        self.assertEqual(
+            RECONCILE.reconcile(self.args(True)),
+            [{"key": "daily-brief", "action": "create"}],
+        )
+        self.assertEqual(api.jobs[0]["context_from"], ["self"])
+        self.assertEqual(api.jobs[0]["workdir"], str(self.home))
+        self.assertEqual(RECONCILE.reconcile(self.args(False)), [])
+
+    def test_agent_job_without_profile_workdir_fails_closed(self):
+        agent = {
+            "key": "daily-brief",
+            "name": "daily-brief",
+            "schedule": "0 7 * * *",
+            "prompt": "Compose the brief.",
+            "deliver": "local",
+            "script": None,
+            "noAgent": False,
+        }
+        self.write_manifest([agent])
+        RECONCILE.native_api = lambda: FakeCron()
+        with self.assertRaisesRegex(
+            RECONCILE.ReconcileError, "profile-workdir-required:daily-brief"
+        ):
+            RECONCILE.reconcile(self.args(False))
+
+    def test_inherited_route_clears_existing_model_pin(self):
+        agent = {
+            "key": "daily-brief",
+            "name": "daily-brief",
+            "schedule": "0 7 * * *",
+            "prompt": "Compose the brief.",
+            "deliver": "local",
+            "script": None,
+            "noAgent": False,
+            "workdir": str(self.home),
+        }
+        self.write_manifest([agent])
+        existing = {
+            "id": "pinned-job",
+            "name": "daily-brief",
+            "prompt": "Compose the brief.",
+            "deliver": "local",
+            "script": None,
+            "no_agent": False,
+            "model": "gpt-5.4-mini",
+            "provider": "openai-codex",
+            "skills": [],
+            "enabled_toolsets": None,
+            "context_from": None,
+            "workdir": str(self.home),
+            "schedule_display": "0 7 * * *",
+            "enabled": True,
+            "state": "scheduled",
+            "origin": RECONCILE.origin_for(agent, "astra"),
+        }
+        api = FakeCron([existing])
+        RECONCILE.native_api = lambda: api
+        self.assertEqual(
+            RECONCILE.reconcile(self.args(True)),
+            [{"key": "daily-brief", "action": "update"}],
+        )
+        self.assertIsNone(api.jobs[0]["model"])
+        self.assertIsNone(api.jobs[0]["provider"])
+        self.assertEqual(RECONCILE.reconcile(self.args(False)), [])
 
 
 class DeliveryLedgerTests(unittest.TestCase):

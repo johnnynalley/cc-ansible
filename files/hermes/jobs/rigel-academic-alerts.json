@@ -8,7 +8,7 @@
   "wrap_response": false,
   "attach_to_session": false,
   "desired_state": "paused-until-cutover",
-  "source": "transformed-managed/imports/courses/academic-state.json",
+  "source": "imported-data/courses/academic-state.json",
   "dedupe_state": "state/rigel-schedule-state.json",
   "health_state": "state/rigel-schedule-health.json",
   "expected_idle_stdout": "",

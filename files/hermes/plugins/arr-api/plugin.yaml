@@ -1,0 +1,4 @@
+name: arr-api
+version: 1.1.0
+description: Credential-isolated managed Arr API access for Astra.
+module: __init__

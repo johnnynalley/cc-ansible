@@ -1,0 +1,357 @@
+{
+  "schemaVersion": 3,
+  "observedAt": "2026-08-20",
+  "source": {
+    "root": "/home/johnny/.openclaw",
+    "workspace": "/home/johnny/.openclaw/workspace",
+    "config": "/home/johnny/.openclaw/openclaw.json",
+    "cronState": "/home/johnny/.openclaw/state/openclaw.sqlite",
+    "historicalCronState": "/home/johnny/.openclaw/cron/jobs.json.migrated",
+    "astraSkillCount": 29,
+    "enabledCronCount": 26,
+    "historicalEnabledCronCount": 28,
+    "historicalOnlyCronCount": 7,
+    "sharedCronCount": 21,
+    "logicalHeartbeatCount": 3,
+    "pairedControlClients": 4,
+    "pairedCliOperators": 1,
+    "pairedIosNodes": 1,
+    "nextcloudTalkBindings": 3,
+    "observedNextcloudTalkSessions": 0,
+    "completeTreeRequired": true,
+    "unclassifiedOmissionAllowed": false
+  },
+  "contracts": {
+    "skills": "files/hermes/profile-skills-contract.json",
+    "automation": "files/hermes/production-automation-reconciliation.json",
+    "profileData": "files/hermes/profile-data-contract.json",
+    "profileTransforms": "files/hermes/profile-transforms-contract.json",
+    "completeEvidence": "files/hermes/openclaw-evidence-contract.json",
+    "bootstrapParity": "files/hermes/bootstrap-parity-contract.json"
+  },
+  "logicalProfiles": {
+    "astra": {
+      "sourceAgentRoot": "/home/johnny/.openclaw/agents/main",
+      "targetProfile": "astra",
+      "deliveryConsumer": "astra",
+      "deliveryMode": "dedicated-gateway",
+      "fullParityRequired": true,
+      "independentAcceptanceRequired": true
+    },
+    "dubble": {
+      "sourceAgentRoot": "/home/johnny/.openclaw/agents/dubble",
+      "targetProfile": "dubble",
+      "deliveryConsumer": "dubble",
+      "deliveryMode": "dedicated-gateway",
+      "fullParityRequired": true,
+      "independentAcceptanceRequired": true
+    },
+    "rigel": {
+      "sourceAgentRoot": "/home/johnny/.openclaw/agents/rigel",
+      "targetProfile": "rigel",
+      "deliveryConsumer": "rigel",
+      "deliveryMode": "dedicated-gateway",
+      "fullParityRequired": true,
+      "independentAcceptanceRequired": true
+    }
+  },
+  "astraSourceSkills": [
+    "caldav-calendar",
+    "clawhub",
+    "daily-summary-thread",
+    "diagram-maker",
+    "discord",
+    "financial-decision-support",
+    "fortnite-tracker",
+    "guided-software-walkthrough",
+    "hardware-inventory",
+    "hardware-planning",
+    "healthcheck",
+    "himalaya",
+    "immich-media-inbox",
+    "job-application-tracker",
+    "live-task-ledger",
+    "lossless-claw",
+    "meme-maker",
+    "node-connect",
+    "node-inspect-debugger",
+    "price-lookup",
+    "python-debugpy",
+    "self-evolution",
+    "skill-creator",
+    "sober-tracker",
+    "spike",
+    "taskflow",
+    "taskflow-inbox-triage",
+    "tmux",
+    "weather"
+  ],
+  "capabilities": [
+    {
+      "id": "identity-and-instructions",
+      "source": "OpenClaw workspace identity, soul, user, agent, and tool guidance",
+      "disposition": "native",
+      "target": "native Hermes bootstrap plus exact OpenClaw bootstrap/reference evidence",
+      "validation": "hermes-bootstrap-parity-validate runtime"
+    },
+    {
+      "id": "self-evolution",
+      "source": "self-evolution skill and correction persistence policy",
+      "disposition": "native",
+      "target": "automatic profile-scoped Hermes memory and skill writes with scheduled self-review",
+      "validation": "behavior regression, heartbeat, and autonomous-write audit"
+    },
+    {
+      "id": "native-terminal",
+      "source": "main exec host gateway with full non-root user authority",
+      "disposition": "native",
+      "target": "Astra local terminal as hermes-astra",
+      "validation": "service-identity terminal smoke"
+    },
+    {
+      "id": "native-file-and-code",
+      "source": "main workspace file tools and code execution",
+      "disposition": "native",
+      "target": "Hermes file and code_execution toolsets",
+      "validation": "service-identity workspace read-write smoke"
+    },
+    {
+      "id": "ops-repository",
+      "source": "/home/johnny/cc-ansible",
+      "disposition": "native",
+      "target": "/var/lib/hermes/astra/workspaces/cc-ansible",
+      "validation": "bounded systemd bind and git status smoke"
+    },
+    {
+      "id": "managed-host-inspection",
+      "source": "OpenClaw SSH host map and direct terminal access",
+      "disposition": "native",
+      "target": "non-root hermes-astra SSH identities",
+      "validation": "inventory-wide id and hostname smoke"
+    },
+    {
+      "id": "calendar",
+      "source": "caldav-calendar skill and Nextcloud CalDAV credential",
+      "disposition": "native",
+      "target": "vdirsyncer and khal as hermes-astra",
+      "validation": "calendar sync and two-day list"
+    },
+    {
+      "id": "mail",
+      "source": "Himalaya skill and iCloud account",
+      "disposition": "native",
+      "target": "Himalaya as hermes-astra",
+      "validation": "one-envelope read"
+    },
+    {
+      "id": "web",
+      "source": "OpenClaw web search and fetch tools",
+      "disposition": "native",
+      "target": "Hermes native web toolset",
+      "validation": "managed config and live tool-index audit"
+    },
+    {
+      "id": "browser",
+      "source": "OpenClaw browser tool available to main and reviewer children",
+      "disposition": "native",
+      "target": "Hermes native browser toolset with local Chromium",
+      "validation": "browser dependency and navigation smoke"
+    },
+    {
+      "id": "vision",
+      "source": "all image attachments with GPT primary and Kimi fallback",
+      "disposition": "native",
+      "target": "Hermes native vision toolset through the subscription-backed OpenAI Codex route",
+      "validation": "Discord image attachment analysis smoke"
+    },
+    {
+      "id": "image-generation",
+      "source": "OpenClaw image generation provider capability",
+      "disposition": "native",
+      "target": "Hermes image_gen toolset with bundled openai-codex backend",
+      "validation": "provider registration and bounded generation smoke"
+    },
+    {
+      "id": "tts",
+      "source": "OpenClaw TTS tool available to main and denied to Dubble",
+      "disposition": "native",
+      "target": "Hermes native TTS toolset with Edge provider for Astra",
+      "validation": "audio artifact and Discord delivery smoke"
+    },
+    {
+      "id": "outbound-messaging",
+      "source": "OpenClaw message tool for main and Dubble",
+      "disposition": "native",
+      "target": "Hermes native MCP channel bridge for Astra and Dubble with an exact non-permission tool whitelist",
+      "validation": "native MCP discovery and authorized cross-channel delivery smoke"
+    },
+    {
+      "id": "discord-native",
+      "source": "two OpenClaw Discord bot consumers for three logical profiles",
+      "disposition": "native",
+      "target": "three isolated Hermes Discord Gateways; the temporary Astra-owned Rigel fallback is removed only after attended third-bot enrollment",
+      "validation": "Discord runtime audit"
+    },
+    {
+      "id": "discord-openclaw-actions",
+      "source": "OpenClaw message actions beyond Hermes core Discord schema",
+      "disposition": "native-equivalent",
+      "target": "policy-bounded discord-parity plugin",
+      "validation": "hermes-discord-parity-validate"
+    },
+    {
+      "id": "discord-attachments",
+      "source": "OpenClaw image and file attachment handling",
+      "disposition": "native",
+      "target": "Hermes cached attachment path with Astra arbitrary-file support and size cap",
+      "validation": "image, text, and binary attachment regression"
+    },
+    {
+      "id": "nextcloud-talk",
+      "source": "three credentialed OpenClaw bindings with zero observed session keys",
+      "disposition": "preserved-inactive",
+      "target": "source credentials retained offline; no dead bridge is represented as live Hermes parity",
+      "validation": "source binding, session-index, and listener audit"
+    },
+    {
+      "id": "remote-dashboard",
+      "source": "four paired OpenClaw Control UI clients and one CLI operator",
+      "disposition": "native",
+      "target": "authenticated Hermes serve/dashboard behind the existing tailnet-only origin",
+      "validation": "auth-required HTTPS and WebSocket smoke"
+    },
+    {
+      "id": "device-node",
+      "source": "one paired OpenClaw iOS node",
+      "disposition": "reenrollment-required",
+      "target": "Hermes remote desktop/mobile client enrollment; OpenClaw node credentials are not portable",
+      "validation": "client availability and attended re-pair proof"
+    },
+    {
+      "id": "canvas-artifacts",
+      "source": "OpenClaw canvas tool available to main",
+      "disposition": "native-equivalent",
+      "target": "Hermes file plus browser artifact workflow and dashboard preview",
+      "validation": "HTML artifact create, render, and inspect smoke"
+    },
+    {
+      "id": "model-routing",
+      "source": "GPT-5.6 primary for main, Dubble, Rigel, and Vega; critical Antares route",
+      "disposition": "native",
+      "target": "OpenAI Codex GPT-5.6 profiles and privacy-bounded Star delegation",
+      "validation": "effective model and reviewer-role audit"
+    },
+    {
+      "id": "model-fallbacks",
+      "source": "OpenAI Codex primary plus historical GLM, Kimi, DeepSeek, and OpenRouter fallback routes",
+      "disposition": "native",
+      "target": "ordered Hermes fallback_providers on Astra, Dubble, and Rigel",
+      "validation": "managed config equality and isolated fallback smokes"
+    },
+    {
+      "id": "google-auxiliary-provider",
+      "source": "Google provider used by OpenClaw Mem0 and auxiliary media paths",
+      "disposition": "preserved-inactive",
+      "target": "sealed OpenClaw evidence only; no metered Gemini or Google route in active Hermes profiles",
+      "validation": "complete evidence reconciliation and active environment/model-route denial"
+    },
+    {
+      "id": "copilot-provider",
+      "source": "enabled OpenClaw GitHub Copilot provider with no active production route",
+      "disposition": "preserved-inactive",
+      "target": "source auth remains archived; no invented production fallback",
+      "validation": "model-route and source-auth inventory audit"
+    },
+    {
+      "id": "docker-operations",
+      "source": "OpenClaw Docker inventory and updater workflows",
+      "disposition": "retained-external",
+      "target": "read-only inventory and bounded update brokers",
+      "validation": "hermes-agent-docker-inventory-validate"
+    },
+    {
+      "id": "cron",
+      "source": "26 current enabled SQLite jobs, 28 enabled historical JSON rows, and three logical heartbeats",
+      "disposition": "native",
+      "target": "Hermes native cron API plus retained deterministic timers",
+      "validation": "zero-drift manifest reconciliation"
+    },
+    {
+      "id": "mem0",
+      "source": "OpenClaw Mem0 Qdrant collection and history database",
+      "disposition": "native",
+      "target": "Hermes native Mem0 with local Ollama LLM and locally re-embedded v2 Qdrant vectors",
+      "validation": "source/v1 preservation, count and payload reconciliation, vector dimensions, and recall health"
+    },
+    {
+      "id": "lossless-context",
+      "source": "OpenClaw lossless-claw context engine and LCM database",
+      "disposition": "native",
+      "target": "Hermes LCM context engine",
+      "validation": "converted database quick-check and coexistence health"
+    },
+    {
+      "id": "sessions-and-search",
+      "source": "all-session visibility, searchable transcripts, and durable context",
+      "disposition": "native",
+      "target": "Hermes sessions and session_search with offline source archive",
+      "validation": "session scorecard cron and sampled archive restore"
+    },
+    {
+      "id": "durable-profile-data",
+      "source": "workspace trackers, references, projects, and managed state",
+      "disposition": "native",
+      "target": "source-preserving managed/writable projections plus complete read-only OpenClaw evidence",
+      "validation": "profile data runtime audit"
+    },
+    {
+      "id": "hardware-tracker",
+      "source": "hardware-inventory and hardware-planning skills plus 63-row inventory",
+      "disposition": "native",
+      "target": "hardware skills and retained 63-row data",
+      "validation": "task-level list and status smoke"
+    },
+    {
+      "id": "fortnite-tracker",
+      "source": "Fortnite skill, progress, locker, V-Bucks, UEFN, and community state",
+      "disposition": "native",
+      "target": "fortnite-tracker skill and retained structured data",
+      "validation": "daily progress snapshot smoke"
+    },
+    {
+      "id": "daily-summary",
+      "source": "OpenClaw heartbeat and Daily Summary collectors",
+      "disposition": "native",
+      "target": "retained collectors plus Hermes compose and watchdog",
+      "validation": "collector artifact and delivery ledger smoke"
+    },
+    {
+      "id": "astra-star-delegation",
+      "source": "Vega and Antares research/review roles",
+      "disposition": "native-equivalent",
+      "target": "privacy-bounded native delegation",
+      "validation": "star-dispatch privacy audit"
+    },
+    {
+      "id": "dubble-astra-handoff",
+      "source": "OpenClaw agent-to-agent main and Dubble session messaging",
+      "disposition": "native-equivalent",
+      "target": "Hermes native peer DM through bounded Dubble plugin",
+      "validation": "peer handoff smoke"
+    },
+    {
+      "id": "profile-backups",
+      "source": "OpenClaw state and workspace backups",
+      "disposition": "native",
+      "target": "hermes-profile-backup timers",
+      "validation": "active timers and restorable archives"
+    },
+    {
+      "id": "source-archive",
+      "source": "the complete stopped /home/johnny/.openclaw tree without relevance filtering",
+      "disposition": "retained-external",
+      "target": "untouched source plus a strictly read-only Astra projection; credential-bearing content is sealed while every descendant remains inventoried",
+      "validation": "complete path manifest, source fingerprint, exact reconciliation, mount read-only proof, and sampled restore"
+    }
+  ]
+}

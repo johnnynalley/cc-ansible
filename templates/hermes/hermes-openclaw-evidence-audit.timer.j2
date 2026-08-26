@@ -1,0 +1,12 @@
+[Unit]
+Description=Periodic complete OpenClaw evidence reconciliation audit
+
+[Timer]
+OnBootSec=1h
+OnUnitActiveSec=6h
+RandomizedDelaySec=15m
+Persistent=true
+Unit={{ hermes_openclaw_evidence_audit_service }}
+
+[Install]
+WantedBy=timers.target

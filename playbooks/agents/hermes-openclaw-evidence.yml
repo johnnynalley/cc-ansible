@@ -1,0 +1,758 @@
+---
+# yamllint disable rule:line-length
+# Purpose: Expose every preserved OpenClaw path to Astra through a complete, redacted, read-only evidence projection.
+# Hosts: hermes_hosts.
+# Key vars: hermes_openclaw_evidence_*.
+# Scripts: scripts/agents/hermes-openclaw-evidence.py.
+# Validation: ansible-playbook playbooks/agents/hermes-openclaw-evidence.yml --syntax-check.
+
+- name: Converge complete OpenClaw evidence for Hermes Astra
+  hosts: hermes_hosts
+  become: true
+  gather_facts: false
+
+  vars:
+    hermes_openclaw_evidence_contract_path: >-
+      {{ playbook_dir }}/../../{{ hermes_openclaw_evidence_contract_source }}
+    hermes_openclaw_evidence_contract: >-
+      {{ lookup('ansible.builtin.file', hermes_openclaw_evidence_contract_path) | from_json }}
+    hermes_openclaw_evidence_source_script: >-
+      {{ playbook_dir }}/../../{{ hermes_openclaw_evidence_script_source }}
+    hermes_bootstrap_parity_contract_path: >-
+      {{ playbook_dir }}/../../{{ hermes_bootstrap_parity_contract_source }}
+    hermes_bootstrap_parity_contract: >-
+      {{ lookup('ansible.builtin.file', hermes_bootstrap_parity_contract_path) | from_json }}
+    hermes_bootstrap_parity_validator_path: >-
+      {{ playbook_dir }}/../../{{ hermes_bootstrap_parity_validator_source }}
+    hermes_openclaw_evidence_service_live: >-
+      /etc/systemd/system/{{ hermes_openclaw_evidence_service }}
+    hermes_openclaw_evidence_audit_service_live: >-
+      /etc/systemd/system/{{ hermes_openclaw_evidence_audit_service }}
+    hermes_openclaw_evidence_audit_timer_live: >-
+      /etc/systemd/system/{{ hermes_openclaw_evidence_audit_timer }}
+    hermes_openclaw_evidence_gateway_unit: hermes-gateway-astra.service
+    hermes_openclaw_evidence_view_parent: >-
+      {{ hermes_openclaw_evidence_contract.runtime.viewRoot | dirname }}
+    hermes_openclaw_evidence_managed_paths:
+      - "{{ hermes_openclaw_evidence_contract_live }}"
+      - "{{ hermes_openclaw_evidence_script_live }}"
+      - "{{ hermes_bootstrap_parity_contract_live }}"
+      - "{{ hermes_bootstrap_parity_validator_live }}"
+      - "{{ hermes_openclaw_evidence_service_live }}"
+      - "{{ hermes_openclaw_evidence_audit_service_live }}"
+      - "{{ hermes_openclaw_evidence_audit_timer_live }}"
+      - "{{ hermes_openclaw_evidence_gateway_dropin }}"
+      - "{{ hermes_openclaw_evidence_contract.runtime.stateRoot }}"
+      - "{{ hermes_openclaw_evidence_contract.runtime.profilePath }}"
+
+  tasks:
+    - name: Validate complete OpenClaw evidence mode
+      ansible.builtin.assert:
+        that:
+          - hermes_openclaw_evidence_mode in ['disabled', 'converge']
+        fail_msg: >-
+          hermes_openclaw_evidence_mode must be disabled or converge.
+
+    - name: Skip complete OpenClaw evidence when disabled
+      ansible.builtin.meta: end_host
+      when: hermes_openclaw_evidence_mode == 'disabled'
+
+    - name: Require exact approval for complete OpenClaw evidence
+      ansible.builtin.assert:
+        that:
+          - hermes_openclaw_evidence_approved | bool
+          - hermes_openclaw_evidence_confirmation == hermes_openclaw_evidence_required_confirmation
+          - inventory_hostname == 'jn-t14s-lin'
+          - hermes_openclaw_evidence_contract.schemaVersion == 1
+          - hermes_openclaw_evidence_contract.mode == 'complete-readonly-redacted'
+          - hermes_openclaw_evidence_contract.sourceRoot == '/home/johnny/.openclaw'
+          - hermes_openclaw_evidence_contract.completeness.everySourcePathInventoried | bool
+          - not (hermes_openclaw_evidence_contract.completeness.sourceMutationAllowed | bool)
+          - not (hermes_openclaw_evidence_contract.completeness.sourceContentCopied | bool)
+          - not (hermes_openclaw_evidence_contract.completeness.sourceSymlinksFollowed | bool)
+          - not (hermes_openclaw_evidence_contract.completeness.unclassifiedOmissionAllowed | bool)
+          - not (hermes_openclaw_evidence_contract.completeness.secretSourceDeletionAllowed | bool)
+          - hermes_openclaw_evidence_contract.completeness.redactedPathInventoryRequired | bool
+          - hermes_openclaw_evidence_contract.completeness.runtimeMountRequired | bool
+          - hermes_openclaw_evidence_contract.runtime.profileUser == 'hermes-astra'
+          - hermes_openclaw_evidence_contract.runtime.profileGroup == 'hermes-astra'
+          - hermes_bootstrap_parity_contract.schemaVersion == 1
+          - hermes_bootstrap_parity_contract.mode == 'complete-openclaw-bootstrap-reference-parity'
+          - hermes_bootstrap_parity_contract.sourceRoot == '/home/johnny/.openclaw/workspace'
+          - hermes_bootstrap_parity_contract.bootstrapSummary.files == 11
+          - hermes_bootstrap_parity_contract.referenceSummary.files == 42
+        fail_msg: >-
+          The requested transaction differs from the reviewed complete-tree,
+          source-preserving, secret-redacted, Astra-only evidence contract.
+
+    - name: Inspect complete OpenClaw evidence source roots
+      ansible.builtin.stat:
+        path: "{{ item.path }}"
+        follow: false
+      loop:
+        - path: "{{ hermes_openclaw_evidence_contract.sourceRoot }}"
+          kind: directory
+        - path: "{{ hermes_openclaw_evidence_source_script }}"
+          kind: file
+        - path: "{{ hermes_openclaw_evidence_contract_path }}"
+          kind: file
+        - path: "{{ hermes_bootstrap_parity_validator_path }}"
+          kind: file
+        - path: "{{ hermes_bootstrap_parity_contract_path }}"
+          kind: file
+        - path: /var/lib/hermes/astra/.hermes/profiles/astra
+          kind: directory
+        - path: "{{ playbook_dir }}/../../templates/hermes/hermes-openclaw-evidence.service.j2"
+          kind: file
+        - path: "{{ playbook_dir }}/../../templates/hermes/hermes-openclaw-evidence-audit.service.j2"
+          kind: file
+        - path: "{{ playbook_dir }}/../../templates/hermes/hermes-openclaw-evidence-audit.timer.j2"
+          kind: file
+        - path: "{{ playbook_dir }}/../../templates/hermes/hermes-gateway-openclaw-evidence.conf.j2"
+          kind: file
+      loop_control:
+        label: "{{ item.path }}"
+      register: hermes_openclaw_evidence_dependencies
+
+    - name: Require safe complete OpenClaw evidence dependencies
+      ansible.builtin.assert:
+        that:
+          - item.stat.exists | default(false)
+          - not (item.stat.islnk | default(false))
+          - >-
+            (item.item.kind == 'file' and (item.stat.isreg | default(false))) or
+            (item.item.kind == 'directory' and (item.stat.isdir | default(false)))
+        fail_msg: >-
+          {{ item.item.path }} is missing, linked, or not the required
+          {{ item.item.kind }}.
+      loop: "{{ hermes_openclaw_evidence_dependencies.results }}"
+      loop_control:
+        label: "{{ item.item.path }}"
+
+    - name: Validate exact OpenClaw bootstrap and reference source pins
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/python3
+          - "{{ hermes_bootstrap_parity_validator_path }}"
+          - --contract
+          - "{{ hermes_bootstrap_parity_contract_path }}"
+          - --repo-root
+          - "{{ playbook_dir }}/../.."
+          - --source-root
+          - "{{ hermes_bootstrap_parity_contract.sourceRoot }}"
+      register: hermes_bootstrap_parity_source_command
+      check_mode: false
+      changed_when: false
+
+    - name: Parse exact OpenClaw bootstrap and reference source pins
+      ansible.builtin.set_fact:
+        hermes_bootstrap_parity_source: >-
+          {{ hermes_bootstrap_parity_source_command.stdout | from_json }}
+
+    - name: Require complete exact bootstrap and reference source inventory
+      ansible.builtin.assert:
+        that:
+          - hermes_bootstrap_parity_source.status == 'ok'
+          - hermes_bootstrap_parity_source.bootstrapFiles == 11
+          - hermes_bootstrap_parity_source.bootstrapBytes == 19640
+          - hermes_bootstrap_parity_source.referenceFiles == 42
+          - hermes_bootstrap_parity_source.referenceBytes == 425807
+          - hermes_bootstrap_parity_source.semanticReferences == 24
+          - hermes_bootstrap_parity_source.archivalEvidence == 18
+        fail_msg: >-
+          A legacy bootstrap/reference source, active native target, exact
+          hash, byte count, or disposition differs from the reviewed complete
+          reconciliation.
+
+    - name: Plan every preserved OpenClaw path before mutation
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/python3
+          - "{{ hermes_openclaw_evidence_source_script }}"
+          - plan
+          - --contract
+          - "{{ hermes_openclaw_evidence_contract_path }}"
+      register: hermes_openclaw_evidence_plan_command
+      check_mode: false
+      changed_when: false
+
+    - name: Parse complete OpenClaw evidence plan
+      ansible.builtin.set_fact:
+        hermes_openclaw_evidence_plan: >-
+          {{ hermes_openclaw_evidence_plan_command.stdout | from_json }}
+
+    - name: Require complete and internally reconciled OpenClaw plan
+      ansible.builtin.assert:
+        that:
+          - hermes_openclaw_evidence_plan.status == 'ok'
+          - hermes_openclaw_evidence_plan.summary.paths > 0
+          - hermes_openclaw_evidence_plan.summary.fileBytes > 0
+          - hermes_openclaw_evidence_plan.summary.classifications.visible > 0
+          - hermes_openclaw_evidence_plan.summary.classifications.redacted > 0
+          - >-
+            hermes_openclaw_evidence_plan.summary.paths
+            == (hermes_openclaw_evidence_plan.summary.classifications.visible
+                + hermes_openclaw_evidence_plan.summary.classifications.redacted)
+          - hermes_openclaw_evidence_plan.sanitization.sanitizedJson > 0
+          - hermes_openclaw_evidence_plan.sanitization.markerFallback >= 0
+          - hermes_openclaw_evidence_plan.sourceFingerprint | length == 64
+        fail_msg: >-
+          The complete source inventory is empty, internally inconsistent, or
+          contains an unsafe strict-sanitization input.
+
+    - name: Report complete OpenClaw evidence check-mode boundary
+      ansible.builtin.debug:
+        msg: >-
+          Check mode inventoried every preserved source path and validated all
+          redaction inputs. It did not install packages, write generated state,
+          mount a view, change a Gateway unit, or restart a service.
+      when: ansible_check_mode
+
+    - name: Stop complete OpenClaw evidence before mutation in check mode
+      ansible.builtin.meta: end_host
+      when: ansible_check_mode
+
+    - name: Read host timestamp for complete evidence rollback
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/date
+          - -u
+          - +%Y%m%dT%H%M%SZ
+      register: hermes_openclaw_evidence_timestamp
+      changed_when: false
+
+    - name: Inspect managed evidence paths before convergence
+      ansible.builtin.stat:
+        path: "{{ item }}"
+        follow: false
+      loop: "{{ hermes_openclaw_evidence_managed_paths }}"
+      register: hermes_openclaw_evidence_paths_before
+
+    - name: Inspect Gateway and evidence service state before convergence
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/systemctl
+          - show
+          - --property=LoadState
+          - --property=ActiveState
+          - --property=UnitFileState
+          - "{{ item }}"
+      loop:
+        - "{{ hermes_openclaw_evidence_gateway_unit }}"
+        - "{{ hermes_openclaw_evidence_service }}"
+        - "{{ hermes_openclaw_evidence_audit_timer }}"
+      register: hermes_openclaw_evidence_services_before
+      changed_when: false
+      failed_when: false
+
+    - name: Record complete evidence rollback facts
+      ansible.builtin.set_fact:
+        hermes_openclaw_evidence_backup_dir: >-
+          {{ hermes_openclaw_evidence_rollback_root }}/{{ hermes_openclaw_evidence_timestamp.stdout }}-pre-openclaw-evidence
+        hermes_openclaw_evidence_existing_paths: >-
+          {{ hermes_openclaw_evidence_paths_before.results
+             | selectattr('stat.exists')
+             | map(attribute='item')
+             | list }}
+        hermes_openclaw_evidence_new_paths: >-
+          {{ hermes_openclaw_evidence_paths_before.results
+             | rejectattr('stat.exists')
+             | map(attribute='item')
+             | list }}
+        hermes_openclaw_evidence_gateway_was_active: >-
+          {{ 'ActiveState=active' in hermes_openclaw_evidence_services_before.results[0].stdout }}
+        hermes_openclaw_evidence_service_was_active: >-
+          {{ 'ActiveState=active' in hermes_openclaw_evidence_services_before.results[1].stdout }}
+        hermes_openclaw_evidence_service_was_enabled: >-
+          {{ 'UnitFileState=enabled' in hermes_openclaw_evidence_services_before.results[1].stdout }}
+        hermes_openclaw_evidence_timer_was_active: >-
+          {{ 'ActiveState=active' in hermes_openclaw_evidence_services_before.results[2].stdout }}
+        hermes_openclaw_evidence_timer_was_enabled: >-
+          {{ 'UnitFileState=enabled' in hermes_openclaw_evidence_services_before.results[2].stdout }}
+
+    - name: Audit existing complete evidence before convergence
+      ansible.builtin.command:
+        argv:
+          - "{{ hermes_openclaw_evidence_script_live }}"
+          - audit
+          - --contract
+          - "{{ hermes_openclaw_evidence_contract_live }}"
+          - --view-root
+          - "{{ hermes_openclaw_evidence_contract.runtime.viewRoot }}"
+      register: hermes_openclaw_evidence_pre_audit_command
+      changed_when: false
+      failed_when: false
+      when: hermes_openclaw_evidence_service_was_active | bool
+
+    - name: Verify existing complete evidence view as Astra
+      ansible.builtin.command:
+        argv:
+          - /usr/sbin/runuser
+          - --user
+          - hermes-astra
+          - --
+          - "{{ hermes_openclaw_evidence_script_live }}"
+          - verify-view
+          - --contract
+          - "{{ hermes_openclaw_evidence_contract_live }}"
+      register: hermes_openclaw_evidence_pre_view_command
+      changed_when: false
+      failed_when: false
+      when: hermes_openclaw_evidence_service_was_active | bool
+
+    - name: Create complete evidence rollback directory
+      ansible.builtin.file:
+        path: "{{ hermes_openclaw_evidence_backup_dir }}"
+        state: directory
+        owner: root
+        group: root
+        mode: "0700"
+
+    - name: Back up prior complete evidence state and units
+      ansible.builtin.command:
+        argv: >-
+          {{ ['/usr/bin/tar', '--create', '--gzip', '--absolute-names',
+              '--one-file-system',
+              '--file', hermes_openclaw_evidence_backup_dir ~ '/managed-state.tar.gz',
+              '--files-from=/dev/null']
+             + hermes_openclaw_evidence_existing_paths }}
+      changed_when: true
+
+    - name: Write content-free complete evidence rollback record
+      ansible.builtin.copy:
+        dest: "{{ hermes_openclaw_evidence_backup_dir }}/rollback-record.json"
+        owner: root
+        group: root
+        mode: "0400"
+        content: >-
+          {{ {
+               'schemaVersion': 1,
+               'sourceRoot': hermes_openclaw_evidence_contract.sourceRoot,
+               'sourceFingerprint': hermes_openclaw_evidence_plan.sourceFingerprint,
+               'sourcePaths': hermes_openclaw_evidence_plan.summary.paths,
+               'managedPathsBackedUp': hermes_openclaw_evidence_existing_paths | length,
+               'gatewayWasActive': hermes_openclaw_evidence_gateway_was_active,
+               'evidenceWasActive': hermes_openclaw_evidence_service_was_active,
+               'evidenceWasEnabled': hermes_openclaw_evidence_service_was_enabled,
+               'timerWasActive': hermes_openclaw_evidence_timer_was_active,
+               'timerWasEnabled': hermes_openclaw_evidence_timer_was_enabled
+             } | to_nice_json }}
+
+    - name: Converge complete OpenClaw evidence transaction
+      block:
+        - name: Install complete evidence mount dependencies
+          ansible.builtin.apt:
+            name:
+              - bindfs
+              - fuse3
+            state: present
+            update_cache: false
+
+        - name: Create persistent complete evidence runtime roots
+          ansible.builtin.file:
+            path: "{{ item.path }}"
+            state: directory
+            owner: "{{ item.owner }}"
+            group: "{{ item.group }}"
+            mode: "{{ item.mode }}"
+          loop:
+            - path: "{{ hermes_openclaw_evidence_contract.runtime.stateRoot }}"
+              owner: root
+              group: root
+              mode: "0700"
+            - path: "{{ hermes_openclaw_evidence_view_parent }}"
+              owner: root
+              group: hermes-astra
+              mode: "0710"
+            - path: "{{ hermes_openclaw_evidence_contract.runtime.profilePath }}"
+              owner: hermes-astra
+              group: hermes-astra
+              mode: "0700"
+
+        - name: Deploy complete OpenClaw evidence contract
+          ansible.builtin.copy:
+            src: "{{ hermes_openclaw_evidence_contract_path }}"
+            dest: "{{ hermes_openclaw_evidence_contract_live }}"
+            owner: root
+            group: root
+            mode: "0444"
+          register: hermes_openclaw_evidence_contract_change
+
+        - name: Deploy complete OpenClaw evidence validator
+          ansible.builtin.copy:
+            src: "{{ hermes_openclaw_evidence_source_script }}"
+            dest: "{{ hermes_openclaw_evidence_script_live }}"
+            owner: root
+            group: root
+            mode: "0755"
+          register: hermes_openclaw_evidence_script_change
+
+        - name: Deploy exact bootstrap and reference parity contract
+          ansible.builtin.copy:
+            src: "{{ hermes_bootstrap_parity_contract_path }}"
+            dest: "{{ hermes_bootstrap_parity_contract_live }}"
+            owner: root
+            group: root
+            mode: "0444"
+
+        - name: Deploy exact bootstrap and reference parity validator
+          ansible.builtin.copy:
+            src: "{{ hermes_bootstrap_parity_validator_path }}"
+            dest: "{{ hermes_bootstrap_parity_validator_live }}"
+            owner: root
+            group: root
+            mode: "0755"
+
+        - name: Deploy complete OpenClaw evidence units
+          ansible.builtin.template:
+            src: "{{ playbook_dir }}/../../templates/hermes/{{ item.source }}"
+            dest: "{{ item.destination }}"
+            owner: root
+            group: root
+            mode: "0644"
+          loop:
+            - source: hermes-openclaw-evidence.service.j2
+              destination: "{{ hermes_openclaw_evidence_service_live }}"
+            - source: hermes-openclaw-evidence-audit.service.j2
+              destination: "{{ hermes_openclaw_evidence_audit_service_live }}"
+            - source: hermes-openclaw-evidence-audit.timer.j2
+              destination: "{{ hermes_openclaw_evidence_audit_timer_live }}"
+            - source: hermes-gateway-openclaw-evidence.conf.j2
+              destination: "{{ hermes_openclaw_evidence_gateway_dropin }}"
+          register: hermes_openclaw_evidence_unit_changes
+
+        - name: Decide whether complete evidence requires regeneration
+          ansible.builtin.set_fact:
+            hermes_openclaw_evidence_projection_restart_required: >-
+              {{ not (hermes_openclaw_evidence_service_was_active | bool)
+                 or (hermes_openclaw_evidence_contract_change.changed | bool)
+                 or (hermes_openclaw_evidence_script_change.changed | bool)
+                 or (hermes_openclaw_evidence_unit_changes.results
+                     | selectattr(
+                         'item.destination',
+                         'equalto',
+                         hermes_openclaw_evidence_service_live
+                       )
+                     | selectattr('changed')
+                     | list
+                     | length > 0)
+                 or (hermes_openclaw_evidence_pre_audit_command.rc
+                     | default(1) | int != 0)
+                 or (hermes_openclaw_evidence_pre_view_command.rc
+                     | default(1) | int != 0) }}
+
+        - name: Decide whether Astra requires one namespace restart
+          ansible.builtin.set_fact:
+            hermes_openclaw_evidence_gateway_restart_required: >-
+              {{ hermes_openclaw_evidence_unit_changes.results
+                 | selectattr(
+                     'item.destination',
+                     'equalto',
+                     hermes_openclaw_evidence_gateway_dropin
+                   )
+                 | selectattr('changed')
+                 | list
+                 | length > 0
+                 or (hermes_openclaw_evidence_projection_restart_required
+                     | bool) }}
+
+        - name: Reload systemd for complete OpenClaw evidence
+          ansible.builtin.systemd_service:
+            daemon_reload: true
+          when: hermes_openclaw_evidence_unit_changes.changed | bool
+
+        - name: Stop Astra Gateway before evidence namespace convergence
+          ansible.builtin.systemd_service:
+            name: "{{ hermes_openclaw_evidence_gateway_unit }}"
+            state: stopped
+          when:
+            - hermes_openclaw_evidence_gateway_was_active | bool
+            - hermes_openclaw_evidence_gateway_restart_required | bool
+
+        - name: Stop prior complete evidence projection
+          ansible.builtin.systemd_service:
+            name: "{{ hermes_openclaw_evidence_service }}"
+            state: stopped
+          when:
+            - hermes_openclaw_evidence_service_was_active | bool
+            - hermes_openclaw_evidence_projection_restart_required | bool
+
+        - name: Create complete evidence mount roots after projection stop
+          ansible.builtin.file:
+            path: "{{ item.path }}"
+            state: directory
+            owner: root
+            group: "{{ item.group }}"
+            mode: "{{ item.mode }}"
+          loop:
+            - path: "{{ hermes_openclaw_evidence_contract.runtime.mergedRoot }}"
+              group: root
+              mode: "0700"
+            - path: "{{ hermes_openclaw_evidence_contract.runtime.viewRoot }}"
+              group: hermes-astra
+              mode: "0710"
+          when: hermes_openclaw_evidence_projection_restart_required | bool
+
+        - name: Start complete read-only OpenClaw evidence projection
+          ansible.builtin.systemd_service:
+            name: "{{ hermes_openclaw_evidence_service }}"
+            state: started
+            enabled: true
+
+        - name: Audit unchanged OpenClaw source against generated manifest
+          ansible.builtin.command:
+            argv:
+              - "{{ hermes_openclaw_evidence_script_live }}"
+              - audit
+              - --contract
+              - "{{ hermes_openclaw_evidence_contract_live }}"
+              - --view-root
+              - "{{ hermes_openclaw_evidence_contract.runtime.viewRoot }}"
+          register: hermes_openclaw_evidence_post_audit_command
+          changed_when: false
+
+        - name: Parse unchanged OpenClaw source audit
+          ansible.builtin.set_fact:
+            hermes_openclaw_evidence_post_audit: >-
+              {{ hermes_openclaw_evidence_post_audit_command.stdout | from_json }}
+
+        - name: Require exact source fingerprint after projection
+          ansible.builtin.assert:
+            that:
+              - hermes_openclaw_evidence_post_audit.status == 'ok'
+              - hermes_openclaw_evidence_post_audit.currentFingerprint == hermes_openclaw_evidence_plan.sourceFingerprint
+              - hermes_openclaw_evidence_post_audit.savedFingerprint == hermes_openclaw_evidence_plan.sourceFingerprint
+              - hermes_openclaw_evidence_post_audit.currentPaths == hermes_openclaw_evidence_plan.summary.paths
+              - hermes_openclaw_evidence_post_audit.savedPaths == hermes_openclaw_evidence_plan.summary.paths
+              - hermes_openclaw_evidence_post_audit.missingRequiredVisible | length == 0
+              - hermes_openclaw_evidence_post_audit.redactedRequiredVisible | length == 0
+            fail_msg: >-
+              The OpenClaw source changed during projection or a required
+              visible path is absent/redacted.
+
+        - name: Verify complete projected view as Astra
+          ansible.builtin.command:
+            argv:
+              - /usr/sbin/runuser
+              - --user
+              - hermes-astra
+              - --
+              - "{{ hermes_openclaw_evidence_script_live }}"
+              - verify-view
+              - --contract
+              - "{{ hermes_openclaw_evidence_contract_live }}"
+          register: hermes_openclaw_evidence_view_command
+          changed_when: false
+
+        - name: Parse complete projected-view verification
+          ansible.builtin.set_fact:
+            hermes_openclaw_evidence_view: >-
+              {{ hermes_openclaw_evidence_view_command.stdout | from_json }}
+
+        - name: Require Astra-readable complete read-only projection
+          ansible.builtin.assert:
+            that:
+              - hermes_openclaw_evidence_view.status == 'ok'
+              - hermes_openclaw_evidence_view.readOnly | bool
+              - hermes_openclaw_evidence_view.paths == hermes_openclaw_evidence_plan.summary.paths
+              - hermes_openclaw_evidence_view.sourceFingerprint == hermes_openclaw_evidence_plan.sourceFingerprint
+              - hermes_openclaw_evidence_view.visiblePaths == hermes_openclaw_evidence_plan.summary.classifications.visible
+              - hermes_openclaw_evidence_view.replacementPaths > 0
+              - hermes_openclaw_evidence_view.opaqueTrees > 0
+            fail_msg: >-
+              Astra cannot traverse the complete projection, the view is not
+              read-only, or a source path lacks its expected visible/redacted
+              representation.
+
+        - name: Enable periodic complete evidence drift audit
+          ansible.builtin.systemd_service:
+            name: "{{ hermes_openclaw_evidence_audit_timer }}"
+            state: started
+            enabled: true
+
+        - name: Restore Astra Gateway after evidence convergence
+          ansible.builtin.systemd_service:
+            name: "{{ hermes_openclaw_evidence_gateway_unit }}"
+            state: started
+          when:
+            - hermes_openclaw_evidence_gateway_was_active | bool
+            - hermes_openclaw_evidence_gateway_restart_required | bool
+
+        - name: Read Astra Gateway PID for native namespace verification
+          ansible.builtin.command:
+            argv:
+              - /usr/bin/systemctl
+              - show
+              - --property=MainPID
+              - --value
+              - "{{ hermes_openclaw_evidence_gateway_unit }}"
+          register: hermes_openclaw_evidence_gateway_pid
+          changed_when: false
+          when: hermes_openclaw_evidence_gateway_was_active | bool
+
+        - name: Verify exact bootstrap and references inside Astra's namespace
+          ansible.builtin.command:
+            argv:
+              - /usr/bin/nsenter
+              - --target
+              - "{{ hermes_openclaw_evidence_gateway_pid.stdout }}"
+              - --mount
+              - --
+              - /usr/sbin/runuser
+              - --user
+              - hermes-astra
+              - --
+              - "{{ hermes_bootstrap_parity_validator_live }}"
+              - --contract
+              - "{{ hermes_bootstrap_parity_contract_live }}"
+              - --repo-root
+              - "{{ hermes_bootstrap_parity_runtime_repo_root }}"
+              - --source-root
+              - "{{ hermes_openclaw_evidence_contract.runtime.profilePath }}/workspace"
+              - --profile-root
+              - /var/lib/hermes/astra/.hermes/profiles/astra
+              - --runtime
+          register: hermes_bootstrap_parity_runtime_command
+          changed_when: false
+          when: hermes_openclaw_evidence_gateway_was_active | bool
+
+        - name: Parse Astra bootstrap and reference runtime verification
+          ansible.builtin.set_fact:
+            hermes_bootstrap_parity_runtime: >-
+              {{ hermes_bootstrap_parity_runtime_command.stdout | from_json }}
+          when: hermes_openclaw_evidence_gateway_was_active | bool
+
+        - name: Require exact Astra bootstrap and reference runtime parity
+          ansible.builtin.assert:
+            that:
+              - hermes_bootstrap_parity_runtime.status == 'ok'
+              - hermes_bootstrap_parity_runtime.runtime | bool
+              - hermes_bootstrap_parity_runtime.bootstrapFiles == 11
+              - hermes_bootstrap_parity_runtime.referenceFiles == 42
+              - hermes_bootstrap_parity_runtime.managedTargets == 5
+            fail_msg: >-
+              Astra cannot read an exact legacy bootstrap/reference artifact,
+              or a native managed bootstrap target does not match its pin.
+          when: hermes_openclaw_evidence_gateway_was_active | bool
+
+        - name: Verify Astra Gateway evidence namespace when active
+          ansible.builtin.command:
+            argv:
+              - /usr/bin/systemctl
+              - is-active
+              - --quiet
+              - "{{ hermes_openclaw_evidence_gateway_unit }}"
+          changed_when: false
+          when: hermes_openclaw_evidence_gateway_was_active | bool
+
+      rescue:
+        - name: Stop Astra Gateway during complete evidence rollback
+          ansible.builtin.systemd_service:
+            name: "{{ hermes_openclaw_evidence_gateway_unit }}"
+            state: stopped
+          when: hermes_openclaw_evidence_gateway_was_active | bool
+          failed_when: false
+
+        - name: Stop complete evidence units during rollback
+          ansible.builtin.systemd_service:
+            name: "{{ item }}"
+            state: stopped
+            enabled: false
+          loop:
+            - "{{ hermes_openclaw_evidence_audit_timer }}"
+            - "{{ hermes_openclaw_evidence_service }}"
+          failed_when: false
+
+        - name: Unmount any residual complete evidence view
+          ansible.builtin.command:
+            argv:
+              - /usr/bin/fusermount3
+              - -u
+              - "{{ hermes_openclaw_evidence_contract.runtime.viewRoot }}"
+          changed_when: false
+          failed_when: false
+
+        - name: Unmount any residual evidence overlay
+          ansible.builtin.command:
+            argv:
+              - /usr/bin/umount
+              - "{{ hermes_openclaw_evidence_contract.runtime.mergedRoot }}"
+          changed_when: false
+          failed_when: false
+
+        - name: Remove transaction-managed complete evidence paths
+          ansible.builtin.file:
+            path: "{{ item }}"
+            state: absent
+          loop: "{{ hermes_openclaw_evidence_managed_paths }}"
+
+        - name: Restore prior complete evidence state and units
+          ansible.builtin.command:
+            argv:
+              - /usr/bin/tar
+              - --extract
+              - --gzip
+              - --absolute-names
+              - --file
+              - "{{ hermes_openclaw_evidence_backup_dir }}/managed-state.tar.gz"
+          changed_when: true
+
+        - name: Reload systemd after complete evidence rollback
+          ansible.builtin.systemd_service:
+            daemon_reload: true
+
+        - name: Restore prior evidence projection activity
+          ansible.builtin.systemd_service:
+            name: "{{ hermes_openclaw_evidence_service }}"
+            state: started
+            enabled: "{{ hermes_openclaw_evidence_service_was_enabled | bool }}"
+          when: hermes_openclaw_evidence_service_was_active | bool
+          failed_when: false
+
+        - name: Restore prior inactive evidence projection enablement
+          ansible.builtin.systemd_service:
+            name: "{{ hermes_openclaw_evidence_service }}"
+            state: stopped
+            enabled: "{{ hermes_openclaw_evidence_service_was_enabled | bool }}"
+          when: not (hermes_openclaw_evidence_service_was_active | bool)
+          failed_when: false
+
+        - name: Restore prior evidence timer activity
+          ansible.builtin.systemd_service:
+            name: "{{ hermes_openclaw_evidence_audit_timer }}"
+            state: started
+            enabled: "{{ hermes_openclaw_evidence_timer_was_enabled | bool }}"
+          when: hermes_openclaw_evidence_timer_was_active | bool
+          failed_when: false
+
+        - name: Restore prior inactive evidence timer enablement
+          ansible.builtin.systemd_service:
+            name: "{{ hermes_openclaw_evidence_audit_timer }}"
+            state: stopped
+            enabled: "{{ hermes_openclaw_evidence_timer_was_enabled | bool }}"
+          when: not (hermes_openclaw_evidence_timer_was_active | bool)
+          failed_when: false
+
+        - name: Restore prior Astra Gateway activity
+          ansible.builtin.systemd_service:
+            name: "{{ hermes_openclaw_evidence_gateway_unit }}"
+            state: started
+          when: hermes_openclaw_evidence_gateway_was_active | bool
+          failed_when: false
+
+        - name: Fail complete OpenClaw evidence transaction after rollback
+          ansible.builtin.fail:
+            msg: >-
+              Complete OpenClaw evidence convergence failed. Managed state and
+              prior service activity were restored from
+              {{ hermes_openclaw_evidence_backup_dir }}.
+
+    - name: Report complete OpenClaw evidence convergence
+      ansible.builtin.debug:
+        msg: >-
+          Complete OpenClaw evidence is active: {{ hermes_openclaw_evidence_view.paths }}
+          source paths reconciled, {{ hermes_openclaw_evidence_view.visiblePaths }}
+          visible read-only paths, {{ hermes_openclaw_evidence_view.replacementPaths }}
+          explicit per-path replacements, and {{ hermes_openclaw_evidence_view.opaqueTrees }}
+          sealed credential/archive trees. Rollback:
+          {{ hermes_openclaw_evidence_backup_dir }}.

@@ -1,0 +1,21 @@
+---
+# Shared contract for Astra's typed Compose transaction boundary.
+hermes_compose_admin_mode: disabled
+hermes_compose_admin_approved: false
+hermes_compose_admin_confirmation: ""
+hermes_compose_admin_required_confirmation: >-
+  enable-typed-compose-transactions-for-hermes-astra
+hermes_compose_admin_user: agent-compose
+hermes_compose_admin_group: agent-compose
+hermes_compose_admin_home: /var/lib/agent-compose
+hermes_compose_admin_target_source: scripts/docker/agent-compose-transaction.py
+hermes_compose_admin_target_live: /usr/local/sbin/agent-compose-transaction
+hermes_compose_admin_target_identity: /etc/agent-compose.json
+hermes_compose_admin_sudoers: /etc/sudoers.d/agent-compose
+hermes_compose_admin_stack_root: /opt/hermes-managed-stacks
+hermes_compose_admin_backup_root: /var/backups/agent-compose
+hermes_compose_admin_audit_log: /var/log/agent-compose-audit.jsonl
+hermes_compose_admin_endpoint_network: 192.168.1.0
+hermes_compose_admin_endpoint_prefix: "24"
+hermes_compose_admin_source_cidrs:
+  - 192.168.1.31/32

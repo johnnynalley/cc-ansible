@@ -1,12 +1,12 @@
 ---
 # yamllint disable rule:line-length
-# Purpose: Stage reviewed Hermes-native profile skills without starting a Gateway.
+# Purpose: Audit/restore the retained projection or perform its one-time native import.
 # Hosts: hermes_hosts.
 # Key vars: hermes_profile_skills_*.
 # Scripts: scripts/agents/hermes-profile-skills-validate.py.
 # Validation: ansible-playbook playbooks/agents/hermes-profile-skills.yml --syntax-check.
 
-- name: Stage reviewed Hermes profile skills
+- name: Audit or restore retained reviewed Hermes profile skills
   hosts: hermes_hosts
   become: true
   gather_facts: false
@@ -34,22 +34,32 @@
     - name: Validate Hermes profile-skills mode
       ansible.builtin.assert:
         that:
-          - hermes_profile_skills_mode in ['disabled', 'stage']
+          - >-
+            hermes_profile_skills_mode
+            in ['disabled', 'audit', 'restore', 'import-native']
         fail_msg: >-
-          hermes_profile_skills_mode must be disabled or stage. This playbook
-          has no Gateway activation, scheduler, messaging, or model mode.
+          hermes_profile_skills_mode must be disabled, audit, restore, or
+          import-native. Audit is read-only. Restore is an explicit retained
+          projection rollback. Import-native is the attended ownership
+          handoff implemented by the second play.
 
     - name: Skip Hermes profile skills when disabled
       ansible.builtin.meta: end_host
       when: hermes_profile_skills_mode == 'disabled'
 
-    - name: Require explicit reviewed Hermes profile-skills approval
+    - name: Defer native ownership import to its isolated transaction
+      ansible.builtin.meta: end_host
+      when: hermes_profile_skills_mode == 'import-native'
+
+    - name: Require reviewed Hermes profile-skills contract and restore approval
       ansible.builtin.assert:
         that:
-          - hermes_profile_skills_approved | bool
+          - >-
+            hermes_profile_skills_mode == 'audit'
+            or hermes_profile_skills_approved | bool
           - inventory_hostname == 'jn-t14s-lin'
           - hermes_profile_skills_contract.schemaVersion == 1
-          - hermes_profile_skills_contract.mode == 'reviewed-native-seed'
+          - hermes_profile_skills_contract.mode == 'reviewed-native-parity'
           - hermes_profile_skills_contract.source.rootReviewed | bool
           - hermes_profile_skills_contract.source.declarativeMarkdownOnly | bool
           - not hermes_profile_skills_contract.source.rawLegacySkillsCopied
@@ -62,7 +72,10 @@
           - hermes_profile_skills_contract.validation.cleanScannerVerdictRequired | bool
           - hermes_profile_skills_contract.validation.exactContentHashRequired | bool
           - not hermes_profile_skills_contract.validation.symlinkAllowed
-          - not hermes_profile_skills_contract.validation.supportingFilesAllowed
+          - hermes_profile_skills_contract.validation.supportingFilesAllowed | bool
+          - >-
+            hermes_profile_skills_contract.validation.supportingFileSuffixes
+            | sort == ['.json', '.jsonl', '.md']
           - not hermes_profile_skills_contract.validation.executableAllowed
           - not hermes_profile_skills_contract.validation.inlineCommandExpansionAllowed
           - not hermes_profile_skills_contract.validation.blueprintAllowed
@@ -70,7 +83,12 @@
           - not hermes_profile_skills_contract.validation.requiredCredentialFilesAllowed
           - hermes_profile_skills_contract.execution.backupRequired | bool
           - hermes_profile_skills_contract.execution.transactionRollbackRequired | bool
-          - hermes_profile_skills_contract.execution.managedRootExclusive | bool
+          - >-
+            hermes_profile_skills_contract.execution.nativeProfileOwnershipRequired
+            | bool
+          - >-
+            not hermes_profile_skills_contract.execution.managedProjectionActive
+            | bool
           - not hermes_profile_skills_contract.execution.gatewayActivationAllowed
           - not hermes_profile_skills_contract.execution.schedulerActivationAllowed
           - not hermes_profile_skills_contract.execution.messagingActivationAllowed
@@ -80,7 +98,8 @@
           - not hermes_profile_skills_contract.execution.legacySourceMutationAllowed
         fail_msg: >-
           The requested profile-skills transaction differs from the reviewed,
-          declarative, native-scanned, backed-up, no-activation contract.
+          declarative, native-scanned, backed-up, no-activation contract, or
+          destructive restore approval was not supplied.
 
     - name: Build reviewed Hermes profile skill inventory
       ansible.builtin.set_fact:
@@ -98,15 +117,39 @@
         {{ hermes_profile_skills_contract.profiles
            | dict2items
            | subelements('value.skills') }}
+      loop_control:
+        label: "{{ item.0.key }}/{{ item.1.name }}"
+
+    - name: Build reviewed Hermes profile supporting-file inventory
+      ansible.builtin.set_fact:
+        hermes_profile_skill_support_inventory: >-
+          {{ (hermes_profile_skill_support_inventory | default([])) + [
+            item.1 | combine({
+              'profile': item.0.profile,
+              'name': item.0.name,
+              'group': item.0.group,
+              'managedRoot': item.0.managedRoot,
+              'source': (item.0.source | dirname) ~ '/' ~ item.1.path
+            })
+          ] }}
+      loop: >-
+        {{ hermes_profile_skills_inventory
+           | subelements('supportingFiles', skip_missing=True) }}
+      loop_control:
+        label: "{{ item.0.profile }}/{{ item.0.name }}/{{ item.1.path }}"
 
     - name: Require exact reviewed Hermes profile and skill inventory
       ansible.builtin.assert:
         that:
           - hermes_profile_skills_contract.profiles.keys() | list | sort == ['astra', 'dubble', 'rigel']
-          - hermes_profile_skills_inventory | length == 7
+          - hermes_profile_skills_inventory | length == 39
           - hermes_profile_skills_inventory | map(attribute='profile') | list | unique | sort == ['astra', 'dubble', 'rigel']
-          - hermes_profile_skills_inventory | map(attribute='name') | list | sort == ['consequential-recommendation', 'evidence-led-investigation', 'fortnite-tracker', 'guided-operation', 'public-support-triage', 'source-grounded-study', 'source-grounded-study']
-          - hermes_profile_skills_inventory | map(attribute='source') | list | unique | length == 7
+          - hermes_profile_skills_contract.profiles.astra.skills | length == 35
+          - hermes_profile_skills_contract.profiles.dubble.skills | length == 2
+          - hermes_profile_skills_contract.profiles.rigel.skills | length == 2
+          - hermes_profile_skills_inventory | map(attribute='source') | list | unique | length == 37
+          - hermes_profile_skill_support_inventory | length == 13
+          - hermes_profile_skill_support_inventory | map(attribute='source') | list | unique | length == 13
         fail_msg: >-
           The reviewed profile-skill inventory is incomplete, duplicated, or
           assigned to an unexpected profile.
@@ -126,16 +169,17 @@
       changed_when: false
       failed_when: false
 
-    - name: Require every Hermes gateway stopped before profile-skills staging
+    - name: Require installed Hermes gateways before profile-skills staging
       ansible.builtin.assert:
         that:
-          - "'ActiveState=inactive' in item.stdout"
+          - "'LoadState=loaded' in item.stdout"
           - >-
             'UnitFileState=enabled' in item.stdout
             or 'UnitFileState=disabled' in item.stdout
         fail_msg: >-
-          A Hermes Gateway is active or has an unexpected installation state.
-          Profile skills may be staged only while all profiles are stopped.
+          A Hermes Gateway is missing or has an unexpected installation state.
+          Profile skills update atomically in place and preserve each unit's
+          active or inactive state.
       loop: "{{ hermes_profile_skills_services_before.results[0:3] }}"
       loop_control:
         label: "{{ item.item }}"
@@ -173,11 +217,124 @@
       loop_control:
         label: "{{ item.item }}"
 
+    - name: Inspect retained profile-skills audit prerequisites
+      ansible.builtin.stat:
+        path: "{{ item }}"
+        follow: false
+      loop:
+        - "{{ hermes_profile_skills_validator_live }}"
+        - "{{ hermes_profile_skills_contract_live }}"
+      register: hermes_profile_skills_audit_prerequisites
+      when: hermes_profile_skills_mode == 'audit'
+
+    - name: Require retained profile-skills audit prerequisites
+      ansible.builtin.assert:
+        that:
+          - item.stat.exists
+          - item.stat.isreg | default(false)
+          - not (item.stat.islnk | default(false))
+        fail_msg: >-
+          Retained profile-skills audit requires the installed validator and
+          contract. Audit mode never installs or repairs them.
+      loop: "{{ hermes_profile_skills_audit_prerequisites.results | default([]) }}"
+      loop_control:
+        label: "{{ item.item }}"
+      when: hermes_profile_skills_mode == 'audit'
+
+    - name: Audit retained profile skills as root
+      ansible.builtin.command:
+        argv:
+          - /usr/local/lib/hermes-agent/venv/bin/python
+          - "{{ hermes_profile_skills_validator_live }}"
+          - --contract
+          - "{{ hermes_profile_skills_contract_live }}"
+          - --mode
+          - installed
+          - --hermes-source
+          - /usr/local/lib/hermes-agent
+      changed_when: false
+      check_mode: false
+      when: hermes_profile_skills_mode == 'audit'
+
+    - name: Audit retained profile skills as each service identity
+      ansible.builtin.command:
+        argv:
+          - /usr/sbin/runuser
+          - --user
+          - "{{ item.value.user }}"
+          - --
+          - /usr/local/lib/hermes-agent/venv/bin/python
+          - "{{ hermes_profile_skills_validator_live }}"
+          - --contract
+          - "{{ hermes_profile_skills_contract_live }}"
+          - --mode
+          - installed
+          - --profile
+          - "{{ item.key }}"
+          - --hermes-source
+          - /usr/local/lib/hermes-agent
+      loop: "{{ hermes_profile_skills_contract.profiles | dict2items }}"
+      loop_control:
+        label: "{{ item.key }}"
+      changed_when: false
+      check_mode: false
+      when: hermes_profile_skills_mode == 'audit'
+
+    - name: Audit retained skills through live read-only service bindings
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/systemd-run
+          - --quiet
+          - --wait
+          - --pipe
+          - --collect
+          - "--property=Type=exec"
+          - "--property=User={{ item.value.user }}"
+          - "--property=Group={{ item.value.group }}"
+          - "--property=WorkingDirectory={{ item.value.home }}"
+          - "--property=NoNewPrivileges=yes"
+          - "--property=ProtectSystem=strict"
+          - "--property=ProtectHome=yes"
+          - "--property=ReadWritePaths={{ item.value.home }}"
+          - "--property=BindReadOnlyPaths={{ item.value.managedRoot }}:{{ item.value.runtimeRoot }}"
+          - "--setenv=HOME={{ item.value.home }}"
+          - "--setenv=HERMES_HOME={{ item.value.home }}"
+          - "--setenv=HERMES_MANAGED_DIR=/etc/hermes/{{ item.key }}"
+          - /usr/local/lib/hermes-agent/venv/bin/python
+          - "{{ hermes_profile_skills_validator_live }}"
+          - --contract
+          - "{{ hermes_profile_skills_contract_live }}"
+          - --mode
+          - runtime
+          - --profile
+          - "{{ item.key }}"
+          - --hermes-source
+          - /usr/local/lib/hermes-agent
+      loop: "{{ hermes_profile_skills_contract.profiles | dict2items }}"
+      loop_control:
+        label: "{{ item.key }}"
+      changed_when: false
+      check_mode: false
+      when: hermes_profile_skills_mode == 'audit'
+
+    - name: Report retained profile-skills audit success
+      ansible.builtin.debug:
+        msg: >-
+          Retained root-owned skill projection is internally valid and visible
+          through all three service namespaces. No profile, contract, service,
+          schedule, credential, or skill file was changed.
+      when: hermes_profile_skills_mode == 'audit'
+
+    - name: Stop after retained profile-skills audit
+      ansible.builtin.meta: end_host
+      when: hermes_profile_skills_mode == 'audit'
+
     - name: Report Hermes profile-skills check-mode boundary
       ansible.builtin.debug:
         msg: >-
-          Check mode validated the contract, inventory, and stopped Gateways.
-          It did not stage source, create a backup, or change managed skills.
+          Check mode validated the contract, inventory, and installed Gateway
+          states. It did not stage source, create a backup, change managed
+          skills, or alter any service.
       when: ansible_check_mode
 
     - name: Stop Hermes profile-skills staging before mutation in check mode
@@ -237,6 +394,26 @@
             group: root
             mode: "0400"
           loop: "{{ hermes_profile_skills_inventory }}"
+          changed_when: false
+
+        - name: Create staged Hermes profile supporting-file directories
+          ansible.builtin.file:
+            path: "{{ hermes_profile_skills_stage_root }}/{{ item.source | dirname }}"
+            state: directory
+            owner: root
+            group: root
+            mode: "0700"
+          loop: "{{ hermes_profile_skill_support_inventory }}"
+          changed_when: false
+
+        - name: Stage exact reviewed Hermes profile supporting files
+          ansible.builtin.copy:
+            src: "{{ ansible_config_file | dirname }}/{{ item.source }}"
+            dest: "{{ hermes_profile_skills_stage_root }}/{{ item.source }}"
+            owner: root
+            group: root
+            mode: "0400"
+          loop: "{{ hermes_profile_skill_support_inventory }}"
           changed_when: false
 
         - name: Stage reviewed Hermes profile-skills contract
@@ -508,14 +685,6 @@
 
         - name: Apply and verify reviewed Hermes profile-skills transaction
           block:
-            - name: Remove prior exclusive managed Hermes skill roots
-              ansible.builtin.file:
-                path: "{{ item.value.managedRoot }}"
-                state: absent
-              loop: "{{ hermes_profile_skills_contract.profiles | dict2items }}"
-              loop_control:
-                label: "{{ item.key }}"
-
             - name: Create exclusive managed Hermes skill roots
               ansible.builtin.file:
                 path: "{{ item.value.managedRoot }}"
@@ -526,6 +695,37 @@
               loop: "{{ hermes_profile_skills_contract.profiles | dict2items }}"
               loop_control:
                 label: "{{ item.key }}"
+
+            - name: Inspect immediate managed Hermes skill entries
+              ansible.builtin.find:
+                paths: "{{ item.value.managedRoot }}"
+                recurse: false
+                hidden: true
+                file_type: any
+                follow: false
+              loop: "{{ hermes_profile_skills_contract.profiles | dict2items }}"
+              loop_control:
+                label: "{{ item.key }}"
+              register: hermes_profile_skills_managed_entries
+
+            - name: Remove unmanaged or malformed Hermes skill entries
+              ansible.builtin.file:
+                path: "{{ item.1.path }}"
+                state: absent
+              loop: >-
+                {{ hermes_profile_skills_managed_entries.results
+                   | subelements('files', skip_missing=True) }}
+              loop_control:
+                label: "{{ item.0.item.key }}/{{ item.1.path | basename }}"
+              vars:
+                hermes_profile_skills_expected_names: >-
+                  {{ hermes_profile_skills_contract.profiles[item.0.item.key].skills
+                     | map(attribute='name') | list }}
+              when: >-
+                (item.1.path | basename)
+                  not in hermes_profile_skills_expected_names
+                or not (item.1.isdir | default(false))
+                or (item.1.islnk | default(false))
 
             - name: Create managed Hermes profile skill directories
               ansible.builtin.file:
@@ -549,6 +749,29 @@
               loop: "{{ hermes_profile_skills_inventory }}"
               loop_control:
                 label: "{{ item.profile }}/{{ item.name }}"
+
+            - name: Create managed Hermes profile supporting-file directories
+              ansible.builtin.file:
+                path: "{{ item.managedRoot }}/{{ item.name }}/{{ item.path | dirname }}"
+                state: directory
+                owner: root
+                group: "{{ item.group }}"
+                mode: "0750"
+              loop: "{{ hermes_profile_skill_support_inventory }}"
+              loop_control:
+                label: "{{ item.profile }}/{{ item.name }}/{{ item.path | dirname }}"
+
+            - name: Install reviewed Hermes profile supporting files
+              ansible.builtin.copy:
+                src: "{{ hermes_profile_skills_stage_root }}/{{ item.source }}"
+                dest: "{{ item.managedRoot }}/{{ item.name }}/{{ item.path }}"
+                remote_src: true
+                owner: root
+                group: "{{ item.group }}"
+                mode: "0440"
+              loop: "{{ hermes_profile_skill_support_inventory }}"
+              loop_control:
+                label: "{{ item.profile }}/{{ item.name }}/{{ item.path }}"
 
             - name: Install reviewed Hermes profile-skills contract
               ansible.builtin.copy:
@@ -718,3 +941,757 @@
             path: "{{ hermes_profile_skills_stage_root }}"
             state: absent
           changed_when: false
+
+- name: Import reviewed skills into native Hermes profile ownership
+  hosts: hermes_hosts
+  become: true
+  gather_facts: false
+
+  vars:
+    hermes_native_skill_repository_root: "{{ ansible_config_file | dirname }}"
+    hermes_native_skill_contract_path: >-
+      {{ hermes_native_skill_repository_root }}/{{ hermes_profile_skills_contract_source }}
+    hermes_native_skill_contract: >-
+      {{ lookup('ansible.builtin.file', hermes_native_skill_contract_path) | from_json }}
+    hermes_native_skill_shared_name: >-
+      {{ hermes_native_skill_contract.nativeOwnership.canonicalSharedSkill }}
+    hermes_native_skill_reader_profiles: >-
+      {{ hermes_native_skill_contract.nativeOwnership.readOnlyProfiles }}
+
+  tasks:
+    - name: Skip native skill import unless explicitly selected
+      ansible.builtin.meta: end_host
+      when: hermes_profile_skills_mode != 'import-native'
+
+    - name: Require exact native skill import authorization
+      ansible.builtin.assert:
+        that:
+          - inventory_hostname == 'jn-t14s-lin'
+          - hermes_profile_skills_approved | bool
+          - >-
+            hermes_profile_skills_import_confirmation
+            == hermes_profile_skills_import_required_confirmation
+          - hermes_native_profile_skills_enabled | bool
+          - hermes_native_skill_contract.schemaVersion == 1
+          - hermes_native_skill_contract.mode == 'reviewed-native-parity'
+          - >-
+            hermes_native_skill_contract.execution.nativeProfileOwnershipRequired
+            | bool
+          - >-
+            not hermes_native_skill_contract.execution.managedProjectionActive
+            | bool
+          - hermes_native_skill_contract.execution.backupRequired | bool
+          - >-
+            hermes_native_skill_contract.execution.transactionRollbackRequired
+            | bool
+          - >-
+            hermes_native_skill_contract.nativeOwnership.writerProfile
+            == 'astra'
+          - hermes_native_skill_reader_profiles == ['dubble', 'rigel']
+        fail_msg: >-
+          Native profile ownership requires the exact attended confirmation,
+          the enabled native unit layout, and the reviewed Astra-writer contract.
+
+    - name: Build native Hermes skill import inventory
+      ansible.builtin.set_fact:
+        hermes_native_skill_inventory: >-
+          {{ (hermes_native_skill_inventory | default([])) + [
+            item.1 | combine({
+              'profile': item.0.key,
+              'user': item.0.value.user,
+              'group': item.0.value.group,
+              'home': item.0.value.home,
+              'nativeRoot': item.0.value.nativeRoot
+            })
+          ] }}
+      loop: >-
+        {{ hermes_native_skill_contract.profiles
+           | dict2items
+           | subelements('value.skills') }}
+      loop_control:
+        label: "{{ item.0.key }}/{{ item.1.name }}"
+
+    - name: Build native Hermes supporting-file import inventory
+      ansible.builtin.set_fact:
+        hermes_native_skill_support_inventory: >-
+          {{ (hermes_native_skill_support_inventory | default([])) + [
+            item.1 | combine({
+              'profile': item.0.profile,
+              'name': item.0.name,
+              'user': item.0.user,
+              'group': item.0.group,
+              'nativeRoot': item.0.nativeRoot,
+              'source': (item.0.source | dirname) ~ '/' ~ item.1.path
+            })
+          ] }}
+      loop: >-
+        {{ hermes_native_skill_inventory
+           | subelements('supportingFiles', skip_missing=True) }}
+      loop_control:
+        label: "{{ item.0.profile }}/{{ item.0.name }}/{{ item.1.path }}"
+
+    - name: Require exact reviewed native skill inventory
+      ansible.builtin.assert:
+        that:
+          - hermes_native_skill_inventory | length == 39
+          - >-
+            hermes_native_skill_inventory
+            | map(attribute='source') | unique | length == 37
+          - hermes_native_skill_support_inventory | length == 13
+          - >-
+            hermes_native_skill_contract.profiles.astra.skills | length == 35
+          - >-
+            hermes_native_skill_contract.profiles.dubble.skills | length == 2
+          - >-
+            hermes_native_skill_contract.profiles.rigel.skills | length == 2
+
+    - name: Inspect Gateway states before native skill import
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/systemctl
+          - show
+          - --property=LoadState
+          - --property=ActiveState
+          - --property=UnitFileState
+          - "hermes-gateway-{{ item }}.service"
+      loop:
+        - astra
+        - dubble
+        - rigel
+      register: hermes_native_skill_gateway_states_before
+      changed_when: false
+      check_mode: false
+
+    - name: Require all native skill consumers online before import
+      ansible.builtin.assert:
+        that:
+          - "'LoadState=loaded' in item.stdout"
+          - "'ActiveState=active' in item.stdout"
+          - "'UnitFileState=enabled' in item.stdout"
+      loop: "{{ hermes_native_skill_gateway_states_before.results }}"
+      loop_control:
+        label: "{{ item.item }}"
+
+    - name: Validate reviewed skill source and native import boundary
+      ansible.builtin.command:
+        argv:
+          - /usr/local/lib/hermes-agent/venv/bin/python
+          - "{{ hermes_native_skill_repository_root }}/{{ hermes_profile_skills_validator_source }}"
+          - --contract
+          - "{{ hermes_native_skill_contract_path }}"
+          - --mode
+          - plan-native
+          - --root
+          - "{{ hermes_native_skill_repository_root }}"
+          - --hermes-source
+          - /usr/local/lib/hermes-agent
+      register: hermes_native_skill_plan
+      changed_when: false
+      check_mode: false
+
+    - name: Parse native skill import plan
+      ansible.builtin.set_fact:
+        hermes_native_skill_plan_data: "{{ hermes_native_skill_plan.stdout | from_json }}"
+
+    - name: Require lossless native skill import boundary
+      ansible.builtin.assert:
+        that:
+          - hermes_native_skill_plan_data.status == 'ok'
+          - hermes_native_skill_plan_data.skills == 39
+          - >-
+            hermes_native_skill_plan_data.nativePlan.absent
+            + hermes_native_skill_plan_data.nativePlan.exact == 37
+          - >-
+            hermes_native_skill_plan_data.nativePlan.sharedMountAbsent
+            + hermes_native_skill_plan_data.nativePlan.sharedMountReady == 2
+        fail_msg: >-
+          A reviewed native target is neither absent nor exact, or a shared
+          reader mountpoint is not absent/empty. No profile state was changed.
+
+    - name: Report native skill import check-mode boundary
+      ansible.builtin.debug:
+        msg: >-
+          Check mode validated authorization, source content, live consumers,
+          and the lossless native import boundary. It did not create a backup,
+          copy a skill, change a Gateway layout, or restart a service.
+      when: ansible_check_mode
+
+    - name: Stop native skill import before mutation in check mode
+      ansible.builtin.meta: end_host
+      when: ansible_check_mode
+
+    - name: Build native skill rollback candidate inventory
+      ansible.builtin.set_fact:
+        hermes_native_skill_backup_candidates:
+          - /var/lib/hermes/astra/.hermes/profiles/astra/skills
+          - /var/lib/hermes/dubble/.hermes/profiles/dubble/skills
+          - /var/lib/hermes/rigel/.hermes/profiles/rigel/skills
+          - /usr/local/libexec/hermes-profile-skills-validate
+          - /etc/hermes/profile-skills-contract.json
+          - /etc/hermes/bootstrap-parity-contract.json
+          - /etc/systemd/system/hermes-gateway-astra.service.d/10-managed.conf
+          - /etc/systemd/system/hermes-gateway-dubble.service.d/10-managed.conf
+          - /etc/systemd/system/hermes-gateway-rigel.service.d/10-managed.conf
+
+    - name: Inspect native skill rollback prerequisites
+      ansible.builtin.stat:
+        path: "{{ item }}"
+        follow: false
+      loop: >-
+        {{ ['/usr/local/sbin/live-rollback-backup']
+           + hermes_native_skill_backup_candidates }}
+      register: hermes_native_skill_backup_prerequisites
+      check_mode: false
+
+    - name: Require complete safe native skill rollback prerequisites
+      ansible.builtin.assert:
+        that:
+          - item.stat.exists | default(false)
+          - not (item.stat.islnk | default(false))
+        fail_msg: "Native skill rollback prerequisite is missing or linked: {{ item.item }}"
+      loop: "{{ hermes_native_skill_backup_prerequisites.results }}"
+      loop_control:
+        label: "{{ item.item }}"
+
+    - name: Initialize native skill rollback command
+      ansible.builtin.set_fact:
+        hermes_native_skill_backup_argv:
+          - /usr/local/sbin/live-rollback-backup
+          - --domain
+          - hermes-profile-skills
+          - --host
+          - jn-t14s-lin
+          - --name
+          - pre-native-skill-ownership
+
+    - name: Add exact native skill paths to rollback command
+      ansible.builtin.set_fact:
+        hermes_native_skill_backup_argv: >-
+          {{ hermes_native_skill_backup_argv + ['--path', item] }}
+      loop: "{{ hermes_native_skill_backup_candidates }}"
+
+    - name: Back up complete native skill state off-host before import
+      ansible.builtin.command:
+        argv: "{{ hermes_native_skill_backup_argv }}"
+      register: hermes_native_skill_backup
+      changed_when: true
+
+    - name: Record validated native skill rollback artifact
+      ansible.builtin.set_fact:
+        hermes_native_skill_backup_path: "{{ hermes_native_skill_backup.stdout }}"
+
+    - name: Inspect published native skill rollback contents
+      ansible.builtin.stat:
+        path: "{{ hermes_native_skill_backup_path }}/files{{ item }}"
+        follow: false
+      loop: "{{ hermes_native_skill_backup_candidates }}"
+      register: hermes_native_skill_published_backup
+      check_mode: false
+
+    - name: Require complete published native skill rollback
+      ansible.builtin.assert:
+        that:
+          - item.stat.exists | default(false)
+          - not (item.stat.islnk | default(false))
+        fail_msg: >-
+          The off-host rollback did not publish an exact requested source:
+          {{ item.item }}. No native skill state was changed.
+      loop: "{{ hermes_native_skill_published_backup.results }}"
+      loop_control:
+        label: "{{ item.item }}"
+
+    - name: Import and activate native profile skill ownership
+      block:
+        - name: Deploy current native profile-skills validator
+          ansible.builtin.copy:
+            src: >-
+              {{ hermes_native_skill_repository_root }}/{{ hermes_profile_skills_validator_source }}
+            dest: "{{ hermes_profile_skills_validator_live }}"
+            owner: root
+            group: root
+            mode: "0555"
+
+        - name: Create profile-owned native skill directories
+          ansible.builtin.file:
+            path: "{{ item.nativeRoot }}/{{ item.name }}"
+            state: directory
+            owner: "{{ item.user }}"
+            group: >-
+              {{
+                hermes_runtime_readers_group
+                if item.name == hermes_native_skill_shared_name
+                else item.group
+              }}
+            mode: "0750"
+          loop: "{{ hermes_native_skill_inventory }}"
+          loop_control:
+            label: "{{ item.profile }}/{{ item.name }}"
+          when: >-
+            not (
+              item.name == hermes_native_skill_shared_name
+              and item.profile in hermes_native_skill_reader_profiles
+            )
+          register: hermes_native_skill_directories
+
+        - name: Import reviewed skills into profile-owned native roots
+          ansible.builtin.copy:
+            src: "{{ hermes_native_skill_repository_root }}/{{ item.source }}"
+            dest: "{{ item.nativeRoot }}/{{ item.name }}/SKILL.md"
+            owner: "{{ item.user }}"
+            group: >-
+              {{
+                hermes_runtime_readers_group
+                if item.name == hermes_native_skill_shared_name
+                else item.group
+              }}
+            mode: "0640"
+          loop: "{{ hermes_native_skill_inventory }}"
+          loop_control:
+            label: "{{ item.profile }}/{{ item.name }}"
+          when: >-
+            not (
+              item.name == hermes_native_skill_shared_name
+              and item.profile in hermes_native_skill_reader_profiles
+            )
+          register: hermes_native_skill_files
+
+        - name: Create profile-owned supporting-file directories
+          ansible.builtin.file:
+            path: >-
+              {{ item.nativeRoot }}/{{ item.name }}/{{ item.path | dirname }}
+            state: directory
+            owner: "{{ item.user }}"
+            group: "{{ item.group }}"
+            mode: "0750"
+          loop: "{{ hermes_native_skill_support_inventory }}"
+          loop_control:
+            label: "{{ item.profile }}/{{ item.name }}/{{ item.path | dirname }}"
+
+        - name: Import reviewed native skill supporting files
+          ansible.builtin.copy:
+            src: "{{ hermes_native_skill_repository_root }}/{{ item.source }}"
+            dest: "{{ item.nativeRoot }}/{{ item.name }}/{{ item.path }}"
+            owner: "{{ item.user }}"
+            group: "{{ item.group }}"
+            mode: "0640"
+          loop: "{{ hermes_native_skill_support_inventory }}"
+          loop_control:
+            label: "{{ item.profile }}/{{ item.name }}/{{ item.path }}"
+          register: hermes_native_skill_support_files
+
+        - name: Create empty shared-skill reader mountpoints
+          ansible.builtin.file:
+            path: >-
+              {{ hermes_native_skill_contract.profiles[item].nativeRoot
+                 }}/{{ hermes_native_skill_shared_name }}
+            state: directory
+            owner: "{{ hermes_native_skill_contract.profiles[item].user }}"
+            group: "{{ hermes_native_skill_contract.profiles[item].group }}"
+            mode: "0750"
+          loop: "{{ hermes_native_skill_reader_profiles }}"
+          register: hermes_native_skill_reader_mountpoints
+
+        - name: Install native ownership validation contract
+          ansible.builtin.copy:
+            src: "{{ hermes_native_skill_contract_path }}"
+            dest: "{{ hermes_profile_skills_contract_live }}"
+            owner: root
+            group: root
+            mode: "0444"
+          register: hermes_native_skill_contract_install
+
+        - name: Install native bootstrap parity contract
+          ansible.builtin.copy:
+            src: >-
+              {{ hermes_native_skill_repository_root }}/{{ hermes_bootstrap_parity_contract_source }}
+            dest: "{{ hermes_bootstrap_parity_contract_live }}"
+            owner: root
+            group: root
+            mode: "0444"
+          register: hermes_native_bootstrap_parity_contract_install
+
+        - name: Deploy native ownership Gateway layout
+          ansible.builtin.template:
+            src: >-
+              {{ playbook_dir }}/../../templates/hermes/hermes-gateway-hardening.conf.j2
+            dest: >-
+              /etc/systemd/system/hermes-gateway-{{ hermes_profile.name }}.service.d/10-managed.conf
+            owner: root
+            group: root
+            mode: "0644"
+          loop: "{{ hermes_shadow_profiles }}"
+          loop_control:
+            loop_var: hermes_profile
+            label: "{{ hermes_profile.name }}"
+          register: hermes_native_skill_gateway_dropins
+
+        - name: Reload systemd after native skill layout staging
+          ansible.builtin.systemd_service:
+            daemon_reload: true
+          when: hermes_native_skill_gateway_dropins.changed
+
+        - name: Determine whether native skill consumers require restart
+          ansible.builtin.set_fact:
+            hermes_native_skill_restart_required: >-
+              {{
+                hermes_native_skill_gateway_dropins.changed
+                or hermes_native_skill_contract_install.changed
+                or hermes_native_bootstrap_parity_contract_install.changed
+                or (
+                  hermes_native_skill_files.results
+                  | selectattr('changed', 'defined')
+                  | selectattr('changed') | list | length > 0
+                )
+                or (
+                  hermes_native_skill_support_files.results
+                  | selectattr('changed', 'defined')
+                  | selectattr('changed') | list | length > 0
+                )
+                or hermes_native_skill_reader_mountpoints.changed
+              }}
+
+        - name: Record entry into native skill consumer restart phase
+          ansible.builtin.set_fact:
+            hermes_native_skill_restart_phase_entered: true
+          when: hermes_native_skill_restart_required | bool
+
+        - name: Prepare planned-stop markers for native skill handoff
+          ansible.builtin.include_tasks:
+            file: ../../tasks/hermes-planned-stop-marker.yml
+          vars:
+            hermes_planned_stop_profile: "{{ item }}"
+          loop: "{{ hermes_shadow_profiles }}"
+          loop_control:
+            label: "{{ item.name }}"
+          when: hermes_native_skill_restart_required | bool
+
+        - name: Restart each native skill consumer exactly once
+          ansible.builtin.systemd_service:
+            name: "hermes-gateway-{{ item }}.service"
+            state: restarted
+            enabled: true
+          loop:
+            - astra
+            - dubble
+            - rigel
+          when: hermes_native_skill_restart_required | bool
+
+        - name: Wait for native skill consumers to reach readiness
+          ansible.builtin.command:
+            argv:
+              - /usr/bin/systemctl
+              - is-active
+              - "hermes-gateway-{{ item }}.service"
+          loop:
+            - astra
+            - dubble
+            - rigel
+          register: hermes_native_skill_consumer_readiness
+          changed_when: false
+          check_mode: false
+          retries: 18
+          delay: 5
+          until: hermes_native_skill_consumer_readiness.stdout == 'active'
+
+        - name: Read effective native skill Gateway layouts
+          ansible.builtin.command:
+            argv:
+              - /usr/bin/systemctl
+              - cat
+              - "hermes-gateway-{{ item.key }}.service"
+          loop: "{{ hermes_native_skill_contract.profiles | dict2items }}"
+          register: hermes_native_skill_gateway_layouts
+          changed_when: false
+
+        - name: Require profile-owned native skill Gateway layouts
+          ansible.builtin.assert:
+            that:
+              - "'/skills/managed' not in item.stdout"
+              - "'--mode native --profile ' ~ item.item.key in item.stdout"
+              - >-
+                item.item.key == 'astra'
+                or (
+                  'BindReadOnlyPaths=' ~ hermes_shared_self_evolution_source
+                  ~ ':' ~ item.item.value.nativeRoot ~ '/self-evolution'
+                ) in item.stdout
+            fail_msg: >-
+              A Gateway still exposes the retired managed projection or lacks
+              native startup validation/shared-skill isolation.
+          loop: "{{ hermes_native_skill_gateway_layouts.results }}"
+          loop_control:
+            label: "{{ item.item.key }}"
+
+        - name: Validate native skills through isolated service namespaces
+          ansible.builtin.command:
+            argv: >-
+              {{
+                [
+                  '/usr/bin/systemd-run', '--quiet', '--wait', '--pipe',
+                  '--collect',
+                  '--unit=hermes-native-skills-' ~ item.key,
+                  '--property=Type=exec',
+                  '--property=User=' ~ item.value.user,
+                  '--property=Group=' ~ item.value.group,
+                  '--property=WorkingDirectory=' ~ item.value.home,
+                  '--property=NoNewPrivileges=yes',
+                  '--property=ProtectSystem=strict',
+                  '--property=ProtectHome=yes',
+                  '--property=ReadWritePaths=' ~ item.value.home
+                ]
+                + (
+                  [
+                    '--property=BindReadOnlyPaths='
+                    ~ hermes_shared_self_evolution_source ~ ':'
+                    ~ item.value.nativeRoot ~ '/self-evolution'
+                  ]
+                  if item.key in hermes_native_skill_reader_profiles
+                  else []
+                )
+                + [
+                  '--setenv=HOME=' ~ item.value.home,
+                  '--setenv=HERMES_HOME=' ~ item.value.home,
+                  '--setenv=HERMES_MANAGED_DIR=/etc/hermes/' ~ item.key,
+                  '/usr/local/lib/hermes-agent/venv/bin/python',
+                  hermes_profile_skills_validator_live,
+                  '--contract', hermes_profile_skills_contract_live,
+                  '--mode', 'native', '--profile', item.key,
+                  '--hermes-source', '/usr/local/lib/hermes-agent'
+                ]
+              }}
+          loop: "{{ hermes_native_skill_contract.profiles | dict2items }}"
+          loop_control:
+            label: "{{ item.key }}"
+          changed_when: false
+
+        - name: Prove each profile can write its native skill root
+          ansible.builtin.command:
+            argv:
+              - /usr/sbin/runuser
+              - --user
+              - "{{ item.value.user }}"
+              - --
+              - /usr/bin/touch
+              - "{{ item.value.nativeRoot }}/.native-write-smoke"
+          loop: "{{ hermes_native_skill_contract.profiles | dict2items }}"
+          loop_control:
+            label: "{{ item.key }}"
+          changed_when: false
+
+        - name: Prove Astra can revise the canonical shared skill
+          ansible.builtin.command:
+            argv:
+              - /usr/sbin/runuser
+              - --user
+              - hermes-astra
+              - --
+              - /usr/bin/touch
+              - "{{ hermes_shared_self_evolution_source }}/.writer-smoke"
+          changed_when: false
+
+        - name: Prove reader profiles cannot revise the shared skill
+          ansible.builtin.command:
+            argv:
+              - /usr/bin/systemd-run
+              - --quiet
+              - --wait
+              - --pipe
+              - --collect
+              - "--unit=hermes-shared-skill-readonly-{{ item }}"
+              - --property=Type=exec
+              - "--property=User={{ hermes_native_skill_contract.profiles[item].user }}"
+              - "--property=Group={{ hermes_native_skill_contract.profiles[item].group }}"
+              - --property=NoNewPrivileges=yes
+              - --property=ProtectSystem=strict
+              - "--property=ReadWritePaths={{ hermes_native_skill_contract.profiles[item].home }}"
+              - >-
+                --property=BindReadOnlyPaths={{ hermes_shared_self_evolution_source }}:{{ hermes_native_skill_contract.profiles[item].nativeRoot }}/self-evolution
+              - /usr/bin/touch
+              - >-
+                {{ hermes_native_skill_contract.profiles[item].nativeRoot }}/self-evolution/.reader-write-smoke
+          loop: "{{ hermes_native_skill_reader_profiles }}"
+          register: hermes_native_skill_reader_write_tests
+          changed_when: false
+          failed_when: hermes_native_skill_reader_write_tests.rc == 0
+
+        - name: Report native profile skill ownership activation
+          ansible.builtin.debug:
+            msg: >-
+              Native profile skill ownership is active. The retained managed
+              projection remains off-path for rollback only. Rollback artifact:
+              {{ hermes_native_skill_backup_path }}
+      rescue:
+        - name: Remove failed native profile skill trees
+          ansible.builtin.file:
+            path: "{{ item.value.nativeRoot }}"
+            state: absent
+          loop: "{{ hermes_native_skill_contract.profiles | dict2items }}"
+          loop_control:
+            label: "{{ item.key }}"
+          failed_when: false
+
+        - name: Restore complete native profile skill trees
+          ansible.builtin.command:
+            argv:
+              - /usr/bin/cp
+              - -a
+              - "{{ hermes_native_skill_backup_path }}/files{{ item.value.nativeRoot }}"
+              - "{{ item.value.nativeRoot | dirname }}"
+          loop: "{{ hermes_native_skill_contract.profiles | dict2items }}"
+          loop_control:
+            label: "{{ item.key }}"
+          changed_when: true
+          failed_when: false
+
+        - name: Restore pre-import native skill validator
+          ansible.builtin.copy:
+            src: >-
+              {{ hermes_native_skill_backup_path }}/files{{ hermes_profile_skills_validator_live }}
+            dest: "{{ hermes_profile_skills_validator_live }}"
+            remote_src: true
+            owner: root
+            group: root
+            mode: "0555"
+          failed_when: false
+
+        - name: Restore pre-import native skill contract
+          ansible.builtin.copy:
+            src: >-
+              {{ hermes_native_skill_backup_path }}/files{{ hermes_profile_skills_contract_live }}
+            dest: "{{ hermes_profile_skills_contract_live }}"
+            remote_src: true
+            owner: root
+            group: root
+            mode: "0444"
+          failed_when: false
+
+        - name: Restore pre-import bootstrap parity contract
+          ansible.builtin.copy:
+            src: >-
+              {{ hermes_native_skill_backup_path }}/files{{ hermes_bootstrap_parity_contract_live }}
+            dest: "{{ hermes_bootstrap_parity_contract_live }}"
+            remote_src: true
+            owner: root
+            group: root
+            mode: "0444"
+          failed_when: false
+
+        - name: Restore pre-import Gateway layouts
+          ansible.builtin.copy:
+            src: >-
+              {{ hermes_native_skill_backup_path }}/files/etc/systemd/system/hermes-gateway-{{ item }}.service.d/10-managed.conf
+            dest: >-
+              /etc/systemd/system/hermes-gateway-{{ item }}.service.d/10-managed.conf
+            remote_src: true
+            owner: root
+            group: root
+            mode: "0644"
+          loop:
+            - astra
+            - dubble
+            - rigel
+          failed_when: false
+
+        - name: Reload restored Gateway layouts
+          ansible.builtin.systemd_service:
+            daemon_reload: true
+          failed_when: false
+
+        - name: Prepare planned-stop markers for restored Gateways
+          ansible.builtin.include_tasks:
+            file: ../../tasks/hermes-planned-stop-marker.yml
+          vars:
+            hermes_planned_stop_profile: "{{ item }}"
+            hermes_planned_stop_strict: false
+          loop: "{{ hermes_shadow_profiles }}"
+          loop_control:
+            label: "{{ item.name }}"
+          when: hermes_native_skill_restart_phase_entered | default(false) | bool
+
+        - name: Restart restored Gateways after failed native import
+          ansible.builtin.systemd_service:
+            name: "hermes-gateway-{{ item }}.service"
+            state: restarted
+            enabled: true
+          loop:
+            - astra
+            - dubble
+            - rigel
+          failed_when: false
+          when: hermes_native_skill_restart_phase_entered | default(false) | bool
+
+        - name: Wait for restored Gateways to reach readiness
+          ansible.builtin.command:
+            argv:
+              - /usr/bin/systemctl
+              - is-active
+              - "hermes-gateway-{{ item }}.service"
+          loop:
+            - astra
+            - dubble
+            - rigel
+          register: hermes_native_skill_restored_readiness
+          changed_when: false
+          check_mode: false
+          retries: 18
+          delay: 5
+          until: hermes_native_skill_restored_readiness.stdout == 'active'
+          when: hermes_native_skill_restart_phase_entered | default(false) | bool
+
+        - name: Validate restored skills through retained service bindings
+          ansible.builtin.command:
+            argv:
+              - /usr/bin/systemd-run
+              - --quiet
+              - --wait
+              - --pipe
+              - --collect
+              - --property=Type=exec
+              - "--property=User={{ item.value.user }}"
+              - "--property=Group={{ item.value.group }}"
+              - "--property=WorkingDirectory={{ item.value.home }}"
+              - --property=NoNewPrivileges=yes
+              - --property=ProtectSystem=strict
+              - --property=ProtectHome=yes
+              - "--property=ReadWritePaths={{ item.value.home }}"
+              - "--property=BindReadOnlyPaths={{ item.value.managedRoot }}:{{ item.value.runtimeRoot }}"
+              - "--setenv=HOME={{ item.value.home }}"
+              - "--setenv=HERMES_HOME={{ item.value.home }}"
+              - "--setenv=HERMES_MANAGED_DIR=/etc/hermes/{{ item.key }}"
+              - /usr/local/lib/hermes-agent/venv/bin/python
+              - "{{ hermes_profile_skills_validator_live }}"
+              - --contract
+              - "{{ hermes_profile_skills_contract_live }}"
+              - --mode
+              - runtime
+              - --profile
+              - "{{ item.key }}"
+              - --hermes-source
+              - /usr/local/lib/hermes-agent
+          loop: "{{ hermes_native_skill_contract.profiles | dict2items }}"
+          loop_control:
+            label: "{{ item.key }}"
+          changed_when: false
+          check_mode: false
+          when: hermes_native_skill_restart_phase_entered | default(false) | bool
+
+        - name: Stop after restoring failed native skill import
+          ansible.builtin.fail:
+            msg: >-
+              Native skill import failed. Profile skill trees, validation
+              contract, Gateway layouts, and previously active Gateways were
+              restored from {{ hermes_native_skill_backup_path }}.
+      always:
+        - name: Remove native skill write-smoke artifacts
+          ansible.builtin.file:
+            path: "{{ item.value.nativeRoot }}/.native-write-smoke"
+            state: absent
+          loop: "{{ hermes_native_skill_contract.profiles | dict2items }}"
+          loop_control:
+            label: "{{ item.key }}"
+          failed_when: false
+
+        - name: Remove canonical shared-skill writer smoke artifact
+          ansible.builtin.file:
+            path: "{{ hermes_shared_self_evolution_source }}/.writer-smoke"
+            state: absent
+          failed_when: false

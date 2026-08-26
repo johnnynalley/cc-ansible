@@ -1,0 +1,53 @@
+[Unit]
+Description=Credential-isolated Rigel to Astra calendar broker
+After=network-online.target
+Wants=network-online.target
+Before=hermes-gateway-rigel.service
+
+[Service]
+Type=simple
+User={{ hermes_rigel_astra_liaison_user }}
+Group={{ hermes_rigel_astra_liaison_group }}
+WorkingDirectory={{ hermes_rigel_astra_liaison_home }}
+Environment=HOME={{ hermes_rigel_astra_liaison_home }}
+Environment=XDG_CONFIG_HOME={{ hermes_rigel_astra_liaison_home }}/.config
+Environment=XDG_DATA_HOME={{ hermes_rigel_astra_liaison_home }}/.local/share
+ExecStart={{ hermes_rigel_astra_liaison_python }} {{ hermes_rigel_astra_liaison_broker_live }} --socket {{ hermes_rigel_astra_liaison_socket }} --allowed-uid {{ hermes_rigel_profile.uid }} --home {{ hermes_rigel_astra_liaison_home }}
+Restart=on-failure
+RestartSec=5s
+TimeoutStartSec=30s
+TimeoutStopSec=15s
+RuntimeDirectory=hermes-rigel-liaison
+RuntimeDirectoryMode=0750
+UMask=0007
+LoadCredential=caldav-password:{{ hermes_rigel_astra_liaison_private_root }}/caldav-password
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectClock=true
+ProtectControlGroups=true
+ProtectHostname=true
+ProtectKernelLogs=true
+ProtectKernelModules=true
+ProtectKernelTunables=true
+ProtectProc=invisible
+LockPersonality=true
+MemoryDenyWriteExecute=true
+RestrictNamespaces=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+CapabilityBoundingSet=
+AmbientCapabilities=
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+ReadWritePaths={{ hermes_rigel_astra_liaison_home }}
+InaccessiblePaths=/etc/hermes/astra /etc/hermes/dubble /etc/hermes/rigel /var/lib/hermes/astra /var/lib/hermes/dubble /var/lib/hermes/rigel /home /root -/run/docker.sock -/var/run/docker.sock -/etc/ansible -/var/lib/docker -/srv -/mnt -/media
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+TasksMax=32
+LimitNOFILE=256
+
+[Install]
+WantedBy=multi-user.target

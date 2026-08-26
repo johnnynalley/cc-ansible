@@ -8,9 +8,10 @@ cross-reference health rather than a single infrastructure service.
 - `repo-audit`: Static repository organization audit. It checks for flat
   template/script/playbook drift, stale playbook/template/script references,
   skill-relative supporting-file references, missing source-of-truth doc
-  pointers, divergent per-host agent npm prefixes, and plaintext secret
-  exposure. It calls `secrets-scan` by default, so this remains the single
-  required audit command.
+  pointers, divergent per-host agent npm prefixes, exhaustive Hermes Ansible
+  path ownership, and plaintext secret exposure. It calls both
+  `hermes-ansible-ownership-audit.py` and `secrets-scan` by default, so this
+  remains the single required audit command.
 - `test_repo_audit.py`: Focused regression coverage for repository and
   skill-relative reference resolution.
 - `secrets-scan`: Built-in tracked-file secret scanner with optional Gitleaks

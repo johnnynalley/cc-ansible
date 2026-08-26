@@ -925,10 +925,11 @@ The production deployment keeps these principals separate:
 
 | Principal | May access | Must not access |
 | --- | --- | --- |
-| `hermes-astra` | Astra profile state and credentials, reviewed managed data/skills, web/delegation, aggregate reports, fixed Docker report/status tools, and exact sudo to start the native updater or restart/reset named Hermes Gateways | General sudo, Docker socket/group, host shell/files through model tools, Dubble state, human home, controller credentials, raw Health data, free-form remote commands |
+| `hermes-astra` | Astra profile state and credentials, reviewed native skills, local terminal/file/code tools under its service identity, web/delegation, aggregate reports, and typed Docker/host/Arr administration brokers | General sudo, Docker socket/group, Dubble/Rigel private state, human home, controller credentials, raw Health data, or free-form privileged commands |
 | `hermes-dubble` | Dubble profile state and its own Discord/provider credentials plus non-execution conversation tools | Astra/Rigel state, delegation, web, Docker tools/credentials, host execution, controller data |
-| Dormant `hermes-rigel` profile | Root-managed archived profile data; no active Gateway or Discord token | Production delivery, Astra/Dubble state, Docker, host execution |
-| Astra native-update service context and `hermes-updater` | Astra profile state, native release discovery, writable reviewed runtime/binary locations, bounded `CAP_SETUID`/`CAP_SETGID` only inside the updater unit, and exact named-Gateway restart sudo for the Astra-owned Hermes updater | Ambient capabilities, Dubble credentials/state, Docker, arbitrary sudo, controller credentials, human home |
+| `hermes-rigel` | Rigel's isolated academic profile/workspace, calendar liaison, and bounded local file/terminal tools for coursework | Astra/Dubble private state, general host administration, Docker, human home, or direct privileged changes |
+| Astra native-update service context | Astra profile state, native release discovery, writable reviewed runtime/binary locations, bounded `CAP_SETUID`/`CAP_SETGID` only inside the updater unit, and exact named-Gateway restart sudo | Ambient capabilities, Dubble/Rigel credentials/state, Docker, arbitrary sudo, controller credentials, human home |
+| Tirith native-update service | Signed Tirith release discovery and writes limited to `/var/lib/hermes-updater` plus the paired root-owned helper in `/usr/local/libexec` | Gateway/profile credentials, Docker, human home, arbitrary filesystem writes, ambient or bounding capabilities |
 | Retained `johnny` Health service | Health token, receiver code, and raw Health database | Hermes profile state and Docker credentials by design; this boundary still depends on the broader human account and is tracked below |
 | Docker reporter accounts | One fresh, redacted report through a forced SSH command | Docker socket, arbitrary SSH commands, environment/mount/log data, updates |
 | Docker update-trigger accounts | `status` or start of one existing root-owned updater service, with lock and cooldown | Service/image/path selection, Compose arguments, Docker socket, interactive SSH, policy edits |
@@ -953,19 +954,21 @@ IDs even though the sudoers rule itself was correct. `CAP_SETUID` and
 `CAP_SETGID` repaired that mechanism; an empty ambient set and exact sudoers
 still prevent arbitrary capability use or arbitrary systemd control.
 
-A prompt injection can influence content Astra or Dubble is already allowed
-to read or send, trigger allowed web/provider activity, and consume model
-budget. It cannot use model-exposed terminal, file, code-execution, cron, or
-computer-use toolsets because those are disabled, and the service identities
-have no general sudo, Docker socket/group, human home, or controller secrets.
-This is a tested authority boundary, not a claim that Hermes, Python, systemd,
-or an upstream dependency has no exploitable implementation flaw.
+A prompt injection can influence content an agent is already allowed to read
+or send, trigger allowed provider activity, and consume model budget. Dubble
+has no local execution tools. Astra and Rigel do have role-appropriate local
+file/terminal authority, but it remains bounded by separate service identities,
+private profile/workspace roots, typed privileged brokers, and cross-agent
+privacy gates. None has general sudo, Docker socket/group, human home, or
+controller secrets. This is a tested authority boundary, not a claim that
+Hermes, Python, systemd, or an upstream dependency has no exploitable
+implementation flaw.
 
 ### Current Risk Register
 
 | Severity | State | Risk and required closure |
 | --- | --- | --- |
-| High | Accepted owner requirement | Native Hermes and Tirith updates can replace code later executed by both Gateways. Their updater identities are unprivileged and have only exact restart sudo, but a compromised upstream release can still read each Gateway's own credentials after restart. Preserve native updates as requested, monitor provenance, retain backups, and treat provider/Discord credentials as rotation targets after any update compromise. |
+| High | Accepted owner requirement | Native Hermes and Tirith updates can replace code later executed by all three Gateways. Hermes uses its bounded updater transaction; Tirith's signed 0.4+ pair requires a capability-empty root unit whose writable paths are limited to Tirith state and `/usr/local/libexec`. A compromised signed upstream release can still become trusted code. Preserve native provenance checks and rollback backups, and treat provider/Discord credentials as rotation targets after any update compromise. |
 | High | Open separate hardening | The retained Health receiver is a network-facing `johnny` user service. Its authentication, source restriction, bounded parser, and separation from model tools reduce exposure, but a receiver-code exploit would inherit the broader human account. Migrate it to the prepared no-login `openclaw-health` service without changing the client endpoint contract. |
 | Medium | Inherent residual | Each active Gateway must read its own Discord and model-provider credentials; Astra also reads its two fixed Docker SSH keys. A native runtime/plugin compromise can steal that profile's credentials even though prompt-level tools cannot. Rotate the affected profile and Docker keys after any process compromise. |
 | Medium | Accepted operational tradeoff | Selected Docker services still auto-update as root-managed systemd work. A malicious image or ordinary bad release can cause availability or container-level supply-chain impact. Major-version and required-path guards remain, updater scripts are root-only, and the Docker socket proxy is excluded from blind updates. |

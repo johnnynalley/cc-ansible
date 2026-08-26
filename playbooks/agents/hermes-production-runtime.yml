@@ -4,7 +4,10 @@
 # Key vars: hermes_production_runtime_*, hermes_shadow_*, hermes_runtime_*.
 # Templates: templates/hermes/hermes-gateway-hardening.conf.j2,
 #            templates/hermes/hermes-native-update.service.j2.
-# Scripts: scripts/agents/hermes-discord-runtime-audit.py.
+# Scripts: scripts/agents/hermes-discord-runtime-audit.py,
+#          scripts/agents/hermes-managed-source-patch.py,
+#          scripts/agents/hermes-native-update-transaction.py,
+#          scripts/agents/hermes-queued-event-durability-validate.py.
 # Validation: ansible-playbook playbooks/agents/hermes-production-runtime.yml
 #             --syntax-check.
 
@@ -27,6 +30,157 @@
       - /etc/systemd/system/hermes-gateway-dubble.service
       - /etc/systemd/system/hermes-gateway-rigel.service
       - /etc/systemd/system/hermes-native-update.service
+    hermes_runtime_update_support_paths:
+      - path: "{{ hermes_native_update_transaction_live }}"
+        backup: hermes-native-update-transaction
+        owner: root
+        group: root
+        mode: "0555"
+      - path: "{{ hermes_native_update_transaction_config }}"
+        backup: native-update-transaction.json
+        owner: root
+        group: root
+        mode: "0444"
+      - path: "{{ hermes_native_update_sudoers_path }}"
+        backup: hermes-native-update.sudoers
+        owner: root
+        group: root
+        mode: "0440"
+    hermes_runtime_owned_files:
+      - source: "{{ hermes_profile_data_stager_source }}"
+        path: "{{ hermes_profile_data_stager_live }}"
+        backup: hermes-profile-data-stage
+        group: root
+        mode: "0555"
+      - source: "{{ hermes_profile_data_contract_source }}"
+        path: "{{ hermes_profile_data_contract_live }}"
+        backup: profile-data-stage-contract.json
+        group: root
+        mode: "0444"
+      - source: "{{ hermes_profile_transformer_source }}"
+        path: "{{ hermes_profile_transformer_live }}"
+        backup: hermes-profile-transform
+        group: root
+        mode: "0555"
+      - source: "{{ hermes_profile_transforms_contract_source }}"
+        path: "{{ hermes_profile_transforms_contract_live }}"
+        backup: profile-transform-contract.json
+        group: root
+        mode: "0444"
+      - source: scripts/agents/hermes-rigel-academic-smoke.py
+        path: /usr/local/libexec/hermes-rigel-academic-smoke
+        backup: hermes-rigel-academic-smoke
+        group: root
+        mode: "0555"
+      - source: scripts/agents/hermes-rigel-workflow-smoke.py
+        path: /usr/local/libexec/hermes-rigel-workflow-smoke
+        backup: hermes-rigel-workflow-smoke
+        group: root
+        mode: "0500"
+      - source: files/hermes/profile-import-contract.json
+        path: >-
+          /usr/local/share/hermes-shadow/repository/files/hermes/profile-import-contract.json
+        backup: repository-profile-import-contract.json
+        group: root
+        mode: "0444"
+      - source: files/openclaw/workspace-migration-policy.json
+        path: >-
+          /usr/local/share/hermes-shadow/repository/files/openclaw/workspace-migration-policy.json
+        backup: repository-workspace-migration-policy.json
+        group: root
+        mode: "0444"
+      - source: files/hermes/profiles/astra/AGENTS.md
+        path: /var/lib/hermes/astra/.hermes/profiles/astra/AGENTS.md
+        backup: astra-AGENTS.md
+        profile: astra
+        owner: hermes-astra
+        group: hermes-astra
+        mode: "0600"
+        seed_only: true
+      - source: files/hermes/profiles/astra/SOUL.md
+        path: /var/lib/hermes/astra/.hermes/profiles/astra/SOUL.md
+        backup: astra-SOUL.md
+        profile: astra
+        owner: hermes-astra
+        group: hermes-astra
+        mode: "0600"
+        seed_only: true
+      - source: files/hermes/profiles/dubble/AGENTS.md
+        path: /var/lib/hermes/dubble/.hermes/profiles/dubble/AGENTS.md
+        backup: dubble-AGENTS.md
+        profile: dubble
+        owner: hermes-dubble
+        group: hermes-dubble
+        mode: "0600"
+        seed_only: true
+      - source: files/hermes/profiles/dubble/SOUL.md
+        path: /var/lib/hermes/dubble/.hermes/profiles/dubble/SOUL.md
+        backup: dubble-SOUL.md
+        profile: dubble
+        owner: hermes-dubble
+        group: hermes-dubble
+        mode: "0600"
+        seed_only: true
+      - source: files/hermes/profiles/rigel/AGENTS.md
+        path: /var/lib/hermes/rigel/.hermes/profiles/rigel/AGENTS.md
+        backup: rigel-AGENTS.md
+        profile: rigel
+        owner: hermes-rigel
+        group: hermes-rigel
+        mode: "0600"
+        seed_only: true
+      - source: files/hermes/profiles/rigel/HEARTBEAT.md
+        path: /var/lib/hermes/rigel/.hermes/profiles/rigel/HEARTBEAT.md
+        backup: rigel-HEARTBEAT.md
+        profile: rigel
+        owner: hermes-rigel
+        group: hermes-rigel
+        mode: "0600"
+        seed_only: true
+      - source: files/hermes/profiles/rigel/SOUL.md
+        path: /var/lib/hermes/rigel/.hermes/profiles/rigel/SOUL.md
+        backup: rigel-SOUL.md
+        profile: rigel
+        owner: hermes-rigel
+        group: hermes-rigel
+        mode: "0600"
+        seed_only: true
+      - source: files/hermes/profiles/rigel/TOOLS.md
+        path: /var/lib/hermes/rigel/.hermes/profiles/rigel/TOOLS.md
+        backup: rigel-TOOLS.md
+        profile: rigel
+        owner: hermes-rigel
+        group: hermes-rigel
+        mode: "0600"
+        seed_only: true
+      - source: files/hermes/profiles/rigel/USER.md
+        path: /var/lib/hermes/rigel/.hermes/profiles/rigel/USER.md
+        backup: rigel-USER.md
+        profile: rigel
+        owner: hermes-rigel
+        group: hermes-rigel
+        mode: "0600"
+        seed_only: true
+    hermes_runtime_managed_policy_paths:
+      - /etc/hermes/astra/config.yaml
+      - /etc/hermes/astra/managed-policy.sha256
+      - /etc/hermes/dubble/config.yaml
+      - /etc/hermes/dubble/managed-policy.sha256
+      - /etc/hermes/rigel/config.yaml
+      - /etc/hermes/rigel/managed-policy.sha256
+    hermes_runtime_star_plugin_files:
+      - name: __init__.py
+        live: "{{ hermes_star_privacy_plugin_managed_root }}/__init__.py"
+        backup: astra-star-managed-init.py
+      - name: plugin.yaml
+        live: "{{ hermes_star_privacy_plugin_managed_root }}/plugin.yaml"
+        backup: astra-star-managed-plugin.yaml
+      - name: __init__.py
+        live: "{{ hermes_star_privacy_plugin_runtime_root }}/__init__.py"
+        backup: astra-star-runtime-init.py
+      - name: plugin.yaml
+        live: "{{ hermes_star_privacy_plugin_runtime_root }}/plugin.yaml"
+        backup: astra-star-runtime-plugin.yaml
     hermes_runtime_user_environment:
       XDG_RUNTIME_DIR: >-
         /run/user/{{ hermes_production_cutover_user_uid }}
@@ -55,6 +209,10 @@
           - inventory_hostname == 'jn-t14s-lin'
           - hermes_shadow_profiles | map(attribute='name') | list
             == ['astra', 'dubble', 'rigel']
+          - >-
+            hermes_production_runtime_force_restart_profiles
+            | difference(['astra', 'dubble', 'rigel'])
+            | length == 0
         fail_msg: >-
           Live runtime convergence requires host-specific approval and the
           exact confirmation string.
@@ -69,8 +227,12 @@
               | map(attribute='home')
               | map('regex_replace', '$', '/config.yaml')
               | list)
+           + (hermes_runtime_star_plugin_files
+              | map(attribute='live')
+              | list)
            + [hermes_shadow_runtime_root,
-              hermes_shadow_runtime_venv ~ '/bin/python'] }}
+              hermes_shadow_runtime_venv ~ '/bin/python',
+              hermes_star_privacy_validator_live] }}
       register: hermes_runtime_required_files
       check_mode: false
 
@@ -135,6 +297,68 @@
         group: root
         mode: "0700"
 
+    - name: Inspect clean Hermes source checkout before backup
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/git
+          - -c
+          - "safe.directory={{ hermes_shadow_runtime_root }}"
+          - -C
+          - "{{ hermes_shadow_runtime_root }}"
+          - status
+          - --porcelain=v1
+      register: hermes_runtime_source_status
+      changed_when: false
+      check_mode: false
+
+    - name: Require clean Hermes source checkout before backup
+      ansible.builtin.assert:
+        that:
+          - hermes_runtime_source_status.stdout | length == 0
+        fail_msg: >-
+          Refusing runtime convergence with uncommitted Hermes source changes.
+
+    - name: Record pre-convergence Hermes source branch
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/git
+          - -c
+          - "safe.directory={{ hermes_shadow_runtime_root }}"
+          - -C
+          - "{{ hermes_shadow_runtime_root }}"
+          - branch
+          - --show-current
+      register: hermes_runtime_source_branch
+      changed_when: false
+      check_mode: false
+
+    - name: Require expected Hermes source branch
+      ansible.builtin.assert:
+        that:
+          - >-
+            hermes_runtime_source_branch.stdout
+            in [
+              hermes_managed_source_patch_target_branch,
+              hermes_managed_source_patch_branch
+            ]
+        fail_msg: >-
+          Hermes source is on an unexpected branch and cannot be patched safely.
+
+    - name: Back up clean Hermes source checkout
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/git
+          - -c
+          - "safe.directory={{ hermes_shadow_runtime_root }}"
+          - -C
+          - "{{ hermes_shadow_runtime_root }}"
+          - bundle
+          - create
+          - "{{ hermes_runtime_backup_root }}/hermes-source.bundle"
+          - --all
+      changed_when: true
+      when: not ansible_check_mode
+
     - name: Back up live Hermes systemd units
       ansible.builtin.copy:
         src: "{{ item }}"
@@ -146,8 +370,143 @@
       loop: "{{ hermes_runtime_unit_paths }}"
       when: not ansible_check_mode
 
+    - name: Inspect existing native update transaction support
+      ansible.builtin.stat:
+        path: "{{ item.path }}"
+        follow: false
+      loop: "{{ hermes_runtime_update_support_paths }}"
+      loop_control:
+        label: "{{ item.path }}"
+      register: hermes_runtime_update_support_before
+      check_mode: false
+
+    - name: Back up existing native update transaction support
+      ansible.builtin.copy:
+        src: "{{ item.item.path }}"
+        dest: "{{ hermes_runtime_backup_root }}/{{ item.item.backup }}"
+        remote_src: true
+        owner: root
+        group: root
+        mode: "0600"
+      loop: "{{ hermes_runtime_update_support_before.results }}"
+      loop_control:
+        label: "{{ item.item.path }}"
+      when:
+        - not ansible_check_mode
+        - item.stat.exists
+        - item.stat.isreg | default(false)
+        - not (item.stat.islnk | default(false))
+
+    - name: Inspect existing runtime-owned support and operating contracts
+      ansible.builtin.stat:
+        path: "{{ item.path }}"
+        follow: false
+      loop: "{{ hermes_runtime_owned_files }}"
+      loop_control:
+        label: "{{ item.path }}"
+      register: hermes_runtime_owned_files_before
+      check_mode: false
+
+    - name: Reject unsafe runtime-owned support and operating contracts
+      ansible.builtin.assert:
+        that:
+          - >-
+            not item.stat.exists
+            or ((item.stat.isreg | default(false))
+                and not (item.stat.islnk | default(false)))
+        fail_msg: >-
+          A runtime-owned support or operating-contract path is not absent or a
+          regular non-symlink file: {{ item.item.path }}.
+      loop: "{{ hermes_runtime_owned_files_before.results }}"
+      loop_control:
+        label: "{{ item.item.path }}"
+
+    - name: Back up existing runtime-owned support and operating contracts
+      ansible.builtin.copy:
+        src: "{{ item.item.path }}"
+        dest: "{{ hermes_runtime_backup_root }}/{{ item.item.backup }}"
+        remote_src: true
+        owner: root
+        group: root
+        mode: "0600"
+      loop: "{{ hermes_runtime_owned_files_before.results }}"
+      loop_control:
+        label: "{{ item.item.path }}"
+      when:
+        - not ansible_check_mode
+        - item.stat.exists
+        - item.stat.isreg | default(false)
+        - not (item.stat.islnk | default(false))
+
+    - name: Back up live Hermes managed policy files
+      ansible.builtin.copy:
+        src: "{{ item }}"
+        dest: >-
+          {{ hermes_runtime_backup_root }}/{{
+            item | regex_replace('^/etc/hermes/', '') | regex_replace('/', '-')
+          }}
+        remote_src: true
+        owner: root
+        group: root
+        mode: "0600"
+      loop: "{{ hermes_runtime_managed_policy_paths }}"
+      when: not ansible_check_mode
+
+    - name: Back up live Astra Star privacy plugin
+      ansible.builtin.copy:
+        src: "{{ item.live }}"
+        dest: "{{ hermes_runtime_backup_root }}/{{ item.backup }}"
+        remote_src: true
+        owner: root
+        group: root
+        mode: "0600"
+      loop: "{{ hermes_runtime_star_plugin_files }}"
+      loop_control:
+        label: "{{ item.live }}"
+      when: not ansible_check_mode
+
+    - name: Back up live Astra Star privacy validator
+      ansible.builtin.copy:
+        src: "{{ hermes_star_privacy_validator_live }}"
+        dest: "{{ hermes_runtime_backup_root }}/astra-star-validator"
+        remote_src: true
+        owner: root
+        group: root
+        mode: "0600"
+      when: not ansible_check_mode
+
+    - name: Record native Hermes update worker and timer state
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/systemctl
+          - is-active
+          - "{{ item }}"
+      loop:
+        - "{{ hermes_native_update_service }}"
+        - "{{ hermes_native_update_timer }}"
+      register: hermes_runtime_update_state_before
+      changed_when: false
+      failed_when: false
+      check_mode: false
+
     - name: Converge live Hermes runtime transaction
       block:
+        - name: Pause native Hermes update schedule during convergence
+          ansible.builtin.systemd_service:
+            name: "{{ hermes_native_update_timer }}"
+            state: stopped
+          when:
+            - not ansible_check_mode
+            - hermes_runtime_update_state_before.results[1].stdout == 'active'
+
+        - name: Require native Hermes update worker idle before convergence
+          ansible.builtin.assert:
+            that:
+              - hermes_runtime_update_state_before.results[0].stdout != 'active'
+            fail_msg: >-
+              The native Hermes updater is active. Wait for it to finish before
+              converging the shared runtime or update boundary.
+
         - name: Create credential-free Hermes runtime readers group
           ansible.builtin.group:
             name: "{{ hermes_runtime_readers_group }}"
@@ -178,6 +537,340 @@
             path: "{{ hermes_shadow_runtime_root }}"
             mode: "0750"
 
+        - name: Install required production Hermes native tool backends
+          ansible.builtin.command:
+            argv:
+              - /usr/sbin/runuser
+              - --user
+              - hermes-astra
+              - --
+              - /usr/bin/env
+              - HOME=/var/lib/hermes/astra
+              - HERMES_HOME=/var/lib/hermes/astra/.hermes/profiles/astra
+              - HERMES_MANAGED_DIR=/etc/hermes/astra
+              - >-
+                PATH={{
+                  [
+                    '/var/lib/hermes/astra/bin',
+                    hermes_shadow_uv_bin_dir,
+                    hermes_shadow_runtime_venv ~ '/bin',
+                    '/usr/local/bin',
+                    '/usr/bin',
+                    '/bin'
+                  ] | join(':')
+                }}
+              - "{{ hermes_shadow_runtime_binary }}"
+              - tools
+              - post-setup
+              - "{{ item }}"
+          loop: "{{ hermes_native_post_setup_keys }}"
+          register: hermes_runtime_native_backends
+          changed_when: "'already installed' not in hermes_runtime_native_backends.stdout"
+          when: not ansible_check_mode
+
+        - name: Deploy trusted Astra agent-browser Chromium selector
+          ansible.builtin.copy:
+            src: >-
+              {{ playbook_dir
+                 }}/../../{{ hermes_agent_browser_selector_source }}
+            dest: "{{ hermes_agent_browser_selector_live }}"
+            owner: root
+            group: root
+            mode: "0555"
+            backup: true
+          register: hermes_runtime_browser_selector
+
+        - name: Deploy production Astra Star privacy plugin
+          ansible.builtin.copy:
+            src: >-
+              {{ playbook_dir
+                 }}/../../{{ hermes_star_privacy_plugin_source }}/{{ item.name }}
+            dest: "{{ item.live }}"
+            owner: root
+            group: hermes-astra
+            mode: "0440"
+          loop: "{{ hermes_runtime_star_plugin_files }}"
+          loop_control:
+            label: "{{ item.live }}"
+          register: hermes_runtime_star_plugin
+
+        - name: Deploy production Astra Star privacy validator
+          ansible.builtin.copy:
+            src: >-
+              {{ playbook_dir
+                 }}/../../{{ hermes_star_privacy_validator_source }}
+            dest: "{{ hermes_star_privacy_validator_live }}"
+            owner: root
+            group: root
+            mode: "0555"
+          register: hermes_runtime_star_validator
+
+        - name: Find generated Astra Star plugin backup files
+          ansible.builtin.find:
+            paths:
+              - "{{ hermes_star_privacy_plugin_managed_root }}"
+              - "{{ hermes_star_privacy_plugin_runtime_root }}"
+            recurse: false
+            file_type: file
+            use_regex: true
+            patterns:
+              - '^(?:__init__\.py|plugin\.yaml)\..+~$'
+          register: hermes_runtime_star_plugin_generated_backups
+
+        - name: Remove generated Astra Star plugin backup files
+          ansible.builtin.file:
+            path: "{{ item.path }}"
+            state: absent
+          loop: "{{ hermes_runtime_star_plugin_generated_backups.files }}"
+          loop_control:
+            label: "{{ item.path }}"
+
+        - name: Validate production Astra Star privacy plugin
+          ansible.builtin.command:
+            argv:
+              - "{{ hermes_star_privacy_validator_live }}"
+              - --source-root
+              - "{{ hermes_star_privacy_plugin_managed_root }}"
+              - --runtime-root
+              - "{{ hermes_star_privacy_plugin_runtime_root }}"
+              - --config
+              - /etc/hermes/astra/config.yaml
+          changed_when: false
+          when: not ansible_check_mode
+
+        - name: Create managed Hermes patch directories
+          ansible.builtin.file:
+            path: "{{ item.path }}"
+            state: directory
+            owner: "{{ item.owner }}"
+            group: "{{ item.group }}"
+            mode: "{{ item.mode }}"
+          loop:
+            - path: "{{ hermes_queued_event_patch_live | dirname }}"
+              owner: root
+              group: root
+              mode: "0755"
+            - path: "{{ hermes_managed_source_patch_staging_root }}"
+              owner: "{{ hermes_native_update_user }}"
+              group: "{{ hermes_native_update_group }}"
+              mode: "0700"
+
+        - name: Deploy reviewed Hermes queued-event durability assets
+          ansible.builtin.copy:
+            src: "{{ playbook_dir }}/../../{{ item.source }}"
+            dest: "{{ item.live }}"
+            owner: root
+            group: "{{ item.group }}"
+            mode: "{{ item.mode }}"
+            backup: true
+          loop:
+            - source: "{{ hermes_queued_event_patch_source }}"
+              live: "{{ hermes_queued_event_patch_live }}"
+              group: "{{ hermes_runtime_readers_group }}"
+              mode: "0440"
+            - source: "{{ hermes_queued_event_validator_source }}"
+              live: "{{ hermes_queued_event_validator_live }}"
+              group: root
+              mode: "0555"
+            - source: "{{ hermes_managed_source_patch_source }}"
+              live: "{{ hermes_managed_source_patch_live }}"
+              group: root
+              mode: "0555"
+
+        - name: Promote reviewed Hermes source-parity patch
+          ansible.builtin.command:
+            argv:
+              - /usr/sbin/runuser
+              - --user
+              - "{{ hermes_native_update_user }}"
+              - --
+              - "{{ hermes_shadow_runtime_venv }}/bin/python"
+              - "{{ hermes_managed_source_patch_live }}"
+              - --source-root
+              - "{{ hermes_shadow_runtime_root }}"
+              - --patch
+              - "{{ hermes_queued_event_patch_live }}"
+              - --validator
+              - "{{ hermes_queued_event_validator_live }}"
+              - --branch
+              - "{{ hermes_managed_source_patch_branch }}"
+              - --target-branch
+              - "{{ hermes_managed_source_patch_target_branch }}"
+              - --staging-root
+              - "{{ hermes_managed_source_patch_staging_root }}"
+              - --apply
+          register: hermes_runtime_source_patch
+          changed_when: >-
+            '"changed": true' in hermes_runtime_source_patch.stdout
+          when: not ansible_check_mode
+
+        - name: Validate managed Hermes source parity
+          ansible.builtin.command:
+            argv:
+              - /usr/sbin/runuser
+              - --user
+              - "{{ hermes_native_update_user }}"
+              - --
+              - "{{ hermes_shadow_runtime_venv }}/bin/python"
+              - "{{ hermes_queued_event_validator_live }}"
+              - --source-root
+              - "{{ hermes_shadow_runtime_root }}"
+          changed_when: false
+          when: not ansible_check_mode
+
+        - name: Normalize managed Hermes patch source access
+          ansible.builtin.file:
+            path: "{{ hermes_shadow_runtime_root }}/{{ item }}"
+            state: file
+            owner: "{{ hermes_native_update_user }}"
+            group: "{{ hermes_runtime_readers_group }}"
+            mode: "0644"
+          loop: "{{ hermes_managed_source_patch_paths }}"
+          when: not ansible_check_mode
+
+        - name: Render current production Hermes managed policy
+          ansible.builtin.template:
+            src: >-
+              {{ playbook_dir
+                 }}/../../templates/hermes/hermes-managed-config.yaml.j2
+            dest: "/etc/hermes/{{ hermes_profile.name }}/config.yaml"
+            owner: root
+            group: "{{ hermes_profile.group }}"
+            mode: "0440"
+            backup: true
+          loop: "{{ hermes_production_consumer_profiles }}"
+          loop_control:
+            loop_var: hermes_profile
+            label: "{{ hermes_profile.name }}"
+          register: hermes_runtime_managed_configs
+          no_log: true
+
+        - name: Validate current production Hermes managed policy
+          ansible.builtin.command:
+            argv:
+              - /usr/sbin/runuser
+              - --user
+              - "{{ item.user }}"
+              - --
+              - /usr/bin/env
+              - "HOME={{ item.account_home }}"
+              - "HERMES_HOME={{ item.home }}"
+              - "HERMES_MANAGED_DIR=/etc/hermes/{{ item.name }}"
+              - "{{ hermes_shadow_runtime_binary }}"
+              - config
+              - check
+          loop: "{{ hermes_production_consumer_profiles }}"
+          loop_control:
+            label: "{{ item.name }}"
+          changed_when: false
+          no_log: true
+
+        - name: Hash current production Hermes policy and environment
+          ansible.builtin.command:
+            argv:
+              - /usr/bin/sha256sum
+              - "/etc/hermes/{{ item.name }}/config.yaml"
+              - >-
+                {{ item.environment_file
+                   | default('/etc/hermes/' ~ item.name ~ '/.env') }}
+          loop: "{{ hermes_production_consumer_profiles }}"
+          loop_control:
+            label: "{{ item.name }}"
+          register: hermes_runtime_managed_hashes
+          changed_when: false
+          no_log: true
+
+        - name: Deploy current production Hermes policy checksum manifests
+          ansible.builtin.copy:
+            content: "{{ item.stdout }}\n"
+            dest: >-
+              /etc/hermes/{{ item.item.name }}/managed-policy.sha256
+            owner: root
+            group: "{{ item.item.group }}"
+            mode: "0440"
+          loop: "{{ hermes_runtime_managed_hashes.results }}"
+          loop_control:
+            label: "{{ item.item.name }}"
+          no_log: true
+
+        - name: Deploy native Hermes update transaction helper
+          ansible.builtin.copy:
+            src: >-
+              {{ playbook_dir
+                 }}/../../{{ hermes_native_update_transaction_source }}
+            dest: "{{ hermes_native_update_transaction_live }}"
+            owner: root
+            group: root
+            mode: "0555"
+            backup: true
+          register: hermes_runtime_update_transaction
+
+        - name: Create native Hermes update rollback root
+          ansible.builtin.file:
+            path: "{{ hermes_native_update_rollback_root }}"
+            state: directory
+            owner: "{{ hermes_native_update_user }}"
+            group: "{{ hermes_native_update_group }}"
+            mode: "0700"
+
+        - name: Render native Hermes update transaction contract
+          ansible.builtin.template:
+            src: >-
+              {{ playbook_dir
+                 }}/../../templates/hermes/hermes-native-update-transaction.json.j2
+            dest: "{{ hermes_native_update_transaction_config }}"
+            owner: root
+            group: root
+            mode: "0444"
+            backup: true
+          register: hermes_runtime_update_transaction_config
+
+        - name: Validate native Hermes update transaction contract
+          ansible.builtin.command:
+            argv:
+              - "{{ hermes_native_update_transaction_live }}"
+              - --config
+              - "{{ hermes_native_update_transaction_config }}"
+              - --validate-config
+          changed_when: false
+          when: not ansible_check_mode
+
+        - name: Validate production browser and TTS backends
+          ansible.builtin.command:
+            argv:
+              - /usr/sbin/runuser
+              - --user
+              - hermes-astra
+              - --
+              - /usr/bin/env
+              - HOME=/var/lib/hermes/astra
+              - HERMES_HOME=/var/lib/hermes/astra/.hermes/profiles/astra
+              - HERMES_MANAGED_DIR=/etc/hermes/astra
+              - >-
+                AGENT_BROWSER_EXECUTABLE_PATH={{
+                  hermes_agent_browser_selector_live
+                }}
+              - "{{ hermes_shadow_runtime_venv }}/bin/python"
+              - -c
+              - >-
+                import edge_tts;
+                from hermes_cli.tools_config import _agent_browser_installed;
+                assert _agent_browser_installed()
+          changed_when: false
+          when: not ansible_check_mode
+
+        - name: Validate trusted Astra Chromium target
+          ansible.builtin.command:
+            argv:
+              - /usr/sbin/runuser
+              - --user
+              - hermes-astra
+              - --
+              - "{{ hermes_agent_browser_selector_live }}"
+              - --check
+          changed_when: false
+          when: not ansible_check_mode
+
         - name: Deploy Hermes Discord runtime audit
           ansible.builtin.copy:
             src: >-
@@ -192,18 +885,16 @@
 
         - name: Deploy production Hermes operating contracts
           ansible.builtin.copy:
-            src: >-
-              {{ playbook_dir
-                 }}/../../files/hermes/profiles/{{ item.name }}/AGENTS.md
-            dest: "{{ item.home }}/AGENTS.md"
-            owner: root
+            src: "{{ playbook_dir }}/../../{{ item.source }}"
+            dest: "{{ item.path }}"
+            owner: "{{ item.owner | default('root') }}"
             group: "{{ item.group }}"
-            mode: "0440"
-            backup: true
-          loop: "{{ hermes_shadow_profiles }}"
+            mode: "{{ item.mode }}"
+            force: "{{ not (item.seed_only | default(false) | bool) }}"
+          loop: "{{ hermes_runtime_owned_files }}"
           loop_control:
-            label: "{{ item.name }}"
-          register: hermes_runtime_operating_contracts
+            label: "{{ item.path }}"
+          register: hermes_runtime_owned_files_deployment
 
         - name: Deploy production Hermes update unit
           ansible.builtin.template:
@@ -216,6 +907,22 @@
             mode: "0644"
             backup: true
           register: hermes_runtime_update_unit
+
+        - name: Deploy exact Astra native update sudoers bridge
+          ansible.builtin.template:
+            src: >-
+              {{ playbook_dir
+                 }}/../../templates/hermes/hermes-native-update.sudoers.j2
+            dest: "{{ hermes_native_update_sudoers_path }}"
+            owner: root
+            group: root
+            mode: "0440"
+            validate: /usr/sbin/visudo -cf %s
+
+        - name: Remove retired native updater timeout shim
+          ansible.builtin.file:
+            path: /usr/local/lib/hermes-native-update-python
+            state: absent
 
         - name: Install native production Hermes Gateway units
           ansible.builtin.command:
@@ -236,13 +943,16 @@
             hermes_runtime_gateway_units.stdout is search(
               'installed|updated|Repairing outdated'
             )
-          loop: "{{ hermes_shadow_profiles[:2] }}"
+          loop: "{{ hermes_production_consumer_profiles }}"
           loop_control:
             loop_var: hermes_profile
             label: "{{ hermes_profile.name }}"
           register: hermes_runtime_gateway_units
+          when:
+            - hermes_production_runtime_reinstall_native_units | bool
+            - not ansible_check_mode
 
-        - name: Install native standalone Rigel Gateway unit
+        - name: Install inactive transitional Rigel Gateway unit
           ansible.builtin.command:
             argv:
               - "{{ hermes_shadow_runtime_binary }}"
@@ -262,6 +972,7 @@
             hermes_runtime_rigel_gateway_unit.stdout is search(
               'installed|updated|Repairing outdated'
             )
+          when: not hermes_rigel_dedicated_discord_enabled | bool
 
         - name: Create native production Gateway drop-in directories
           ansible.builtin.file:
@@ -313,27 +1024,93 @@
             label: "{{ item.name }}"
           changed_when: false
 
-        - name: Keep standalone Rigel Gateway stopped and disabled
+        - name: Keep transitional Rigel Gateway stopped and disabled
           ansible.builtin.systemd_service:
             name: hermes-gateway-rigel.service
             state: stopped
             enabled: false
+          when: not hermes_rigel_dedicated_discord_enabled | bool
+
+        - name: Select production consumers requiring runtime restart
+          ansible.builtin.set_fact:
+            hermes_runtime_restart_profiles: >-
+              {{
+                (hermes_runtime_restart_profiles | default([]))
+                + [item.name]
+              }}
+          loop: "{{ hermes_production_consumer_profiles }}"
+          loop_control:
+            label: "{{ item.name }}"
+          when: >-
+            hermes_runtime_reader_group.changed
+            or (
+              hermes_runtime_reader_memberships.results
+              | selectattr('item.name', 'equalto', item.name)
+              | selectattr('changed')
+              | list
+              | length > 0
+            )
+            or (
+              hermes_runtime_owned_files_deployment.results
+              | selectattr('item.profile', 'defined')
+              | selectattr('item.profile', 'equalto', item.name)
+              | selectattr('changed')
+              | list
+              | length > 0
+            )
+            or (
+              hermes_runtime_gateway_units.results | default([])
+              | selectattr('hermes_profile.name', 'equalto', item.name)
+              | selectattr('changed')
+              | list
+              | length > 0
+            )
+            or (
+              item.name == 'rigel'
+              and
+              hermes_runtime_rigel_gateway_unit.changed
+              | default(false)
+            )
+            or (
+              hermes_runtime_gateway_dropins.results
+              | selectattr('hermes_profile.name', 'equalto', item.name)
+              | selectattr('changed')
+              | list
+              | length > 0
+            )
+            or (
+              item.name == 'astra'
+              and hermes_runtime_browser_selector.changed
+            )
+            or hermes_runtime_source_patch.changed | default(false)
+            or (
+              hermes_runtime_managed_configs.results
+              | selectattr('hermes_profile.name', 'equalto', item.name)
+              | selectattr('changed')
+              | list
+              | length > 0
+            )
+            or (
+              item.name == 'astra'
+              and hermes_runtime_star_plugin.changed
+            )
+            or item.name in hermes_production_runtime_force_restart_profiles
+
+        - name: Record entry into the production consumer restart phase
+          ansible.builtin.set_fact:
+            hermes_runtime_restart_phase_entered: true
+          when: >-
+            hermes_runtime_restart_profiles | default([]) | length > 0
 
         - name: Prepare service-owned markers for runtime restarts
           ansible.builtin.include_tasks:
             file: ../../tasks/hermes-planned-stop-marker.yml
           vars:
             hermes_planned_stop_profile: "{{ item }}"
-          loop: "{{ hermes_shadow_profiles[:2] }}"
+          loop: "{{ hermes_production_consumer_profiles }}"
           loop_control:
             label: "{{ item.name }}"
-          when: >-
-            hermes_runtime_reader_group.changed
-            or hermes_runtime_reader_memberships.changed
-            or hermes_runtime_operating_contracts.changed
-            or hermes_runtime_gateway_units.changed
-            or hermes_runtime_rigel_gateway_unit.changed
-            or hermes_runtime_gateway_dropins.changed
+          when: item.name in (hermes_runtime_restart_profiles | default([]))
 
         - name: Restart production consumers natively for runtime changes
           ansible.builtin.command:
@@ -346,49 +1123,54 @@
             HOME: "{{ item.account_home }}"
             HERMES_HOME: "{{ item.home }}"
             HERMES_MANAGED_DIR: "/etc/hermes/{{ item.name }}"
-          loop: "{{ hermes_shadow_profiles[:2] }}"
+          loop: "{{ hermes_production_consumer_profiles }}"
           loop_control:
             label: "{{ item.name }}"
           changed_when: true
-          when: >-
-            hermes_runtime_reader_group.changed
-            or hermes_runtime_reader_memberships.changed
-            or hermes_runtime_operating_contracts.changed
-            or hermes_runtime_gateway_units.changed
-            or hermes_runtime_rigel_gateway_unit.changed
-            or hermes_runtime_gateway_dropins.changed
+          when: item.name in (hermes_runtime_restart_profiles | default([]))
 
         - name: Ensure production Discord consumers remain active
           ansible.builtin.systemd_service:
             name: "hermes-gateway-{{ item }}.service"
             state: started
             enabled: true
-          loop:
-            - astra
-            - dubble
+          loop: >-
+            {{ hermes_production_consumer_profiles | map(attribute='name') | list }}
 
-        - name: Require live Hermes consumers and native update timers
+        - name: Wait for production Discord consumers to reach native readiness
           ansible.builtin.command:
             argv:
               - /usr/bin/systemctl
               - is-active
-              - "{{ item }}"
-          loop:
-            - hermes-gateway-astra.service
-            - hermes-gateway-dubble.service
-            - "{{ hermes_native_update_timer }}"
-            - "{{ hermes_tirith_update_timer }}"
-          register: hermes_runtime_live_units
+              - "{{ item.unit }}"
+          loop: "{{ hermes_production_consumer_profiles }}"
+          loop_control:
+            label: "{{ item.name }}"
+          register: hermes_runtime_consumer_ready
           changed_when: false
           check_mode: false
+          retries: 18
+          delay: 5
+          until: hermes_runtime_consumer_ready.stdout == 'active'
 
-        - name: Require all production Hermes units active
-          ansible.builtin.assert:
-            that:
-              - item.stdout == 'active'
-          loop: "{{ hermes_runtime_live_units.results }}"
-          loop_control:
-            label: "{{ item.item }}"
+        - name: Restore native Hermes update schedule after convergence
+          ansible.builtin.systemd_service:
+            name: "{{ hermes_native_update_timer }}"
+            state: started
+          when:
+            - not ansible_check_mode
+            - hermes_runtime_update_state_before.results[1].stdout == 'active'
+
+        - name: Require native Hermes update timer after convergence when previously active
+          ansible.builtin.command:
+            argv:
+              - /usr/bin/systemctl
+              - is-active
+              - "{{ hermes_native_update_timer }}"
+          register: hermes_runtime_update_timer_ready
+          changed_when: false
+          check_mode: false
+          when: hermes_runtime_update_state_before.results[1].stdout == 'active'
 
         - name: Scan production Hermes consumers for adapter failures
           ansible.builtin.command:
@@ -398,6 +1180,8 @@
               - hermes-gateway-astra.service
               - -u
               - hermes-gateway-dubble.service
+              - -u
+              - hermes-gateway-rigel.service
               - --since=-2 minutes
               - --no-pager
               - -o
@@ -442,6 +1226,114 @@
               - hermes_runtime_health_state.stdout == 'active'
 
       rescue:
+        - name: Restore pre-convergence Hermes source branch
+          ansible.builtin.command:
+            argv:
+              - /usr/sbin/runuser
+              - --user
+              - "{{ hermes_native_update_user }}"
+              - --
+              - /usr/bin/git
+              - -C
+              - "{{ hermes_shadow_runtime_root }}"
+              - switch
+              - "{{ hermes_runtime_source_branch.stdout }}"
+          changed_when: true
+          failed_when: false
+          when:
+            - hermes_runtime_source_patch.changed | default(false)
+            - hermes_runtime_source_branch.stdout | length > 0
+
+        - name: Remove failed managed Hermes source branch
+          ansible.builtin.command:
+            argv:
+              - /usr/sbin/runuser
+              - --user
+              - "{{ hermes_native_update_user }}"
+              - --
+              - /usr/bin/git
+              - -C
+              - "{{ hermes_shadow_runtime_root }}"
+              - branch
+              - -D
+              - "{{ hermes_managed_source_patch_branch }}"
+          changed_when: true
+          failed_when: false
+          when:
+            - hermes_runtime_source_patch.changed | default(false)
+            - >-
+              hermes_runtime_source_branch.stdout
+              != hermes_managed_source_patch_branch
+
+        - name: Restore pre-convergence Hermes managed policy files
+          ansible.builtin.copy:
+            src: >-
+              {{ hermes_runtime_backup_root }}/{{
+                item | regex_replace('^/etc/hermes/', '') | regex_replace('/', '-')
+              }}
+            dest: "{{ item }}"
+            remote_src: true
+            owner: root
+            group: >-
+              {{
+                hermes_shadow_profiles
+                | selectattr('name', 'equalto', item.split('/')[3])
+                | map(attribute='group')
+                | first
+              }}
+            mode: "0440"
+          loop: "{{ hermes_runtime_managed_policy_paths }}"
+
+        - name: Restore prior runtime-owned support and operating contracts
+          ansible.builtin.copy:
+            src: "{{ hermes_runtime_backup_root }}/{{ item.item.backup }}"
+            dest: "{{ item.item.path }}"
+            remote_src: true
+            owner: >-
+              {{ item.stat.pw_name
+                 | default(item.item.owner | default('root')) }}
+            group: "{{ item.stat.gr_name | default(item.item.group) }}"
+            mode: "{{ item.stat.mode | default(item.item.mode) }}"
+          loop: "{{ hermes_runtime_owned_files_before.results }}"
+          loop_control:
+            label: "{{ item.item.path }}"
+          failed_when: false
+          when:
+            - item.stat.exists
+            - item.stat.isreg | default(false)
+            - not (item.stat.islnk | default(false))
+
+        - name: Remove newly introduced runtime-owned support and operating contracts
+          ansible.builtin.file:
+            path: "{{ item.item.path }}"
+            state: absent
+          loop: "{{ hermes_runtime_owned_files_before.results }}"
+          loop_control:
+            label: "{{ item.item.path }}"
+          failed_when: false
+          when: not item.stat.exists
+
+        - name: Restore pre-convergence Astra Star privacy validator
+          ansible.builtin.copy:
+            src: "{{ hermes_runtime_backup_root }}/astra-star-validator"
+            dest: "{{ hermes_star_privacy_validator_live }}"
+            remote_src: true
+            owner: root
+            group: root
+            mode: "0555"
+
+        - name: Restore pre-convergence Astra Star privacy plugin
+          ansible.builtin.copy:
+            src: "{{ hermes_runtime_backup_root }}/{{ item.backup }}"
+            dest: "{{ item.live }}"
+            remote_src: true
+            owner: root
+            group: hermes-astra
+            mode: "0440"
+          loop: "{{ hermes_runtime_star_plugin_files }}"
+          loop_control:
+            label: "{{ item.live }}"
+
         - name: Restore pre-convergence Hermes systemd units
           ansible.builtin.copy:
             src: "{{ hermes_runtime_backup_root }}/{{ item | basename }}"
@@ -452,9 +1344,45 @@
             mode: "0644"
           loop: "{{ hermes_runtime_unit_paths }}"
 
+        - name: Restore prior native update transaction support
+          ansible.builtin.copy:
+            src: "{{ hermes_runtime_backup_root }}/{{ item.item.backup }}"
+            dest: "{{ item.item.path }}"
+            remote_src: true
+            owner: "{{ item.item.owner }}"
+            group: "{{ item.item.group }}"
+            mode: "{{ item.item.mode }}"
+          loop: "{{ hermes_runtime_update_support_before.results }}"
+          loop_control:
+            label: "{{ item.item.path }}"
+          failed_when: false
+          when:
+            - item.stat.exists
+            - item.stat.isreg | default(false)
+            - not (item.stat.islnk | default(false))
+
+        - name: Remove newly introduced native update transaction support
+          ansible.builtin.file:
+            path: "{{ item.item.path }}"
+            state: absent
+          loop: "{{ hermes_runtime_update_support_before.results }}"
+          loop_control:
+            label: "{{ item.item.path }}"
+          failed_when: false
+          when: not item.stat.exists
+
         - name: Reload restored Hermes systemd units
           ansible.builtin.systemd_service:
             daemon_reload: true
+
+        - name: Restore native Hermes update schedule after failure
+          ansible.builtin.systemd_service:
+            name: "{{ hermes_native_update_timer }}"
+            state: started
+          failed_when: false
+          when:
+            - not ansible_check_mode
+            - hermes_runtime_update_state_before.results[1].stdout == 'active'
 
         - name: Prepare best-effort markers for restored consumer restarts
           ansible.builtin.include_tasks:
@@ -462,9 +1390,12 @@
           vars:
             hermes_planned_stop_profile: "{{ item }}"
             hermes_planned_stop_strict: false
-          loop: "{{ hermes_shadow_profiles[:2] }}"
+          loop: "{{ hermes_production_consumer_profiles }}"
           loop_control:
             label: "{{ item.name }}"
+          when:
+            - hermes_runtime_restart_phase_entered | default(false) | bool
+            - item.name in (hermes_runtime_restart_profiles | default([]))
 
         - name: Restore consumers natively after convergence failure
           ansible.builtin.command:
@@ -477,14 +1408,18 @@
             HOME: "{{ item.account_home }}"
             HERMES_HOME: "{{ item.home }}"
             HERMES_MANAGED_DIR: "/etc/hermes/{{ item.name }}"
-          loop: "{{ hermes_shadow_profiles[:2] }}"
+          loop: "{{ hermes_production_consumer_profiles }}"
           loop_control:
             label: "{{ item.name }}"
           changed_when: true
           failed_when: false
+          when:
+            - hermes_runtime_restart_phase_entered | default(false) | bool
+            - item.name in (hermes_runtime_restart_profiles | default([]))
 
         - name: Fail after restoring pre-convergence units
           ansible.builtin.fail:
             msg: >-
-              Hermes production runtime convergence failed. Prior units were
-              restored from {{ hermes_runtime_backup_root }}.
+              Hermes production runtime convergence failed. Prior units and
+              the Astra Star privacy plugin and validator were restored from
+              {{ hermes_runtime_backup_root }}.

@@ -1,0 +1,1134 @@
+---
+# Purpose: Audit or transactionally update the local Qdrant and Ollama servers
+#          used by Hermes memory to their newest official stable releases.
+# Hosts: hermes_hosts.
+# Key vars: hermes_memory_servers_*; hermes_mem0_*.
+# Templates: templates/hermes/hermes-ollama.service.j2.
+# Validation: ansible-playbook playbooks/agents/hermes-memory-servers.yml
+#             --syntax-check.
+
+- name: Converge Hermes memory backing servers to official stable releases
+  hosts: hermes_hosts
+  become: true
+  gather_facts: true
+  serial: 1
+
+  pre_tasks:
+    - name: Validate memory-server operating mode
+      ansible.builtin.assert:
+        that:
+          - hermes_memory_servers_mode in ['audit', 'apply']
+          - >-
+            hermes_memory_servers_mode != 'apply'
+            or (
+              hermes_memory_servers_approved | bool
+              and hermes_memory_servers_confirmation
+                  == hermes_memory_servers_required_confirmation
+            )
+        fail_msg: >-
+          Memory-server mutation requires apply mode, explicit approval, and
+          the exact confirmation phrase.
+
+  tasks:
+    - name: Resolve newest official stable Qdrant release
+      ansible.builtin.uri:
+        url: "{{ hermes_memory_servers_qdrant_release_api }}"
+        method: GET
+        return_content: true
+        status_code: 200
+        headers:
+          Accept: application/vnd.github+json
+          User-Agent: cc-ansible-hermes-memory-server-audit
+      register: hermes_memory_servers_qdrant_release
+      changed_when: false
+      check_mode: false
+
+    - name: Resolve newest official stable Ollama release
+      ansible.builtin.uri:
+        url: "{{ hermes_memory_servers_ollama_release_api }}"
+        method: GET
+        return_content: true
+        status_code: 200
+        headers:
+          Accept: application/vnd.github+json
+          User-Agent: cc-ansible-hermes-memory-server-audit
+      register: hermes_memory_servers_ollama_release
+      changed_when: false
+      check_mode: false
+
+    - name: Select official stable release coordinates
+      ansible.builtin.set_fact:
+        hermes_memory_servers_qdrant_latest: >-
+          {{ hermes_memory_servers_qdrant_release.json.tag_name
+             | regex_replace('^v', '') }}
+        hermes_memory_servers_ollama_latest: >-
+          {{ hermes_memory_servers_ollama_release.json.tag_name
+             | regex_replace('^v', '') }}
+        hermes_memory_servers_ollama_asset: >-
+          {{ hermes_memory_servers_ollama_release.json.assets
+             | selectattr('name', 'equalto',
+                          hermes_memory_servers_ollama_asset_name)
+             | list | first | default({}) }}
+
+    - name: Require stable semantic releases and a checksummed Ollama asset
+      ansible.builtin.assert:
+        that:
+          - not (hermes_memory_servers_qdrant_release.json.draft | bool)
+          - not (hermes_memory_servers_qdrant_release.json.prerelease | bool)
+          - not (hermes_memory_servers_ollama_release.json.draft | bool)
+          - not (hermes_memory_servers_ollama_release.json.prerelease | bool)
+          - hermes_memory_servers_qdrant_latest is match('^[0-9]+\\.[0-9]+\\.[0-9]+$')
+          - hermes_memory_servers_ollama_latest is match('^[0-9]+\\.[0-9]+\\.[0-9]+$')
+          - hermes_memory_servers_ollama_asset.name == hermes_memory_servers_ollama_asset_name
+          - hermes_memory_servers_ollama_asset.digest is match('^sha256:[0-9a-f]{64}$')
+          - hermes_memory_servers_ollama_asset.browser_download_url is match('^https://github.com/ollama/ollama/releases/download/')
+        fail_msg: >-
+          Official stable release metadata or the checksummed Linux amd64
+          Ollama asset is incomplete; refusing to guess or use a prerelease.
+
+    - name: Inspect installed Qdrant version
+      ansible.builtin.uri:
+        url: "{{ hermes_mem0_qdrant_url }}/"
+        method: GET
+        return_content: true
+        status_code: 200
+      register: hermes_memory_servers_qdrant_before
+      changed_when: false
+      check_mode: false
+
+    - name: Inspect installed Ollama version
+      ansible.builtin.command:
+        argv:
+          - "{{ hermes_memory_servers_ollama_binary }}"
+          - --version
+      register: hermes_memory_servers_ollama_before
+      changed_when: false
+      check_mode: false
+
+    - name: Record installed memory-server versions
+      ansible.builtin.set_fact:
+        hermes_memory_servers_qdrant_current: >-
+          {{ hermes_memory_servers_qdrant_before.json.version }}
+        hermes_memory_servers_ollama_current: >-
+          {{ hermes_memory_servers_ollama_before.stdout
+             | regex_search('[0-9]+\.[0-9]+\.[0-9]+') }}
+
+    - name: Inspect Qdrant collection inventory
+      ansible.builtin.uri:
+        url: "{{ hermes_mem0_qdrant_url }}/collections"
+        method: GET
+        return_content: true
+        status_code: 200
+      register: hermes_memory_servers_qdrant_collections_before
+      changed_when: false
+      check_mode: false
+
+    - name: Record Qdrant collection names
+      ansible.builtin.set_fact:
+        hermes_memory_servers_qdrant_collection_names: >-
+          {{ hermes_memory_servers_qdrant_collections_before.json.result.collections
+             | map(attribute='name') | sort | list }}
+
+    - name: Count Qdrant points before server update
+      ansible.builtin.uri:
+        url: >-
+          {{ hermes_mem0_qdrant_url }}/collections/{{ item }}/points/count
+        method: POST
+        body_format: json
+        body:
+          exact: true
+        return_content: true
+        status_code: 200
+      loop: "{{ hermes_memory_servers_qdrant_collection_names }}"
+      register: hermes_memory_servers_qdrant_counts_before_raw
+      changed_when: false
+      check_mode: false
+
+    - name: Record exact pre-update Qdrant counts
+      ansible.builtin.set_fact:
+        hermes_memory_servers_qdrant_counts_before: >-
+          {{ dict(hermes_memory_servers_qdrant_collection_names
+                  | zip(hermes_memory_servers_qdrant_counts_before_raw.results
+                        | map(attribute='json.result.count') | list)) }}
+
+    - name: Inspect Ollama model inventory before update
+      ansible.builtin.uri:
+        url: "{{ hermes_mem0_ollama_url }}/api/tags"
+        method: GET
+        return_content: true
+        status_code: 200
+      register: hermes_memory_servers_ollama_models_before_raw
+      changed_when: false
+      check_mode: false
+
+    - name: Record exact Ollama model identities before update
+      ansible.builtin.set_fact:
+        hermes_memory_servers_ollama_models_before: >-
+          {{ dict(hermes_memory_servers_ollama_models_before_raw.json.models
+                  | map(attribute='name')
+                  | zip(hermes_memory_servers_ollama_models_before_raw.json.models
+                        | map(attribute='digest'))) }}
+
+    - name: Read live Ollama service definition
+      ansible.builtin.slurp:
+        src: "{{ hermes_memory_servers_ollama_unit }}"
+      register: hermes_memory_servers_ollama_service_before
+      check_mode: false
+
+    - name: Classify managed Ollama service drift
+      ansible.builtin.set_fact:
+        hermes_memory_servers_ollama_service_current: >-
+          {{ (hermes_memory_servers_ollama_service_before.content | b64decode)
+             == lookup('ansible.builtin.template',
+                       playbook_dir
+                       + '/../../templates/hermes/hermes-ollama.service.j2') }}
+
+    - name: Report memory-server stable-generation audit
+      ansible.builtin.debug:
+        msg:
+          qdrant:
+            installed: "{{ hermes_memory_servers_qdrant_current }}"
+            latest_stable: "{{ hermes_memory_servers_qdrant_latest }}"
+          ollama:
+            installed: "{{ hermes_memory_servers_ollama_current }}"
+            latest_stable: "{{ hermes_memory_servers_ollama_latest }}"
+            managed_service_current: >-
+              {{ hermes_memory_servers_ollama_service_current | bool }}
+            managed_context_length: >-
+              {{ hermes_memory_servers_ollama_context_length }}
+          mutation_authorized: "{{ hermes_memory_servers_mode == 'apply' }}"
+
+    - name: Stop after read-only stable-generation audit
+      ansible.builtin.meta: end_host
+      when: hermes_memory_servers_mode == 'audit'
+
+    - name: Stop apply mode when backing servers and service are already current
+      ansible.builtin.meta: end_host
+      when:
+        - hermes_memory_servers_mode == 'apply'
+        - hermes_memory_servers_qdrant_current == hermes_memory_servers_qdrant_latest
+        - hermes_memory_servers_ollama_current == hermes_memory_servers_ollama_latest
+        - hermes_memory_servers_ollama_service_current | bool
+
+    - name: Build memory-server transaction coordinates
+      ansible.builtin.set_fact:
+        hermes_memory_servers_run_id: >-
+          {{ ansible_facts.date_time.iso8601_basic_short | lower }}-pre-memory-servers
+        hermes_memory_servers_qdrant_update_started: false
+        hermes_memory_servers_ollama_update_started: false
+        hermes_memory_servers_ollama_config_backup_verified: false
+
+    - name: Derive memory-server rollback and staging paths
+      ansible.builtin.set_fact:
+        hermes_memory_servers_rollback_dir: >-
+          {{ hermes_memory_servers_rollback_root }}/{{ hermes_memory_servers_run_id }}
+        hermes_memory_servers_local_stage: >-
+          {{ hermes_memory_servers_local_stage_root }}/{{ hermes_memory_servers_run_id }}
+
+    - name: Inspect consumer Gateway states before memory-server transaction
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/systemctl
+          - is-active
+          - "{{ item.unit }}"
+      loop: "{{ hermes_production_consumer_profiles }}"
+      loop_control:
+        label: "{{ item.name }}"
+      register: hermes_memory_servers_gateway_states_before_raw
+      changed_when: false
+      failed_when: hermes_memory_servers_gateway_states_before_raw.rc not in [0, 3]
+      check_mode: false
+
+    - name: Record consumer Gateway activation timestamps before memory-server transaction
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/systemctl
+          - show
+          - --property=ActiveEnterTimestampMonotonic
+          - --value
+          - "{{ item.unit }}"
+      loop: "{{ hermes_production_consumer_profiles }}"
+      loop_control:
+        label: "{{ item.name }}"
+      register: hermes_memory_servers_gateway_activations_before_raw
+      changed_when: false
+      check_mode: false
+
+    - name: Record exact consumer Gateway baseline
+      ansible.builtin.set_fact:
+        hermes_memory_servers_gateway_states_before: >-
+          {{ dict(hermes_production_consumer_profiles | map(attribute='name')
+                  | zip(hermes_memory_servers_gateway_states_before_raw.results
+                        | map(attribute='stdout') | list)) }}
+        hermes_memory_servers_gateway_activations_before: >-
+          {{ dict(hermes_production_consumer_profiles | map(attribute='name')
+                  | zip(hermes_memory_servers_gateway_activations_before_raw.results
+                        | map(attribute='stdout') | list)) }}
+
+    - name: Inspect Ollama state before memory-server transaction
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/systemctl
+          - is-active
+          - ollama.service
+      register: hermes_memory_servers_ollama_state_before
+      changed_when: false
+      failed_when: hermes_memory_servers_ollama_state_before.rc not in [0, 3]
+      check_mode: false
+
+    - name: Converge Ollama service configuration without replacing servers
+      when:
+        - hermes_memory_servers_qdrant_current == hermes_memory_servers_qdrant_latest
+        - hermes_memory_servers_ollama_current == hermes_memory_servers_ollama_latest
+        - not (hermes_memory_servers_ollama_service_current | bool)
+      block:
+        - name: Create private Ollama configuration rollback directory
+          ansible.builtin.file:
+            path: "{{ hermes_memory_servers_rollback_dir }}"
+            state: directory
+            owner: root
+            group: root
+            mode: "0700"
+
+        - name: Back up prior Ollama service before configuration change
+          ansible.builtin.copy:
+            src: "{{ hermes_memory_servers_ollama_unit }}"
+            dest: "{{ hermes_memory_servers_rollback_dir }}/ollama.service"
+            remote_src: true
+            owner: root
+            group: root
+            mode: "0600"
+          when: not ansible_check_mode
+
+        - name: Hash live and rollback Ollama service definitions
+          ansible.builtin.stat:
+            path: "{{ item }}"
+            checksum_algorithm: sha256
+          loop:
+            - "{{ hermes_memory_servers_ollama_unit }}"
+            - "{{ hermes_memory_servers_rollback_dir }}/ollama.service"
+          register: hermes_memory_servers_ollama_config_hashes
+          when: not ansible_check_mode
+
+        - name: Require exact Ollama configuration rollback copy
+          ansible.builtin.assert:
+            that:
+              - hermes_memory_servers_ollama_config_hashes.results[0].stat.isreg
+              - hermes_memory_servers_ollama_config_hashes.results[1].stat.isreg
+              - >-
+                hermes_memory_servers_ollama_config_hashes.results[0].stat.checksum
+                == hermes_memory_servers_ollama_config_hashes.results[1].stat.checksum
+          when: not ansible_check_mode
+
+        - name: Mark Ollama configuration rollback as verified
+          ansible.builtin.set_fact:
+            hermes_memory_servers_ollama_config_backup_verified: true
+          when: not ansible_check_mode
+
+        - name: Deploy managed Ollama context configuration
+          ansible.builtin.template:
+            src: "{{ playbook_dir }}/../../templates/hermes/hermes-ollama.service.j2"
+            dest: "{{ hermes_memory_servers_ollama_unit }}"
+            owner: root
+            group: root
+            mode: "0644"
+          register: hermes_memory_servers_ollama_config_change
+
+        - name: Restart Ollama after managed context change
+          ansible.builtin.systemd_service:
+            name: ollama.service
+            state: restarted
+            enabled: true
+            daemon_reload: true
+          when:
+            - hermes_memory_servers_ollama_config_change.changed
+            - hermes_memory_servers_ollama_state_before.stdout == 'active'
+            - not ansible_check_mode
+
+        - name: Reload inactive Ollama unit after managed context change
+          ansible.builtin.systemd_service:
+            name: ollama.service
+            daemon_reload: true
+          when:
+            - hermes_memory_servers_ollama_config_change.changed
+            - hermes_memory_servers_ollama_state_before.stdout != 'active'
+            - not ansible_check_mode
+
+        - name: Wait for context-configured Ollama API
+          ansible.builtin.uri:
+            url: "{{ hermes_mem0_ollama_url }}/api/tags"
+            method: GET
+            return_content: true
+            status_code: 200
+          register: hermes_memory_servers_ollama_config_ready
+          retries: 60
+          delay: 2
+          until: hermes_memory_servers_ollama_config_ready.status == 200
+          when:
+            - hermes_memory_servers_ollama_state_before.stdout == 'active'
+            - not ansible_check_mode
+
+        - name: Load approved embedding model under managed context
+          ansible.builtin.uri:
+            url: "{{ hermes_mem0_ollama_url }}/api/embed"
+            method: POST
+            body_format: json
+            body:
+              model: "{{ hermes_mem0_ollama_embedding_model }}"
+              input:
+                - Hermes LCM managed context acceptance
+              truncate: false
+              dimensions: "{{ hermes_mem0_ollama_embedding_dimensions }}"
+            return_content: true
+            status_code: 200
+          register: hermes_memory_servers_ollama_context_embedding
+          when:
+            - hermes_memory_servers_ollama_state_before.stdout == 'active'
+            - not ansible_check_mode
+
+        - name: Inspect loaded Ollama context after configuration change
+          ansible.builtin.uri:
+            url: "{{ hermes_mem0_ollama_url }}/api/ps"
+            method: GET
+            return_content: true
+            status_code: 200
+          register: hermes_memory_servers_ollama_context_processes
+          when:
+            - hermes_memory_servers_ollama_state_before.stdout == 'active'
+            - not ansible_check_mode
+
+        - name: Inspect consumer Gateway states after Ollama-only change
+          ansible.builtin.command:
+            argv:
+              - /usr/bin/systemctl
+              - is-active
+              - "{{ item.unit }}"
+          loop: "{{ hermes_production_consumer_profiles }}"
+          loop_control:
+            label: "{{ item.name }}"
+          register: hermes_memory_servers_gateway_states_after_config_raw
+          changed_when: false
+          failed_when: >-
+            hermes_memory_servers_gateway_states_after_config_raw.rc
+            not in [0, 3]
+          when: not ansible_check_mode
+
+        - name: Record consumer Gateway activation timestamps after Ollama-only change
+          ansible.builtin.command:
+            argv:
+              - /usr/bin/systemctl
+              - show
+              - --property=ActiveEnterTimestampMonotonic
+              - --value
+              - "{{ item.unit }}"
+          loop: "{{ hermes_production_consumer_profiles }}"
+          loop_control:
+            label: "{{ item.name }}"
+          register: hermes_memory_servers_gateway_activations_after_config_raw
+          changed_when: false
+          when: not ansible_check_mode
+
+        - name: Record consumer Gateway state after Ollama-only change
+          ansible.builtin.set_fact:
+            hermes_memory_servers_gateway_states_after_config: >-
+              {{ dict(hermes_production_consumer_profiles | map(attribute='name')
+                      | zip(hermes_memory_servers_gateway_states_after_config_raw.results
+                            | map(attribute='stdout') | list)) }}
+            hermes_memory_servers_gateway_activations_after_config: >-
+              {{ dict(hermes_production_consumer_profiles | map(attribute='name')
+                      | zip(hermes_memory_servers_gateway_activations_after_config_raw.results
+                            | map(attribute='stdout') | list)) }}
+          when: not ansible_check_mode
+
+        - name: Require managed context and uninterrupted consumer Gateways
+          ansible.builtin.assert:
+            that:
+              - >-
+                hermes_memory_servers_gateway_states_after_config
+                == hermes_memory_servers_gateway_states_before
+              - >-
+                hermes_memory_servers_gateway_activations_after_config
+                == hermes_memory_servers_gateway_activations_before
+              - >-
+                hermes_memory_servers_ollama_state_before.stdout != 'active'
+                or hermes_memory_servers_ollama_context_embedding.json.embeddings
+                   | length == 1
+              - >-
+                hermes_memory_servers_ollama_state_before.stdout != 'active'
+                or hermes_memory_servers_ollama_context_embedding.json.embeddings[0]
+                   | length == hermes_mem0_ollama_embedding_dimensions
+              - >-
+                hermes_memory_servers_ollama_state_before.stdout != 'active'
+                or (hermes_memory_servers_ollama_context_processes.json.models
+                    | selectattr('model', 'equalto',
+                                 hermes_mem0_ollama_embedding_model)
+                    | map(attribute='context_length') | list | first)
+                   == hermes_memory_servers_ollama_context_length
+          when: not ansible_check_mode
+
+        - name: Record accepted Ollama configuration-only transaction
+          ansible.builtin.copy:
+            dest: "{{ hermes_memory_servers_rollback_dir }}/RESULT"
+            owner: root
+            group: root
+            mode: "0600"
+            content: >-
+              {{ {'status': 'accepted',
+                  'scope': 'ollama-service-configuration-only',
+                 'context_length': hermes_memory_servers_ollama_context_length,
+                  'consumer_gateway_states_unchanged': true}
+                 | to_nice_json }}
+          when: not ansible_check_mode
+
+      rescue:
+        - name: Restore prior Ollama service after context-only failure
+          ansible.builtin.copy:
+            src: "{{ hermes_memory_servers_rollback_dir }}/ollama.service"
+            dest: "{{ hermes_memory_servers_ollama_unit }}"
+            remote_src: true
+            owner: root
+            group: root
+            mode: "0644"
+          when: hermes_memory_servers_ollama_config_backup_verified | bool
+          failed_when: false
+
+        - name: Restart restored Ollama service after context-only failure
+          ansible.builtin.systemd_service:
+            name: ollama.service
+            state: restarted
+            enabled: true
+            daemon_reload: true
+          when:
+            - hermes_memory_servers_ollama_config_backup_verified | bool
+            - hermes_memory_servers_ollama_state_before.stdout == 'active'
+          failed_when: false
+
+        - name: Reload restored inactive Ollama service definition
+          ansible.builtin.systemd_service:
+            name: ollama.service
+            daemon_reload: true
+          when:
+            - hermes_memory_servers_ollama_config_backup_verified | bool
+            - hermes_memory_servers_ollama_state_before.stdout != 'active'
+          failed_when: false
+
+        - name: Stop after Ollama context configuration rollback
+          ansible.builtin.fail:
+            msg: >-
+              Ollama service configuration failed. The prior unit was restored
+              from {{ hermes_memory_servers_rollback_dir }}; Astra was not
+              intentionally restarted.
+
+    - name: Stop after accepted configuration-only convergence
+      ansible.builtin.meta: end_host
+      when:
+        - hermes_memory_servers_qdrant_current == hermes_memory_servers_qdrant_latest
+        - hermes_memory_servers_ollama_current == hermes_memory_servers_ollama_latest
+
+    - name: Measure installed Ollama runtime footprint
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/du
+          - --bytes
+          - --summarize
+          - --total
+          - "{{ hermes_memory_servers_ollama_binary }}"
+          - "{{ hermes_memory_servers_ollama_library }}"
+      register: hermes_memory_servers_ollama_runtime_footprint
+      changed_when: false
+      check_mode: false
+
+    - name: Derive conservative local Ollama staging requirement
+      ansible.builtin.set_fact:
+        hermes_memory_servers_ollama_installed_bytes: >-
+          {{ hermes_memory_servers_ollama_runtime_footprint.stdout_lines
+             | last | regex_search('^[0-9]+') | int }}
+        hermes_memory_servers_ollama_staging_required_bytes: >-
+          {{ ((hermes_memory_servers_ollama_runtime_footprint.stdout_lines
+               | last | regex_search('^[0-9]+') | int) * 5 // 4)
+             + 1073741824 }}
+        hermes_memory_servers_root_available_bytes: >-
+          {{ ansible_facts.mounts
+             | selectattr('mount', 'equalto', '/')
+             | map(attribute='size_available')
+             | first | int }}
+
+    - name: Require enough local space for verified Ollama staging
+      ansible.builtin.assert:
+        that:
+          - >-
+            hermes_memory_servers_root_available_bytes | int
+            > hermes_memory_servers_ollama_staging_required_bytes | int
+        fail_msg: >-
+          The root filesystem has
+          {{ hermes_memory_servers_root_available_bytes }} bytes free, below
+          the {{ hermes_memory_servers_ollama_staging_required_bytes }}-byte
+          bound required to stage up to 125 percent of the installed Ollama
+          runtime plus a 1 GiB reserve. The checksummed release archive is
+          stored separately on managed rollback storage.
+
+    - name: Report accepted local Ollama staging capacity
+      ansible.builtin.debug:
+        msg:
+          installed_runtime_bytes: >-
+            {{ hermes_memory_servers_ollama_installed_bytes }}
+          required_staging_bytes: >-
+            {{ hermes_memory_servers_ollama_staging_required_bytes }}
+          root_available_bytes: >-
+            {{ hermes_memory_servers_root_available_bytes }}
+          archive_storage: "{{ hermes_memory_servers_rollback_dir }}"
+
+    - name: Stop after accepted memory-server transaction dry run
+      ansible.builtin.meta: end_host
+      when: ansible_check_mode
+
+    - name: Apply memory-server stable updates transactionally
+      block:
+        - name: Create private local and NFS transaction directories
+          ansible.builtin.file:
+            path: "{{ item }}"
+            state: directory
+            owner: root
+            group: root
+            mode: "0700"
+          loop:
+            - "{{ hermes_memory_servers_rollback_dir }}"
+            - "{{ hermes_memory_servers_local_stage }}"
+            - "{{ hermes_memory_servers_local_stage }}/new"
+            - "{{ hermes_memory_servers_local_stage }}/old"
+
+        - name: Back up live memory-server configuration
+          ansible.builtin.copy:
+            src: "{{ item.src }}"
+            dest: "{{ hermes_memory_servers_rollback_dir }}/{{ item.dest }}"
+            remote_src: true
+            owner: root
+            group: root
+            mode: "0600"
+          loop:
+            - src: "{{ hermes_memory_servers_qdrant_compose_root }}/docker-compose.yml"
+              dest: qdrant-docker-compose.yml
+            - src: "{{ hermes_memory_servers_ollama_unit }}"
+              dest: ollama.service
+
+        - name: Record redacted pre-update server inventory
+          ansible.builtin.copy:
+            dest: "{{ hermes_memory_servers_rollback_dir }}/inventory.json"
+            owner: root
+            group: root
+            mode: "0600"
+            content: >-
+              {{ {'qdrant_version': hermes_memory_servers_qdrant_current,
+                  'qdrant_counts': hermes_memory_servers_qdrant_counts_before,
+                  'ollama_version': hermes_memory_servers_ollama_current,
+                  'ollama_models': hermes_memory_servers_ollama_models_before,
+                  'latest_qdrant': hermes_memory_servers_qdrant_latest,
+                  'latest_ollama': hermes_memory_servers_ollama_latest}
+                 | to_nice_json }}
+
+        - name: Create full single-node Qdrant snapshot
+          ansible.builtin.uri:
+            url: "{{ hermes_mem0_qdrant_url }}/snapshots?wait=true"
+            method: POST
+            return_content: true
+            status_code: 200
+          register: hermes_memory_servers_qdrant_snapshot
+
+        - name: Download full Qdrant snapshot to managed rollback storage
+          ansible.builtin.get_url:
+            url: >-
+              {{ hermes_mem0_qdrant_url }}/snapshots/{{ hermes_memory_servers_qdrant_snapshot.json.result.name }}
+            dest: >-
+              {{ hermes_memory_servers_rollback_dir }}/{{ hermes_memory_servers_qdrant_snapshot.json.result.name }}
+            owner: root
+            group: root
+            mode: "0600"
+            checksum: >-
+              sha256:{{ hermes_memory_servers_qdrant_snapshot.json.result.checksum
+                         | regex_replace('^sha256:', '') }}
+            timeout: 1800
+
+        - name: Download checksummed newest-stable Ollama archive
+          ansible.builtin.get_url:
+            url: "{{ hermes_memory_servers_ollama_asset.browser_download_url }}"
+            dest: >-
+              {{ hermes_memory_servers_rollback_dir }}/ollama-{{ hermes_memory_servers_ollama_latest }}.tar.zst
+            owner: root
+            group: root
+            mode: "0600"
+            checksum: "{{ hermes_memory_servers_ollama_asset.digest }}"
+            timeout: 3600
+
+        - name: Extract newest-stable Ollama into isolated staging
+          ansible.builtin.command:
+            argv:
+              - /usr/bin/tar
+              - --zstd
+              - --extract
+              - --file
+              - >-
+                {{ hermes_memory_servers_rollback_dir }}/ollama-{{ hermes_memory_servers_ollama_latest }}.tar.zst
+              - --directory
+              - "{{ hermes_memory_servers_local_stage }}/new"
+          changed_when: true
+
+        - name: Inspect staged Ollama payload
+          ansible.builtin.stat:
+            path: "{{ item }}"
+          loop:
+            - "{{ hermes_memory_servers_local_stage }}/new/bin/ollama"
+            - "{{ hermes_memory_servers_local_stage }}/new/lib/ollama"
+          register: hermes_memory_servers_ollama_staged_paths
+
+        - name: Require complete staged Ollama payload
+          ansible.builtin.assert:
+            that:
+              - hermes_memory_servers_ollama_staged_paths.results[0].stat.isreg
+              - hermes_memory_servers_ollama_staged_paths.results[0].stat.executable
+              - hermes_memory_servers_ollama_staged_paths.results[1].stat.isdir
+
+        - name: Prepare planned-stop markers for active memory consumers
+          ansible.builtin.include_tasks:
+            file: ../../tasks/hermes-planned-stop-marker.yml
+          loop: "{{ hermes_production_consumer_profiles }}"
+          loop_control:
+            loop_var: hermes_planned_stop_profile
+            label: "{{ hermes_planned_stop_profile.name }}"
+          vars:
+            hermes_planned_stop_strict: true
+          when:
+            - >-
+              hermes_memory_servers_gateway_states_before[
+                hermes_planned_stop_profile.name] == 'active'
+
+        - name: Stop active consumers for one memory-server replacement window
+          ansible.builtin.systemd_service:
+            name: "{{ item.unit }}"
+            state: stopped
+          loop: "{{ hermes_production_consumer_profiles }}"
+          loop_control:
+            label: "{{ item.name }}"
+          when: hermes_memory_servers_gateway_states_before[item.name] == 'active'
+
+        - name: Inspect running Qdrant container before image replacement
+          community.docker.docker_container_info:
+            name: qdrant
+          register: hermes_memory_servers_qdrant_container_before
+          when: >-
+            hermes_memory_servers_qdrant_current
+            != hermes_memory_servers_qdrant_latest
+
+        - name: Require managed running Qdrant container
+          ansible.builtin.assert:
+            that:
+              - hermes_memory_servers_qdrant_container_before.exists
+              - hermes_memory_servers_qdrant_container_before.container.State.Running
+              - hermes_memory_servers_qdrant_container_before.container.Config.Image == 'qdrant/qdrant:latest'
+          when: >-
+            hermes_memory_servers_qdrant_current
+            != hermes_memory_servers_qdrant_latest
+
+        - name: Mark Qdrant update as started for rollback
+          ansible.builtin.set_fact:
+            hermes_memory_servers_qdrant_update_started: true
+          when: >-
+            hermes_memory_servers_qdrant_current
+            != hermes_memory_servers_qdrant_latest
+
+        - name: Pull newest stable Qdrant image
+          ansible.builtin.command:
+            argv:
+              - /usr/bin/docker
+              - compose
+              - pull
+              - qdrant
+            chdir: "{{ hermes_memory_servers_qdrant_compose_root }}"
+          changed_when: true
+          when: >-
+            hermes_memory_servers_qdrant_current
+            != hermes_memory_servers_qdrant_latest
+
+        - name: Recreate Qdrant on the stable channel image
+          ansible.builtin.command:
+            argv:
+              - /usr/bin/docker
+              - compose
+              - up
+              - -d
+              - qdrant
+            chdir: "{{ hermes_memory_servers_qdrant_compose_root }}"
+          changed_when: true
+          when: >-
+            hermes_memory_servers_qdrant_current
+            != hermes_memory_servers_qdrant_latest
+
+        - name: Wait for updated Qdrant API
+          ansible.builtin.uri:
+            url: "{{ hermes_mem0_qdrant_url }}/"
+            method: GET
+            return_content: true
+            status_code: 200
+          register: hermes_memory_servers_qdrant_after
+          retries: 30
+          delay: 2
+          until: hermes_memory_servers_qdrant_after.status == 200
+          when: >-
+            hermes_memory_servers_qdrant_current
+            != hermes_memory_servers_qdrant_latest
+
+        - name: Require newest stable Qdrant server
+          ansible.builtin.assert:
+            that:
+              - hermes_memory_servers_qdrant_after.json.version == hermes_memory_servers_qdrant_latest
+          when: >-
+            hermes_memory_servers_qdrant_current
+            != hermes_memory_servers_qdrant_latest
+
+        - name: Mark Ollama update as started for rollback
+          ansible.builtin.set_fact:
+            hermes_memory_servers_ollama_update_started: true
+
+        - name: Stop Ollama for atomic runtime replacement
+          ansible.builtin.systemd_service:
+            name: ollama.service
+            state: stopped
+
+        - name: Move prior Ollama binary into local rollback staging
+          ansible.builtin.command:
+            argv:
+              - /usr/bin/mv
+              - "{{ hermes_memory_servers_ollama_binary }}"
+              - "{{ hermes_memory_servers_local_stage }}/old/ollama"
+          changed_when: true
+
+        - name: Move prior Ollama libraries into local rollback staging
+          ansible.builtin.command:
+            argv:
+              - /usr/bin/mv
+              - "{{ hermes_memory_servers_ollama_library }}"
+              - "{{ hermes_memory_servers_local_stage }}/old/lib-ollama"
+          changed_when: true
+
+        - name: Install staged newest-stable Ollama binary
+          ansible.builtin.command:
+            argv:
+              - /usr/bin/mv
+              - "{{ hermes_memory_servers_local_stage }}/new/bin/ollama"
+              - "{{ hermes_memory_servers_ollama_binary }}"
+          changed_when: true
+
+        - name: Install staged newest-stable Ollama libraries
+          ansible.builtin.command:
+            argv:
+              - /usr/bin/mv
+              - "{{ hermes_memory_servers_local_stage }}/new/lib/ollama"
+              - "{{ hermes_memory_servers_ollama_library }}"
+          changed_when: true
+
+        - name: Normalize installed Ollama runtime ownership
+          ansible.builtin.file:
+            path: "{{ item.path }}"
+            owner: root
+            group: root
+            mode: "{{ item.mode }}"
+            recurse: "{{ item.recurse }}"
+          loop:
+            - path: "{{ hermes_memory_servers_ollama_binary }}"
+              mode: "0755"
+              recurse: false
+            - path: "{{ hermes_memory_servers_ollama_library }}"
+              mode: "0755"
+              recurse: false
+
+        - name: Deploy managed Ollama service
+          ansible.builtin.template:
+            src: "{{ playbook_dir }}/../../templates/hermes/hermes-ollama.service.j2"
+            dest: "{{ hermes_memory_servers_ollama_unit }}"
+            owner: root
+            group: root
+            mode: "0644"
+
+        - name: Start managed newest-stable Ollama server
+          ansible.builtin.systemd_service:
+            name: ollama.service
+            state: started
+            enabled: true
+            daemon_reload: true
+
+        - name: Wait for updated Ollama API
+          ansible.builtin.uri:
+            url: "{{ hermes_mem0_ollama_url }}/api/tags"
+            method: GET
+            return_content: true
+            status_code: 200
+          register: hermes_memory_servers_ollama_models_after_raw
+          retries: 60
+          delay: 2
+          until: hermes_memory_servers_ollama_models_after_raw.status == 200
+
+        - name: Inspect updated Ollama version
+          ansible.builtin.command:
+            argv:
+              - "{{ hermes_memory_servers_ollama_binary }}"
+              - --version
+          register: hermes_memory_servers_ollama_after
+          changed_when: false
+
+        - name: Record exact post-update Ollama model identities
+          ansible.builtin.set_fact:
+            hermes_memory_servers_ollama_models_after: >-
+              {{ dict(hermes_memory_servers_ollama_models_after_raw.json.models
+                      | map(attribute='name')
+                      | zip(hermes_memory_servers_ollama_models_after_raw.json.models
+                            | map(attribute='digest'))) }}
+
+        - name: Require newest stable Ollama and unchanged model inventory
+          ansible.builtin.assert:
+            that:
+              - >-
+                (hermes_memory_servers_ollama_after.stdout
+                 | regex_search('[0-9]+\.[0-9]+\.[0-9]+'))
+                == hermes_memory_servers_ollama_latest
+              - >-
+                hermes_memory_servers_ollama_models_after
+                == hermes_memory_servers_ollama_models_before
+
+        - name: Verify local embedding dimensions after Ollama update
+          ansible.builtin.uri:
+            url: "{{ hermes_mem0_ollama_url }}/api/embed"
+            method: POST
+            body_format: json
+            body:
+              model: "{{ hermes_mem0_ollama_embedding_model }}"
+              input:
+                - Hermes memory-server stable acceptance
+              truncate: true
+              dimensions: "{{ hermes_mem0_ollama_embedding_dimensions }}"
+            return_content: true
+            status_code: 200
+          register: hermes_memory_servers_embedding_probe
+
+        - name: Require approved local embedding shape
+          ansible.builtin.assert:
+            that:
+              - hermes_memory_servers_embedding_probe.json.embeddings | length == 1
+              - >-
+                hermes_memory_servers_embedding_probe.json.embeddings[0]
+                | length == hermes_mem0_ollama_embedding_dimensions
+
+        - name: Recount Qdrant points after server update
+          ansible.builtin.uri:
+            url: >-
+              {{ hermes_mem0_qdrant_url }}/collections/{{ item }}/points/count
+            method: POST
+            body_format: json
+            body:
+              exact: true
+            return_content: true
+            status_code: 200
+          loop: "{{ hermes_memory_servers_qdrant_collection_names }}"
+          register: hermes_memory_servers_qdrant_counts_after_raw
+          changed_when: false
+
+        - name: Record exact post-update Qdrant counts
+          ansible.builtin.set_fact:
+            hermes_memory_servers_qdrant_counts_after: >-
+              {{ dict(hermes_memory_servers_qdrant_collection_names
+                      | zip(hermes_memory_servers_qdrant_counts_after_raw.results
+                            | map(attribute='json.result.count') | list)) }}
+
+        - name: Require lossless Qdrant server update
+          ansible.builtin.assert:
+            that:
+              - >-
+                hermes_memory_servers_qdrant_counts_after
+                == hermes_memory_servers_qdrant_counts_before
+
+        - name: Inspect native v3 Mem0 collection schemas after server update
+          ansible.builtin.uri:
+            url: >-
+              {{ hermes_mem0_qdrant_url }}/collections/{{ item }}
+            method: GET
+            return_content: true
+            status_code: 200
+          loop:
+            - "{{ hermes_mem0_native_target_collection }}"
+            - "{{ hermes_mem0_native_target_collection }}_entities"
+          register: hermes_memory_servers_v3_schemas
+          changed_when: false
+
+        - name: Require native v3 dense and BM25 schemas after server update
+          ansible.builtin.assert:
+            that:
+              - item.json.result.config.params.vectors.size == hermes_mem0_ollama_embedding_dimensions
+              - item.json.result.config.params.sparse_vectors.bm25.modifier == 'idf'
+              - item.json.result.payload_schema.user_id.data_type == 'keyword'
+              - item.json.result.payload_schema.agent_id.data_type == 'keyword'
+          loop: "{{ hermes_memory_servers_v3_schemas.results }}"
+          loop_control:
+            label: "{{ item.item }}"
+
+        - name: Restore active consumers after one memory-server replacement window
+          ansible.builtin.systemd_service:
+            name: "{{ item.unit }}"
+            state: started
+          loop: "{{ hermes_production_consumer_profiles }}"
+          loop_control:
+            label: "{{ item.name }}"
+          when: hermes_memory_servers_gateway_states_before[item.name] == 'active'
+
+        - name: Validate each isolated Mem0 provider after backing-server updates
+          ansible.builtin.command:
+            argv:
+              - /usr/sbin/runuser
+              - --user
+              - "{{ item.user }}"
+              - --
+              - /usr/bin/env
+              - "HOME={{ item.account_home }}"
+              - "HERMES_HOME={{ item.home }}"
+              - "HERMES_MANAGED_DIR=/etc/hermes/{{ item.name }}"
+              - "{{ hermes_shadow_runtime_venv }}/bin/python"
+              - -c
+              - >-
+                from plugins.memory.mem0 import Mem0MemoryProvider;
+                p=Mem0MemoryProvider();
+                p.initialize('server-check-{{ item.name }}', user_id='johnny', platform='system');
+                assert p.is_available() and p._backend is not None;
+                result=p._backend.search('memory server acceptance', filters={'user_id':'johnny'}, top_k=1);
+                assert isinstance(result, list)
+          loop: "{{ hermes_production_consumer_profiles }}"
+          loop_control:
+            label: "{{ item.name }}"
+          changed_when: false
+
+        - name: Remove local memory-server transaction staging after acceptance
+          ansible.builtin.file:
+            path: "{{ hermes_memory_servers_local_stage }}"
+            state: absent
+
+        - name: Record accepted full memory-server stable update
+          ansible.builtin.copy:
+            dest: "{{ hermes_memory_servers_rollback_dir }}/RESULT"
+            owner: root
+            group: root
+            mode: "0600"
+            content: >-
+              {{ {'status': 'accepted',
+                  'scope': 'full-memory-server-stable-update',
+                  'qdrant_version': hermes_memory_servers_qdrant_latest,
+                  'qdrant_point_counts_unchanged': true,
+                  'ollama_version': hermes_memory_servers_ollama_latest,
+                  'ollama_model_inventory_unchanged': true,
+                  'ollama_archive_digest': hermes_memory_servers_ollama_asset.digest,
+                  'consumer_profiles': hermes_production_consumer_profiles
+                    | map(attribute='name') | list,
+                  'isolated_mem0_provider_validation': 'passed',
+                  'local_staging_removed': true}
+                 | to_nice_json }}
+
+      rescue:
+        - name: Stop Ollama before best-effort rollback
+          ansible.builtin.systemd_service:
+            name: ollama.service
+            state: stopped
+          when: hermes_memory_servers_ollama_update_started | bool
+          failed_when: false
+
+        - name: Inspect locally staged prior Ollama paths
+          ansible.builtin.stat:
+            path: "{{ item }}"
+          loop:
+            - "{{ hermes_memory_servers_local_stage }}/old/ollama"
+            - "{{ hermes_memory_servers_local_stage }}/old/lib-ollama"
+          register: hermes_memory_servers_old_ollama_paths
+          failed_when: false
+
+        - name: Remove failed Ollama binary when prior binary is staged
+          ansible.builtin.file:
+            path: "{{ hermes_memory_servers_ollama_binary }}"
+            state: absent
+          when: hermes_memory_servers_old_ollama_paths.results[0].stat.exists | default(false)
+
+        - name: Remove failed Ollama libraries when prior libraries are staged
+          ansible.builtin.file:
+            path: "{{ hermes_memory_servers_ollama_library }}"
+            state: absent
+          when: hermes_memory_servers_old_ollama_paths.results[1].stat.exists | default(false)
+
+        - name: Restore prior Ollama binary
+          ansible.builtin.command:
+            argv:
+              - /usr/bin/mv
+              - "{{ hermes_memory_servers_local_stage }}/old/ollama"
+              - "{{ hermes_memory_servers_ollama_binary }}"
+          when: hermes_memory_servers_old_ollama_paths.results[0].stat.exists | default(false)
+
+        - name: Restore prior Ollama libraries
+          ansible.builtin.command:
+            argv:
+              - /usr/bin/mv
+              - "{{ hermes_memory_servers_local_stage }}/old/lib-ollama"
+              - "{{ hermes_memory_servers_ollama_library }}"
+          when: hermes_memory_servers_old_ollama_paths.results[1].stat.exists | default(false)
+
+        - name: Restore prior Ollama service definition
+          ansible.builtin.copy:
+            src: "{{ hermes_memory_servers_rollback_dir }}/ollama.service"
+            dest: "{{ hermes_memory_servers_ollama_unit }}"
+            remote_src: true
+            owner: root
+            group: root
+            mode: "0644"
+          when: hermes_memory_servers_ollama_update_started | bool
+          failed_when: false
+
+        - name: Restart restored Ollama server
+          ansible.builtin.systemd_service:
+            name: ollama.service
+            state: started
+            enabled: true
+            daemon_reload: true
+          when: hermes_memory_servers_ollama_update_started | bool
+          failed_when: false
+
+        - name: Retag prior Qdrant image as stable channel rollback
+          ansible.builtin.command:
+            argv:
+              - /usr/bin/docker
+              - image
+              - tag
+              - "{{ hermes_memory_servers_qdrant_container_before.container.Image }}"
+              - qdrant/qdrant:latest
+          when: hermes_memory_servers_qdrant_update_started | bool
+          failed_when: false
+
+        - name: Recreate prior Qdrant image after failed update
+          ansible.builtin.command:
+            argv:
+              - /usr/bin/docker
+              - compose
+              - up
+              - -d
+              - --force-recreate
+              - qdrant
+            chdir: "{{ hermes_memory_servers_qdrant_compose_root }}"
+          when: hermes_memory_servers_qdrant_update_started | bool
+          failed_when: false
+
+        - name: Restart active consumers after failed transaction
+          ansible.builtin.systemd_service:
+            name: "{{ item.unit }}"
+            state: started
+          loop: "{{ hermes_production_consumer_profiles }}"
+          loop_control:
+            label: "{{ item.name }}"
+          when: hermes_memory_servers_gateway_states_before[item.name] == 'active'
+          failed_when: false
+
+        - name: Stop after memory-server rollback
+          ansible.builtin.fail:
+            msg: >-
+              Memory-server stable update failed. Prior Ollama/Qdrant runtime
+              restoration was attempted; inspect the retained rollback at
+              {{ hermes_memory_servers_rollback_dir }} before retrying.

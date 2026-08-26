@@ -1,0 +1,15 @@
+{
+  "course_id": "",
+  "updated_at": "YYYY-MM-DDTHH:MM:SS-05:00",
+  "due": [
+    {
+      "concept_id": "",
+      "concept": "",
+      "due_at": "YYYY-MM-DDTHH:MM:SS-05:00",
+      "reason": "miss|partial|spaced_review|cram_recycle|manual",
+      "priority": "high|medium|low",
+      "required_form": "different_form|open_recall|comparison|any",
+      "notes": ""
+    }
+  ]
+}

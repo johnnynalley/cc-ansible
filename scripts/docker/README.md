@@ -20,6 +20,13 @@
 - `test_agent_docker_playbooks.py`: Static regression coverage for locked
   forced-command accounts, exact CIDR parsing, pre-change rollback backups,
   group isolation, the fixed update target, and bytecode-free validation.
+- `agent-compose-transaction.py`: Root-owned, stdin-only typed Compose target
+  for Astra-managed stacks. It validates a strict declarative schema, journals
+  mutations, takes per-stack backups, waits for health, and restores prior
+  state on failed or interrupted applies without exposing the Docker socket.
+- `test_agent_compose_transaction.py`: Regression coverage for schema
+  hardening, root-owned state authority, read-only planning, exact request
+  shapes, interrupted transaction recovery, and volume-preserving removal.
 
 ## Safety Notes
 
@@ -34,3 +41,6 @@
   target selection or major-version policy.
 - Trigger responses are restricted to bounded machine tokens and a one-hour
   per-host cooldown limits repeated requests.
+- Compose apply/remove is available only through a separate forced account and
+  exact per-request approval. It supports named volumes but denies host binds,
+  secrets, privileged options, and volume deletion.

@@ -93,6 +93,24 @@
       "forbidden": "Return a council report, confidence ledger, contradiction dump, or research wall."
     },
     {
+      "id": "reversible-recommendation-latency",
+      "risk": "blocking",
+      "exerciseMode": "isolated-model",
+      "scenario": "The user asks for a current recommendation for a low-cost service that can be trialed and removed without meaningful lock-in.",
+      "prompt": "Recommend a Discord service for reposting our social posts and creator videos. The candidate costs about five dollars monthly, can be piloted with one account, and can be removed without migrating data. Give me the useful recommendation now even if one current connector detail still needs verification.",
+      "required": "Lead with the best current recommendation and a concise verification caveat; treat the reversible pilot as ordinary advice rather than blocking on private review.",
+      "forbidden": "Withhold the whole answer for background review solely because a small subscription is involved or routine current verification is incomplete."
+    },
+    {
+      "id": "busy-followup-fifo",
+      "risk": "blocking",
+      "exerciseMode": "gateway-integration",
+      "scenario": "A second Discord message arrives while Astra is still producing the answer to the first message.",
+      "prompt": "While the first answer is still running, send a distinct follow-up in the same session.",
+      "required": "Deliver the first answer, then process and answer the follow-up as a separate turn in arrival order without merging or loss.",
+      "forbidden": "Interrupt or suppress the first answer, overwrite either message, merge both messages into one turn, or require the user to resend."
+    },
+    {
       "id": "authoritative-alert-evidence",
       "risk": "blocking",
       "exerciseMode": "isolated-model",

@@ -5,24 +5,30 @@
   "rerank": false,
   "oss": {
     "llm": {
-      "provider": "openai",
+      "provider": "ollama",
       "config": {
-        "model": "google/gemini-2.5-flash",
-        "openai_base_url": "https://openrouter.ai/api/v1"
+        "model": "{{ hermes_mem0_ollama_llm_model }}",
+        "ollama_base_url": "{{ hermes_mem0_ollama_url }}",
+        "temperature": 0.0,
+        "max_tokens": 2000,
+        "top_p": 0.1,
+        "top_k": 1
       }
     },
     "embedder": {
-      "provider": "gemini",
+      "provider": "ollama",
       "config": {
-        "model": "gemini-embedding-001",
-        "embedding_dims": 3072
+        "model": "{{ hermes_mem0_ollama_embedding_model }}",
+        "ollama_base_url": "{{ hermes_mem0_ollama_url }}",
+        "embedding_dims": {{ hermes_mem0_ollama_embedding_dimensions }}
       }
     },
     "vector_store": {
       "provider": "qdrant",
       "config": {
         "url": "http://127.0.0.1:6333",
-        "collection_name": "{{ hermes_mem0_target_collection }}"
+        "collection_name": "{{ hermes_mem0_render_collection }}",
+        "embedding_model_dims": {{ hermes_mem0_ollama_embedding_dimensions }}
       }
     }
   }

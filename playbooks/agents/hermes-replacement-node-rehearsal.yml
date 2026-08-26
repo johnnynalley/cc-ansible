@@ -1,0 +1,262 @@
+---
+# Purpose: Rehearse the rebuildable Hermes bootstrap on a disposable fresh
+#          systemd container without credentials, delivery, or mutable restore.
+# Hosts: rehearsal_controller plus a dynamic disposable hermes_hosts member.
+# Key vars: hermes_replacement_rehearsal_*; hermes_shadow_*.
+# Files: files/hermes/rehearsal/Containerfile.
+# Validation: use the dedicated rehearsal inventory for syntax and task-list
+#             checks, then the exact attended confirmation string.
+
+- name: Prepare a disposable Hermes replacement-node target
+  hosts: rehearsal_controller
+  gather_facts: false
+  become: false
+
+  vars:
+    hermes_replacement_rehearsal_container: hermes-replacement-rehearsal
+    hermes_replacement_rehearsal_image: >-
+      localhost/hermes-replacement-rehearsal:ubuntu24.04
+    hermes_replacement_rehearsal_context: >-
+      {{ playbook_dir }}/../../files/hermes/rehearsal
+    hermes_replacement_rehearsal_required_confirmation: >-
+      rebuild-hermes-platform-on-disposable-replacement-node
+
+  tasks:
+    - name: Validate replacement-node rehearsal mode
+      ansible.builtin.assert:
+        that:
+          - hermes_replacement_rehearsal_mode in ['disabled', 'run', 'cleanup']
+
+    - name: Stop when replacement-node rehearsal is disabled
+      ansible.builtin.meta: end_play
+      when: hermes_replacement_rehearsal_mode == 'disabled'
+
+    - name: Require exact replacement-node rehearsal approval
+      ansible.builtin.assert:
+        that:
+          - hermes_replacement_rehearsal_approved | bool
+          - >-
+            hermes_replacement_rehearsal_confirmation
+            == hermes_replacement_rehearsal_required_confirmation
+
+    - name: Report replacement-node rehearsal check plan
+      ansible.builtin.debug:
+        msg:
+          status: planned
+          target: disposable-rootless-podman-systemd
+          source: "{{ hermes_replacement_rehearsal_context }}"
+          credentials_present: false
+          gateways_started: false
+      when: ansible_check_mode
+
+    - name: Stop before disposable resource creation in check mode
+      ansible.builtin.meta: end_play
+      when: ansible_check_mode
+
+    - name: Remove a retained disposable rehearsal container
+      containers.podman.podman_container:
+        name: "{{ hermes_replacement_rehearsal_container }}"
+        state: absent
+        delete_volumes: true
+      when: hermes_replacement_rehearsal_mode in ['run', 'cleanup']
+
+    - name: Remove the disposable rehearsal image during cleanup
+      containers.podman.podman_image:
+        name: "{{ hermes_replacement_rehearsal_image }}"
+        state: absent
+      when: hermes_replacement_rehearsal_mode == 'cleanup'
+
+    - name: Stop after replacement-node rehearsal cleanup
+      ansible.builtin.meta: end_play
+      when: hermes_replacement_rehearsal_mode == 'cleanup'
+
+    - name: Build the credential-free systemd rehearsal image
+      containers.podman.podman_image:
+        name: "{{ hermes_replacement_rehearsal_image }}"
+        path: "{{ hermes_replacement_rehearsal_context }}"
+        state: build
+        build:
+          file: >-
+            {{ hermes_replacement_rehearsal_context }}/Containerfile
+          force_rm: true
+          rm: true
+
+    - name: Start the disposable systemd rehearsal target
+      containers.podman.podman_container:
+        name: "{{ hermes_replacement_rehearsal_container }}"
+        image: "{{ hermes_replacement_rehearsal_image }}"
+        hostname: hermes-replacement
+        command:
+          - /sbin/init
+        state: started
+        systemd: always
+        privileged: true
+
+    - name: Wait for the disposable systemd manager
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/podman
+          - exec
+          - "{{ hermes_replacement_rehearsal_container }}"
+          - /usr/bin/systemctl
+          - is-system-running
+          - --wait
+      register: hermes_replacement_rehearsal_systemd
+      changed_when: false
+      failed_when: >-
+        hermes_replacement_rehearsal_systemd.rc not in [0, 1]
+        or hermes_replacement_rehearsal_systemd.stdout
+           not in ['running', 'degraded']
+      retries: 30
+      delay: 2
+      until: >-
+        hermes_replacement_rehearsal_systemd.rc in [0, 1]
+        and hermes_replacement_rehearsal_systemd.stdout
+            in ['running', 'degraded']
+
+    - name: Seed an empty replacement workspace mountpoint
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/podman
+          - exec
+          - "{{ hermes_replacement_rehearsal_container }}"
+          - /usr/bin/install
+          - --directory
+          - --mode=0755
+          - /home/johnny/cc-ansible
+      changed_when: true
+
+    - name: Register the disposable replacement-node target
+      ansible.builtin.add_host:
+        name: hermes-replacement-rehearsal
+        groups:
+          - hermes_hosts
+        ansible_host: "{{ hermes_replacement_rehearsal_container }}"
+        ansible_connection: containers.podman.podman
+        ansible_user: root
+        hermes_shadow_mode: bootstrap
+        hermes_shadow_change_approved: true
+        hermes_shadow_install_approved: true
+        hermes_shadow_start_approved: false
+        hermes_shadow_replacement_rehearsal: true
+        hermes_native_updates_automatic: false
+
+- import_playbook: hermes-shadow.yml
+
+- name: Validate and remove the accepted replacement-node rehearsal
+  hosts: hermes_hosts
+  gather_facts: false
+  become: true
+
+  tasks:
+    - name: Inspect replacement-node platform paths
+      ansible.builtin.stat:
+        path: "{{ item }}"
+      loop:
+        - /usr/local/bin/hermes
+        - /usr/local/lib/hermes-agent
+        - /etc/hermes/astra/config.yaml
+        - /etc/hermes/dubble/config.yaml
+        - /etc/hermes/rigel/config.yaml
+        - /etc/systemd/system/hermes-gateway-astra.service
+        - /etc/systemd/system/hermes-gateway-dubble.service
+        - /etc/systemd/system/hermes-gateway-rigel.service
+        - /usr/local/libexec/hermes-native-update-transaction
+      register: hermes_replacement_rehearsal_platform_paths
+
+    - name: Require complete replacement-node platform bootstrap
+      ansible.builtin.assert:
+        that:
+          - item.stat.exists
+          - not item.stat.islnk | default(false)
+      loop: "{{ hermes_replacement_rehearsal_platform_paths.results }}"
+      loop_control:
+        label: "{{ item.item }}"
+
+    - name: Require replacement Gateways to remain stopped and disabled
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/systemctl
+          - show
+          - "{{ item.unit }}"
+          - --property=ActiveState
+          - --property=UnitFileState
+      loop: "{{ hermes_shadow_profiles }}"
+      loop_control:
+        label: "{{ item.name }}"
+      register: hermes_replacement_rehearsal_gateway_states
+      changed_when: false
+      failed_when: >-
+        'ActiveState=inactive' not in
+          hermes_replacement_rehearsal_gateway_states.stdout_lines
+        or 'UnitFileState=disabled' not in
+          hermes_replacement_rehearsal_gateway_states.stdout_lines
+
+    - name: Reject Discord credentials on the replacement bootstrap
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/grep
+          - --extended-regexp
+          - --files-with-matches
+          - '^DISCORD_'
+          - "{{ item.environment_file | default('/etc/hermes/' ~ item.name ~ '/.env') }}"
+      loop: "{{ hermes_shadow_profiles }}"
+      loop_control:
+        label: "{{ item.name }}"
+      register: hermes_replacement_rehearsal_discord_credentials
+      changed_when: false
+      failed_when: hermes_replacement_rehearsal_discord_credentials.rc != 1
+      no_log: true
+
+    - name: Validate replacement Hermes runtime and profile wiring
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/python3
+          - /usr/local/libexec/hermes-native-update-transaction
+          - --config
+          - /etc/hermes/native-update-transaction.json
+          - --validate-runtime
+      register: hermes_replacement_rehearsal_runtime_validation
+      changed_when: false
+
+    - name: Require accepted replacement-node runtime validation
+      ansible.builtin.assert:
+        that:
+          - >-
+            (hermes_replacement_rehearsal_runtime_validation.stdout | from_json).status
+            == 'runtime-valid'
+
+    - name: Report accepted replacement-node bootstrap
+      ansible.builtin.debug:
+        msg:
+          status: accepted
+          target: disposable-rootless-podman-systemd
+          profiles: "{{ hermes_shadow_profiles | map(attribute='name') | list }}"
+          credentials_present: false
+          gateways_started: false
+          restored_data_applied: false
+          next_step: restore-verified-restic-mutable-layer
+
+- name: Clean accepted replacement-node rehearsal resources
+  hosts: rehearsal_controller
+  gather_facts: false
+  become: false
+
+  vars:
+    hermes_replacement_rehearsal_container: hermes-replacement-rehearsal
+    hermes_replacement_rehearsal_image: >-
+      localhost/hermes-replacement-rehearsal:ubuntu24.04
+
+  tasks:
+    - name: Remove accepted disposable rehearsal container
+      containers.podman.podman_container:
+        name: "{{ hermes_replacement_rehearsal_container }}"
+        state: absent
+        delete_volumes: true
+      when: not ansible_check_mode
+
+    - name: Remove accepted disposable rehearsal image
+      containers.podman.podman_image:
+        name: "{{ hermes_replacement_rehearsal_image }}"
+        state: absent
+      when: not ansible_check_mode

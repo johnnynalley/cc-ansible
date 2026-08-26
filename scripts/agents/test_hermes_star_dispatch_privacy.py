@@ -5,7 +5,10 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
+import tempfile
 import unittest
+from unittest import mock
 from pathlib import Path
 
 ROOT = Path(__file__).parents[2]
@@ -61,11 +64,48 @@ class StarDispatchPrivacyTests(unittest.TestCase):
             MODULE._trusted_completion_turns.clear()
             MODULE._retry_used.clear()
 
-    def test_validator_accepts_the_ordered_lcm_plugin_contract(self) -> None:
-        self.assertEqual(
-            VALIDATOR_MODULE.ENABLED_PLUGINS,
-            ["star-dispatch-privacy", "agent-docker-inventory", "hermes-lcm"],
-        )
+    def test_validator_accepts_additional_managed_plugins(self) -> None:
+        config = """
+plugins:
+  enabled: [star-dispatch-privacy, agent-docker-inventory, arr-api, discord-parity, hermes-lcm]
+  disabled: []
+"""
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "config.yaml"
+            path.write_text(config, encoding="utf-8")
+            VALIDATOR_MODULE.validate_config(path)
+
+    def test_validator_accepts_only_a_safe_generated_bytecode_cache(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary) / "plugin"
+            cache = root / "__pycache__"
+            cache.mkdir(parents=True, mode=0o750)
+            root.chmod(0o750)
+            cache.chmod(0o750)
+            for name in ("__init__.py", "plugin.yaml"):
+                path = root / name
+                path.write_text(name, encoding="utf-8")
+                path.chmod(0o440)
+            bytecode = cache / "__init__.cpython-313.pyc"
+            bytecode.write_bytes(b"managed-cache")
+            bytecode.chmod(0o440)
+
+            real_lstat = os.lstat
+
+            def root_owned(path):
+                result = real_lstat(path)
+                return mock.Mock(st_mode=result.st_mode, st_uid=0)
+
+            with mock.patch.object(VALIDATOR_MODULE.os, "lstat", root_owned):
+                hashes = VALIDATOR_MODULE.validate_tree(root)
+            self.assertEqual(set(hashes), {"__init__.py", "plugin.yaml"})
+
+            unexpected = cache / "payload.py"
+            unexpected.write_text("bad", encoding="utf-8")
+            unexpected.chmod(0o440)
+            with mock.patch.object(VALIDATOR_MODULE.os, "lstat", root_owned):
+                with self.assertRaises(VALIDATOR_MODULE.ValidationError):
+                    VALIDATOR_MODULE.validate_tree(root)
 
     def test_plugin_is_hook_only(self) -> None:
         self.assertEqual(self.context.tools, [])
@@ -123,6 +163,51 @@ class StarDispatchPrivacyTests(unittest.TestCase):
                 "The reviewers are running.", session_id="session-a"
             ),
             "NO_REPLY",
+        )
+
+    def test_incomplete_dispatch_turn_cannot_silence_reviewer_completion(self) -> None:
+        args = star_tasks()
+        MODULE._post_tool_call(
+            "delegate_task",
+            args,
+            json.dumps({
+                "status": "dispatched",
+                "delegation_id": "deleg_star_1234",
+            }),
+            session_id="session-a",
+        )
+
+        trusted = MODULE._pre_llm_call(
+            "session-a",
+            "[ASYNC DELEGATION BATCH COMPLETE \u2014 deleg_star_1234]\nReal",
+        )
+
+        self.assertIn("HOST-VERIFIED", trusted["context"])
+        self.assertIsNone(
+            MODULE._transform_llm_output(
+                "One concise answer.", session_id="session-a"
+            )
+        )
+
+    def test_incomplete_dispatch_turn_cannot_silence_next_user_turn(self) -> None:
+        args = star_tasks()
+        MODULE._post_tool_call(
+            "delegate_task",
+            args,
+            json.dumps({
+                "status": "dispatched",
+                "delegation_id": "deleg_star_1234",
+            }),
+            session_id="session-a",
+        )
+
+        self.assertIsNone(
+            MODULE._pre_llm_call("session-a", "A different user message")
+        )
+        self.assertIsNone(
+            MODULE._transform_llm_output(
+                "The next answer is delivered.", session_id="session-a"
+            )
         )
 
     def test_failed_dispatch_does_not_suppress_a_real_error(self) -> None:

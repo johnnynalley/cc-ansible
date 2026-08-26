@@ -51,10 +51,10 @@ class HermesProfileImportAuditTests(unittest.TestCase):
     def test_canonical_contract_maps_every_retained_source_once(self) -> None:
         result = self.validate(CONTRACT)
         self.assertEqual(result["profiles"], ["astra", "dubble", "rigel"])
-        self.assertEqual(result["workspace"]["mappingCount"], 31)
+        self.assertEqual(result["workspace"]["mappingCount"], 33)
         self.assertEqual(
             result["workspace"]["profiles"],
-            {"astra": 24, "dubble": 4, "rigel": 3},
+            {"astra": 24, "dubble": 4, "rigel": 5},
         )
         self.assertEqual(result["stateRoot"]["mappingCount"], 2)
 
@@ -136,6 +136,19 @@ class HermesProfileImportAuditTests(unittest.TestCase):
             with self.assertRaisesRegex(
                 audit_module.ProfileImportAuditError,
                 "must use approved curation",
+            ):
+                self.validate(self.write_contract(root, payload))
+
+    def test_rigel_academic_journal_remains_isolated_course_data(self) -> None:
+        with tempfile.TemporaryDirectory() as directory_name:
+            root = Path(directory_name)
+            payload = copy.deepcopy(self.contract)
+            mapping = self.mapping(payload, "rigel-memory")
+            mapping["importMode"] = "memory-curation"
+            mapping["exposure"] = "approved-memory"
+            with self.assertRaisesRegex(
+                audit_module.ProfileImportAuditError,
+                "must remain isolated Rigel data",
             ):
                 self.validate(self.write_contract(root, payload))
 

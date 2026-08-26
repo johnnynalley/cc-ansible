@@ -9,7 +9,10 @@
     "useForConsequentialRecommendations": true,
     "useForMateriallyUncertainCurrentFacts": true,
     "useWhenExplicitlyRequested": true,
-    "skipForTrivialOrMechanicalAnswers": true
+    "skipForTrivialOrMechanicalAnswers": true,
+    "materialCommitmentRequired": true,
+    "ordinaryReversibleAnswerMayBeWithheldForReview": false,
+    "ordinaryReversibleRecommendationDisposition": "answer-immediately-with-evidence-caveat"
   },
   "delegation": {
     "batchSize": 2,

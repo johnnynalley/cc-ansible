@@ -3,10 +3,10 @@
 ## Status
 
 The official Nous Research Hermes Agent is the production runtime on
-`jn-t14s-lin`. Astra and Dubble are the two active Discord consumers; Astra
-also owns the Rigel channel persona and deterministic academic schedule.
-OpenClaw delivery and update units are stopped and disabled, while their files
-remain offline for reference and operator-controlled rollback.
+`jn-t14s-lin`. Astra, Dubble, and Rigel are active as three distinct Discord
+applications, profiles, service identities, and Gateways. OpenClaw delivery
+and update units are stopped and disabled, while their files remain offline
+for reference and operator-controlled rollback.
 
 This document owns the replacement architecture, parity decisions, behavior
 acceptance tests, security boundary, migration order, and rollback contract.
@@ -33,7 +33,7 @@ The existing OpenClaw documents remain authoritative for the source system.
 - Let Hermes own Gateway service lifecycle through native named-profile units.
   Ansible may add security/readiness drop-ins, but must not replace native
   `ExecStart`, restart, watchdog, identity, `HOME`, or `HERMES_HOME` behavior.
-  The official v0.20.4 units do not define `ExecStop`; every operator stop must
+  The current stable native units do not define `ExecStop`; every operator stop must
   use Hermes's planned-stop marker before systemd sends `SIGTERM`.
 - Preserve all OpenClaw source state, sessions, transcripts, secrets, runtime,
   and rollback instructions until Hermes has passed an attended rollback test.
@@ -63,7 +63,9 @@ complete security boundary against prompt injection. File-write guards do not
 constrain shell commands. Astra therefore runs native local tools as the
 dedicated no-login `hermes-astra` account, with no sudo, Docker socket/group, or
 Linux capabilities and with systemd restricting writes to its owned profile and
-reviewed work roots. Dubble and Rigel have no terminal, file, or code toolsets.
+reviewed work roots. Dubble has no local tools; Rigel has native file and local
+terminal tools confined to its isolated academic workspace and unprivileged
+service identity.
 
 ## Parity Matrix
 
@@ -77,12 +79,13 @@ reviewed work roots. Dubble and Rigel have no terminal, file, or code toolsets.
 | Antares's intentionally critical role | Distinct `goal` and `context` for the adversarial leaf; reviewer model inherits Astra's reviewed route without an exact-version pin | Native, one child-model route | Promotion proves Antares challenges rather than echoes while neither reviewer sees the other's output |
 | Long-running multi-agent work | Named profiles and Hermes Kanban for durable asynchronous work | Native | Task survives Gateway restart, retains owner/history, and cannot gain a wider toolset on handoff |
 | File memory and user preferences | Per-profile `MEMORY.md` and `USER.md`, plus FTS5 session search | Native with curated import | Exact user preferences and durable facts survive restart; no raw transcript dump is injected into every prompt |
-| Lossless conversation context | Reviewed `hermes-lcm` plugin plus a source-preserving conversion from the stopped OpenClaw LCM database | Native plugin with conversion | SQLite integrity passes, eligible messages and summaries reconcile exactly, and source state remains unchanged |
-| Mem0/Qdrant knowledge | Hermes OSS Mem0 provider backed by a new Astra-only Qdrant collection converted from approved OpenClaw owner/main scopes | Native provider with conversion | Source and target counts/digests reconcile, other agent scopes stay excluded, and existing memories are recalled through Hermes |
-| Self-evolution | Hermes background review with `memory.write_approval: true` and `skills.write_approval: true` | Native with approval | A correction stages one general memory/skill diff, does not mutate policy directly, and can be approved, rejected, audited, and rolled back |
+| Lossless conversation context | Reviewed stable `hermes-lcm` plugin with separate profile-owned databases and source-preserving conversion from stopped OpenClaw history | Native plugin with conversion | Astra and Rigel reconcile their approved scopes; Dubble imports only route-proven public history; SQLite integrity passes and source state remains unchanged |
+| Mem0/Qdrant knowledge | Hermes OSS Mem0 provider backed by separate Astra, Rigel, and Dubble v3 hybrid collections | Native provider with conversion | Astra/Rigel source boundaries reconcile; Dubble starts empty because legacy provenance is unresolved; every profile proves dense and BM25 recall without cross-profile points |
+| Self-evolution | Hermes background review with approval-free guarded profile-local memory and skill writes; Astra alone reviews and writes the shared fleet skill | Native with isolated ownership | A correction improves the owning native memory/skill, does not mutate root policy, and shared changes are evidence-backed, validated, audited, and reversible |
+| Owner-directed agent administration | Astra-only native fleet tool backed by an authenticated typed broker for Astra, Dubble, and Rigel native profile/workspace state | Native with owner provenance | An exact owner Astra session can inspect, hash-guard, back up, mutate, validate, and restart any profile while target sessions and users cannot call the broker, disclose cross-profile data, or rewrite root-owned policy |
 | Astra root-cause learning | Root-owned behavior policy plus review-gated agent memory/skills and transcript regression tests | Manual policy port | Repeated incidents consolidate into a general rule; incident-specific rule accumulation is rejected |
 | OpenClaw sessions and trajectories | Preserve as offline searchable archive; new Hermes sessions live in each profile's SQLite state | Archive, not live migration | Archive manifest, sampled transcript restore, and Hermes access through a read-only search boundary if later required |
-| 14 semantic scheduled jobs | Recreate disabled in Hermes cron with exact schedule, timezone, owner, bounded tools, and delivery policy | Manual | Declaration diff plus one attended run per job before enabling |
+| Native scheduled jobs | Import the reviewed 17 Astra, one Dubble, and one Rigel declarations once, then leave each profile's native cron store authoritative | Native after one-time seed | Read-only declaration audit, missing-only seed, explicit exact restore, native edit persistence across restart, and natural delivery receipts |
 | 10 deterministic command jobs | Root-managed unprivileged systemd services/timers or no-agent Hermes prechecks | Replace | Empty stdout is silent, failures are bounded and classified, and no Gateway credential enters the worker |
 | Main heartbeat catalog | Deterministic collectors and per-check state feed bounded semantic jobs; do not fan out the full catalog in one turn | Manual modernization | Existing cadence, pressure gates, dedupe, and maximum concurrency are regression-tested |
 | Discord | Two isolated Gateways and bot tokens, explicit user/channel allowlists, DMs denied, and nonempty pairing grants rejected at startup | Native | Unauthorized user, unauthorized channel, duplicate token, DM, attachment, pairing-state, and restart tests |
@@ -91,7 +94,81 @@ reviewed work roots. Dubble and Rigel have no terminal, file, or code toolsets.
 | Model routing | Per-profile providers plus a named MoA preset for Star; no policy-level exact-version pin unless explicitly approved | Native with reconciliation | Provider auth, context size, fallback, model identity, and no unintended exact pin are verified |
 | Hooks and plugins | Default to none. Add only root-reviewed hooks or plugins required by a proven parity gap | Manual | Hash/provenance, consent, tool scope, failure mode, update behavior, and rollback are documented |
 | Dashboard and API | Disabled during shadow and initial production; any later UI remains loopback-only behind independent authentication | Deliberately omitted | No listener or remote route exists during initial rollout |
-| Backups and rollback | Per-profile state backup plus untouched OpenClaw state/runtime backup | Manual | Hermes restore and Hermes-to-OpenClaw rollback are both tested before cutover |
+| Backups and rollback | Full native profile archives for short-horizon rollback plus application-consistent SQLite/Qdrant staging in encrypted Restic on NAS ZFS | Native plus managed DR boundary | Native profile extraction, complete staged-artifact verification, disposable Qdrant restore, and replacement-node recovery order are tested |
+
+## Backup And Node-Loss Recovery
+
+Hermes recovery has two independent layers with different failure domains:
+
+1. `hermes backup` creates a full archive for each discovered profile. These
+   same-node archives are the fast rollback path for a bad agent, skill,
+   schedule, or configuration change. They include profile configuration,
+   skills, sessions, memory, and data, but they are not node-loss protection.
+2. Before each `jn-t14s-lin` local Restic run,
+   `/usr/local/libexec/hermes-disaster-recovery-stage` refreshes every native
+   profile archive, creates SQLite online-backup copies with
+   `PRAGMA quick_check`, and downloads one Qdrant full-storage snapshot after
+   proving Qdrant is single-node and collection point counts stayed stable.
+   The immutable manifest and artifacts are verified before Restic can copy
+   them to the encrypted per-host repository on `nas-zfs`.
+
+The Restic snapshot also includes the complete mutable Hermes roots under
+`/var/lib/hermes`, `/var/lib/hermes-automation`, and `/etc/hermes`, plus the
+controller checkout and owner home needed for rebuild reconciliation. Large
+rebuildable caches, duplicated evidence worktrees, rootless container storage,
+and the raw live Qdrant directory are excluded from the local repository;
+Qdrant is recovered from its application-consistent snapshot instead.
+
+Ansible ownership is enforced by
+`files/hermes/ansible-ownership-contract.json` and
+`scripts/agents/hermes-ansible-ownership-audit.py`. The audit scans every
+absolute host-path reference in all Hermes agent playbooks, the Restic
+disaster-recovery playbook, and the owning inventory declarations. Every path
+must resolve to one reviewed class: rebuildable platform, bootstrap seed,
+mutable native state, migration, restore-only, evidence, rollback, transient,
+cache, external read-only state, legacy retirement, or a forbidden interface.
+The most-specific prefix wins, so a native profile path cannot be hidden by the
+broader root-owned `/var/lib/hermes` platform layout. New unclassified paths
+fail `scripts/repo/repo-audit`.
+
+TS440 runs `restic-snapshot-freshness@hermes-jn-t14s-lin.timer` independently
+of the source node. It requires a snapshot no older than three hours containing
+`/var/backups/hermes-disaster-recovery/current` and sends a deduplicated Apprise
+alert when the proof is missing or stale. This is the source-node-loss alert;
+the source-side status file alone is not sufficient when the T14s is offline.
+
+Hermes currently has a native `backup` command but no native `restore`
+subcommand. A profile rollback therefore extracts its full archive into a new
+private Hermes root, restores the service identity ownership, runs static
+Doctor and SQLite integrity checks, and only then performs an attended atomic
+cutover. Node-loss recovery rebuilds the platform with Ansible first, restores
+the mutable roots and staged artifacts from Restic second, then restores the
+Qdrant full-storage snapshot into a compatible server. Qdrant full snapshots
+must be restored to the same minor version or the next minor version, followed
+by exact collection-name and point-count verification. See the official
+[snapshot](https://qdrant.tech/documentation/snapshots/) and
+[recovery operations](https://qdrant.tech/documentation/operations/snapshots/) guidance.
+
+Do not claim this layer healthy from a successful backup service alone. The
+acceptance gate requires a local native-profile rollback rehearsal and an
+off-host Restic restore into disposable storage, including an actual Qdrant
+start and exact manifest comparison, without modifying production Qdrant.
+
+The remaining platform-order gate uses
+`playbooks/agents/hermes-replacement-node-rehearsal.yml` with
+`inventory/hermes-replacement-rehearsal.ini`. That inventory contains no
+production target. With the exact attended confirmation, the play builds a
+fresh credential-free Ubuntu systemd container through rootless Podman, applies
+the same `hermes-shadow.yml` platform/bootstrap boundary used for production,
+requires Astra, Dubble, and Rigel to remain stopped and disabled, rejects all
+Discord enrollment, validates the native updater/runtime wiring, and removes
+the accepted container and image. The disposable proof retains the production
+CPU contract but uses bounded 4 GiB available-memory and 4 GiB free-disk floors
+because it shares the already-running production host; the real replacement
+target still requires the full production capacity contract. This proves the
+required recovery order:
+rebuild the platform first, then apply the separately verified Restic mutable
+restore and Qdrant recovery layers.
 
 ## Rigel Idle-Silence Design
 
@@ -182,24 +259,57 @@ and
 [Mixture of Agents](https://hermes-agent.nousresearch.com/docs/user-guide/features/mixture-of-agents)
 behavior.
 
-`files/hermes/star-regressions.json` defines six runtime promotion cases:
+`files/hermes/star-regressions.json` defines seven runtime promotion cases:
 seeded premise error, purchased-item reversal, current-source conflict,
 reviewer independence, single normal answer, and reviewer failure. Static
-policy tests do not establish model behavior. Gate 7 must prove two actual
-child calls, Antares's adversarial value, concise Discord output, and failure
-handling before Star parity is accepted.
+policy tests do not establish model behavior. The seventh case proves that an
+ordinary low-cost reversible pilot bypasses Star and receives a prompt initial
+answer. Gate 7 must prove two actual child calls, Antares's adversarial value,
+concise Discord output, failure handling, and the reversible-pilot bypass
+before Star parity is accepted.
 
 ## Discord Routing And Cutover
 
 The retained OpenClaw configuration has two Discord applications. Astra's
-application serves both `#astra` and `#rigel`; Dubble has the second
-application. Production Hermes therefore runs two delivery Gateways for three
-logical roles. Astra owns the Astra route plus a channel-scoped Rigel persona
-and study skill, while Dubble owns only its support route. The isolated Rigel
-profile remains preserved and stopped unless a future third Discord
-application is enrolled. Native Hermes token locks are a last defensive check,
-not permission to overlap consumers: OpenClaw and Hermes must never use the
-same Discord identity concurrently. Bot-authored input is disabled.
+application served both `#astra` and `#rigel`; Dubble had the second
+application. Hermes initially retained that transport shape as a compatibility
+fallback, but it is not the final parity topology. The managed target uses a
+new third Discord application for Rigel, with one bot token, service identity,
+profile, Gateway, channel route, and scheduler per logical role. Native Hermes
+token locks are a last defensive check, not permission to overlap consumers:
+OpenClaw and Hermes must never use the same Discord identity concurrently.
+Bot-authored input is disabled.
+
+All three logical profiles have independent full-parity requirements. During
+the transition, `#rigel` remains transported by Astra so the route stays usable.
+Promotion removes that fallback only after the dedicated Rigel bot proves its
+identity and exact guild/channel access. Rigel must then load its own
+instructions, study skill, course/calendar state, memory, model route, schedule,
+and behavior contract. Astra Gateway health or generic skill discovery is not
+Rigel acceptance. Dubble likewise retains its own independent behavior and
+state contract despite the shared host runtime.
+
+Hermes busy-session input is managed as `queue`, not the native `interrupt`
+default. Each conversational message received while a turn is active is
+preserved as a separate per-session FIFO turn. The active answer is delivered
+first, then queued follow-ups drain in arrival order; text messages are not
+newline-merged. Native `/stop`, `/new`, and `/reset` remain the explicit ways
+to cancel or replace work. Hermes caps the busy queue at 32 entries and carries
+queue-mode input across a planned Gateway restart. The delivery ledger begins
+only after a final response exists, so it cannot repair a response suppressed
+before delivery registration; preventing interruption at the input boundary is
+the required fix for that failure class.
+
+Native cron execution completion and Discord delivery are separate acceptance
+signals. Every scheduled platform send appends a content-free child receipt to
+the native execution ledger with the execution ID, target, delivery status,
+timestamp, and platform message ID when the adapter returns one. A timeout that
+the adapter confirms as sent is recorded as `assumed_delivered`; receipt
+persistence failure makes the delivery result fail without retrying the send
+and risking a duplicate. `hermes cron runs` is the operator interface for these
+receipts. `last_status=ok`, a completed execution, or a fresh producer artifact
+alone is not proof that Discord received Daily Summary, Fortnite, or another
+scheduled report.
 
 The managed shadow config is deliberately inert. It has no Discord token,
 user, role, channel, home-channel, or free-response enrollment; unknown DMs
@@ -231,10 +341,10 @@ disabled-by-default `playbooks/agents/hermes-production-cutover.yml`:
    `openclaw-delivery-cutover-audit.py`. Pending queue rows or active session
    recovery fields block cutover; failed history may be archived but is never
    replayed.
-4. Enroll both Discord identities and all three provider scopes. Start Astra,
-   prove the Astra and Rigel channel routes, then start Dubble and prove its
-   route. Keep the Rigel Gateway stopped because Astra is its sole delivery
-   consumer.
+4. Enroll three distinct Discord identities and all three provider scopes.
+   Prove Rigel's new identity can access the exact existing `#rigel` route,
+   remove the Astra-owned fallback from the rendered policy, then start and
+   prove Astra, Dubble, and Rigel as separate consumers.
 5. Enable only reviewed schedules and prove Rigel's idle tick remains empty.
 
 The playbook also enables Hermes's and Tirith's native update timers, keeps the
@@ -273,6 +383,34 @@ jobs: 18 agent turns and 10 command jobs. The current agent configuration also
 has three enabled 30-minute heartbeats for Astra, Dubble, and Rigel. All 31
 lanes are represented explicitly in `files/hermes/automation-contract.json`;
 none is dropped merely because its implementation changes.
+
+Production currently has 19 reviewed native jobs: 17 owned by Astra, one by
+Dubble, and one by Rigel. The original declaration is retained as migration
+and disaster-recovery evidence, but each service-owned `cron/jobs.json` is the
+normal source of truth after the one-time import. Gateway startup validates
+the immutable OpenClaw parity contract and never runs exact cron
+reconciliation. Normal `hermes-automation.yml` convergence uses schedule mode
+`preserve`; it reports content-free drift counts and does not add, remove, or
+rewrite native jobs.
+
+Schedule reconciliation is an explicit operator action with separate modes:
+
+- `audit` compares reviewed managed declarations without mutation. It ignores
+  unrelated profile-authored jobs and returns a distinct drift status.
+- `seed` creates only missing reviewed jobs. It preserves edited managed jobs,
+  stale managed rows, and profile-authored jobs, and rejects an unmanaged name
+  collision rather than adopting it.
+- `restore` performs exact reviewed restoration and may update or remove
+  managed rows. It requires its own exact confirmation string and a current
+  rollback set.
+
+A live persistence proof created a disabled Astra-native job with the Hermes
+CLI, restarted only Astra, verified the same paused job remained, confirmed
+the managed audit still reported zero changes, and then removed the test job
+through the native CLI. Dubble and Rigel retained their exact PIDs throughout.
+This is the acceptance boundary for native schedule ownership; Ansible remains
+the platform/bootstrap/restore mechanism rather than the continuous owner of
+mutable schedules.
 
 The target classification is:
 
@@ -344,18 +482,21 @@ cannot be promoted until the following tests pass:
     user does not receive a research dossier unless requested.
 11. Alerts require authoritative source evidence. A prior generated memory or
     alert marker cannot bootstrap a fabricated exam.
-12. Self-evolution proposes a general correction, cites the triggering failure,
-    and remains pending until approved. It cannot rewrite root-owned security,
-    runtime, or deployment policy.
+12. Self-evolution applies a general correction to isolated native state and
+    cites the triggering failure. Shared-skill changes remain Astra-reviewed;
+    no profile can rewrite root-owned security, runtime, or deployment policy.
 
 ## Security Boundary
 
-The target uses three dedicated no-login Hermes profile identities. Only Astra
-and Dubble have active Gateways; the Rigel profile remains dormant while Astra
-owns the current Rigel route and script-only schedule. Profile state is
-writable only where Hermes requires runtime state. Behavior policy, fixed host
-access plugins, systemd units, and deployment configuration are root-owned and
-read-only to Hermes.
+The target uses three dedicated no-login Hermes profile identities and three
+active Gateways. The active-consumer selector resolves to Astra, Dubble, and
+Rigel for runtime, memory, Docker inventory, and offline-maintenance
+transactions. Profile state is writable only where Hermes requires runtime
+state. Behavior policy, typed host access plugins, systemd units, and
+deployment configuration remain root-owned. Astra receives only explicit
+typed administration paths, including the owner-session-only three-profile
+native fleet boundary; it does not receive general root, root-policy mutation,
+or unrestricted cross-profile filesystem access.
 
 Initial production policy:
 
@@ -364,9 +505,10 @@ Initial production policy:
   capabilities, cross-profile access, or write access outside its private
   profile and reviewed work roots. This is normal host tool access, not a
   wrapper-per-action interface.
-- Dubble and Rigel have no terminal, file, or code-execution toolsets. Their
-  dormant Docker backend remains networkless and mountless but is not exposed
-  as an agent tool.
+- Dubble has no terminal, file, or code-execution toolsets. Rigel has native
+  file and local terminal tools only in its owned academic workspace, as the
+  unprivileged `hermes-rigel` identity, with terminal-originated network,
+  runtime-secret, host-administration, and cross-profile access denied.
 - `computer_use` is explicitly disabled for every profile. Browser retrieval
   remains available for current-source research, but no agent receives desktop
   control merely because Hermes includes that tool in its built-in safe set.
@@ -377,25 +519,37 @@ Initial production policy:
   destructive session confirmations are enabled. Astra cron uses manual
   approval policy; Dubble and Rigel deny cron commands.
 - Explicit Discord allowlists; no allow-all mode.
-- `memory.write_approval: true` and `skills.write_approval: true`.
+- `memory.write_approval: false` and `skills.write_approval: false` for guarded
+  profile-local evolution. Root-managed policy and shared-skill authority remain
+  outside ordinary profile writes.
 - Agent-created skill scanning enabled; third-party skills are not installed
   until inspected and pinned by provenance, not by stale application version.
-- Reviewed baseline skills are declarative, exact-hashed, and root-owned under
-  `/etc/hermes/<profile>/skills`. Each Gateway bind-mounts only its own tree
-  read-only under `~/.hermes/skills/managed`; its service identity cannot edit
-  or replace the mounted content while running. Hermes's native frontmatter
-  validator, threat scanner, exact inventory, and model-visible skill index
-  must all pass before startup. Profile-local agent proposals remain separate
-  and retain native scan plus explicit write approval.
+- The retained reviewed-skill baseline is declarative, exact-hashed, and
+  root-owned under `/etc/hermes/<profile>/skills`. It remains mounted read-only
+  at `~/.hermes/skills/managed` as a validated rollback source during the
+  ownership transition. `hermes-profile-skills.yml` may audit it without
+  mutation or restore it only with explicit approval; ordinary convergence
+  must not re-project it over agent-authored state. The accepted target moves
+  ordinary skills into each profile-owned native root and keeps one canonical
+  `self-evolution` tree writable only by Astra and read-only to Dubble/Rigel.
+  `hermes_native_profile_skills_enabled` is the default-off unit-layout gate
+  for that handoff. It must be enabled only in the attended import transaction
+  after all 39 installed skill instances and supporting files are backed up,
+  copied into native roots, validated, and covered by off-host rollback. In
+  native mode the broad managed-skill bind disappears; Dubble and Rigel receive
+  only Astra's local `skills/self-evolution` through a read-only bind.
 - No auto-accepted hooks. Any hook is root-reviewed and its consent record is
   audited after edits because Hermes hook consent keys the command path, not
   script content.
 - Prompt-injection scanning and secret redaction enabled. Tirith is bootstrapped
   from an exact official release after Sigstore identity and signed-checksum
-  verification, then maintained by its own signed atomic updater under the
-  dedicated `hermes-updater` identity. Gateways use only the absolute binary,
-  run it offline, reject runtime lazy installs, and fail closed on scanner
-  errors. Hermes's background downloader is never part of the production path.
+  verification, then maintained by its own signed atomic updater in a
+  root-owned, capability-empty systemd sandbox. Tirith 0.4+ updates the scanner
+  and `/usr/local/libexec/tirith-package-approval-authority` as one signed
+  transaction, so the unit can write only `/var/lib/hermes-updater` and
+  `/usr/local/libexec`. Gateways use only the absolute binary, run it offline,
+  reject runtime lazy installs, and fail closed on scanner errors. Hermes's
+  background downloader is never part of the production path.
 - Dashboard/API disabled. Gateway listeners remain loopback-only unless a
   separately authenticated Tailscale proxy is deliberately approved.
 - Egress is restricted to required model, web, Discord, aggregate-report, and
@@ -436,9 +590,9 @@ stays in place as offline source evidence.
 
 Hermes uses three no-login service users, separate account homes under
 `/var/lib/hermes/*`, native named-profile homes below each account's
-`.hermes/profiles/` directory, and root-owned policy and secrets. Astra uses the
-native local backend within the `hermes-astra` account and hardened systemd
-namespace; Dubble and Rigel expose no terminal tools. `ProtectHome=true`,
+`.hermes/profiles/` directory, and root-owned policy and secrets. Astra and
+Rigel use native local backends within their separate service accounts and
+hardened systemd namespaces; Dubble exposes no terminal tools. `ProtectHome=true`,
 separate UIDs, and the absence of raw-source mounts prevent Hermes from reading
 the OpenClaw tree or the controller user's home. Memory conversion runs as a
 separate attended root-controlled transaction against stopped source state and
@@ -459,9 +613,9 @@ one Unix identity:
 
 | Identity | Account home | Native profile home | Authority |
 | --- | --- | --- | --- |
-| `hermes-astra` | `/var/lib/hermes/astra` | `/var/lib/hermes/astra/.hermes/profiles/astra` | Primary conversation, native non-root local tools, web research, review synthesis, LCM/Mem0 recall, approved learning proposals, aggregate reports, fixed cross-host Docker tools, and the Rigel route/schedule |
+| `hermes-astra` | `/var/lib/hermes/astra` | `/var/lib/hermes/astra/.hermes/profiles/astra` | Primary conversation, native non-root local tools, web research, review synthesis, LCM/Mem0 recall, guarded native learning, aggregate reports, and inventory-derived cross-host Docker tools; temporarily retains the Rigel route until dedicated promotion |
 | `hermes-dubble` | `/var/lib/hermes/dubble` | `/var/lib/hermes/dubble/.hermes/profiles/dubble` | Public support only; no terminal, host report, infrastructure, update, or cross-profile credential access |
-| `hermes-rigel` | `/var/lib/hermes/rigel` | `/var/lib/hermes/rigel/.hermes/profiles/rigel` | Dormant retained study profile; no active Gateway, Discord credential, or production schedule |
+| `hermes-rigel` | `/var/lib/hermes/rigel` | `/var/lib/hermes/rigel/.hermes/profiles/rigel` | Dedicated academic conversation, study skill, course/calendar state, memory, model route, vision, no-agent reminder schedule, and unprivileged local C++ coursework tools confined to its owned academic workspace |
 
 Each native profile home has independent config, auth, state database, memory, skills,
 sessions, cron, pending approvals, cache, sandbox metadata, and logs. Files are
@@ -521,13 +675,28 @@ backup, dependency migration, syntax rollback, config migration, and Gateway
 restart remain in upstream Hermes. The bridge does not implement an updater.
 Dubble and Rigel have no update trigger or sudoers entry.
 
+One reviewed reliability correction is maintained as a committed
+`astra-managed-parity` branch rather than an uncommitted source edit. It
+persists the complete accepted inbound event FIFO before Gateway teardown,
+including message, media, routing, profile, and trust fields; restores those
+events through normal adapter/session dispatch; and acknowledges each event
+only after that event's turn and transcript/session writes succeed. Production
+convergence applies the patch in an isolated Git worktree, validates and
+compiles the exact four changed paths, commits before switching the live
+checkout, and takes a full Git bundle first. Hermes's supported
+`updates.parked_branch_strategy: update_in_place` keeps the maintained branch
+checked out and merges `origin/main` into it during native updates. A merge
+conflict aborts the update without dropping the patch, and a source validator
+runs after every successful native update.
+
 The oneshot runs as `hermes-astra`, not root, and invokes the native CLI entry
 directly so it cannot recurse through the launcher trigger. This lets Hermes use
 its normal private mode-`0700` profile home without ACL or group exceptions. The
 unit does not set `HERMES_MANAGED_DIR`; the entire root-managed Astra directory
 is inaccessible to it, so Hermes cannot load the Gateway's credentials while
-updating. It has no Linux capabilities and sees root-owned behavior, plugin,
-script, and imported-data paths read-only. Hermes's own restart logic may issue
+updating. It has no Linux capabilities. Profile-authored behavior remains
+profile-owned; security policy, plugins, managed support scripts, and retained
+evidence remain root-owned and read-only. Hermes's own restart logic may issue
 only `reset-failed`, `start`, and `restart` for the three enumerated Hermes
 Gateway units. Together with the exact update-unit trigger, those commands are
 Astra's entire sudo surface. Dubble and Rigel have no sudo authority.
@@ -544,7 +713,7 @@ Hermes intentionally excludes the optional `messaging` and `mem0` profiles from
 lock, and the native update unit reconciles the current source tree's official
 `messaging` and `mem0` extras after Hermes completes its own update. The updater runs with
 the code-only `hermes-runtime-readers` primary group, then normalizes that
-shared credential-free checkout and restarts Astra and Dubble through the same
+shared credential-free checkout and restarts Astra, Dubble, and Rigel through the same
 exact-command sudo boundary. This does not grant access to another profile's
 home, managed environment, token, memory, or imported data.
 
@@ -587,24 +756,45 @@ public egress. DDGS remains a rate-limited search backend and does not provide
 page extraction; a credentialed extraction provider is an optional future
 upgrade, not assumed parity.
 Bundled skills are initially opted out; only reviewed, required skills are
-seeded per role. Do not configure root-owned baseline skills only through
-`skills.external_dirs` in managed scope: Hermes v0.20.0's lightweight runtime
-skill loader reads the profile-local config directly and would ignore that
-merged managed value even though `hermes config check` accepts it.
+seeded per role. The currently retained root-owned baseline is bind-mounted at
+`skills/managed` and validated through the same `skill_view` path cron uses.
+That path is a migration/restore baseline, not the mutable ownership target.
+Hermes searches the profile-local native skill root before configured external
+roots, and treats external roots as externally owned for autonomous lifecycle
+maintenance. The ownership migration therefore seeds ordinary skills into the
+profile-local root and uses a separate Astra-owned shared path for
+`self-evolution`; it must remove duplicate-name ambiguity before retiring the
+retained bind.
 
 Hermes v0.20.0 otherwise starts a background Tirith installer when the scanner
 is absent. The managed deployment disables that lazy path and authenticates the
 initial Tirith release with exact SHA-256 plus `cosign` verification against
 the official GitHub Actions identity and issuer. It installs that bootstrap
-artifact at `/var/lib/hermes-updater/.local/bin/tirith`, owned by a dedicated
-no-login identity. This location matters: Tirith classifies system paths such
-as `/usr/local/libexec` as package-managed and refuses native self-replacement,
-whereas its supported `~/.local/bin` layout is self-managed. Future scanner
-updates therefore run unmodified `tirith update --yes --format json`, retaining
-Tirith's mandatory signature check, atomic swap, previous-binary sidecar, and
-native rollback. Service startup uses the absolute binary with
-`TIRITH_OFFLINE=1`; attended deployment also proves one benign allow verdict
-and one pipe-to-interpreter block verdict without network access.
+artifact at `/var/lib/hermes-updater/.local/bin/tirith` and installs Tirith
+0.4's paired package-approval helper at its required root-owned
+`/usr/local/libexec` path. The scanner's home location matters: Tirith
+classifies `/usr/local/libexec` as package-managed and refuses scanner
+self-replacement there, whereas its supported `~/.local/bin` layout is
+self-managed. Future updates therefore run unmodified
+`tirith update --yes --format json` as root inside a capability-empty unit with
+strict filesystem protection and only those two writable roots. The unit does
+not set `RestrictSUIDSGID`: on stable 0.4 that restriction makes GNU tar return
+`ENOSYS` while extracting the signed archive's completion/manpage files. All
+other reviewed hardening remains. Tirith retains mandatory signature checks,
+atomic replacement, previous-binary sidecars, and native rollback. Service
+startup uses the absolute binary with `TIRITH_OFFLINE=1`; attended deployment
+also proves one benign allow verdict and one pipe-to-interpreter block verdict
+without network access.
+Ubuntu 24.04 does not provide Cosign in its default package repositories, so a
+fresh bootstrap installs the reviewed official stable Linux AMD64 binary at
+`/usr/local/bin/cosign`, enforces its GitHub-published SHA-256, and verifies its
+exact version before it may authenticate Tirith.
+On a first install, Ansible's Git checkout can normalize line endings in three
+upstream PowerShell test files. The bootstrap accepts only that exact path set
+and only when `git diff --ignore-space-at-eol` proves no semantic change, then
+restores those worktree files from the reviewed commit and requires a fully
+clean checkout before dependency synchronization. Existing runtime checkouts
+are outside this normalization path.
 The policy-schema transaction advances an existing profile-local config only
 when it is the exact prior one-key version stub. Any profile with additional
 mutable settings remains blocked for an explicit reviewed migration.
@@ -627,10 +817,15 @@ permissions and the systemd namespace permit, but cannot be modified. Material
 infrastructure changes still require the normal Hermes approval policy and an
 operator-controlled privileged path.
 
-Dubble and Rigel expose no terminal, file, or code toolsets. Their retained
-Docker backend configuration stays rootless, networkless, and mountless only
-as inert defense in depth; it is not Astra's execution environment and does not
-need to replicate host access.
+Dubble exposes no terminal, file, or code toolsets. Rigel exposes Hermes's
+native file and local terminal tools, with both its process working directory
+and `TERMINAL_CWD` fixed to its isolated writable academic tree. The terminal
+runs as `hermes-rigel`, supports ordinary C++ source, compile, run, test, and
+debug work, and cannot read profile secrets, other profiles, the owner home, or
+administrator surfaces; terminal-originated network is denied. Rigel can also
+ingest syllabuses, slides, notes, and course state directly. Dubble's
+retained Docker backend configuration stays rootless, networkless, and
+mountless only as inert defense in depth.
 
 ### Mandatory Hermes Policy
 
@@ -639,7 +834,8 @@ Root-owned managed scope enforces at least:
 - manual command approvals, with `cron_mode: manual` for Astra and `deny` for
   Dubble and Rigel;
 - no permanent command allowlist;
-- memory and skill write approval enabled;
+- approval-free guarded profile-local memory and skill writes, without authority
+  over root-managed policy or another profile;
 - agent-created skill scanning enabled;
 - lazy runtime installs disabled;
 - secret redaction, context injection scanning, SSRF protection, and website
@@ -703,12 +899,16 @@ their schema/signature/age, and atomically publish root-owned read-only inputs
 for Astra. Dubble and Rigel cannot traverse those paths.
 
 The live Docker inventory reporter uses a prompt-resistant schema-v2 result and
-a dedicated `agent-report` identity on all four Docker hosts. The live update
-path uses a different key and `agent-auto-update` identity on the three hosts
-whose existing `docker-auto-update.timer` is enabled. It accepts only `status`
-or `run` for that fixed root-owned service, adds a one-hour cooldown, and emits
-bounded result tokens. Astra cannot select images, services, paths, arguments,
-or Compose options and cannot reach a Docker daemon.
+a dedicated `agent-report` identity on every current Ansible `docker_hosts`
+member. Ansible derives the endpoint manifest and pinned SSH host keys from
+inventory and live host facts; the Astra plugin reloads the root-owned manifest
+on every call. Container membership is discovered from each live Engine every
+five minutes and is never hardcoded into the plugin. The update path uses a
+different key and `agent-auto-update` identity only where the existing
+`docker-auto-update.timer` policy is enabled. It accepts only `status` or `run`
+for that root-owned service, adds a one-hour cooldown, and emits bounded result
+tokens. Astra cannot select images, services, paths, arguments, or Compose
+options and cannot reach a Docker daemon.
 
 Scheduled systemd updates remain automatic. The native Astra plugin asks for
 fresh approval only for an unscheduled `run`, and its rule key includes the
@@ -765,7 +965,8 @@ The credential-free machine-readable declaration is
 `scripts/agents/hermes-shadow-target-audit.py`; it rejects unknown top-level
 schema instead of using natural-language phrase matching. The declaration pins
 `jn-t14s-lin`, forbids concurrent OpenClaw/Hermes gateways, forbids raw source
-mounts or wholesale copies, and retains the source files offline.
+mounts or wholesale copies, retains the raw source files offline, and requires
+Astra's separate redacted read-only evidence projection to remain available.
 
 ## Gate 4 Declarative Runtime
 
@@ -787,10 +988,11 @@ Its modes are explicit:
   scheduler delivery, route, dashboard, or API listener.
 
 Each profile has a distinct no-login OS identity, fixed home, subordinate-ID
-range, root-owned managed scope, and hardened system unit. Astra alone exposes
-native local terminal, file, and code tools; Dubble and Rigel expose none. The
-retained dormant Docker backend has no Docker group/socket, host mounts, host
-user mapping, forwarded environment, forwarded credentials, or network.
+range, root-owned managed scope, and hardened system unit. Astra exposes native
+local terminal, file, and code tools. Rigel exposes native file and local
+terminal operations inside its own academic tree; Dubble exposes none. Any retained dormant
+Docker backend has no Docker group/socket, host mounts, host user mapping,
+forwarded environment, forwarded credentials, or network.
 Managed-scope validation is not treated as the sandbox: filesystem ownership,
 the dedicated identities, and systemd controls remain independently required.
 
@@ -959,6 +1161,16 @@ Health user services remained active and enabled. The pre-seed rollback is
 `/srv/live-rollbacks/jn-t14s-lin/hermes-migration/20260813T235259Z-pre-profile-memory`;
 its manifest hash matches the retained archive.
 
+That compact file-memory seed is distinct from provider-backed conversation
+memory. Dubble's later native activation audited all 3,228 canonical retained
+conversations against five retained route indexes and imported only the one
+conversation with exact public-route proof (11 eligible messages). The other
+3,227 conversations remain preserved offline and are not model-visible.
+Dubble's separate `memories_hermes_dubble_v3` Qdrant collection was initialized
+empty because no legacy Mem0 point set had equally strong public provenance.
+The live provider passed temporary add, dense recall, BM25 recall, and delete
+acceptance, and the collection returned to zero points afterward.
+
 The first live attempt exposed an Ansible transport issue: `become_user`
 could not create a module directory beneath the controller's root-only remote
 temporary path. The transaction restored all three stores before failing. The
@@ -1039,21 +1251,25 @@ an inconsistent nonempty target is a hard failure.
 
 ## Reviewed Profile Skills And Data
 
-Five legacy procedural areas have been rebuilt as declarative Hermes-native
-skills rather than copied from mutable phrase-triggered trees. Their
-root-owned sources are staged per profile, parsed and threat-scanned by the
-exact installed Hermes runtime, bound read-only under each profile's native
-skill root, and checked through Hermes's own runtime skill index before any
-Gateway can start. The accepted inactive transaction left all Gateways stopped
-and production OpenClaw and Health unchanged.
+The retained contract describes 39 profile skill instances from 37 reviewed
+Hermes-native sources. The exact root-owned projection is parser-, scanner-,
+hash-, identity-, discovery-, and namespace-validated and remains available for
+read-only audit or explicit rollback restore. It is not routine ownership.
+Rigel's academic baseline includes 13 hash-pinned Markdown/JSON protocols and
+course-state templates. The pending native-ownership transaction will seed
+ordinary skills once into profile-owned local roots and promote
+`self-evolution` into one Astra-writable shared tree consumed read-only by
+Dubble and Rigel, while profile memory and durable state remain isolated.
 
 Normal project data is a separate boundary from memory and skills.
-`files/hermes/profile-data-stage-contract.json` permits only the 16
-`data-stage` mappings and four `operator-reference` mappings already assigned
-by the pinned profile-import contract. Current planning selects 1,195 objects,
-1,125 files, and 752,637,034 bytes: 1,120 Astra files, four Dubble files, and
-one Rigel reference file. The bulk is user project/media data; it is not loaded
-into a model prompt.
+`files/hermes/profile-data-stage-contract.json` permits exactly the 24 mappings
+assigned by the pinned profile-import contract. Rigel's complete OpenClaw
+`courses/`, `memory/`, syllabus PDF, ECS-2390 inbound tree, and general inbound
+tree now map to its native writable profile data; they are no longer reduced to
+one reference file or a lossy state transform. The stager recomputes and proves
+the full object/byte inventory against source hashes before promotion. Project
+and course content is available on demand through native file operations; it is
+not injected wholesale into a model prompt.
 
 `playbooks/agents/hermes-profile-data.yml` is disabled by default. An approved
 run requires every Hermes Gateway stopped and boot-disabled, verifies the
@@ -1075,7 +1291,7 @@ prompt injection are excluded from this transaction. The original OpenClaw
 tree remains untouched and unmounted. Gateway, model, Discord, scheduler, and
 readiness activation are outside this playbook.
 
-The accepted 2026-08-13 transaction installed all 1,125 files and
+The prior accepted 2026-08-13 generation installed 1,125 files and
 752,637,034 bytes. The root-private mode-`0400` manifest strictly revalidated
 in the post-install check run, and all three transient service namespaces
 proved the exact writable/read-only bind pair as their no-login identities.
@@ -1098,21 +1314,19 @@ The failed-attempt rollback and the targeted pre-correction contract/stager
 rollback remain under the same live-rollbacks domain for diagnosis.
 
 Structured legacy runtime state is a separate transaction from copied project
-data. `files/hermes/profile-transform-contract.json` declares exactly six
-conversions and seven input objects. The root-owned transformer parses and
-canonicalizes FreshRSS dedupe state, Reddit sync state, the private sobriety
-tracker, Nextcloud task state, an empty Dubble user registry, and Rigel's
-completed-semester/calendar-request source. It neither copies nor mounts the
-169 MB Rigel course archive into a profile.
+data. `files/hermes/profile-transform-contract.json` now declares exactly five
+Astra/Dubble conversions: FreshRSS dedupe state, Reddit sync state, the private
+sobriety tracker, Nextcloud task state, and an empty Dubble user registry.
+Rigel is absent from this transformer. Its source archive is copied intact into
+native writable profile data, and the academic skill maintains
+`courses/academic-state.json` using a hash-pinned native template.
 
-Rigel migration is intentionally fail-closed. The legacy source is accepted
-only when it explicitly identifies a completed semester, says there are no
-upcoming exams, and has no pending calendar request below its marker. Active,
-ambiguous, or pending state must be curated into the native academic schema by
-an operator instead of being guessed from Markdown. The accepted migration
-produces zero events and zero calendar requests, so the always-on 30-minute
-evaluator is immediately idle and emits no stdout, reasoning text, token, or
-Discord message.
+Rigel scheduling remains fail-closed without a legacy compatibility directory.
+The always-on 30-minute evaluator reads only
+`imported-data/courses/academic-state.json`. A missing state file is a healthy
+`idle-uninitialized` result, while expected idle or malformed state emits no
+stdout, reasoning text, token, or Discord message. Alerts become possible only
+after Rigel has ingested source-grounded course dates into that native file.
 
 `playbooks/agents/hermes-profile-transforms.yml` stages the small generation
 under `/var/lib/hermes/profile-transforms`, records a root-only manifest and
@@ -1125,49 +1339,58 @@ staging run and does not start a Gateway, model, scheduler, or messaging route.
 ## Behavior And Self-Evolution
 
 The replacement does not use a plugin or phrase table to decide when Astra
-should research, compare hardware, perform RCA, or learn. The root-owned
-`AGENTS.md` for each profile is always loaded with its `SOUL.md`. Astra selects
-evidence from the request's intent, stakes, uncertainty, exact object, current
-thread, and durable project state. Dubble and Rigel have separate operating
-contracts and cannot read Astra's policy or data through a shared profile.
+should research, compare hardware, perform RCA, or learn. Each profile's
+profile-owned `AGENTS.md` is always loaded with its `SOUL.md`; Ansible seeds
+both only when absent and does not overwrite reviewed native evolution. Astra
+selects evidence from the request's intent, stakes, uncertainty, exact object,
+current thread, and durable project state. Dubble and Rigel have separate
+operating contracts and cannot read Astra's policy or data through a shared
+profile.
 
 Hermes' native background review is the semantic self-evolution mechanism. It
 runs after a turn and can propose compact memory or procedural skill changes.
-Both `memory.write_approval` and `skills.write_approval` remain enabled in the
-root-managed config, so foreground and background writes are staged rather
-than applied. Pending proposals survive restart and are reviewed with
-`/memory pending`, `/memory approve`, `/memory reject`, `/skills pending`,
-`/skills diff`, `/skills approve`, and `/skills reject`. Background memory
-notifications are off so this mechanism does not append another process wall
-to an otherwise normal answer. Official behavior and approval semantics are
-documented under
+The shared declarative self-evolution skill gives all three agents the same
+review, evidence, and proposal procedure; an approved change updates one
+canonical source and is projected to every profile. This does not merge their
+memories or grant cross-profile reads.
+All three profiles set `memory.write_approval: false` and
+`skills.write_approval: false` for their isolated native state, with
+`guard_agent_created: true`. Foreground and background improvements can
+therefore persist without waiting for Johnny, while root-managed policy,
+credentials, tools, other profiles, and the fleet-shared skill remain outside
+ordinary write authority. Astra is the sole reviewer and writer for the shared
+`self-evolution` tree; Dubble and Rigel submit bounded proposals through their
+peer path. Background maintenance remains silent unless a real owner or
+operator decision is blocked. Official behavior is documented under
 [persistent memory](https://hermes-agent.nousresearch.com/docs/user-guide/features/memory/)
 and [skills](https://hermes-agent.nousresearch.com/docs/user-guide/features/skills/).
 
-The agent may propose only three writable outcomes: user preference/stable fact
-memory, profile memory, or a reusable profile skill. Behavior, security,
-deployment, tool authority, `SOUL.md`, and `AGENTS.md` remain root-owned and
-outside agent write access. The agent cannot approve its own proposal. If an
-existing general rule already covered a failure, the correct outcome is a
-regression or enforcement proposal, not another incident-specific reminder.
+The agent may write stable preference or profile memory and create or improve
+a reusable profile-local skill. Profile-owned `SOUL.md` and `AGENTS.md` may
+evolve through the reviewed native workflow after ownership migration.
+Security floors, deployment, credentials, and tool authority remain root-owned
+and outside agent write access. Ansible never reverts valid profile-authored
+behavior during normal convergence. If an existing general rule already
+covered a failure, the correct outcome is a regression or enforcement repair,
+not another incident-specific reminder.
 
 `files/hermes/behavior-regressions.json` converts the saved private transcripts
-into 12 sanitized promotion cases without copying transcript text, private
+into 14 sanitized promotion cases without copying transcript text, private
 paths, or platform identifiers into the repository. The cases cover antecedent
 resolution, current regional research, purchase-state reconciliation,
 compatibility versus performance, direct decisions, useful walkthrough
 checkpoints, expected absence, incident RCA, scope/preferences, concise Star,
-source-backed alerts, and correction generalization. The isolated model run
-passed all nine model-owned cases with independent Vega and Antares verdicts;
-current research, deterministic idle silence, and concise Star synthesis passed
-through their separately owned integration gates.
+reversible recommendation latency, busy follow-up FIFO delivery, source-backed
+alerts, and correction generalization. The isolated model suite contains ten
+model-owned cases; current research, deterministic idle silence, concise Star
+synthesis, and busy follow-up FIFO retain separately owned integration gates.
 
-The corpus assigns each case to its real execution owner. Nine reasoning cases
+The corpus assigns each case to its real execution owner. Ten reasoning cases
 run privately through `scripts/agents/hermes-behavior-acceptance.py` and require
 independent Vega and Antares semantic pass verdicts. Current regional research
 waits for the reviewed live-evidence route, idle absence remains owned by the
-deterministic Rigel evaluator, and concise Star synthesis remains a Gateway
-integration test. The runner must not collapse those three boundaries into a
+deterministic Rigel evaluator, and concise Star synthesis plus busy follow-up
+FIFO remain Gateway integration tests. The runner must not collapse those four boundaries into a
 generic model prompt merely to report a complete gate.
 
 ## Migration Gates
@@ -1176,7 +1399,8 @@ generic model prompt merely to report a complete gate.
    sessions, jobs, and backups without stopping production.
 2. **Parity:** approve this matrix and record every unsupported/manual item.
 3. **Target design:** define the service identity, paths, systemd units,
-   sandbox, secrets, backup, loopback listeners, and fixed host-action schemas.
+   sandbox, secrets, backup, loopback listeners, and inventory-derived typed
+   host-action schemas.
 4. **Shadow install:** install Hermes with no production bot token, delivery,
    host authority, cron delivery, dashboard, or external listener.
 5. **Dry-run import:** run `hermes claw migrate --dry-run` against a protected
@@ -1198,15 +1422,15 @@ generic model prompt merely to report a complete gate.
 Gates 1 through 8 completed on 2026-08-14. OpenClaw's production Gateway,
 isolated canaries, repo-sync timer, and update-check timer are stopped and
 disabled; its files remain offline for reference and rollback. Health remains
-an independent active user service. Astra and Dubble are the two active Hermes
-Discord consumers. Astra also owns the Rigel channel prompt, skill binding,
-canonical academic state, and exact 30-minute no-model scheduler. The
-standalone Rigel Gateway remains disabled because the source installation has
-only two Discord applications.
+an independent active user service. Astra, Dubble, and Rigel are active Hermes
+Discord consumers with distinct applications, tokens, service identities,
+profile homes, routes, and OAuth state. Rigel owns its academic server/channel
+route and exact 30-minute no-model scheduler; Astra no longer carries a
+temporary Rigel route.
 
 The Discord consumers were migrated to Hermes's official native named-profile
-base units on 2026-08-20. Astra and Dubble are active; the standalone Rigel
-Gateway remains disabled. The units run as their dedicated service identities
+base units on 2026-08-20, and dedicated Rigel enrollment completed on
+2026-08-24. All three units run as their dedicated service identities
 with Ansible-owned hardening/readiness drop-ins, while Hermes retains ownership
 of the base lifecycle and command.
 
@@ -1220,7 +1444,7 @@ shared planned-stop task before stopping a Gateway.
 
 `playbooks/agents/hermes-native-gateway-migration.yml` is the exact-approval
 transaction used for that repair. It pauses update and automation timers,
-marks the two stops as planned, stops each consumer once, refreshes the stopped
+marks configured stops as planned, stops each active consumer once, refreshes the stopped
 file inventory, archives and copy-migrates profile state into native named
 profiles, invokes Hermes's native system installer, applies only hardened
 drop-ins, verifies Discord ownership, and retains the old roots and units for
@@ -1241,7 +1465,7 @@ proof of messaging. Both processes had stayed alive for cron after logging
 first repair. The corrected service now runs the dependency audit with the
 managed Hermes interpreter before startup and cannot become active until its
 main process owns an established TLS session. Production convergence restarts
-Astra and Dubble sequentially through Hermes's native lifecycle and rejects
+Astra, Dubble, and Rigel sequentially through Hermes's native lifecycle and rejects
 adapter, dependency, permission,
 audit, or traceback journal patterns while treating an expected no-match as a
 successful probe.
@@ -1257,9 +1481,10 @@ Current rollback artifacts include:
 - `20260820T050342-pre-runtime-converge` for the final native runtime gates
 - `20260820T050753-pre-automation` for the managed schema-38 reconciliation
 
-The Docker/security closeout completed on 2026-08-14. The result-only Docker
-reporter is live on all four Docker hosts, while the fixed managed-updater
-trigger is live only on the three hosts with an enabled updater policy. Astra
+The Docker/security boundary first completed on 2026-08-14 and its dynamic host
+manifest converged on 2026-08-23. The result-only reporter is live on every
+current `docker_hosts` member, while the managed-updater trigger is live only
+where updater policy is enabled. Astra
 receives the two credentials
 through systemd; Dubble and Rigel receive neither. Native turn-bound approval
 protects unscheduled runs, and scheduled systemd updates remain automatic.
@@ -1272,10 +1497,11 @@ native profile and memory migration on 2026-08-20. The source
 inventory contained 26 current cron rows, three logical heartbeats, and two
 historical completed one-shots. All 31 lanes have an explicit final
 disposition in `files/hermes/production-automation-reconciliation.json`.
-Seven native Astra jobs are active: Rigel's 30-minute deterministic academic
-poll, the STW and Warframe minute watches, the hourly HDD deal watch, the
+In fallback mode, Astra retains Rigel's 30-minute deterministic academic poll
+alongside the STW and Warframe minute watches, the hourly HDD deal watch, the
 07:08 Daily Summary, the 06:50 Fortnite progress report, and the Sunday 09:00
-social-seed review. Root-managed systemd timers own the retained collectors,
+social-seed review. Dedicated mode moves only the academic poll into Rigel's
+own native manifest. Root-managed systemd timers own the retained collectors,
 Warframe feed, Fortnite calendar, and three profile backups. Completed
 one-shots were not replayed; OpenClaw-specific maintenance and generic noisy
 heartbeats were retired rather than emulated.
@@ -1323,22 +1549,54 @@ summary/feed/calendar services. Identity-level Discord TLS audits, native cron
 reconciliation, Rigel idle health, Docker forced-command smoke tests, updater
 status, and direct Docker-socket denial all passed after convergence.
 
-Final capability acceptance completed on 2026-08-20. Astra runs as UID 62010
-with Hermes's native `local` terminal backend and direct terminal, file, code,
-vision, memory, context-engine, session-search, and cron toolsets on Discord.
-Its intended working directory is writable only inside the hardened service
-mount namespace; general sudo and direct Docker-socket access remain denied.
-The live namespace exposes five Astra managed skills, including
-`fortnite-tracker`, plus `hermes-lcm 0.21.0-rc2`; Mem0 reports installed and
-available. The managed config is schema 38, uses `openai-codex/gpt-5.6-sol`
-with an 8,192-token output ceiling, and has exactly one fallback,
-`ollama-cloud/glm-5.2`. A GLM-only exact-output smoke test and a direct local
-image Gemini vision test both passed without consuming GPT-5.6 or creating an
-Astra session. Astra and Dubble own established Discord TLS sessions, Rigel's
-standalone Gateway remains disabled, all seven production/backup timers and
-both update timers are active, Health remains active, OpenClaw remains stopped,
-and the post-convergence Gateway journals contain no adapter, dependency,
-audit, traceback, or permission failures.
+The 2026-08-24 checkpoint validates three distinct Discord applications,
+active Gateways, isolated routes, Rigel's academic behavior and schedule, and
+Astra's native non-root tool path. Overall acceptance remains open for the
+remaining exhaustive source/reference and latest-stable audit; no beta,
+preview, RC, or legacy/v1 dependency may remain where a supported stable
+replacement exists.
+
+## Astra Prowlarr Administration
+
+The 2026-08-26 Prowlarr failure was credential drift, not missing Astra
+authority. Prowlarr's native API key had rotated on 2026-08-23 while the
+root-private credential isolated behind Astra's Arr broker retained the prior
+key. The stale key returned HTTP 401, and the broker misclassified Prowlarr's
+non-JSON error body as `unsupported-response`. In addition, Prowlarr's native
+indexer schema exceeded the generic two-megabyte response limit and the generic
+Arr mutation boundary correctly rejected tracker secret fields. Those three
+independent conditions made tracker enrollment unusable.
+
+The existing Arr plugin and broker now expose two narrow Prowlarr operations;
+no second plugin, shell, Docker access, or direct API key was added. Filtered
+schema discovery reads up to eight megabytes inside the broker but returns no
+more than 20 sanitized matches. Indexer test, create, and positive-integer-ID
+update accept declared tracker secrets in a separate map, require a valid bound
+owner turn, reject unmatched or non-secret-shaped fields, and redact every
+response recursively. A direct owner request for that exact typed operation
+does not trigger a second approval prompt; an unbound call is blocked. The
+generic Arr request tool continues to require write approval and deny all
+secret-bearing mutations. Broker audit records contain only service, method,
+path, and status; they never contain request or response bodies.
+
+Live acceptance as `hermes-astra` passed for Bazarr, Prowlarr, Radarr, and
+Sonarr. A filtered Prowlarr schema query returned bounded matches from 134
+eligible definitions, the deployed validator reported all four model-visible
+tools, and a synthetic secret redaction probe proved that the supplied value
+was absent from rendered tool-call text. No production tracker was added
+without an owner-supplied tracker identity and settings. The deployment used
+rollback
+`/srv/live-rollbacks/jn-t14s-lin/hermes-migration/20260826T003854-pre-arr-api`.
+A subsequent owner interaction created SeedCore through the narrow tool with
+ratio `5.0`, no time limits, and priority `11`; a native read-back and HTTP 200
+indexer test passed. HD-Space was corrected natively to priority `12`, and both
+Sonarr and Radarr synchronized the complete requested ordering. The obsolete
+hardcoded indexer-priority mutator was retired instead of expanded. Prowlarr
+indexer settings remain native backed-up application state, not Ansible-owned
+policy. A subsequent zero-drift convergence did not restart Astra. Prowlarr API-key
+rotation remains a platform-secret event: the rotation workflow must run the
+exact Arr credential convergence transaction so the isolated broker copy is
+refreshed and revalidated without exposing the key to Astra.
 
 ## Deferred Movie DJ Research
 

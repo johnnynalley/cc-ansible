@@ -69,7 +69,8 @@ MODE_OWNER_CLASSES = {
     "structured-transform": {"executor-writable", "operator-readonly"},
 }
 REVIEWER_RULES = {"antares-memory-data", "vega-memory-data"}
-MEMORY_RULES = {"dubble-memory", "legacy-memory-tree", "rigel-memory"}
+MEMORY_RULES = {"dubble-memory", "legacy-memory-tree"}
+ACADEMIC_DATA_RULES = {"rigel-memory"}
 
 
 class ProfileImportAuditError(RuntimeError):
@@ -314,6 +315,16 @@ def _validate_workspace_mappings(
         if not mapping or mapping["importMode"] != "memory-curation":
             raise ProfileImportAuditError(
                 f"memory source {rule_id} must use approved curation"
+            )
+    for rule_id in ACADEMIC_DATA_RULES:
+        mapping = mappings.get(rule_id)
+        if not mapping or (
+            mapping["importMode"] != "data-stage"
+            or mapping["exposure"] != "on-demand"
+            or mapping["profile"] != "rigel"
+        ):
+            raise ProfileImportAuditError(
+                f"academic data source {rule_id} must remain isolated Rigel data"
             )
     return {
         "mappingCount": len(mappings),

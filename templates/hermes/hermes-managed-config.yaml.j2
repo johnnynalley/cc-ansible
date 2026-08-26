@@ -1,6 +1,6 @@
 ---
 # Managed by Ansible. Root-owned policy for {{ hermes_profile.name }}.
-_config_version: {{ hermes_shadow_config_version }}
+_config_version: {{ hermes_managed_config_version | default(hermes_shadow_config_version) }}
 timezone: America/Chicago
 max_concurrent_sessions: 4
 group_sessions_per_user: true
@@ -14,6 +14,9 @@ model:
 {% if hermes_profile.model_max_tokens is defined %}
   max_tokens: {{ hermes_profile.model_max_tokens }}
 {% endif %}
+{% if hermes_profile.model_supports_vision is defined %}
+  supports_vision: {{ 'true' if hermes_profile.model_supports_vision else 'false' }}
+{% endif %}
 {% if hermes_profile.fallback_providers | default([]) %}
 
 fallback_providers:
@@ -23,12 +26,29 @@ fallback_providers:
 {% endfor %}
 {% endif %}
 
-{% if hermes_profile.auxiliary_vision is defined %}
+{% if hermes_profile.auxiliary_vision is defined or hermes_profile.auxiliary_approval is defined or hermes_profile.auxiliary_background_review is defined %}
 auxiliary:
+{% if hermes_profile.auxiliary_approval is defined %}
+  approval:
+    provider: "{{ hermes_profile.auxiliary_approval.provider }}"
+    model: "{{ hermes_profile.auxiliary_approval.model }}"
+    timeout: {{ hermes_profile.auxiliary_approval.timeout }}
+    reasoning_effort: {{ hermes_profile.auxiliary_approval.reasoning_effort }}
+{% endif %}
+{% if hermes_profile.auxiliary_background_review is defined %}
+  background_review:
+    enabled: {{ 'true' if hermes_profile.auxiliary_background_review.enabled else 'false' }}
+    provider: "{{ hermes_profile.auxiliary_background_review.provider }}"
+    model: "{{ hermes_profile.auxiliary_background_review.model }}"
+    timeout: {{ hermes_profile.auxiliary_background_review.timeout }}
+    reasoning_effort: {{ hermes_profile.auxiliary_background_review.reasoning_effort }}
+{% endif %}
+{% if hermes_profile.auxiliary_vision is defined %}
   vision:
     provider: {{ hermes_profile.auxiliary_vision.provider }}
     model: {{ hermes_profile.auxiliary_vision.model }}
     reasoning_effort: {{ hermes_profile.auxiliary_vision.reasoning_effort }}
+{% endif %}
 {% endif %}
 
 runtime:
@@ -44,6 +64,10 @@ gateway:
 {% for value in hermes_profile.discord_allowed_users %}
           - "{{ value }}"
 {% endfor %}
+        allowed_roles:
+{% for value in hermes_profile.discord_allowed_roles | default([]) %}
+          - "{{ value }}"
+{% endfor %}
         allow_admin_from:
 {% for value in hermes_profile.discord_admin_users %}
           - "{{ value }}"
@@ -55,6 +79,37 @@ gateway:
         user_allowed_commands: []
         group_user_allowed_commands: []
         slash_commands: {{ 'true' if hermes_profile.discord_slash_commands else 'false' }}
+
+{% if hermes_profile.bot_peers is defined %}
+bot_peers:
+{% for peer_name, peer in hermes_profile.bot_peers.items() %}
+  {{ peer_name }}:
+    url: {{ peer.url }}
+{% endfor %}
+{% endif %}
+
+{% if hermes_profile.native_messaging_bridge | default(false) %}
+mcp_servers:
+  hermes_messaging:
+    command: {{ hermes_shadow_runtime_binary }}
+    args:
+      - mcp
+      - serve
+    env:
+      HOME: {{ hermes_profile.account_home }}
+      HERMES_HOME: {{ hermes_profile.home }}
+      # Keep the native stdio server on the real profile state while preventing
+      # `hermes mcp serve` from rediscovering this same managed server.
+      HERMES_MANAGED_DIR: /etc/hermes/{{ hermes_profile.name }}/mcp-server
+      DISCORD_BOT_TOKEN: "${DISCORD_BOT_TOKEN}"
+    tools:
+      include:
+{% for tool_name in hermes_native_messaging_tools %}
+        - {{ tool_name }}
+{% endfor %}
+      resources: false
+      prompts: false
+{% endif %}
 
 cron:
   script_timeout_seconds: 30
@@ -85,15 +140,30 @@ web:
   search_backend: ddgs
 {% endif %}
 
+{% if 'image_gen' in hermes_profile.toolsets %}
+image_gen:
+  provider: openai-codex
+{% endif %}
+
+{% if 'tts' in hermes_profile.toolsets %}
+tts:
+  provider: edge
+{% endif %}
+
 toolsets:
 {% for toolset in hermes_profile.toolsets %}
   - {{ toolset }}
 {% endfor %}
 
 agent:
-  verify_on_stop: auto
+  verify_on_stop: false
   verify_guidance: true
   max_verify_nudges: 2
+  todo_stop_guard: {{ hermes_profile.todo_stop_guard | default(false) | bool | lower }}
+  max_todo_stop_nudges: {{ hermes_profile.max_todo_stop_nudges | default(4) }}
+{% if hermes_profile.image_input_mode is defined %}
+  image_input_mode: {{ hermes_profile.image_input_mode }}
+{% endif %}
   disabled_toolsets:
 {% for toolset in hermes_profile.disabled_toolsets %}
     - {{ toolset }}
@@ -126,12 +196,16 @@ terminal:
   timeout: 180
 
 approvals:
-  mode: manual
+  mode: {{ hermes_profile.approval_mode | default('manual') }}
   timeout: 300
   cron_mode: {{ hermes_profile.cron_approval_mode | default('deny') }}
   mcp_reload_confirm: true
   destructive_slash_confirm: true
   denial_breaker_threshold: 3
+{% if hermes_profile.approval_smart_policy is defined %}
+  smart_policy: >-
+    {{ hermes_profile.approval_smart_policy }}
+{% endif %}
   deny:
 {% for pattern in hermes_profile.approval_deny %}
     - '{{ pattern }}'
@@ -148,6 +222,8 @@ security:
 
 updates:
   non_interactive_local_changes: discard
+  auto_switch_parked_branch: true
+  parked_branch_strategy: update_in_place
 
 memory:
 {% if hermes_profile.memory_provider is defined %}
@@ -155,13 +231,30 @@ memory:
 {% endif %}
   memory_enabled: true
   user_profile_enabled: true
-  memory_char_limit: 2200
-  user_char_limit: 1375
-  write_approval: true
+  memory_char_limit: {{ hermes_profile.memory_char_limit | default(2200) }}
+  user_char_limit: {{ hermes_profile.user_char_limit | default(1375) }}
+  write_approval: {{ 'true' if hermes_profile.memory_write_approval | default(true) else 'false' }}
+  nudge_interval: {{ hermes_profile.memory_nudge_interval | default(10) }}
 
 skills:
   guard_agent_created: true
-  write_approval: true
+  write_approval: {{ 'true' if hermes_profile.skills_write_approval | default(true) else 'false' }}
+  creation_nudge_interval: {{ hermes_profile.skills_creation_nudge_interval | default(10) }}
+
+{% if hermes_profile.curator is defined %}
+curator:
+  enabled: {{ 'true' if hermes_profile.curator.enabled else 'false' }}
+  interval_hours: {{ hermes_profile.curator.interval_hours }}
+  min_idle_hours: {{ hermes_profile.curator.min_idle_hours }}
+  stale_after_days: {{ hermes_profile.curator.stale_after_days }}
+  archive_after_days: {{ hermes_profile.curator.archive_after_days }}
+  consolidate: {{ 'true' if hermes_profile.curator.consolidate else 'false' }}
+  prune_builtins: {{ 'true' if hermes_profile.curator.prune_builtins else 'false' }}
+  archive_ttl_days: {{ hermes_profile.curator.archive_ttl_days }}
+  backup:
+    enabled: {{ 'true' if hermes_profile.curator.backup.enabled else 'false' }}
+    keep: {{ hermes_profile.curator.backup.keep }}
+{% endif %}
 
 compression:
   enabled: true
@@ -169,6 +262,7 @@ compression:
 
 display:
   tool_progress: "off"
+  busy_input_mode: queue
   busy_ack_enabled: false
   background_process_notifications: error
   memory_notifications: "off"
@@ -177,6 +271,14 @@ streaming:
   enabled: false
 
 discord:
+  server_actions:
+{% for action in hermes_profile.discord_server_actions %}
+    - {{ action }}
+{% endfor %}
+  allowed_roles:
+{% for value in hermes_profile.discord_allowed_roles | default([]) %}
+    - "{{ value }}"
+{% endfor %}
   require_mention: true
   thread_require_mention: true
   ignore_no_mention: true
@@ -224,7 +326,7 @@ discord:
     window_seconds: 0
     limit: 0
     max_dispatches: 0
-  allow_any_attachment: false
+  allow_any_attachment: {{ 'true' if hermes_profile.allow_any_attachment | default(false) else 'false' }}
   max_attachment_bytes: 16777216
   allow_mentions:
     everyone: false

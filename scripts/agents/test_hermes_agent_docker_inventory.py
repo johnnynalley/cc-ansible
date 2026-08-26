@@ -77,24 +77,31 @@ def report(host: str = "docker-vm") -> dict:
     }
 
 
-class AgentDockerInventoryTests(unittest.TestCase):
-    def test_validator_accepts_the_ordered_lcm_plugin_contract(self) -> None:
-        self.assertEqual(
-            VALIDATOR_MODULE.EXPECTED_ENABLED,
-            ["star-dispatch-privacy", "agent-docker-inventory", "hermes-lcm"],
-        )
+def endpoints() -> tuple[dict[str, str], dict[str, str]]:
+    reports = {
+        "docker-vm": "192.168.1.153",
+        "media-vm": "192.168.1.136",
+        "nextcloud-vm": "192.168.1.78",
+        "jn-t14s-lin": "192.168.1.31",
+    }
+    updates = {
+        host: address for host, address in reports.items() if host != "jn-t14s-lin"
+    }
+    return reports, updates
 
+
+class AgentDockerInventoryTests(unittest.TestCase):
     def test_validator_accepts_native_tools_only_with_the_nonroot_policy(self) -> None:
         config = """
 plugins:
-  enabled: [star-dispatch-privacy, agent-docker-inventory, hermes-lcm]
+  enabled: [star-dispatch-privacy, agent-docker-inventory, arr-api, discord-parity, hermes-lcm]
   disabled: []
-toolsets: [agent_docker, terminal, file, code_execution, cronjob]
+toolsets: [agent_docker, terminal, file, code_execution, cronjob, discord, discord_admin, discord_parity]
 agent:
-  disabled_toolsets: [computer_use, discord_admin, homeassistant]
+  disabled_toolsets: [computer_use, homeassistant]
 terminal:
   backend: local
-  cwd: /var/lib/hermes/astra/.hermes/profiles/astra/imported-data
+  cwd: /var/lib/hermes/astra/.hermes/profiles/astra
 approvals:
   deny: ['*sudo*', '*docker*', '*podman*', '*curl*|*sh*']
 """
@@ -134,7 +141,7 @@ approvals:
             playbook[promote:],
         )
 
-    def test_registers_only_fixed_docker_tools(self) -> None:
+    def test_registers_dynamic_manifest_backed_docker_tools(self) -> None:
         context = Context()
         MODULE.register(context)
         self.assertEqual([name for name, _ in context.hooks], ["pre_tool_call"])
@@ -144,14 +151,12 @@ approvals:
         )
         self.assertEqual(context.tools[0]["toolset"], "agent_docker")
         self.assertEqual(context.tools[1]["toolset"], "agent_docker")
-        self.assertEqual(
-            set(context.tools[0]["schema"]["parameters"]["properties"]["host"]["enum"]),
-            {"all", "docker-vm", "media-vm", "nextcloud-vm", "jn-t14s-lin"},
-        )
-        self.assertEqual(
-            context.tools[1]["schema"]["parameters"]["properties"]["host"]["enum"],
-            ["all", "docker-vm", "media-vm", "nextcloud-vm"],
-        )
+        inventory_host = context.tools[0]["schema"]["parameters"]["properties"]["host"]
+        update_host = context.tools[1]["schema"]["parameters"]["properties"]["host"]
+        self.assertNotIn("enum", inventory_host)
+        self.assertNotIn("enum", update_host)
+        self.assertEqual(inventory_host["pattern"], VALIDATOR_MODULE.EXPECTED_HOST_PATTERN)
+        self.assertEqual(update_host["pattern"], VALIDATOR_MODULE.EXPECTED_HOST_PATTERN)
         self.assertEqual(
             context.tools[1]["schema"]["parameters"]["properties"]["action"]["enum"],
             ["status", "run"],
@@ -168,24 +173,29 @@ approvals:
                 turn_id="turn-1",
             )
         )
-        directive = hook(
-            tool_name="docker_update",
-            args={"host": "docker-vm", "action": "run"},
-            turn_id="turn-1",
-        )
-        self.assertEqual(directive["action"], "approve")
-        self.assertEqual(directive["rule_key"], "docker-update:turn-1")
-        self.assertEqual(
-            hook(
+        with mock.patch.object(MODULE, "_load_endpoints", return_value=endpoints()):
+            directive = hook(
                 tool_name="docker_update",
                 args={"host": "docker-vm", "action": "run"},
-                turn_id="",
-            )["action"],
-            "block",
-        )
+                turn_id="turn-1",
+            )
+        self.assertEqual(directive["action"], "approve")
+        self.assertEqual(directive["rule_key"], "docker-update:turn-1")
+        with mock.patch.object(MODULE, "_load_endpoints", return_value=endpoints()):
+            self.assertEqual(
+                hook(
+                    tool_name="docker_update",
+                    args={"host": "docker-vm", "action": "run"},
+                    turn_id="",
+                )["action"],
+                "block",
+            )
 
     def test_rejects_unknown_host_without_subprocess(self) -> None:
-        with mock.patch.object(MODULE.subprocess, "run") as runner:
+        with (
+            mock.patch.object(MODULE, "_load_endpoints", return_value=endpoints()),
+            mock.patch.object(MODULE.subprocess, "run") as runner,
+        ):
             value = json.loads(MODULE._handle_inventory({"host": "evil"}))
         self.assertEqual(value["code"], "invalid-request")
         runner.assert_not_called()
@@ -203,6 +213,7 @@ approvals:
             with (
                 mock.patch.dict(os.environ, {"CREDENTIALS_DIRECTORY": temporary}),
                 mock.patch.object(MODULE, "_KNOWN_HOSTS", str(known_hosts)),
+                mock.patch.object(MODULE, "_load_endpoints", return_value=endpoints()),
                 mock.patch.object(MODULE.subprocess, "run", return_value=completed) as runner,
             ):
                 value = json.loads(MODULE._handle_inventory({"host": "docker-vm"}))
@@ -218,26 +229,71 @@ approvals:
             ["agent-report@192.168.1.153"],
         )
 
-    def test_uses_lan_openssh_instead_of_tailscale_ssh(self) -> None:
-        self.assertEqual(
-            MODULE._HOSTS,
-            {
-                "docker-vm": "192.168.1.153",
-                "media-vm": "192.168.1.136",
-                "nextcloud-vm": "192.168.1.78",
-                "jn-t14s-lin": "192.168.1.31",
-            },
-        )
-        self.assertEqual(
-            set(MODULE._HOSTS.values()),
-            VALIDATOR_MODULE.EXPECTED_REPORT_ENDPOINTS,
-        )
+    def test_endpoint_manifest_accepts_inventory_hosts_without_code_literals(self) -> None:
+        value = {
+            "schemaVersion": 1,
+            "hosts": [
+                {"name": name, "address": address, "report": True, "update": name != "jn-t14s-lin"}
+                for name, address in endpoints()[0].items()
+            ],
+        }
+        self.assertEqual(MODULE._validate_endpoint_data(value), endpoints())
+        source = PLUGIN.read_text(encoding="utf-8")
+        self.assertNotIn('"docker-vm": "192.168.1.153"', source)
+        self.assertNotIn("\n_HOSTS = {", source)
+
+    def test_endpoint_manifest_rejects_unmanaged_or_ambiguous_entries(self) -> None:
+        invalid = {
+            "schemaVersion": 1,
+            "hosts": [
+                {
+                    "name": "docker-vm",
+                    "address": "192.168.1.153",
+                    "report": True,
+                    "update": True,
+                    "command": "docker ps",
+                }
+            ],
+        }
+        with self.assertRaisesRegex(MODULE.InventoryError, "invalid-endpoints"):
+            MODULE._validate_endpoint_data(invalid)
+        invalid["hosts"][0].pop("command")
+        invalid["hosts"][0]["address"] = "host.example"
+        with self.assertRaisesRegex(MODULE.InventoryError, "invalid-endpoints"):
+            MODULE._validate_endpoint_data(invalid)
+
+    def test_playbook_derives_endpoints_and_keys_from_docker_hosts(self) -> None:
+        playbook = PLAYBOOK.read_text(encoding="utf-8")
+        self.assertIn("groups['docker_hosts'] | sort", playbook)
+        self.assertIn("ansible_default_ipv4.address", playbook)
+        self.assertIn("/etc/ssh/ssh_host_ed25519_key.pub", playbook)
+        self.assertIn("Publish managed Docker endpoint manifest", playbook)
+        self.assertNotIn("hermes_docker_inventory_host_keys", playbook)
+
+    def test_playbook_restarts_only_astra_and_only_for_runtime_drift(self) -> None:
+        playbook = PLAYBOOK.read_text(encoding="utf-8")
+        restart = playbook.index("Restart promoted production consumers natively")
+        smoke = playbook.index("Exercise Docker inventory as the real Astra identity")
+        section = playbook[restart:smoke]
+        self.assertIn("hermes_docker_inventory_astra_profile", section)
+        self.assertIn("hermes_docker_inventory_restart_required", section)
+        self.assertNotIn("hermes_production_consumer_profiles", section)
+        self.assertNotIn("Keep transitional Rigel Gateway stopped", playbook)
 
     def test_validation_does_not_create_runtime_bytecode(self) -> None:
         validator = VALIDATOR.read_text(encoding="utf-8")
+        smoke = (ROOT / "scripts/agents/hermes-agent-docker-inventory-smoke.py").read_text(
+            encoding="utf-8"
+        )
         playbook = PLAYBOOK.read_text(encoding="utf-8")
         self.assertIn("sys.dont_write_bytecode = True", validator)
+        self.assertIn("sys.dont_write_bytecode = True", smoke)
         self.assertIn("Remove stale managed plugin bytecode caches", playbook)
+        self.assertIn("Remove validation bytecode after Docker acceptance", playbook)
+        self.assertGreater(
+            playbook.index("Remove validation bytecode after Docker acceptance"),
+            playbook.index("Exercise Docker inventory as the real Astra identity"),
+        )
 
     def test_rejects_prompt_shaped_report_value(self) -> None:
         unsafe = report()
@@ -261,6 +317,7 @@ approvals:
             with (
                 mock.patch.dict(os.environ, {"CREDENTIALS_DIRECTORY": temporary}),
                 mock.patch.object(MODULE, "_KNOWN_HOSTS", str(known_hosts)),
+                mock.patch.object(MODULE, "_load_endpoints", return_value=endpoints()),
                 mock.patch.object(MODULE.subprocess, "run", return_value=completed),
             ):
                 value = MODULE._handle_inventory({"host": "docker-vm"})
@@ -294,6 +351,7 @@ approvals:
             with (
                 mock.patch.dict(os.environ, {"CREDENTIALS_DIRECTORY": temporary}),
                 mock.patch.object(MODULE, "_KNOWN_HOSTS", str(known_hosts)),
+                mock.patch.object(MODULE, "_load_endpoints", return_value=endpoints()),
                 mock.patch.object(MODULE.subprocess, "run", return_value=completed) as runner,
             ):
                 value = json.loads(

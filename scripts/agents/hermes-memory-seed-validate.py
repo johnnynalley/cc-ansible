@@ -33,7 +33,7 @@ def main() -> int:
     args = parser.parse_args()
 
     try:
-        if args.max_chars not in {1375, 2200}:
+        if args.max_chars not in {1375, 2200, 6000}:
             raise SeedError("unsupported-character-limit")
         path = Path(args.path)
         require_regular(path)

@@ -19,8 +19,10 @@ EXPECTED_CASES = {
     "explicit-scope-and-preference",
     "incident-root-cause-before-suppression",
     "purchase-commitment-reconciliation",
+    "reversible-recommendation-latency",
     "self-evolution-generalization",
     "star-concise-private-review",
+    "busy-followup-fifo",
     "thread-antecedent-resolution",
     "walkthrough-real-branch",
 }
@@ -54,6 +56,13 @@ class HermesBehaviorContractTests(unittest.TestCase):
             "routineValidationNarrationVisible",
         }:
             self.assertFalse(output[key])
+
+    def test_busy_followups_are_fifo_and_do_not_supersede_active_answers(self) -> None:
+        continuity = self.contract["continuity"]
+        self.assertEqual(continuity["busyInputMode"], "queue")
+        self.assertTrue(continuity["oneTurnPerFollowUp"])
+        self.assertFalse(continuity["unfinishedAnswerMayBeSuperseded"])
+        self.assertTrue(continuity["explicitStopOrResetMayInterrupt"])
 
     def test_native_self_evolution_is_approval_gated(self) -> None:
         evolution = self.contract["selfEvolution"]
@@ -159,11 +168,15 @@ class HermesBehaviorContractTests(unittest.TestCase):
             "gateway-integration",
         )
         self.assertEqual(
+            by_id["busy-followup-fifo"]["exerciseMode"],
+            "gateway-integration",
+        )
+        self.assertEqual(
             sum(
                 case["exerciseMode"] == "isolated-model"
                 for case in self.regressions["cases"]
             ),
-            9,
+            10,
         )
 
     def test_every_transcript_derived_failure_is_promotion_blocking_or_high(

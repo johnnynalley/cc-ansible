@@ -1,0 +1,13 @@
+[Unit]
+Description=Schedule Astra LCM {{ hermes_lcm_backfill_lane.corpus }} embedding backfill
+
+[Timer]
+OnActiveSec={{ hermes_lcm_backfill_lane.initial_delay }}
+OnUnitInactiveSec={{ hermes_lcm_backfill_lane.interval }}
+RandomizedDelaySec={{ hermes_lcm_backfill_lane.randomized_delay }}
+Persistent=true
+AccuracySec=1m
+Unit=hermes-lcm-{{ hermes_lcm_backfill_lane.corpus }}-backfill.service
+
+[Install]
+WantedBy=timers.target

@@ -1,0 +1,2 @@
+[Service]
+ExecStartPre={{ hermes_shadow_runtime_venv }}/bin/python {{ hermes_openclaw_parity_validator_live }} --contract {{ hermes_openclaw_parity_contract_live }} --skills {{ hermes_profile_skills_contract_live }} --automation {{ hermes_automation_reconciliation_live }} --astra-manifest {{ hermes_automation_manifest_live }} --dubble-manifest {{ hermes_dubble_automation_manifest_live }} --rigel-manifest {{ hermes_rigel_automation_manifest_live }} --rigel-delivery-mode {{ 'dedicated' if hermes_rigel_dedicated_discord_enabled else 'fallback' }}

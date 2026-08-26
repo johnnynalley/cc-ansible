@@ -34,17 +34,81 @@
     - item.bind_source is defined
     - (nfs_pseudo_root | default('/srv') ~ '/' ~ item.name) != item.bind_source
 
+- name: Inspect NFS export bind sources
+  ansible.builtin.command:
+    argv:
+      - /usr/bin/findmnt
+      - --target
+      - "{{ item.bind_source }}"
+      - --output
+      - SOURCE,FSTYPE
+      - --noheadings
+  loop: "{{ nfs_exports | default([]) }}"
+  loop_control:
+    label: "{{ item.name }}"
+  when: item.bind_source is defined
+  register: nfs_export_bind_sources
+  changed_when: false
+  check_mode: false
+
+- name: Require intended NFS export source filesystems
+  ansible.builtin.assert:
+    that:
+      - item.rc == 0
+      - item.stdout.split() | length == 2
+      - >-
+        item.item.bind_source_name is not defined
+        or item.stdout.split()[0] == item.item.bind_source_name
+      - >-
+        item.item.bind_source_fstype is not defined
+        or item.stdout.split()[-1] == item.item.bind_source_fstype
+    fail_msg: >-
+      Refusing to bind or export {{ item.item.name }} because
+      {{ item.item.bind_source }} is not the intended mounted filesystem.
+  loop: "{{ nfs_export_bind_sources.results }}"
+  loop_control:
+    label: "{{ item.item.name }}"
+
+- name: Write NFS export source identity markers
+  ansible.builtin.copy:
+    dest: "{{ item.bind_source }}/{{ item.bind_source_marker }}"
+    content: "{{ item.bind_source_marker_content }}"
+    owner: root
+    group: root
+    mode: "0444"
+  loop: "{{ nfs_exports | default([]) }}"
+  loop_control:
+    label: "{{ item.name }}"
+  when: item.bind_source_marker is defined
+
 - name: Create bind mounts for exports
   ansible.posix.mount:
     path: "{{ nfs_pseudo_root | default('/srv') }}/{{ item.name }}"
     src: "{{ item.bind_source }}"
     fstype: none
-    opts: "bind,nofail,x-systemd.requires-mounts-for={{ item.bind_source }}"
+    opts: >-
+      {{ item.bind_opts | default('bind,nofail,x-systemd.requires-mounts-for=' ~ item.bind_source) }}
     state: mounted
   loop: "{{ nfs_exports | default([]) }}"
   when:
     - item.bind_source is defined
     - (nfs_pseudo_root | default('/srv') ~ '/' ~ item.name) != item.bind_source
+
+- name: Reject stale NFS export bind mounts
+  ansible.builtin.command:
+    argv:
+      - /usr/bin/test
+      - "{{ nfs_pseudo_root | default('/srv') }}/{{ item.name }}"
+      - -ef
+      - "{{ item.bind_source }}"
+  loop: "{{ nfs_exports | default([]) }}"
+  loop_control:
+    label: "{{ item.name }}"
+  when:
+    - item.bind_source is defined
+    - (nfs_pseudo_root | default('/srv') ~ '/' ~ item.name) != item.bind_source
+  changed_when: false
+  check_mode: false
 
 - name: Remove obsolete same-path export bind mounts from fstab
   ansible.posix.mount:
@@ -89,6 +153,14 @@
       [Unit]
       {% for export in nfs_exports | selectattr('bind_source', 'defined') | list %}
       RequiresMountsFor={{ export.bind_source }}
+      {% if export.bind_requires_unit is defined %}
+      After={{ export.bind_requires_unit }}
+      Requires={{ export.bind_requires_unit }}
+      {% endif %}
+      {% endfor %}
+      [Service]
+      {% for export in nfs_exports | selectattr('bind_source', 'defined') | list %}
+      ExecStartPre=/usr/bin/test {{ nfs_pseudo_root | default('/srv') }}/{{ export.name }} -ef {{ export.bind_source }}
       {% endfor %}
     mode: "0644"
   notify: Reload systemd
@@ -99,3 +171,35 @@
     name: nfs-kernel-server
     enabled: true
     state: started
+    daemon_reload: true
+
+- name: Reconcile active NFS exports
+  ansible.builtin.command:
+    argv:
+      - /usr/sbin/exportfs
+      - -ra
+  changed_when: false
+  check_mode: false
+  when: not ansible_check_mode
+
+- name: Read active NFS exports
+  ansible.builtin.command:
+    argv:
+      - /usr/sbin/exportfs
+      - -v
+  register: nfs_active_exports
+  changed_when: false
+  check_mode: false
+
+- name: Require every configured NFS export to be active
+  ansible.builtin.assert:
+    that:
+      - >-
+        (nfs_pseudo_root | default('/srv') ~ '/' ~ item.name)
+        in nfs_active_exports.stdout
+    fail_msg: >-
+      NFS export {{ item.name }} is configured but absent from the active
+      kernel export table.
+  loop: "{{ nfs_exports | default([]) }}"
+  loop_control:
+    label: "{{ item.name }}"

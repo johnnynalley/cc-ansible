@@ -156,13 +156,19 @@ def _pre_llm_call(
     user_message: str,
     **_: Any,
 ) -> dict[str, str] | None:
+    session = _session(session_id)
+    if session:
+        # A dispatch marker can suppress only the turn that created it. If that
+        # turn ended before finalization, do not let the stale marker silence a
+        # later reviewer completion or user message in the same session.
+        with _lock:
+            _dispatch_turns.discard(session)
     if not isinstance(user_message, str):
         return None
     match = _COMPLETION.match(user_message.strip())
     if match is None:
         return None
     delegation_id = match.group(1)
-    session = _session(session_id)
     with _lock:
         trusted = (
             bool(session)

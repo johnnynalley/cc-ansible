@@ -1,0 +1,21 @@
+[Unit]
+Description=Ollama local model server for Hermes memory
+Documentation=https://docs.ollama.com/linux
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ollama
+Group=ollama
+Environment=HOME=/usr/share/ollama
+Environment=PATH=/usr/local/bin:/usr/bin:/bin
+Environment=OLLAMA_CONTEXT_LENGTH={{ hermes_memory_servers_ollama_context_length }}
+ExecStart={{ hermes_memory_servers_ollama_binary }} serve
+Restart=always
+RestartSec=3
+TimeoutStopSec=120
+UMask=0027
+
+[Install]
+WantedBy=multi-user.target

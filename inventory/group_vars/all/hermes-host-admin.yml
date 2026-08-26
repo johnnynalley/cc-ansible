@@ -1,0 +1,22 @@
+---
+# Shared contract for the bounded Astra host-administration target. These
+# non-secret values must be visible both to the Hermes controller and to every
+# managed Linux target enrolled by the transaction.
+hermes_host_admin_mode: disabled
+hermes_host_admin_approved: false
+hermes_host_admin_confirmation: ""
+hermes_host_admin_defer_gateway_restart: false
+hermes_host_admin_required_confirmation: >-
+  enable-bounded-host-admin-for-hermes-astra
+hermes_host_admin_user: agent-host-admin
+hermes_host_admin_group: agent-host-admin
+hermes_host_admin_home: /var/lib/agent-host-admin
+hermes_host_admin_target_source: scripts/agents/hermes-host-admin-target.py
+hermes_host_admin_target_live: /usr/local/sbin/agent-host-admin
+hermes_host_admin_target_identity: /etc/agent-host-admin.json
+hermes_host_admin_sudoers: /etc/sudoers.d/agent-host-admin
+hermes_host_admin_endpoint_network: 192.168.1.0
+hermes_host_admin_endpoint_prefix: "24"
+hermes_host_admin_source_cidrs:
+  - 100.73.46.86/32
+  - 192.168.1.31/32

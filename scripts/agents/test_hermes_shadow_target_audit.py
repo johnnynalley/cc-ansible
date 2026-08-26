@@ -51,10 +51,10 @@ class HermesShadowTargetAuditTests(unittest.TestCase):
         data["deployment"]["sourceRuntimeConcurrentEnabled"] = True
         self.assert_rejected(data, "source-runtime-concurrency-enabled")
 
-    def test_direct_source_read_is_rejected(self) -> None:
+    def test_complete_source_evidence_must_be_readable(self) -> None:
         data = copy.deepcopy(self.base)
-        data["deployment"]["sourceFilesDirectlyReadableByHermes"] = True
-        self.assert_rejected(data, "source-files-directly-readable")
+        data["deployment"]["sourceFilesDirectlyReadableByHermes"] = False
+        self.assert_rejected(data, "source-files-evidence-unreadable")
 
     def test_source_files_must_be_retained(self) -> None:
         data = copy.deepcopy(self.base)
@@ -86,10 +86,15 @@ class HermesShadowTargetAuditTests(unittest.TestCase):
         data["sandbox"]["forwardEnvironment"] = ["OPENAI_API_KEY"]
         self.assert_rejected(data, "unsafe-sandbox-forwardEnvironment")
 
-    def test_unreviewed_memory_write_is_rejected(self) -> None:
+    def test_memory_write_approval_is_not_required(self) -> None:
         data = copy.deepcopy(self.base)
-        data["commonPolicy"]["memoryWriteApproval"] = False
-        self.assert_rejected(data, "policy-required-memoryWriteApproval")
+        data["commonPolicy"]["memoryWriteApproval"] = True
+        self.assert_rejected(data, "policy-unexpected-memoryWriteApproval")
+
+    def test_skill_write_approval_is_not_required(self) -> None:
+        data = copy.deepcopy(self.base)
+        data["commonPolicy"]["skillsWriteApproval"] = True
+        self.assert_rejected(data, "policy-unexpected-skillsWriteApproval")
 
     def test_runtime_scanner_download_is_rejected(self) -> None:
         data = copy.deepcopy(self.base)
@@ -150,6 +155,16 @@ class HermesShadowTargetAuditTests(unittest.TestCase):
         data = copy.deepcopy(self.base)
         data["profiles"][0]["terminalEnabled"] = False
         self.assert_rejected(data, "profile-terminal-astra")
+
+    def test_astra_manual_approval_mode_is_rejected(self) -> None:
+        data = copy.deepcopy(self.base)
+        data["profiles"][0]["approvalMode"] = "manual"
+        self.assert_rejected(data, "profile-approval-mode-astra")
+
+    def test_dubble_smart_approval_mode_is_rejected(self) -> None:
+        data = copy.deepcopy(self.base)
+        data["profiles"][1]["approvalMode"] = "smart"
+        self.assert_rejected(data, "profile-approval-mode-dubble")
 
     def test_agent_approval_of_docker_plan_is_rejected(self) -> None:
         data = copy.deepcopy(self.base)

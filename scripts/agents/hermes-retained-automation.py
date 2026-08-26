@@ -9,6 +9,7 @@ import os
 import subprocess
 import sys
 import tempfile
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -69,23 +70,75 @@ def read_json(path: Path) -> Any:
         raise CollectorError(f"invalid-json-artifact:{path.name}") from exc
 
 
-def daily_summary(workspace: Path, output_root: Path) -> None:
-    scripts = workspace / "scripts"
-    run([sys.executable, str(scripts / "collect-media-summary.py")], cwd=workspace)
-    run([str(scripts / "daily_personal_collect.py")], cwd=workspace)
-    destination = output_root / "daily-summary.md"
+def daily_updates(workspace: Path, output_root: Path, freshrss_root: Path) -> None:
     run(
-        [sys.executable, str(scripts / "daily-summary-assemble.py")],
+        [
+            "/usr/local/libexec/hermes-daily-updates-collect",
+            "--section",
+            str(workspace / "memory/daily-summary-sections/updates.md"),
+            "--state",
+            str(output_root / "container-versions.json"),
+        ],
         cwd=workspace,
-        env={"DAILY_SUMMARY_SCRATCH_OUT": str(destination)},
     )
-    content = destination.read_text(encoding="utf-8")
-    atomic_text(destination, content)
+    run(
+        [
+            "/usr/local/libexec/hermes-freshrss-collect",
+            "--root",
+            str(freshrss_root),
+            "--section",
+            str(workspace / "memory/daily-summary-sections/rss.md"),
+        ],
+        cwd=workspace,
+        timeout=120,
+    )
+
+
+def daily_media(workspace: Path) -> None:
+    run(
+        [sys.executable, "/usr/local/libexec/hermes-media-summary-collect"],
+        cwd=workspace,
+    )
+
+
+def daily_personal(workspace: Path) -> None:
+    run(["/usr/local/libexec/hermes-daily-personal-collect"], cwd=workspace)
+
+
+def daily_assemble(workspace: Path, output_root: Path) -> None:
+    destination = output_root / "daily-summary.md"
+    scratch = output_root / f".daily-summary.{os.getpid()}.md"
+    try:
+        scratch.unlink(missing_ok=True)
+        run(
+            [sys.executable, "/usr/local/libexec/hermes-daily-summary-assemble"],
+            cwd=workspace,
+            env={"DAILY_SUMMARY_SCRATCH_OUT": str(scratch)},
+        )
+        content = scratch.read_text(encoding="utf-8")
+        atomic_text(destination, content)
+    finally:
+        scratch.unlink(missing_ok=True)
+
+
+def task_state(output_root: Path, task: str, status: str, detail: str | None = None) -> None:
+    payload: dict[str, Any] = {
+        "schemaVersion": 1,
+        "task": task,
+        "status": status,
+        "recordedAt": datetime.now(timezone.utc).isoformat(),
+    }
+    if detail:
+        payload["detail"] = detail[:300]
+    atomic_text(
+        output_root / "state" / "daily-summary" / f"{task}.json",
+        json.dumps(payload, sort_keys=True, separators=(",", ":")),
+        mode=0o640,
+    )
 
 
 def fortnite_progress(workspace: Path, output_root: Path) -> None:
-    scripts = workspace / "scripts"
-    output = run([sys.executable, str(scripts / "fortnite-progress-snapshot.py")], cwd=workspace)
+    output = run([sys.executable, "/usr/local/libexec/hermes-fortnite-progress-snapshot"], cwd=workspace)
     try:
         result = json.loads(output)
     except json.JSONDecodeError as exc:
@@ -105,18 +158,41 @@ def fortnite_progress(workspace: Path, output_root: Path) -> None:
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("task", choices=("daily-summary", "fortnite-progress"))
+    parser.add_argument(
+        "task",
+        choices=(
+            "daily-updates",
+            "daily-media",
+            "daily-personal",
+            "daily-assemble",
+            "fortnite-progress",
+        ),
+    )
     parser.add_argument("--workspace", type=Path, required=True)
     parser.add_argument("--output-root", type=Path, required=True)
+    parser.add_argument("--freshrss-root", type=Path, required=True)
     args = parser.parse_args()
     try:
-        if args.task == "daily-summary":
-            daily_summary(args.workspace, args.output_root)
-        else:
+        if args.task == "daily-updates":
+            daily_updates(args.workspace, args.output_root, args.freshrss_root)
+        elif args.task == "daily-media":
+            daily_media(args.workspace)
+        elif args.task == "daily-personal":
+            daily_personal(args.workspace)
+        elif args.task == "daily-assemble":
+            daily_assemble(args.workspace, args.output_root)
+        elif args.task == "fortnite-progress":
             fortnite_progress(args.workspace, args.output_root)
+        if args.task.startswith("daily-"):
+            task_state(args.output_root, args.task, "ok")
         print(json.dumps({"status": "ok", "task": args.task}, separators=(",", ":")))
         return 0
     except (CollectorError, OSError, subprocess.SubprocessError) as exc:
+        if args.task.startswith("daily-"):
+            try:
+                task_state(args.output_root, args.task, "error", str(exc))
+            except (CollectorError, OSError):
+                pass
         print(f"Retained automation failed ({args.task}): {exc}", file=sys.stderr)
         return 1
 

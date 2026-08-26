@@ -13,6 +13,13 @@
   force_handlers: true
 
   vars:
+    hermes_automation_rigel_profile: >-
+      {{ hermes_shadow_profiles | selectattr('name', 'equalto', 'rigel') | first }}
+    hermes_automation_rigel_environment_file: >-
+      {{
+        hermes_automation_rigel_profile.environment_file
+        | default('/etc/hermes/rigel/.env')
+      }}
     hermes_automation_backup_id: >-
       {{ ansible_facts['date_time']['iso8601_basic_short'] }}-pre-automation
     hermes_automation_backup_root: >-
@@ -23,11 +30,25 @@
         /run/user/{{ hermes_production_cutover_user_uid }}
       DBUS_SESSION_BUS_ADDRESS: >-
         unix:path=/run/user/{{ hermes_production_cutover_user_uid }}/bus
+    hermes_automation_profile_skills_contract: >-
+      {{
+        lookup(
+          'ansible.builtin.file',
+          ansible_config_file | dirname
+          ~ '/' ~ hermes_profile_skills_contract_source
+        ) | from_json
+      }}
     hermes_automation_template_units:
       - name: hermes-retained-automation@.service
         source: hermes-retained-automation@.service.j2
-      - name: hermes-daily-summary-collect.timer
-        source: hermes-daily-summary-collect.timer.j2
+      - name: hermes-daily-updates-collect.timer
+        source: hermes-daily-updates-collect.timer.j2
+      - name: hermes-daily-media-collect.timer
+        source: hermes-daily-media-collect.timer.j2
+      - name: hermes-daily-personal-collect.timer
+        source: hermes-daily-personal-collect.timer.j2
+      - name: hermes-daily-summary-assemble.timer
+        source: hermes-daily-summary-assemble.timer.j2
       - name: hermes-fortnite-progress-collect.timer
         source: hermes-fortnite-progress-collect.timer.j2
       - name: hermes-warframe-feed.service
@@ -48,18 +69,51 @@
       {{
         [
           '/var/lib/hermes/astra/.hermes/profiles/astra/cron/jobs.json',
+          '/var/lib/hermes/dubble/.hermes/profiles/dubble/cron/jobs.json',
+          '/var/lib/hermes/rigel/.hermes/profiles/rigel/cron/jobs.json',
           hermes_automation_manifest_live,
+          hermes_dubble_automation_manifest_live,
+          hermes_rigel_automation_manifest_live,
+          '/etc/hermes/astra/production-jobs.json',
+          '/etc/hermes/dubble/production-jobs.json',
+          '/etc/hermes/astra/production-automation-reconciliation.json',
           hermes_automation_reconciliation_live,
+          hermes_openclaw_parity_contract_live,
+          hermes_production_cutover_enrollment,
           '/etc/hermes/astra/.env',
+          '/etc/hermes/dubble/.env',
+          hermes_automation_rigel_environment_file,
+          hermes_freshrss_credential_live,
+          hermes_astra_freshrss_live_root,
+          hermes_astra_calendar_live_root,
+          hermes_freshrss_collect_live,
           '/etc/systemd/system/hermes-gateway-astra.service',
           '/etc/systemd/system/' ~ hermes_native_update_service,
           '/etc/sudoers.d/hermes-native-update',
           hermes_cron_reconcile_live,
+          hermes_docker_inventory_validator_live,
           hermes_retained_automation_live,
+          hermes_retained_media_live,
+          hermes_retained_collector_environment_live,
+          hermes_vdirsyncer_state_migrator_live,
+          hermes_daily_updates_live,
           hermes_warframe_feed_live,
           hermes_fortnite_calendar_compat_live,
           hermes_fortnite_calendar_fetch_live,
-          hermes_fortnite_calendar_schedule_live
+          hermes_fortnite_calendar_schedule_live,
+          hermes_fortnite_geckodriver_path,
+          hermes_astra_vdirsyncer_config_live,
+          hermes_astra_khal_config_live,
+          hermes_astra_himalaya_config_live,
+          hermes_astra_himalaya_live_binary,
+          hermes_openclaw_parity_validator_live,
+          hermes_profile_skills_validator_live,
+          hermes_profile_skills_contract_live,
+          hermes_bootstrap_parity_validator_live,
+          hermes_bootstrap_parity_contract_live,
+          '/etc/hermes/astra/skills',
+          '/etc/hermes/dubble/skills',
+          '/etc/hermes/rigel/skills'
         ]
         + hermes_shadow_profiles
           | map(attribute='name')
@@ -72,10 +126,17 @@
           | map('regex_replace', '$', '/managed-policy.sha256')
           | list
         + hermes_shadow_profiles
+          | map(attribute='account_home')
+          | map('regex_replace', '$', '/.hermes/.backup.lock')
+          | list
+        + hermes_shadow_profiles
           | map(attribute='home')
-          | map('regex_replace', '$', '/.backup.lock')
+          | map('regex_replace', '$', '/config.yaml')
           | list
         + hermes_automation_system_units
+          | map('regex_replace', '^', '/etc/systemd/system/')
+          | list
+        + hermes_automation_retired_timers
           | map('regex_replace', '^', '/etc/systemd/system/')
           | list
         + hermes_automation_astra_scripts
@@ -86,6 +147,14 @@
               hermes_native_update_profile_home ~ '/scripts/'
             )
           | list
+        + hermes_automation_rigel_scripts
+          | map(attribute='destination')
+          | map(
+              'regex_replace',
+              '^',
+              '/var/lib/hermes/rigel/.hermes/profiles/rigel/scripts/'
+            )
+          | list
       }}
 
   tasks:
@@ -93,6 +162,9 @@
       ansible.builtin.assert:
         that:
           - hermes_automation_mode in ['disabled', 'converge']
+          - >-
+            hermes_automation_schedule_mode
+            in ['preserve', 'audit', 'seed', 'restore']
         fail_msg: hermes_automation_mode must be disabled or converge.
 
     - name: Skip hosts without Hermes automation approval
@@ -109,13 +181,65 @@
           - inventory_hostname == 'jn-t14s-lin'
           - hermes_automation_output_root == '/var/lib/hermes-automation'
           - >-
-            hermes_automation_legacy_workspace
-            == '/home/johnny/.openclaw/workspace'
+            hermes_automation_native_workspace
+            == '/var/lib/hermes-automation/workspace'
           - hermes_shadow_profiles | map(attribute='name') | list
             == ['astra', 'dubble', 'rigel']
+          - hermes_automation_defer_gateway_restart in [true, false]
         fail_msg: >-
           Production automation requires host-specific approval and the exact
           confirmation string.
+
+    - name: Require explicit native schedule mutation authorization
+      ansible.builtin.assert:
+        that:
+          - >-
+            hermes_automation_schedule_mode == 'seed'
+            and hermes_automation_schedule_confirmation
+                == hermes_automation_schedule_seed_confirmation
+            or hermes_automation_schedule_mode == 'restore'
+            and hermes_automation_schedule_confirmation
+                == hermes_automation_schedule_restore_confirmation
+        fail_msg: >-
+          Native schedule seed or exact restore requires its own reviewed
+          confirmation string; normal platform convergence preserves schedules.
+      when: hermes_automation_schedule_mode in ['seed', 'restore']
+
+    - name: Build managed profile skill inventory for automation convergence
+      ansible.builtin.set_fact:
+        hermes_automation_profile_skills_inventory: >-
+          {{
+            (hermes_automation_profile_skills_inventory | default([]))
+            + [
+                item.1 | combine({
+                  'profile': item.0.key,
+                  'group': item.0.value.group,
+                  'managedRoot': item.0.value.managedRoot
+                })
+              ]
+          }}
+      loop: >-
+        {{
+          hermes_automation_profile_skills_contract.profiles
+          | dict2items
+          | subelements('value.skills')
+        }}
+      loop_control:
+        label: "{{ item.0.key }}/{{ item.1.name }}"
+
+    - name: Require the complete managed profile skill inventory
+      ansible.builtin.assert:
+        that:
+          - >-
+            hermes_automation_profile_skills_contract.profiles.keys()
+            | list | sort == ['astra', 'dubble', 'rigel']
+          - hermes_automation_profile_skills_inventory | length == 39
+          - >-
+            hermes_automation_profile_skills_inventory
+            | map(attribute='profile') | unique | sort
+            == ['astra', 'dubble', 'rigel']
+        fail_msg: >-
+          Automation refuses to publish an incomplete managed skill contract.
 
     - name: Check OpenClaw user Gateway before automation convergence
       ansible.builtin.command:
@@ -146,25 +270,12 @@
         path: "{{ item }}"
         follow: false
       loop:
-        - >-
-          {{ hermes_automation_legacy_workspace
-             }}/scripts/collect-media-summary.py
-        - >-
-          {{ hermes_automation_legacy_workspace
-             }}/scripts/daily_personal_collect.py
-        - >-
-          {{ hermes_automation_legacy_workspace
-             }}/scripts/daily-summary-assemble.py
-        - >-
-          {{ hermes_automation_legacy_workspace
-             }}/scripts/fortnite-progress-snapshot.py
-        - >-
-          {{ hermes_automation_legacy_workspace
-             }}/scripts/fortnite-tournament-calendar-sync.py
-        - >-
-          {{ hermes_automation_legacy_workspace
-             }}/scripts/warframe_drops_feed.py
-        - "{{ hermes_production_cutover_source_env }}"
+        - "{{ hermes_astra_himalaya_live_binary }}"
+        - "{{ hermes_astra_vdirsyncer_config_live }}"
+        - "{{ hermes_astra_khal_config_live }}"
+        - "{{ hermes_astra_himalaya_config_live }}"
+        - "{{ hermes_freshrss_credential_live }}"
+        - "{{ hermes_automation_native_environment_live }}"
       register: hermes_automation_prerequisites
       check_mode: false
 
@@ -175,11 +286,11 @@
       register: hermes_automation_python_prerequisite
       check_mode: false
 
-    - name: Resolve the Fortnite WebDriver prerequisite
+    - name: Resolve the Fortnite browser prerequisite
       ansible.builtin.stat:
-        path: "{{ hermes_fortnite_geckodriver_path }}"
+        path: "{{ hermes_fortnite_firefox_binary_path }}"
         follow: true
-      register: hermes_automation_geckodriver_prerequisite
+      register: hermes_automation_firefox_prerequisite
       check_mode: false
 
     - name: Require complete retained automation prerequisites
@@ -196,10 +307,10 @@
           - hermes_automation_python_prerequisite.stat.exists | default(false)
           - hermes_automation_python_prerequisite.stat.isreg | default(false)
           - >-
-            hermes_automation_geckodriver_prerequisite.stat.exists
+            hermes_automation_firefox_prerequisite.stat.exists
             | default(false)
           - >-
-            hermes_automation_geckodriver_prerequisite.stat.isreg
+            hermes_automation_firefox_prerequisite.stat.isreg
             | default(false)
         fail_msg: >-
           A reviewed retained collector, runtime, or private environment is
@@ -216,24 +327,84 @@
             ) | from_json
           }}
 
-    - name: Require every historical scheduler lane reconciled
+    - name: Require every current and historical scheduler lane reconciled
       ansible.builtin.assert:
         that:
-          - hermes_automation_reconciliation.schemaVersion == 1
+          - hermes_automation_reconciliation.schemaVersion == 3
           - >-
-            hermes_automation_reconciliation.source.totalReconciledLanes == 31
-          - hermes_automation_reconciliation.lanes | length == 31
-          - hermes_automation_reconciliation.production.nativeCronJobs == 7
+            hermes_automation_reconciliation.source.totalActiveReconciledLanes
+            == 29
+          - >-
+            hermes_automation_reconciliation.source.totalHistoricalReconciledLanes
+            == 7
+          - hermes_automation_reconciliation.lanes | length == 29
+          - hermes_automation_reconciliation.historicalLanes | length == 7
+          - hermes_automation_reconciliation.production.nativeCronJobs == 19
+          - >-
+            hermes_automation_reconciliation.production
+            .astraFallbackNativeCronJobs == 18
+          - >-
+            hermes_automation_reconciliation.production
+            .astraDedicatedNativeCronJobs == 17
+          - >-
+            hermes_automation_reconciliation.production.dubbleNativeCronJobs
+            == 1
+          - >-
+            hermes_automation_reconciliation.production.rigelNativeCronJobs
+            == 1
           - >-
             hermes_automation_reconciliation.production.openclawScheduler
             == 'offline'
           - >-
-            hermes_automation_reconciliation.pendingOneShots
-            ['cron-warframe-reminder-snootydeath'].sourceDueAt
-            == '2026-08-17T00:00:00Z'
+            hermes_automation_reconciliation.lanes
+            ['heartbeat-dubble'].target == 'dubble-thread-followup'
         fail_msg: >-
           The production schedule reconciliation is incomplete or no longer
           matches the approved migration boundary.
+
+    - name: Inspect subscription-backed primary model credentials
+      ansible.builtin.command:
+        argv:
+          - /usr/sbin/runuser
+          - --user
+          - "{{ item.user }}"
+          - --
+          - /usr/bin/env
+          - "HOME={{ item.account_home }}"
+          - "HERMES_HOME={{ item.home }}"
+          - "HERMES_MANAGED_DIR=/etc/hermes/{{ item.name }}"
+          - "{{ hermes_shadow_runtime_binary }}"
+          - auth
+          - list
+          - "{{ item.model_provider }}"
+      loop: >-
+        {{ hermes_shadow_profiles
+           | selectattr('model_provider', 'equalto', 'openai-codex')
+           | list }}
+      loop_control:
+        label: "{{ item.name }}"
+      register: hermes_automation_subscription_auth
+      changed_when: false
+      failed_when: false
+      check_mode: false
+
+    - name: Require native subscription-backed primary model credentials
+      ansible.builtin.assert:
+        that:
+          - item.rc == 0
+          - >-
+            (item.stdout
+             | regex_search(
+                 '^openai-codex \\([1-9][0-9]* credentials?\\):'
+               )) is not none
+        fail_msg: >-
+          Hermes profile {{ item.item.name }} selects openai-codex but has no
+          native subscription-backed credential. Enroll that isolated profile
+          with `hermes auth add openai-codex --type oauth` before production
+          automation convergence; do not substitute a metered API key.
+      loop: "{{ hermes_automation_subscription_auth.results }}"
+      loop_control:
+        label: "{{ item.item.name }}"
 
     - name: Stop after read-only Hermes automation check-mode preflight
       ansible.builtin.meta: end_host
@@ -249,9 +420,96 @@
           - --value
       loop: >-
         {{ hermes_automation_enabled_timers
+           + hermes_automation_retired_timers
            + [hermes_native_update_timer, hermes_tirith_update_timer] }}
       register: hermes_automation_prior_timer_units
       changed_when: false
+
+    - name: Inspect pre-transaction Hermes Gateway load state
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/systemctl
+          - show
+          - "{{ item }}"
+          - --property=LoadState
+          - --value
+      loop:
+        - hermes-gateway-astra.service
+        - hermes-gateway-dubble.service
+        - hermes-gateway-rigel.service
+      register: hermes_automation_prior_gateway_units
+      changed_when: false
+      check_mode: false
+
+    - name: Inspect pre-transaction Hermes Gateway activity
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/systemctl
+          - is-active
+          - "{{ item }}"
+      loop:
+        - hermes-gateway-astra.service
+        - hermes-gateway-dubble.service
+        - hermes-gateway-rigel.service
+      register: hermes_automation_prior_gateway_activity
+      changed_when: false
+      failed_when: false
+      check_mode: false
+
+    - name: Inspect pre-transaction Hermes Gateway enablement
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/systemctl
+          - is-enabled
+          - "{{ item }}"
+      loop:
+        - hermes-gateway-astra.service
+        - hermes-gateway-dubble.service
+        - hermes-gateway-rigel.service
+      register: hermes_automation_prior_gateway_enablement
+      changed_when: false
+      failed_when: false
+      check_mode: false
+
+    - name: Record pre-transaction Hermes Gateway state
+      ansible.builtin.set_fact:
+        hermes_automation_prior_gateways: >-
+          {{
+            (hermes_automation_prior_gateways | default([]))
+            + [{
+              'name': item.item,
+              'exists': item.stdout == 'loaded',
+              'active': hermes_automation_prior_gateway_activity.results[
+                gateway_index
+              ].stdout,
+              'enabled': hermes_automation_prior_gateway_enablement.results[
+                gateway_index
+              ].stdout
+            }]
+          }}
+      loop: "{{ hermes_automation_prior_gateway_units.results }}"
+      loop_control:
+        index_var: gateway_index
+        label: "{{ item.item }}"
+
+    - name: Require an existing stopped maintenance window before deferred restart
+      ansible.builtin.assert:
+        that:
+          - hermes_automation_prior_gateways | length == 3
+          - >-
+            hermes_automation_prior_gateways
+            | rejectattr('exists', 'equalto', true)
+            | list
+            | length == 0
+          - >-
+            hermes_automation_prior_gateways
+            | rejectattr('active', 'equalto', 'inactive')
+            | list
+            | length == 0
+        fail_msg: >-
+          Deferred Gateway restart is permitted only after the bounded parity
+          maintenance transaction has stopped all three native Gateways.
+      when: hermes_automation_defer_gateway_restart | bool
 
     - name: Inspect pre-transaction timer activity
       ansible.builtin.command:
@@ -261,6 +519,7 @@
           - "{{ item }}"
       loop: >-
         {{ hermes_automation_enabled_timers
+           + hermes_automation_retired_timers
            + [hermes_native_update_timer, hermes_tirith_update_timer] }}
       register: hermes_automation_prior_timer_activity
       changed_when: false
@@ -274,6 +533,7 @@
           - "{{ item }}"
       loop: >-
         {{ hermes_automation_enabled_timers
+           + hermes_automation_retired_timers
            + [hermes_native_update_timer, hermes_tirith_update_timer] }}
       register: hermes_automation_prior_timer_enablement
       changed_when: false
@@ -383,9 +643,31 @@
         label: "{{ item.item }}"
       when: item.stat.exists and item.stat.isreg
 
+    - name: Back up existing automation state directories
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/tar
+          - --create
+          - --file
+          - >-
+            {{ hermes_automation_backup_root
+               }}/{{ item.item | regex_replace('^/', '')
+                                | regex_replace('/', '__') }}.tar
+          - --acls
+          - --xattrs
+          - --numeric-owner
+          - --directory
+          - "{{ item.item | dirname }}"
+          - "{{ item.item | basename }}"
+      loop: "{{ hermes_automation_rollback_stats.results }}"
+      loop_control:
+        label: "{{ item.item }}"
+      when: item.stat.exists and item.stat.isdir
+      changed_when: true
+
     - name: Normalize existing native profile backup locks
       ansible.builtin.file:
-        path: "{{ item.home }}/.backup.lock"
+        path: "{{ item.account_home }}/.hermes/.backup.lock"
         state: file
         owner: "{{ item.user }}"
         group: "{{ item.group }}"
@@ -444,10 +726,368 @@
         label: "{{ item.name }}"
       check_mode: false
 
-    - name: Read retained Astra provider credentials privately
+    - name: Read native Astra provider credentials privately
+      ansible.builtin.slurp:
+        src: "{{ hermes_automation_native_environment_live }}"
+      register: hermes_automation_source_environment
+      no_log: true
+
+    - name: Identify missing native Fortnite collector credentials
+      ansible.builtin.set_fact:
+        hermes_automation_missing_fortnite_credentials: >-
+          {{
+            ['FORTNITE_API_KEY', 'API_FORTNITE_KEY']
+            | reject(
+                'in',
+                hermes_automation_source_environment.content
+                | b64decode
+                | regex_findall('(?m)^([A-Z0-9_]+)=')
+              )
+            | list
+          }}
+      no_log: true
+
+    - name: Read preserved Fortnite credentials for one-time native migration
       ansible.builtin.slurp:
         src: "{{ hermes_production_cutover_source_env }}"
+      register: hermes_automation_fortnite_migration_environment
+      when: hermes_automation_missing_fortnite_credentials | length > 0
+      no_log: true
+
+    - name: Require complete preserved Fortnite migration credentials
+      ansible.builtin.assert:
+        that:
+          - hermes_automation_fortnite_migration_values | length == 1
+          - hermes_automation_fortnite_migration_values[0] | length > 0
+          - >-
+            hermes_automation_fortnite_migration_values[0]
+            is not search('[\r\n]')
+        fail_msg: >-
+          A missing Fortnite credential cannot be migrated into native Hermes
+          storage. No native credential was changed.
+      loop: "{{ hermes_automation_missing_fortnite_credentials }}"
+      loop_control:
+        label: "{{ item }}"
+      vars:
+        hermes_automation_fortnite_migration_values: >-
+          {{
+            hermes_automation_fortnite_migration_environment.content
+            | b64decode
+            | regex_findall('(?m)^' ~ item ~ '=([^\r\n]+)$')
+          }}
+      when: hermes_automation_missing_fortnite_credentials | length > 0
+      no_log: true
+
+    - name: Migrate Fortnite credentials into native Hermes storage once
+      ansible.builtin.lineinfile:
+        path: "{{ hermes_automation_native_environment_live }}"
+        regexp: "^{{ item }}="
+        line: >-
+          {{ item }}={{
+            (
+              hermes_automation_fortnite_migration_environment.content
+              | b64decode
+              | regex_findall('(?m)^' ~ item ~ '=([^\r\n]+)$')
+            )[0]
+          }}
+        owner: root
+        group: hermes-astra
+        mode: "0440"
+      loop: "{{ hermes_automation_missing_fortnite_credentials }}"
+      loop_control:
+        label: "{{ item }}"
+      when: hermes_automation_missing_fortnite_credentials | length > 0
+      no_log: true
+
+    - name: Refresh native Astra credentials after one-time migration
+      ansible.builtin.slurp:
+        src: "{{ hermes_automation_native_environment_live }}"
       register: hermes_automation_source_environment
+      no_log: true
+
+    - name: Read the native Sonarr credential privately
+      ansible.builtin.slurp:
+        src: /opt/media-stack/sonarr/config.xml
+      delegate_to: docker-vm
+      register: hermes_automation_sonarr_config
+      no_log: true
+
+    - name: Read the native Radarr credential privately
+      ansible.builtin.slurp:
+        src: /opt/media-stack/radarr/config.xml
+      delegate_to: docker-vm
+      register: hermes_automation_radarr_config
+      no_log: true
+
+    - name: Read the retained Tautulli credential privately
+      ansible.builtin.slurp:
+        src: /opt/media-stack/tautulli/config.ini
+      delegate_to: media-vm
+      register: hermes_automation_tautulli_config
+      no_log: true
+
+    - name: Read the retained Seerr credential privately
+      ansible.builtin.slurp:
+        src: /opt/seerr/config/settings.json
+      delegate_to: docker-vm
+      register: hermes_automation_seerr_config
+      no_log: true
+
+    - name: Resolve private retained collector credentials
+      ansible.builtin.set_fact:
+        hermes_automation_sonarr_api_key: >-
+          {{
+            hermes_automation_sonarr_config.content
+            | b64decode
+            | regex_findall('(?s)<ApiKey>\s*([^<]+?)\s*</ApiKey>')
+            | first
+            | default('', true)
+            | trim
+          }}
+        hermes_automation_radarr_api_key: >-
+          {{
+            hermes_automation_radarr_config.content
+            | b64decode
+            | regex_findall('(?s)<ApiKey>\s*([^<]+?)\s*</ApiKey>')
+            | first
+            | default('', true)
+            | trim
+          }}
+        hermes_automation_tautulli_api_key: >-
+          {{
+            hermes_automation_tautulli_config.content
+            | b64decode
+            | regex_findall('(?mi)^api_key\s*=\s*([^\r\n]+)$')
+            | first
+            | default('', true)
+            | trim
+          }}
+        hermes_automation_seerr_api_key: >-
+          {{
+            (
+              (hermes_automation_seerr_config.content | b64decode | from_json)
+              .get('main', {})
+              .get('apiKey', '')
+            )
+            or
+            (
+              (hermes_automation_seerr_config.content | b64decode | from_json)
+              .get('apiKey', '')
+            )
+          }}
+      no_log: true
+
+    - name: Require complete retained collector credentials
+      ansible.builtin.assert:
+        that:
+          - hermes_automation_sonarr_api_key | length > 0
+          - hermes_automation_radarr_api_key | length > 0
+          - hermes_automation_tautulli_api_key | length > 0
+          - hermes_automation_seerr_api_key | length > 0
+          - hermes_automation_sonarr_api_key is not search('[\r\n]')
+          - hermes_automation_radarr_api_key is not search('[\r\n]')
+          - hermes_automation_tautulli_api_key is not search('[\r\n]')
+          - hermes_automation_seerr_api_key is not search('[\r\n]')
+          - hermes_automation_collector_source_values | length == 1
+          - hermes_automation_collector_source_values[0] | length > 0
+          - hermes_automation_collector_source_values[0] is not search('[\r\n]')
+        fail_msg: >-
+          A required retained Daily Summary or Fortnite collector credential
+          is missing or ambiguous. No managed collector secret was changed.
+      loop:
+        - FORTNITE_API_KEY
+        - API_FORTNITE_KEY
+      loop_control:
+        label: "{{ item }}"
+      vars:
+        hermes_automation_collector_source_values: >-
+          {{
+            hermes_automation_source_environment.content
+            | b64decode
+            | regex_findall('(?m)^' ~ item ~ '=([^\r\n]+)$')
+          }}
+      no_log: true
+
+    - name: Read current managed profile environments privately
+      ansible.builtin.slurp:
+        src: >-
+          {{ item.environment_file | default('/etc/hermes/' ~ item.name ~ '/.env') }}
+      loop: "{{ hermes_shadow_profiles }}"
+      loop_control:
+        label: "{{ item.name }}"
+      register: hermes_automation_profile_environments
+      no_log: true
+
+    - name: Resolve current Discord consumer credentials privately
+      ansible.builtin.set_fact:
+        hermes_automation_astra_discord_token: >-
+          {{
+            hermes_automation_profile_environments.results[0].content
+            | b64decode
+            | regex_findall('(?m)^DISCORD_BOT_TOKEN=([^\r\n]+)$')
+            | first
+            | default('', true)
+          }}
+        hermes_automation_dubble_discord_token: >-
+          {{
+            hermes_automation_profile_environments.results[1].content
+            | b64decode
+            | regex_findall('(?m)^DISCORD_BOT_TOKEN=([^\r\n]+)$')
+            | first
+            | default('', true)
+          }}
+        hermes_automation_existing_rigel_discord_token: >-
+          {{
+            hermes_automation_profile_environments.results[2].content
+            | b64decode
+            | regex_findall('(?m)^DISCORD_BOT_TOKEN=([^\r\n]+)$')
+            | first
+            | default('', true)
+          }}
+      no_log: true
+
+    - name: Refuse an implicit dedicated Rigel demotion
+      ansible.builtin.assert:
+        that:
+          - >-
+            hermes_rigel_dedicated_discord_enabled | bool
+            or hermes_automation_existing_rigel_discord_token | length == 0
+          - >-
+            hermes_rigel_dedicated_discord_enabled | bool
+            or (
+              hermes_automation_prior_gateways
+              | selectattr('name', 'equalto', 'hermes-gateway-rigel.service')
+              | map(attribute='active')
+              | first
+            ) != 'active'
+        fail_msg: >-
+          Rigel is already a dedicated Discord consumer. Refusing to restore
+          the transitional Astra-owned route without a separate rollback.
+      no_log: true
+
+    - name: Require a private third Discord credential for Rigel promotion
+      ansible.builtin.assert:
+        that:
+          - hermes_automation_astra_discord_token | length >= 20
+          - hermes_automation_dubble_discord_token | length >= 20
+          - hermes_rigel_discord_bot_token | length >= 20
+          - hermes_rigel_discord_bot_token | length <= 4096
+          - hermes_rigel_discord_bot_token is not search('[\r\n]')
+        fail_msg: >-
+          Dedicated Rigel promotion requires the existing Astra and Dubble
+          credentials plus one vault-backed Rigel bot token.
+      when: hermes_rigel_dedicated_discord_enabled | bool
+      no_log: true
+
+    - name: Resolve Astra Discord application identity
+      ansible.builtin.uri:
+        url: https://discord.com/api/v10/users/@me
+        method: GET
+        headers:
+          Authorization: "Bot {{ hermes_automation_astra_discord_token }}"
+          User-Agent: ARK-Hermes-Rigel-Cutover/1.0
+        return_content: true
+        status_code: 200
+      register: hermes_automation_astra_discord_identity
+      when: hermes_rigel_dedicated_discord_enabled | bool
+      no_log: true
+      check_mode: false
+
+    - name: Resolve Dubble Discord application identity
+      ansible.builtin.uri:
+        url: https://discord.com/api/v10/users/@me
+        method: GET
+        headers:
+          Authorization: "Bot {{ hermes_automation_dubble_discord_token }}"
+          User-Agent: ARK-Hermes-Rigel-Cutover/1.0
+        return_content: true
+        status_code: 200
+      register: hermes_automation_dubble_discord_identity
+      when: hermes_rigel_dedicated_discord_enabled | bool
+      no_log: true
+      check_mode: false
+
+    - name: Resolve dedicated Rigel Discord application identity
+      ansible.builtin.uri:
+        url: https://discord.com/api/v10/users/@me
+        method: GET
+        headers:
+          Authorization: "Bot {{ hermes_rigel_discord_bot_token }}"
+          User-Agent: ARK-Hermes-Rigel-Cutover/1.0
+        return_content: true
+        status_code: 200
+      register: hermes_automation_rigel_discord_identity
+      when: hermes_rigel_dedicated_discord_enabled | bool
+      no_log: true
+      check_mode: false
+
+    - name: Prove dedicated Rigel can access its exact Discord channel
+      ansible.builtin.uri:
+        url: >-
+          https://discord.com/api/v10/channels/{{
+            hermes_rigel_discord_channel_id
+          }}
+        method: GET
+        headers:
+          Authorization: "Bot {{ hermes_rigel_discord_bot_token }}"
+          User-Agent: ARK-Hermes-Rigel-Cutover/1.0
+        return_content: true
+        status_code: 200
+      register: hermes_automation_rigel_discord_channel
+      when: hermes_rigel_dedicated_discord_enabled | bool
+      no_log: true
+      check_mode: false
+
+    - name: Require three distinct Discord identities and the exact Rigel route
+      ansible.builtin.assert:
+        that:
+          - hermes_automation_astra_discord_identity.json.bot | bool
+          - hermes_automation_dubble_discord_identity.json.bot | bool
+          - hermes_automation_rigel_discord_identity.json.bot | bool
+          - >-
+            [
+              hermes_automation_astra_discord_identity.json.id,
+              hermes_automation_dubble_discord_identity.json.id,
+              hermes_automation_rigel_discord_identity.json.id
+            ] | unique | length == 3
+          - >-
+            hermes_automation_rigel_discord_channel.json.id | string
+            == hermes_rigel_discord_channel_id | string
+          - >-
+            hermes_automation_rigel_discord_channel.json.guild_id | string
+            == hermes_rigel_discord_guild_id | string
+        fail_msg: >-
+          Rigel's new application is not distinct or cannot access the exact
+          approved guild/channel. Astra's fallback remains unchanged.
+      when: hermes_rigel_dedicated_discord_enabled | bool
+      no_log: true
+
+    - name: Resolve one private native peer credential
+      ansible.builtin.set_fact:
+        hermes_automation_peer_key: >-
+          {{
+            (
+              hermes_automation_profile_environments.results[0].content
+              | b64decode
+              | regex_findall('(?m)^API_SERVER_KEY=([^\r\n]+)$')
+              | first
+              | default('', true)
+            )
+            or
+            (
+              hermes_automation_profile_environments.results[1].content
+              | b64decode
+              | regex_findall('(?m)^HERMES_PEER_ASTRA_KEY=([^\r\n]+)$')
+              | first
+              | default('', true)
+            )
+            or lookup(
+              'ansible.builtin.password',
+              '/dev/null',
+              length=64,
+              chars=['ascii_letters', 'digits']
+            )
+          }}
       no_log: true
 
     - name: Require exactly one retained credential for each Astra provider
@@ -461,10 +1101,10 @@
           changed.
       loop:
         - OLLAMA_API_KEY
-        - GEMINI_API_KEY
-        - OPENROUTER_API_KEY
         - EBAY_APP_ID
         - EBAY_CERT_ID
+        - ICLOUD_APP_PASSWORD
+        - NEXTCLOUD_CALDAV_APP_PASSWORD
       loop_control:
         label: "{{ item }}"
       vars:
@@ -507,21 +1147,163 @@
           loop:
             - target: OLLAMA_API_KEY
               source: OLLAMA_API_KEY
-            - target: GEMINI_API_KEY
-              source: GEMINI_API_KEY
-            - target: GOOGLE_API_KEY
-              source: GEMINI_API_KEY
-            - target: OPENROUTER_API_KEY
-              source: OPENROUTER_API_KEY
-            - target: OPENAI_API_KEY
-              source: OPENROUTER_API_KEY
             - target: EBAY_APP_ID
               source: EBAY_APP_ID
             - target: EBAY_CERT_ID
               source: EBAY_CERT_ID
+            - target: ICLOUD_APP_PASSWORD
+              source: ICLOUD_APP_PASSWORD
+            - target: NEXTCLOUD_CALDAV_APP_PASSWORD
+              source: NEXTCLOUD_CALDAV_APP_PASSWORD
           loop_control:
             label: "{{ item.target }}"
           register: hermes_automation_astra_provider_environment
+          no_log: true
+
+        - name: Enroll subscription fallback credentials for every profile
+          ansible.builtin.lineinfile:
+            path: >-
+              {{
+                hermes_automation_rigel_environment_file
+                if item.profile == 'rigel'
+                else '/etc/hermes/' ~ item.profile ~ '/.env'
+              }}
+            regexp: "^{{ item.target }}="
+            line: >-
+              {{ item.target }}={{
+                (
+                  hermes_automation_source_environment.content
+                  | b64decode
+                  | regex_findall(
+                      '(?m)^' ~ item.source ~ '=([^\r\n]+)$'
+                    )
+                )[0]
+              }}
+            owner: root
+            group: >-
+              {{ 'root' if item.profile == 'rigel' else 'hermes-' ~ item.profile }}
+            mode: "{{ '0400' if item.profile == 'rigel' else '0440' }}"
+          loop:
+            - profile: astra
+              target: OLLAMA_API_KEY
+              source: OLLAMA_API_KEY
+            - profile: dubble
+              target: OLLAMA_API_KEY
+              source: OLLAMA_API_KEY
+            - profile: rigel
+              target: OLLAMA_API_KEY
+              source: OLLAMA_API_KEY
+          loop_control:
+            label: "{{ item.profile }}:{{ item.target }}"
+          register: hermes_automation_fallback_provider_environments
+          no_log: true
+
+        - name: Enroll the complete dedicated Rigel Discord environment
+          ansible.builtin.lineinfile:
+            path: "{{ hermes_automation_rigel_environment_file }}"
+            regexp: "^{{ item.key }}="
+            line: "{{ item.key }}={{ item.value }}"
+            owner: root
+            group: root
+            mode: "0400"
+          loop:
+            - key: DISCORD_BOT_TOKEN
+              value: "{{ hermes_rigel_discord_bot_token }}"
+            - key: DISCORD_ALLOWED_USERS
+              value: "{{ hermes_automation_owner_user_id }}"
+            - key: DISCORD_HOME_CHANNEL
+              value: "{{ hermes_rigel_discord_channel_id }}"
+            - key: DISCORD_HOME_CHANNEL_NAME
+              value: Rigel
+          loop_control:
+            label: "{{ item.key }}"
+          register: hermes_automation_rigel_discord_environment
+          when: hermes_rigel_dedicated_discord_enabled | bool
+          no_log: true
+
+        - name: Record the three-consumer private Discord enrollment
+          ansible.builtin.template:
+            src: >-
+              {{ playbook_dir
+                 }}/../../templates/hermes/hermes-private-discord-enrollment.json.j2
+            dest: "{{ hermes_production_cutover_enrollment }}"
+            owner: root
+            group: root
+            mode: "0400"
+            backup: true
+          register: hermes_automation_rigel_private_enrollment
+          when: hermes_rigel_dedicated_discord_enabled | bool
+          no_log: true
+
+        - name: Remove retired Anthropic provider credentials
+          ansible.builtin.lineinfile:
+            path: >-
+              {{
+                hermes_automation_rigel_environment_file
+                if item == 'rigel'
+                else '/etc/hermes/' ~ item ~ '/.env'
+              }}
+            regexp: ^ANTHROPIC_API_KEY=
+            state: absent
+            owner: root
+            group: "{{ 'root' if item == 'rigel' else 'hermes-' ~ item }}"
+            mode: "{{ '0400' if item == 'rigel' else '0440' }}"
+          loop:
+            - astra
+            - dubble
+            - rigel
+          register: hermes_automation_retired_provider_environment
+          no_log: true
+
+        - name: Remove inactive metered API credentials from Hermes profiles
+          ansible.builtin.lineinfile:
+            path: >-
+              {{
+                hermes_automation_rigel_environment_file
+                if item.0 == 'rigel'
+                else '/etc/hermes/' ~ item.0 ~ '/.env'
+              }}
+            regexp: "^{{ item.1 }}="
+            state: absent
+            owner: root
+            group: >-
+              {{ 'root' if item.0 == 'rigel' else 'hermes-' ~ item.0 }}
+            mode: "{{ '0400' if item.0 == 'rigel' else '0440' }}"
+          loop: >-
+            {{ ['astra', 'dubble', 'rigel']
+               | product([
+                   'OPENROUTER_API_KEY',
+                   'OPENAI_API_KEY',
+                   'GEMINI_API_KEY',
+                   'GOOGLE_API_KEY'
+                 ])
+               | list }}
+          loop_control:
+            label: "{{ item.0 }}:{{ item.1 }}"
+          register: hermes_automation_inactive_metered_environment
+          no_log: true
+
+        - name: Enroll Astra native API server credential
+          ansible.builtin.lineinfile:
+            path: /etc/hermes/astra/.env
+            regexp: ^API_SERVER_KEY=
+            line: "API_SERVER_KEY={{ hermes_automation_peer_key }}"
+            owner: root
+            group: hermes-astra
+            mode: "0440"
+          register: hermes_automation_astra_peer_environment
+          no_log: true
+
+        - name: Enroll Dubble fixed Astra peer credential
+          ansible.builtin.lineinfile:
+            path: /etc/hermes/dubble/.env
+            regexp: ^HERMES_PEER_ASTRA_KEY=
+            line: >-
+              HERMES_PEER_ASTRA_KEY={{ hermes_automation_peer_key }}
+            owner: root
+            group: hermes-dubble
+            mode: "0440"
+          register: hermes_automation_dubble_peer_environment
           no_log: true
 
         - name: Create bounded automation readers group
@@ -530,13 +1312,107 @@
             system: true
             state: present
 
+        - name: Create root-private collector credential directory
+          ansible.builtin.file:
+            path: "{{ hermes_retained_collector_environment_live | dirname }}"
+            state: directory
+            owner: root
+            group: root
+            mode: "0700"
+
+        - name: Deploy the least-privilege retained collector environment
+          ansible.builtin.copy:
+            content: |
+              TAUTULLI_API_KEY={{ hermes_automation_tautulli_api_key }}
+              SONARR_API_KEY={{ hermes_automation_sonarr_api_key }}
+              RADARR_API_KEY={{ hermes_automation_radarr_api_key }}
+              SEERR_API_KEY={{ hermes_automation_seerr_api_key }}
+              FORTNITE_API_KEY={{ (hermes_automation_source_environment.content | b64decode | regex_findall('(?m)^FORTNITE_API_KEY=([^\r\n]+)$'))[0] }}
+              API_FORTNITE_KEY={{ (hermes_automation_source_environment.content | b64decode | regex_findall('(?m)^API_FORTNITE_KEY=([^\r\n]+)$'))[0] }}
+            dest: "{{ hermes_retained_collector_environment_live }}"
+            owner: root
+            group: root
+            mode: "0400"
+            backup: true
+          no_log: true
+
         - name: Create bounded automation output directory
           ansible.builtin.file:
             path: "{{ hermes_automation_output_root }}"
             state: directory
-            owner: "{{ hermes_production_cutover_user }}"
+            owner: hermes-astra
             group: "{{ hermes_automation_readers_group }}"
             mode: "2770"
+
+        - name: Create Astra-owned Daily Summary section directory
+          ansible.builtin.file:
+            path: "{{ hermes_automation_output_root }}/daily-summary-sections"
+            state: directory
+            owner: hermes-astra
+            group: "{{ hermes_automation_readers_group }}"
+            mode: "2770"
+
+        - name: Create Hermes-native automation workspace mountpoints
+          ansible.builtin.file:
+            path: "{{ item }}"
+            state: directory
+            owner: hermes-astra
+            group: "{{ hermes_automation_readers_group }}"
+            mode: "2770"
+          loop:
+            - "{{ hermes_automation_native_workspace }}"
+            - "{{ hermes_automation_native_workspace }}/memory"
+            - "{{ hermes_automation_native_workspace }}/memory/daily-summary-sections"
+            - "{{ hermes_automation_native_workspace }}/fortnite-progress"
+            - "{{ hermes_automation_native_workspace }}/state"
+
+        - name: Create Astra native FreshRSS state directory
+          ansible.builtin.file:
+            path: "{{ hermes_astra_freshrss_live_root }}"
+            state: directory
+            owner: hermes-astra
+            group: hermes-astra
+            mode: "0700"
+
+        - name: Create Astra native calendar and mail config directories
+          ansible.builtin.file:
+            path: "{{ item }}"
+            state: directory
+            owner: hermes-astra
+            group: hermes-astra
+            mode: "0700"
+          loop:
+            - /var/lib/hermes/astra/.config/vdirsyncer
+            - /var/lib/hermes/astra/.config/khal
+            - /var/lib/hermes/astra/.config/himalaya
+            - "{{ hermes_astra_calendar_live_root | dirname }}"
+
+        - name: Normalize imported Astra calendar cache ownership
+          ansible.builtin.file:
+            path: "{{ hermes_astra_calendar_live_root }}"
+            state: directory
+            owner: hermes-astra
+            group: hermes-astra
+            mode: u=rwX,go=
+            recurse: true
+
+        - name: Deploy Astra native calendar and mail configs
+          ansible.builtin.template:
+            src: "{{ playbook_dir }}/../../templates/hermes/{{ item.source }}"
+            dest: "{{ item.destination }}"
+            owner: hermes-astra
+            group: hermes-astra
+            mode: "0600"
+            backup: true
+          loop:
+            - source: "{{ hermes_astra_vdirsyncer_config_source }}"
+              destination: "{{ hermes_astra_vdirsyncer_config_live }}"
+            - source: "{{ hermes_astra_khal_config_source }}"
+              destination: "{{ hermes_astra_khal_config_live }}"
+            - source: "{{ hermes_astra_himalaya_config_source }}"
+              destination: "{{ hermes_astra_himalaya_config_live }}"
+          loop_control:
+            label: "{{ item.destination }}"
 
         - name: Create native profile backup directories
           ansible.builtin.file:
@@ -549,6 +1425,102 @@
           loop_control:
             label: "{{ item.name }}"
 
+        - name: Create Hermes-native collector library directory
+          ansible.builtin.file:
+            path: "{{ hermes_warframe_parser_live | dirname }}"
+            state: directory
+            owner: root
+            group: root
+            mode: "0755"
+
+        - name: Create verified geckodriver package cache directories
+          ansible.builtin.file:
+            path: "{{ item }}"
+            state: directory
+            owner: root
+            group: root
+            mode: "0755"
+          loop:
+            - "{{ hermes_fortnite_geckodriver_cache_root }}"
+            - >-
+              {{ hermes_fortnite_geckodriver_cache_root
+                 }}/{{ hermes_fortnite_geckodriver_version }}
+
+        - name: Download the reviewed stable geckodriver archive
+          ansible.builtin.get_url:
+            url: "{{ hermes_fortnite_geckodriver_url }}"
+            dest: >-
+              {{ hermes_fortnite_geckodriver_cache_root
+                 }}/{{ hermes_fortnite_geckodriver_archive_name }}
+            checksum: "sha256:{{ hermes_fortnite_geckodriver_sha256 }}"
+            owner: root
+            group: root
+            mode: "0644"
+
+        - name: Extract the reviewed stable geckodriver archive once
+          ansible.builtin.unarchive:
+            src: >-
+              {{ hermes_fortnite_geckodriver_cache_root
+                 }}/{{ hermes_fortnite_geckodriver_archive_name }}
+            dest: >-
+              {{ hermes_fortnite_geckodriver_cache_root
+                 }}/{{ hermes_fortnite_geckodriver_version }}
+            remote_src: true
+            creates: >-
+              {{ hermes_fortnite_geckodriver_cache_root
+                 }}/{{ hermes_fortnite_geckodriver_version }}/geckodriver
+
+        - name: Verify the extracted stable geckodriver version
+          ansible.builtin.command:
+            argv:
+              - >-
+                {{ hermes_fortnite_geckodriver_cache_root
+                   }}/{{ hermes_fortnite_geckodriver_version }}/geckodriver
+              - --version
+          register: hermes_automation_extracted_geckodriver_version
+          changed_when: false
+
+        - name: Require the exact reviewed stable geckodriver version
+          ansible.builtin.assert:
+            that:
+              - >-
+                hermes_automation_extracted_geckodriver_version.stdout
+                is match(
+                  '^geckodriver '
+                  ~ hermes_fortnite_geckodriver_version
+                  ~ '(\\s|$)'
+                )
+            fail_msg: >-
+              The checksum-verified geckodriver archive did not report the
+              reviewed stable version.
+
+        - name: Install the verified standalone geckodriver atomically
+          ansible.builtin.copy:
+            src: >-
+              {{ hermes_fortnite_geckodriver_cache_root
+                 }}/{{ hermes_fortnite_geckodriver_version }}/geckodriver
+            dest: "{{ hermes_fortnite_geckodriver_path }}"
+            remote_src: true
+            owner: root
+            group: root
+            mode: "0755"
+
+        - name: Verify the direct Firefox binary used by geckodriver
+          ansible.builtin.command:
+            argv:
+              - "{{ hermes_fortnite_firefox_binary_path }}"
+              - --version
+          register: hermes_automation_firefox_version
+          changed_when: false
+
+        - name: Require a usable direct Firefox binary
+          ansible.builtin.assert:
+            that:
+              - hermes_automation_firefox_version.stdout is search('Firefox')
+            fail_msg: >-
+              The direct Firefox binary required by the public Fortnite
+              collector is not usable.
+
         - name: Deploy root-owned automation helpers
           ansible.builtin.copy:
             src: "{{ playbook_dir }}/../../{{ item.source }}"
@@ -560,16 +1532,183 @@
           loop:
             - source: "{{ hermes_cron_reconcile_source }}"
               destination: "{{ hermes_cron_reconcile_live }}"
+            - source: "{{ hermes_docker_inventory_validator_source }}"
+              destination: "{{ hermes_docker_inventory_validator_live }}"
             - source: "{{ hermes_retained_automation_source }}"
               destination: "{{ hermes_retained_automation_live }}"
+            - source: "{{ hermes_retained_media_source }}"
+              destination: "{{ hermes_retained_media_live }}"
+            - source: "{{ hermes_daily_personal_source }}"
+              destination: "{{ hermes_daily_personal_live }}"
+            - source: "{{ hermes_daily_summary_assemble_source }}"
+              destination: "{{ hermes_daily_summary_assemble_live }}"
+            - source: "{{ hermes_health_summary_source }}"
+              destination: "{{ hermes_health_summary_live }}"
+            - source: "{{ hermes_fortnite_progress_source }}"
+              destination: "{{ hermes_fortnite_progress_live }}"
+            - source: "{{ hermes_fortnite_normalize_source }}"
+              destination: "{{ hermes_fortnite_normalize_live }}"
+            - source: "{{ hermes_fortnite_rank_source }}"
+              destination: "{{ hermes_fortnite_rank_live }}"
+            - source: "{{ hermes_fortnite_calendar_sync_source }}"
+              destination: "{{ hermes_fortnite_calendar_sync_live }}"
+            - source: "{{ hermes_warframe_parser_source }}"
+              destination: "{{ hermes_warframe_parser_live }}"
+            - source: "{{ hermes_vdirsyncer_state_migrator_source }}"
+              destination: "{{ hermes_vdirsyncer_state_migrator_live }}"
+            - source: "{{ hermes_daily_updates_source }}"
+              destination: "{{ hermes_daily_updates_live }}"
+            - source: "{{ hermes_freshrss_collect_source }}"
+              destination: "{{ hermes_freshrss_collect_live }}"
             - source: "{{ hermes_warframe_feed_source }}"
               destination: "{{ hermes_warframe_feed_live }}"
             - source: "{{ hermes_fortnite_calendar_compat_source }}"
               destination: "{{ hermes_fortnite_calendar_compat_live }}"
             - source: "{{ hermes_fortnite_calendar_fetch_source }}"
               destination: "{{ hermes_fortnite_calendar_fetch_live }}"
+            - source: "{{ hermes_openclaw_parity_validator_source }}"
+              destination: "{{ hermes_openclaw_parity_validator_live }}"
+            - source: "{{ hermes_profile_skills_validator_source }}"
+              destination: "{{ hermes_profile_skills_validator_live }}"
+            - source: "{{ hermes_bootstrap_parity_validator_source }}"
+              destination: "{{ hermes_bootstrap_parity_validator_live }}"
           loop_control:
             label: "{{ item.destination }}"
+          register: hermes_automation_root_helper_copies
+
+        - name: Convert imported Astra vdirsyncer collection paths
+          ansible.builtin.command:
+            argv:
+              - /usr/sbin/runuser
+              - --user
+              - hermes-astra
+              - --
+              - /usr/bin/python3
+              - "{{ hermes_vdirsyncer_state_migrator_live }}"
+              - --collections
+              - >-
+                {{ hermes_astra_calendar_live_root
+                }}/status/personal.collections
+              - --old-root
+              - /home/johnny/.local/share/vdirsyncer/calendars
+              - --new-root
+              - >-
+                {{ hermes_astra_calendar_live_root }}/calendars
+              - --apply
+          register: hermes_automation_calendar_state_migration
+          changed_when: >-
+            (hermes_automation_calendar_state_migration.stdout | from_json)
+            .replacements > 0
+
+        - name: Verify imported Astra vdirsyncer collection paths
+          ansible.builtin.command:
+            argv:
+              - /usr/sbin/runuser
+              - --user
+              - hermes-astra
+              - --
+              - /usr/bin/python3
+              - "{{ hermes_vdirsyncer_state_migrator_live }}"
+              - --collections
+              - >-
+                {{ hermes_astra_calendar_live_root
+                }}/status/personal.collections
+              - --old-root
+              - /home/johnny/.local/share/vdirsyncer/calendars
+              - --new-root
+              - >-
+                {{ hermes_astra_calendar_live_root }}/calendars
+          register: hermes_automation_calendar_state_check
+          changed_when: false
+
+        - name: Inspect one-time OpenClaw Fortnite calendar ledger migration
+          ansible.builtin.stat:
+            path: >-
+              {{ hermes_astra_calendar_live_root
+              }}/status/.openclaw-fortnite-calendar-ledger-migrated
+          register: hermes_automation_fortnite_calendar_ledger_marker
+
+        - name: Reset only the stale imported Fortnite calendar sync ledger
+          ansible.builtin.file:
+            path: >-
+              {{ hermes_astra_calendar_live_root
+              }}/status/personal/fortnite-tournaments.items
+            state: absent
+          when: not hermes_automation_fortnite_calendar_ledger_marker.stat.exists
+
+        - name: Sync Astra's native CalDAV cache as its service identity
+          ansible.builtin.command:
+            argv:
+              - /usr/sbin/runuser
+              - --user
+              - hermes-astra
+              - --
+              - /usr/bin/env
+              - HOME=/var/lib/hermes/astra
+              - HERMES_HOME=/var/lib/hermes/astra/.hermes/profiles/astra
+              - /usr/bin/timeout
+              - 5m
+              - /usr/bin/vdirsyncer
+              - sync
+          register: hermes_automation_astra_calendar_sync
+          changed_when: false
+          args:
+            stdin: ""
+            stdin_add_newline: false
+
+        - name: Record successful OpenClaw Fortnite calendar ledger migration
+          ansible.builtin.file:
+            path: >-
+              {{ hermes_astra_calendar_live_root
+              }}/status/.openclaw-fortnite-calendar-ledger-migrated
+            state: touch
+            owner: hermes-astra
+            group: hermes-astra
+            mode: "0600"
+            modification_time: preserve
+            access_time: preserve
+          when: not hermes_automation_fortnite_calendar_ledger_marker.stat.exists
+
+        - name: Verify Astra can read its current calendar
+          ansible.builtin.command:
+            argv:
+              - /usr/sbin/runuser
+              - --user
+              - hermes-astra
+              - --
+              - /usr/bin/env
+              - HOME=/var/lib/hermes/astra
+              - HERMES_HOME=/var/lib/hermes/astra/.hermes/profiles/astra
+              - /usr/bin/khal
+              - list
+              - today
+              - 2d
+          register: hermes_automation_astra_calendar_read
+          changed_when: false
+          no_log: true
+
+        - name: Verify Astra can read one iCloud envelope natively
+          ansible.builtin.command:
+            argv:
+              - /usr/sbin/runuser
+              - --user
+              - hermes-astra
+              - --
+              - /usr/bin/env
+              - HOME=/var/lib/hermes/astra
+              - HERMES_HOME=/var/lib/hermes/astra/.hermes/profiles/astra
+              - "{{ hermes_astra_himalaya_live_binary }}"
+              - envelope
+              - list
+              - --account
+              - icloud
+              - --folder
+              - INBOX
+              - --page-size
+              - "1"
+          register: hermes_automation_astra_mail_read
+          changed_when: false
+          no_log: true
 
         - name: Deploy root-owned Astra cron scripts
           ansible.builtin.copy:
@@ -585,6 +1724,31 @@
           loop_control:
             label: "{{ item.destination }}"
 
+        - name: Deploy root-owned Rigel cron scripts
+          ansible.builtin.copy:
+            src: "{{ playbook_dir }}/../../{{ item.source }}"
+            dest: >-
+              /var/lib/hermes/rigel/.hermes/profiles/rigel/scripts/{{
+                item.destination
+              }}
+            owner: root
+            group: hermes-rigel
+            mode: "0550"
+            backup: true
+          loop: "{{ hermes_automation_rigel_scripts }}"
+          loop_control:
+            label: "{{ item.destination }}"
+          when: hermes_rigel_dedicated_discord_enabled | bool
+          register: hermes_automation_rigel_scripts_deployed
+
+        - name: Create shared credential-free production manifest directory
+          ansible.builtin.file:
+            path: "{{ hermes_automation_manifest_root }}"
+            state: directory
+            owner: root
+            group: "{{ hermes_runtime_readers_group }}"
+            mode: "0750"
+
         - name: Deploy Astra production cron manifest
           ansible.builtin.template:
             src: >-
@@ -592,7 +1756,74 @@
                  ~ hermes_automation_manifest_source }}
             dest: "{{ hermes_automation_manifest_live }}"
             owner: root
-            group: hermes-astra
+            group: "{{ hermes_runtime_readers_group }}"
+            mode: "0440"
+            backup: true
+
+        - name: Deploy Dubble production cron manifest
+          ansible.builtin.template:
+            src: >-
+              {{ playbook_dir ~ '/../../templates/hermes/'
+                 ~ hermes_dubble_automation_manifest_source }}
+            dest: "{{ hermes_dubble_automation_manifest_live }}"
+            owner: root
+            group: "{{ hermes_runtime_readers_group }}"
+            mode: "0440"
+            backup: true
+
+        - name: Deploy Rigel production cron manifest
+          ansible.builtin.template:
+            src: >-
+              {{ playbook_dir ~ '/../../templates/hermes/'
+                 ~ hermes_rigel_automation_manifest_source }}
+            dest: "{{ hermes_rigel_automation_manifest_live }}"
+            owner: root
+            group: "{{ hermes_runtime_readers_group }}"
+            mode: "0440"
+            backup: true
+
+        - name: Verify production cron manifests are readable by their profiles
+          ansible.builtin.command:
+            argv:
+              - /usr/sbin/runuser
+              - --user
+              - "{{ item.user }}"
+              - --
+              - /usr/bin/head
+              - --bytes=0
+              - "{{ item.manifest }}"
+          loop:
+            - user: hermes-astra
+              manifest: "{{ hermes_automation_manifest_live }}"
+            - user: hermes-astra
+              manifest: "{{ hermes_dubble_automation_manifest_live }}"
+            - user: hermes-dubble
+              manifest: "{{ hermes_automation_manifest_live }}"
+            - user: hermes-dubble
+              manifest: "{{ hermes_dubble_automation_manifest_live }}"
+            - user: hermes-rigel
+              manifest: "{{ hermes_rigel_automation_manifest_live }}"
+          loop_control:
+            label: "{{ item.user }}:{{ item.manifest }}"
+          changed_when: false
+
+        - name: Remove superseded private production cron manifests
+          ansible.builtin.file:
+            path: "{{ item }}"
+            state: absent
+          loop:
+            - /etc/hermes/astra/production-jobs.json
+            - /etc/hermes/dubble/production-jobs.json
+            - /etc/hermes/astra/production-automation-reconciliation.json
+
+        - name: Deploy the exhaustive OpenClaw parity contract
+          ansible.builtin.copy:
+            src: >-
+              {{ playbook_dir }}/../../{{
+                 hermes_openclaw_parity_contract_source }}
+            dest: "{{ hermes_openclaw_parity_contract_live }}"
+            owner: root
+            group: hermes-runtime-readers
             mode: "0440"
             backup: true
 
@@ -603,9 +1834,40 @@
                  hermes_automation_reconciliation_source }}
             dest: "{{ hermes_automation_reconciliation_live }}"
             owner: root
-            group: hermes-astra
+            group: "{{ hermes_runtime_readers_group }}"
             mode: "0440"
             backup: true
+
+        - name: Validate complete OpenClaw parity before interruption
+          ansible.builtin.command:
+            argv:
+              - "{{ hermes_shadow_runtime_venv }}/bin/python"
+              - "{{ hermes_openclaw_parity_validator_live }}"
+              - --contract
+              - "{{ hermes_openclaw_parity_contract_live }}"
+              - --skills
+              - "{{ hermes_profile_skills_contract_live }}"
+              - --automation
+              - "{{ hermes_automation_reconciliation_live }}"
+              - --astra-manifest
+              - "{{ hermes_automation_manifest_live }}"
+              - --dubble-manifest
+              - "{{ hermes_dubble_automation_manifest_live }}"
+              - --rigel-manifest
+              - "{{ hermes_rigel_automation_manifest_live }}"
+              - --rigel-delivery-mode
+              - >-
+                {{
+                  'dedicated'
+                  if hermes_rigel_dedicated_discord_enabled | bool
+                  else 'fallback'
+                }}
+              - --source-jobs
+              - "{{ hermes_openclaw_current_cron_state }}"
+              - --historical-source-jobs
+              - "{{ hermes_openclaw_historical_cron_state }}"
+          register: hermes_automation_parity_validation
+          changed_when: false
 
         - name: Deploy bounded automation systemd units
           ansible.builtin.template:
@@ -618,6 +1880,16 @@
           loop: "{{ hermes_automation_template_units }}"
           loop_control:
             label: "{{ item.name }}"
+
+        - name: Deploy compatibility-safe memory dependency resolver
+          ansible.builtin.copy:
+            src: >-
+              {{ ansible_config_file | dirname }}/{{ hermes_mem0_dependency_updater_source }}
+            dest: "{{ hermes_mem0_dependency_updater_live }}"
+            owner: root
+            group: root
+            mode: "0755"
+            backup: true
 
         - name: Deploy corrected Hermes native update unit
           ansible.builtin.template:
@@ -642,6 +1914,104 @@
             validate: /usr/sbin/visudo -cf %s
             backup: true
 
+        - name: Create isolated native MCP server managed scopes
+          ansible.builtin.file:
+            path: "/etc/hermes/{{ item.name }}/mcp-server"
+            state: directory
+            owner: root
+            group: "{{ item.group }}"
+            mode: "0750"
+          loop: "{{ hermes_shadow_profiles }}"
+          loop_control:
+            label: "{{ item.name }}"
+
+        - name: Create exclusive managed Hermes skill roots
+          ansible.builtin.file:
+            path: "{{ item.value.managedRoot }}"
+            state: directory
+            owner: root
+            group: "{{ item.value.group }}"
+            mode: "0750"
+          loop: >-
+            {{
+              hermes_automation_profile_skills_contract.profiles
+              | dict2items
+            }}
+          loop_control:
+            label: "{{ item.key }}"
+
+        - name: Create managed Hermes profile skill directories
+          ansible.builtin.file:
+            path: "{{ item.managedRoot }}/{{ item.name }}"
+            state: directory
+            owner: root
+            group: "{{ item.group }}"
+            mode: "0750"
+          loop: "{{ hermes_automation_profile_skills_inventory }}"
+          loop_control:
+            label: "{{ item.profile }}/{{ item.name }}"
+
+        - name: Publish reviewed managed Hermes profile skills
+          ansible.builtin.copy:
+            src: >-
+              {{ ansible_config_file | dirname }}/{{ item.source }}
+            dest: "{{ item.managedRoot }}/{{ item.name }}/SKILL.md"
+            owner: root
+            group: "{{ item.group }}"
+            mode: "0440"
+          loop: "{{ hermes_automation_profile_skills_inventory }}"
+          loop_control:
+            label: "{{ item.profile }}/{{ item.name }}"
+          register: hermes_automation_profile_skill_copies
+
+        - name: Publish managed Hermes profile skill contract
+          ansible.builtin.copy:
+            src: >-
+              {{ ansible_config_file | dirname }}/{{
+                hermes_profile_skills_contract_source }}
+            dest: "{{ hermes_profile_skills_contract_live }}"
+            owner: root
+            group: root
+            mode: "0444"
+            backup: true
+          register: hermes_automation_profile_skill_contract_copy
+
+        - name: Publish mutable native bootstrap parity contract
+          ansible.builtin.copy:
+            src: >-
+              {{ ansible_config_file | dirname }}/{{
+                hermes_bootstrap_parity_contract_source }}
+            dest: "{{ hermes_bootstrap_parity_contract_live }}"
+            owner: root
+            group: root
+            mode: "0444"
+            backup: true
+          register: hermes_automation_bootstrap_parity_contract_copy
+
+        - name: Resolve the installed stable Hermes config schema
+          ansible.builtin.command:
+            argv:
+              - "{{ hermes_shadow_runtime_venv }}/bin/python"
+              - -c
+              - >-
+                from hermes_cli.config_defaults import DEFAULT_CONFIG;
+                print(int(DEFAULT_CONFIG['_config_version']))
+          register: hermes_automation_runtime_config_schema
+          changed_when: false
+
+        - name: Require a valid installed stable Hermes config schema
+          ansible.builtin.assert:
+            that:
+              - >-
+                hermes_automation_runtime_config_schema.stdout
+                is match('^[1-9][0-9]*$')
+              - >-
+                hermes_automation_runtime_config_schema.stdout | int
+                >= hermes_shadow_config_version | int
+            fail_msg: >-
+              Installed Hermes reports an invalid or older config schema than
+              the reviewed stable repository baseline.
+
         - name: Deploy bounded Hermes managed policies
           ansible.builtin.template:
             src: >-
@@ -656,14 +2026,185 @@
           loop_control:
             loop_var: hermes_profile
             label: "{{ hermes_profile.name }}"
+          vars:
+            hermes_managed_config_version: >-
+              {{ hermes_automation_runtime_config_schema.stdout | int }}
           register: hermes_automation_managed_policies
+
+        - name: Read mutable Hermes profile configs for native skill discovery
+          ansible.builtin.slurp:
+            src: "{{ item.home }}/config.yaml"
+          loop: "{{ hermes_shadow_profiles }}"
+          loop_control:
+            label: "{{ item.name }}"
+          register: hermes_automation_mutable_configs_before_skills
+          no_log: true
+
+        - name: Migrate isolated profile configs through native Hermes
+          ansible.builtin.command:
+            argv:
+              - /usr/sbin/runuser
+              - --user
+              - "{{ item.item.user }}"
+              - --
+              - /usr/bin/env
+              - "HOME={{ item.item.account_home }}"
+              - "HERMES_HOME={{ item.item.home }}"
+              - PYTHONNOUSERSITE=1
+              - "{{ hermes_shadow_runtime_venv }}/bin/python"
+              - -c
+              - >-
+                import json;
+                from hermes_cli.config import check_config_version, migrate_config;
+                before, latest = check_config_version();
+                result = migrate_config(interactive=False, quiet=True)
+                if before < latest else {};
+                after, observed_latest = check_config_version();
+                print(json.dumps({'after': after, 'before': before,
+                'latest': observed_latest}, sort_keys=True));
+                raise SystemExit(0 if after == observed_latest and before == after
+                else 3 if after == observed_latest else 1)
+          loop: "{{ hermes_automation_mutable_configs_before_skills.results }}"
+          loop_control:
+            label: "{{ item.item.name }}"
+          register: hermes_automation_profile_config_migrations
+          changed_when: hermes_automation_profile_config_migrations.rc == 3
+          failed_when: >-
+            hermes_automation_profile_config_migrations.rc not in [0, 3]
+          check_mode: false
+          no_log: true
+
+        - name: Re-read mutable profile configs after native migration
+          ansible.builtin.slurp:
+            src: "{{ item.home }}/config.yaml"
+          loop: "{{ hermes_shadow_profiles }}"
+          loop_control:
+            label: "{{ item.name }}"
+          register: hermes_automation_mutable_configs_after_migration
+          no_log: true
+
+        - name: Require safe current mutable Hermes profile configs
+          ansible.builtin.assert:
+            that:
+              - hermes_mutable_config is mapping
+              - hermes_mutable_config._config_version is defined
+              - >-
+                hermes_mutable_config._config_version | int
+                == hermes_automation_runtime_config_schema.stdout | int
+              - >-
+                hermes_mutable_config.skills is not defined
+                or hermes_mutable_config.skills is mapping
+              - >-
+                hermes_mutable_external_dirs is sequence
+                and hermes_mutable_external_dirs is not string
+            fail_msg: >-
+              A mutable Hermes profile config is malformed or on an unexpected
+              schema. Refusing to alter user-owned skill discovery settings.
+          loop: "{{ hermes_automation_mutable_configs_after_migration.results }}"
+          loop_control:
+            label: "{{ item.item.name }}"
+          vars:
+            hermes_mutable_config: >-
+              {{ item.content | b64decode | from_yaml }}
+            hermes_mutable_external_dirs: >-
+              {{
+                (hermes_mutable_config.skills | default({})).external_dirs
+                | default([])
+              }}
+          no_log: true
+
+        - name: Remove duplicate managed root from mutable skill discovery
+          ansible.builtin.copy:
+            content: >-
+              {{
+                hermes_mutable_config
+                | combine({
+                    'skills': hermes_mutable_skills
+                      | combine({
+                          'external_dirs': hermes_mutable_external_dirs
+                            | reject('equalto', hermes_managed_skill_root)
+                            | list
+                        })
+                  })
+                | to_nice_yaml(indent=2, sort_keys=false)
+              }}
+            dest: "{{ item.item.home }}/config.yaml"
+            owner: "{{ item.item.user }}"
+            group: "{{ item.item.group }}"
+            mode: "0600"
+          loop: "{{ hermes_automation_mutable_configs_after_migration.results }}"
+          loop_control:
+            label: "{{ item.item.name }}"
+          vars:
+            hermes_mutable_config: >-
+              {{ item.content | b64decode | from_yaml }}
+            hermes_mutable_skills: >-
+              {{ hermes_mutable_config.skills | default({}) }}
+            hermes_mutable_external_dirs: >-
+              {{ hermes_mutable_skills.external_dirs | default([]) }}
+            hermes_managed_skill_root: >-
+              {{ '/etc/hermes/' ~ item.item.name ~ '/skills' }}
+          register: hermes_automation_profile_skill_configs
+          no_log: true
+
+        - name: Verify every managed skill source before Gateway restart
+          ansible.builtin.command:
+            argv:
+              - /usr/sbin/runuser
+              - --user
+              - "{{ item.user }}"
+              - --
+              - /usr/bin/env
+              - "HOME={{ item.account_home }}"
+              - "HERMES_HOME={{ item.home }}"
+              - "{{ hermes_shadow_runtime_venv }}/bin/python"
+              - "{{ hermes_profile_skills_validator_live }}"
+              - --contract
+              - "{{ hermes_profile_skills_contract_live }}"
+              - --mode
+              - installed
+              - --profile
+              - "{{ item.name }}"
+              - --hermes-source
+              - /usr/local/lib/hermes-agent
+          loop: "{{ hermes_shadow_profiles }}"
+          loop_control:
+            label: "{{ item.name }}"
+          changed_when: false
+
+        - name: Verify profile-owned native skills before Gateway restart
+          ansible.builtin.command:
+            argv:
+              - /usr/sbin/runuser
+              - --user
+              - "{{ item.user }}"
+              - --
+              - /usr/bin/env
+              - "HOME={{ item.account_home }}"
+              - "HERMES_HOME={{ item.home }}"
+              - "{{ hermes_shadow_runtime_venv }}/bin/python"
+              - "{{ hermes_profile_skills_validator_live }}"
+              - --contract
+              - "{{ hermes_profile_skills_contract_live }}"
+              - --mode
+              - native
+              - --profile
+              - "{{ item.name }}"
+              - --hermes-source
+              - /usr/local/lib/hermes-agent
+              - --allow-unmounted-shared-readers
+          loop: "{{ hermes_shadow_profiles }}"
+          loop_control:
+            label: "{{ item.name }}"
+          changed_when: false
 
         - name: Hash bounded Hermes policy and environment
           ansible.builtin.command:
             argv:
               - /usr/bin/sha256sum
               - "/etc/hermes/{{ item.name }}/config.yaml"
-              - "/etc/hermes/{{ item.name }}/.env"
+              - >-
+                {{ item.environment_file | default('/etc/hermes/' ~ item.name ~ '/.env') }}
           loop: "{{ hermes_shadow_profiles }}"
           loop_control:
             label: "{{ item.name }}"
@@ -694,7 +2235,7 @@
             group: root
             mode: "0755"
 
-        - name: Deploy Astra live cron drift gate
+        - name: Deploy Astra immutable automation parity gate
           ansible.builtin.template:
             src: >-
               {{ playbook_dir
@@ -706,11 +2247,74 @@
             backup: true
           register: hermes_automation_astra_gateway_dropin
 
-        - name: Remove temporary native-migration cron drift gate
+        - name: Create Dubble Gateway systemd drop-in directory
+          ansible.builtin.file:
+            path: "{{ hermes_dubble_automation_gateway_dropin | dirname }}"
+            state: directory
+            owner: root
+            group: root
+            mode: "0755"
+
+        - name: Deploy Dubble immutable automation parity gate
+          ansible.builtin.template:
+            src: >-
+              {{ playbook_dir
+                 }}/../../templates/hermes/hermes-gateway-dubble-automation.conf.j2
+            dest: "{{ hermes_dubble_automation_gateway_dropin }}"
+            owner: root
+            group: root
+            mode: "0644"
+            backup: true
+          register: hermes_automation_dubble_gateway_dropin
+
+        - name: Create Rigel Gateway systemd drop-in directory
+          ansible.builtin.file:
+            path: "{{ hermes_rigel_automation_gateway_dropin | dirname }}"
+            state: directory
+            owner: root
+            group: root
+            mode: "0755"
+
+        - name: Deploy Rigel immutable automation parity gate
+          ansible.builtin.template:
+            src: >-
+              {{ playbook_dir
+                 }}/../../templates/hermes/hermes-gateway-rigel-automation.conf.j2
+            dest: "{{ hermes_rigel_automation_gateway_dropin }}"
+            owner: root
+            group: root
+            mode: "0644"
+            backup: true
+          register: hermes_automation_rigel_gateway_dropin
+
+        - name: Remove superseded native-migration startup drop-in
           ansible.builtin.file:
             path: >-
               /etc/systemd/system/hermes-gateway-astra.service.d/20-automation.conf
             state: absent
+
+        - name: Inspect superseded collapsed Daily Summary timer
+          ansible.builtin.stat:
+            path: "/etc/systemd/system/{{ item }}"
+            follow: false
+          loop: "{{ hermes_automation_retired_timers }}"
+          register: hermes_automation_retired_timer_files
+
+        - name: Stop and disable superseded collapsed Daily Summary timer
+          ansible.builtin.systemd_service:
+            name: "{{ item.item }}"
+            state: stopped
+            enabled: false
+          loop: "{{ hermes_automation_retired_timer_files.results }}"
+          loop_control:
+            label: "{{ item.item }}"
+          when: item.stat.exists
+
+        - name: Remove superseded collapsed Daily Summary timer
+          ansible.builtin.file:
+            path: "/etc/systemd/system/{{ item }}"
+            state: absent
+          loop: "{{ hermes_automation_retired_timers }}"
 
         - name: Reload Hermes automation systemd units
           ansible.builtin.systemd_service:
@@ -734,10 +2338,84 @@
               - /var/lib/hermes/astra/.hermes/profiles/astra
               - --profile
               - astra
-              - --check
+              - --audit
           register: hermes_automation_reconcile_precheck
           changed_when: false
+          failed_when: hermes_automation_reconcile_precheck.rc not in [0, 3]
           check_mode: false
+
+        - name: Check Dubble cron drift before any interruption
+          ansible.builtin.command:
+            argv:
+              - /usr/sbin/runuser
+              - --user
+              - hermes-dubble
+              - --
+              - /usr/bin/env
+              - HOME=/var/lib/hermes/dubble
+              - HERMES_HOME=/var/lib/hermes/dubble/.hermes/profiles/dubble
+              - "{{ hermes_shadow_runtime_venv }}/bin/python"
+              - "{{ hermes_cron_reconcile_live }}"
+              - --manifest
+              - "{{ hermes_dubble_automation_manifest_live }}"
+              - --home
+              - /var/lib/hermes/dubble/.hermes/profiles/dubble
+              - --profile
+              - dubble
+              - --audit
+          register: hermes_automation_dubble_reconcile_precheck
+          changed_when: false
+          failed_when: >-
+            hermes_automation_dubble_reconcile_precheck.rc not in [0, 3]
+          check_mode: false
+
+        - name: Check Rigel cron drift before any interruption
+          ansible.builtin.command:
+            argv:
+              - /usr/sbin/runuser
+              - --user
+              - hermes-rigel
+              - --
+              - /usr/bin/env
+              - HOME=/var/lib/hermes/rigel
+              - HERMES_HOME=/var/lib/hermes/rigel/.hermes/profiles/rigel
+              - "{{ hermes_shadow_runtime_venv }}/bin/python"
+              - "{{ hermes_cron_reconcile_live }}"
+              - --manifest
+              - "{{ hermes_rigel_automation_manifest_live }}"
+              - --home
+              - /var/lib/hermes/rigel/.hermes/profiles/rigel
+              - --profile
+              - rigel
+              - --audit
+          register: hermes_automation_rigel_reconcile_precheck
+          changed_when: false
+          failed_when: >-
+            hermes_automation_rigel_reconcile_precheck.rc not in [0, 3]
+          check_mode: false
+
+        - name: Decide which native schedules require explicit reconciliation
+          ansible.builtin.set_fact:
+            hermes_automation_astra_schedule_reconcile_required: >-
+              {{
+                hermes_automation_schedule_mode in ['seed', 'restore']
+                and (hermes_automation_reconcile_precheck.stdout | from_json)
+                    .changes | length > 0
+              }}
+            hermes_automation_dubble_schedule_reconcile_required: >-
+              {{
+                hermes_automation_schedule_mode in ['seed', 'restore']
+                and (
+                  hermes_automation_dubble_reconcile_precheck.stdout | from_json
+                ).changes | length > 0
+              }}
+            hermes_automation_rigel_schedule_reconcile_required: >-
+              {{
+                hermes_automation_schedule_mode in ['seed', 'restore']
+                and (
+                  hermes_automation_rigel_reconcile_precheck.stdout | from_json
+                ).changes | length > 0
+              }}
 
         - name: Decide which production consumers need one restart
           ansible.builtin.set_fact:
@@ -756,14 +2434,63 @@
                   | map(attribute='changed')
                   | first
                 )
+                or hermes_automation_dubble_peer_environment.changed
+                or
+                (
+                  hermes_automation_fallback_provider_environments.results
+                  | selectattr('item.profile', 'equalto', 'dubble')
+                  | map(attribute='changed')
+                  | select('equalto', true)
+                  | list
+                  | length > 0
+                )
+                or hermes_automation_dubble_gateway_dropin.changed
+                or
+                (
+                  hermes_automation_profile_config_migrations.results
+                  | selectattr('item.item.name', 'equalto', 'dubble')
+                  | map(attribute='changed')
+                  | first
+                )
+                or
+                (
+                  hermes_automation_profile_skill_configs.results
+                  | selectattr('item.item.name', 'equalto', 'dubble')
+                  | map(attribute='changed')
+                  | first
+                )
+                or
+                (
+                  hermes_automation_profile_skill_copies.results
+                  | selectattr('item.profile', 'equalto', 'dubble')
+                  | map(attribute='changed')
+                  | select('equalto', true)
+                  | list
+                  | length > 0
+                )
+                or hermes_automation_dubble_schedule_reconcile_required | bool
               }}
             hermes_automation_astra_restart_required: >-
               {{
-                (
-                  (hermes_automation_reconcile_precheck.stdout | from_json)
-                  .changes | length > 0
-                )
+                hermes_automation_astra_schedule_reconcile_required | bool
                 or hermes_automation_astra_provider_environment.changed
+                or
+                (
+                  hermes_automation_fallback_provider_environments.results
+                  | selectattr('item.profile', 'equalto', 'astra')
+                  | map(attribute='changed')
+                  | select('equalto', true)
+                  | list
+                  | length > 0
+                )
+                or hermes_automation_astra_peer_environment.changed
+                or
+                (
+                  hermes_automation_profile_config_migrations.results
+                  | selectattr('item.item.name', 'equalto', 'astra')
+                  | map(attribute='changed')
+                  | first
+                )
                 or
                 (
                   hermes_automation_managed_policies.results
@@ -779,6 +2506,89 @@
                   | first
                 )
                 or hermes_automation_astra_gateway_dropin.changed
+                or hermes_automation_bootstrap_parity_contract_copy.changed
+                or
+                (
+                  hermes_automation_root_helper_copies.results
+                  | selectattr(
+                      'item.destination',
+                      'equalto',
+                      hermes_bootstrap_parity_validator_live
+                    )
+                  | map(attribute='changed')
+                  | first
+                )
+                or
+                (
+                  hermes_automation_profile_skill_configs.results
+                  | selectattr('item.item.name', 'equalto', 'astra')
+                  | map(attribute='changed')
+                  | first
+                )
+                or
+                (
+                  hermes_automation_profile_skill_copies.results
+                  | selectattr('item.profile', 'equalto', 'astra')
+                  | map(attribute='changed')
+                  | select('equalto', true)
+                  | list
+                  | length > 0
+                )
+              }}
+            hermes_automation_rigel_restart_required: >-
+              {{
+                hermes_rigel_dedicated_discord_enabled | bool
+                and (
+                  (
+                    hermes_automation_managed_policies.results
+                    | selectattr('hermes_profile.name', 'equalto', 'rigel')
+                    | map(attribute='changed')
+                    | first
+                  )
+                  or
+                  (
+                    hermes_automation_policy_manifests.results
+                    | selectattr('item.item.name', 'equalto', 'rigel')
+                    | map(attribute='changed')
+                    | first
+                  )
+                  or
+                  (
+                    hermes_automation_fallback_provider_environments.results
+                    | selectattr('item.profile', 'equalto', 'rigel')
+                    | map(attribute='changed')
+                    | select('equalto', true)
+                    | list
+                    | length > 0
+                  )
+                  or hermes_automation_rigel_discord_environment.changed
+                  or hermes_automation_rigel_gateway_dropin.changed
+                  or hermes_automation_rigel_scripts_deployed.changed
+                  or
+                  (
+                    hermes_automation_profile_config_migrations.results
+                    | selectattr('item.item.name', 'equalto', 'rigel')
+                    | map(attribute='changed')
+                    | first
+                  )
+                  or
+                  (
+                    hermes_automation_profile_skill_configs.results
+                    | selectattr('item.item.name', 'equalto', 'rigel')
+                    | map(attribute='changed')
+                    | first
+                  )
+                  or
+                  (
+                    hermes_automation_profile_skill_copies.results
+                    | selectattr('item.profile', 'equalto', 'rigel')
+                    | map(attribute='changed')
+                    | select('equalto', true)
+                    | list
+                    | length > 0
+                  )
+                  or hermes_automation_rigel_schedule_reconcile_required | bool
+                )
               }}
 
         - name: Prepare Astra planned-stop marker for automation changes
@@ -786,7 +2596,9 @@
             file: ../../tasks/hermes-planned-stop-marker.yml
           vars:
             hermes_planned_stop_profile: "{{ hermes_shadow_profiles[0] }}"
-          when: hermes_automation_astra_restart_required | bool
+          when:
+            - hermes_automation_astra_restart_required | bool
+            - not hermes_automation_defer_gateway_restart | bool
 
         - name: Stop Astra natively once when cron or runtime state changed
           ansible.builtin.command:
@@ -800,6 +2612,16 @@
             HERMES_HOME: "{{ hermes_shadow_profiles[0].home }}"
             HERMES_MANAGED_DIR: /etc/hermes/astra
           changed_when: true
+          when:
+            - hermes_automation_astra_restart_required | bool
+            - not hermes_automation_defer_gateway_restart | bool
+
+        - name: Inspect stopped Astra native cron state
+          ansible.builtin.stat:
+            path: /var/lib/hermes/astra/.hermes/profiles/astra/cron/jobs.json
+            follow: false
+          register: hermes_automation_astra_stopped_cron
+          check_mode: false
           when: hermes_automation_astra_restart_required | bool
 
         - name: Refresh the native cron backup with Astra stopped
@@ -812,7 +2634,9 @@
             owner: root
             group: root
             mode: "0600"
-          when: hermes_automation_astra_restart_required | bool
+          when:
+            - hermes_automation_astra_restart_required | bool
+            - hermes_automation_astra_stopped_cron.stat.exists
 
         - name: Reconcile Astra jobs through the native Hermes API
           ansible.builtin.command:
@@ -832,57 +2656,307 @@
               - /var/lib/hermes/astra/.hermes/profiles/astra
               - --profile
               - astra
-              - --apply
+              - >-
+                {{
+                  '--seed'
+                  if hermes_automation_schedule_mode == 'seed'
+                  else '--restore'
+                }}
           register: hermes_automation_reconcile
           changed_when: >-
             (hermes_automation_reconcile.stdout | from_json).changes
             | length > 0
           check_mode: false
-          when: hermes_automation_astra_restart_required | bool
+          when: hermes_automation_astra_schedule_reconcile_required | bool
 
-        - name: Start Astra natively after the single bounded reconciliation
-          ansible.builtin.command:
-            argv:
-              - "{{ hermes_shadow_runtime_binary }}"
-              - gateway
-              - start
-              - --system
-          environment:
-            HOME: "{{ hermes_shadow_profiles[0].account_home }}"
-            HERMES_HOME: "{{ hermes_shadow_profiles[0].home }}"
-            HERMES_MANAGED_DIR: /etc/hermes/astra
-          changed_when: true
-          when: hermes_automation_astra_restart_required | bool
+        - name: Start Astra through the native systemd readiness window
+          ansible.builtin.systemd_service:
+            name: hermes-gateway-astra.service
+            state: started
+            enabled: true
+          when:
+            - hermes_automation_astra_restart_required | bool
+            - not hermes_automation_defer_gateway_restart | bool
 
-        - name: Prepare Dubble planned-stop marker for shared policy changes
+        - name: Prepare Dubble planned-stop marker for cron or policy changes
           ansible.builtin.include_tasks:
             file: ../../tasks/hermes-planned-stop-marker.yml
           vars:
             hermes_planned_stop_profile: "{{ hermes_shadow_profiles[1] }}"
-          when: hermes_automation_shared_policy_changed | bool
+          when:
+            - hermes_automation_shared_policy_changed | bool
+            - not hermes_automation_defer_gateway_restart | bool
 
-        - name: Restart Dubble natively only when shared policy changed
+        - name: Stop Dubble natively once when cron or policy changed
           ansible.builtin.command:
             argv:
               - "{{ hermes_shadow_runtime_binary }}"
               - gateway
-              - restart
+              - stop
               - --system
           environment:
             HOME: "{{ hermes_shadow_profiles[1].account_home }}"
             HERMES_HOME: "{{ hermes_shadow_profiles[1].home }}"
             HERMES_MANAGED_DIR: /etc/hermes/dubble
           changed_when: true
+          when:
+            - hermes_automation_shared_policy_changed | bool
+            - not hermes_automation_defer_gateway_restart | bool
+
+        - name: Inspect stopped Dubble native cron state
+          ansible.builtin.stat:
+            path: /var/lib/hermes/dubble/.hermes/profiles/dubble/cron/jobs.json
+            follow: false
+          register: hermes_automation_dubble_stopped_cron
+          check_mode: false
           when: hermes_automation_shared_policy_changed | bool
 
-        - name: Ensure both production consumers remain active
+        - name: Refresh the native cron backup with Dubble stopped
+          ansible.builtin.copy:
+            src: /var/lib/hermes/dubble/.hermes/profiles/dubble/cron/jobs.json
+            dest: >-
+              {{ hermes_automation_backup_root
+                 }}/var__lib__hermes__dubble__cron__jobs.json
+            remote_src: true
+            owner: root
+            group: root
+            mode: "0600"
+          when:
+            - hermes_automation_shared_policy_changed | bool
+            - hermes_automation_dubble_stopped_cron.stat.exists
+
+        - name: Reconcile Dubble jobs through the native Hermes API
+          ansible.builtin.command:
+            argv:
+              - /usr/sbin/runuser
+              - --user
+              - hermes-dubble
+              - --
+              - /usr/bin/env
+              - HOME=/var/lib/hermes/dubble
+              - HERMES_HOME=/var/lib/hermes/dubble/.hermes/profiles/dubble
+              - "{{ hermes_shadow_runtime_venv }}/bin/python"
+              - "{{ hermes_cron_reconcile_live }}"
+              - --manifest
+              - "{{ hermes_dubble_automation_manifest_live }}"
+              - --home
+              - /var/lib/hermes/dubble/.hermes/profiles/dubble
+              - --profile
+              - dubble
+              - >-
+                {{
+                  '--seed'
+                  if hermes_automation_schedule_mode == 'seed'
+                  else '--restore'
+                }}
+          register: hermes_automation_dubble_reconcile
+          changed_when: >-
+            (hermes_automation_dubble_reconcile.stdout | from_json).changes
+            | length > 0
+          check_mode: false
+          when: hermes_automation_dubble_schedule_reconcile_required | bool
+
+        - name: Start Dubble through the native systemd readiness window
+          ansible.builtin.systemd_service:
+            name: hermes-gateway-dubble.service
+            state: started
+            enabled: true
+          when:
+            - hermes_automation_shared_policy_changed | bool
+            - not hermes_automation_defer_gateway_restart | bool
+
+        - name: Create Rigel readiness marker after third-identity proof
+          ansible.builtin.file:
+            path: "/etc/hermes/rigel/{{ hermes_gateway_readiness_marker }}"
+            state: touch
+            owner: root
+            group: hermes-rigel
+            mode: "0440"
+            modification_time: preserve
+            access_time: preserve
+          when: hermes_rigel_dedicated_discord_enabled | bool
+
+        - name: Prepare Rigel planned-stop marker for cron or policy changes
+          ansible.builtin.include_tasks:
+            file: ../../tasks/hermes-planned-stop-marker.yml
+          vars:
+            hermes_planned_stop_profile: "{{ hermes_shadow_profiles[2] }}"
+          when:
+            - hermes_automation_rigel_restart_required | bool
+            - not hermes_automation_defer_gateway_restart | bool
+            - >-
+              (
+                hermes_automation_prior_gateways
+                | selectattr(
+                    'name',
+                    'equalto',
+                    'hermes-gateway-rigel.service'
+                  )
+                | map(attribute='active')
+                | first
+              ) == 'active'
+
+        - name: Stop Rigel natively once when active runtime state changed
+          ansible.builtin.command:
+            argv:
+              - "{{ hermes_shadow_runtime_binary }}"
+              - gateway
+              - stop
+              - --system
+          environment:
+            HOME: "{{ hermes_shadow_profiles[2].account_home }}"
+            HERMES_HOME: "{{ hermes_shadow_profiles[2].home }}"
+            HERMES_MANAGED_DIR: /etc/hermes/rigel
+          changed_when: true
+          when:
+            - hermes_automation_rigel_restart_required | bool
+            - not hermes_automation_defer_gateway_restart | bool
+            - >-
+              (
+                hermes_automation_prior_gateways
+                | selectattr(
+                    'name',
+                    'equalto',
+                    'hermes-gateway-rigel.service'
+                  )
+                | map(attribute='active')
+                | first
+              ) == 'active'
+
+        - name: Inspect stopped Rigel native cron state
+          ansible.builtin.stat:
+            path: /var/lib/hermes/rigel/.hermes/profiles/rigel/cron/jobs.json
+            follow: false
+          register: hermes_automation_rigel_stopped_cron
+          check_mode: false
+          when: hermes_automation_rigel_restart_required | bool
+
+        - name: Refresh the native cron backup with Rigel stopped
+          ansible.builtin.copy:
+            src: /var/lib/hermes/rigel/.hermes/profiles/rigel/cron/jobs.json
+            dest: >-
+              {{ hermes_automation_backup_root
+                 }}/var__lib__hermes__rigel__cron__jobs.json
+            remote_src: true
+            owner: root
+            group: root
+            mode: "0600"
+          when:
+            - hermes_automation_rigel_restart_required | bool
+            - hermes_automation_rigel_stopped_cron.stat.exists
+
+        - name: Reconcile Rigel jobs through the native Hermes API
+          ansible.builtin.command:
+            argv:
+              - /usr/sbin/runuser
+              - --user
+              - hermes-rigel
+              - --
+              - /usr/bin/env
+              - HOME=/var/lib/hermes/rigel
+              - HERMES_HOME=/var/lib/hermes/rigel/.hermes/profiles/rigel
+              - "{{ hermes_shadow_runtime_venv }}/bin/python"
+              - "{{ hermes_cron_reconcile_live }}"
+              - --manifest
+              - "{{ hermes_rigel_automation_manifest_live }}"
+              - --home
+              - /var/lib/hermes/rigel/.hermes/profiles/rigel
+              - --profile
+              - rigel
+              - >-
+                {{
+                  '--seed'
+                  if hermes_automation_schedule_mode == 'seed'
+                  else '--restore'
+                }}
+          register: hermes_automation_rigel_reconcile
+          changed_when: >-
+            (hermes_automation_rigel_reconcile.stdout | from_json).changes
+            | length > 0
+          check_mode: false
+          when: hermes_automation_rigel_schedule_reconcile_required | bool
+
+        - name: Start Rigel through the native systemd readiness window
+          ansible.builtin.systemd_service:
+            name: hermes-gateway-rigel.service
+            state: started
+            enabled: true
+          when:
+            - hermes_rigel_dedicated_discord_enabled | bool
+            - not hermes_automation_defer_gateway_restart | bool
+
+        - name: Ensure all configured production consumers remain active
           ansible.builtin.systemd_service:
             name: "hermes-gateway-{{ item }}.service"
             state: started
             enabled: true
-          loop:
-            - astra
-            - dubble
+          loop: >-
+            {{
+              ['astra', 'dubble']
+              + (
+                  ['rigel']
+                  if hermes_rigel_dedicated_discord_enabled | bool
+                  else []
+                )
+            }}
+          when: not hermes_automation_defer_gateway_restart | bool
+
+        - name: Resolve production Gateway mount namespaces
+          ansible.builtin.command:
+            argv:
+              - /usr/bin/systemctl
+              - show
+              - --property=MainPID
+              - --value
+              - "{{ item.unit }}"
+          loop: "{{ hermes_production_consumer_profiles }}"
+          loop_control:
+            label: "{{ item.name }}"
+          register: hermes_automation_gateway_pids
+          changed_when: false
+          when: not hermes_automation_defer_gateway_restart | bool
+
+        - name: Require live production Gateway processes
+          ansible.builtin.assert:
+            that:
+              - item.stdout is match('^[1-9][0-9]*$')
+              - item.stdout | int > 1
+            fail_msg: >-
+              Hermes Gateway {{ item.item.name }} has no live MainPID after
+              native readiness.
+          loop: "{{ hermes_automation_gateway_pids.results }}"
+          loop_control:
+            label: "{{ item.item.name }}"
+          when: not hermes_automation_defer_gateway_restart | bool
+
+        - name: Verify profile skills through native runtime discovery
+          ansible.builtin.command:
+            argv:
+              - /usr/bin/nsenter
+              - "--mount=/proc/{{ item.stdout }}/ns/mnt"
+              - --
+              - /usr/sbin/runuser
+              - --user
+              - "{{ item.item.user }}"
+              - --
+              - /usr/bin/env
+              - "HOME={{ item.item.account_home }}"
+              - "HERMES_HOME={{ item.item.home }}"
+              - "{{ hermes_shadow_runtime_venv }}/bin/python"
+              - "{{ hermes_profile_skills_validator_live }}"
+              - --contract
+              - "{{ hermes_profile_skills_contract_live }}"
+              - --mode
+              - native
+              - --profile
+              - "{{ item.item.name }}"
+              - --hermes-source
+              - /usr/local/lib/hermes-agent
+          loop: "{{ hermes_automation_gateway_pids.results }}"
+          loop_control:
+            label: "{{ item.item.name }}"
+          changed_when: false
+          when: not hermes_automation_defer_gateway_restart | bool
 
         - name: Enable production automation and backup timers
           ansible.builtin.systemd_service:
@@ -890,6 +2964,7 @@
             state: started
             enabled: true
           loop: "{{ hermes_automation_enabled_timers }}"
+          when: not hermes_automation_defer_gateway_restart | bool
 
         - name: Resume native update timers after convergence
           ansible.builtin.systemd_service:
@@ -899,8 +2974,9 @@
           loop:
             - "{{ hermes_native_update_timer }}"
             - "{{ hermes_tirith_update_timer }}"
+          when: not hermes_automation_defer_gateway_restart | bool
 
-        - name: Verify zero Astra cron drift through the native API
+        - name: Audit Astra native schedule declarations after convergence
           ansible.builtin.command:
             argv:
               - /usr/sbin/runuser
@@ -918,10 +2994,119 @@
               - /var/lib/hermes/astra/.hermes/profiles/astra
               - --profile
               - astra
-              - --check
+              - --audit
           register: hermes_automation_reconcile_check
           changed_when: false
+          failed_when: hermes_automation_reconcile_check.rc not in [0, 3]
           check_mode: false
+
+        - name: Audit Dubble native schedule declarations after convergence
+          ansible.builtin.command:
+            argv:
+              - /usr/sbin/runuser
+              - --user
+              - hermes-dubble
+              - --
+              - /usr/bin/env
+              - HOME=/var/lib/hermes/dubble
+              - HERMES_HOME=/var/lib/hermes/dubble/.hermes/profiles/dubble
+              - "{{ hermes_shadow_runtime_venv }}/bin/python"
+              - "{{ hermes_cron_reconcile_live }}"
+              - --manifest
+              - "{{ hermes_dubble_automation_manifest_live }}"
+              - --home
+              - /var/lib/hermes/dubble/.hermes/profiles/dubble
+              - --profile
+              - dubble
+              - --audit
+          register: hermes_automation_dubble_reconcile_check
+          changed_when: false
+          failed_when: >-
+            hermes_automation_dubble_reconcile_check.rc not in [0, 3]
+          check_mode: false
+
+        - name: Audit Rigel native schedule declarations after convergence
+          ansible.builtin.command:
+            argv:
+              - /usr/sbin/runuser
+              - --user
+              - hermes-rigel
+              - --
+              - /usr/bin/env
+              - HOME=/var/lib/hermes/rigel
+              - HERMES_HOME=/var/lib/hermes/rigel/.hermes/profiles/rigel
+              - "{{ hermes_shadow_runtime_venv }}/bin/python"
+              - "{{ hermes_cron_reconcile_live }}"
+              - --manifest
+              - "{{ hermes_rigel_automation_manifest_live }}"
+              - --home
+              - /var/lib/hermes/rigel/.hermes/profiles/rigel
+              - --profile
+              - rigel
+              - --audit
+          register: hermes_automation_rigel_reconcile_check
+          changed_when: false
+          failed_when: >-
+            hermes_automation_rigel_reconcile_check.rc not in [0, 3]
+          check_mode: false
+
+        - name: Report native schedule declaration differences without mutation
+          ansible.builtin.debug:
+            msg:
+              scheduleMode: "{{ hermes_automation_schedule_mode }}"
+              astraDifferences: >-
+                {{
+                  (hermes_automation_reconcile_check.stdout | from_json)
+                  .changes | length
+                }}
+              dubbleDifferences: >-
+                {{
+                  (hermes_automation_dubble_reconcile_check.stdout | from_json)
+                  .changes | length
+                }}
+              rigelDifferences: >-
+                {{
+                  (hermes_automation_rigel_reconcile_check.stdout | from_json)
+                  .changes | length
+                }}
+
+        - name: Require every requested native schedule seed creation
+          ansible.builtin.assert:
+            that:
+              - >-
+                (hermes_automation_reconcile_check.stdout | from_json).changes
+                | selectattr('action', 'equalto', 'create') | list | length == 0
+              - >-
+                (
+                  hermes_automation_dubble_reconcile_check.stdout
+                  | from_json
+                ).changes
+                | selectattr('action', 'equalto', 'create') | list | length == 0
+              - >-
+                (
+                  hermes_automation_rigel_reconcile_check.stdout
+                  | from_json
+                ).changes
+                | selectattr('action', 'equalto', 'create') | list | length == 0
+          when: hermes_automation_schedule_mode == 'seed'
+
+        - name: Require exact native schedule restoration when requested
+          ansible.builtin.assert:
+            that:
+              - >-
+                (hermes_automation_reconcile_check.stdout | from_json).changes
+                | length == 0
+              - >-
+                (
+                  hermes_automation_dubble_reconcile_check.stdout
+                  | from_json
+                ).changes | length == 0
+              - >-
+                (
+                  hermes_automation_rigel_reconcile_check.stdout
+                  | from_json
+                ).changes | length == 0
+          when: hermes_automation_schedule_mode == 'restore'
 
         - name: Require active production Hermes automation units
           ansible.builtin.command:
@@ -930,14 +3115,27 @@
               - is-active
               - "{{ item }}"
           loop: >-
-            {{ ['hermes-gateway-astra.service',
-                'hermes-gateway-dubble.service',
-                hermes_native_update_timer,
+            {{ (
+                 []
+                 if hermes_automation_defer_gateway_restart | bool
+                 else ['hermes-gateway-astra.service',
+                       'hermes-gateway-dubble.service']
+               )
+               + (
+                   ['hermes-gateway-rigel.service']
+                   if (
+                     hermes_rigel_dedicated_discord_enabled | bool
+                     and not hermes_automation_defer_gateway_restart | bool
+                   )
+                   else []
+                 )
+               + [hermes_native_update_timer,
                 hermes_tirith_update_timer]
                + hermes_automation_enabled_timers }}
           register: hermes_automation_live_units
           changed_when: false
           check_mode: false
+          when: not hermes_automation_defer_gateway_restart | bool
 
         - name: Require every production automation unit active
           ansible.builtin.assert:
@@ -946,6 +3144,7 @@
           loop: "{{ hermes_automation_live_units.results }}"
           loop_control:
             label: "{{ item.item }}"
+          when: not hermes_automation_defer_gateway_restart | bool
 
         - name: Verify Health receiver remains active
           ansible.builtin.command:
@@ -967,6 +3166,10 @@
           ansible.builtin.assert:
             that:
               - hermes_automation_health_state.stdout == 'active'
+
+        - name: Mark the automation transaction successful
+          ansible.builtin.set_fact:
+            hermes_automation_transaction_succeeded: true
 
       rescue:
         - name: Inspect automation timers available during rescue
@@ -991,10 +3194,14 @@
             label: "{{ item.item }}"
           when: item.stdout == 'loaded'
 
-        - name: Stop Astra before restoring prior cron state
+        - name: Stop Hermes consumers before restoring prior cron state
           ansible.builtin.systemd_service:
-            name: hermes-gateway-astra.service
+            name: "{{ item }}"
             state: stopped
+          loop:
+            - hermes-gateway-astra.service
+            - hermes-gateway-dubble.service
+            - hermes-gateway-rigel.service
 
         - name: Restore backed-up automation, policy, and Gateway files
           ansible.builtin.copy:
@@ -1012,6 +3219,36 @@
             label: "{{ item.item }}"
           when: item.stat.exists and item.stat.isreg
 
+        - name: Remove changed automation state directories before restore
+          ansible.builtin.file:
+            path: "{{ item.item }}"
+            state: absent
+          loop: "{{ hermes_automation_rollback_stats.results }}"
+          loop_control:
+            label: "{{ item.item }}"
+          when: item.stat.exists and item.stat.isdir
+
+        - name: Restore backed-up automation state directories
+          ansible.builtin.command:
+            argv:
+              - /usr/bin/tar
+              - --extract
+              - --file
+              - >-
+                {{ hermes_automation_backup_root
+                   }}/{{ item.item | regex_replace('^/', '')
+                                    | regex_replace('/', '__') }}.tar
+              - --acls
+              - --xattrs
+              - --numeric-owner
+              - --directory
+              - "{{ item.item | dirname }}"
+          loop: "{{ hermes_automation_rollback_stats.results }}"
+          loop_control:
+            label: "{{ item.item }}"
+          when: item.stat.exists and item.stat.isdir
+          changed_when: true
+
         - name: Remove files introduced by the failed transaction
           ansible.builtin.file:
             path: "{{ item.item }}"
@@ -1025,14 +3262,27 @@
           ansible.builtin.systemd_service:
             daemon_reload: true
 
-        - name: Restore Astra and Dubble availability after failure
+        - name: Restore pre-transaction Hermes consumer state after failure
           ansible.builtin.systemd_service:
-            name: "{{ item }}"
-            state: started
-            enabled: true
-          loop:
-            - hermes-gateway-astra.service
-            - hermes-gateway-dubble.service
+            name: "{{ item.name }}"
+            state: "{{ 'started' if item.active == 'active' else 'stopped' }}"
+            enabled: "{{ item.enabled == 'enabled' }}"
+          loop: "{{ hermes_automation_prior_gateways | default([]) }}"
+          loop_control:
+            label: "{{ item.name }}"
+          when: item.exists
+
+        - name: Clear failed Gateway status after exact state restore
+          ansible.builtin.command:
+            argv:
+              - /usr/bin/systemctl
+              - reset-failed
+              - "{{ item.name }}"
+          loop: "{{ hermes_automation_prior_gateways | default([]) }}"
+          loop_control:
+            label: "{{ item.name }}"
+          changed_when: false
+          when: item.exists
 
         - name: Fail after restoring the pre-automation state
           ansible.builtin.fail:
@@ -1050,4 +3300,7 @@
       loop: "{{ hermes_automation_prior_timers | default([]) }}"
       loop_control:
         label: "{{ item.name }}"
-      when: item.exists
+      when:
+        - item.exists
+        - item.name not in hermes_automation_retired_timers
+        - not (hermes_automation_transaction_succeeded | default(false) | bool)

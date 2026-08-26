@@ -32,6 +32,20 @@ are included only when explicitly requested.
 
 The current Twitch, YouTube, TikTok, Mac OBS, Aitum Vertical, SleepyChat, and experimental Apple Music routing setup is documented in [docs/streaming-runbook.md](docs/streaming-runbook.md).
 
+## Hermes Recovery Rehearsal
+
+Use the dedicated credential-free inventory for the disposable replacement-node
+bootstrap proof. It contains no production Hermes host and does not restore
+mutable data or enroll Discord:
+
+```bash
+ansible-playbook -i inventory/hermes-replacement-rehearsal.ini \
+  playbooks/agents/hermes-replacement-node-rehearsal.yml --syntax-check
+```
+
+The full attended command and recovery acceptance contract are documented in
+[docs/hermes-replacement.md](docs/hermes-replacement.md).
+
 ## Operator Docs
 
 Start with [docs/README.md](docs/README.md) for the operator-doc index.
@@ -412,12 +426,13 @@ Check status: `journalctl -u docker-auto-update`, `systemctl list-timers docker-
 
 ## Agent Docker Access
 
-Hermes Astra has live result-only Docker inventory on all four Docker hosts and
-a separate fixed trigger for the existing managed updater on `docker-vm`,
-`media-vm`, and `nextcloud-vm`. Scheduled updates remain automatic; an
-unscheduled Astra run requires fresh native approval bound to the current user
-turn. Neither path grants Hermes a Docker socket, Docker group, general shell,
-or broad sudo. See
+Hermes Astra has live result-only Docker inventory on all four Docker hosts, a
+separate fixed trigger for the existing managed updater, and a third typed
+Compose transaction boundary for Astra-managed stacks. Scheduled updates remain
+automatic. Unscheduled updater runs and Compose apply/remove requests require
+fresh native approval; Compose approval is also bound to the exact request
+digest. None grants Hermes a Docker socket, Docker group, general shell, host
+binds, inline secrets, arbitrary Compose keys, or broad sudo. See
 [docs/agent-docker-access.md](docs/agent-docker-access.md) for the schema,
 threat model, migration handling, and rollout gates.
 
@@ -1079,14 +1094,16 @@ created.
   `playbooks/agents/hermes-native-gateway-migration.yml` copy-migrates profile
   state into native named-profile homes and uses `hermes gateway install
   --system`; Ansible owns only security/readiness drop-ins around those units
-- **Native Astra tools**: Astra uses Hermes's local terminal, file, and code
-  toolsets as the dedicated no-login `hermes-astra` account. It has no sudo,
-  Docker group/socket, Linux capabilities, or cross-profile access; Dubble and
-  Rigel expose no host-execution tools
-- **Memory continuity**: `playbooks/agents/hermes-memory-continuity.yml`
-  transactionally installs the reviewed LCM context engine and native OSS Mem0
-  provider, converts existing approved OpenClaw memories into separate
-  Hermes-owned stores, and leaves all source stores intact
+- **Native role tools**: Astra uses Hermes's local terminal, file, and code
+  toolsets as the dedicated no-login `hermes-astra` account plus typed
+  least-privilege administration brokers. Rigel has bounded local file and
+  terminal tools rooted in its academic workspace. Dubble exposes no local
+  execution tools. No profile has general sudo, Docker group/socket, Linux
+  capabilities, or cross-profile private-state access
+- **Memory continuity**: the guarded memory transactions install reviewed LCM
+  and native OSS Mem0 providers for Astra, Dubble, and Rigel in isolated
+  profile-owned stores, convert only each profile's approved OpenClaw history,
+  and leave all source stores intact
 - **Discord readiness**: service startup requires the official messaging
   dependencies plus an established TLS session owned by the Gateway process;
   a cron-only process cannot report healthy messaging
@@ -1094,11 +1111,14 @@ created.
   `hermes-tirith-native-update.timer` are enabled. Hermes retains native
   release discovery, backup, Git update, and Gateway orchestration; the unit
   reconciles the official messaging and Mem0 extras excluded from upstream
-  `all`
-- **Scheduled automation**: `playbooks/agents/hermes-automation.yml`
-  transactionally owns seven native jobs, the retained collectors and
-  feed/calendar timers, and native profile backups. All 31 historical
-  OpenClaw schedule/heartbeat lanes have explicit final dispositions
+  `all`. Tirith 0.4+ updates its signed scanner/helper pair in a capability-
+  empty root sandbox limited to Tirith state and `/usr/local/libexec`
+- **Scheduled automation**: `playbooks/agents/hermes-automation.yml` seeds and
+  audits the reviewed native schedules without continuously overwriting agent-
+  owned state. Production currently uses 17 Astra jobs, one Dubble job, and
+  one Rigel job plus retained collectors, feed/calendar timers, and native
+  profile backups. All historical OpenClaw schedule/heartbeat lanes have
+  explicit final dispositions
 - **Isolation**: Astra, Dubble, and Rigel retain separate no-login identities,
   homes, managed credentials, data, memory, and skills. A code-only
   `hermes-runtime-readers` group grants read access solely to the shared

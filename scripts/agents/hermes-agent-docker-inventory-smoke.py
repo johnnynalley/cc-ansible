@@ -9,6 +9,8 @@ import json
 import sys
 from pathlib import Path
 
+sys.dont_write_bytecode = True
+
 
 def main() -> int:
     parser = argparse.ArgumentParser()
@@ -21,7 +23,8 @@ def main() -> int:
         return 1
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
-    for host in module._HOSTS:
+    report_hosts, update_hosts = module._load_endpoints()
+    for host in report_hosts:
         value = json.loads(module._handle_inventory({"host": host}))
         if value.get("status") != "ok":
             code = value.get("code", "invalid-response")
@@ -35,7 +38,7 @@ def main() -> int:
         ):
             print(f"{host}: invalid-response", file=sys.stderr)
             return 1
-    for host in module._UPDATE_HOSTS:
+    for host in update_hosts:
         value = json.loads(module._handle_update({"host": host, "action": "status"}))
         if value.get("status") != "ok":
             code = value.get("code", "invalid-response")

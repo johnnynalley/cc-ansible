@@ -5,79 +5,74 @@ from __future__ import annotations
 import json
 import os
 import re
+import stat
 import subprocess
+from ipaddress import ip_address
 from pathlib import Path
 from typing import Any
 
-_HOSTS = {
-    "docker-vm": "192.168.1.153",
-    "media-vm": "192.168.1.136",
-    "nextcloud-vm": "192.168.1.78",
-    "jn-t14s-lin": "192.168.1.31",
-}
-_UPDATE_HOSTS = {
-    host: address for host, address in _HOSTS.items() if host != "jn-t14s-lin"
-}
 _SSH = "/usr/bin/ssh"
 _KNOWN_HOSTS = "/etc/hermes/astra/docker-known-hosts"
+_ENDPOINTS = "/etc/hermes/astra/docker-endpoints.json"
 _CREDENTIAL = "agent-docker-report-key"
 _UPDATE_CREDENTIAL = "agent-docker-update-key"
 _MAX_REPORT_BYTES = 16 * 1024 * 1024
 _MAX_UPDATE_BYTES = 4096
+_MAX_ENDPOINT_BYTES = 64 * 1024
+_MAX_HOSTS = 128
 _MAX_CONTAINERS = 2048
 _TOKEN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._+:/@-]*$")
 _IDENTIFIER = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]*$")
 _TURN_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$")
 
-_SCHEMA = {
-    "name": "docker_inventory",
-    "description": (
-        "Read the current redacted Docker container and image inventory from "
-        "one managed host or all managed Docker hosts. This tool cannot read "
-        "container logs, environment variables, mounts, ports, commands, "
-        "networks, secrets, or the Docker socket."
-    ),
-    "parameters": {
-        "type": "object",
-        "properties": {
-            "host": {
-                "type": "string",
-                "enum": ["all", *_HOSTS],
-                "description": "Managed Docker host to inspect.",
-            }
-        },
-        "required": ["host"],
-        "additionalProperties": False,
-    },
+_HOST_PARAMETER = {
+    "type": "string",
+    "pattern": r"^(all|[A-Za-z0-9][A-Za-z0-9_.-]{0,127})$",
+    "maxLength": 128,
+    "description": "Managed inventory hostname, or all.",
 }
 
-_UPDATE_SCHEMA = {
-    "name": "docker_update",
-    "description": (
-        "Read the status of, or trigger, the existing Ansible-managed Docker "
-        "auto-updater on one managed host or all eligible hosts. The target "
-        "stacks, services, update policy, and major-version guard are fixed by "
-        "Ansible; this tool cannot select a container, image, path, command, "
-        "or Compose option."
-    ),
-    "parameters": {
-        "type": "object",
-        "properties": {
-            "host": {
-                "type": "string",
-                "enum": ["all", *_UPDATE_HOSTS],
-                "description": "Managed Docker update host.",
-            },
-            "action": {
-                "type": "string",
-                "enum": ["status", "run"],
-                "description": "Read updater status or request an immediate run.",
-            },
+
+def _tool_schema(name: str, description: str, *, update: bool = False) -> dict[str, Any]:
+    properties: dict[str, Any] = {"host": dict(_HOST_PARAMETER)}
+    required = ["host"]
+    if update:
+        properties["action"] = {
+            "type": "string",
+            "enum": ["status", "run"],
+            "description": "Read updater status or request an immediate run.",
+        }
+        required.append("action")
+    return {
+        "name": name,
+        "description": description,
+        "parameters": {
+            "type": "object",
+            "properties": properties,
+            "required": required,
+            "additionalProperties": False,
         },
-        "required": ["host", "action"],
-        "additionalProperties": False,
-    },
-}
+    }
+
+
+_SCHEMA = _tool_schema(
+    "docker_inventory",
+    "Read the current redacted Docker container and image inventory from one "
+    "Ansible-enrolled host or every enrolled Docker host. The managed host "
+    "manifest is reloaded on each call, so this tool does not hardcode host or "
+    "container names. It cannot read container logs, environment variables, "
+    "mounts, ports, commands, networks, secrets, or the Docker socket.",
+)
+
+_UPDATE_SCHEMA = _tool_schema(
+    "docker_update",
+    "Read the status of, or trigger, the existing Ansible-managed Docker "
+    "auto-updater on one eligible host or all eligible hosts. The target "
+    "stacks, services, update policy, and major-version guard remain fixed by "
+    "Ansible; this tool cannot select a container, image, path, command, or "
+    "Compose option.",
+    update=True,
+)
 
 
 class InventoryError(RuntimeError):
@@ -130,6 +125,69 @@ def _require_keys(value: Any, expected: set[str], code: str) -> dict[str, Any]:
     if not isinstance(value, dict) or set(value) != expected:
         raise InventoryError(code)
     return value
+
+
+def _validate_endpoint_data(value: Any) -> tuple[dict[str, str], dict[str, str]]:
+    manifest = _require_keys(value, {"schemaVersion", "hosts"}, "invalid-endpoints")
+    hosts = manifest["hosts"]
+    if (
+        manifest["schemaVersion"] != 1
+        or not isinstance(hosts, list)
+        or not hosts
+        or len(hosts) > _MAX_HOSTS
+    ):
+        raise InventoryError("invalid-endpoints")
+    reports: dict[str, str] = {}
+    updates: dict[str, str] = {}
+    addresses: set[str] = set()
+    for raw in hosts:
+        item = _require_keys(
+            raw,
+            {"name", "address", "report", "update"},
+            "invalid-endpoints",
+        )
+        name = item["name"]
+        address = item["address"]
+        if (
+            not _safe_identifier(name, 128)
+            or name == "all"
+            or not isinstance(address, str)
+            or len(address) > 64
+            or item["report"] is not True
+            or not isinstance(item["update"], bool)
+            or name in reports
+            or address in addresses
+        ):
+            raise InventoryError("invalid-endpoints")
+        try:
+            ip_address(address)
+        except ValueError as exc:
+            raise InventoryError("invalid-endpoints") from exc
+        addresses.add(address)
+        reports[name] = address
+        if item["update"]:
+            updates[name] = address
+    if not reports:
+        raise InventoryError("invalid-endpoints")
+    return reports, updates
+
+
+def _load_endpoints() -> tuple[dict[str, str], dict[str, str]]:
+    path = Path(_ENDPOINTS)
+    try:
+        info = os.lstat(path)
+        if (
+            not stat.S_ISREG(info.st_mode)
+            or stat.S_ISLNK(info.st_mode)
+            or info.st_uid != 0
+            or stat.S_IMODE(info.st_mode) != 0o440
+            or info.st_size > _MAX_ENDPOINT_BYTES
+        ):
+            raise InventoryError("endpoint-unavailable")
+        value = json.loads(path.read_text(encoding="ascii"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise InventoryError("endpoint-unavailable") from exc
+    return _validate_endpoint_data(value)
 
 
 def _validate_report(value: Any, expected_host: str) -> dict[str, Any]:
@@ -226,7 +284,7 @@ def _validate_report(value: Any, expected_host: str) -> dict[str, Any]:
     return report
 
 
-def _read_host(host: str) -> dict[str, Any]:
+def _read_host(host: str, hosts: dict[str, str]) -> dict[str, Any]:
     credential = _credentials_directory() / _CREDENTIAL
     if not credential.is_file() or not Path(_KNOWN_HOSTS).is_file():
         raise InventoryError("credential-unavailable")
@@ -252,7 +310,7 @@ def _read_host(host: str) -> dict[str, Any]:
         "ClearAllForwardings=yes",
         "-i",
         str(credential),
-        f"agent-report@{_HOSTS[host]}",
+        f"agent-report@{hosts[host]}",
     ]
     try:
         result = subprocess.run(
@@ -357,7 +415,9 @@ def _validate_update_response(
     return value
 
 
-def _update_host(host: str, action: str) -> dict[str, Any]:
+def _update_host(
+    host: str, action: str, update_hosts: dict[str, str]
+) -> dict[str, Any]:
     credential = _credentials_directory() / _UPDATE_CREDENTIAL
     if not credential.is_file() or not Path(_KNOWN_HOSTS).is_file():
         raise InventoryError("credential-unavailable")
@@ -383,7 +443,7 @@ def _update_host(host: str, action: str) -> dict[str, Any]:
         "ClearAllForwardings=yes",
         "-i",
         str(credential),
-        f"agent-auto-update@{_UPDATE_HOSTS[host]}",
+        f"agent-auto-update@{update_hosts[host]}",
     ]
     request = json.dumps(
         {"schemaVersion": 1, "action": action},
@@ -412,14 +472,14 @@ def _update_host(host: str, action: str) -> dict[str, Any]:
 
 def _handle_inventory(args: dict[str, Any], **_: Any) -> str:
     host = args.get("host") if isinstance(args, dict) else None
-    if not isinstance(args, dict) or set(args) != {"host"} or host not in {
-        "all",
-        *_HOSTS,
-    }:
+    if not isinstance(args, dict) or set(args) != {"host"}:
         return _error("invalid-request")
-    selected = list(_HOSTS) if host == "all" else [host]
     try:
-        reports = [_read_host(item) for item in selected]
+        hosts, _ = _load_endpoints()
+        if host not in {"all", *hosts}:
+            return _error("invalid-request")
+        selected = list(hosts) if host == "all" else [host]
+        reports = [_read_host(item, hosts) for item in selected]
     except InventoryError as exc:
         return _error(str(exc))
     return json.dumps(
@@ -432,16 +492,16 @@ def _handle_inventory(args: dict[str, Any], **_: Any) -> str:
 def _handle_update(args: dict[str, Any], **_: Any) -> str:
     host = args.get("host") if isinstance(args, dict) else None
     action = args.get("action") if isinstance(args, dict) else None
-    if (
-        not isinstance(args, dict)
-        or set(args) != {"host", "action"}
-        or host not in {"all", *_UPDATE_HOSTS}
-        or action not in {"status", "run"}
-    ):
+    if not isinstance(args, dict) or set(args) != {"host", "action"}:
         return _error("invalid-request")
-    selected = list(_UPDATE_HOSTS) if host == "all" else [host]
+    if action not in {"status", "run"}:
+        return _error("invalid-request")
     try:
-        results = [_update_host(item, action) for item in selected]
+        _, update_hosts = _load_endpoints()
+        if host not in {"all", *update_hosts}:
+            return _error("invalid-request")
+        selected = list(update_hosts) if host == "all" else [host]
+        results = [_update_host(item, action, update_hosts) for item in selected]
     except InventoryError as exc:
         return _error(str(exc))
     return json.dumps(
@@ -454,24 +514,28 @@ def _handle_update(args: dict[str, Any], **_: Any) -> str:
 def _check_available() -> bool:
     try:
         credential = _credentials_directory() / _CREDENTIAL
+        hosts, _ = _load_endpoints()
     except InventoryError:
         return False
     return (
         Path(_SSH).is_file()
         and Path(_KNOWN_HOSTS).is_file()
         and credential.is_file()
+        and bool(hosts)
     )
 
 
 def _check_update_available() -> bool:
     try:
         credential = _credentials_directory() / _UPDATE_CREDENTIAL
+        _, update_hosts = _load_endpoints()
     except InventoryError:
         return False
     return (
         Path(_SSH).is_file()
         and Path(_KNOWN_HOSTS).is_file()
         and credential.is_file()
+        and bool(update_hosts)
     )
 
 
@@ -494,7 +558,11 @@ def _require_update_approval(
             "message": "An immediate Docker update requires a bound user turn.",
         }
     host = args.get("host")
-    if host not in {"all", *_UPDATE_HOSTS}:
+    try:
+        _, update_hosts = _load_endpoints()
+    except InventoryError:
+        update_hosts = {}
+    if host not in {"all", *update_hosts}:
         return {
             "action": "block",
             "message": "The Docker update target is outside managed policy.",

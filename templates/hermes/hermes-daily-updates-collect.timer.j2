@@ -1,0 +1,11 @@
+[Unit]
+Description=Collect Hermes Daily Summary updates, homelab, and RSS inputs
+
+[Timer]
+OnCalendar=*-*-* 06:15:00 America/Chicago
+Persistent=true
+AccuracySec=1s
+Unit=hermes-retained-automation@daily-updates.service
+
+[Install]
+WantedBy=timers.target

@@ -1,7 +1,18 @@
 [Unit]
 ConditionPathExists=/etc/hermes/{{ hermes_profile.name }}/{{ hermes_gateway_readiness_marker }}
+{% if hermes_profile.name == 'astra' %}
+Wants=hermes-arr-api-broker.service
+After=hermes-arr-api-broker.service
+{% elif hermes_profile.name == 'rigel' %}
+Requires=hermes-rigel-astra-calendar-broker.service
+After=hermes-rigel-astra-calendar-broker.service
+{% endif %}
 
 [Service]
+{% if hermes_profile.gateway_working_directory is defined %}
+WorkingDirectory={{ hermes_profile.gateway_working_directory }}
+Environment=TERMINAL_CWD={{ hermes_profile.terminal_cwd }}
+{% endif %}
 SupplementaryGroups={{ hermes_runtime_readers_group }}
 Environment=HERMES_MANAGED_DIR=/etc/hermes/{{ hermes_profile.name }}
 {% if (hermes_profile.terminal_backend | default('docker')) == 'docker' %}
@@ -9,23 +20,45 @@ Environment=HERMES_DOCKER_BINARY=/usr/bin/podman
 {% endif %}
 Environment=TIRITH_OFFLINE=1
 Environment=XDG_RUNTIME_DIR=/run/hermes-{{ hermes_profile.name }}
-EnvironmentFile=/etc/hermes/{{ hermes_profile.name }}/.env
+EnvironmentFile={{ hermes_profile.environment_file | default('/etc/hermes/' ~ hermes_profile.name ~ '/.env') }}
 {% if hermes_profile.name == 'astra' %}
+Environment=AGENT_BROWSER_EXECUTABLE_PATH={{ hermes_agent_browser_selector_live }}
+{% endif %}
+{% if hermes_profile.memory_provider | default('') == 'mem0' %}
 Environment=MEM0_DIR={{ hermes_profile.home }}/mem0
+Environment=MEM0_TELEMETRY=false
+Environment=FASTEMBED_CACHE_PATH={{ hermes_profile.home }}/mem0/fastembed-cache
+{% endif %}
+{% if hermes_profile.context_engine | default('') == 'lcm' %}
 Environment=LCM_DATABASE_PATH={{ hermes_profile.home }}/lcm.db
+Environment=LCM_EMBEDDINGS_ENABLED=true
+Environment=LCM_EMBEDDING_PROVIDER={{ hermes_lcm_embedding_provider }}
+Environment=LCM_EMBEDDING_MODEL={{ hermes_lcm_embedding_model }}
+Environment=LCM_OLLAMA_BASE_URL={{ hermes_lcm_ollama_base_url }}
+Environment=LCM_EMBEDDING_STORAGE_DTYPE={{ hermes_lcm_embedding_storage_dtype }}
+Environment=LCM_EMBEDDING_STORE_DIM={{ hermes_lcm_embedding_store_dim }}
+Environment=LCM_EMBEDDING_BINARY_PRESCREEN={{ hermes_lcm_embedding_binary_prescreen | ternary('true', 'false') }}
+Environment=LCM_EMBED_CONTENT_POLICY={{ hermes_lcm_embedding_content_policy }}
+Environment=LCM_EMBEDDING_MAX_BATCH_ITEMS={{ hermes_lcm_embedding_max_batch_items }}
+Environment=LCM_EMBEDDING_QUERY_TIMEOUT_S={{ hermes_lcm_embedding_query_timeout_s }}
+Environment=LCM_RECALL_QUERY_TIMEOUT_S={{ hermes_lcm_recall_query_timeout_s }}
+Environment=LCM_EMBEDDING_BACKFILL_TIMEOUT_S={{ hermes_lcm_embedding_backfill_timeout_s }}
+Environment=LCM_PROACTIVE_RECALL_ENABLED={{ hermes_lcm_proactive_recall_enabled | ternary('true', 'false') }}
+Environment=LCM_TEMPORAL_ROLLUPS_ENABLED={{ hermes_lcm_temporal_rollups_enabled | ternary('true', 'false') }}
+{% endif %}
+{% if hermes_profile.name == 'astra' %}
 LoadCredential=agent-docker-report-key:{{ hermes_docker_inventory_private_key }}
 LoadCredential=agent-docker-update-key:{{ hermes_docker_update_private_key }}
+LoadCredential=agent-host-admin-key:{{ hermes_host_admin_private_key }}
+LoadCredential=agent-compose-key:{{ hermes_compose_admin_private_key }}
 {% endif %}
 ExecStartPre={{ hermes_shadow_audit_live }} {{ hermes_shadow_contract_live }}
 ExecStartPre={{ hermes_discord_audit_live }} {{ hermes_discord_contract_live }} --repository-root /usr/local/share/hermes-shadow/repository
-{% if hermes_profile.name != 'astra' %}
-ExecStartPre={{ hermes_automation_audit_live }} {{ hermes_automation_contract_live }} --repository-root /usr/local/share/hermes-shadow/repository
-{% endif %}
-ExecStartPre=/usr/bin/sha256sum --check --status --strict /etc/hermes/{{ hermes_profile.name }}/managed-policy.sha256
+ExecStartPre=+/usr/bin/sha256sum --check --status --strict /etc/hermes/{{ hermes_profile.name }}/managed-policy.sha256
 ExecStartPre={{ hermes_tirith_binary }} --version
 ExecStartPre={{ hermes_shadow_runtime_binary }} config check
 ExecStartPre={{ hermes_shadow_runtime_venv }}/bin/python {{ hermes_discord_runtime_audit_live }} --home={{ hermes_profile.home }} --imports-only
-ExecStartPre={{ hermes_shadow_runtime_venv }}/bin/python {{ hermes_profile_skills_validator_live }} --contract {{ hermes_profile_skills_contract_live }} --mode runtime --profile {{ hermes_profile.name }} --hermes-source {{ hermes_shadow_runtime_root }}
+ExecStartPre={{ hermes_shadow_runtime_venv }}/bin/python {{ hermes_profile_skills_validator_live }} --contract {{ hermes_profile_skills_contract_live }} --mode {{ 'native' if hermes_native_profile_skills_enabled | bool else 'runtime' }} --profile {{ hermes_profile.name }} --hermes-source {{ hermes_shadow_runtime_root }}
 {% if hermes_gateway_bootstrap_skip_projection_preflights | default(false) %}
 Environment=HERMES_PROJECTION_PREFLIGHTS_PENDING=1
 {% else %}
@@ -36,7 +69,16 @@ ExecStartPre={{ hermes_profile_transformer_live }} --contract {{ hermes_profile_
 {% endif %}
 {% if hermes_profile.name == 'astra' %}
 ExecStartPre={{ hermes_shadow_runtime_venv }}/bin/python {{ hermes_star_privacy_validator_live }} --source-root {{ hermes_star_privacy_plugin_managed_root }} --runtime-root {{ hermes_star_privacy_plugin_runtime_root }} --config /etc/hermes/astra/config.yaml
-ExecStartPre={{ hermes_shadow_runtime_venv }}/bin/python {{ hermes_docker_inventory_validator_live }} --source-root {{ hermes_docker_inventory_plugin_managed_root }} --runtime-root {{ hermes_docker_inventory_plugin_runtime_root }} --config /etc/hermes/astra/config.yaml --known-hosts {{ hermes_docker_inventory_known_hosts }}
+ExecStartPre={{ hermes_shadow_runtime_venv }}/bin/python {{ hermes_docker_inventory_validator_live }} --source-root {{ hermes_docker_inventory_plugin_managed_root }} --runtime-root {{ hermes_docker_inventory_plugin_runtime_root }} --config /etc/hermes/astra/config.yaml --known-hosts {{ hermes_docker_inventory_known_hosts }} --endpoints {{ hermes_docker_inventory_endpoints }}
+ExecStartPre={{ hermes_shadow_runtime_venv }}/bin/python {{ hermes_arr_api_validator_live }} --source-root {{ hermes_arr_api_plugin_managed_root }} --runtime-root {{ hermes_arr_api_plugin_runtime_root }} --config /etc/hermes/astra/config.yaml --socket {{ hermes_arr_api_socket }} --socket-group {{ hermes_arr_api_group }}
+ExecStartPre={{ hermes_shadow_runtime_venv }}/bin/python {{ hermes_host_admin_validator_live }} --source-root {{ hermes_host_admin_plugin_managed_root }} --runtime-root {{ hermes_host_admin_plugin_runtime_root }} --config /etc/hermes/astra/config.yaml --endpoints {{ hermes_host_admin_endpoints }} --known-hosts {{ hermes_host_admin_known_hosts }}
+ExecStartPre={{ hermes_shadow_runtime_venv }}/bin/python {{ hermes_compose_admin_validator_live }} --source-root {{ hermes_compose_admin_plugin_managed_root }} --runtime-root {{ hermes_compose_admin_plugin_runtime_root }} --config /etc/hermes/astra/config.yaml --endpoints {{ hermes_compose_admin_endpoints }} --known-hosts {{ hermes_compose_admin_known_hosts }}
+ExecStartPre={{ hermes_shadow_runtime_venv }}/bin/python {{ hermes_discord_parity_validator_live }} --source-root {{ hermes_discord_parity_plugin_managed_root }} --runtime-root {{ hermes_discord_parity_plugin_runtime_root }} --config /etc/hermes/astra/config.yaml --policy {{ hermes_discord_parity_policy_live }} --profile astra
+{% elif hermes_profile.name == 'dubble' %}
+ExecStartPre={{ hermes_shadow_runtime_venv }}/bin/python {{ hermes_discord_parity_validator_live }} --source-root {{ hermes_dubble_discord_parity_plugin_managed_root }} --runtime-root {{ hermes_dubble_discord_parity_plugin_runtime_root }} --config /etc/hermes/dubble/config.yaml --policy {{ hermes_dubble_discord_parity_policy_live }} --profile dubble
+ExecStartPre={{ hermes_shadow_runtime_venv }}/bin/python {{ hermes_astra_handoff_validator_live }} --source-root {{ hermes_astra_handoff_plugin_managed_root }} --runtime-root {{ hermes_astra_handoff_plugin_runtime_root }} --config /etc/hermes/dubble/config.yaml
+{% elif hermes_profile.name == 'rigel' %}
+ExecStartPre={{ hermes_shadow_runtime_venv }}/bin/python {{ hermes_rigel_astra_liaison_validator_live }} --source-root {{ hermes_rigel_astra_liaison_plugin_managed_root }} --runtime-root {{ hermes_rigel_astra_liaison_plugin_runtime_root }} --config /etc/hermes/rigel/config.yaml --policy {{ hermes_rigel_astra_liaison_policy_live }} --socket {{ hermes_rigel_astra_liaison_socket }} --socket-group {{ hermes_rigel_astra_liaison_group }}
 {% endif %}
 ExecStartPost={{ hermes_shadow_runtime_venv }}/bin/python {{ hermes_discord_runtime_audit_live }} --home={{ hermes_profile.home }} --pid=${MAINPID} --timeout=30
 RuntimeDirectory=hermes-{{ hermes_profile.name }}
@@ -45,7 +87,13 @@ UMask=0077
 NoNewPrivileges=true
 ProtectSystem=strict
 ProtectHome=true
+{% if hermes_native_profile_skills_enabled | bool %}
+{% if hermes_profile.name in ['dubble', 'rigel'] %}
+BindReadOnlyPaths={{ hermes_shared_self_evolution_source }}:{{ hermes_profile.home }}/skills/self-evolution
+{% endif %}
+{% else %}
 BindReadOnlyPaths=/etc/hermes/{{ hermes_profile.name }}/skills:{{ hermes_profile.home }}/skills/managed
+{% endif %}
 BindPaths={{ hermes_profile_data_root }}/{{ hermes_profile.name }}/writable:{{ hermes_profile.home }}/imported-data
 BindReadOnlyPaths={{ hermes_profile_data_root }}/{{ hermes_profile.name }}/managed:{{ hermes_profile.home }}/managed-data
 BindPaths={{ hermes_profile_transforms_root }}/{{ hermes_profile.name }}/writable:{{ hermes_profile.home }}/transformed-data
@@ -53,10 +101,27 @@ BindReadOnlyPaths={{ hermes_profile_transforms_root }}/{{ hermes_profile.name }}
 {% if hermes_profile.name == 'astra' %}
 BindReadOnlyPaths={{ hermes_star_privacy_plugin_managed_root }}:{{ hermes_star_privacy_plugin_runtime_root }}
 BindReadOnlyPaths={{ hermes_docker_inventory_plugin_managed_root }}:{{ hermes_docker_inventory_plugin_runtime_root }}
+BindReadOnlyPaths={{ hermes_arr_api_plugin_managed_root }}:{{ hermes_arr_api_plugin_runtime_root }}
+BindReadOnlyPaths={{ hermes_arr_api_runtime_dir }}
+BindReadOnlyPaths={{ hermes_host_admin_plugin_managed_root }}:{{ hermes_host_admin_plugin_runtime_root }}
+BindReadOnlyPaths={{ hermes_compose_admin_plugin_managed_root }}:{{ hermes_compose_admin_plugin_runtime_root }}
+BindReadOnlyPaths={{ hermes_discord_parity_plugin_managed_root }}:{{ hermes_discord_parity_plugin_runtime_root }}
 BindReadOnlyPaths=-{{ hermes_lcm_plugin_managed_root }}:{{ hermes_profile.home }}/plugins/hermes-lcm
-BindReadOnlyPaths=/var/lib/hermes/rigel-channel-state:{{ hermes_profile.home }}/rigel-channel-state
+BindPaths={{ hermes_astra_workspace_source }}:{{ hermes_astra_workspace_live }}
+{% elif hermes_profile.name == 'dubble' %}
+BindReadOnlyPaths={{ hermes_dubble_discord_parity_plugin_managed_root }}:{{ hermes_dubble_discord_parity_plugin_runtime_root }}
+BindReadOnlyPaths={{ hermes_astra_handoff_plugin_managed_root }}:{{ hermes_astra_handoff_plugin_runtime_root }}
+{% elif hermes_profile.name == 'rigel' %}
+BindReadOnlyPaths={{ hermes_rigel_astra_liaison_plugin_managed_root }}:{{ hermes_rigel_astra_liaison_plugin_runtime_root }}
+BindReadOnlyPaths={{ hermes_rigel_astra_liaison_runtime_dir }}
+{% endif %}
+{% if 'hermes-lcm' in (hermes_profile.plugins_enabled | default([])) and hermes_profile.name != 'astra' %}
+BindReadOnlyPaths=-{{ hermes_lcm_plugin_managed_root }}:{{ hermes_profile.home }}/plugins/hermes-lcm
 {% endif %}
 ReadWritePaths={{ hermes_profile.account_home }} /run/hermes-{{ hermes_profile.name }} {{ hermes_profile_data_root }}/{{ hermes_profile.name }}/writable {{ hermes_profile_transforms_root }}/{{ hermes_profile.name }}/writable
+{% if hermes_profile.name == 'astra' %}
+ReadWritePaths={{ hermes_astra_workspace_live }}
+{% endif %}
 PrivateTmp=true
 ProtectClock=true
 ProtectControlGroups=true
@@ -66,10 +131,16 @@ ProtectKernelModules=true
 ProtectKernelTunables=true
 ProtectProc=invisible
 LockPersonality=true
+{% if hermes_profile.name == 'astra' %}
+# Local Chromium requires JIT executable memory and browser sandbox namespaces.
+MemoryDenyWriteExecute=false
+RestrictNamespaces=~user mnt pid ipc net uts
+{% else %}
 MemoryDenyWriteExecute=true
+RestrictNamespaces=true
+{% endif %}
 RestrictRealtime=true
 RestrictSUIDSGID=true
-RestrictNamespaces=true
 CapabilityBoundingSet=
 AmbientCapabilities=
 RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6

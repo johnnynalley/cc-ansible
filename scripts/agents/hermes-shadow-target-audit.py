@@ -66,8 +66,8 @@ def validate_deployment(data: dict[str, Any]) -> None:
     )
     require(deployment.get("sourceFilesRetained") is True, "source-files-not-retained")
     require(
-        deployment.get("sourceFilesDirectlyReadableByHermes") is False,
-        "source-files-directly-readable",
+        deployment.get("sourceFilesDirectlyReadableByHermes") is True,
+        "source-files-evidence-unreadable",
     )
     for key in (
         "productionDeliveryEnabled",
@@ -217,12 +217,13 @@ def validate_sandbox(data: dict[str, Any]) -> None:
 def validate_common_policy(data: dict[str, Any]) -> None:
     policy = data["commonPolicy"]
     require(isinstance(policy, dict), "common-policy-not-object")
-    require(policy.get("approvalMode") == "manual", "approval-mode")
+    require(
+        policy.get("approvalMode") == "profile-specific",
+        "approval-mode",
+    )
     require(policy.get("cronApprovalMode") == "deny", "cron-approval-mode")
     require(policy.get("permanentCommandAllowlist") == [], "command-allowlist")
     for key in (
-        "memoryWriteApproval",
-        "skillsWriteApproval",
         "agentSkillScan",
         "promptInjectionScan",
         "secretRedaction",
@@ -231,6 +232,8 @@ def validate_common_policy(data: dict[str, Any]) -> None:
         "mcpReloadConfirmation",
     ):
         require(policy.get(key) is True, f"policy-required-{key}")
+    for key in ("memoryWriteApproval", "skillsWriteApproval"):
+        require(policy.get(key) is False, f"policy-unexpected-{key}")
     require(policy.get("privateUrlAccess") is False, "private-url-access-enabled")
     require(policy.get("tirithFailOpen") is False, "tirith-fail-open")
     require(policy.get("generalSudoers") is False, "general-sudoers-enabled")
@@ -302,7 +305,11 @@ def validate_profiles(data: dict[str, Any]) -> None:
         "profile-terminal-backend-astra",
     )
     require(
-        by_name["astra"].get("cronApprovalMode") == "manual",
+        by_name["astra"].get("approvalMode") == "smart",
+        "profile-approval-mode-astra",
+    )
+    require(
+        by_name["astra"].get("cronApprovalMode") == "approve",
         "profile-cron-mode-astra",
     )
     for name in ("dubble", "rigel"):
@@ -315,7 +322,12 @@ def validate_profiles(data: dict[str, Any]) -> None:
             f"profile-terminal-backend-{name}",
         )
         require(
-            by_name[name].get("cronApprovalMode") == "deny",
+            by_name[name].get("approvalMode") == "manual",
+            f"profile-approval-mode-{name}",
+        )
+        require(
+            by_name[name].get("cronApprovalMode")
+            == ("approve" if name == "dubble" else "deny"),
             f"profile-cron-mode-{name}",
         )
         require(
@@ -382,7 +394,7 @@ def main() -> int:
     except AuditError as exc:
         print(f"status=failed reason={exc}", file=sys.stderr)
         return 1
-    print("status=ok schema=2 profiles=3 mode=shadow")
+    print("status=ok schema=3 profiles=3 mode=shadow")
     return 0
 
 

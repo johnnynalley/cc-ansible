@@ -1,0 +1,31 @@
+[Unit]
+Description=Audit complete OpenClaw evidence source reconciliation
+After={{ hermes_openclaw_evidence_service }}
+Requires={{ hermes_openclaw_evidence_service }}
+
+[Service]
+Type=oneshot
+User={{ hermes_openclaw_evidence_contract.runtime.profileUser }}
+Group={{ hermes_openclaw_evidence_contract.runtime.profileGroup }}
+ExecStart={{ hermes_openclaw_evidence_script_live }} verify-view --contract {{ hermes_openclaw_evidence_contract_live }} --view-root {{ hermes_openclaw_evidence_contract.runtime.viewRoot }}
+ExecStart={{ hermes_bootstrap_parity_validator_live }} --contract {{ hermes_bootstrap_parity_contract_live }} --repo-root {{ hermes_bootstrap_parity_runtime_repo_root }} --source-root {{ hermes_openclaw_evidence_contract.runtime.viewRoot }}/workspace --profile-root /var/lib/hermes/astra/.hermes/profiles/astra --evidence-root {{ hermes_openclaw_evidence_contract.runtime.viewRoot }} --runtime
+UMask=0077
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ProtectClock=true
+ProtectControlGroups=true
+ProtectHostname=true
+ProtectKernelLogs=true
+ProtectKernelModules=true
+ProtectKernelTunables=true
+ProtectProc=invisible
+LockPersonality=true
+MemoryDenyWriteExecute=true
+RestrictAddressFamilies=AF_UNIX
+RestrictNamespaces=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+CapabilityBoundingSet=
+AmbientCapabilities=

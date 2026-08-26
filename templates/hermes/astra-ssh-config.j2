@@ -1,0 +1,13 @@
+# Managed by Ansible. Non-root Astra access to managed Linux hosts.
+{% for hostname in groups['linux_hosts'] | difference(groups['hermes_hosts']) | sort %}
+Host {{ hostname }} {{ hostvars[hostname].ansible_host }}
+  HostName {{ hostvars[hostname].ansible_host }}
+  User hermes-astra
+  IdentityFile {{ hermes_remote_access_key }}
+  IdentitiesOnly yes
+  BatchMode yes
+  StrictHostKeyChecking yes
+  UserKnownHostsFile {{ hermes_remote_access_known_hosts_live }}
+  ConnectTimeout 8
+
+{% endfor %}

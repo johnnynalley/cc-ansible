@@ -7,7 +7,6 @@ import argparse
 import hashlib
 import json
 import os
-import re
 import stat
 import tempfile
 from dataclasses import dataclass
@@ -80,7 +79,6 @@ EXPECTED_TRANSFORMS = {
     "dubble-users",
     "freshrss-state",
     "reddit-sync-state",
-    "rigel-courses",
     "sobriety-state",
     "nextcloud-task-state",
 }
@@ -99,14 +97,6 @@ EXPECTED_TRANSFORM_LAYOUT = {
         "sources": ["reddit/sync-state.json"],
         "output": "data/integrations/reddit/sync-state.json",
         "transform": "reddit-sync-state-v1",
-    },
-    "rigel-courses": {
-        "sources": [
-            "rigel/courses/semester-context.md",
-            "rigel/courses/pending-calendar-requests.md",
-        ],
-        "output": "imports/courses/academic-state.json",
-        "transform": "rigel-completed-semester-v1",
     },
     "sobriety-state": {
         "sources": ["sober-tracking/state.json"],
@@ -346,7 +336,7 @@ def validate_contract(
         loaded[name] = load_json_file(path, f"pin-{name}-json-invalid")
 
     transforms = contract["transforms"]
-    require(isinstance(transforms, list) and len(transforms) == 6, "transform-count-invalid")
+    require(isinstance(transforms, list) and len(transforms) == 5, "transform-count-invalid")
     require(
         {row.get("id") for row in transforms if isinstance(row, dict)} == EXPECTED_TRANSFORMS,
         "transform-inventory-invalid",
@@ -595,47 +585,10 @@ def transform_nextcloud_tasks(inputs: list[InputRecord], limits: dict[str, int])
     }
 
 
-def transform_rigel(inputs: list[InputRecord], limits: dict[str, int]) -> dict[str, Any]:
-    require(len(inputs) == 2 and all(item.kind == "file" for item in inputs), "rigel-input-count")
-    by_name = {PurePosixPath(item.relative).name: item for item in inputs}
-    require(set(by_name) == {"semester-context.md", "pending-calendar-requests.md"}, "rigel-input-files")
-    try:
-        context = by_name["semester-context.md"].payload.decode("utf-8")
-        pending = by_name["pending-calendar-requests.md"].payload.decode("utf-8")
-    except UnicodeError as exc:
-        raise TransformError("rigel-input-encoding") from exc
-    heading = re.search(r"(?m)^## Current Semester:\s*(.+?)\s*$", context)
-    complete = re.search(r"(?im)^_None\s+.+?\bcomplete as of (\d{4}-\d{2}-\d{2})\._\s*$", context)
-    upcoming = re.search(
-        r"(?ms)^## Upcoming Exams\s*$\s*^_None\s+.+?\bcomplete as of \d{4}-\d{2}-\d{2}\._\s*$",
-        context,
-    )
-    require(heading is not None and complete is not None and upcoming is not None, "rigel-semester-not-safely-completed")
-    semester_name = checked_string(heading.group(1).strip(), "rigel-semester-name", 80)
-    completed_on = checked_date(complete.group(1), "rigel-completed-on")
-    marker = "<!-- New entries go below this line -->"
-    require(marker in pending and not pending.split(marker, 1)[1].strip(), "rigel-pending-requests-not-empty")
-    semester_id = re.sub(r"[^a-z0-9]+", "-", semester_name.lower()).strip("-")
-    require(bool(semester_id), "rigel-semester-id")
-    return {
-        "schemaVersion": 1,
-        "timezone": "America/Chicago",
-        "semester": {
-            "id": semester_id,
-            "status": "completed",
-            "startsOn": completed_on,
-            "endsOn": completed_on,
-        },
-        "events": [],
-        "calendarRequests": [],
-    }
-
-
 TRANSFORMERS: dict[str, Callable[[list[InputRecord], dict[str, int]], dict[str, Any]]] = {
     "empty-user-registry": transform_empty_users,
     "freshrss-state-v1": transform_freshrss,
     "reddit-sync-state-v1": transform_reddit,
-    "rigel-completed-semester-v1": transform_rigel,
     "sobriety-state-v1": transform_sobriety,
     "nextcloud-task-state-v1": transform_nextcloud_tasks,
 }
@@ -922,7 +875,7 @@ def verify(
         "manifest-contract-invalid",
     )
     rows = manifest["files"]
-    require(isinstance(rows, list) and len(rows) == 6, "manifest-files-invalid")
+    require(isinstance(rows, list) and len(rows) == 5, "manifest-files-invalid")
     expected_paths: set[Path] = set()
     for row in rows:
         require(

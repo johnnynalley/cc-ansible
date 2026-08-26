@@ -1,0 +1,345 @@
+---
+# Purpose: Converge Astra's authenticated native Hermes dashboard.
+# Hosts: hermes_hosts.
+# Key vars: hermes_dashboard_*.
+# Templates: templates/hermes/hermes-dashboard.service.j2.
+# Validation: ansible-playbook playbooks/agents/hermes-dashboard.yml
+#             --syntax-check.
+
+- name: Converge the authenticated Hermes dashboard
+  hosts: hermes_hosts
+  become: true
+  gather_facts: true
+
+  vars:
+    hermes_dashboard_backup_id: >-
+      {{
+        ansible_facts['date_time']['iso8601_basic_short']
+        ~ '-pre-dashboard'
+      }}
+    hermes_dashboard_backup_dir: >-
+      {{ hermes_dashboard_rollback_root }}/{{ hermes_dashboard_backup_id }}
+    hermes_dashboard_password_file: /etc/hermes/astra/dashboard-password
+    hermes_dashboard_candidate_paths:
+      - /etc/systemd/system/{{ hermes_dashboard_unit }}
+      - "{{ hermes_dashboard_environment }}"
+      - "{{ hermes_dashboard_password_file }}"
+
+  tasks:
+    - name: Validate Hermes dashboard rollout mode
+      ansible.builtin.assert:
+        that:
+          - hermes_dashboard_mode in ['disabled', 'converge']
+        fail_msg: hermes_dashboard_mode must be disabled or converge.
+
+    - name: Skip hosts without Hermes dashboard approval
+      ansible.builtin.meta: end_host
+      when: hermes_dashboard_mode == 'disabled'
+
+    - name: Require exact Hermes dashboard authorization
+      ansible.builtin.assert:
+        that:
+          - hermes_dashboard_approved | bool
+          - >-
+            hermes_dashboard_confirmation
+            == hermes_dashboard_required_confirmation
+          - inventory_hostname == 'jn-t14s-lin'
+          - hermes_dashboard_bind_address == '100.73.46.86'
+          - hermes_dashboard_port | int == 9119
+          - hermes_dashboard_public_url == 'https://openclaw.jnalley.me'
+        fail_msg: >-
+          Dashboard convergence requires the exact host-specific approval and
+          the reviewed Tailscale-only bind.
+
+    - name: Require the native Astra Gateway to be active
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/systemctl
+          - is-active
+          - hermes-gateway-astra.service
+      changed_when: false
+      check_mode: false
+
+    - name: Inspect existing dashboard rollback candidates
+      ansible.builtin.stat:
+        path: "{{ item }}"
+        follow: false
+      loop: "{{ hermes_dashboard_candidate_paths }}"
+      register: hermes_dashboard_candidates
+      no_log: true
+
+    - name: Reject unsafe dashboard rollback candidates
+      ansible.builtin.assert:
+        that:
+          - not item.stat.exists or item.stat.isreg
+          - not item.stat.exists or not item.stat.islnk
+        fail_msg: A dashboard-managed path is not a regular file.
+      loop: "{{ hermes_dashboard_candidates.results }}"
+      no_log: true
+
+    - name: Inspect prior dashboard service state
+      ansible.builtin.service_facts:
+
+    - name: Create dashboard rollback directory
+      ansible.builtin.file:
+        path: "{{ hermes_dashboard_backup_dir }}"
+        state: directory
+        owner: root
+        group: root
+        mode: '0700'
+
+    - name: Preserve existing dashboard files
+      ansible.builtin.copy:
+        src: "{{ item.item }}"
+        dest: >-
+          {{ hermes_dashboard_backup_dir }}/{{ item.item | basename }}
+        remote_src: true
+        owner: root
+        group: root
+        mode: preserve
+      loop: "{{ hermes_dashboard_candidates.results }}"
+      when: item.stat.exists
+      no_log: true
+
+    - name: Record dashboard rollback manifest
+      ansible.builtin.copy:
+        content: >-
+          {{
+            {
+              'createdAt': ansible_facts['date_time']['iso8601'],
+              'paths': hermes_dashboard_candidates.results
+                | map(attribute='item') | list,
+              'serviceWasActive':
+                ansible_facts.services.get(
+                  hermes_dashboard_unit,
+                  {'state': 'stopped'}
+                ).state == 'running',
+              'serviceWasEnabled':
+                ansible_facts.services.get(
+                  hermes_dashboard_unit,
+                  {'status': 'disabled'}
+                ).status == 'enabled'
+            } | to_nice_json
+          }}
+        dest: "{{ hermes_dashboard_backup_dir }}/manifest.json"
+        owner: root
+        group: root
+        mode: '0600'
+
+    - name: Inspect existing dashboard credential pair
+      ansible.builtin.stat:
+        path: "{{ item }}"
+        follow: false
+      loop:
+        - "{{ hermes_dashboard_environment }}"
+        - "{{ hermes_dashboard_password_file }}"
+      register: hermes_dashboard_credentials
+      no_log: true
+
+    - name: Require dashboard credentials to exist as a complete pair
+      ansible.builtin.assert:
+        that:
+          - >-
+            hermes_dashboard_credentials.results[0].stat.exists
+            == hermes_dashboard_credentials.results[1].stat.exists
+        fail_msg: >-
+          Dashboard credential state is partial; restore the missing paired
+          file before convergence.
+      no_log: true
+
+    - name: Generate the initial dashboard password
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/openssl
+          - rand
+          - -hex
+          - '24'
+      register: hermes_dashboard_generated_password
+      changed_when: true
+      when: not hermes_dashboard_credentials.results[0].stat.exists
+      check_mode: false
+      no_log: true
+
+    - name: Generate the stable dashboard signing secret
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/openssl
+          - rand
+          - -base64
+          - '48'
+      register: hermes_dashboard_generated_secret
+      changed_when: true
+      when: not hermes_dashboard_credentials.results[0].stat.exists
+      check_mode: false
+      no_log: true
+
+    - name: Hash the initial dashboard password with Hermes native auth
+      ansible.builtin.command:
+        argv:
+          - "{{ hermes_shadow_runtime_venv }}/bin/python"
+          - -c
+          - >-
+            import sys; from plugins.dashboard_auth.basic import hash_password;
+            print(hash_password(sys.stdin.read().strip()))
+        stdin: "{{ hermes_dashboard_generated_password.stdout }}"
+      register: hermes_dashboard_password_hash
+      changed_when: true
+      when: not hermes_dashboard_credentials.results[0].stat.exists
+      check_mode: false
+      no_log: true
+
+    - name: Converge dashboard service and credentials
+      block:
+        - name: Store the one-time dashboard operator password
+          ansible.builtin.copy:
+            content: "{{ hermes_dashboard_generated_password.stdout }}\n"
+            dest: "{{ hermes_dashboard_password_file }}"
+            owner: root
+            group: root
+            mode: '0600'
+          when: not hermes_dashboard_credentials.results[0].stat.exists
+          no_log: true
+
+        - name: Store hashed dashboard authentication environment
+          ansible.builtin.copy:
+            content: |
+              HERMES_DASHBOARD_BASIC_AUTH_USERNAME={{ hermes_dashboard_username }}
+              HERMES_DASHBOARD_BASIC_AUTH_PASSWORD_HASH={{ hermes_dashboard_password_hash.stdout }}
+              HERMES_DASHBOARD_BASIC_AUTH_SECRET={{ hermes_dashboard_generated_secret.stdout }}
+              HERMES_DASHBOARD_PUBLIC_URL={{ hermes_dashboard_public_url }}
+            dest: "{{ hermes_dashboard_environment }}"
+            owner: root
+            group: hermes-astra
+            mode: '0640'
+          when: not hermes_dashboard_credentials.results[0].stat.exists
+          no_log: true
+
+        - name: Inspect the built Hermes dashboard frontend
+          ansible.builtin.stat:
+            path: "{{ hermes_shadow_runtime_root }}/hermes_cli/web_dist/index.html"
+          register: hermes_dashboard_frontend
+
+        - name: Install locked dashboard frontend dependencies
+          ansible.builtin.command:
+            argv:
+              - /usr/bin/npm
+              - ci
+              - --ignore-scripts
+            chdir: "{{ hermes_shadow_runtime_root }}/web"
+          become_user: hermes-astra
+          when:
+            - not ansible_check_mode
+            - not hermes_dashboard_frontend.stat.exists
+
+        - name: Build the Hermes dashboard frontend
+          ansible.builtin.command:
+            argv:
+              - /usr/bin/npm
+              - run
+              - build
+            chdir: "{{ hermes_shadow_runtime_root }}/web"
+          become_user: hermes-astra
+          when:
+            - not ansible_check_mode
+            - not hermes_dashboard_frontend.stat.exists
+
+        - name: Install hardened native dashboard unit
+          ansible.builtin.template:
+            src: >-
+              {{ playbook_dir
+                 }}/../../templates/hermes/hermes-dashboard.service.j2
+            dest: "/etc/systemd/system/{{ hermes_dashboard_unit }}"
+            owner: root
+            group: root
+            mode: '0644'
+            backup: true
+
+        - name: Start authenticated Hermes dashboard
+          ansible.builtin.systemd_service:
+            name: "{{ hermes_dashboard_unit }}"
+            daemon_reload: true
+            enabled: true
+            state: restarted
+          when: not ansible_check_mode
+
+        - name: Read dashboard public authentication status
+          ansible.builtin.uri:
+            url: >-
+              http://{{ hermes_dashboard_bind_address }}:{{ hermes_dashboard_port }}/api/status
+            return_content: true
+            status_code: 200
+          register: hermes_dashboard_status
+          retries: 12
+          delay: 2
+          until: hermes_dashboard_status.status == 200
+          when: not ansible_check_mode
+
+        - name: Require the remote dashboard to fail closed behind basic auth
+          ansible.builtin.assert:
+            that:
+              - hermes_dashboard_status.json.auth_required | bool
+              - "'basic' in hermes_dashboard_status.json.auth_providers"
+          when: not ansible_check_mode
+
+      rescue:
+        - name: Stop failed dashboard deployment
+          ansible.builtin.systemd_service:
+            name: "{{ hermes_dashboard_unit }}"
+            state: stopped
+          failed_when: false
+
+        - name: Remove dashboard files absent before deployment
+          ansible.builtin.file:
+            path: "{{ item.item }}"
+            state: absent
+          loop: "{{ hermes_dashboard_candidates.results }}"
+          when: not item.stat.exists
+          no_log: true
+
+        - name: Restore preserved dashboard files
+          ansible.builtin.copy:
+            src: >-
+              {{ hermes_dashboard_backup_dir }}/{{ item.item | basename }}
+            dest: "{{ item.item }}"
+            remote_src: true
+            owner: "{{ item.stat.pw_name }}"
+            group: "{{ item.stat.gr_name }}"
+            mode: "{{ item.stat.mode }}"
+          loop: "{{ hermes_dashboard_candidates.results }}"
+          when: item.stat.exists
+          no_log: true
+
+        - name: Reload systemd after dashboard rollback
+          ansible.builtin.systemd_service:
+            daemon_reload: true
+
+        - name: Restore prior dashboard service activity
+          ansible.builtin.systemd_service:
+            name: "{{ hermes_dashboard_unit }}"
+            enabled: >-
+              {{
+                ansible_facts.services.get(
+                  hermes_dashboard_unit,
+                  {'status': 'disabled'}
+                ).status == 'enabled'
+              }}
+            state: >-
+              {{
+                'started'
+                if ansible_facts.services.get(
+                  hermes_dashboard_unit,
+                  {'state': 'stopped'}
+                ).state == 'running'
+                else 'stopped'
+              }}
+          when: >-
+            ansible_facts.services.get(
+              hermes_dashboard_unit,
+              {'status': 'not-found'}
+            ).status != 'not-found'
+
+        - name: Fail after restoring prior dashboard state
+          ansible.builtin.fail:
+            msg: >-
+              Hermes dashboard convergence failed and prior dashboard files
+              were restored from {{ hermes_dashboard_backup_dir }}.

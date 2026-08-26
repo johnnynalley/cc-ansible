@@ -25,10 +25,13 @@
     - name: Validate Hermes shadow mode
       ansible.builtin.assert:
         that:
-          - hermes_shadow_mode in ['disabled', 'bootstrap', 'shadow']
+          - >-
+            hermes_shadow_mode
+            in ['disabled', 'bootstrap', 'shadow', 'maintenance']
         fail_msg: >-
-          hermes_shadow_mode must be disabled, bootstrap, or shadow. This
-          playbook does not implement production delivery or cutover.
+          hermes_shadow_mode must be disabled, bootstrap, shadow, or
+          maintenance. This playbook does not implement production delivery or
+          cutover.
 
     - name: Inspect Hermes shadow units
       ansible.builtin.stat:
@@ -80,14 +83,36 @@
       ansible.builtin.assert:
         that:
           - hermes_shadow_change_approved | bool
-          - inventory_hostname == hermes_shadow_contract.deployment.targetHost
+          - >-
+            hermes_shadow_mode != 'maintenance'
+            or
+            hermes_shadow_maintenance_confirmation
+            == hermes_shadow_maintenance_required_confirmation
+          - >-
+            (
+              not hermes_shadow_replacement_rehearsal | bool
+              and inventory_hostname
+                  == hermes_shadow_contract.deployment.targetHost
+              and hermes_shadow_contract.deployment.sameHostReplacement | bool
+            )
+            or
+            (
+              hermes_shadow_replacement_rehearsal | bool
+              and hermes_shadow_mode == 'bootstrap'
+              and inventory_hostname
+                  == hermes_shadow_replacement_rehearsal_host
+              and (ansible_connection | default(''))
+                  == 'containers.podman.podman'
+              and not hermes_shadow_start_approved | bool
+            )
           - hermes_shadow_contract.deployment.mode == 'shadow'
-          - hermes_shadow_contract.deployment.sameHostReplacement | bool
           - not hermes_shadow_contract.deployment.sourceRuntimeConcurrentEnabled
           - hermes_shadow_contract.deployment.sourceFilesRetained | bool
           - >-
-            not hermes_shadow_contract.deployment
-            .sourceFilesDirectlyReadableByHermes
+            hermes_shadow_contract.deployment
+            .sourceFilesDirectlyReadableByHermes | bool
+          - not hermes_shadow_contract.host.sourceStateCopiedWholesale
+          - not hermes_shadow_contract.host.sourceStateDirectlyMounted
           - not hermes_shadow_contract.deployment.productionDeliveryEnabled
           - not hermes_shadow_contract.deployment.productionSchedulerEnabled
           - not hermes_shadow_contract.deployment.productionRouteEnabled
@@ -135,6 +160,28 @@
           - >-
             hermes_shadow_profiles | map(attribute='name') | list
             == ['astra', 'dubble', 'rigel']
+          - hermes_astra_workspace_source == '/home/johnny/cc-ansible'
+          - hermes_astra_workspace_root == '/var/lib/hermes/astra/workspaces'
+          - >-
+            hermes_astra_workspace_live
+            == hermes_astra_workspace_root + '/cc-ansible'
+          - hermes_astra_workspace_user == 'hermes-astra'
+          - >-
+            not hermes_shadow_replacement_rehearsal | bool
+            or (
+              hermes_shadow_replacement_rehearsal_minimum_available_memory_mib
+              | int >= 4096
+              and
+              hermes_shadow_replacement_rehearsal_minimum_available_memory_mib
+              | int
+              <= hermes_shadow_contract.host.minimumAvailableMemoryMiB | int
+              and
+              hermes_shadow_replacement_rehearsal_minimum_free_disk_gib | int
+              >= 4
+              and
+              hermes_shadow_replacement_rehearsal_minimum_free_disk_gib | int
+              <= hermes_shadow_contract.host.minimumFreeDiskGiB | int
+            )
         fail_msg: >-
           The requested host, mode, profiles, or security boundary differs from
           the reviewed Hermes shadow contract.
@@ -151,24 +198,36 @@
           - item.uid | int >= 62010
           - item.uid | int <= 62012
           - item.subid_start | int >= 200000
+          - item.model_provider == 'openai-codex'
+          - item.model_default == 'gpt-5.6-sol'
+          - item.model_max_tokens | int == 8192
           - >-
-            item.model_provider
-            == ('openai-codex' if item.name == 'astra' else 'anthropic')
-          - >-
-            item.model_default
-            == ('gpt-5.6-sol' if item.name == 'astra' else 'claude-sonnet-4-6')
+            item.fallback_providers
+            == [
+              {'provider': 'ollama-cloud', 'model': 'glm-5.2'},
+              {'provider': 'ollama-cloud', 'model': 'kimi-k2.7-code'},
+              {'provider': 'ollama-cloud', 'model': 'deepseek-v4-pro'}
+            ]
           - item.discord_allowed_users is iterable
           - item.discord_allowed_channels is iterable
           - item.discord_free_response_channels is iterable
           - item.discord_channel_prompts is mapping
           - item.discord_channel_skill_bindings is iterable
           - item.discord_admin_users is iterable
+          - item.discord_server_actions is iterable
           - not item.discord_slash_commands | bool
           - >-
             item.plugins_enabled
             == (
-              ['star-dispatch-privacy', 'agent-docker-inventory', 'hermes-lcm']
-              if item.name == 'astra' else []
+              ['star-dispatch-privacy', 'agent-docker-inventory',
+               'arr-api', 'host-admin', 'compose-admin',
+               'discord-parity', 'fleet-admin', 'hermes-lcm']
+              if item.name == 'astra'
+              else (
+                ['discord-parity', 'astra-handoff', 'hermes-lcm']
+                if item.name == 'dubble'
+                else ['hermes-lcm', 'rigel-astra-liaison']
+              )
             )
           - >-
             ('agent_docker' in item.toolsets)
@@ -176,36 +235,93 @@
           - item.toolsets | length > 0
           - >-
             ('terminal' in item.toolsets)
-            == (item.name == 'astra')
+            == (item.name in ['astra', 'rigel'])
           - >-
             ('file' in item.toolsets)
-            == (item.name == 'astra')
+            == (item.name in ['astra', 'rigel'])
           - >-
             ('code_execution' in item.toolsets)
             == (item.name == 'astra')
           - >-
             ('cronjob' in item.toolsets)
+            == (item.name in ['astra', 'dubble'])
+          - >-
+            ('discord' in item.toolsets)
+            == (item.name in ['astra', 'dubble'])
+          - >-
+            ('discord_admin' in item.toolsets)
+            == (item.name in ['astra', 'dubble'])
+          - >-
+            ('discord_parity' in item.toolsets)
+            == (item.name in ['astra', 'dubble'])
+          - >-
+            ('astra_handoff' in item.toolsets)
+            == (item.name == 'dubble')
+          - >-
+            ('rigel_astra_liaison' in item.toolsets)
+            == (item.name == 'rigel')
+          - >-
+            ('arr_api' in item.toolsets)
             == (item.name == 'astra')
           - >-
+            ('host_admin' in item.toolsets)
+            == (item.name == 'astra')
+          - >-
+            ('compose_admin' in item.toolsets)
+            == (item.name == 'astra')
+          - >-
+            ('fleet_admin' in item.toolsets)
+            == (item.name == 'astra')
+          - >-
+            ('browser' in item.toolsets)
+            == (item.name in ['astra', 'rigel'])
+          - >-
+            ('vision' in item.toolsets)
+            == (item.name in ['astra', 'rigel'])
+          - >-
+            ('image_gen' in item.toolsets)
+            == (item.name == 'astra')
+          - >-
+            ('tts' in item.toolsets)
+            == (item.name == 'astra')
+          - >-
+            (item.native_messaging_bridge | default(false) | bool)
+            == (item.name in ['astra', 'dubble'])
+          - "'messaging' not in item.toolsets"
+          - >-
             ('terminal' in item.disabled_toolsets)
-            == (item.name != 'astra')
+            == (item.name == 'dubble')
           - >-
             ('file' in item.disabled_toolsets)
-            == (item.name != 'astra')
+            == (item.name == 'dubble')
           - >-
             ('code_execution' in item.disabled_toolsets)
             == (item.name != 'astra')
           - >-
             ('cronjob' in item.disabled_toolsets)
-            == (item.name != 'astra')
+            == (item.name == 'rigel')
+          - >-
+            ('discord_admin' in item.disabled_toolsets)
+            == (item.name == 'rigel')
           - >-
             item.terminal_backend
-            == ('local' if item.name == 'astra' else 'docker')
+            == ('local' if item.name in ['astra', 'rigel'] else 'docker')
           - >-
             item.cron_approval_mode
-            == ('manual' if item.name == 'astra' else 'deny')
+            == ('approve' if item.name in ['astra', 'dubble'] else 'deny')
+          - >-
+            item.approval_mode
+            == ('smart' if item.name in ['astra', 'rigel'] else 'manual')
+          - >-
+            (item.approval_smart_policy is defined)
+            == (item.name in ['astra', 'rigel'])
+          - >-
+            (item.bot_peers is defined)
+            == (item.name == 'dubble')
           - "'computer_use' in item.disabled_toolsets"
-          - "'discord_admin' in item.disabled_toolsets"
+          - >-
+            ('add_role' not in item.discord_server_actions)
+            and ('remove_role' not in item.discord_server_actions)
         fail_msg: >-
           Hermes profile {{ item.name }} exceeds its reviewed authority.
       loop: "{{ hermes_shadow_profiles }}"
@@ -250,11 +366,20 @@
             >= hermes_shadow_contract.host.minimumLogicalCpus | int
           - >-
             hermes_shadow_host_available_memory.stdout | int
-            >= hermes_shadow_contract.host.minimumAvailableMemoryMiB | int
+            >= (
+              hermes_shadow_replacement_rehearsal_minimum_available_memory_mib
+              | int
+              if hermes_shadow_replacement_rehearsal | bool
+              else hermes_shadow_contract.host.minimumAvailableMemoryMiB | int
+            )
           - >-
             hermes_shadow_host_free_disk.stdout_lines[-1]
             | regex_replace('[^0-9]', '') | int
-            >= hermes_shadow_contract.host.minimumFreeDiskGiB | int
+            >= (
+              hermes_shadow_replacement_rehearsal_minimum_free_disk_gib | int
+              if hermes_shadow_replacement_rehearsal | bool
+              else hermes_shadow_contract.host.minimumFreeDiskGiB | int
+            )
         fail_msg: >-
           The same-host Hermes CPU, available-memory, or free-disk preflight no
           longer meets the reviewed contract. Do not install or start Hermes.
@@ -301,10 +426,20 @@
             is match('^[0-9a-f]{64}$')
           - hermes_tirith_certificate_sha256 is match('^[0-9a-f]{64}$')
           - >-
+            hermes_tirith_package_approval_helper_sha256
+            is match('^[0-9a-f]{64}$')
+          - >-
             hermes_tirith_binary
             == '/var/lib/hermes-updater/.local/bin/tirith'
           - hermes_tirith_update_user == 'hermes-updater'
           - hermes_tirith_update_uid | int == 62013
+          - hermes_cosign_version is match('^[0-9]+(\.[0-9]+){2}$')
+          - >-
+            hermes_cosign_url
+            == 'https://github.com/sigstore/cosign/releases/download/v'
+               + hermes_cosign_version + '/cosign-linux-amd64'
+          - hermes_cosign_sha256 is match('^[0-9a-f]{64}$')
+          - hermes_cosign_binary == '/usr/local/bin/cosign'
         fail_msg: >-
           Tirith must bootstrap from the reviewed official release into its
           dedicated native self-managed update identity.
@@ -326,7 +461,7 @@
       ansible.builtin.apt:
         name:
           - ca-certificates
-          - cosign
+          - acl
           - curl
           - fuse-overlayfs
           - git
@@ -337,6 +472,33 @@
           - xz-utils
         state: present
         update_cache: true
+
+    - name: Install reviewed Cosign verifier
+      ansible.builtin.get_url:
+        url: "{{ hermes_cosign_url }}"
+        dest: "{{ hermes_cosign_binary }}"
+        owner: root
+        group: root
+        mode: "0755"
+        checksum: "sha256:{{ hermes_cosign_sha256 }}"
+
+    - name: Read installed Cosign verifier version
+      ansible.builtin.command:
+        argv:
+          - "{{ hermes_cosign_binary }}"
+          - version
+      register: hermes_cosign_installed_version
+      changed_when: false
+
+    - name: Require reviewed Cosign verifier version
+      ansible.builtin.assert:
+        that:
+          - >-
+            hermes_cosign_installed_version.stdout
+            is search('GitVersion:\\s+v' + hermes_cosign_version | regex_escape)
+        fail_msg: >-
+          The installed Cosign verifier does not match the reviewed stable
+          release.
 
     - name: Create Hermes service groups
       ansible.builtin.group:
@@ -371,6 +533,68 @@
       loop: "{{ hermes_shadow_profiles }}"
       loop_control:
         label: "{{ item.name }}"
+
+    - name: Inspect Astra managed workspace source
+      ansible.builtin.stat:
+        path: "{{ hermes_astra_workspace_source }}"
+        follow: false
+      register: hermes_astra_workspace_source_state
+      check_mode: false
+
+    - name: Require a regular managed workspace directory
+      ansible.builtin.assert:
+        that:
+          - hermes_astra_workspace_source_state.stat.exists
+          - hermes_astra_workspace_source_state.stat.isdir
+          - not hermes_astra_workspace_source_state.stat.islnk
+        fail_msg: >-
+          Astra's collaboration workspace must be the existing non-symlink
+          cc-ansible repository.
+
+    - name: Create Astra native workspace mountpoints
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: directory
+        owner: "{{ hermes_astra_workspace_user }}"
+        group: "{{ hermes_astra_workspace_user }}"
+        mode: "0750"
+      loop:
+        - "{{ hermes_astra_workspace_root }}"
+        - "{{ hermes_astra_workspace_live }}"
+
+    - name: Grant Astra access to existing managed workspace content
+      ansible.posix.acl:
+        path: "{{ hermes_astra_workspace_source }}"
+        entity: "{{ hermes_astra_workspace_user }}"
+        etype: user
+        permissions: rwX
+        recursive: true
+        follow: false
+        state: present
+
+    - name: Find managed workspace directories for inherited Astra access
+      ansible.builtin.find:
+        paths: "{{ hermes_astra_workspace_source }}"
+        file_type: directory
+        recurse: true
+        hidden: true
+      register: hermes_astra_workspace_directories
+      check_mode: false
+
+    - name: Grant Astra inherited access in managed workspace directories
+      ansible.posix.acl:
+        path: "{{ item.path }}"
+        entity: "{{ hermes_astra_workspace_user }}"
+        etype: user
+        permissions: rwx
+        default: true
+        follow: false
+        state: present
+      loop: >-
+        {{ [{'path': hermes_astra_workspace_source}]
+           + hermes_astra_workspace_directories.files }}
+      loop_control:
+        label: "{{ item.path }}"
 
     - name: Create Tirith native update group
       ansible.builtin.group:
@@ -466,14 +690,8 @@
       ansible.builtin.file:
         path: "{{ item }}"
         state: directory
-        # Account creation is simulated in check mode. Omit ownership only when
-        # the read-only account probe proves that identity does not yet exist.
-        owner: >-
-          {{ hermes_tirith_update_user
-             if hermes_tirith_update_account_probe.rc == 0 else omit }}
-        group: >-
-          {{ hermes_tirith_update_group
-             if hermes_tirith_update_account_probe.rc == 0 else omit }}
+        owner: root
+        group: root
         mode: "0755"
       loop:
         - "{{ hermes_tirith_update_home }}"
@@ -486,9 +704,87 @@
       register: hermes_tirith_runtime
       check_mode: false
 
+    - name: Inspect Tirith package-approval helper
+      ansible.builtin.stat:
+        path: "{{ hermes_tirith_package_approval_helper }}"
+        checksum_algorithm: sha256
+        follow: false
+      register: hermes_tirith_package_approval_runtime
+      check_mode: false
+
+    - name: Reject an unsafe Tirith package-approval helper path
+      ansible.builtin.assert:
+        that:
+          - >-
+            not hermes_tirith_package_approval_runtime.stat.exists
+            or (
+              hermes_tirith_package_approval_runtime.stat.isreg | default(false)
+              and not (
+                hermes_tirith_package_approval_runtime.stat.islnk
+                | default(false)
+              )
+            )
+        fail_msg: >-
+          The Tirith package-approval helper is not absent or a regular,
+          non-symlink file.
+
+    - name: Select Tirith signed bootstrap requirement
+      ansible.builtin.set_fact:
+        hermes_tirith_bootstrap_required: >-
+          {{
+            not hermes_tirith_runtime.stat.exists
+            or not hermes_tirith_package_approval_runtime.stat.exists
+            or (
+              hermes_tirith_package_approval_runtime.stat.checksum
+              | default('')
+            ) != hermes_tirith_package_approval_helper_sha256
+          }}
+
     - name: Create per-profile Hermes managed scopes
       ansible.builtin.file:
         path: "/etc/hermes/{{ item.name }}"
+        state: directory
+        owner: root
+        group: "{{ item.group }}"
+        mode: "0750"
+      loop: "{{ hermes_shadow_profiles }}"
+      loop_control:
+        label: "{{ item.name }}"
+
+    - name: Inspect native Hermes profile roots
+      ansible.builtin.stat:
+        path: "{{ item.home }}"
+        follow: false
+      loop: "{{ hermes_shadow_profiles }}"
+      loop_control:
+        label: "{{ item.name }}"
+      register: hermes_shadow_native_profile_roots
+
+    - name: Reject unsafe native Hermes profile roots
+      ansible.builtin.assert:
+        that:
+          - not item.stat.exists or (item.stat.isdir and not item.stat.islnk)
+        fail_msg: >-
+          A native Hermes profile root is not absent or a regular,
+          non-symlink directory.
+      loop: "{{ hermes_shadow_native_profile_roots.results }}"
+      loop_control:
+        label: "{{ item.item.name }}"
+
+    - name: Create agent-owned native Hermes profile roots
+      ansible.builtin.file:
+        path: "{{ item.home }}"
+        state: directory
+        owner: "{{ item.user }}"
+        group: "{{ item.group }}"
+        mode: "0700"
+      loop: "{{ hermes_shadow_profiles }}"
+      loop_control:
+        label: "{{ item.name }}"
+
+    - name: Create isolated native MCP server managed scopes
+      ansible.builtin.file:
+        path: "/etc/hermes/{{ item.name }}/mcp-server"
         state: directory
         owner: root
         group: "{{ item.group }}"
@@ -524,7 +820,7 @@
         label: "{{ item.dest }}"
       when:
         - not ansible_check_mode
-        - not hermes_tirith_runtime.stat.exists
+        - hermes_tirith_bootstrap_required
 
     - name: Decode reviewed Tirith signing certificate
       ansible.builtin.command:
@@ -536,7 +832,7 @@
       changed_when: false
       when:
         - not ansible_check_mode
-        - not hermes_tirith_runtime.stat.exists
+        - hermes_tirith_bootstrap_required
 
     - name: Stage decoded Tirith signing certificate
       ansible.builtin.copy:
@@ -547,7 +843,7 @@
         mode: "0644"
       when:
         - not ansible_check_mode
-        - not hermes_tirith_runtime.stat.exists
+        - hermes_tirith_bootstrap_required
 
     - name: Inspect decoded Tirith certificate checksum
       ansible.builtin.stat:
@@ -556,7 +852,7 @@
       register: hermes_tirith_decoded_certificate_stat
       when:
         - not ansible_check_mode
-        - not hermes_tirith_runtime.stat.exists
+        - hermes_tirith_bootstrap_required
 
     - name: Require exact decoded Tirith signing certificate
       ansible.builtin.assert:
@@ -567,12 +863,12 @@
         fail_msg: The decoded Tirith signing certificate hash changed.
       when:
         - not ansible_check_mode
-        - not hermes_tirith_runtime.stat.exists
+        - hermes_tirith_bootstrap_required
 
     - name: Verify Tirith signed checksum provenance
       ansible.builtin.command:
         argv:
-          - /usr/bin/cosign
+          - "{{ hermes_cosign_binary }}"
           - verify-blob
           - --certificate
           - "{{ hermes_tirith_certificate_cache }}"
@@ -586,7 +882,7 @@
       changed_when: false
       when:
         - not ansible_check_mode
-        - not hermes_tirith_runtime.stat.exists
+        - hermes_tirith_bootstrap_required
 
     - name: Require Tirith archive in signed checksum manifest
       ansible.builtin.command:
@@ -601,7 +897,7 @@
       changed_when: false
       when:
         - not ansible_check_mode
-        - not hermes_tirith_runtime.stat.exists
+        - hermes_tirith_bootstrap_required
 
     - name: Extract reviewed Tirith release archive
       ansible.builtin.unarchive:
@@ -611,19 +907,87 @@
         creates: "{{ hermes_tirith_extract_root }}/tirith"
       when:
         - not ansible_check_mode
-        - not hermes_tirith_runtime.stat.exists
+        - hermes_tirith_bootstrap_required
 
     - name: Install Tirith native self-managed bootstrap binary
       ansible.builtin.copy:
         src: "{{ hermes_tirith_extract_root }}/tirith"
         dest: "{{ hermes_tirith_binary }}"
         remote_src: true
-        owner: "{{ hermes_tirith_update_user }}"
-        group: "{{ hermes_tirith_update_group }}"
+        owner: root
+        group: root
         mode: "0755"
       when:
         - not ansible_check_mode
         - not hermes_tirith_runtime.stat.exists
+
+    - name: Install Tirith root-owned package-approval helper
+      ansible.builtin.copy:
+        src: >-
+          {{ hermes_tirith_extract_root
+             ~ '/tirith-package-approval-authority' }}
+        dest: "{{ hermes_tirith_package_approval_helper }}"
+        remote_src: true
+        owner: root
+        group: root
+        mode: "0755"
+      when:
+        - not ansible_check_mode
+        - >-
+          not hermes_tirith_package_approval_runtime.stat.exists
+          or (
+            hermes_tirith_package_approval_runtime.stat.checksum
+            | default('')
+          ) != hermes_tirith_package_approval_helper_sha256
+
+    - name: Keep Tirith native updater state root-owned
+      ansible.builtin.file:
+        path: "{{ hermes_tirith_update_home }}"
+        state: directory
+        owner: root
+        group: root
+        mode: "0755"
+
+    - name: Keep Tirith native executable tree root-owned
+      ansible.builtin.file:
+        path: "{{ hermes_tirith_update_home }}/.local"
+        state: directory
+        owner: root
+        group: root
+        recurse: true
+
+    - name: Keep Tirith Sigstore cache root-owned
+      ansible.builtin.file:
+        path: "{{ hermes_tirith_update_home }}/.sigstore"
+        state: directory
+        owner: root
+        group: root
+        recurse: true
+
+    - name: Verify Tirith package-approval helper checksum
+      ansible.builtin.stat:
+        path: "{{ hermes_tirith_package_approval_helper }}"
+        checksum_algorithm: sha256
+        follow: false
+      register: hermes_tirith_package_approval_verified
+      when: not ansible_check_mode
+
+    - name: Require matching Tirith package-approval helper
+      ansible.builtin.assert:
+        that:
+          - hermes_tirith_package_approval_verified.stat.isreg | default(false)
+          - >-
+            not (
+              hermes_tirith_package_approval_verified.stat.islnk
+              | default(false)
+            )
+          - >-
+            hermes_tirith_package_approval_verified.stat.checksum
+            == hermes_tirith_package_approval_helper_sha256
+        fail_msg: >-
+          Tirith's root-owned package-approval helper does not match the
+          signed bootstrap release.
+      when: not ansible_check_mode
 
     - name: Read installed Tirith version
       ansible.builtin.command:
@@ -794,6 +1158,72 @@
         - "{{ hermes_docker_inventory_plugin_managed_root }}"
         - "{{ hermes_docker_inventory_plugin_runtime_root }}"
 
+    - name: Inspect Astra Discord parity plugin directories
+      ansible.builtin.stat:
+        path: "{{ item }}"
+        follow: false
+      loop:
+        - "{{ hermes_discord_parity_plugin_managed_root }}"
+        - "{{ hermes_discord_parity_plugin_runtime_root }}"
+      register: hermes_discord_parity_plugin_directories
+
+    - name: Reject unsafe Astra Discord parity plugin directories
+      ansible.builtin.assert:
+        that:
+          - not item.stat.exists or (item.stat.isdir and not item.stat.islnk)
+        fail_msg: >-
+          An Astra Discord parity plugin path is not absent or a regular,
+          non-symlink directory.
+      loop: "{{ hermes_discord_parity_plugin_directories.results }}"
+      loop_control:
+        label: "{{ item.item }}"
+
+    - name: Create root-owned Astra Discord parity plugin directories
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: directory
+        owner: root
+        group: hermes-astra
+        mode: "0750"
+      loop:
+        - "{{ hermes_discord_parity_plugin_managed_root }}"
+        - "{{ hermes_discord_parity_plugin_runtime_root }}"
+
+    - name: Inspect Dubble bounded plugin directories
+      ansible.builtin.stat:
+        path: "{{ item }}"
+        follow: false
+      loop:
+        - "{{ hermes_dubble_discord_parity_plugin_managed_root }}"
+        - "{{ hermes_dubble_discord_parity_plugin_runtime_root }}"
+        - "{{ hermes_astra_handoff_plugin_managed_root }}"
+        - "{{ hermes_astra_handoff_plugin_runtime_root }}"
+      register: hermes_dubble_plugin_directories
+
+    - name: Reject unsafe Dubble bounded plugin directories
+      ansible.builtin.assert:
+        that:
+          - not item.stat.exists or (item.stat.isdir and not item.stat.islnk)
+        fail_msg: >-
+          A Dubble plugin path is not absent or a regular, non-symlink
+          directory.
+      loop: "{{ hermes_dubble_plugin_directories.results }}"
+      loop_control:
+        label: "{{ item.item }}"
+
+    - name: Create root-owned Dubble bounded plugin directories
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: directory
+        owner: root
+        group: hermes-dubble
+        mode: "0750"
+      loop:
+        - "{{ hermes_dubble_discord_parity_plugin_managed_root }}"
+        - "{{ hermes_dubble_discord_parity_plugin_runtime_root }}"
+        - "{{ hermes_astra_handoff_plugin_managed_root }}"
+        - "{{ hermes_astra_handoff_plugin_runtime_root }}"
+
     - name: Create per-profile Hermes mutable directories
       ansible.builtin.file:
         path: "{{ item.0.home }}/{{ item.1 }}"
@@ -852,6 +1282,21 @@
       loop: "{{ hermes_shadow_profiles }}"
       loop_control:
         label: "{{ item.name }}"
+
+    - name: Create read-only shared self-evolution mountpoints
+      ansible.builtin.file:
+        path: "{{ item.home }}/skills/self-evolution"
+        state: directory
+        owner: root
+        group: "{{ item.group }}"
+        mode: "0750"
+      loop: >-
+        {{ hermes_shadow_profiles
+           | rejectattr('name', 'equalto', 'astra')
+           | list }}
+      loop_control:
+        label: "{{ item.name }}"
+      when: hermes_native_profile_skills_enabled | bool
 
     - name: Inspect Hermes profile-data runtime mountpoints
       ansible.builtin.stat:
@@ -988,6 +1433,106 @@
         update: true
       when: not hermes_shadow_runtime.stat.exists
 
+    - name: Inspect fresh Hermes checkout status
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/git
+          - -c
+          - "safe.directory={{ hermes_shadow_runtime_root }}"
+          - -C
+          - "{{ hermes_shadow_runtime_root }}"
+          - status
+          - --porcelain
+          - --untracked-files=all
+      register: hermes_shadow_fresh_checkout_status
+      changed_when: false
+      when: not hermes_shadow_runtime.stat.exists
+
+    - name: Prove fresh checkout drift is line-ending only
+      ansible.builtin.command:
+        argv: >-
+          {{
+            [
+              '/usr/bin/git', '-c',
+              'safe.directory=' ~ hermes_shadow_runtime_root,
+              '-C', hermes_shadow_runtime_root,
+              'diff', '--ignore-space-at-eol', '--exit-code', '--'
+            ]
+            + hermes_shadow_fresh_checkout_eol_paths
+          }}
+      register: hermes_shadow_fresh_checkout_eol_probe
+      changed_when: false
+      failed_when: >-
+        hermes_shadow_fresh_checkout_eol_probe.rc not in [0, 1]
+      when:
+        - not hermes_shadow_runtime.stat.exists
+        - hermes_shadow_fresh_checkout_status.stdout | length > 0
+
+    - name: Read fresh checkout changed paths
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/git
+          - -c
+          - "safe.directory={{ hermes_shadow_runtime_root }}"
+          - -C
+          - "{{ hermes_shadow_runtime_root }}"
+          - diff
+          - --name-only
+      register: hermes_shadow_fresh_checkout_changed_paths
+      changed_when: false
+      when:
+        - not hermes_shadow_runtime.stat.exists
+        - hermes_shadow_fresh_checkout_status.stdout | length > 0
+
+    - name: Require bounded fresh checkout line-ending drift
+      ansible.builtin.assert:
+        that:
+          - hermes_shadow_fresh_checkout_eol_probe.rc == 0
+          - >-
+            hermes_shadow_fresh_checkout_changed_paths.stdout_lines
+            | difference(hermes_shadow_fresh_checkout_eol_paths)
+            | length == 0
+          - >-
+            hermes_shadow_fresh_checkout_status.stdout_lines | length
+            == hermes_shadow_fresh_checkout_changed_paths.stdout_lines | length
+        fail_msg: >-
+          A fresh Hermes checkout contains drift beyond the reviewed
+          line-ending-only PowerShell paths.
+      when:
+        - not hermes_shadow_runtime.stat.exists
+        - hermes_shadow_fresh_checkout_status.stdout | length > 0
+
+    - name: Restore reviewed fresh checkout line endings
+      ansible.builtin.command:
+        argv: >-
+          {{
+            [
+              '/usr/bin/git', '-c',
+              'safe.directory=' ~ hermes_shadow_runtime_root,
+              '-C', hermes_shadow_runtime_root,
+              'restore', '--source=HEAD', '--worktree', '--'
+            ]
+            + hermes_shadow_fresh_checkout_eol_paths
+          }}
+      changed_when: true
+      when:
+        - not hermes_shadow_runtime.stat.exists
+        - hermes_shadow_fresh_checkout_status.stdout | length > 0
+
+    - name: Require clean fresh Hermes checkout
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/git
+          - -c
+          - "safe.directory={{ hermes_shadow_runtime_root }}"
+          - -C
+          - "{{ hermes_shadow_runtime_root }}"
+          - diff
+          - --quiet
+          - --exit-code
+      changed_when: false
+      when: not hermes_shadow_runtime.stat.exists
+
     - name: Synchronize only locked Hermes dependencies
       ansible.builtin.command:
         argv:
@@ -999,6 +1544,8 @@
           - messaging
           - --extra
           - mem0
+          - --extra
+          - edge-tts
           - --locked
         chdir: "{{ hermes_shadow_runtime_root }}"
         creates: "{{ hermes_shadow_runtime_venv }}/bin/hermes"
@@ -1010,7 +1557,7 @@
         UV_CACHE_DIR: "{{ hermes_shadow_uv_cache_dir }}"
         UV_NO_ENV_FILE: "1"
         UV_PROJECT_ENVIRONMENT: "{{ hermes_shadow_runtime_venv }}"
-        UV_PYTHON_INSTALL_DIR: /usr/local/share/uv/python
+        UV_PYTHON_INSTALL_DIR: "{{ hermes_shadow_uv_python_root }}"
         UV_PYTHON_BIN_DIR: /usr/local/share/uv/bin
       when: not hermes_shadow_runtime.stat.exists
 
@@ -1029,7 +1576,7 @@
         src: >-
           {{ playbook_dir
              }}/../../templates/hermes/hermes-native-update.sudoers.j2
-        dest: /etc/sudoers.d/hermes-native-update
+        dest: "{{ hermes_native_update_sudoers_path }}"
         owner: root
         group: root
         mode: "0440"
@@ -1097,6 +1644,70 @@
       loop: "{{ hermes_shadow_profiles }}"
       loop_control:
         label: "{{ item.name }}"
+
+    - name: Inspect final Hermes source content drift
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/git
+          - -c
+          - "safe.directory={{ hermes_shadow_runtime_root }}"
+          - -C
+          - "{{ hermes_shadow_runtime_root }}"
+          - diff
+          - --name-only
+      register: hermes_shadow_final_changed_paths
+      check_mode: false
+      changed_when: false
+
+    - name: Prove final Hermes source drift is reviewed line endings only
+      ansible.builtin.command:
+        argv: >-
+          {{
+            [
+              '/usr/bin/git', '-c',
+              'safe.directory=' ~ hermes_shadow_runtime_root,
+              '-C', hermes_shadow_runtime_root,
+              'diff', '--ignore-space-at-eol', '--exit-code', '--'
+            ]
+            + hermes_shadow_fresh_checkout_eol_paths
+          }}
+      register: hermes_shadow_final_eol_probe
+      check_mode: false
+      changed_when: false
+      failed_when: hermes_shadow_final_eol_probe.rc not in [0, 1]
+      when: hermes_shadow_final_changed_paths.stdout | length > 0
+
+    - name: Require bounded final Hermes source drift
+      ansible.builtin.assert:
+        that:
+          - hermes_shadow_final_eol_probe.rc == 0
+          - >-
+            hermes_shadow_final_changed_paths.stdout_lines
+            | difference(hermes_shadow_fresh_checkout_eol_paths)
+            | length == 0
+        fail_msg: >-
+          Hermes bootstrap changed tracked source beyond the reviewed
+          line-ending-only PowerShell paths.
+      when: hermes_shadow_final_changed_paths.stdout | length > 0
+
+    - name: Restore reviewed final Hermes source line endings
+      ansible.builtin.command:
+        argv: >-
+          {{
+            [
+              '/usr/bin/git', '-c',
+              'safe.directory=' ~ hermes_shadow_runtime_root,
+              '-C', hermes_shadow_runtime_root,
+              'restore', '--source=HEAD', '--worktree', '--'
+            ]
+            + hermes_shadow_fresh_checkout_eol_paths
+          }}
+      become: true
+      become_user: "{{ hermes_native_update_user }}"
+      changed_when: true
+      when:
+        - not ansible_check_mode
+        - hermes_shadow_final_changed_paths.stdout | length > 0
 
     - name: Inspect Hermes source origin
       ansible.builtin.command:
@@ -1185,7 +1796,7 @@
       check_mode: false
       changed_when: false
 
-    - name: Inspect Hermes source modifications
+    - name: Inspect tracked Hermes worktree modifications
       ansible.builtin.command:
         argv:
           - /usr/bin/git
@@ -1193,10 +1804,43 @@
           - "safe.directory={{ hermes_shadow_runtime_root }}"
           - -C
           - "{{ hermes_shadow_runtime_root }}"
-          - status
-          - --porcelain
-          - --untracked-files=all
-      register: hermes_shadow_installed_status
+          - diff
+          - --quiet
+          - --exit-code
+      register: hermes_shadow_installed_worktree_diff
+      failed_when: hermes_shadow_installed_worktree_diff.rc not in [0, 1]
+      check_mode: false
+      changed_when: false
+
+    - name: Inspect staged Hermes source modifications
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/git
+          - -c
+          - "safe.directory={{ hermes_shadow_runtime_root }}"
+          - -C
+          - "{{ hermes_shadow_runtime_root }}"
+          - diff
+          - --cached
+          - --quiet
+          - --exit-code
+      register: hermes_shadow_installed_index_diff
+      failed_when: hermes_shadow_installed_index_diff.rc not in [0, 1]
+      check_mode: false
+      changed_when: false
+
+    - name: Inspect untracked Hermes source paths
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/git
+          - -c
+          - "safe.directory={{ hermes_shadow_runtime_root }}"
+          - -C
+          - "{{ hermes_shadow_runtime_root }}"
+          - ls-files
+          - --others
+          - --exclude-standard
+      register: hermes_shadow_installed_untracked
       check_mode: false
       changed_when: false
 
@@ -1224,7 +1868,9 @@
           - >-
             hermes_shadow_installed_tag_commit.stdout
             == hermes_shadow_expected_commit
-          - hermes_shadow_installed_status.stdout | length == 0
+          - hermes_shadow_installed_worktree_diff.rc == 0
+          - hermes_shadow_installed_index_diff.rc == 0
+          - hermes_shadow_installed_untracked.stdout | length == 0
         fail_msg: >-
           The installed Hermes source is neither the reviewed bootstrap commit
           nor a clean checkout at official origin/main.
@@ -1379,6 +2025,110 @@
         {{ [
              hermes_docker_inventory_plugin_managed_root,
              hermes_docker_inventory_plugin_runtime_root
+           ]
+           | product(['__init__.py', 'plugin.yaml'])
+           | list }}
+      loop_control:
+        label: "{{ item.0 }}/{{ item.1 }}"
+
+    - name: Deploy Astra Discord parity plugin validator
+      ansible.builtin.copy:
+        src: >-
+          {{ playbook_dir
+             }}/../../{{ hermes_discord_parity_validator_source }}
+        dest: "{{ hermes_discord_parity_validator_live }}"
+        owner: root
+        group: root
+        mode: "0555"
+        backup: true
+
+    - name: Deploy root-owned Astra Discord parity plugin
+      ansible.builtin.copy:
+        src: >-
+          {{ playbook_dir
+             }}/../../{{ hermes_discord_parity_plugin_source }}/{{ item.1 }}
+        dest: "{{ item.0 }}/{{ item.1 }}"
+        owner: root
+        group: hermes-astra
+        mode: "0440"
+        backup: true
+      loop: >-
+        {{ [
+             hermes_discord_parity_plugin_managed_root,
+             hermes_discord_parity_plugin_runtime_root
+           ]
+           | product(['__init__.py', 'plugin.yaml'])
+           | list }}
+      loop_control:
+        label: "{{ item.0 }}/{{ item.1 }}"
+
+    - name: Deploy root-owned Astra Discord parity policy
+      ansible.builtin.copy:
+        src: >-
+          {{ playbook_dir
+             }}/../../{{ hermes_discord_parity_policy_source }}
+        dest: "{{ hermes_discord_parity_policy_live }}"
+        owner: root
+        group: hermes-astra
+        mode: "0440"
+        backup: true
+
+    - name: Deploy Dubble Astra handoff validator
+      ansible.builtin.copy:
+        src: >-
+          {{ playbook_dir
+             }}/../../{{ hermes_astra_handoff_validator_source }}
+        dest: "{{ hermes_astra_handoff_validator_live }}"
+        owner: root
+        group: root
+        mode: "0555"
+        backup: true
+
+    - name: Deploy root-owned Dubble Discord parity plugin
+      ansible.builtin.copy:
+        src: >-
+          {{ playbook_dir
+             }}/../../{{ hermes_discord_parity_plugin_source }}/{{ item.1 }}
+        dest: "{{ item.0 }}/{{ item.1 }}"
+        owner: root
+        group: hermes-dubble
+        mode: "0440"
+        backup: true
+      loop: >-
+        {{ [
+             hermes_dubble_discord_parity_plugin_managed_root,
+             hermes_dubble_discord_parity_plugin_runtime_root
+           ]
+           | product(['__init__.py', 'plugin.yaml'])
+           | list }}
+      loop_control:
+        label: "{{ item.0 }}/{{ item.1 }}"
+
+    - name: Deploy root-owned Dubble Discord parity policy
+      ansible.builtin.copy:
+        src: >-
+          {{ playbook_dir
+             }}/../../{{ hermes_dubble_discord_parity_policy_source }}
+        dest: "{{ hermes_dubble_discord_parity_policy_live }}"
+        owner: root
+        group: hermes-dubble
+        mode: "0440"
+        backup: true
+
+    - name: Deploy root-owned Dubble Astra handoff plugin
+      ansible.builtin.copy:
+        src: >-
+          {{ playbook_dir
+             }}/../../{{ hermes_astra_handoff_plugin_source }}/{{ item.1 }}
+        dest: "{{ item.0 }}/{{ item.1 }}"
+        owner: root
+        group: hermes-dubble
+        mode: "0440"
+        backup: true
+      loop: >-
+        {{ [
+             hermes_astra_handoff_plugin_managed_root,
+             hermes_astra_handoff_plugin_runtime_root
            ]
            | product(['__init__.py', 'plugin.yaml'])
            | list }}
@@ -1563,13 +2313,14 @@
       when: (item.content | b64decode | from_yaml) == {}
       no_log: true
 
-    - name: Migrate version-only Hermes profile configs one schema forward
+    - name: Migrate reviewed Hermes profile configs one schema forward
       ansible.builtin.copy:
         content: "_config_version: {{ hermes_shadow_config_version }}\n"
         dest: "{{ item.item.home }}/config.yaml"
         owner: "{{ item.item.user }}"
         group: "{{ item.item.group }}"
         mode: "0600"
+        backup: true
       loop: "{{ hermes_shadow_mutable_configs_before_repair.results }}"
       loop_control:
         label: "{{ item.item.name }}"
@@ -1577,7 +2328,6 @@
         hermes_existing_mutable_config: >-
           {{ item.content | b64decode | from_yaml }}
       when:
-        - hermes_existing_mutable_config | length == 1
         - hermes_existing_mutable_config._config_version is defined
         - >-
           hermes_existing_mutable_config._config_version | int
@@ -1585,6 +2335,27 @@
         - >-
           hermes_shadow_config_version | int
           == hermes_shadow_version_only_migration_from | int + 1
+        - >-
+          (
+            item.item.name in ['dubble', 'rigel']
+            and hermes_existing_mutable_config | length == 1
+          )
+          or
+          (
+            item.item.name == 'astra'
+            and hermes_existing_mutable_config == {
+              '_config_version': hermes_shadow_version_only_migration_from,
+              'model': {
+                'default': 'gpt-5.6-sol',
+                'provider': 'openai-codex',
+                'base_url': 'https://chatgpt.com/backend-api/codex'
+              },
+              'agent': {'reasoning_effort': 'xhigh'},
+              'display': {
+                'platforms': {'discord': {'show_reasoning': true}}
+              }
+            }
+          )
       no_log: true
 
     - name: Migrate reviewed Astra Codex route one schema forward
@@ -1648,13 +2419,55 @@
             or
             (
               ansible_check_mode
-              and (item.content | b64decode | from_yaml) | length == 1
               and
               (item.content | b64decode | from_yaml)._config_version | int
               == hermes_shadow_version_only_migration_from | int
               and
               hermes_shadow_config_version | int
               == hermes_shadow_version_only_migration_from | int + 1
+              and
+              (
+                (
+                  item.item.name in ['dubble', 'rigel']
+                  and (item.content | b64decode | from_yaml) | length == 1
+                )
+                or
+                (
+                  item.item.name == 'astra'
+                  and (item.content | b64decode | from_yaml) == {
+                    '_config_version': hermes_shadow_version_only_migration_from,
+                    'model': {
+                      'default': 'gpt-5.6-sol',
+                      'provider': 'openai-codex',
+                      'base_url': 'https://chatgpt.com/backend-api/codex'
+                    },
+                    'agent': {'reasoning_effort': 'xhigh'},
+                    'display': {
+                      'platforms': {'discord': {'show_reasoning': true}}
+                    }
+                  }
+                )
+                or
+                (
+                  item.item.name == 'astra'
+                  and (item.content | b64decode | from_yaml) | length == 2
+                  and (item.content | b64decode | from_yaml).model is mapping
+                  and
+                  (
+                    (item.content | b64decode | from_yaml).model.keys() | sort
+                    == ['base_url', 'default', 'provider']
+                  )
+                  and
+                  (item.content | b64decode | from_yaml).model.provider
+                  == 'openai-codex'
+                  and
+                  (item.content | b64decode | from_yaml).model.default
+                  == 'gpt-5.6-sol'
+                  and
+                  (item.content | b64decode | from_yaml).model.base_url
+                  == 'https://chatgpt.com/backend-api/codex'
+                )
+              )
             )
         fail_msg: >-
           Existing Hermes profile config requires an attended offline schema
@@ -1664,14 +2477,27 @@
         label: "{{ item.item.name }}"
       no_log: true
 
+    - name: Create root-private Hermes service environment directories
+      ansible.builtin.file:
+        path: "{{ item.environment_file | dirname }}"
+        state: directory
+        owner: root
+        group: root
+        mode: "0700"
+      loop: "{{ hermes_shadow_profiles }}"
+      loop_control:
+        label: "{{ item.name }}"
+      when: item.environment_file is defined
+
     - name: Seed root-managed Hermes service environment once
       ansible.builtin.copy:
         content: |
           # Provider credentials are enrolled during an attended gate.
-        dest: "/etc/hermes/{{ item.name }}/.env"
+        dest: >-
+          {{ item.environment_file | default('/etc/hermes/' ~ item.name ~ '/.env') }}
         owner: root
-        group: "{{ item.group }}"
-        mode: "0440"
+        group: "{{ 'root' if item.name == 'rigel' else item.group }}"
+        mode: "{{ '0400' if item.name == 'rigel' else '0440' }}"
         force: false
       loop: "{{ hermes_shadow_profiles }}"
       loop_control:
@@ -1680,7 +2506,8 @@
 
     - name: Read Hermes shadow service environments privately
       ansible.builtin.slurp:
-        src: "/etc/hermes/{{ item.name }}/.env"
+        src: >-
+          {{ item.environment_file | default('/etc/hermes/' ~ item.name ~ '/.env') }}
       loop: "{{ hermes_shadow_profiles }}"
       loop_control:
         label: "{{ item.name }}"
@@ -1700,20 +2527,69 @@
       loop: "{{ hermes_shadow_service_environments.results }}"
       loop_control:
         label: "{{ item.item.name }}"
+      when: hermes_shadow_mode != 'maintenance'
+      no_log: true
+
+    - name: Require existing Discord enrollment during Hermes maintenance
+      ansible.builtin.assert:
+        that:
+          - >-
+            (
+              item.item.name in ['astra', 'dubble']
+              and
+              item.content | b64decode
+              | regex_findall('(?m)^DISCORD_BOT_TOKEN=([^\r\n]+)$')
+              | length == 1
+            )
+            or
+            (
+              item.item.name == 'rigel'
+              and
+              (
+                (
+                  hermes_rigel_dedicated_discord_enabled | bool
+                  and
+                  item.content | b64decode
+                  | regex_findall('(?m)^DISCORD_BOT_TOKEN=([^\r\n]+)$')
+                  | length == 1
+                )
+                or
+                (
+                  not hermes_rigel_dedicated_discord_enabled | bool
+                  and
+                  item.content | b64decode
+                  | regex_findall('(?m)^DISCORD_BOT_TOKEN=([^\r\n]+)$')
+                  | length == 0
+                )
+              )
+            )
+        fail_msg: >-
+          Hermes maintenance requires the existing reviewed production Discord
+          enrollment shape.
+      loop: "{{ hermes_shadow_service_environments.results }}"
+      loop_control:
+        label: "{{ item.item.name }}"
+      when: hermes_shadow_mode == 'maintenance'
       no_log: true
 
     - name: Validate merged Hermes config as each service identity
       ansible.builtin.command:
         argv:
-          - /usr/sbin/runuser
-          - --user
-          - "{{ item.user }}"
-          - --
-          - /usr/bin/env
-          - "HOME={{ item.account_home }}"
-          - "HERMES_HOME={{ item.home }}"
-          - "HERMES_MANAGED_DIR=/etc/hermes/{{ item.name }}"
-          - HERMES_DOCKER_BINARY=/usr/bin/podman
+          - /usr/bin/systemd-run
+          - --quiet
+          - --wait
+          - --collect
+          - --pipe
+          - --service-type=exec
+          - --uid={{ item.user }}
+          - --gid={{ item.group }}
+          - --property=SupplementaryGroups=hermes-runtime-readers
+          - >-
+            --property=EnvironmentFile={{ item.environment_file | default('/etc/hermes/' ~ item.name ~ '/.env') }}
+          - --setenv=HOME={{ item.account_home }}
+          - --setenv=HERMES_HOME={{ item.home }}
+          - --setenv=HERMES_MANAGED_DIR=/etc/hermes/{{ item.name }}
+          - --setenv=HERMES_DOCKER_BINARY=/usr/bin/podman
           - "{{ hermes_shadow_runtime_binary }}"
           - config
           - check
@@ -1729,7 +2605,8 @@
         argv:
           - /usr/bin/sha256sum
           - "/etc/hermes/{{ item.name }}/config.yaml"
-          - "/etc/hermes/{{ item.name }}/.env"
+          - >-
+            {{ item.environment_file | default('/etc/hermes/' ~ item.name ~ '/.env') }}
       loop: "{{ hermes_shadow_profiles }}"
       loop_control:
         label: "{{ item.name }}"
@@ -1758,33 +2635,61 @@
       loop_control:
         label: "{{ item.name }}"
 
-    - name: Deploy root-owned Hermes identities
+    - name: Seed profile-owned Hermes identities once
       ansible.builtin.copy:
         src: >-
           {{ playbook_dir
              }}/../../files/hermes/profiles/{{ item.name }}/SOUL.md
         dest: "{{ item.home }}/SOUL.md"
-        owner: root
+        owner: "{{ item.user }}"
         group: "{{ item.group }}"
-        mode: "0440"
+        mode: "0600"
+        force: false
         backup: true
       loop: "{{ hermes_shadow_profiles }}"
       loop_control:
         label: "{{ item.name }}"
+      tags:
+        - hermes_profile_identities
 
-    - name: Deploy root-owned Hermes operating contracts
+    - name: Seed profile-owned Hermes operating contracts once
       ansible.builtin.copy:
         src: >-
           {{ playbook_dir
              }}/../../files/hermes/profiles/{{ item.name }}/AGENTS.md
         dest: "{{ item.home }}/AGENTS.md"
-        owner: root
+        owner: "{{ item.user }}"
         group: "{{ item.group }}"
-        mode: "0440"
+        mode: "0600"
+        force: false
         backup: true
       loop: "{{ hermes_shadow_profiles }}"
       loop_control:
         label: "{{ item.name }}"
+
+    - name: Seed complete profile-owned Rigel bootstrap references once
+      ansible.builtin.copy:
+        src: >-
+          {{ playbook_dir
+             }}/../../files/hermes/profiles/rigel/{{ item }}
+        dest: "{{ hermes_shadow_profiles[2].home }}/{{ item }}"
+        owner: hermes-rigel
+        group: hermes-rigel
+        mode: "0600"
+        force: false
+        backup: true
+      loop:
+        - HEARTBEAT.md
+        - TOOLS.md
+        - USER.md
+      loop_control:
+        label: "rigel/{{ item }}"
+
+    - name: Remove retired Rigel channel-state compatibility root
+      ansible.builtin.file:
+        path: /var/lib/hermes/rigel-channel-state
+        state: absent
+      when: hermes_shadow_mode in ['bootstrap', 'maintenance']
 
     - name: Keep Astra native update roots private
       ansible.builtin.file:
@@ -1844,6 +2749,119 @@
       ansible.builtin.group:
         name: hermes-native-updater
         state: absent
+
+    - name: Remove retired native updater timeout shim
+      ansible.builtin.file:
+        path: /usr/local/lib/hermes-native-update-python
+        state: absent
+
+    - name: Create native Hermes update rollback root
+      ansible.builtin.file:
+        path: "{{ hermes_native_update_rollback_root }}"
+        state: directory
+        owner: "{{ hermes_native_update_user }}"
+        group: "{{ hermes_native_update_group }}"
+        mode: "0700"
+
+    - name: Create native Hermes update dependency directories
+      ansible.builtin.file:
+        path: "{{ item.path }}"
+        state: directory
+        owner: "{{ item.owner }}"
+        group: "{{ item.group }}"
+        mode: "{{ item.mode }}"
+      loop:
+        - path: "{{ hermes_queued_event_patch_live | dirname }}"
+          owner: root
+          group: root
+          mode: "0755"
+        - path: "{{ hermes_managed_source_patch_staging_root }}"
+          owner: "{{ hermes_native_update_user }}"
+          group: "{{ hermes_native_update_group }}"
+          mode: "0700"
+
+    - name: Deploy native Hermes queued-event update assets
+      ansible.builtin.copy:
+        src: "{{ playbook_dir }}/../../{{ item.source }}"
+        dest: "{{ item.live }}"
+        owner: root
+        group: "{{ item.group }}"
+        mode: "{{ item.mode }}"
+        backup: true
+      loop:
+        - source: "{{ hermes_queued_event_patch_source }}"
+          live: "{{ hermes_queued_event_patch_live }}"
+          group: "{{ hermes_runtime_readers_group }}"
+          mode: "0440"
+        - source: "{{ hermes_queued_event_validator_source }}"
+          live: "{{ hermes_queued_event_validator_live }}"
+          group: root
+          mode: "0555"
+
+    - name: Deploy native Hermes browser selector
+      ansible.builtin.copy:
+        src: >-
+          {{ playbook_dir
+             }}/../../{{ hermes_agent_browser_selector_source }}
+        dest: "{{ hermes_agent_browser_selector_live }}"
+        owner: root
+        group: root
+        mode: "0555"
+        backup: true
+
+    - name: Deploy native Hermes memory dependency resolver
+      ansible.builtin.copy:
+        src: >-
+          {{ playbook_dir
+             }}/../../{{ hermes_mem0_dependency_updater_source }}
+        dest: "{{ hermes_mem0_dependency_updater_live }}"
+        owner: root
+        group: root
+        mode: "0755"
+        backup: true
+
+    - name: Deploy managed Hermes source patcher
+      ansible.builtin.copy:
+        src: >-
+          {{ playbook_dir
+             }}/../../{{ hermes_managed_source_patch_source }}
+        dest: "{{ hermes_managed_source_patch_live }}"
+        owner: root
+        group: root
+        mode: "0555"
+        backup: true
+
+    - name: Deploy native Hermes update transaction helper
+      ansible.builtin.copy:
+        src: >-
+          {{ playbook_dir
+             }}/../../{{ hermes_native_update_transaction_source }}
+        dest: "{{ hermes_native_update_transaction_live }}"
+        owner: root
+        group: root
+        mode: "0555"
+        backup: true
+
+    - name: Render native Hermes update transaction contract
+      ansible.builtin.template:
+        src: >-
+          {{ playbook_dir
+             }}/../../templates/hermes/hermes-native-update-transaction.json.j2
+        dest: "{{ hermes_native_update_transaction_config }}"
+        owner: root
+        group: root
+        mode: "0444"
+        backup: true
+
+    - name: Validate native Hermes update transaction contract
+      ansible.builtin.command:
+        argv:
+          - "{{ hermes_native_update_transaction_live }}"
+          - --config
+          - "{{ hermes_native_update_transaction_config }}"
+          - --validate-config
+      changed_when: false
+      when: not ansible_check_mode
 
     - name: Deploy deterministic Rigel academic schedule
       ansible.builtin.copy:
@@ -1960,7 +2978,9 @@
         - "{{ hermes_tirith_update_timer }}"
       when:
         - not ansible_check_mode
-        - not hermes_native_updates_automatic | bool
+        - >-
+          not hermes_native_updates_automatic | bool
+          or hermes_shadow_mode == 'maintenance'
 
     - name: Enable automatic native updates after cutover
       ansible.builtin.systemd_service:
@@ -1973,6 +2993,7 @@
       when:
         - not ansible_check_mode
         - hermes_native_updates_automatic | bool
+        - hermes_shadow_mode != 'maintenance'
 
     - name: Remove Hermes gateway readiness markers during bootstrap
       ansible.builtin.file:
@@ -2005,7 +3026,7 @@
       loop_control:
         label: "{{ item.name }}"
 
-    - name: Keep Hermes gateways stopped during bootstrap
+    - name: Keep Hermes gateways stopped during bootstrap or maintenance
       ansible.builtin.systemd_service:
         name: "hermes-gateway-{{ item.name }}.service"
         enabled: false
@@ -2013,7 +3034,7 @@
       loop: "{{ hermes_shadow_profiles }}"
       loop_control:
         label: "{{ item.name }}"
-      when: hermes_shadow_mode == 'bootstrap'
+      when: hermes_shadow_mode in ['bootstrap', 'maintenance']
 
     - name: Require explicit approval to start Hermes shadow gateways
       ansible.builtin.assert:

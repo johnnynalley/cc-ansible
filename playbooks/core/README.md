@@ -8,7 +8,8 @@ Owner area: Base OS and controller hygiene.
 - Template owners: templates/auto-updates, templates/logging, templates/motd, templates/smartmontools, templates/ups.
 - Script owners: scripts/repo/repo-audit for repo checks; otherwise none by default.
 - Keep playbook metadata headers and `playbooks/README.md` in sync when behavior changes.
-- `logging.yml` can opt a desktop host into `drkonqi_coredump_recursion_guard`.
+- `logging.yml` can opt a desktop host into `drkonqi_coredump_recursion_guard`
+  and bound the related crash cache with `drkonqi_crash_cache_retention_days`.
   The guard preserves `systemd-coredump` evidence and normal DrKonqi handling,
   but stops the launcher socket after five activations per minute so a crashing
   notification handler cannot create an unbounded failed-unit graph. Set

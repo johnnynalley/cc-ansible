@@ -7,34 +7,25 @@ ConditionPathIsDirectory={{ hermes_shadow_runtime_root }}/.git
 
 [Service]
 Type=oneshot
-User={{ hermes_native_update_user }}
-Group={{ hermes_runtime_readers_group }}
-SupplementaryGroups={{ hermes_native_update_group }}
-WorkingDirectory={{ hermes_shadow_runtime_root }}
-Environment=HOME={{ hermes_native_update_home }}
-Environment=HERMES_HOME={{ hermes_native_update_profile_home }}
-Environment=PATH={{ hermes_native_update_profile_home }}/bin:{{ hermes_shadow_uv_bin_dir }}:{{ hermes_shadow_runtime_venv }}/bin:/usr/local/bin:/usr/bin:/bin
-Environment=PYTHONUNBUFFERED=1
-Environment=UV_LINK_MODE=copy
-ExecStart={{ hermes_shadow_runtime_venv }}/bin/python {{ hermes_shadow_runtime_root }}/hermes update --gateway --yes
-ExecStartPost={{ hermes_shadow_uv_binary }} pip install --strict --python {{ hermes_shadow_runtime_venv }}/bin/python -e {{ hermes_shadow_runtime_root }}[messaging,mem0]
-ExecStartPost={{ hermes_shadow_uv_binary }} pip install --strict --no-deps --python {{ hermes_shadow_runtime_venv }}/bin/python {{ hermes_mem0_gemini_dependency }}
-ExecStartPost={{ hermes_shadow_uv_binary }} pip check --python {{ hermes_shadow_runtime_venv }}/bin/python
-ExecStartPost=/usr/bin/chgrp -R --no-dereference {{ hermes_runtime_readers_group }} {{ hermes_shadow_runtime_root }}
-{% for post_setup_key in hermes_native_post_setup_keys %}
-ExecStartPost={{ hermes_shadow_runtime_binary }} tools post-setup {{ post_setup_key }}
-{% endfor %}
+User=root
+Group=root
+WorkingDirectory=/
+ExecStartPre=/usr/bin/python3 {{ hermes_native_update_transaction_live }} --config {{ hermes_native_update_transaction_config }} --validate-runtime
+ExecStart=/usr/bin/python3 {{ hermes_native_update_transaction_live }} --config {{ hermes_native_update_transaction_config }}
 StandardOutput=append:{{ hermes_native_update_home }}/.update_output.txt
 StandardError=append:{{ hermes_native_update_home }}/.update_output.txt
 UMask=0022
-# Native `hermes update --gateway` uses the exact unit-only sudoers bridge to
-# drain and restart every active Hermes Gateway after updating.
-NoNewPrivileges=false
+# The fixed root-owned transaction prepares Hermes planned-stop markers, drops
+# to hermes-astra for the unmodified native updater and dependency work, then
+# restores only the Gateway units that were active before the transaction.
+NoNewPrivileges=true
 ProtectSystem=strict
 ProtectHome=true
-ReadWritePaths={{ hermes_shadow_runtime_root }} {{ hermes_native_update_home }} {{ hermes_native_update_profile_home }}
-ReadOnlyPaths={{ hermes_native_update_profile_home }}/.no-bundled-skills {{ hermes_native_update_profile_home }}/AGENTS.md {{ hermes_native_update_profile_home }}/SOUL.md {{ hermes_native_update_profile_home }}/imported-data {{ hermes_native_update_profile_home }}/managed-data {{ hermes_native_update_profile_home }}/plugins {{ hermes_native_update_profile_home }}/scripts {{ hermes_native_update_profile_home }}/skills/managed {{ hermes_native_update_profile_home }}/transformed-data {{ hermes_native_update_profile_home }}/transformed-managed
-InaccessiblePaths=/etc/hermes/astra
+ReadWritePaths={{ ([hermes_shadow_runtime_root, hermes_native_update_rollback_root] + (hermes_production_consumer_profiles | map(attribute='account_home') | list) + (hermes_production_consumer_profiles | map(attribute='home') | list)) | join(' ') }}
+ReadOnlyPaths={{ hermes_native_update_transaction_config }} {{ hermes_shadow_uv_binary }} {{ hermes_shadow_uv_python_root }} {{ hermes_native_update_profile_home }}/.no-bundled-skills {{ hermes_native_update_profile_home }}/AGENTS.md {{ hermes_native_update_profile_home }}/SOUL.md {{ hermes_native_update_profile_home }}/imported-data {{ hermes_native_update_profile_home }}/managed-data {{ hermes_native_update_profile_home }}/plugins {{ hermes_native_update_profile_home }}/scripts {{ hermes_native_update_profile_home }}/skills/managed {{ hermes_native_update_profile_home }}/transformed-data {{ hermes_native_update_profile_home }}/transformed-managed
+InaccessiblePaths=/etc/hermes/astra /etc/hermes/dubble /etc/hermes/rigel
+RuntimeDirectory=hermes-native-update
+RuntimeDirectoryMode=0700
 PrivateTmp=true
 PrivateDevices=true
 ProtectClock=true
@@ -46,11 +37,10 @@ ProtectKernelTunables=true
 ProtectProc=invisible
 LockPersonality=true
 RestrictRealtime=true
-# The native `--gateway` restart path requires sudo to restore root UID/GID.
-# Keep only those identity-switch capabilities available to the setuid child;
-# the service receives no ambient capabilities and sudoers constrains the
-# resulting authority to exact reviewed Gateway unit operations.
-CapabilityBoundingSet=CAP_SETUID CAP_SETGID
+# The transaction starts as root only to manage fixed Gateway units. PID 1
+# launches every source, dependency, and post-setup command as its fixed
+# zero-capability service identity in a separate transient sandbox.
+CapabilityBoundingSet=
 AmbientCapabilities=
 RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK
 TimeoutStartSec=1h

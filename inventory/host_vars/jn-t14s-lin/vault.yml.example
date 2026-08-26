@@ -1,2 +1,3 @@
 # Copy to vault.yml and encrypt with ansible-vault.
 vault_plex_appliance_token: "replace-with-plex-token"
+vault_hermes_rigel_discord_bot_token: "replace-with-rigel-discord-bot-token"

@@ -5,8 +5,15 @@
 
 hermes_shadow_mode: disabled
 hermes_shadow_change_approved: false
+hermes_shadow_maintenance_confirmation: ""
+hermes_shadow_maintenance_required_confirmation: >-
+  maintain-native-hermes-runtime-on-jn-t14s-lin
 hermes_shadow_install_approved: false
 hermes_shadow_start_approved: false
+hermes_shadow_replacement_rehearsal: false
+hermes_shadow_replacement_rehearsal_host: hermes-replacement-rehearsal
+hermes_shadow_replacement_rehearsal_minimum_free_disk_gib: 4
+hermes_shadow_replacement_rehearsal_minimum_available_memory_mib: 4096
 
 # Production replacement transaction. This remains inert unless the operator
 # supplies all three controls to the dedicated cutover playbook. The exact
@@ -60,18 +67,42 @@ hermes_production_cutover_source_ports:
   - 19789
   - 19790
 hermes_production_cutover_health_port: 18791
-hermes_production_cutover_rigel_source: >-
-  /var/lib/hermes/profile-transforms/rigel/managed/imports/courses/academic-state.json
-hermes_production_cutover_rigel_root: /var/lib/hermes/rigel-channel-state
 hermes_production_cutover_rigel_job_name: rigel-academic-alerts
 hermes_production_cutover_completion_message: >-
   Hermes cutover complete. Astra and Dubble are live; Rigel is available in
   its channel and its idle academic checks remain silent.
+# Keep Astra's current Rigel route intact until a separately enrolled Discord
+# identity has passed the attended cutover. This flag is supplied only for the
+# exact automation transaction that installs the private token, moves the
+# channel and schedule, and starts Rigel's existing isolated Gateway.
+hermes_rigel_dedicated_discord_enabled: true
+hermes_rigel_discord_bot_token: >-
+  {{ vault_hermes_rigel_discord_bot_token | default('') }}
+hermes_production_consumer_profiles: >-
+  {{
+    hermes_shadow_profiles
+    if hermes_rigel_dedicated_discord_enabled | bool
+    else hermes_shadow_profiles[:2]
+  }}
+hermes_rigel_discord_guild_id: "1209365945882251294"
+hermes_rigel_discord_channel_id: "1488752822466904256"
+hermes_astra_discord_channel_id: "1482585492330381343"
+hermes_astra_logs_channel_id: "1482589440663617638"
+hermes_dubble_logs_channel_id: "1483229869079920741"
 hermes_production_runtime_mode: disabled
 hermes_production_runtime_approved: false
 hermes_production_runtime_confirmation: ""
 hermes_production_runtime_required_confirmation: >-
   converge-live-hermes-runtime-on-jn-t14s-lin
+# Native Gateway units are created by the dedicated migration/cutover path.
+# Routine runtime convergence validates and hardens existing units without
+# rewriting them. Set this only for an explicitly reviewed native-unit repair.
+hermes_production_runtime_reinstall_native_units: false
+# Empty during routine convergence. A separate transaction that atomically
+# replaces a bind-mounted skill or profile-data root must name the affected
+# profiles explicitly so they enter one planned restart after every staged
+# dependency is ready.
+hermes_production_runtime_force_restart_profiles: []
 hermes_native_gateway_migration_mode: disabled
 hermes_native_gateway_migration_approved: false
 hermes_native_gateway_migration_confirmation: ""
@@ -109,6 +140,43 @@ hermes_openclaw_dry_run_script_source: >-
 hermes_openclaw_dry_run_script_live: >-
   /usr/local/libexec/hermes-openclaw-dry-run
 
+# Complete legacy evidence projection. This never copies or mutates the
+# OpenClaw source tree. Root overlays explicit redactions, bindfs maps the
+# resulting tree read-only to Astra, and a full path manifest proves that no
+# source path was silently omitted.
+hermes_openclaw_evidence_mode: disabled
+hermes_openclaw_evidence_approved: false
+hermes_openclaw_evidence_confirmation: ""
+hermes_openclaw_evidence_required_confirmation: >-
+  expose-complete-redacted-openclaw-evidence-to-hermes-astra
+hermes_openclaw_evidence_contract_source: >-
+  files/hermes/openclaw-evidence-contract.json
+hermes_openclaw_evidence_contract_live: >-
+  /etc/hermes/openclaw-evidence-contract.json
+hermes_openclaw_evidence_script_source: >-
+  scripts/agents/hermes-openclaw-evidence.py
+hermes_openclaw_evidence_script_live: >-
+  /usr/local/libexec/hermes-openclaw-evidence
+hermes_bootstrap_parity_contract_source: >-
+  files/hermes/bootstrap-parity-contract.json
+hermes_bootstrap_parity_contract_live: >-
+  /etc/hermes/bootstrap-parity-contract.json
+hermes_bootstrap_parity_validator_source: >-
+  scripts/agents/hermes-bootstrap-parity-validate.py
+hermes_bootstrap_parity_validator_live: >-
+  /usr/local/libexec/hermes-bootstrap-parity-validate
+hermes_bootstrap_parity_runtime_repo_root: >-
+  /var/lib/hermes/astra/workspaces/cc-ansible
+hermes_openclaw_evidence_service: hermes-openclaw-evidence.service
+hermes_openclaw_evidence_audit_service: >-
+  hermes-openclaw-evidence-audit.service
+hermes_openclaw_evidence_audit_timer: >-
+  hermes-openclaw-evidence-audit.timer
+hermes_openclaw_evidence_gateway_dropin: >-
+  /etc/systemd/system/hermes-gateway-astra.service.d/30-openclaw-evidence.conf
+hermes_openclaw_evidence_rollback_root: >-
+  /srv/live-rollbacks/jn-t14s-lin/hermes-migration
+
 # Curated profile-memory seed transaction. Vault-encrypted source files are
 # validated with Hermes's native scanner before any target memory changes.
 hermes_profile_memory_mode: disabled
@@ -122,6 +190,110 @@ hermes_profile_memory_validator_live: >-
 hermes_profile_memory_rollback_root: >-
   /srv/live-rollbacks/jn-t14s-lin/hermes-migration
 
+# Profile-isolated provider memory. Rigel is the first enabled non-Astra
+# profile; Dubble remains excluded until its public-facing recall policy and
+# one malformed legacy source line are reviewed explicitly.
+hermes_profile_memory_continuity_mode: disabled
+hermes_profile_memory_continuity_approved: false
+hermes_profile_memory_continuity_confirmation: ""
+hermes_profile_memory_continuity_required_confirmation: >-
+  migrate-openclaw-rigel-memory-into-isolated-hermes-providers-on-jn-t14s-lin
+hermes_profile_memory_continuity_profile: rigel
+hermes_profile_memory_continuity_importer_source: >-
+  scripts/agents/hermes-profile-lcm-import.py
+hermes_profile_memory_continuity_importer_live: >-
+  /usr/local/libexec/hermes-profile-lcm-import
+hermes_profile_memory_privacy_auditor_source: >-
+  scripts/agents/hermes-profile-memory-privacy-audit.py
+hermes_profile_memory_privacy_auditor_live: >-
+  /usr/local/libexec/hermes-profile-memory-privacy-audit
+hermes_profile_mem0_smoke_source: >-
+  scripts/agents/hermes-profile-mem0-smoke.py
+hermes_profile_mem0_smoke_live: >-
+  /usr/local/libexec/hermes-profile-mem0-smoke
+hermes_profile_memory_continuity_rollback_root: >-
+  /srv/live-rollbacks/jn-t14s-lin/hermes-profile-memory
+hermes_profile_memory_continuity_profiles:
+  rigel:
+    required_confirmation: >-
+      migrate-openclaw-rigel-memory-into-isolated-hermes-providers-on-jn-t14s-lin
+    source_dir: /home/johnny/.openclaw/agents/rigel/sessions
+    target_db: /var/lib/hermes/rigel/.hermes/profiles/rigel/lcm.db
+    namespace: openclaw-rigel-jsonl
+    import_id: openclaw-rigel-jsonl-v1
+    expected_source_files: 2995
+    expected_trajectory_files: 3004
+    expected_source_bytes: 26225193
+    expected_source_sha256: >-
+      883bc0fcb8f7699f5c7979e4885a1c645e202e598fdcb29a61a4e5b4eb392a2c
+    expected_selected_files: 2995
+    expected_selected_sha256: >-
+      883bc0fcb8f7699f5c7979e4885a1c645e202e598fdcb29a61a4e5b4eb392a2c
+    expected_conversations: 2995
+    expected_scanned: 31843
+    expected_eligible: 22741
+    mem0_source_collection: memories_rebuild_2026-04-08_01-50-47-926
+    mem0_target_collection: memories_hermes_rigel_v3
+    mem0_source_user_ids:
+      - johnny:agent:rigel
+    mem0_user_id: johnny
+    mem0_agent_id: rigel
+    expected_mem0_source: 4435
+    expected_mem0_selected: 111
+    expected_mem0_excluded: 4324
+    expected_mem0_digest: >-
+      c803053c19eb2514ef31967262bf10a398af1270bc4f07995274cec618fb72d6
+    mem0_empty_target: false
+  dubble:
+    required_confirmation: >-
+      initialize-public-only-dubble-memory-on-jn-t14s-lin
+    source_dir: /home/johnny/.openclaw/agents/dubble/sessions
+    target_db: /var/lib/hermes/dubble/.hermes/profiles/dubble/lcm.db
+    namespace: openclaw-dubble-public-jsonl
+    import_id: openclaw-dubble-public-jsonl-v1
+    expected_source_files: 3228
+    expected_trajectory_files: 3233
+    expected_source_bytes: 88431744
+    expected_source_sha256: >-
+      312c540a923d34943013552879fb39441a019a1cac8bebcb726e3bba24f1c778
+    expected_selected_files: 1
+    expected_selected_sha256: >-
+      a1529bc3340cf91d0ba2ccb4751acf4853149d15d2b3380c7aa68d2b951a893d
+    expected_selection_manifest_sha256: >-
+      706e6f57c5c8ea46a1e62d73062c40fee6da94b819aa0e7f3e7b2ec8d9bdcc09
+    expected_conversations: 1
+    expected_scanned: 14
+    expected_eligible: 11
+    privacy_policy: /etc/hermes/dubble/discord-parity-policy.json
+    privacy_session_indexes:
+      - /home/johnny/.openclaw/agents/dubble/sessions/sessions.json
+      - /home/johnny/.openclaw/agents/dubble/sessions.backup-20260318-230934/sessions.json
+      - /home/johnny/.openclaw/agents/dubble/sessions.backup-20260319-005044/sessions.json
+      - /home/johnny/.openclaw/agents/dubble/sessions/sessions.json.bak.1777776524
+      - /home/johnny/.openclaw/agents/dubble/sessions/sessions.json.heartbeat-2026-06-28-2026-06-28-1734.bak
+    expected_privacy_policy_sha256: >-
+      be28f42bfd20a29eb18060cb770999fb7b55e22b80e60cdf2d219e33fc70d008
+    expected_privacy_index_sha256: >-
+      d58ba44c01474f8e5dff7687fde48f52ca1587b2e53e97571b79f3309c08d5cb
+    expected_privacy_classes:
+      approved-public: 1
+      unresolved-thread-parent: 1
+      direct: 0
+      other-channel: 0
+      unknown-route: 12
+      conflicting-route-evidence: 0
+      unindexed: 3214
+    mem0_target_collection: memories_hermes_dubble_v3
+    mem0_user_id: johnny
+    mem0_agent_id: dubble
+    mem0_source_user_ids: []
+    expected_mem0_source: 0
+    expected_mem0_selected: 0
+    expected_mem0_excluded: 0
+    expected_mem0_digest: >-
+      e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
+    mem0_empty_target: true
+
 # Astra memory-continuity transaction. The source OpenClaw databases and
 # Qdrant collection remain untouched; apply mode creates new Hermes-native
 # targets only after source backups and dry-run reconciliation succeed.
@@ -133,7 +305,7 @@ hermes_memory_continuity_required_confirmation: >-
 hermes_memory_continuity_rollback_root: >-
   /srv/live-rollbacks/jn-t14s-lin/hermes-migration
 hermes_lcm_repository: https://github.com/stephenschoettler/hermes-lcm.git
-hermes_lcm_release_track: main
+hermes_lcm_release_track: stable
 hermes_lcm_plugin_managed_root: /usr/local/share/hermes-plugins/hermes-lcm
 hermes_lcm_source_database: /home/johnny/.openclaw/lcm.db
 hermes_lcm_target_database: >-
@@ -143,27 +315,132 @@ hermes_lcm_externalized_output_root: >-
 hermes_lcm_external_importer_components:
   - scripts
   - import_lossless_claw.py
+hermes_lcm_native_features_mode: audit
+hermes_lcm_native_features_approved: false
+hermes_lcm_native_features_confirmation: ""
+hermes_lcm_native_features_required_confirmation: >-
+  enable-native-hermes-lcm-feature-depth-on-jn-t14s-lin
+hermes_lcm_native_features_rollback_root: >-
+  /srv/live-rollbacks/jn-t14s-lin/hermes-lcm-features
+hermes_lcm_native_features_local_stage_root: >-
+  /var/lib/hermes/bootstrap/lcm-features
+hermes_lcm_native_maintenance_source: >-
+  scripts/agents/hermes-lcm-native-maintenance.py
+hermes_lcm_native_maintenance_live: >-
+  /usr/local/libexec/hermes-lcm-native-maintenance
+hermes_lcm_native_maintenance_confirmation: maintain-native-hermes-lcm-astra
+hermes_lcm_embedding_provider: ollama
+hermes_lcm_embedding_model: qwen3-embedding:0.6b
+hermes_lcm_embedding_dimensions: 1024
+hermes_lcm_ollama_base_url: http://127.0.0.1:11434
+hermes_lcm_embedding_storage_dtype: float32
+hermes_lcm_embedding_store_dim: 0
+hermes_lcm_embedding_binary_prescreen: true
+hermes_lcm_embedding_content_policy: conversational
+hermes_lcm_embedding_max_batch_items: 16
+# Local Ollama can take more than the plugin's 3-second cloud-oriented default
+# to cold-load. Keep interactive failure bounded while allowing local warmup.
+hermes_lcm_embedding_query_timeout_s: 15
+hermes_lcm_recall_query_timeout_s: 20
+hermes_lcm_embedding_backfill_timeout_s: 600
+hermes_lcm_proactive_recall_enabled: true
+hermes_lcm_temporal_rollups_enabled: true
+hermes_lcm_native_backfill_batch: 16
+hermes_lcm_native_backfill_max_passes: 1000
+hermes_lcm_native_fts_canary: source-candidates-present
+hermes_lcm_backfill_mode: audit
+hermes_lcm_backfill_approved: false
+hermes_lcm_backfill_confirmation: ""
+hermes_lcm_backfill_required_confirmation: >-
+  enable-native-hermes-lcm-background-backfill-on-jn-t14s-lin
+hermes_lcm_backfill_timeout_start_sec: 15min
+hermes_lcm_backfill_passes_per_run: 8
+hermes_lcm_backfill_uncertain_retry_batch: 1
+hermes_lcm_backfill_uncertain_retry_max_passes: 128
+hermes_lcm_backfill_lanes:
+  - corpus: summary
+    initial_delay: 20m
+    interval: 30m
+    randomized_delay: 2m
+  - corpus: chunks
+    initial_delay: 35m
+    interval: 30m
+    randomized_delay: 2m
 hermes_mem0_source_history_database: >-
   /home/johnny/.openclaw/state/mem0/history.db
 hermes_mem0_qdrant_url: http://127.0.0.1:6333
 hermes_mem0_source_collection: memories_rebuild_2026-04-08_01-50-47-926
-hermes_mem0_target_collection: memories_hermes_astra_v1
+hermes_mem0_preserved_collection: memories_hermes_astra_v1
+hermes_mem0_target_collection: memories_hermes_astra_v2
+hermes_mem0_native_source_collection: "{{ hermes_mem0_target_collection }}"
+hermes_mem0_native_target_collection: memories_hermes_astra_v3
 hermes_mem0_source_user_ids:
   - johnny
   - johnny:agent:main
   - "740687933803331726"
 hermes_mem0_migrator_source: scripts/agents/hermes-mem0-qdrant-migrate.py
 hermes_mem0_migrator_live: /usr/local/libexec/hermes-mem0-qdrant-migrate
+hermes_mem0_dependency_updater_source: >-
+  scripts/agents/hermes-memory-dependencies-update.py
+hermes_mem0_dependency_updater_live: >-
+  /usr/local/libexec/hermes-memory-dependencies-update
 hermes_mem0_config_template: hermes-mem0.json.j2
 hermes_mem0_config_live: >-
   /var/lib/hermes/astra/.hermes/profiles/astra/mem0.json
 hermes_mem0_user_id: johnny
 hermes_mem0_agent_id: astra
-# Mem0 2.0.10 declares this only in its broad `llms` extra even though the
-# Gemini embedder imports it directly. Google GenAI 2.13+ requires
-# google-auth>=2.56 while Hermes v0.20.4 locks 2.55.1, so retain the compatible
-# release track without pulling every unrelated LLM backend into the runtime.
-hermes_mem0_gemini_dependency: "google-genai>=1.0.0,<2.13.0"
+hermes_mem0_ollama_url: http://127.0.0.1:11434
+hermes_mem0_ollama_binary: /usr/local/bin/ollama
+hermes_mem0_ollama_llm_model: qwen3:4b
+hermes_mem0_ollama_embedding_model: qwen3-embedding:0.6b
+hermes_mem0_ollama_embedding_dimensions: 1024
+# Hermes currently pins an older Mem0 release. Reassert the newest stable
+# upstream packages after each native Hermes update; prereleases remain denied.
+hermes_mem0_stable_dependencies:
+  - mem0ai[nlp]
+  - fastembed
+  - ollama
+  # Hermes exposes this through native read_file but keeps it lazy-only.
+  # Preinstall the newest stable release because runtime lazy installs are off.
+  - firecrawl-anydoc
+hermes_mem0_ollama_dependency: ollama
+hermes_mem0_spacy_model: en_core_web_sm
+hermes_mem0_fastembed_cache: >-
+  /var/lib/hermes/astra/.hermes/profiles/astra/mem0/fastembed-cache
+hermes_mem0_native_upgrade_mode: disabled
+hermes_mem0_native_upgrade_approved: false
+hermes_mem0_native_upgrade_confirmation: ""
+hermes_mem0_native_upgrade_existing_backup: ""
+hermes_mem0_native_upgrade_required_confirmation: >-
+  upgrade-hermes-astra-mem0-to-latest-stable-native-v3-on-jn-t14s-lin
+hermes_mem0_native_upgrade_rollback_root: >-
+  /srv/live-rollbacks/jn-t14s-lin/hermes-memory-runtime
+# Guarded backing-server convergence. Release versions are resolved from the
+# official stable GitHub release records at run time; these are evidence and
+# rollback coordinates, not policy pins.
+hermes_memory_servers_mode: audit
+hermes_memory_servers_approved: false
+hermes_memory_servers_confirmation: ""
+hermes_memory_servers_required_confirmation: >-
+  upgrade-hermes-memory-servers-to-latest-stable-on-jn-t14s-lin
+hermes_memory_servers_rollback_root: >-
+  /srv/live-rollbacks/jn-t14s-lin/hermes-memory-servers
+hermes_memory_servers_local_stage_root: >-
+  /var/lib/hermes/bootstrap/memory-server-upgrade
+hermes_memory_servers_qdrant_release_api: >-
+  https://api.github.com/repos/qdrant/qdrant/releases/latest
+hermes_memory_servers_qdrant_compose_root: /opt/qdrant
+hermes_memory_servers_ollama_release_api: >-
+  https://api.github.com/repos/ollama/ollama/releases/latest
+hermes_memory_servers_ollama_asset_name: ollama-linux-amd64.tar.zst
+hermes_memory_servers_ollama_binary: /usr/local/bin/ollama
+hermes_memory_servers_ollama_library: /usr/local/lib/ollama
+hermes_memory_servers_ollama_unit: /etc/systemd/system/ollama.service
+# Retained LCM chunks can exceed Ollama's 8K default after exact tokenizer
+# expansion. Both approved Qwen models declare at least 32K; use the smallest
+# validated 16K server context so local recall preserves those chunks without
+# the RAM growth of enabling their full model context.
+hermes_memory_servers_ollama_context_length: 16384
 hermes_memory_continuity_policy_files:
   - source: "{{ hermes_star_privacy_validator_source }}"
     destination: "{{ hermes_star_privacy_validator_live }}"
@@ -227,11 +504,14 @@ hermes_memory_continuity_policy_files:
          ~ 'workspace-migration-policy.json' }}
     mode: "0444"
 
-# Reviewed, declarative Hermes-native profile skills. The managed external
-# skill roots are immutable to the service identities and are staged without
-# starting a Gateway, scheduler, messaging route, or model.
+# Retained reviewed skill projection. `audit` is read-only; `restore` is an
+# explicitly approved rollback transaction. Ordinary convergence must not use
+# this to overwrite profile-owned native skills.
 hermes_profile_skills_mode: disabled
 hermes_profile_skills_approved: false
+hermes_profile_skills_import_confirmation: ""
+hermes_profile_skills_import_required_confirmation: >-
+  import-reviewed-skills-into-native-hermes-profile-ownership
 hermes_profile_skills_contract_source: >-
   files/hermes/profile-skills-contract.json
 hermes_profile_skills_validator_source: >-
@@ -243,11 +523,23 @@ hermes_profile_skills_contract_live: >-
 hermes_profile_skills_rollback_root: >-
   /srv/live-rollbacks/jn-t14s-lin/hermes-migration
 
+# Default-off handoff from the retained root-owned projection to Hermes-native
+# profile ownership. Enable only in the same attended transaction that imports
+# every reviewed skill into the profile-local roots and proves rollback.
+hermes_native_profile_skills_enabled: true
+hermes_shared_self_evolution_source: >-
+  /var/lib/hermes/astra/.hermes/profiles/astra/skills/self-evolution
+
 # Reviewed project data and operator references copied into a new isolated
 # Hermes generation. This remains disabled and does not import memory,
 # credentials, structured runtime state, schedules, routes, or model context.
 hermes_profile_data_mode: disabled
 hermes_profile_data_approved: false
+# A writable difference is never merged by the normal convergence approval
+# alone. Set this only after a relaxed verification proves the drift is confined
+# to safe profile-owned writable data. The transaction preserves that live data
+# over the new source baseline; it does not replace it.
+hermes_profile_data_preserve_reviewed_writable_drift: false
 hermes_profile_data_contract_source: >-
   files/hermes/profile-data-stage-contract.json
 hermes_profile_data_contract_live: /etc/hermes/profile-data-stage-contract.json
@@ -289,8 +581,8 @@ hermes_star_privacy_validator_source: >-
 hermes_star_privacy_validator_live: >-
   /usr/local/libexec/hermes-star-dispatch-privacy-validate
 
-# Root-owned Astra tools for redacted estate-wide Docker inventory and the
-# fixed Ansible-managed updater trigger. These plugin tools grant no shell or
+# Root-owned Astra tools for dynamic, redacted estate-wide Docker inventory and
+# the typed Ansible-managed updater trigger. These plugin tools grant no shell or
 # filesystem access and may reach only forced-command identities. Astra's
 # separate local terminal/file/code toolsets run as `hermes-astra`; neither
 # path has a Docker socket, Docker group, or general sudo access.
@@ -310,65 +602,294 @@ hermes_docker_inventory_private_key: >-
 hermes_docker_update_private_key: >-
   /etc/hermes/private/docker-access/update_ed25519
 hermes_docker_inventory_known_hosts: /etc/hermes/astra/docker-known-hosts
+hermes_docker_inventory_endpoints: /etc/hermes/astra/docker-endpoints.json
 hermes_docker_inventory_mode: disabled
 hermes_docker_inventory_approved: false
 hermes_docker_inventory_confirmation: ""
 hermes_docker_inventory_required_confirmation: >-
   enable-hermes-docker-access-on-jn-t14s-lin
-hermes_docker_inventory_host_keys:
-  192.168.1.153: >-
-    ssh-ed25519
-    AAAAC3NzaC1lZDI1NTE5AAAAIJWZ8sNcINmltoWhEoe+kagWrltvsXB3h0FEZ9rQ36db
-  192.168.1.136: >-
-    ssh-ed25519
-    AAAAC3NzaC1lZDI1NTE5AAAAIIy1pZcC3KfU/2skADHJlSUo0cG8lGHdbbZvyEkw6ryg
-  192.168.1.78: >-
-    ssh-ed25519
-    AAAAC3NzaC1lZDI1NTE5AAAAIG6Be/AJgN/J+4z0srzlbRulBxvQKSWb6tCEVPPxZ8Z6
-  192.168.1.31: >-
-    ssh-ed25519
-    AAAAC3NzaC1lZDI1NTE5AAAAINjxi55jYExGWzjkMhtUQMxUQohrS90bEODPpg/XWfTQ
+
+# Root-reviewed Discord parity plugin for OpenClaw actions that Hermes' built-in
+# Discord tools do not expose. The policy restricts it to the ARK guild and
+# explicit channels. Source-disabled role, moderation, and presence actions are
+# deliberately absent.
+hermes_discord_parity_plugin_source: files/hermes/plugins/discord-parity
+hermes_discord_parity_plugin_managed_root: /etc/hermes/astra/plugins/discord-parity
+hermes_discord_parity_plugin_runtime_root: >-
+  /var/lib/hermes/astra/.hermes/profiles/astra/plugins/discord-parity
+hermes_discord_parity_policy_source: files/hermes/discord-parity-policy.json
+hermes_discord_parity_policy_live: /etc/hermes/astra/discord-parity-policy.json
+hermes_discord_parity_validator_source: >-
+  scripts/agents/hermes-discord-parity-validate.py
+hermes_discord_parity_validator_live: >-
+  /usr/local/libexec/hermes-discord-parity-validate
+hermes_dubble_discord_parity_plugin_managed_root: >-
+  /etc/hermes/dubble/plugins/discord-parity
+hermes_dubble_discord_parity_plugin_runtime_root: >-
+  /var/lib/hermes/dubble/.hermes/profiles/dubble/plugins/discord-parity
+hermes_dubble_discord_parity_policy_source: >-
+  files/hermes/dubble-discord-parity-policy.json
+hermes_dubble_discord_parity_policy_live: >-
+  /etc/hermes/dubble/discord-parity-policy.json
+hermes_astra_handoff_plugin_source: files/hermes/plugins/astra-handoff
+hermes_astra_handoff_plugin_managed_root: >-
+  /etc/hermes/dubble/plugins/astra-handoff
+hermes_astra_handoff_plugin_runtime_root: >-
+  /var/lib/hermes/dubble/.hermes/profiles/dubble/plugins/astra-handoff
+hermes_astra_handoff_validator_source: >-
+  scripts/agents/hermes-astra-handoff-validate.py
+hermes_astra_handoff_validator_live: >-
+  /usr/local/libexec/hermes-astra-handoff-validate
+
+# Rigel's calendar liaison is a typed, Discord-provenance-gated model tool.
+# A dedicated service identity receives one CalDAV credential and maintains its
+# own calendar mirror; it cannot read any agent profile or administrator tool.
+hermes_rigel_astra_liaison_mode: disabled
+hermes_rigel_astra_liaison_approved: false
+hermes_rigel_astra_liaison_confirmation: ""
+hermes_rigel_astra_liaison_required_confirmation: >-
+  enable-privacy-isolated-rigel-astra-calendar-liaison
+hermes_rigel_astra_liaison_user: hermes-rigel-calendar
+hermes_rigel_astra_liaison_group: hermes-rigel-liaison
+hermes_rigel_astra_liaison_home: /var/lib/hermes-rigel-calendar
+hermes_rigel_astra_liaison_private_root: /etc/hermes/private/rigel-astra-liaison
+hermes_rigel_astra_liaison_runtime_dir: /run/hermes-rigel-liaison
+hermes_rigel_astra_liaison_socket: /run/hermes-rigel-liaison/broker.sock
+hermes_rigel_astra_liaison_python: /usr/bin/python3
+hermes_rigel_astra_liaison_broker_source: >-
+  scripts/agents/hermes-rigel-astra-calendar-broker.py
+hermes_rigel_astra_liaison_broker_live: >-
+  /usr/local/libexec/hermes-rigel-astra-calendar-broker
+hermes_rigel_astra_liaison_validator_source: >-
+  scripts/agents/hermes-rigel-astra-liaison-validate.py
+hermes_rigel_astra_liaison_validator_live: >-
+  /usr/local/libexec/hermes-rigel-astra-liaison-validate
+hermes_rigel_astra_liaison_smoke_source: >-
+  scripts/agents/hermes-rigel-astra-liaison-smoke.py
+hermes_rigel_astra_liaison_smoke_live: >-
+  /usr/local/libexec/hermes-rigel-astra-liaison-smoke
+hermes_rigel_astra_liaison_plugin_source: >-
+  files/hermes/plugins/rigel-astra-liaison
+hermes_rigel_astra_liaison_plugin_managed_root: >-
+  /etc/hermes/rigel/plugins/rigel-astra-liaison
+hermes_rigel_astra_liaison_plugin_runtime_root: >-
+  /var/lib/hermes/rigel/.hermes/profiles/rigel/plugins/rigel-astra-liaison
+hermes_rigel_astra_liaison_policy_live: >-
+  /etc/hermes/rigel/astra-liaison-policy.json
+hermes_rigel_astra_liaison_service_unit: >-
+  /etc/systemd/system/hermes-rigel-astra-calendar-broker.service
+hermes_rigel_astra_liaison_rollback_root: >-
+  /srv/live-rollbacks/jn-t14s-lin/hermes-rigel-astra-liaison
+
+# Owner-provenance-gated Astra administration of the other two Hermes
+# profiles. The model tool carries no privilege itself: a root broker accepts
+# only HMAC-authenticated typed requests from Astra's exact owner Discord
+# session and backs every mutation to the off-host rollback mount first.
+hermes_fleet_admin_mode: disabled
+hermes_fleet_admin_approved: false
+hermes_fleet_admin_mutation_acceptance: false
+hermes_fleet_admin_confirmation: ""
+hermes_fleet_admin_required_confirmation: >-
+  enable-owner-only-astra-fleet-administration-on-jn-t14s-lin
+hermes_fleet_admin_group: hermes-fleet-admin
+hermes_fleet_admin_private_root: /etc/hermes/private/fleet-admin
+hermes_fleet_admin_key: /etc/hermes/private/fleet-admin/key
+hermes_fleet_admin_gateway_environment: >-
+  /etc/hermes/private/fleet-admin/astra.env
+hermes_fleet_admin_plugin_source: files/hermes/plugins/fleet-admin
+hermes_fleet_admin_plugin_managed_root: /etc/hermes/astra/plugins/fleet-admin
+hermes_fleet_admin_plugin_runtime_root: >-
+  /var/lib/hermes/astra/.hermes/profiles/astra/plugins/fleet-admin
+hermes_fleet_admin_policy_live: /etc/hermes/astra/fleet-admin-policy.json
+hermes_fleet_admin_broker_source: scripts/agents/hermes-fleet-admin-broker.py
+hermes_fleet_admin_broker_live: /usr/local/libexec/hermes-fleet-admin-broker
+hermes_fleet_admin_validator_source: scripts/agents/hermes-fleet-admin-validate.py
+hermes_fleet_admin_validator_live: /usr/local/libexec/hermes-fleet-admin-validate
+hermes_fleet_admin_smoke_source: scripts/agents/hermes-fleet-admin-smoke.py
+hermes_fleet_admin_smoke_live: /usr/local/libexec/hermes-fleet-admin-smoke
+hermes_fleet_admin_runtime_dir: /run/hermes-fleet-admin
+hermes_fleet_admin_socket: /run/hermes-fleet-admin/broker.sock
+hermes_fleet_admin_service_unit: /etc/systemd/system/hermes-fleet-admin.service
+hermes_fleet_admin_audit_log: /var/log/hermes/fleet-admin.jsonl
+hermes_fleet_admin_rollback_root: >-
+  /srv/live-rollbacks/jn-t14s-lin/hermes-fleet-admin
+
+# Native local workspace for Astra. The service can collaborate in the managed
+# infrastructure repository without seeing the rest of Johnny's home or any
+# personal SSH credentials.
+hermes_astra_workspace_source: /home/johnny/cc-ansible
+hermes_astra_workspace_root: /var/lib/hermes/astra/workspaces
+hermes_astra_workspace_live: /var/lib/hermes/astra/workspaces/cc-ansible
+hermes_astra_workspace_user: hermes-astra
+hermes_remote_access_mode: disabled
+hermes_remote_access_approved: false
+hermes_remote_access_confirmation: ""
+hermes_remote_access_required_confirmation: >-
+  provision-nonroot-hermes-astra-ssh-on-managed-linux
+hermes_remote_access_key: /var/lib/hermes/astra/.ssh/id_ed25519
+hermes_remote_access_public_key: /var/lib/hermes/astra/.ssh/id_ed25519.pub
+hermes_remote_access_known_hosts_source: /home/johnny/.ssh/known_hosts
+hermes_remote_access_known_hosts_live: /var/lib/hermes/astra/.ssh/known_hosts
+hermes_remote_access_config_live: /var/lib/hermes/astra/.ssh/config
+hermes_remote_access_rollback_root: /srv/live-rollbacks
+hermes_remote_access_state_live: /var/lib/hermes/astra/state/remote-access.json
+hermes_remote_access_required_hosts:
+  - ts440
+  - docker-vm
+  - media-vm
+  - mercury
 hermes_docker_inventory_smoke_source: >-
   scripts/agents/hermes-agent-docker-inventory-smoke.py
 hermes_docker_inventory_smoke_live: >-
   /usr/local/libexec/hermes-agent-docker-inventory-smoke
 
+# Credential-isolated Arr API broker. The broker service, not Astra, receives
+# API keys through systemd credentials and exposes only a peer-UID-checked Unix
+# socket with recursive response redaction. Generic writes require approval;
+# narrow Prowlarr indexer operations require a bound owner turn.
+hermes_arr_api_mode: disabled
+hermes_arr_api_approved: false
+hermes_arr_api_confirmation: ""
+hermes_arr_api_required_confirmation: >-
+  enable-credential-isolated-arr-api-for-hermes-astra
+hermes_arr_api_user: hermes-arr-api
+hermes_arr_api_group: hermes-arr-api
+hermes_arr_api_private_root: /etc/hermes/private/arr-api
+hermes_arr_api_runtime_dir: /run/hermes-arr-api
+hermes_arr_api_socket: /run/hermes-arr-api/broker.sock
+hermes_arr_api_python: /usr/bin/python3
+hermes_arr_api_broker_source: scripts/agents/hermes-arr-api-broker.py
+hermes_arr_api_broker_live: /usr/local/libexec/hermes-arr-api-broker
+hermes_arr_api_extractor_source: scripts/agents/hermes-arr-credential-extract.py
+hermes_arr_api_validator_source: scripts/agents/hermes-arr-api-validate.py
+hermes_arr_api_validator_live: /usr/local/libexec/hermes-arr-api-validate
+hermes_arr_api_smoke_source: scripts/agents/hermes-arr-api-smoke.py
+hermes_arr_api_smoke_live: /usr/local/libexec/hermes-arr-api-smoke
+hermes_arr_api_plugin_source: files/hermes/plugins/arr-api
+hermes_arr_api_plugin_managed_root: /etc/hermes/astra/plugins/arr-api
+hermes_arr_api_plugin_runtime_root: >-
+  /var/lib/hermes/astra/.hermes/profiles/astra/plugins/arr-api
+hermes_arr_api_service_unit: /etc/systemd/system/hermes-arr-api-broker.service
+hermes_arr_api_allowed_addresses:
+  - "{{ hostvars['docker-vm'].ansible_host }}/32"
+hermes_arr_api_services:
+  - name: sonarr
+    source_host: docker-vm
+    config: /opt/media-stack/sonarr/config.xml
+    format: xml
+    port: 8989
+    api_header: X-Api-Key
+    path_prefixes: [/api/v3/]
+    status_path: /api/v3/system/status
+  - name: radarr
+    source_host: docker-vm
+    config: /opt/media-stack/radarr/config.xml
+    format: xml
+    port: 7878
+    api_header: X-Api-Key
+    path_prefixes: [/api/v3/]
+    status_path: /api/v3/system/status
+  - name: prowlarr
+    source_host: docker-vm
+    config: /opt/media-stack/prowlarr/config.xml
+    format: xml
+    port: 9696
+    api_header: X-Api-Key
+    path_prefixes: [/api/v1/]
+    status_path: /api/v1/system/status
+  - name: bazarr
+    source_host: docker-vm
+    config: /opt/media-stack/bazarr/config/config.yaml
+    format: yaml
+    port: 6767
+    api_header: X-API-KEY
+    path_prefixes: [/api/]
+    status_path: /api/system/status
+
+# Bounded host administration. Reachable linux_hosts are enrolled through a
+# dedicated forced-command account; Astra receives one private key as a systemd
+# credential and no sudo, owner SSH key, or arbitrary remote command channel.
+hermes_host_admin_private_root: /etc/hermes/private/host-admin
+hermes_host_admin_private_key: /etc/hermes/private/host-admin/id_ed25519
+hermes_host_admin_known_hosts: /etc/hermes/astra/host-admin-known-hosts
+hermes_host_admin_endpoints: /etc/hermes/astra/host-admin-endpoints.json
+hermes_host_admin_validator_source: scripts/agents/hermes-host-admin-validate.py
+hermes_host_admin_validator_live: /usr/local/libexec/hermes-host-admin-validate
+hermes_host_admin_smoke_source: scripts/agents/hermes-host-admin-smoke.py
+hermes_host_admin_smoke_live: /usr/local/libexec/hermes-host-admin-smoke
+hermes_host_admin_plugin_source: files/hermes/plugins/host-admin
+hermes_host_admin_plugin_managed_root: /etc/hermes/astra/plugins/host-admin
+hermes_host_admin_plugin_runtime_root: >-
+  /var/lib/hermes/astra/.hermes/profiles/astra/plugins/host-admin
+hermes_host_admin_required_hosts:
+  - jn-t14s-lin
+  - ts440
+  - docker-vm
+  - media-vm
+  - nextcloud-vm
+
+# Typed Docker Compose transactions use a separate forced-command identity from
+# read-only inventory and managed updater access. The private key is delivered
+# to Astra only as a systemd credential.
+hermes_compose_admin_private_root: /etc/hermes/private/compose-admin
+hermes_compose_admin_private_key: /etc/hermes/private/compose-admin/id_ed25519
+hermes_compose_admin_known_hosts: /etc/hermes/astra/compose-admin-known-hosts
+hermes_compose_admin_endpoints: /etc/hermes/astra/compose-admin-endpoints.json
+hermes_compose_admin_validator_source: scripts/agents/hermes-compose-admin-validate.py
+hermes_compose_admin_validator_live: /usr/local/libexec/hermes-compose-admin-validate
+hermes_compose_admin_smoke_source: scripts/agents/hermes-compose-admin-smoke.py
+hermes_compose_admin_smoke_live: /usr/local/libexec/hermes-compose-admin-smoke
+hermes_compose_admin_plugin_source: files/hermes/plugins/compose-admin
+hermes_compose_admin_plugin_managed_root: /etc/hermes/astra/plugins/compose-admin
+hermes_compose_admin_plugin_runtime_root: >-
+  /var/lib/hermes/astra/.hermes/profiles/astra/plugins/compose-admin
+
 # Tirith bootstrap transaction provenance. These exact values authenticate the
 # first install only. The live binary then follows Tirith's native signed
 # self-update channel from a dedicated self-managed service identity.
 hermes_tirith_release_track: official-latest
-hermes_tirith_version: 0.3.3
+hermes_tirith_version: 0.4.0
 hermes_tirith_release_base_url: >-
-  https://github.com/sheeki03/tirith/releases/download/v0.3.3
+  https://github.com/sheeki03/tirith/releases/download/v0.4.0
 hermes_tirith_archive_name: tirith-x86_64-unknown-linux-gnu.tar.gz
 hermes_tirith_archive_sha256: >-
-  6cdbe35e8f9ccf42e70ad95b501c93cd218ac18201c3df958d54f6ba0d995ce2
+  ec90836eef3519829f0b8371836a09c12c31fd8620d411a38b69423b19b5e468
 hermes_tirith_checksums_sha256: >-
-  acb5544bb8f98e8d6760e5bdd6b5f3a878e17af485c11e3b736cfd30f9641371
+  d283170ba5750d1b353aeb42e71cc4222715bbbf5df08fb0ed7c9572da3e7499
 hermes_tirith_signature_sha256: >-
-  d794010c10ca6b9898efbfb856685f10bd12ebc2a619f9cf0f218f9989ba5c75
+  e44e6a8d6b81d5ab20f49a423130bb5d3ad9c248115389171d142a0b48c53157
 hermes_tirith_certificate_encoded_sha256: >-
-  aefa92fe00b89f92dee402bb67f9d0d4dd03bdd69fe70f4217a30e5cbe18e99c
+  290e18f4716ede0caf7e0e3150c9fb5593e13b595e3a3efbea3f06fa1fb01f02
 hermes_tirith_certificate_sha256: >-
-  bf04bd991bbb70ee8022a3341b7288aff619872a4837c4d07e6cd89f724e29ca
-hermes_tirith_cache_root: /var/cache/hermes/tirith-0.3.3
+  aec6e616cea939bb2eaa12cccdc543e805cd49a446b17727096b12392beb717b
+hermes_tirith_cache_root: /var/cache/hermes/tirith-0.4.0
 hermes_tirith_archive_cache: >-
-  /var/cache/hermes/tirith-0.3.3/tirith-x86_64-unknown-linux-gnu.tar.gz
+  /var/cache/hermes/tirith-0.4.0/tirith-x86_64-unknown-linux-gnu.tar.gz
 hermes_tirith_checksums_cache: >-
-  /var/cache/hermes/tirith-0.3.3/checksums.txt
+  /var/cache/hermes/tirith-0.4.0/checksums.txt
 hermes_tirith_signature_cache: >-
-  /var/cache/hermes/tirith-0.3.3/checksums.txt.sig
+  /var/cache/hermes/tirith-0.4.0/checksums.txt.sig
 hermes_tirith_certificate_encoded_cache: >-
-  /var/cache/hermes/tirith-0.3.3/checksums.txt.pem.b64
+  /var/cache/hermes/tirith-0.4.0/checksums.txt.pem.b64
 hermes_tirith_certificate_cache: >-
-  /var/cache/hermes/tirith-0.3.3/checksums.txt.pem
-hermes_tirith_extract_root: /var/cache/hermes/tirith-0.3.3/extracted
+  /var/cache/hermes/tirith-0.4.0/checksums.txt.pem
+hermes_tirith_extract_root: /var/cache/hermes/tirith-0.4.0/extracted
 hermes_tirith_update_user: hermes-updater
 hermes_tirith_update_group: hermes-updater
 hermes_tirith_update_uid: 62013
 hermes_tirith_update_home: /var/lib/hermes-updater
 hermes_tirith_binary: /var/lib/hermes-updater/.local/bin/tirith
+hermes_tirith_package_approval_helper: >-
+  /usr/local/libexec/tirith-package-approval-authority
+hermes_tirith_package_approval_helper_sha256: >-
+  9dedbd6801661004e7d2f3dddb1df239d43bd87e75a96b293693d01404b9bdda
 hermes_tirith_legacy_binary: /usr/local/libexec/hermes-tirith
+hermes_cosign_version: 3.1.3
+hermes_cosign_binary: /usr/local/bin/cosign
+hermes_cosign_url: >-
+  https://github.com/sigstore/cosign/releases/download/v3.1.3/cosign-linux-amd64
+hermes_cosign_sha256: >-
+  4629c757b7618056f8ddd7e2625ae9fdd94c0372a65049520bc7d9df9efc7f71
 hermes_tirith_cosign_identity_regexp: >-
   ^https://github.com/sheeki03/tirith/\.github/workflows/release\.yml@refs/tags/v
 hermes_tirith_cosign_issuer: https://token.actions.githubusercontent.com
@@ -377,6 +898,10 @@ hermes_shadow_source_repo: https://github.com/NousResearch/hermes-agent.git
 hermes_shadow_install_ref: v2026.8.3
 hermes_shadow_expected_tag_object: 7de39e700d2c329e15d32eb0b96e2f7cdd9fbdb2
 hermes_shadow_expected_commit: 3c27eb6234bf91b8ceee9e9071591b31e9b148cb
+hermes_shadow_fresh_checkout_eol_paths:
+  - scripts/ci/test_install_ps1_path_migration.ps1
+  - scripts/tests/test-install-ps1-gitbash-compatibility.ps1
+  - scripts/tests/test-install-ps1-stage-protocol.ps1
 hermes_shadow_uv_version: 0.12.4
 hermes_shadow_uv_archive_url: >-
   https://github.com/astral-sh/uv/releases/download/0.12.4/uv-x86_64-unknown-linux-gnu.tar.gz
@@ -389,6 +914,7 @@ hermes_shadow_uv_binary: /var/lib/hermes/bootstrap/bin/uv
 hermes_shadow_uv_bin_dir: /var/lib/hermes/bootstrap/bin
 hermes_shadow_uv_config_home: /var/lib/hermes/bootstrap/config
 hermes_shadow_uv_config_dirs: /var/lib/hermes/bootstrap/config-dirs
+hermes_shadow_uv_python_root: /usr/local/share/uv/python
 hermes_shadow_runtime_binary: /usr/local/bin/hermes
 hermes_shadow_runtime_root: /usr/local/lib/hermes-agent
 hermes_shadow_runtime_venv: /usr/local/lib/hermes-agent/venv
@@ -400,21 +926,109 @@ hermes_native_update_profile_home: >-
   /var/lib/hermes/astra/.hermes/profiles/astra
 hermes_native_update_service: hermes-native-update.service
 hermes_native_update_timer: hermes-native-update.timer
+hermes_native_update_sudoers_path: /etc/sudoers.d/hermes-native-update
 hermes_tirith_update_service: hermes-tirith-native-update.service
 hermes_tirith_update_timer: hermes-tirith-native-update.timer
+hermes_native_update_gateway_wait_seconds: 120
+hermes_native_update_transaction_source: >-
+  scripts/agents/hermes-native-update-transaction.py
+hermes_native_update_transaction_live: >-
+  /usr/local/libexec/hermes-native-update-transaction
+hermes_native_update_transaction_config: >-
+  /etc/hermes/native-update-transaction.json
+hermes_native_update_rollback_root: >-
+  /srv/live-rollbacks/jn-t14s-lin/hermes-native-update
+hermes_native_update_rollback_keep: 2
+hermes_native_update_minimum_free_bytes: 2147483648
+hermes_queued_event_patch_source: >-
+  files/hermes/patches/queued-event-shutdown-replay.patch
+hermes_queued_event_patch_live: >-
+  /usr/local/share/hermes-managed-patches/queued-event-shutdown-replay.patch
+hermes_queued_event_validator_source: >-
+  scripts/agents/hermes-queued-event-durability-validate.py
+hermes_queued_event_validator_live: >-
+  /usr/local/libexec/hermes-queued-event-durability-validate
+hermes_managed_source_patch_source: >-
+  scripts/agents/hermes-managed-source-patch.py
+hermes_managed_source_patch_live: >-
+  /usr/local/libexec/hermes-managed-source-patch
+hermes_managed_source_patch_branch: astra-managed-parity
+hermes_managed_source_patch_target_branch: main
+hermes_managed_source_patch_paths:
+  - agent/conversation_loop.py
+  - agent/todo_stop.py
+  - agent/turn_context.py
+  - cron/executions.py
+  - cron/scheduler.py
+  - gateway/platforms/base.py
+  - gateway/run.py
+  - gateway/shutdown_flush.py
+  - hermes_cli/cron.py
+  - hermes_cli/config_defaults.py
+  - plugins/memory/mem0/__init__.py
+  - run_agent.py
+  - tests/agent/test_todo_stop.py
+  - tests/cron/test_execution_ledger.py
+  - tests/cron/test_scheduler.py
+  - tests/gateway/test_queued_event_shutdown_replay.py
+  - tests/plugins/memory/test_mem0_shutdown.py
+  - tests/run_agent/test_memory_sync_interrupted.py
+  - tools/lazy_deps.py
+hermes_managed_source_patch_staging_root: >-
+  /var/lib/hermes/astra/managed-patch-staging
 # Hermes is the production route. Keep both vendor-native update timers
 # enabled during routine convergence.
 hermes_native_updates_automatic: true
 hermes_native_update_calendar: daily
 hermes_native_update_randomized_delay: 6h
-# Hermes ships DDGS as a supported native post-setup backend instead of a
-# locked core extra. Keep the selection explicit and re-run the idempotent
-# native hook after bootstrap/update so web research cannot disappear when the
-# shared environment is rebuilt.
+# Hermes ships DDGS and the local Chromium browser as supported native
+# post-setup backends instead of locked core extras. Keep the selection
+# explicit and re-run the idempotent native hooks after bootstrap/update so
+# web research and browser automation cannot disappear when the shared
+# environment is rebuilt.
 hermes_native_post_setup_keys:
   - ddgs
-hermes_shadow_version_only_migration_from: 36
-hermes_shadow_config_version: 38
+  - agent_browser
+hermes_agent_browser_selector_source: >-
+  scripts/agents/hermes-agent-browser-chromium.py
+hermes_agent_browser_selector_live: >-
+  /usr/local/libexec/hermes-agent-browser-chromium
+# Hermes v0.20.4 intentionally keeps outbound channel operations out of the
+# built-in agent registry. Its native OpenClaw-compatible MCP channel server
+# restores that surface without a custom wrapper. Only the conversation and
+# message operations Astra and Dubble previously used are exposed; approval
+# response tools remain unavailable to the model.
+hermes_native_messaging_tools:
+  - conversations_list
+  - conversation_get
+  - messages_read
+  - attachments_fetch
+  - events_poll
+  - events_wait
+  - messages_send
+  - channels_list
+hermes_dashboard_mode: disabled
+hermes_dashboard_approved: false
+hermes_dashboard_confirmation: ""
+hermes_dashboard_required_confirmation: >-
+  converge-authenticated-hermes-dashboard-on-jn-t14s-lin
+hermes_dashboard_bind_address: 100.73.46.86
+hermes_dashboard_port: 9119
+hermes_dashboard_public_url: https://openclaw.jnalley.me
+hermes_dashboard_username: johnny
+hermes_dashboard_environment: /etc/hermes/astra/dashboard.env
+hermes_dashboard_unit: hermes-dashboard.service
+hermes_dashboard_rollback_root: >-
+  /srv/live-rollbacks/jn-t14s-lin/hermes-dashboard
+hermes_parity_offline_mode: disabled
+hermes_parity_offline_approved: false
+hermes_parity_offline_confirmation: ""
+hermes_parity_offline_required_confirmation: >-
+  open-hermes-parity-maintenance-window-on-jn-t14s-lin
+hermes_parity_offline_rollback_root: >-
+  /srv/live-rollbacks/jn-t14s-lin/hermes-parity-offline
+hermes_shadow_version_only_migration_from: 37
+hermes_shadow_config_version: 39
 hermes_shadow_contract_source: files/hermes/shadow-target.json
 hermes_shadow_contract_live: /usr/local/share/hermes-shadow/shadow-target.json
 hermes_shadow_audit_source: scripts/agents/hermes-shadow-target-audit.py
@@ -449,29 +1063,108 @@ hermes_rigel_schedule_manifest_source: >-
 # Production scheduled automation. This transaction is separate from the
 # original cutover so rescue never reactivates OpenClaw.
 hermes_automation_mode: disabled
+hermes_automation_schedule_mode: preserve
+hermes_automation_schedule_confirmation: ""
+hermes_automation_schedule_seed_confirmation: >-
+  seed-native-hermes-schedules-on-jn-t14s-lin
+hermes_automation_schedule_restore_confirmation: >-
+  restore-native-hermes-schedules-on-jn-t14s-lin
 hermes_automation_approved: false
 hermes_automation_confirmation: ""
+# Used only inside an already-open, planned parity maintenance window. Cron and
+# policy state converges while all Gateways remain stopped; the production
+# runtime transaction performs the one final native start after every profile
+# projection is ready.
+hermes_automation_defer_gateway_restart: false
 hermes_automation_required_confirmation: >-
   converge-hermes-production-automation-on-jn-t14s-lin
 hermes_automation_readers_group: hermes-automation-readers
 hermes_automation_output_root: /var/lib/hermes-automation
-hermes_automation_legacy_workspace: /home/johnny/.openclaw/workspace
+hermes_automation_native_workspace: /var/lib/hermes-automation/workspace
 hermes_automation_manifest_source: astra-production-jobs.json.j2
-hermes_automation_manifest_live: /etc/hermes/astra/production-jobs.json
+hermes_automation_manifest_root: /etc/hermes/production-jobs
+hermes_automation_manifest_live: /etc/hermes/production-jobs/astra.json
+hermes_dubble_automation_manifest_source: dubble-production-jobs.json.j2
+hermes_dubble_automation_manifest_live: /etc/hermes/production-jobs/dubble.json
+hermes_rigel_automation_manifest_source: rigel-production-jobs.json.j2
+hermes_rigel_automation_manifest_live: /etc/hermes/production-jobs/rigel.json
 hermes_automation_owner_user_id: "740687933803331726"
+hermes_dubble_guild_id: "1209365945882251294"
+hermes_dubble_parent_channel_id: "1483229851350728784"
 hermes_automation_rigel_channel_id: "1488752822466904256"
 hermes_automation_logs_channel_id: "1501040629025865779"
 hermes_automation_social_channel_id: "1501040923042254970"
+hermes_astra_vdirsyncer_config_source: astra-vdirsyncer-config.j2
+hermes_astra_vdirsyncer_config_live: /var/lib/hermes/astra/.config/vdirsyncer/config
+hermes_astra_khal_config_source: astra-khal-config.j2
+hermes_astra_khal_config_live: /var/lib/hermes/astra/.config/khal/config
+hermes_astra_himalaya_config_source: astra-himalaya-config.toml.j2
+hermes_astra_himalaya_config_live: /var/lib/hermes/astra/.config/himalaya/config.toml
+hermes_astra_himalaya_source_binary: /home/johnny/.local/bin/himalaya
+hermes_astra_himalaya_live_binary: /usr/local/bin/himalaya
+hermes_astra_calendar_source_root: /home/johnny/.local/share/vdirsyncer
+hermes_astra_calendar_live_root: /var/lib/hermes/astra/.local/share/vdirsyncer
+hermes_freshrss_credential_source: >-
+  /home/johnny/.openclaw/workspace/credentials/freshrss.json
+hermes_freshrss_credential_live: /etc/hermes/astra/freshrss.json
+hermes_astra_freshrss_live_root: >-
+  /var/lib/hermes/astra/.hermes/profiles/astra/imported-data/data/integrations/freshrss
+hermes_freshrss_collect_source: scripts/agents/hermes-freshrss-briefing.py
+hermes_freshrss_collect_live: /usr/local/libexec/hermes-freshrss-collect
 hermes_automation_reconciliation_source: >-
   files/hermes/production-automation-reconciliation.json
 hermes_automation_reconciliation_live: >-
-  /etc/hermes/astra/production-automation-reconciliation.json
+  /etc/hermes/production-jobs/reconciliation.json
+hermes_openclaw_parity_contract_source: >-
+  files/hermes/openclaw-parity-contract.json
+hermes_openclaw_parity_contract_live: >-
+  /etc/hermes/openclaw-parity-contract.json
+hermes_openclaw_parity_validator_source: >-
+  scripts/agents/hermes-openclaw-parity-validate.py
+hermes_openclaw_parity_validator_live: >-
+  /usr/local/libexec/hermes-openclaw-parity-validate
+hermes_openclaw_current_cron_state: /home/johnny/.openclaw/state/openclaw.sqlite
+hermes_openclaw_historical_cron_state: >-
+  /home/johnny/.openclaw/cron/jobs.json.migrated
 hermes_automation_gateway_dropin: >-
   /etc/systemd/system/hermes-gateway-astra.service.d/production-automation.conf
+hermes_dubble_automation_gateway_dropin: >-
+  /etc/systemd/system/hermes-gateway-dubble.service.d/production-automation.conf
+hermes_rigel_automation_gateway_dropin: >-
+  /etc/systemd/system/hermes-gateway-rigel.service.d/production-automation.conf
 hermes_cron_reconcile_source: scripts/agents/hermes-cron-reconcile.py
 hermes_cron_reconcile_live: /usr/local/libexec/hermes-cron-reconcile
 hermes_retained_automation_source: scripts/agents/hermes-retained-automation.py
 hermes_retained_automation_live: /usr/local/libexec/hermes-retained-automation
+hermes_retained_media_source: scripts/agents/hermes-media-summary-collect.py
+hermes_retained_media_live: /usr/local/libexec/hermes-media-summary-collect
+hermes_daily_personal_source: scripts/agents/hermes-daily-personal-collect.py
+hermes_daily_personal_live: /usr/local/libexec/hermes-daily-personal-collect
+hermes_daily_summary_assemble_source: scripts/agents/hermes-daily-summary-assemble.py
+hermes_daily_summary_assemble_live: /usr/local/libexec/hermes-daily-summary-assemble
+hermes_health_summary_source: scripts/agents/hermes-health-summary.py
+hermes_health_summary_live: /usr/local/libexec/hermes-health-summary
+hermes_fortnite_progress_source: scripts/agents/hermes-fortnite-progress-snapshot.py
+hermes_fortnite_progress_live: /usr/local/libexec/hermes-fortnite-progress-snapshot
+hermes_fortnite_normalize_source: scripts/agents/hermes-fortnite-progress-normalize.py
+hermes_fortnite_normalize_live: /usr/local/libexec/hermes-fortnite-progress-normalize
+hermes_fortnite_rank_source: scripts/agents/hermes_fortnite_rank.py
+hermes_fortnite_rank_live: /usr/local/libexec/hermes_fortnite_rank.py
+hermes_fortnite_calendar_sync_source: >-
+  scripts/agents/hermes-fortnite-tournament-calendar-sync.py
+hermes_fortnite_calendar_sync_live: >-
+  /usr/local/libexec/hermes-fortnite-tournament-calendar-sync
+hermes_warframe_parser_source: scripts/agents/hermes-warframe-drops-feed.py
+hermes_warframe_parser_live: /usr/local/libexec/hermes-native/warframe_drops_feed.py
+hermes_retained_collector_environment_live: >-
+  /etc/hermes/collectors/astra-retained.env
+hermes_automation_native_environment_live: /etc/hermes/astra/.env
+hermes_vdirsyncer_state_migrator_source: >-
+  scripts/agents/hermes-vdirsyncer-state-migrate.py
+hermes_vdirsyncer_state_migrator_live: >-
+  /usr/local/libexec/hermes-vdirsyncer-state-migrate
+hermes_daily_updates_source: scripts/agents/hermes-daily-updates-collect.py
+hermes_daily_updates_live: /usr/local/libexec/hermes-daily-updates-collect
 hermes_warframe_feed_source: scripts/agents/hermes-warframe-feed-collect.py
 hermes_warframe_feed_live: /usr/local/libexec/hermes-warframe-feed-collect
 hermes_fortnite_calendar_compat_source: >-
@@ -484,7 +1177,18 @@ hermes_fortnite_calendar_fetch_live: >-
   /usr/local/libexec/hermes-fortnite-calendar-fetch
 hermes_fortnite_calendar_schedule_live: >-
   /var/lib/hermes-automation/fortnite-schedule.json
-hermes_fortnite_geckodriver_path: /snap/bin/geckodriver
+hermes_fortnite_geckodriver_version: "0.37.1"
+hermes_fortnite_geckodriver_archive_name: >-
+  geckodriver-v{{ hermes_fortnite_geckodriver_version }}-linux64.tar.gz
+hermes_fortnite_geckodriver_url: >-
+  https://github.com/mozilla/geckodriver/releases/download/v{{ hermes_fortnite_geckodriver_version }}/{{ hermes_fortnite_geckodriver_archive_name }}
+hermes_fortnite_geckodriver_sha256: >-
+  e815130ea95983e162ae91843b48d3a3ce991735635fce83a647afde21e09f7e
+hermes_fortnite_geckodriver_cache_root: /var/cache/hermes/geckodriver
+hermes_fortnite_geckodriver_path: >-
+  /usr/local/libexec/hermes-native/geckodriver
+hermes_fortnite_firefox_binary_path: >-
+  /snap/firefox/current/usr/lib/firefox/firefox
 hermes_automation_astra_scripts:
   - source: scripts/agents/hermes_cron_delivery.py
     destination: hermes_cron_delivery.py
@@ -502,11 +1206,21 @@ hermes_automation_astra_scripts:
     destination: hermes-fortnite-progress-input.py
   - source: scripts/agents/hermes-warframe-reminder-watch.py
     destination: hermes-warframe-reminder-watch.py
+  - source: scripts/agents/hermes-heartbeat-state.py
+    destination: hermes-heartbeat-state.py
+hermes_automation_rigel_scripts:
+  - source: scripts/agents/hermes-rigel-schedule.py
+    destination: hermes-rigel-schedule.py
 hermes_automation_system_units:
   - hermes-gateway-astra.service.d/20-automation.conf
   - hermes-gateway-astra.service.d/production-automation.conf
+  - hermes-gateway-dubble.service.d/production-automation.conf
+  - hermes-gateway-rigel.service.d/production-automation.conf
   - hermes-retained-automation@.service
-  - hermes-daily-summary-collect.timer
+  - hermes-daily-updates-collect.timer
+  - hermes-daily-media-collect.timer
+  - hermes-daily-personal-collect.timer
+  - hermes-daily-summary-assemble.timer
   - hermes-fortnite-progress-collect.timer
   - hermes-warframe-feed.service
   - hermes-warframe-feed.timer
@@ -516,13 +1230,18 @@ hermes_automation_system_units:
   - hermes-profile-backup@.service
   - hermes-profile-backup@.timer
 hermes_automation_enabled_timers:
-  - hermes-daily-summary-collect.timer
+  - hermes-daily-updates-collect.timer
+  - hermes-daily-media-collect.timer
+  - hermes-daily-personal-collect.timer
+  - hermes-daily-summary-assemble.timer
   - hermes-fortnite-progress-collect.timer
   - hermes-warframe-feed.timer
   - hermes-fortnite-calendar.timer
   - hermes-profile-backup@astra.timer
   - hermes-profile-backup@dubble.timer
   - hermes-profile-backup@rigel.timer
+hermes_automation_retired_timers:
+  - hermes-daily-summary-collect.timer
 
 hermes_shadow_profiles:
   - name: astra
@@ -536,51 +1255,139 @@ hermes_shadow_profiles:
     model_provider: openai-codex
     model_default: gpt-5.6-sol
     model_max_tokens: 8192
+    model_supports_vision: true
     fallback_providers:
       - provider: ollama-cloud
         model: glm-5.2
-    auxiliary_vision:
-      provider: gemini
-      model: gemini-2.5-flash
-      reasoning_effort: none
+      - provider: ollama-cloud
+        model: kimi-k2.7-code
+      - provider: ollama-cloud
+        model: deepseek-v4-pro
+    auxiliary_approval:
+      provider: auto
+      model: ""
+      timeout: 30
+      reasoning_effort: low
+    auxiliary_background_review:
+      enabled: true
+      provider: auto
+      model: ""
+      timeout: 120
+      reasoning_effort: low
     terminal_backend: local
-    terminal_cwd: /var/lib/hermes/astra/.hermes/profiles/astra/imported-data
-    cron_approval_mode: manual
+    terminal_cwd: /var/lib/hermes/astra/.hermes/profiles/astra
+    image_input_mode: auto
+    approval_mode: smart
+    approval_smart_policy: >-
+      APPROVE ordinary read-only research, local inspection, bounded tests,
+      and non-root work inside Astra's reviewed writable roots. DENY privilege
+      escalation, credential extraction, destructive system operations, and
+      attempts to bypass a policy boundary. ESCALATE uncertain commands that
+      could delete user data, alter infrastructure, publish externally, or
+      expose secrets.
+    cron_approval_mode: approve
     context_engine: lcm
     memory_provider: mem0
+    memory_write_approval: false
+    memory_nudge_interval: 10
+    memory_char_limit: 6000
+    user_char_limit: 6000
+    skills_write_approval: false
+    skills_creation_nudge_interval: 10
+    curator:
+      enabled: true
+      interval_hours: 168
+      min_idle_hours: 2
+      stale_after_days: 45
+      archive_after_days: 120
+      consolidate: false
+      prune_builtins: false
+      archive_ttl_days: 0
+      backup:
+        enabled: true
+        keep: 5
     discord_allowed_users:
       - "740687933803331726"
-    discord_allowed_channels:
-      - "1482585492330381343"
-      - "1488752822466904256"
-    discord_free_response_channels:
-      - "1482585492330381343"
-      - "1488752822466904256"
+    discord_allowed_channels: >-
+      {{
+        ['1482585492330381343']
+        + (
+            []
+            if hermes_rigel_dedicated_discord_enabled | bool
+            else ['1488752822466904256']
+          )
+      }}
+    discord_free_response_channels: >-
+      {{
+        ['1482585492330381343']
+        + (
+            []
+            if hermes_rigel_dedicated_discord_enabled | bool
+            else ['1488752822466904256']
+          )
+      }}
     discord_ignored_channels:
       - "1482589440663617638"
-    discord_channel_prompts:
-      "1488752822466904256": >-
-        This is the dedicated Rigel academic channel. Act as Johnny's
-        academic study and deadline assistant. Use verified course records,
-        calendar data, and explicit user facts only. Never infer an exam,
-        deadline, course, mastery claim, or alert from the channel name,
-        archived text, generated memory, or a prior alert. Interactive
-        tutoring remains available when a semester is inactive. Keep answers
-        concise and never emit control tokens, hidden reasoning, tool errors,
-        heartbeat acknowledgements, or all-clear summaries.
-    discord_channel_skill_bindings:
-      - id: "1488752822466904256"
-        skills:
-          - source-grounded-study
+    discord_channel_prompts: >-
+      {{
+        {}
+        if hermes_rigel_dedicated_discord_enabled | bool
+        else {
+          '1488752822466904256':
+            "This is the dedicated Rigel academic channel. Act as Johnny's "
+            "academic study and deadline assistant. Use verified course "
+            "records, calendar data, and explicit user facts only. Never "
+            "infer an exam, deadline, course, mastery claim, or alert from "
+            "the channel name, archived text, generated memory, or a prior "
+            "alert. Interactive tutoring remains available when a semester "
+            "is inactive. Keep answers concise and never emit control tokens, "
+            "hidden reasoning, tool errors, heartbeat acknowledgements, or "
+            "all-clear summaries."
+        }
+      }}
+    discord_channel_skill_bindings: >-
+      {{
+        []
+        if hermes_rigel_dedicated_discord_enabled | bool
+        else [{
+          'id': '1488752822466904256',
+          'skills': ['source-grounded-study']
+        }]
+      }}
+    allow_any_attachment: true
     discord_admin_users:
       - "740687933803331726"
+    discord_server_actions:
+      - list_guilds
+      - server_info
+      - list_channels
+      - channel_info
+      - list_roles
+      - member_info
+      - search_members
+      - fetch_messages
+      - list_pins
+      - pin_message
+      - unpin_message
+      - delete_message
+      - create_thread
     discord_slash_commands: false
     plugins_enabled:
       - star-dispatch-privacy
       - agent-docker-inventory
+      - arr-api
+      - host-admin
+      - compose-admin
+      - discord-parity
+      - fleet-admin
       - hermes-lcm
+    native_messaging_bridge: true
     toolsets:
       - safe
+      - vision
+      - image_gen
+      - browser
+      - tts
       - skills
       - memory
       - session_search
@@ -588,14 +1395,20 @@ hermes_shadow_profiles:
       - clarify
       - delegation
       - web
+      - discord
+      - discord_admin
+      - discord_parity
       - agent_docker
+      - arr_api
+      - host_admin
+      - compose_admin
+      - fleet_admin
       - terminal
       - file
       - code_execution
       - cronjob
     disabled_toolsets:
       - computer_use
-      - discord_admin
       - homeassistant
     approval_deny:
       - '*sudo*'
@@ -610,12 +1423,44 @@ hermes_shadow_profiles:
     account_home: /var/lib/hermes/dubble
     home: /var/lib/hermes/dubble/.hermes/profiles/dubble
     subid_start: 265536
-    model_provider: anthropic
-    model_default: claude-sonnet-4-6
+    model_provider: openai-codex
+    model_default: gpt-5.6-sol
+    model_max_tokens: 8192
     terminal_backend: docker
-    cron_approval_mode: deny
-    fallback_providers: []
+    approval_mode: manual
+    cron_approval_mode: approve
+    bot_peers:
+      astra:
+        url: http://127.0.0.1:8642
+    fallback_providers:
+      - provider: ollama-cloud
+        model: glm-5.2
+      - provider: ollama-cloud
+        model: kimi-k2.7-code
+      - provider: ollama-cloud
+        model: deepseek-v4-pro
+    auxiliary_approval:
+      provider: auto
+      model: ""
+      timeout: 30
+      reasoning_effort: low
+    auxiliary_background_review:
+      enabled: true
+      provider: auto
+      model: ""
+      timeout: 120
+      reasoning_effort: low
+    context_engine: lcm
+    memory_provider: mem0
+    memory_write_approval: false
+    skills_write_approval: false
+    skills_creation_nudge_interval: 10
     discord_allowed_users: []
+    # The Discord guild's @everyone role has the same ID as the guild. This
+    # authorizes every guild member while the channel whitelist below keeps
+    # Dubble inaccessible in DMs and every other channel.
+    discord_allowed_roles:
+      - "1209365945882251294"
     discord_allowed_channels:
       - "1483229851350728784"
     discord_free_response_channels:
@@ -626,8 +1471,14 @@ hermes_shadow_profiles:
     discord_channel_skill_bindings: []
     discord_admin_users:
       - "740687933803331726"
+    discord_server_actions:
+      - fetch_messages
     discord_slash_commands: false
-    plugins_enabled: []
+    plugins_enabled:
+      - discord-parity
+      - astra-handoff
+      - hermes-lcm
+    native_messaging_bridge: true
     toolsets:
       - safe
       - skills
@@ -635,14 +1486,17 @@ hermes_shadow_profiles:
       - session_search
       - todo
       - clarify
+      - discord
+      - discord_admin
+      - discord_parity
+      - astra_handoff
+      - cronjob
     disabled_toolsets:
       - terminal
       - file
       - code_execution
       - computer_use
-      - cronjob
       - delegation
-      - discord_admin
       - homeassistant
     approval_deny:
       - '*sudo*'
@@ -657,31 +1511,99 @@ hermes_shadow_profiles:
     uid: 62012
     account_home: /var/lib/hermes/rigel
     home: /var/lib/hermes/rigel/.hermes/profiles/rigel
+    environment_file: /etc/hermes/private/environments/rigel.env
     subid_start: 331072
-    model_provider: anthropic
-    model_default: claude-sonnet-4-6
-    terminal_backend: docker
+    model_provider: openai-codex
+    model_default: gpt-5.6-sol
+    model_max_tokens: 8192
+    model_supports_vision: true
+    terminal_backend: local
+    terminal_cwd: /var/lib/hermes/rigel/.hermes/profiles/rigel/imported-data
+    gateway_working_directory: /var/lib/hermes/rigel/.hermes/profiles/rigel/imported-data
+    approval_mode: smart
+    approval_smart_policy: >-
+      APPROVE ordinary read-only inspection and non-root C++ coursework inside
+      Rigel's reviewed academic workspace, including g++, make, gdb, compiler
+      diagnostics, sanitizers, and bounded test execution. APPROVE creation and
+      modification of course files under courses/. DENY privilege escalation,
+      package installation, persistence outside Rigel's academic workspace,
+      credential or runtime-state access, cross-profile or owner-home access,
+      Docker/Podman/system administration, destructive host operations, and
+      terminal-driven network access. ESCALATE uncertain commands that could
+      alter agent runtime/bootstrap state, publish externally, or expose data.
     cron_approval_mode: deny
-    fallback_providers: []
-    discord_allowed_users: []
-    discord_allowed_channels: []
-    discord_free_response_channels: []
+    fallback_providers:
+      - provider: ollama-cloud
+        model: glm-5.2
+      - provider: ollama-cloud
+        model: kimi-k2.7-code
+      - provider: ollama-cloud
+        model: deepseek-v4-pro
+    auxiliary_approval:
+      provider: auto
+      model: ""
+      timeout: 30
+      reasoning_effort: low
+    auxiliary_background_review:
+      enabled: true
+      provider: auto
+      model: ""
+      timeout: 120
+      reasoning_effort: low
+    context_engine: lcm
+    memory_provider: mem0
+    memory_write_approval: false
+    skills_write_approval: false
+    skills_creation_nudge_interval: 10
+    image_input_mode: auto
+    todo_stop_guard: true
+    max_todo_stop_nudges: 6
+    discord_allowed_users: >-
+      {{
+        ['740687933803331726']
+        if hermes_rigel_dedicated_discord_enabled | bool
+        else []
+      }}
+    discord_allowed_channels: >-
+      {{
+        [hermes_rigel_discord_channel_id]
+        if hermes_rigel_dedicated_discord_enabled | bool
+        else []
+      }}
+    discord_free_response_channels: >-
+      {{
+        [hermes_rigel_discord_channel_id]
+        if hermes_rigel_dedicated_discord_enabled | bool
+        else []
+      }}
     discord_ignored_channels: []
     discord_channel_prompts: {}
     discord_channel_skill_bindings: []
-    discord_admin_users: []
+    discord_admin_users: >-
+      {{
+        ['740687933803331726']
+        if hermes_rigel_dedicated_discord_enabled | bool
+        else []
+      }}
+    discord_server_actions: []
     discord_slash_commands: false
-    plugins_enabled: []
+    plugins_enabled:
+      - hermes-lcm
+      - rigel-astra-liaison
+    allow_any_attachment: true
     toolsets:
       - safe
+      - vision
+      - browser
+      - file
+      - terminal
       - skills
       - memory
       - session_search
       - todo
       - clarify
+      - rigel_astra_liaison
     disabled_toolsets:
-      - terminal
-      - file
       - code_execution
       - computer_use
       - cronjob

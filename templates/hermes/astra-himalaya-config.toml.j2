@@ -1,0 +1,20 @@
+# Astra's read-only iCloud IMAP account. The app password remains in the
+# root-managed Hermes environment and is never embedded in this file.
+[accounts.icloud]
+default = true
+email = "jn@jnalley.me"
+
+folder.aliases.inbox = "INBOX"
+folder.aliases.sent = "Sent Messages"
+folder.aliases.trash = "Deleted Messages"
+folder.aliases.jobs = "Jobs"
+
+message.read.headers = ["From", "To", "Cc", "Subject", "Date"]
+
+backend.type = "imap"
+backend.host = "imap.mail.me.com"
+backend.port = 993
+backend.encryption.type = "tls"
+backend.login = "jn@jnalley.me"
+backend.auth.type = "password"
+backend.auth.cmd = "awk -F= '/^ICLOUD_APP_PASSWORD=/{print $2; exit}' /etc/hermes/astra/.env"

@@ -5,11 +5,11 @@
   "sourcePins": {
     "profileImport": {
       "path": "files/hermes/profile-import-contract.json",
-      "sha256": "7e4953e9c08dae0380d761781c41ecae669fa9ff978b9fdd6e98b59ed14d5128"
+      "sha256": "0eadb9699b51690cd1895785b025bb1c6ea07c128465b2c7f21bf9029471b5d1"
     },
     "workspacePolicy": {
       "path": "files/openclaw/workspace-migration-policy.json",
-      "sha256": "08e30aa55c72a54a6ac0e7c67e6d99b5557bd0fed75e8b16a19af556ee20e211"
+      "sha256": "9920d1299ffe1dcaf2e290c5ed044dca1413e8d93ebc9146cd043f08ecdac839"
     }
   },
   "profiles": {
@@ -79,17 +79,6 @@
       "sources": ["reddit/sync-state.json"],
       "output": "data/integrations/reddit/sync-state.json",
       "transform": "reddit-sync-state-v1"
-    },
-    {
-      "id": "rigel-courses",
-      "profile": "rigel",
-      "ownerClass": "operator-readonly",
-      "sources": [
-        "rigel/courses/semester-context.md",
-        "rigel/courses/pending-calendar-requests.md"
-      ],
-      "output": "imports/courses/academic-state.json",
-      "transform": "rigel-completed-semester-v1"
     },
     {
       "id": "sobriety-state",

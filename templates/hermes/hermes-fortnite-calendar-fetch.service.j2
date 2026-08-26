@@ -6,24 +6,20 @@ Requires=snapd.seeded.service
 
 [Service]
 Type=oneshot
-User={{ hermes_production_cutover_user }}
-Group={{ hermes_production_cutover_user }}
-SupplementaryGroups={{ hermes_automation_readers_group }}
+User=hermes-astra
+Group=hermes-astra
 WorkingDirectory={{ hermes_automation_output_root }}
-ExecStart=/usr/bin/python3 {{ hermes_fortnite_calendar_fetch_live }} --output {{ hermes_fortnite_calendar_schedule_live }}
+ExecStart=/usr/bin/python3 {{ hermes_fortnite_calendar_fetch_live }} --output {{ hermes_fortnite_calendar_schedule_live }} --geckodriver {{ hermes_fortnite_geckodriver_path }} --firefox-binary {{ hermes_fortnite_firefox_binary_path }}
 Environment=PYTHONNOUSERSITE=1
 Environment=PYTHONPATH=
-Environment=HOME=/home/{{ hermes_production_cutover_user }}
-Environment=XDG_RUNTIME_DIR=/run/user/{{ hermes_production_cutover_user_uid }}
+Environment=HOME=/run/hermes-fortnite-calendar-fetch
 UMask=0027
-# Snap's root-owned confinement helper requires its packaged file capabilities.
-# This public-only fetcher contains no credentials and executes no writable code.
-NoNewPrivileges=false
-RestrictSUIDSGID=false
+RuntimeDirectory=hermes-fortnite-calendar-fetch
+RuntimeDirectoryMode=0700
+NoNewPrivileges=true
+RestrictSUIDSGID=true
 ProtectSystem=strict
-ProtectHome=tmpfs
-BindPaths=-/home/{{ hermes_production_cutover_user }}/snap/firefox
-BindPaths=-/home/{{ hermes_production_cutover_user }}/.cache
+ProtectHome=true
 ReadWritePaths={{ hermes_automation_output_root }}
 PrivateTmp=true
 PrivateDevices=true
@@ -36,7 +32,7 @@ ProtectKernelTunables=true
 ProtectProc=invisible
 LockPersonality=true
 RestrictRealtime=true
-CapabilityBoundingSet=CAP_CHOWN CAP_DAC_OVERRIDE CAP_DAC_READ_SEARCH CAP_FOWNER CAP_SETGID CAP_SETUID CAP_SYS_CHROOT CAP_SYS_PTRACE CAP_SYS_ADMIN CAP_SYS_RESOURCE
+CapabilityBoundingSet=
 AmbientCapabilities=
 RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK
 TimeoutStartSec=5m

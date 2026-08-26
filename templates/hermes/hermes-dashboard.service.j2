@@ -1,0 +1,62 @@
+[Unit]
+Description=Authenticated Hermes Astra dashboard
+Documentation=https://hermes-agent.nousresearch.com/docs/user-guide/features/web-dashboard/
+After=network-online.target hermes-gateway-astra.service
+Wants=network-online.target
+ConditionPathExists=/etc/hermes/astra/{{ hermes_gateway_readiness_marker }}
+
+[Service]
+Type=simple
+User=hermes-astra
+Group=hermes-astra
+SupplementaryGroups={{ hermes_runtime_readers_group }}
+WorkingDirectory={{ hermes_shadow_runtime_root }}
+Environment=HOME=/var/lib/hermes/astra
+Environment=HERMES_HOME=/var/lib/hermes/astra/.hermes/profiles/astra
+Environment=HERMES_MANAGED_DIR=/etc/hermes/astra
+Environment=PATH=/var/lib/hermes/astra/bin:{{ hermes_shadow_runtime_venv }}/bin:/usr/local/bin:/usr/bin:/bin
+EnvironmentFile=/etc/hermes/astra/.env
+EnvironmentFile={{ hermes_dashboard_environment }}
+ExecStart={{ hermes_shadow_runtime_binary }} dashboard --host {{ hermes_dashboard_bind_address }} --port {{ hermes_dashboard_port }} --no-open
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=45
+UMask=0077
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+{% if not (hermes_native_profile_skills_enabled | bool) %}
+BindReadOnlyPaths=/etc/hermes/astra/skills:/var/lib/hermes/astra/.hermes/profiles/astra/skills/managed
+{% endif %}
+BindPaths={{ hermes_profile_data_root }}/astra/writable:/var/lib/hermes/astra/.hermes/profiles/astra/imported-data
+BindReadOnlyPaths={{ hermes_profile_data_root }}/astra/managed:/var/lib/hermes/astra/.hermes/profiles/astra/managed-data
+BindPaths={{ hermes_profile_transforms_root }}/astra/writable:/var/lib/hermes/astra/.hermes/profiles/astra/transformed-data
+BindReadOnlyPaths={{ hermes_profile_transforms_root }}/astra/managed:/var/lib/hermes/astra/.hermes/profiles/astra/transformed-managed
+BindPaths={{ hermes_astra_workspace_source }}:{{ hermes_astra_workspace_live }}
+ReadWritePaths=/var/lib/hermes/astra {{ hermes_profile_data_root }}/astra/writable {{ hermes_profile_transforms_root }}/astra/writable {{ hermes_astra_workspace_live }}
+InaccessiblePaths=/var/lib/hermes/dubble /var/lib/hermes/rigel /etc/hermes/dubble /etc/hermes/rigel
+PrivateTmp=true
+ProtectClock=true
+ProtectControlGroups=true
+ProtectHostname=true
+ProtectKernelLogs=true
+ProtectKernelModules=true
+ProtectKernelTunables=true
+ProtectProc=invisible
+LockPersonality=true
+MemoryDenyWriteExecute=false
+RestrictRealtime=true
+RestrictSUIDSGID=true
+RestrictNamespaces=~user mnt pid ipc net uts
+CapabilityBoundingSet=
+AmbientCapabilities=
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+PrivateDevices=true
+DevicePolicy=closed
+DeviceAllow=/dev/null rw
+DeviceAllow=/dev/urandom r
+DeviceAllow=/dev/random r
+TasksMax=1024
+
+[Install]
+WantedBy=multi-user.target

@@ -23,8 +23,8 @@ class HermesDiscordEnrollTests(unittest.TestCase):
         env = {
             "DISCORD_BOT_TOKEN": "a" * 64,
             "DISCORD_DUBBLE_BOT_TOKEN": "b" * 64,
-            "ANTHROPIC_API_KEY": "c" * 64,
             "OLLAMA_API_KEY": "d" * 64,
+            "OPENROUTER_API_KEY": "e" * 64,
         }
         owner = "1111111111111111"
         config = {
@@ -75,34 +75,49 @@ class HermesDiscordEnrollTests(unittest.TestCase):
                     "db-logs": "1000000000000005",
                 },
             ),
+            (
+                "2000000000000003",
+                {"rigel": "1000000000000003"},
+            ),
         ]
 
-    def test_build_preserves_two_consumers_and_three_logical_roles(self) -> None:
+    def test_build_creates_three_isolated_consumers(self) -> None:
         env, config = self.fixture()
         with mock.patch.object(
             MODULE, "bot_and_channels", side_effect=self.discoveries()
         ):
-            enrollment, credentials = MODULE.build_enrollment(env, config)
-        self.assertEqual(enrollment["consumerCount"], 2)
+            enrollment, credentials = MODULE.build_enrollment(
+                env, config, "c" * 64
+            )
+        self.assertEqual(enrollment["consumerCount"], 3)
         self.assertEqual(enrollment["logicalProfiles"], ["astra", "dubble", "rigel"])
         self.assertEqual(
-            enrollment["profiles"]["rigel"]["discordConsumer"], "astra"
+            enrollment["profiles"]["rigel"]["discordConsumer"], "rigel"
         )
         astra = enrollment["profiles"]["astra"]
         self.assertEqual(astra["ignoredChannels"], ["1000000000000002"])
-        self.assertEqual(
-            astra["channelSkillBindings"],
-            [{"id": "1000000000000003", "skills": ["source-grounded-study"]}],
-        )
+        self.assertEqual(astra["allowedChannels"], ["1000000000000001"])
+        self.assertEqual(astra["channelSkillBindings"], [])
         self.assertIn("DISCORD_BOT_TOKEN=" + "a" * 64, credentials["astra"])
         self.assertIn("OLLAMA_API_KEY=" + "d" * 64, credentials["astra"])
+        self.assertNotIn("OPENROUTER_API_KEY", credentials["astra"])
         self.assertIn("DISCORD_BOT_TOKEN=" + "b" * 64, credentials["dubble"])
+        self.assertIn("OLLAMA_API_KEY=" + "d" * 64, credentials["dubble"])
+        self.assertNotIn("OPENROUTER_API_KEY", credentials["dubble"])
         self.assertEqual(
             enrollment["profiles"]["dubble"]["ignoredChannels"],
             ["1000000000000005"],
         )
-        self.assertNotIn("DISCORD_BOT_TOKEN", credentials["rigel"])
-        self.assertNotIn("ANTHROPIC_API_KEY", credentials["astra"])
+        self.assertIn("DISCORD_BOT_TOKEN=" + "c" * 64, credentials["rigel"])
+        self.assertIn("OLLAMA_API_KEY=" + "d" * 64, credentials["rigel"])
+        self.assertNotIn("OPENROUTER_API_KEY", credentials["rigel"])
+        self.assertNotIn("ANTHROPIC_API_KEY", "".join(credentials.values()))
+        for key in (
+            "OPENAI_API_KEY",
+            "GEMINI_API_KEY",
+            "GOOGLE_API_KEY",
+        ):
+            self.assertNotIn(key, "".join(credentials.values()))
 
     def test_duplicate_bot_identity_is_rejected(self) -> None:
         env, config = self.fixture()
@@ -112,7 +127,7 @@ class HermesDiscordEnrollTests(unittest.TestCase):
             with self.assertRaisesRegex(
                 MODULE.EnrollmentError, "discord-bot-identities-not-distinct"
             ):
-                MODULE.build_enrollment(env, config)
+                MODULE.build_enrollment(env, config, "c" * 64)
 
     def test_discovered_channel_must_be_enabled_in_source(self) -> None:
         env, config = self.fixture()
@@ -125,7 +140,7 @@ class HermesDiscordEnrollTests(unittest.TestCase):
             with self.assertRaisesRegex(
                 MODULE.EnrollmentError, "source-astra-route-mismatch"
             ):
-                MODULE.build_enrollment(env, config)
+                MODULE.build_enrollment(env, config, "c" * 64)
 
     def test_discovery_checks_only_source_enabled_channel_ids(self) -> None:
         channel_names = {
@@ -171,7 +186,13 @@ class HermesDiscordEnrollTests(unittest.TestCase):
                 MODULE.read_dotenv(path)
 
     def test_normal_output_schema_contains_no_private_values(self) -> None:
-        result = {"schemaVersion": 1, "status": "ok", "consumers": 2, "profiles": 3, "channels": 4}
+        result = {
+            "schemaVersion": 1,
+            "status": "ok",
+            "consumers": 3,
+            "profiles": 3,
+            "channels": 5,
+        }
         serialized = json.dumps(result)
         self.assertNotRegex(serialized, r"\b\d{16,20}\b")
         for forbidden in ("token", "user", "guild", "channelId"):

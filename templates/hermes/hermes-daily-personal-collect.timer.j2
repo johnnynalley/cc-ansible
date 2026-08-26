@@ -1,0 +1,11 @@
+[Unit]
+Description=Collect Hermes Daily Summary personal inputs
+
+[Timer]
+OnCalendar=*-*-* 06:45:00 America/Chicago
+Persistent=true
+AccuracySec=1s
+Unit=hermes-retained-automation@daily-personal.service
+
+[Install]
+WantedBy=timers.target

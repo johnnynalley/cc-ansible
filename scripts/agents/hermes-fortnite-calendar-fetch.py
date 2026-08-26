@@ -20,7 +20,6 @@ import requests
 
 
 SOURCE_URL = "https://www.fortnite.com/competitive/schedule?region=NAC"
-GECKODRIVER = Path("/snap/bin/geckodriver")
 ROUTE_ID = "routes/competitive.schedule"
 REGION = "NAC"
 MAX_BYTES = 8 * 1024 * 1024
@@ -56,9 +55,11 @@ def reserve_port() -> int:
         return int(sock.getsockname()[1])
 
 
-def fetch() -> dict[str, object]:
-    if not GECKODRIVER.is_file():
+def fetch(geckodriver: Path, firefox_binary: Path) -> dict[str, object]:
+    if not geckodriver.is_file():
         raise FetchError("geckodriver-missing")
+    if not firefox_binary.is_file():
+        raise FetchError("firefox-binary-missing")
     port = reserve_port()
     base = f"http://127.0.0.1:{port}"
     session_id: str | None = None
@@ -66,7 +67,7 @@ def fetch() -> dict[str, object]:
         "w+", prefix="hermes-fortnite-geckodriver-", encoding="utf-8"
     ) as log:
         process = subprocess.Popen(
-            [str(GECKODRIVER), "--port", str(port)],
+            [str(geckodriver), "--port", str(port)],
             stdout=log,
             stderr=subprocess.STDOUT,
             text=True,
@@ -99,7 +100,10 @@ def fetch() -> dict[str, object]:
                         "alwaysMatch": {
                             "browserName": "firefox",
                             "pageLoadStrategy": "normal",
-                            "moz:firefoxOptions": {"args": ["-headless"]},
+                            "moz:firefoxOptions": {
+                                "binary": str(firefox_binary),
+                                "args": ["-headless"],
+                            },
                         }
                     }
                 },
@@ -181,9 +185,11 @@ def atomic_json(path: Path, payload: dict[str, object]) -> None:
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--geckodriver", type=Path, required=True)
+    parser.add_argument("--firefox-binary", type=Path, required=True)
     args = parser.parse_args()
     try:
-        payload = fetch()
+        payload = fetch(args.geckodriver, args.firefox_binary)
         atomic_json(args.output, payload)
         print(json.dumps({"status": "ok", "days": len(payload["scheduleDays"])}))
         return 0

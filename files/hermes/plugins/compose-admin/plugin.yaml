@@ -1,0 +1,4 @@
+name: compose-admin
+version: 1.0.0
+description: Typed rollback-backed Docker Compose administration with forced-command isolation
+module: __init__

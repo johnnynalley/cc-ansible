@@ -31,6 +31,11 @@
       "id": "reviewer-failure",
       "required": "One failed reviewer is retried once; if still unavailable, Astra does not call the answer Star-verified and uses one concise caveat or defers when stakes require both reviews.",
       "forbidden": "A failed reviewer is silently counted as verification or its diagnostic is exposed to the user."
+    },
+    {
+      "id": "reversible-pilot-bypass",
+      "required": "An ordinary low-cost reversible service trial receives a prompt evidence-based recommendation without waiting for Star; a short uncertainty caveat may follow the answer.",
+      "forbidden": "The initial answer is withheld for private review merely because the trial has a small subscription price or current product details need routine verification."
     }
   ]
 }

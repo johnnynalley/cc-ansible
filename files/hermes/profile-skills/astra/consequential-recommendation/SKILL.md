@@ -23,13 +23,15 @@ not a shifting list of plausible products or architectures.
 ## When to Use
 
 - Recommending hardware, software, subscriptions, providers, deployment
-  architecture, or a security-sensitive action.
+  architecture, or a security-sensitive action when the cost, lock-in,
+  migration effort, privacy exposure, or failure impact is material.
 - Revisiting advice after the user bought, ordered, configured, or deployed
   something based on an earlier recommendation.
 - Comparing options whose compatibility or benefit depends on exact variants.
 
-Do not load this for low-cost, reversible preference questions with no material
-downside.
+Do not load this for low-cost, reversible preference questions or short trials
+with no material downside. Answer those promptly from the best current evidence;
+do not make private review a prerequisite to the initial answer.
 
 ## Procedure
 

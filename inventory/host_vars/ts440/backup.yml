@@ -19,3 +19,14 @@ restic_excludes_extra:
   # Time Machine has its own versioning
   - "/srv/nas-zfs/backups/timemachine"
   - "/srv/nas-zfs/backups/timemachine/**"
+
+# Independent source-loss detection for the Hermes disaster-recovery backup.
+# The checker runs on the NAS, so it still alerts when jn-t14s-lin is offline.
+local_restic_freshness_monitors:
+  - name: hermes-jn-t14s-lin
+    source_host: jn-t14s-lin
+    repository: /srv/nas-zfs/backups/jn-t14s-lin
+    max_age_seconds: 10800
+    alert_dedup_seconds: 21600
+    required_paths:
+      - /var/backups/hermes-disaster-recovery/current

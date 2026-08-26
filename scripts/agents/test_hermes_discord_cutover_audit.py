@@ -39,9 +39,17 @@ class HermesDiscordCutoverAuditTests(unittest.TestCase):
         result = MODULE.audit_contract(CONTRACT_PATH, ROOT)
         self.assertEqual(result["status"], "ok")
         self.assertEqual(result["profiles"], ["astra", "dubble", "rigel"])
-        self.assertEqual(result["distinctIdentities"], 2)
+        self.assertEqual(result["distinctIdentities"], 3)
         self.assertEqual(result["promotionCases"], 12)
         self.assertFalse(result["liveChangeAuthorized"])
+        dubble = next(
+            profile for profile in self.contract["profiles"]
+            if profile["name"] == "dubble"
+        )
+        self.assertEqual(
+            dubble["allowedRolesRef"],
+            "policy:dubble-discord-parity/guilds-as-everyone-roles",
+        )
 
     def test_cli_output_is_content_free(self) -> None:
         result = subprocess.run(
@@ -84,18 +92,15 @@ class HermesDiscordCutoverAuditTests(unittest.TestCase):
                         self.write_contract(Path(directory), payload), ROOT
                     )
 
-    def test_rigel_cannot_start_a_duplicate_discord_consumer(self) -> None:
+    def test_rigel_cannot_reuse_astra_discord_identity(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             payload = copy.deepcopy(self.contract)
             rigel = payload["profiles"][2]
-            rigel["service"] = "hermes-gateway-rigel.service"
-            rigel["credentialFile"] = "/etc/hermes/rigel/.env"
-            rigel["applicationIdentityRef"] = (
-                "private-enrollment:discord/rigel/application"
-            )
-            rigel["botTokenRef"] = "private-enrollment:discord/rigel/token"
+            rigel["applicationIdentityRef"] = payload["profiles"][0][
+                "applicationIdentityRef"
+            ]
             with self.assertRaisesRegex(
-                MODULE.DiscordCutoverAuditError, "service drift"
+                MODULE.DiscordCutoverAuditError, "not distinct"
             ):
                 MODULE.audit_contract(
                     self.write_contract(Path(directory), payload), ROOT

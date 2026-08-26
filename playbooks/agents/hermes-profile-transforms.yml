@@ -47,7 +47,7 @@
           - inventory_hostname == 'jn-t14s-lin'
           - hermes_profile_transforms_contract.schemaVersion == 1
           - hermes_profile_transforms_contract.mode == 'inactive-reviewed-profile-transforms'
-          - hermes_profile_transforms_contract.transforms | length == 6
+          - hermes_profile_transforms_contract.transforms | length == 5
           - hermes_profile_transforms_contract.safety.values() | select('equalto', false) | list | length == hermes_profile_transforms_contract.safety | length
           - hermes_profile_transforms_contract.execution.values() | select('equalto', true) | list | length == hermes_profile_transforms_contract.execution | length
         fail_msg: >-
@@ -206,13 +206,13 @@
         that:
           - hermes_profile_transforms_plan.status == 'ok'
           - hermes_profile_transforms_plan.mode == 'plan'
-          - hermes_profile_transforms_plan.summary.inputs == 7
-          - hermes_profile_transforms_plan.summary.outputs == 6
+          - hermes_profile_transforms_plan.summary.inputs == 5
+          - hermes_profile_transforms_plan.summary.outputs == 5
           - hermes_profile_transforms_plan.summary.inputBytes <= hermes_profile_transforms_contract.limits.maxInputBytes
           - hermes_profile_transforms_plan.summary.outputBytes <= hermes_profile_transforms_contract.limits.maxOutputBytes
           - hermes_profile_transforms_plan.summary.profiles.astra.writableOutputs == 4
           - hermes_profile_transforms_plan.summary.profiles.dubble.writableOutputs == 1
-          - hermes_profile_transforms_plan.summary.profiles.rigel.managedOutputs == 1
+          - hermes_profile_transforms_plan.summary.profiles.rigel.outputs == 0
         fail_msg: >-
           The canonical transform plan is missing an input/output, exceeds its
           limits, or assigns state to the wrong profile or ownership class.

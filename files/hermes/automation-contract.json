@@ -5,15 +5,15 @@
   "sourcePins": {
     "stateMigration": {
       "path": "files/hermes/openclaw-state-migration-contract.json",
-      "sha256": "ace3d5f6b0f97abb15e523fad624175272962a4a04d5cc5cc8a125938da81cbd"
+      "sha256": "b52d41e2890497c349f9268f3b81c3c26ce6ab977ef717175442fe8db0aa4f88"
     },
     "discordCutover": {
       "path": "files/hermes/discord-cutover-contract.json",
-      "sha256": "e9968bede240e7826455cc6b2e0ebb118a081e9776cb387586e78a36c95f5802"
+      "sha256": "356fe6d8a6187d986b216591af54fe4f4a0d89be7b8f408c2d27715499c347ea"
     },
     "rigelJob": {
       "path": "files/hermes/jobs/rigel-academic-alerts.json",
-      "sha256": "b92bf252a991b15a167756b076cc962b27b8f9741c4807eb7b3b5122b9f9cf3e"
+      "sha256": "e4ccc6aa5b7eccd5f8730b4ad5abdec68b1ad401d8013c8b86cc6c320de4ff0a"
     },
     "healthReceiverPlaybook": {
       "path": "playbooks/agents/openclaw-health-receiver.yml",

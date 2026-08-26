@@ -1,0 +1,9 @@
+{
+  "schemaVersion": 1,
+  "profile": "astra",
+  "allowedSource": "discord",
+  "allowedUserIds": [{{ hermes_automation_owner_user_id | string | to_json }}],
+  "allowedGuildIds": [{{ hermes_rigel_discord_guild_id | string | to_json }}],
+  "allowedChannelIds": [{{ hermes_astra_discord_channel_id | string | to_json }}],
+  "allowedTargets": ["astra", "dubble", "rigel"]
+}

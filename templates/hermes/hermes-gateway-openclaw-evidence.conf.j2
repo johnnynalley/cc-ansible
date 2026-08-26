@@ -1,0 +1,10 @@
+[Unit]
+Requires={{ hermes_openclaw_evidence_service }}
+After={{ hermes_openclaw_evidence_service }}
+
+[Service]
+BindReadOnlyPaths={{ hermes_openclaw_evidence_contract.runtime.viewRoot }}:{{ hermes_openclaw_evidence_contract.runtime.profilePath }}
+ExecStartPre=/usr/bin/test -r {{ hermes_openclaw_evidence_contract.runtime.profilePath }}/.hermes-evidence-manifest.json
+ExecStartPre=/usr/bin/test -r {{ hermes_openclaw_evidence_contract.runtime.profilePath }}/workspace/AGENTS.md
+ExecStartPre=/usr/bin/test -r {{ hermes_openclaw_evidence_contract.runtime.profilePath }}/workspace/references
+ExecStartPre={{ hermes_bootstrap_parity_validator_live }} --contract {{ hermes_bootstrap_parity_contract_live }} --repo-root {{ hermes_bootstrap_parity_runtime_repo_root }} --source-root {{ hermes_openclaw_evidence_contract.runtime.profilePath }}/workspace --profile-root /var/lib/hermes/astra/.hermes/profiles/astra --runtime

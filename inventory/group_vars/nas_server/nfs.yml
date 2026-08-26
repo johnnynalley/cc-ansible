@@ -63,6 +63,11 @@ nfs_exports:
   # /srv/media/plex via the single media export above.
   - name: archive
     bind_source: /srv/nas-zfs/archive
+    bind_source_name: nas_zfs/archive
+    bind_source_fstype: zfs
+    bind_requires_unit: zfs-mount.service
+    bind_opts: >-
+      bind,nofail,x-systemd.requires-mounts-for=/srv/nas-zfs/archive,x-systemd.requires=zfs-mount.service,x-systemd.after=zfs-mount.service
     owner: johnny
     group: johnny
     mode: "0775"
@@ -75,6 +80,15 @@ nfs_exports:
   # Sanoid-backed live rollback cache for one-off config/data backups.
   - name: live-rollbacks
     bind_source: /srv/nas-zfs/backups/live-rollbacks
+    bind_source_name: nas_zfs/backups/live-rollbacks
+    bind_source_fstype: zfs
+    bind_requires_unit: zfs-mount.service
+    bind_opts: >-
+      bind,nofail,x-systemd.requires-mounts-for=/srv/nas-zfs/backups/live-rollbacks,x-systemd.requires=zfs-mount.service,x-systemd.after=zfs-mount.service
+    bind_source_marker: .live-rollback-origin
+    bind_source_marker_content: |
+      schema=1
+      dataset=nas_zfs/backups/live-rollbacks
     owner: johnny
     group: johnny
     mode: "2775"

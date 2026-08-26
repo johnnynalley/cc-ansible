@@ -29,8 +29,14 @@ class ReconcileError(Exception):
 def load_json(path: Path) -> Any:
     try:
         return json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as exc:
-        raise ReconcileError(f"invalid-json:{path.name}") from exc
+    except OSError as exc:
+        raise ReconcileError(
+            f"json-read-failed:{path.name}:errno={exc.errno}"
+        ) from exc
+    except json.JSONDecodeError as exc:
+        raise ReconcileError(
+            f"invalid-json:{path.name}:line={exc.lineno}:column={exc.colno}"
+        ) from exc
 
 
 def parse_expiry(value: Any) -> datetime | None:
@@ -77,6 +83,8 @@ def validate_job(value: Any, scripts_root: Path) -> dict[str, Any]:
         "provider",
         "skills",
         "enabledToolsets",
+        "continuity",
+        "workdir",
         "adoptExisting",
         "expiresAt",
     }
@@ -91,6 +99,8 @@ def validate_job(value: Any, scripts_root: Path) -> dict[str, Any]:
     no_agent = value.get("noAgent", False)
     model = value.get("model")
     provider = value.get("provider")
+    continuity = value.get("continuity", False)
+    workdir = value.get("workdir")
     adopt_existing = value.get("adoptExisting", False)
     if not isinstance(key, str) or not KEY_RE.fullmatch(key):
         raise ReconcileError("invalid-job-key")
@@ -102,7 +112,11 @@ def validate_job(value: Any, scripts_root: Path) -> dict[str, Any]:
         raise ReconcileError(f"invalid-prompt:{key}")
     if not isinstance(deliver, str) or not DELIVERY_RE.fullmatch(deliver):
         raise ReconcileError(f"invalid-delivery:{key}")
-    if not isinstance(no_agent, bool) or not isinstance(adopt_existing, bool):
+    if (
+        not isinstance(no_agent, bool)
+        or not isinstance(continuity, bool)
+        or not isinstance(adopt_existing, bool)
+    ):
         raise ReconcileError(f"invalid-mode:{key}")
     if script is not None:
         if not isinstance(script, str) or not SCRIPT_RE.fullmatch(script):
@@ -114,6 +128,16 @@ def validate_job(value: Any, scripts_root: Path) -> dict[str, Any]:
         raise ReconcileError(f"script-required:{key}")
     if not no_agent and not prompt.strip():
         raise ReconcileError(f"prompt-required:{key}")
+    if continuity and no_agent:
+        raise ReconcileError(f"continuity-requires-agent:{key}")
+    if workdir is not None and (
+        not isinstance(workdir, str)
+        or not workdir
+        or len(workdir) > 512
+        or "\x00" in workdir
+        or not Path(workdir).is_absolute()
+    ):
+        raise ReconcileError(f"invalid-workdir:{key}")
     if (model is None) != (provider is None):
         raise ReconcileError(f"incomplete-model-pin:{key}")
     if model is not None and (
@@ -131,6 +155,8 @@ def validate_job(value: Any, scripts_root: Path) -> dict[str, Any]:
         value.get("enabledToolsets"), f"invalid-toolsets:{key}"
     )
     normalized["adoptExisting"] = adopt_existing
+    normalized["continuity"] = continuity
+    normalized["workdir"] = workdir
     normalized["expiresAt"] = parse_expiry(value.get("expiresAt"))
     return normalized
 
@@ -192,7 +218,8 @@ def desired_fields(job: dict[str, Any], profile: str, api: Any | None = None) ->
         "provider": job.get("provider"),
         "skills": job.get("skills") or [],
         "enabled_toolsets": job.get("enabledToolsets") or None,
-        "workdir": None,
+        "context_from": ["self"] if job.get("continuity") else None,
+        "workdir": job.get("workdir"),
         "schedule_display": schedule_display,
         "origin": origin_for(job, profile),
     }
@@ -253,6 +280,8 @@ def create_native(api: Any, job: dict[str, Any], profile: str) -> dict[str, Any]
         provider=job.get("provider"),
         script=job.get("script"),
         enabled_toolsets=job.get("enabledToolsets") or None,
+        context_from=["self"] if job.get("continuity") else None,
+        workdir=job.get("workdir"),
         no_agent=job.get("noAgent", False),
     )
 
@@ -272,10 +301,26 @@ def update_native(api: Any, existing: dict[str, Any], job: dict[str, Any], profi
             raise ReconcileError(f"native-resume-failed:{job['key']}")
 
 
+def requested_mode(args: argparse.Namespace) -> str:
+    explicit = getattr(args, "operation", None)
+    if explicit in {"audit", "seed", "restore"}:
+        return explicit
+    if getattr(args, "seed", False):
+        return "seed"
+    if getattr(args, "restore", False) or getattr(args, "apply", False):
+        return "restore"
+    return "audit"
+
+
 def reconcile(args: argparse.Namespace) -> list[dict[str, str]]:
     home = args.home.resolve(strict=True)
     scripts_root = home / "scripts"
     jobs = load_manifest(args.manifest, scripts_root, args.profile)
+    for job in jobs:
+        if not job.get("noAgent") and job.get("workdir") != str(home):
+            raise ReconcileError(f"profile-workdir-required:{job['key']}")
+        if job.get("noAgent") and job.get("workdir") is not None:
+            raise ReconcileError(f"script-workdir-forbidden:{job['key']}")
     now = datetime.now(timezone.utc)
     desired = {
         job["key"]: job
@@ -283,6 +328,8 @@ def reconcile(args: argparse.Namespace) -> list[dict[str, str]]:
         if job.get("expiresAt") is None or job["expiresAt"] > now
     }
     api = native_api()
+    operation = requested_mode(args)
+    mutating = operation in {"seed", "restore"}
     native = api.list_jobs(include_disabled=True)
     if not isinstance(native, list) or not all(isinstance(job, dict) for job in native):
         raise ReconcileError("invalid-native-job-list")
@@ -305,6 +352,8 @@ def reconcile(args: argparse.Namespace) -> list[dict[str, str]]:
         if existing is None:
             collisions = by_name.get(job["name"].casefold(), [])
             if collisions:
+                if operation == "seed":
+                    raise ReconcileError(f"seed-name-collision:{key}")
                 if not job.get("adoptExisting") or len(collisions) != 1:
                     raise ReconcileError(f"unmanaged-name-collision:{key}")
                 existing = collisions[0]
@@ -312,21 +361,22 @@ def reconcile(args: argparse.Namespace) -> list[dict[str, str]]:
                     raise ReconcileError(f"managed-name-collision:{key}")
         if existing is None:
             changes.append({"key": key, "action": "create"})
-            if args.apply:
+            if mutating:
                 create_native(api, job, args.profile)
-        elif not is_current(existing, job, args.profile, api):
+        elif operation != "seed" and not is_current(existing, job, args.profile, api):
             changes.append({"key": key, "action": "update"})
-            if args.apply:
+            if operation == "restore":
                 update_native(api, existing, job, args.profile)
 
-    for key, existing in sorted(by_key.items()):
-        if key in desired:
-            continue
-        changes.append({"key": key, "action": "remove"})
-        if args.apply:
-            job_id = existing.get("id")
-            if not isinstance(job_id, str) or not api.remove_job(job_id):
-                raise ReconcileError(f"native-remove-failed:{key}")
+    if operation != "seed":
+        for key, existing in sorted(by_key.items()):
+            if key in desired:
+                continue
+            changes.append({"key": key, "action": "remove"})
+            if operation == "restore":
+                job_id = existing.get("id")
+                if not isinstance(job_id, str) or not api.remove_job(job_id):
+                    raise ReconcileError(f"native-remove-failed:{key}")
     return changes
 
 
@@ -336,13 +386,28 @@ def main() -> int:
     parser.add_argument("--home", type=Path, required=True)
     parser.add_argument("--profile", required=True)
     mode = parser.add_mutually_exclusive_group(required=True)
-    mode.add_argument("--check", action="store_true")
-    mode.add_argument("--apply", action="store_true")
+    mode.add_argument("--audit", action="store_const", const="audit", dest="operation")
+    mode.add_argument("--seed", action="store_const", const="seed", dest="operation")
+    mode.add_argument("--restore", action="store_const", const="restore", dest="operation")
+    mode.add_argument(
+        "--check",
+        action="store_const",
+        const="audit",
+        dest="operation",
+        help=argparse.SUPPRESS,
+    )
+    mode.add_argument(
+        "--apply",
+        action="store_const",
+        const="restore",
+        dest="operation",
+        help=argparse.SUPPRESS,
+    )
     args = parser.parse_args()
     with reconcile_lock(args.home.resolve(strict=True)):
         changes = reconcile(args)
     print(json.dumps({"status": "ok", "changes": changes}, separators=(",", ":")))
-    return 0 if args.apply or not changes else 3
+    return 0 if args.operation in {"seed", "restore"} or not changes else 3
 
 
 if __name__ == "__main__":

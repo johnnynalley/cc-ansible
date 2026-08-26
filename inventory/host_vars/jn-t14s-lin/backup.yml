@@ -10,10 +10,31 @@ restic_backup_paths_extra:
 
 # Local backup to ts440 ZFS (for quick restore)
 local_restic_enabled: true
+# Use TS440's stable Tailscale route; the LAN address is not reachable when
+# the local router path is unavailable.
+local_restic_target_host: "100.71.188.16"
 local_restic_backup_paths:
   - /home/johnny
   - /opt/cc-ansible
-  - /opt/qdrant/storage
+  - /var/lib/hermes
+  - /var/lib/hermes-automation
+  - /etc/hermes
+  - /var/backups/hermes-disaster-recovery/current
+
+# Hermes native archives are same-host rollback. This application-consistent
+# staging set and the complete mutable roots above are the node-loss recovery
+# source copied to encrypted Restic storage on nas-zfs.
+hermes_disaster_recovery_enabled: true
+
+local_restic_excludes_extra:
+  - /var/lib/hermes/openclaw-evidence/merged
+  - /var/lib/hermes/openclaw-evidence/work
+  - /var/lib/hermes/astra/workspaces/cc-ansible
+  - /var/lib/hermes/astra/.agent-browser/browsers
+  - /var/lib/hermes/astra/.cache
+  - /var/lib/hermes/astra/.npm
+  - /var/lib/hermes/astra/.local/share/containers
+  - /var/lib/hermes/bootstrap
 
 # Skip backups when on battery power (systemd ConditionACPower=true)
 restic_require_ac_power: true

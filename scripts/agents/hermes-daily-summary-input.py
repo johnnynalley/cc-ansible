@@ -10,7 +10,7 @@ from pathlib import Path
 
 SOURCE = Path("/var/lib/hermes-automation/daily-summary.md")
 MAX_BYTES = 262_144
-MAX_AGE_SECONDS = 4 * 60 * 60
+MAX_AGE_SECONDS = 15 * 60
 
 
 def main() -> int:

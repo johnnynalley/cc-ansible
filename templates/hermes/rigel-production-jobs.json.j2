@@ -1,0 +1,9 @@
+{
+  "schemaVersion": 1,
+  "profile": "rigel",
+  "jobs": [
+{% if hermes_rigel_dedicated_discord_enabled %}
+    {"key":"rigel-academic-alerts","name":"rigel-academic-alerts","schedule":"every 30m","prompt":"","deliver":"discord:{{ hermes_rigel_discord_channel_id }}","script":"hermes-rigel-schedule.py","noAgent":true,"adoptExisting":true}
+{% endif %}
+  ]
+}

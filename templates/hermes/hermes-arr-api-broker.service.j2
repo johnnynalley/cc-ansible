@@ -1,0 +1,53 @@
+[Unit]
+Description=Credential-isolated Hermes Arr API broker
+After=network-online.target
+Wants=network-online.target
+Before=hermes-gateway-astra.service
+
+[Service]
+Type=simple
+User={{ hermes_arr_api_user }}
+Group={{ hermes_arr_api_group }}
+ExecStart={{ hermes_arr_api_python }} {{ hermes_arr_api_broker_live }} --socket {{ hermes_arr_api_socket }} --allowed-uid {{ hermes_arr_api_astra_profile.uid }}
+Restart=on-failure
+RestartSec=5s
+TimeoutStartSec=30s
+TimeoutStopSec=15s
+RuntimeDirectory=hermes-arr-api
+RuntimeDirectoryMode=0750
+UMask=0007
+{% for service in hermes_arr_api_services %}
+LoadCredential={{ service.name }}:{{ hermes_arr_api_private_root }}/{{ service.name }}.json
+{% endfor %}
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectClock=true
+ProtectControlGroups=true
+ProtectHostname=true
+ProtectKernelLogs=true
+ProtectKernelModules=true
+ProtectKernelTunables=true
+ProtectProc=invisible
+LockPersonality=true
+MemoryDenyWriteExecute=true
+RestrictNamespaces=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+CapabilityBoundingSet=
+AmbientCapabilities=
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+IPAddressDeny=any
+{% for address in hermes_arr_api_allowed_addresses %}
+IPAddressAllow={{ address }}
+{% endfor %}
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+TasksMax=32
+LimitNOFILE=256
+
+[Install]
+WantedBy=multi-user.target

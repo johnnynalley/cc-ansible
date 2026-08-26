@@ -1,0 +1,11 @@
+[Unit]
+Description=Assemble the Hermes Daily Summary source artifact
+
+[Timer]
+OnCalendar=*-*-* 07:00:00 America/Chicago
+Persistent=true
+AccuracySec=1s
+Unit=hermes-retained-automation@daily-assemble.service
+
+[Install]
+WantedBy=timers.target

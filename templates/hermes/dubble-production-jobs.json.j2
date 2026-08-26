@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "profile": "dubble",
+  "jobs": [
+    {
+      "key": "thread-followup",
+      "name": "dubble-thread-followup",
+      "schedule": "every 30m",
+      "prompt": "Inspect only live Discord threads under parent channel {{ hermes_dubble_parent_channel_id }} in guild {{ hermes_dubble_guild_id }}. Ignore the configured log channel. For a thread whose latest Dubble message has no user reply for at least 30 minutes, use the bounded native peer handoff tool to ask Astra for guidance, wait for the result, and post one useful follow-up in that same thread. After two hours unresolved, archive the thread only when the preserved Dubble rule allows it. Never inspect private Astra sessions or other channels. If no action is due, respond with only [SILENT].",
+      "deliver": "local",
+      "script": null,
+      "noAgent": false,
+      "enabledToolsets": ["safe", "memory", "session_search", "discord", "discord_admin", "discord_parity", "astra_handoff"],
+      "workdir": "/var/lib/hermes/dubble/.hermes/profiles/dubble"
+    }
+  ]
+}

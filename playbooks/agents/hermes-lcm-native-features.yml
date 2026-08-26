@@ -1,0 +1,838 @@
+---
+# Purpose: Audit or transactionally enable stable native LCM semantic,
+#          proactive, temporal, and cross-session recall features for Astra.
+# Hosts: hermes_hosts.
+# Key vars: hermes_lcm_native_features_*; hermes_lcm_*.
+# Templates: templates/hermes/hermes-gateway-hardening.conf.j2.
+# Validation: ansible-playbook playbooks/agents/hermes-lcm-native-features.yml
+#             --syntax-check.
+
+- name: Enable and verify Astra native LCM feature depth
+  hosts: hermes_hosts
+  become: true
+  gather_facts: true
+  serial: 1
+
+  pre_tasks:
+    - name: Validate native LCM feature operating mode
+      ansible.builtin.assert:
+        that:
+          - hermes_lcm_native_features_mode in ['audit', 'apply']
+          - >-
+            hermes_lcm_native_features_mode != 'apply'
+            or (
+              hermes_lcm_native_features_approved | bool
+              and hermes_lcm_native_features_confirmation
+                  == hermes_lcm_native_features_required_confirmation
+            )
+        fail_msg: >-
+          LCM feature mutation requires apply mode, explicit approval, and the
+          exact confirmation phrase.
+
+  tasks:
+    - name: Select the managed Astra profile
+      ansible.builtin.set_fact:
+        hermes_lcm_native_astra_profile: >-
+          {{ hermes_shadow_profiles
+             | selectattr('name', 'equalto', 'astra') | list | first }}
+
+    - name: Build Astra-native LCM command environment
+      ansible.builtin.set_fact:
+        hermes_lcm_native_command_prefix: >-
+          {{ ['/usr/sbin/runuser', '--user',
+              hermes_lcm_native_astra_profile.user, '--', '/usr/bin/env',
+              'HOME=' + hermes_lcm_native_astra_profile.account_home,
+              'HERMES_HOME=' + hermes_lcm_native_astra_profile.home,
+              'LCM_DATABASE_PATH=' + hermes_lcm_target_database,
+              'LCM_EMBEDDINGS_ENABLED=true',
+              'LCM_EMBEDDING_PROVIDER=' + hermes_lcm_embedding_provider,
+              'LCM_EMBEDDING_MODEL=' + hermes_lcm_embedding_model,
+              'LCM_OLLAMA_BASE_URL=' + hermes_lcm_ollama_base_url,
+              'LCM_EMBEDDING_STORAGE_DTYPE=' +
+                hermes_lcm_embedding_storage_dtype,
+              'LCM_EMBEDDING_STORE_DIM=' +
+                (hermes_lcm_embedding_store_dim | string),
+              'LCM_EMBEDDING_BINARY_PRESCREEN=' +
+                (hermes_lcm_embedding_binary_prescreen
+                 | ternary('true', 'false')),
+              'LCM_EMBED_CONTENT_POLICY=' +
+                hermes_lcm_embedding_content_policy,
+              'LCM_EMBEDDING_MAX_BATCH_ITEMS=' +
+                (hermes_lcm_embedding_max_batch_items | string),
+              'LCM_EMBEDDING_QUERY_TIMEOUT_S=' +
+                (hermes_lcm_embedding_query_timeout_s | string),
+              'LCM_RECALL_QUERY_TIMEOUT_S=' +
+                (hermes_lcm_recall_query_timeout_s | string),
+              'LCM_EMBEDDING_BACKFILL_TIMEOUT_S=' +
+                (hermes_lcm_embedding_backfill_timeout_s | string),
+              'LCM_EMBEDDING_BACKFILL_BUDGET_S=0',
+              'LCM_PROACTIVE_RECALL_ENABLED=' +
+                (hermes_lcm_proactive_recall_enabled
+                 | ternary('true', 'false')),
+              'LCM_TEMPORAL_ROLLUPS_ENABLED=' +
+                (hermes_lcm_temporal_rollups_enabled
+                 | ternary('true', 'false')),
+              hermes_shadow_runtime_venv + '/bin/python',
+              hermes_lcm_native_maintenance_live] }}
+        hermes_lcm_native_required_dropin_lines:
+          - Environment=LCM_EMBEDDINGS_ENABLED=true
+          - >-
+            Environment=LCM_EMBEDDING_PROVIDER={{ hermes_lcm_embedding_provider }}
+          - >-
+            Environment=LCM_EMBEDDING_MODEL={{ hermes_lcm_embedding_model }}
+          - >-
+            Environment=LCM_OLLAMA_BASE_URL={{ hermes_lcm_ollama_base_url }}
+          - >-
+            Environment=LCM_EMBEDDING_STORAGE_DTYPE={{ hermes_lcm_embedding_storage_dtype }}
+          - >-
+            Environment=LCM_EMBEDDING_STORE_DIM={{ hermes_lcm_embedding_store_dim }}
+          - >-
+            Environment=LCM_EMBEDDING_BINARY_PRESCREEN={{ hermes_lcm_embedding_binary_prescreen | ternary('true', 'false') }}
+          - >-
+            Environment=LCM_EMBED_CONTENT_POLICY={{ hermes_lcm_embedding_content_policy }}
+          - >-
+            Environment=LCM_EMBEDDING_MAX_BATCH_ITEMS={{ hermes_lcm_embedding_max_batch_items }}
+          - >-
+            Environment=LCM_EMBEDDING_QUERY_TIMEOUT_S={{ hermes_lcm_embedding_query_timeout_s }}
+          - >-
+            Environment=LCM_RECALL_QUERY_TIMEOUT_S={{ hermes_lcm_recall_query_timeout_s }}
+          - >-
+            Environment=LCM_EMBEDDING_BACKFILL_TIMEOUT_S={{ hermes_lcm_embedding_backfill_timeout_s }}
+          - >-
+            Environment=LCM_PROACTIVE_RECALL_ENABLED={{ hermes_lcm_proactive_recall_enabled | ternary('true', 'false') }}
+          - >-
+            Environment=LCM_TEMPORAL_ROLLUPS_ENABLED={{ hermes_lcm_temporal_rollups_enabled | ternary('true', 'false') }}
+
+    - name: Inspect required native LCM paths
+      ansible.builtin.stat:
+        path: "{{ item.path }}"
+      loop:
+        - name: plugin
+          path: "{{ hermes_lcm_plugin_managed_root }}/plugin.yaml"
+          expected_type: regular
+        - name: database
+          path: "{{ hermes_lcm_target_database }}"
+          expected_type: regular
+        - name: state database
+          path: "{{ hermes_lcm_native_astra_profile.home }}/state.db"
+          expected_type: regular
+        - name: runtime venv
+          path: "{{ hermes_shadow_runtime_venv }}/bin/python"
+          expected_type: runtime_selector
+        - name: gateway drop-in
+          path: >-
+            /etc/systemd/system/{{ hermes_lcm_native_astra_profile.unit }}.d/10-managed.conf
+          expected_type: regular
+      register: hermes_lcm_native_required_paths
+
+    - name: Require regular native LCM inputs
+      ansible.builtin.assert:
+        that:
+          - item.stat.exists
+          - >-
+            (item.item.expected_type == 'regular'
+             and (item.stat.isreg | default(false))
+             and not (item.stat.islnk | default(false)))
+            or
+            (item.item.expected_type == 'runtime_selector'
+             and (item.stat.islnk | default(false))
+             and (item.stat.lnk_source | default(''))
+                 is match('^/usr/local/share/uv/python/'))
+        fail_msg: "Required native LCM {{ item.item.name }} is missing or unsafe."
+      loop: "{{ hermes_lcm_native_required_paths.results }}"
+      loop_control:
+        label: "{{ item.item.name }}"
+
+    - name: Inspect installed native LCM maintenance utility
+      ansible.builtin.stat:
+        path: "{{ hermes_lcm_native_maintenance_live }}"
+      register: hermes_lcm_native_maintenance_before
+
+    - name: Require installed utility for read-only audit mode
+      ansible.builtin.assert:
+        that:
+          - hermes_lcm_native_maintenance_before.stat.exists
+          - hermes_lcm_native_maintenance_before.stat.isreg | default(false)
+        fail_msg: >-
+          The native LCM maintenance utility is not installed; use approved
+          apply mode to deploy and validate it first.
+      when: hermes_lcm_native_features_mode == 'audit'
+
+    - name: Deploy bounded native LCM maintenance utility
+      ansible.builtin.copy:
+        src: "{{ playbook_dir }}/../../{{ hermes_lcm_native_maintenance_source }}"
+        dest: "{{ hermes_lcm_native_maintenance_live }}"
+        owner: root
+        group: root
+        mode: "0755"
+      when: hermes_lcm_native_features_mode == 'apply'
+
+    - name: Inventory Astra LCM without exposing retained content
+      ansible.builtin.command:
+        argv: "{{ hermes_lcm_native_command_prefix + ['inventory'] }}"
+      register: hermes_lcm_native_inventory_before
+      changed_when: false
+      check_mode: false
+
+    - name: Run content-free native LCM doctor summary
+      ansible.builtin.command:
+        argv: "{{ hermes_lcm_native_command_prefix + ['doctor-summary'] }}"
+      register: hermes_lcm_native_doctor_before
+      changed_when: false
+      check_mode: false
+
+    - name: Audit current-session and imported LCM continuity without content
+      ansible.builtin.command:
+        argv: "{{ hermes_lcm_native_command_prefix + ['continuity-audit'] }}"
+      register: hermes_lcm_native_continuity_before
+      changed_when: false
+      check_mode: false
+
+    - name: Prove native proactive recall assembly without exposing content
+      ansible.builtin.command:
+        argv: "{{ hermes_lcm_native_command_prefix + ['proactive-smoke'] }}"
+      register: hermes_lcm_native_proactive_before
+      changed_when: false
+      check_mode: false
+
+    - name: Read live Astra Gateway drop-in
+      ansible.builtin.slurp:
+        src: >-
+          /etc/systemd/system/{{ hermes_lcm_native_astra_profile.unit }}.d/10-managed.conf
+      register: hermes_lcm_native_dropin_before
+
+    - name: Preview summary embedding debt
+      ansible.builtin.command:
+        argv: >-
+          {{ hermes_lcm_native_command_prefix
+             + ['backfill', '--corpus', 'summary', '--limit', '1'] }}
+      register: hermes_lcm_native_summary_preview_before
+      changed_when: false
+      failed_when: false
+      check_mode: false
+
+    - name: Preview chunk embedding debt
+      ansible.builtin.command:
+        argv: >-
+          {{ hermes_lcm_native_command_prefix
+             + ['backfill', '--corpus', 'chunks', '--limit', '1',
+                '--policy', hermes_lcm_embedding_content_policy] }}
+      register: hermes_lcm_native_chunk_preview_before
+      changed_when: false
+      failed_when: false
+      check_mode: false
+
+    - name: Classify native LCM feature convergence
+      ansible.builtin.set_fact:
+        hermes_lcm_native_config_current: >-
+          {{ hermes_lcm_native_required_dropin_lines
+             | difference((hermes_lcm_native_dropin_before.content
+                            | b64decode).splitlines()) | length == 0 }}
+        hermes_lcm_native_summary_current: >-
+          {{ hermes_lcm_native_summary_preview_before.rc == 0
+             and 'remaining: 0'
+                 in hermes_lcm_native_summary_preview_before.stdout }}
+        hermes_lcm_native_chunks_current: >-
+          {{ hermes_lcm_native_chunk_preview_before.rc == 0
+             and 'remaining: 0'
+                 in hermes_lcm_native_chunk_preview_before.stdout }}
+
+    - name: Report native LCM feature audit
+      ansible.builtin.debug:
+        msg:
+          inventory: "{{ hermes_lcm_native_inventory_before.stdout | from_json }}"
+          doctor: "{{ hermes_lcm_native_doctor_before.stdout | from_json }}"
+          continuity: "{{ hermes_lcm_native_continuity_before.stdout | from_json }}"
+          proactive: "{{ hermes_lcm_native_proactive_before.stdout | from_json }}"
+          config_current: "{{ hermes_lcm_native_config_current }}"
+          summary_embeddings_current: "{{ hermes_lcm_native_summary_current }}"
+          chunk_embeddings_current: "{{ hermes_lcm_native_chunks_current }}"
+          mutation_authorized: "{{ hermes_lcm_native_features_mode == 'apply' }}"
+
+    - name: Require live native LCM continuity and proactive recall
+      ansible.builtin.assert:
+        that:
+          - >-
+            (hermes_lcm_native_continuity_before.stdout
+             | from_json).recent_lcm_sessions_present_in_state | int > 0
+          - >-
+            (hermes_lcm_native_continuity_before.stdout
+             | from_json).recent_lcm_sessions_missing_in_state | int == 0
+          - >-
+            (hermes_lcm_native_inventory_before.stdout
+             | from_json).tables.lcm_rollups is defined
+          - >-
+            (hermes_lcm_native_proactive_before.stdout
+             | from_json).generated
+          - >-
+            (hermes_lcm_native_proactive_before.stdout
+             | from_json).wrapped
+          - >-
+            (hermes_lcm_native_proactive_before.stdout
+             | from_json).injected | int > 0
+          - >-
+            (hermes_lcm_native_proactive_before.stdout
+             | from_json).timeout | int == 0
+        fail_msg: >-
+          Native LCM continuity, temporal schema, or proactive recall acceptance
+          failed; do not treat configuration presence as feature parity.
+
+    - name: Stop after read-only native LCM audit
+      ansible.builtin.meta: end_host
+      when: hermes_lcm_native_features_mode == 'audit'
+
+    - name: Stop check mode after complete read-only LCM preview
+      ansible.builtin.meta: end_host
+      when: ansible_check_mode
+
+    - name: Stop zero-drift LCM apply before backup or Gateway restart
+      ansible.builtin.meta: end_host
+      when: hermes_lcm_native_config_current | bool
+
+    - name: Build native LCM transaction coordinates
+      ansible.builtin.set_fact:
+        hermes_lcm_native_run_id: >-
+          {{ ansible_facts.date_time.iso8601_basic_short | lower }}-pre-lcm-features
+        hermes_lcm_native_prior_state_published: false
+        hermes_lcm_native_dropin_activated: false
+
+    - name: Derive native LCM rollback and staging paths
+      ansible.builtin.set_fact:
+        hermes_lcm_native_rollback_dir: >-
+          {{ hermes_lcm_native_features_rollback_root }}/{{ hermes_lcm_native_run_id }}
+        hermes_lcm_native_local_stage: >-
+          {{ hermes_lcm_native_features_local_stage_root }}/{{ hermes_lcm_native_run_id }}
+        hermes_lcm_native_dropin_path: >-
+          /etc/systemd/system/{{ hermes_lcm_native_astra_profile.unit }}.d/10-managed.conf
+
+    - name: Inspect Astra Gateway state before LCM transaction
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/systemctl
+          - is-active
+          - "{{ hermes_lcm_native_astra_profile.unit }}"
+      register: hermes_lcm_native_astra_before
+      changed_when: false
+      failed_when: hermes_lcm_native_astra_before.rc not in [0, 3]
+
+    - name: Require enough local space for LCM backup and vectors
+      ansible.builtin.assert:
+        that:
+          - ansible_facts.mounts
+            | selectattr('mount', 'equalto', '/')
+            | map(attribute='size_available')
+            | first | int > 8589934592
+        fail_msg: >-
+          Less than 8 GiB is free on the root filesystem; refusing to stage an
+          integrity-checked LCM backup and full vector corpora.
+
+    - name: Apply native LCM feature transaction
+      block:
+        - name: Create private local and NFS LCM transaction directories
+          ansible.builtin.file:
+            path: "{{ item.path }}"
+            state: directory
+            owner: "{{ item.owner }}"
+            group: "{{ item.group }}"
+            mode: "{{ item.mode }}"
+          loop:
+            - path: "{{ hermes_lcm_native_rollback_dir }}"
+              owner: root
+              group: root
+              mode: "0700"
+            - path: "{{ hermes_lcm_native_local_stage }}"
+              owner: "{{ hermes_lcm_native_astra_profile.user }}"
+              group: "{{ hermes_lcm_native_astra_profile.group }}"
+              mode: "0700"
+
+        - name: Create live SQLite backup through the native LCM identity
+          ansible.builtin.command:
+            argv: >-
+              {{ hermes_lcm_native_command_prefix
+                 + ['backup', '--backup-destination',
+                    hermes_lcm_native_local_stage + '/lcm.db', '--approved',
+                    '--confirmation',
+                    hermes_lcm_native_maintenance_confirmation] }}
+          register: hermes_lcm_native_backup_result
+          changed_when: true
+
+        - name: Require integrity-checked native LCM backup
+          ansible.builtin.assert:
+            that:
+              - >-
+                (hermes_lcm_native_backup_result.stdout
+                 | from_json).quick_check == 'ok'
+              - >-
+                (hermes_lcm_native_backup_result.stdout
+                 | from_json).bytes | int > 0
+              - >-
+                (hermes_lcm_native_backup_result.stdout
+                 | from_json).sha256 is match('^[0-9a-f]{64}$')
+
+        - name: Publish LCM database backup to NFS staging
+          ansible.builtin.command:
+            argv:
+              - /usr/bin/cp
+              - --sparse=always
+              - "{{ hermes_lcm_native_local_stage }}/lcm.db"
+              - "{{ hermes_lcm_native_rollback_dir }}/lcm.db.partial"
+          changed_when: true
+
+        - name: Flush staged NFS LCM backup
+          ansible.builtin.command:
+            argv:
+              - /usr/bin/sync
+              - -f
+              - "{{ hermes_lcm_native_rollback_dir }}/lcm.db.partial"
+          changed_when: false
+
+        - name: Compare local and NFS LCM backup hashes
+          ansible.builtin.command:
+            argv:
+              - /usr/bin/sha256sum
+              - "{{ item }}"
+          loop:
+            - "{{ hermes_lcm_native_local_stage }}/lcm.db"
+            - "{{ hermes_lcm_native_rollback_dir }}/lcm.db.partial"
+          register: hermes_lcm_native_backup_hashes
+          changed_when: false
+
+        - name: Require hash-equal LCM backup publication
+          ansible.builtin.assert:
+            that:
+              - >-
+                hermes_lcm_native_backup_hashes.results[0].stdout.split()[0]
+                == hermes_lcm_native_backup_hashes.results[1].stdout.split()[0]
+              - >-
+                hermes_lcm_native_backup_hashes.results[0].stdout.split()[0]
+                == (hermes_lcm_native_backup_result.stdout | from_json).sha256
+
+        - name: Publish verified LCM backup atomically
+          ansible.builtin.command:
+            argv:
+              - /usr/bin/mv
+              - "{{ hermes_lcm_native_rollback_dir }}/lcm.db.partial"
+              - "{{ hermes_lcm_native_rollback_dir }}/lcm.db"
+          changed_when: true
+
+        - name: Back up prior Astra Gateway drop-in
+          ansible.builtin.copy:
+            src: "{{ hermes_lcm_native_dropin_path }}"
+            dest: "{{ hermes_lcm_native_rollback_dir }}/10-managed.conf"
+            remote_src: true
+            mode: "0600"
+
+        - name: Mark verified prior LCM state as published
+          ansible.builtin.set_fact:
+            hermes_lcm_native_prior_state_published: true
+
+        - name: Warm and dimension-lock local LCM embedding profiles
+          ansible.builtin.command:
+            argv: >-
+              {{ hermes_lcm_native_command_prefix
+                 + ['warmup', '--approved', '--confirmation',
+                    hermes_lcm_native_maintenance_confirmation] }}
+          register: hermes_lcm_native_warmup
+          changed_when: true
+
+        - name: Require local full-dimension v3 LCM profiles
+          ansible.builtin.assert:
+            that:
+              - "'status: ready' in hermes_lcm_native_warmup.stdout"
+              - >-
+                ('provider: ' + hermes_lcm_embedding_provider)
+                in hermes_lcm_native_warmup.stdout
+              - >-
+                ('model: ' + hermes_lcm_embedding_model)
+                in hermes_lcm_native_warmup.stdout
+              - >-
+                ('dim: ' + (hermes_lcm_embedding_dimensions | string))
+                in hermes_lcm_native_warmup.stdout
+              - >-
+                ('dtype: ' + hermes_lcm_embedding_storage_dtype)
+                in hermes_lcm_native_warmup.stdout
+              - >-
+                'local Ollama model; no per-call API charge'
+                in hermes_lcm_native_warmup.stdout
+
+        - name: Preview bounded summary embedding seed
+          ansible.builtin.command:
+            argv: >-
+              {{ hermes_lcm_native_command_prefix
+                 + ['backfill', '--corpus', 'summary', '--limit',
+                    (hermes_lcm_native_backfill_batch | string)] }}
+          register: hermes_lcm_native_summary_preview
+          changed_when: false
+
+        - name: Preview bounded conversational chunk embedding seed
+          ansible.builtin.command:
+            argv: >-
+              {{ hermes_lcm_native_command_prefix
+                 + ['backfill', '--corpus', 'chunks', '--limit',
+                    (hermes_lcm_native_backfill_batch | string), '--policy',
+                    hermes_lcm_embedding_content_policy] }}
+          register: hermes_lcm_native_chunk_preview
+          changed_when: false
+
+        - name: Populate bounded summary embeddings locally
+          ansible.builtin.command:
+            argv: >-
+              {{ hermes_lcm_native_command_prefix
+                 + ['backfill', '--corpus', 'summary', '--limit',
+                    (hermes_lcm_native_backfill_batch | string), '--apply',
+                    '--approved', '--confirmation',
+                    hermes_lcm_native_maintenance_confirmation] }}
+          register: hermes_lcm_native_summary_apply
+          changed_when: >-
+            'embedded: 0' not in hermes_lcm_native_summary_apply.stdout
+
+        - name: Populate bounded conversational chunk embeddings locally
+          ansible.builtin.command:
+            argv: >-
+              {{ hermes_lcm_native_command_prefix
+                 + ['backfill', '--corpus', 'chunks', '--limit',
+                    (hermes_lcm_native_backfill_batch | string), '--policy',
+                    hermes_lcm_embedding_content_policy, '--apply', '--approved',
+                    '--confirmation',
+                    hermes_lcm_native_maintenance_confirmation] }}
+          register: hermes_lcm_native_chunk_apply
+          changed_when: >-
+            'embedded: 0' not in hermes_lcm_native_chunk_apply.stdout
+
+        - name: Render Astra Gateway with stable native LCM features
+          ansible.builtin.template:
+            src: >-
+              {{ playbook_dir }}/../../templates/hermes/hermes-gateway-hardening.conf.j2
+            dest: "{{ hermes_lcm_native_dropin_path }}"
+            owner: root
+            group: root
+            mode: "0644"
+          vars:
+            hermes_profile: "{{ hermes_lcm_native_astra_profile }}"
+          register: hermes_lcm_native_dropin_change
+
+        - name: Mark changed native LCM configuration for rollback
+          ansible.builtin.set_fact:
+            hermes_lcm_native_dropin_activated: >-
+              {{ hermes_lcm_native_dropin_change.changed }}
+
+        - name: Reload systemd after native LCM configuration change
+          ansible.builtin.systemd_service:
+            daemon_reload: true
+          when: hermes_lcm_native_dropin_change.changed
+
+        - name: Restart Astra once after complete LCM staging
+          ansible.builtin.systemd_service:
+            name: "{{ hermes_lcm_native_astra_profile.unit }}"
+            state: restarted
+          when:
+            - hermes_lcm_native_dropin_change.changed
+            - hermes_lcm_native_astra_before.stdout == 'active'
+
+        - name: Wait for Astra native readiness after LCM activation
+          ansible.builtin.command:
+            argv:
+              - /usr/bin/systemctl
+              - is-active
+              - "{{ hermes_lcm_native_astra_profile.unit }}"
+          register: hermes_lcm_native_astra_after
+          retries: 60
+          delay: 2
+          until: hermes_lcm_native_astra_after.stdout == 'active'
+          changed_when: false
+          when: hermes_lcm_native_astra_before.stdout == 'active'
+
+        - name: Validate enabled native LCM configuration
+          ansible.builtin.command:
+            argv: "{{ hermes_lcm_native_command_prefix + ['config'] }}"
+          register: hermes_lcm_native_config_after
+          changed_when: false
+
+        - name: Inventory populated native LCM corpora
+          ansible.builtin.command:
+            argv: "{{ hermes_lcm_native_command_prefix + ['inventory'] }}"
+          register: hermes_lcm_native_inventory_after
+          changed_when: false
+
+        - name: Run final native LCM doctor summary
+          ansible.builtin.command:
+            argv: "{{ hermes_lcm_native_command_prefix + ['doctor-summary'] }}"
+          register: hermes_lcm_native_doctor_after
+          changed_when: false
+
+        - name: Prove semantic all-time recall without exposing memory content
+          ansible.builtin.command:
+            argv: >-
+              {{ hermes_lcm_native_command_prefix
+                 + ['recall-embedded-smoke', '--limit', '25'] }}
+          register: hermes_lcm_native_recall_after
+          changed_when: false
+
+        - name: Prove exact all-session archive search without exposing content
+          ansible.builtin.command:
+            argv: >-
+              {{ hermes_lcm_native_command_prefix
+                 + ['grep-smoke', '--query', hermes_lcm_native_fts_canary,
+                    '--limit', '25'] }}
+          register: hermes_lcm_native_grep_after
+          changed_when: false
+
+        - name: Require complete native LCM feature acceptance
+          ansible.builtin.assert:
+            that:
+              - >-
+                (hermes_lcm_native_config_after.stdout
+                 | from_json).embeddings_enabled
+              - >-
+                (hermes_lcm_native_config_after.stdout
+                 | from_json).embedding_provider
+                == hermes_lcm_embedding_provider
+              - >-
+                (hermes_lcm_native_config_after.stdout
+                 | from_json).embedding_model
+                == hermes_lcm_embedding_model
+              - >-
+                (hermes_lcm_native_config_after.stdout
+                 | from_json).embedding_binary_prescreen
+              - >-
+                (hermes_lcm_native_config_after.stdout
+                 | from_json).embedding_query_timeout_s | int
+                == hermes_lcm_embedding_query_timeout_s | int
+              - >-
+                (hermes_lcm_native_config_after.stdout
+                 | from_json).recall_query_timeout_s | int
+                == hermes_lcm_recall_query_timeout_s | int
+              - >-
+                (hermes_lcm_native_config_after.stdout
+                 | from_json).embedding_backfill_timeout_s | int
+                == hermes_lcm_embedding_backfill_timeout_s | int
+              - >-
+                (hermes_lcm_native_config_after.stdout
+                 | from_json).proactive_recall_enabled
+              - >-
+                (hermes_lcm_native_config_after.stdout
+                 | from_json).temporal_rollups_enabled
+              - >-
+                (hermes_lcm_native_inventory_after.stdout
+                 | from_json).quick_check == 'ok'
+              - >-
+                (hermes_lcm_native_inventory_after.stdout
+                 | from_json).distinct_sessions.messages | int > 500
+              - >-
+                (hermes_lcm_native_inventory_after.stdout
+                 | from_json).embedding_vectors_by_task.summary
+                 | default(0) | int > 0
+              - >-
+                (hermes_lcm_native_inventory_after.stdout
+                 | from_json).chunk_vectors_by_task.chunk
+                 | default(0) | int > 0
+              - >-
+                (hermes_lcm_native_doctor_after.stdout
+                 | from_json).checks.database_integrity == 'pass'
+              - >-
+                (hermes_lcm_native_doctor_after.stdout
+                 | from_json).checks.messages_fts_integrity == 'pass'
+              - >-
+                (hermes_lcm_native_doctor_after.stdout
+                 | from_json).checks.nodes_fts_integrity == 'pass'
+              - >-
+                (hermes_lcm_native_recall_after.stdout
+                 | from_json).result_count | int > 0
+              - >-
+                (hermes_lcm_native_recall_after.stdout
+                 | from_json).result_types.summary | default(0) | int > 0
+              - >-
+                (hermes_lcm_native_recall_after.stdout
+                 | from_json).coverage.summary
+                 | default('none') in ['full', 'full_approx', 'bounded']
+              - >-
+                not ((hermes_lcm_native_recall_after.stdout
+                      | from_json).degraded_to_fts | bool)
+              - >-
+                (hermes_lcm_native_grep_after.stdout
+                 | from_json).result_count | int > 0
+
+        - name: Record native LCM feature transaction result
+          ansible.builtin.copy:
+            dest: "{{ hermes_lcm_native_rollback_dir }}/RESULT.json"
+            owner: root
+            group: root
+            mode: "0600"
+            content: >-
+              {{ {'status': 'complete',
+                  'database_sha256':
+                    (hermes_lcm_native_backup_result.stdout | from_json).sha256,
+                  'summary_seed': hermes_lcm_native_summary_apply.stdout,
+                  'chunk_seed': hermes_lcm_native_chunk_apply.stdout,
+                  'inventory':
+                    (hermes_lcm_native_inventory_after.stdout | from_json),
+                  'doctor':
+                    (hermes_lcm_native_doctor_after.stdout | from_json),
+                  'recall':
+                    (hermes_lcm_native_recall_after.stdout | from_json),
+                  'grep':
+                    (hermes_lcm_native_grep_after.stdout | from_json)}
+                 | to_nice_json }}
+
+      rescue:
+        - name: Remove incomplete NFS LCM backup partial
+          ansible.builtin.file:
+            path: "{{ hermes_lcm_native_rollback_dir }}/lcm.db.partial"
+            state: absent
+          failed_when: false
+
+        - name: Inspect failed transaction database before rollback choice
+          ansible.builtin.command:
+            argv: "{{ hermes_lcm_native_command_prefix + ['inventory'] }}"
+          register: hermes_lcm_native_failed_inventory
+          changed_when: false
+          failed_when: false
+          when: hermes_lcm_native_prior_state_published | bool
+
+        - name: Classify whether database restoration is required
+          ansible.builtin.set_fact:
+            hermes_lcm_native_database_restore_required: >-
+              {{ hermes_lcm_native_failed_inventory.rc != 0
+                 or ((hermes_lcm_native_failed_inventory.stdout
+                      | default('{}') | from_json).quick_check
+                     | default('failed')) != 'ok' }}
+          when: hermes_lcm_native_prior_state_published | bool
+
+        - name: Stop Astra before integrity-required LCM database rollback
+          ansible.builtin.systemd_service:
+            name: "{{ hermes_lcm_native_astra_profile.unit }}"
+            state: stopped
+          when:
+            - hermes_lcm_native_prior_state_published | bool
+            - hermes_lcm_native_database_restore_required | bool
+            - hermes_lcm_native_astra_before.stdout == 'active'
+
+        - name: Restore published LCM database into local staging
+          ansible.builtin.command:
+            argv:
+              - /usr/bin/cp
+              - --sparse=always
+              - "{{ hermes_lcm_native_rollback_dir }}/lcm.db"
+              - "{{ hermes_lcm_native_local_stage }}/restore-lcm.db"
+          when:
+            - hermes_lcm_native_prior_state_published | bool
+            - hermes_lcm_native_database_restore_required | bool
+          changed_when: true
+
+        - name: Verify rollback copy hash
+          ansible.builtin.command:
+            argv:
+              - /usr/bin/sha256sum
+              - "{{ item }}"
+          loop:
+            - "{{ hermes_lcm_native_rollback_dir }}/lcm.db"
+            - "{{ hermes_lcm_native_local_stage }}/restore-lcm.db"
+          register: hermes_lcm_native_rollback_hashes
+          when:
+            - hermes_lcm_native_prior_state_published | bool
+            - hermes_lcm_native_database_restore_required | bool
+          changed_when: false
+
+        - name: Require hash-equal rollback staging
+          ansible.builtin.assert:
+            that:
+              - >-
+                hermes_lcm_native_rollback_hashes.results[0].stdout.split()[0]
+                == hermes_lcm_native_rollback_hashes.results[1].stdout.split()[0]
+          when:
+            - hermes_lcm_native_prior_state_published | bool
+            - hermes_lcm_native_database_restore_required | bool
+
+        - name: Remove stale SQLite sidecars before database restoration
+          ansible.builtin.file:
+            path: "{{ hermes_lcm_target_database }}{{ item }}"
+            state: absent
+          loop:
+            - -wal
+            - -shm
+          when:
+            - hermes_lcm_native_prior_state_published | bool
+            - hermes_lcm_native_database_restore_required | bool
+
+        - name: Restore prior LCM database atomically
+          ansible.builtin.command:
+            argv:
+              - /usr/bin/mv
+              - "{{ hermes_lcm_native_local_stage }}/restore-lcm.db"
+              - "{{ hermes_lcm_target_database }}"
+          when:
+            - hermes_lcm_native_prior_state_published | bool
+            - hermes_lcm_native_database_restore_required | bool
+          changed_when: true
+
+        - name: Restore prior LCM database ownership
+          ansible.builtin.file:
+            path: "{{ hermes_lcm_target_database }}"
+            owner: "{{ hermes_lcm_native_astra_profile.user }}"
+            group: "{{ hermes_lcm_native_astra_profile.group }}"
+            mode: "0600"
+          when:
+            - hermes_lcm_native_prior_state_published | bool
+            - hermes_lcm_native_database_restore_required | bool
+
+        - name: Restore prior Astra Gateway drop-in
+          ansible.builtin.copy:
+            src: "{{ hermes_lcm_native_rollback_dir }}/10-managed.conf"
+            dest: "{{ hermes_lcm_native_dropin_path }}"
+            remote_src: true
+            owner: root
+            group: root
+            mode: "0644"
+          when: hermes_lcm_native_prior_state_published | bool
+
+        - name: Reload systemd after LCM rollback
+          ansible.builtin.systemd_service:
+            daemon_reload: true
+          when: hermes_lcm_native_prior_state_published | bool
+
+        - name: Start Astra after verified LCM database rollback
+          ansible.builtin.systemd_service:
+            name: "{{ hermes_lcm_native_astra_profile.unit }}"
+            state: started
+          when:
+            - hermes_lcm_native_prior_state_published | bool
+            - hermes_lcm_native_database_restore_required | bool
+            - hermes_lcm_native_astra_before.stdout == 'active'
+
+        - name: Restart Astra after configuration-only rollback
+          ansible.builtin.systemd_service:
+            name: "{{ hermes_lcm_native_astra_profile.unit }}"
+            state: restarted
+          when:
+            - hermes_lcm_native_prior_state_published | bool
+            - not (hermes_lcm_native_database_restore_required | bool)
+            - hermes_lcm_native_dropin_activated | bool
+            - hermes_lcm_native_astra_before.stdout == 'active'
+
+        - name: Verify restored LCM database integrity
+          ansible.builtin.command:
+            argv: "{{ hermes_lcm_native_command_prefix + ['inventory'] }}"
+          register: hermes_lcm_native_rollback_inventory
+          changed_when: false
+          failed_when: >-
+            (hermes_lcm_native_rollback_inventory.stdout
+             | from_json).quick_check != 'ok'
+          when:
+            - hermes_lcm_native_prior_state_published | bool
+            - hermes_lcm_native_database_restore_required | bool
+
+        - name: Fail after completed native LCM rollback
+          ansible.builtin.fail:
+            msg: >-
+              Native LCM feature activation failed. The hash-verified prior
+              database was restored only if integrity required it, and the
+              prior Gateway drop-in was restored. Healthy additive vector state
+              remains inert for safe resume; inspect the retained rollback
+              directory before retrying.
+
+      always:
+        - name: Remove private local LCM staging tree
+          ansible.builtin.file:
+            path: "{{ hermes_lcm_native_local_stage }}"
+            state: absent
+          failed_when: false

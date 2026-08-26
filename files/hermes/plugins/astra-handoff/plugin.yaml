@@ -1,0 +1,4 @@
+---
+name: astra-handoff
+version: "1.0.0"
+description: Send one fixed-target private handoff to Astra through Hermes peer DM.

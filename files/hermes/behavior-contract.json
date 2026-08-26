@@ -17,6 +17,12 @@
     "correctionTransactionVisible": false,
     "routineValidationNarrationVisible": false
   },
+  "continuity": {
+    "busyInputMode": "queue",
+    "oneTurnPerFollowUp": true,
+    "unfinishedAnswerMayBeSuperseded": false,
+    "explicitStopOrResetMayInterrupt": true
+  },
   "corrections": {
     "fixCurrentAnswerFirst": true,
     "rootCauseClassRequired": true,

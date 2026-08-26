@@ -1,0 +1,46 @@
+[Unit]
+Description=Hermes owner-only fleet administration broker
+After=local-fs.target
+
+[Service]
+Type=simple
+User=root
+Group={{ hermes_fleet_admin_group }}
+UMask=0077
+RuntimeDirectory=hermes-fleet-admin
+RuntimeDirectoryMode=0750
+LoadCredential=fleet-admin-key:{{ hermes_fleet_admin_key }}
+ExecStart={{ hermes_shadow_runtime_venv }}/bin/python {{ hermes_fleet_admin_broker_live }} --socket {{ hermes_fleet_admin_socket }} --socket-group {{ hermes_fleet_admin_group }} --backup-root {{ hermes_fleet_admin_rollback_root }} --audit-log {{ hermes_fleet_admin_audit_log }}
+Restart=on-failure
+RestartSec=5s
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectClock=true
+ProtectControlGroups=true
+ProtectHostname=true
+ProtectKernelLogs=true
+ProtectKernelModules=true
+ProtectKernelTunables=true
+ProtectProc=invisible
+LockPersonality=true
+MemoryDenyWriteExecute=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+RestrictNamespaces=true
+RestrictAddressFamilies=AF_UNIX
+IPAddressDeny=any
+SystemCallArchitectures=native
+CapabilityBoundingSet=CAP_CHOWN CAP_DAC_OVERRIDE CAP_FOWNER CAP_SETGID CAP_SETUID
+AmbientCapabilities=
+ReadWritePaths={{ hermes_fleet_admin_runtime_dir }} {{ hermes_fleet_admin_rollback_root }} /var/log/hermes /var/lib/hermes/astra/.hermes/profiles/astra /var/lib/hermes/dubble/.hermes/profiles/dubble /var/lib/hermes/rigel/.hermes/profiles/rigel /var/lib/hermes/profile-data/astra/writable /var/lib/hermes/profile-data/dubble/writable /var/lib/hermes/profile-data/rigel/writable
+InaccessiblePaths=-/etc/hermes/astra/.env -/etc/hermes/dubble/.env -/etc/hermes/private/environments/rigel.env
+InaccessiblePaths=-/var/lib/hermes/astra/.hermes/profiles/astra/auth.json -/var/lib/hermes/astra/.hermes/profiles/astra/auth.lock -/var/lib/hermes/astra/.hermes/profiles/astra/state.db -/var/lib/hermes/astra/.hermes/profiles/astra/state.db-shm -/var/lib/hermes/astra/.hermes/profiles/astra/state.db-wal -/var/lib/hermes/astra/.hermes/profiles/astra/lcm.db -/var/lib/hermes/astra/.hermes/profiles/astra/lcm.db-shm -/var/lib/hermes/astra/.hermes/profiles/astra/lcm.db-wal -/var/lib/hermes/astra/.hermes/profiles/astra/lcm-large-outputs -/var/lib/hermes/astra/.hermes/profiles/astra/mem0 -/var/lib/hermes/astra/.hermes/profiles/astra/mem0.json -/var/lib/hermes/astra/.hermes/profiles/astra/sessions -/var/lib/hermes/astra/.hermes/profiles/astra/backups -/var/lib/hermes/astra/.hermes/profiles/astra/.curator_backups
+InaccessiblePaths=-/var/lib/hermes/dubble/.hermes/profiles/dubble/auth.json -/var/lib/hermes/dubble/.hermes/profiles/dubble/auth.lock -/var/lib/hermes/dubble/.hermes/profiles/dubble/state.db -/var/lib/hermes/dubble/.hermes/profiles/dubble/state.db-shm -/var/lib/hermes/dubble/.hermes/profiles/dubble/state.db-wal -/var/lib/hermes/dubble/.hermes/profiles/dubble/sessions -/var/lib/hermes/dubble/.hermes/profiles/dubble/backups -/var/lib/hermes/dubble/.hermes/profiles/dubble/.curator_backups
+InaccessiblePaths=-/var/lib/hermes/rigel/.hermes/profiles/rigel/auth.json -/var/lib/hermes/rigel/.hermes/profiles/rigel/auth.lock -/var/lib/hermes/rigel/.hermes/profiles/rigel/state.db -/var/lib/hermes/rigel/.hermes/profiles/rigel/state.db-shm -/var/lib/hermes/rigel/.hermes/profiles/rigel/state.db-wal -/var/lib/hermes/rigel/.hermes/profiles/rigel/lcm.db -/var/lib/hermes/rigel/.hermes/profiles/rigel/lcm.db-shm -/var/lib/hermes/rigel/.hermes/profiles/rigel/lcm.db-wal -/var/lib/hermes/rigel/.hermes/profiles/rigel/lcm-large-outputs -/var/lib/hermes/rigel/.hermes/profiles/rigel/mem0 -/var/lib/hermes/rigel/.hermes/profiles/rigel/mem0.json -/var/lib/hermes/rigel/.hermes/profiles/rigel/sessions -/var/lib/hermes/rigel/.hermes/profiles/rigel/backups -/var/lib/hermes/rigel/.hermes/profiles/rigel/.curator_backups
+TasksMax=64
+
+[Install]
+WantedBy=multi-user.target

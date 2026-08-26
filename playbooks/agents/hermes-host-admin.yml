@@ -1,0 +1,749 @@
+---
+# Purpose: Enroll bounded host administration targets and promote Astra's plugin.
+# Hosts: hermes_hosts, then every reachable linux_hosts member.
+# Key vars: hermes_host_admin_* and hermes_shadow_profiles.
+# Files: files/hermes/plugins/host-admin.
+# Scripts: scripts/agents/hermes-host-admin-*.py.
+# Validation: focused tests, syntax-check, list-tasks, check-mode, live smoke.
+
+- name: Prepare the dedicated Astra host administration identity
+  hosts: hermes_hosts
+  become: true
+  gather_facts: true
+
+  tasks:
+    - name: Validate host administration rollout mode
+      ansible.builtin.assert:
+        that:
+          - hermes_host_admin_mode in ['disabled', 'converge']
+
+    - name: Skip host administration when disabled
+      ansible.builtin.meta: end_host
+      when: hermes_host_admin_mode == 'disabled'
+
+    - name: Require exact host administration authorization
+      ansible.builtin.assert:
+        that:
+          - hermes_host_admin_approved | bool
+          - hermes_host_admin_confirmation == hermes_host_admin_required_confirmation
+          - inventory_hostname == 'jn-t14s-lin'
+          - hermes_host_admin_required_hosts | difference(groups['linux_hosts']) | length == 0
+
+    - name: Require OpenClaw delivery to remain offline
+      ansible.builtin.command:
+        argv: [/usr/bin/systemctl, is-active, openclaw-isolated-gateway.service]
+      register: hermes_host_admin_openclaw_state
+      check_mode: false
+      changed_when: false
+      failed_when: hermes_host_admin_openclaw_state.stdout not in ['inactive', 'failed', 'unknown']
+
+    - name: Stop after controller read-only check-mode preflight
+      ansible.builtin.meta: end_play
+      when: ansible_check_mode
+
+    - name: Inspect dedicated host administration credential paths
+      ansible.builtin.stat:
+        path: "{{ item }}"
+        follow: false
+      loop:
+        - "{{ hermes_host_admin_private_root }}"
+        - "{{ hermes_host_admin_private_key }}"
+        - "{{ hermes_host_admin_private_key }}.pub"
+      register: hermes_host_admin_credential_paths
+      no_log: true
+
+    - name: Reject linked host administration credential paths
+      ansible.builtin.assert:
+        that:
+          - not item.stat.exists or not item.stat.islnk
+      loop: "{{ hermes_host_admin_credential_paths.results }}"
+      no_log: true
+
+    - name: Create root-private host administration credential directory
+      ansible.builtin.file:
+        path: "{{ hermes_host_admin_private_root }}"
+        state: directory
+        owner: root
+        group: root
+        mode: "0700"
+
+    - name: Generate dedicated host administration key
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/ssh-keygen
+          - -q
+          - -t
+          - ed25519
+          - -N
+          - ""
+          - -C
+          - hermes-astra-host-admin
+          - -f
+          - "{{ hermes_host_admin_private_key }}"
+        creates: "{{ hermes_host_admin_private_key }}"
+      no_log: true
+
+    - name: Read dedicated host administration public key
+      ansible.builtin.slurp:
+        src: "{{ hermes_host_admin_private_key }}.pub"
+      register: hermes_host_admin_public_key
+      no_log: true
+
+    - name: Require a single valid dedicated public key
+      ansible.builtin.assert:
+        that:
+          - >-
+            hermes_host_admin_public_key.content | b64decode | trim
+            is match('^ssh-ed25519 [A-Za-z0-9+/]+={0,3} hermes-astra-host-admin$')
+      no_log: true
+
+- name: Enroll every reachable managed Linux host in bounded administration
+  hosts: linux_hosts
+  become: true
+  gather_facts: false
+  ignore_unreachable: true
+  serial: 5
+
+  vars:
+    ansible_ssh_timeout: 5
+    hermes_host_admin_target_backup_root: >-
+      /var/backups/hermes-host-admin/{{ hermes_host_admin_target_transaction_id }}
+    hermes_host_admin_target_backup_archive: >-
+      {{ hermes_host_admin_target_backup_root }}/target-state.tar
+    hermes_host_admin_target_paths:
+      - "{{ hermes_host_admin_target_live }}"
+      - "{{ hermes_host_admin_target_identity }}"
+      - "{{ hermes_host_admin_sudoers }}"
+      - "{{ hermes_host_admin_home }}"
+
+  pre_tasks:
+    - name: Probe bounded target SSH reachability
+      ansible.builtin.ping:
+      register: hermes_host_admin_connection_probe
+      check_mode: false
+      ignore_unreachable: true
+      ignore_errors: true
+
+    - name: Leave offline target pending without repeated SSH retries
+      ansible.builtin.meta: end_host
+      when: >-
+        hermes_host_admin_connection_probe is failed
+        or hermes_host_admin_connection_probe.unreachable | default(false) | bool
+
+    - name: Freeze one rollback identifier for this target transaction
+      ansible.builtin.set_fact:
+        hermes_host_admin_target_transaction_id: >-
+          {{ now(utc=true, fmt='%Y%m%dT%H%M%SZ') }}
+
+    - name: Discover the target LAN endpoint
+      ansible.builtin.setup:
+        filter: ansible_default_ipv4
+        gather_subset:
+          - '!all'
+          - '!min'
+          - network
+      check_mode: false
+
+    - name: Require the target endpoint on the managed LAN
+      ansible.builtin.assert:
+        that:
+          - ansible_facts.default_ipv4.address is string
+          - ansible_facts.default_ipv4.address | length > 0
+          - ansible_facts.default_ipv4.network == hermes_host_admin_endpoint_network
+          - ansible_facts.default_ipv4.prefix | string == hermes_host_admin_endpoint_prefix
+
+  tasks:
+    - name: Require exact target enrollment authorization
+      ansible.builtin.assert:
+        that:
+          - hermes_host_admin_mode == 'converge'
+          - hermes_host_admin_approved | bool
+          - hermes_host_admin_confirmation == hermes_host_admin_required_confirmation
+
+    - name: Require the existing managed update service
+      ansible.builtin.command:
+        argv: [/usr/bin/systemctl, cat, auto-updates.service]
+      check_mode: false
+      changed_when: false
+
+    - name: Stop after target read-only check-mode preflight
+      ansible.builtin.meta: end_host
+      when: ansible_check_mode
+
+    - name: Inspect prior host-admin account
+      ansible.builtin.getent:
+        database: passwd
+        key: "{{ hermes_host_admin_user }}"
+        fail_key: false
+      register: hermes_host_admin_prior_user
+
+    - name: Inspect prior host-admin group
+      ansible.builtin.getent:
+        database: group
+        key: "{{ hermes_host_admin_group }}"
+        fail_key: false
+      register: hermes_host_admin_prior_group
+
+    - name: Inspect prior host-admin target paths
+      ansible.builtin.stat:
+        path: "{{ item }}"
+        follow: false
+      loop: "{{ hermes_host_admin_target_paths }}"
+      register: hermes_host_admin_prior_target_paths
+
+    - name: Select prior and newly created target paths
+      ansible.builtin.set_fact:
+        hermes_host_admin_existing_target_paths: >-
+          {{ hermes_host_admin_prior_target_paths.results | selectattr('stat.exists') | map(attribute='item') | list }}
+        hermes_host_admin_new_target_paths: >-
+          {{ hermes_host_admin_prior_target_paths.results | rejectattr('stat.exists') | map(attribute='item') | list }}
+
+    - name: Create local host-admin target rollback directory
+      ansible.builtin.file:
+        path: "{{ hermes_host_admin_target_backup_root }}"
+        state: directory
+        owner: root
+        group: root
+        mode: "0700"
+
+    - name: Back up prior host-admin target paths
+      ansible.builtin.command:
+        argv: >-
+          {{
+            ['/usr/bin/tar', '--acls', '--xattrs', '-C', '/', '-cpf',
+             hermes_host_admin_target_backup_archive]
+            + (hermes_host_admin_existing_target_paths | map('regex_replace', '^/', '') | list)
+          }}
+      when: hermes_host_admin_existing_target_paths | length > 0
+      changed_when: true
+
+    - name: Verify target rollback archive readability
+      ansible.builtin.command:
+        argv: [/usr/bin/tar, -tf, "{{ hermes_host_admin_target_backup_archive }}"]
+      when: hermes_host_admin_existing_target_paths | length > 0
+      changed_when: false
+
+    - name: Promote bounded host-admin target
+      block:
+        - name: Create dedicated host-admin target group
+          ansible.builtin.group:
+            name: "{{ hermes_host_admin_group }}"
+            system: true
+            state: present
+
+        - name: Create dedicated host-admin target account
+          ansible.builtin.user:
+            name: "{{ hermes_host_admin_user }}"
+            group: "{{ hermes_host_admin_group }}"
+            home: "{{ hermes_host_admin_home }}"
+            shell: /bin/sh
+            system: true
+            create_home: false
+            password_lock: true
+            state: present
+
+        - name: Create root-owned target SSH directory
+          ansible.builtin.file:
+            path: "{{ hermes_host_admin_home }}/.ssh"
+            state: directory
+            owner: root
+            group: "{{ hermes_host_admin_group }}"
+            mode: "0750"
+
+        - name: Deploy root-owned host-admin target
+          ansible.builtin.copy:
+            src: "{{ playbook_dir }}/../../{{ hermes_host_admin_target_source }}"
+            dest: "{{ hermes_host_admin_target_live }}"
+            owner: root
+            group: root
+            mode: "0555"
+
+        - name: Deploy root-owned canonical host-admin identity
+          ansible.builtin.copy:
+            content: >-
+              {{ {'schemaVersion': 1, 'host': inventory_hostname} | to_nice_json }}
+            dest: "{{ hermes_host_admin_target_identity }}"
+            owner: root
+            group: root
+            mode: "0444"
+
+        - name: Install no-argument host-admin sudo boundary
+          ansible.builtin.copy:
+            content: |
+              {{ hermes_host_admin_user }} ALL=(root) NOPASSWD: {{ hermes_host_admin_target_live }} ""
+            dest: "{{ hermes_host_admin_sudoers }}"
+            owner: root
+            group: root
+            mode: "0440"
+            validate: /usr/sbin/visudo -cf %s
+
+        - name: Install sole forced-command host-admin key
+          ansible.builtin.copy:
+            content: >-
+              restrict,command="/usr/bin/sudo -n {{ hermes_host_admin_target_live }}",from="{{ hermes_host_admin_source_cidrs | join(',') }}"
+              {{ hostvars[groups['hermes_hosts'][0]].hermes_host_admin_public_key.content | b64decode | trim }}
+            dest: "{{ hermes_host_admin_home }}/.ssh/authorized_keys"
+            owner: root
+            group: "{{ hermes_host_admin_group }}"
+            mode: "0440"
+          no_log: true
+
+        - name: Smoke-test local host-admin status boundary
+          ansible.builtin.command:
+            argv: ["{{ hermes_host_admin_target_live }}"]
+            stdin: '{"schemaVersion":1,"action":"status"}'
+          register: hermes_host_admin_target_smoke
+          changed_when: false
+
+        - name: Require successful local host-admin status
+          ansible.builtin.assert:
+            that:
+              - (hermes_host_admin_target_smoke.stdout | from_json).status == 'ok'
+              - (hermes_host_admin_target_smoke.stdout | from_json).host == inventory_hostname
+              - (hermes_host_admin_target_smoke.stdout | from_json).action == 'status'
+
+        - name: Read target Ed25519 host key
+          ansible.builtin.slurp:
+            src: /etc/ssh/ssh_host_ed25519_key.pub
+          register: hermes_host_admin_target_host_key
+          no_log: true
+
+        - name: Record successful target enrollment
+          ansible.builtin.set_fact:
+            hermes_host_admin_enrolled: true
+            hermes_host_admin_endpoint_address: "{{ ansible_facts.default_ipv4.address }}"
+            hermes_host_admin_endpoint_host_key: >-
+              {{ (hermes_host_admin_target_host_key.content | b64decode | trim).split()[0:2] | join(' ') }}
+          no_log: true
+
+      rescue:
+        - name: Restore prior host-admin target archive
+          ansible.builtin.command:
+            argv: [/usr/bin/tar, --acls, --xattrs, -C, /, -xpf, "{{ hermes_host_admin_target_backup_archive }}"]
+          when: hermes_host_admin_existing_target_paths | length > 0
+          changed_when: true
+          failed_when: false
+
+        - name: Remove paths created only by failed target enrollment
+          ansible.builtin.file:
+            path: "{{ item }}"
+            state: absent
+          loop: "{{ hermes_host_admin_new_target_paths | default([]) }}"
+          failed_when: false
+
+        - name: Remove newly created host-admin target account
+          ansible.builtin.user:
+            name: "{{ hermes_host_admin_user }}"
+            state: absent
+          when: hermes_host_admin_prior_user.ansible_facts.getent_passwd.get(hermes_host_admin_user) is none
+          failed_when: false
+
+        - name: Remove newly created host-admin target group
+          ansible.builtin.group:
+            name: "{{ hermes_host_admin_group }}"
+            state: absent
+          when: hermes_host_admin_prior_group.ansible_facts.getent_group.get(hermes_host_admin_group) is none
+          failed_when: false
+
+        - name: Fail after host-admin target rollback
+          ansible.builtin.fail:
+            msg: Host-admin target enrollment failed and prior state was restored.
+
+- name: Promote Astra's native host administration plugin
+  hosts: hermes_hosts
+  become: true
+  gather_facts: true
+
+  vars:
+    hermes_host_admin_astra_profile: >-
+      {{ hermes_shadow_profiles | selectattr('name', 'equalto', 'astra') | first }}
+    hermes_host_admin_backup_root: >-
+      /srv/live-rollbacks/{{ inventory_hostname }}/hermes-migration/{{ ansible_facts.date_time.iso8601_basic_short }}-pre-host-admin
+    hermes_host_admin_backup_archive: "{{ hermes_host_admin_backup_root }}/host-admin.tar"
+    hermes_host_admin_dropin: /etc/systemd/system/hermes-gateway-astra.service.d/10-managed.conf
+    hermes_host_admin_candidate_paths:
+      - "{{ hermes_host_admin_known_hosts }}"
+      - "{{ hermes_host_admin_endpoints }}"
+      - "{{ hermes_host_admin_validator_live }}"
+      - "{{ hermes_host_admin_smoke_live }}"
+      - "{{ hermes_host_admin_plugin_managed_root }}"
+      - "{{ hermes_host_admin_plugin_runtime_root }}"
+      - /etc/hermes/astra/config.yaml
+      - /etc/hermes/astra/managed-policy.sha256
+      - "{{ hermes_host_admin_dropin }}"
+
+  tasks:
+    - name: Require exact controller promotion authorization
+      ansible.builtin.assert:
+        that:
+          - hermes_host_admin_mode == 'converge'
+          - hermes_host_admin_approved | bool
+          - hermes_host_admin_confirmation == hermes_host_admin_required_confirmation
+          - hermes_host_admin_defer_gateway_restart is boolean
+
+    - name: Stop after promotion read-only check-mode preflight
+      ansible.builtin.meta: end_play
+      when: ansible_check_mode
+
+    - name: Initialize enrolled host administration records
+      ansible.builtin.set_fact:
+        hermes_host_admin_endpoint_records: []
+        hermes_host_admin_host_key_records: {}
+
+    - name: Build enrolled host administration records
+      ansible.builtin.set_fact:
+        hermes_host_admin_endpoint_records: >-
+          {{ hermes_host_admin_endpoint_records + [{'name': item, 'address': hostvars[item].hermes_host_admin_endpoint_address}] }}
+        hermes_host_admin_host_key_records: >-
+          {{ hermes_host_admin_host_key_records | combine({item: hostvars[item].hermes_host_admin_endpoint_host_key}) }}
+      loop: "{{ groups['linux_hosts'] | sort }}"
+      when: hostvars[item].hermes_host_admin_enrolled | default(false) | bool
+      no_log: true
+
+    - name: Record pending offline host administration coverage
+      ansible.builtin.set_fact:
+        hermes_host_admin_pending_hosts: >-
+          {{ groups['linux_hosts'] | difference(hermes_host_admin_endpoint_records | map(attribute='name') | list) | sort }}
+
+    - name: Require critical host administration coverage
+      ansible.builtin.assert:
+        that:
+          - hermes_host_admin_required_hosts | difference(hermes_host_admin_endpoint_records | map(attribute='name') | list) | length == 0
+          - hermes_host_admin_endpoint_records | length >= 5
+          - hermes_host_admin_host_key_records.keys() | length == hermes_host_admin_endpoint_records | length
+
+    - name: Inspect prior host administration controller paths
+      ansible.builtin.stat:
+        path: "{{ item }}"
+        follow: false
+      loop: "{{ hermes_host_admin_candidate_paths }}"
+      register: hermes_host_admin_prior_controller_paths
+
+    - name: Select prior and new controller paths
+      ansible.builtin.set_fact:
+        hermes_host_admin_existing_controller_paths: >-
+          {{ hermes_host_admin_prior_controller_paths.results | selectattr('stat.exists') | map(attribute='item') | list }}
+        hermes_host_admin_new_controller_paths: >-
+          {{ hermes_host_admin_prior_controller_paths.results | rejectattr('stat.exists') | map(attribute='item') | list }}
+        hermes_host_admin_restart_attempted: false
+
+    - name: Verify live rollback storage before host administration promotion
+      ansible.builtin.command:
+        argv: [/usr/bin/mountpoint, -q, /srv/live-rollbacks]
+      changed_when: false
+
+    - name: Create host administration rollback directory
+      ansible.builtin.file:
+        path: "{{ hermes_host_admin_backup_root }}"
+        state: directory
+        owner: root
+        group: root
+        mode: "0700"
+
+    - name: Back up prior host administration controller paths
+      ansible.builtin.command:
+        argv: >-
+          {{
+            ['/usr/bin/tar', '--acls', '--xattrs', '-C', '/', '-cpf', hermes_host_admin_backup_archive]
+            + (hermes_host_admin_existing_controller_paths | map('regex_replace', '^/', '') | list)
+          }}
+      changed_when: true
+
+    - name: Read prior Astra Gateway state
+      ansible.builtin.command:
+        argv: [/usr/bin/systemctl, is-active, hermes-gateway-astra.service]
+      register: hermes_host_admin_prior_astra_state
+      changed_when: false
+      failed_when: false
+
+    - name: Promote host administration controller state
+      block:
+        - name: Publish enrolled host endpoint manifest
+          ansible.builtin.copy:
+            content: >-
+              {{ {'schemaVersion': 1, 'hosts': hermes_host_admin_endpoint_records | sort(attribute='name')} | to_nice_json }}
+            dest: "{{ hermes_host_admin_endpoints }}"
+            owner: root
+            group: hermes-astra
+            mode: "0440"
+          register: hermes_host_admin_endpoints_copy
+
+        - name: Publish pinned host administration known hosts
+          ansible.builtin.copy:
+            content: |
+              {% for item in hermes_host_admin_endpoint_records | sort(attribute='name') %}
+              {{ item.address }} {{ hermes_host_admin_host_key_records[item.name] }}
+              {% endfor %}
+            dest: "{{ hermes_host_admin_known_hosts }}"
+            owner: root
+            group: hermes-astra
+            mode: "0440"
+          register: hermes_host_admin_known_hosts_copy
+          no_log: true
+
+        - name: Create root-owned host administration plugin directories
+          ansible.builtin.file:
+            path: "{{ item }}"
+            state: directory
+            owner: root
+            group: hermes-astra
+            mode: "0750"
+          loop:
+            - "{{ hermes_host_admin_plugin_managed_root }}"
+            - "{{ hermes_host_admin_plugin_runtime_root }}"
+
+        - name: Deploy root-owned host administration plugin copies
+          ansible.builtin.copy:
+            src: "{{ playbook_dir }}/../../{{ hermes_host_admin_plugin_source }}/{{ item.1 }}"
+            dest: "{{ item.0 }}/{{ item.1 }}"
+            owner: root
+            group: hermes-astra
+            mode: "0440"
+          loop: >-
+            {{ [hermes_host_admin_plugin_managed_root, hermes_host_admin_plugin_runtime_root] | product(['__init__.py', 'plugin.yaml']) | list }}
+          register: hermes_host_admin_plugin_copies
+
+        - name: Deploy host administration validator and smoke probe
+          ansible.builtin.copy:
+            src: "{{ playbook_dir }}/../../{{ item.source }}"
+            dest: "{{ item.destination }}"
+            owner: root
+            group: root
+            mode: "0555"
+          loop:
+            - source: "{{ hermes_host_admin_validator_source }}"
+              destination: "{{ hermes_host_admin_validator_live }}"
+            - source: "{{ hermes_host_admin_smoke_source }}"
+              destination: "{{ hermes_host_admin_smoke_live }}"
+          register: hermes_host_admin_script_copies
+
+        - name: Remove host administration plugin bytecode drift
+          ansible.builtin.file:
+            path: "{{ item }}/__pycache__"
+            state: absent
+          loop:
+            - "{{ hermes_host_admin_plugin_managed_root }}"
+            - "{{ hermes_host_admin_plugin_runtime_root }}"
+
+        - name: Render Astra policy with host administration toolset
+          ansible.builtin.template:
+            src: "{{ playbook_dir }}/../../templates/hermes/hermes-managed-config.yaml.j2"
+            dest: /etc/hermes/astra/config.yaml
+            owner: root
+            group: hermes-astra
+            mode: "0440"
+          vars:
+            hermes_profile: "{{ hermes_host_admin_astra_profile }}"
+          register: hermes_host_admin_policy_copy
+
+        - name: Deploy Astra drop-in with host administration credential and plugin
+          ansible.builtin.template:
+            src: "{{ playbook_dir }}/../../templates/hermes/hermes-gateway-hardening.conf.j2"
+            dest: "{{ hermes_host_admin_dropin }}"
+            owner: root
+            group: root
+            mode: "0644"
+          vars:
+            hermes_profile: "{{ hermes_host_admin_astra_profile }}"
+          register: hermes_host_admin_dropin_copy
+
+        - name: Hash Astra policy and environment
+          ansible.builtin.command:
+            argv: [/usr/bin/sha256sum, /etc/hermes/astra/config.yaml, /etc/hermes/astra/.env]
+          register: hermes_host_admin_policy_hash
+          changed_when: false
+          no_log: true
+
+        - name: Publish Astra managed policy checksum
+          ansible.builtin.copy:
+            content: "{{ hermes_host_admin_policy_hash.stdout }}\n"
+            dest: /etc/hermes/astra/managed-policy.sha256
+            owner: root
+            group: hermes-astra
+            mode: "0440"
+          register: hermes_host_admin_checksum_copy
+          no_log: true
+
+        - name: Reload systemd after host administration promotion
+          ansible.builtin.systemd_service:
+            daemon_reload: true
+
+        - name: Validate merged Astra config as its service identity
+          ansible.builtin.command:
+            argv:
+              - /usr/sbin/runuser
+              - --user
+              - hermes-astra
+              - --
+              - /usr/bin/env
+              - HOME=/var/lib/hermes/astra
+              - HERMES_HOME=/var/lib/hermes/astra/.hermes/profiles/astra
+              - HERMES_MANAGED_DIR=/etc/hermes/astra
+              - HERMES_DOCKER_BINARY=/usr/bin/podman
+              - "{{ hermes_shadow_runtime_binary }}"
+              - config
+              - check
+          changed_when: false
+          no_log: true
+
+        - name: Validate promoted host administration boundary
+          ansible.builtin.command:
+            argv:
+              - "{{ hermes_shadow_runtime_venv }}/bin/python"
+              - "{{ hermes_host_admin_validator_live }}"
+              - --source-root
+              - "{{ hermes_host_admin_plugin_managed_root }}"
+              - --runtime-root
+              - "{{ hermes_host_admin_plugin_runtime_root }}"
+              - --config
+              - /etc/hermes/astra/config.yaml
+              - --endpoints
+              - "{{ hermes_host_admin_endpoints }}"
+              - --known-hosts
+              - "{{ hermes_host_admin_known_hosts }}"
+          changed_when: false
+
+        - name: Determine whether Astra needs one host administration restart
+          ansible.builtin.set_fact:
+            hermes_host_admin_restart_required: >-
+              {{
+                hermes_host_admin_endpoints_copy.changed
+                or hermes_host_admin_known_hosts_copy.changed
+                or hermes_host_admin_policy_copy.changed
+                or hermes_host_admin_dropin_copy.changed
+                or hermes_host_admin_checksum_copy.changed
+                or hermes_host_admin_plugin_copies.results | selectattr('changed') | list | length > 0
+              }}
+
+        - name: Prepare Astra planned-stop marker for host administration
+          ansible.builtin.include_tasks:
+            file: ../../tasks/hermes-planned-stop-marker.yml
+          vars:
+            hermes_planned_stop_profile: "{{ hermes_host_admin_astra_profile }}"
+          when:
+            - hermes_host_admin_restart_required | bool
+            - not hermes_host_admin_defer_gateway_restart | bool
+
+        - name: Record host administration restart attempt
+          ansible.builtin.set_fact:
+            hermes_host_admin_restart_attempted: true
+          when:
+            - hermes_host_admin_restart_required | bool
+            - not hermes_host_admin_defer_gateway_restart | bool
+
+        - name: Restart only Astra for host administration promotion
+          ansible.builtin.systemd_service:
+            name: hermes-gateway-astra.service
+            state: restarted
+          when:
+            - hermes_host_admin_restart_required | bool
+            - not hermes_host_admin_defer_gateway_restart | bool
+
+        - name: Wait for Astra native readiness after host administration
+          ansible.builtin.command:
+            argv: [/usr/bin/systemctl, is-active, hermes-gateway-astra.service]
+          register: hermes_host_admin_astra_state
+          retries: 45
+          delay: 2
+          until:
+            - hermes_host_admin_astra_state.rc == 0
+            - hermes_host_admin_astra_state.stdout == 'active'
+          changed_when: false
+
+        - name: Exercise every enrolled host as the real Astra identity
+          ansible.builtin.command:
+            argv:
+              - /usr/bin/systemd-run
+              - --quiet
+              - --wait
+              - --pipe
+              - --collect
+              - --unit=hermes-host-admin-smoke
+              - --property=User=hermes-astra
+              - --property=Group=hermes-astra
+              - >-
+                --property=LoadCredential=agent-host-admin-key:{{ hermes_host_admin_private_key }}
+              - "{{ hermes_shadow_runtime_venv }}/bin/python"
+              - "{{ hermes_host_admin_smoke_live }}"
+              - --plugin
+              - "{{ hermes_host_admin_plugin_runtime_root }}"
+          register: hermes_host_admin_live_smoke
+          changed_when: false
+
+        - name: Require exact enrolled host smoke coverage
+          ansible.builtin.assert:
+            that:
+              - (hermes_host_admin_live_smoke.stdout | from_json).status == 'ok'
+              - >-
+                (hermes_host_admin_live_smoke.stdout | from_json).results | map(attribute='host') | sort
+                == hermes_host_admin_endpoint_records | map(attribute='name') | sort
+
+        - name: Remove validation bytecode after host administration acceptance
+          ansible.builtin.file:
+            path: "{{ item }}/__pycache__"
+            state: absent
+          loop:
+            - "{{ hermes_host_admin_plugin_managed_root }}"
+            - "{{ hermes_host_admin_plugin_runtime_root }}"
+
+      rescue:
+        - name: Restore prior host administration controller archive
+          ansible.builtin.command:
+            argv: [/usr/bin/tar, --acls, --xattrs, -C, /, -xpf, "{{ hermes_host_admin_backup_archive }}"]
+          changed_when: true
+          failed_when: false
+
+        - name: Remove paths created only by failed controller promotion
+          ansible.builtin.file:
+            path: "{{ item }}"
+            state: absent
+          loop: "{{ hermes_host_admin_new_controller_paths | default([]) }}"
+          failed_when: false
+
+        - name: Reload restored systemd state
+          ansible.builtin.systemd_service:
+            daemon_reload: true
+          failed_when: false
+
+        - name: Restart Astra after changed host administration rollback
+          ansible.builtin.systemd_service:
+            name: hermes-gateway-astra.service
+            state: restarted
+          when:
+            - hermes_host_admin_restart_attempted | default(false) | bool
+            - hermes_host_admin_prior_astra_state.stdout == 'active'
+          failed_when: false
+
+        - name: Restore Astra if dependency propagation stopped it
+          ansible.builtin.systemd_service:
+            name: hermes-gateway-astra.service
+            state: started
+          when: hermes_host_admin_prior_astra_state.stdout == 'active'
+          failed_when: false
+
+        - name: Wait for prior active Astra state after rollback
+          ansible.builtin.command:
+            argv: [/usr/bin/systemctl, is-active, hermes-gateway-astra.service]
+          register: hermes_host_admin_restored_astra_state
+          retries: 45
+          delay: 2
+          until:
+            - hermes_host_admin_restored_astra_state.rc == 0
+            - hermes_host_admin_restored_astra_state.stdout == 'active'
+          when: hermes_host_admin_prior_astra_state.stdout == 'active'
+          changed_when: false
+
+        - name: Fail after host administration controller rollback
+          ansible.builtin.fail:
+            msg: Host administration promotion failed and prior Astra state was restored.
+
+    - name: Report enrolled and pending host administration coverage
+      ansible.builtin.debug:
+        msg:
+          enrolled: "{{ hermes_host_admin_endpoint_records | map(attribute='name') | sort }}"
+          pending: "{{ hermes_host_admin_pending_hosts }}"
+          restartDeferred: >-
+            {{
+              hermes_host_admin_restart_required | default(false) | bool
+              and hermes_host_admin_defer_gateway_restart | bool
+            }}

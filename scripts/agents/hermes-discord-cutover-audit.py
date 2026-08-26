@@ -24,10 +24,10 @@ EXPECTED_AUTHORITY = {
 EXPECTED_INVARIANTS = {
     "oneActiveConsumerPerDiscordIdentity": True,
     "threeLogicalHermesProfiles": True,
-    "twoDistinctDiscordApplications": True,
-    "twoDistinctDiscordBotTokens": True,
-    "rigelUsesAstraDeliveryConsumer": True,
-    "rigelChannelPromptAndSkillBindingRequired": True,
+    "threeDistinctDiscordApplications": True,
+    "threeDistinctDiscordBotTokens": True,
+    "rigelUsesDedicatedDeliveryConsumer": True,
+    "astraRigelFallbackRemovedOnlyAfterThirdIdentityProof": True,
     "nativeHermesTokenLocksRequired": True,
     "noSharedProfileHome": True,
     "noSharedCredentialFile": True,
@@ -54,24 +54,27 @@ EXPECTED_PROFILES = {
         "authorizationMode": "user-and-channel",
         "proactiveDelivery": True,
         "requiresAllowedUsers": True,
+        "requiresAllowedRoles": False,
         "requiresHomeChannel": True,
         "hasConsumer": True,
     },
     "dubble": {
         "deliveryOwner": "dubble",
-        "authorizationMode": "channel-scope-plus-admin-user",
+        "authorizationMode": "guild-everyone-role-plus-channel-scope-plus-admin-user",
         "proactiveDelivery": False,
         "requiresAllowedUsers": False,
+        "requiresAllowedRoles": True,
         "requiresHomeChannel": False,
         "hasConsumer": True,
     },
     "rigel": {
-        "deliveryOwner": "astra",
-        "authorizationMode": "astra-channel-persona",
+        "deliveryOwner": "rigel",
+        "authorizationMode": "user-and-channel",
         "proactiveDelivery": True,
         "requiresAllowedUsers": True,
+        "requiresAllowedRoles": False,
         "requiresHomeChannel": True,
-        "hasConsumer": False,
+        "hasConsumer": True,
     },
 }
 EXPECTED_PROFILE_KEYS = {
@@ -100,6 +103,7 @@ EXPECTED_PRECONDITIONS = {
     "openclaw-schedules-idle",
     "hermes-regressions-passed",
     "private-discord-enrollment-reviewed",
+    "dedicated-rigel-identity-and-channel-access-proved",
     "rollback-command-reviewed",
 }
 EXPECTED_SOURCE_STOP = [
@@ -112,9 +116,11 @@ EXPECTED_SOURCE_STOP = [
 ]
 EXPECTED_TARGET_START = [
     "start-astra-delivery-gateway",
-    "prove-astra-and-rigel-channel-routing-and-single-delivery",
+    "prove-astra-routing-and-single-delivery",
     "start-dubble-delivery-gateway",
     "prove-dubble-routing-and-single-delivery",
+    "start-rigel-delivery-gateway",
+    "prove-rigel-routing-and-single-delivery",
     "enable-reviewed-hermes-schedules",
     "prove-rigel-idle-silence",
 ]
@@ -168,6 +174,17 @@ def _private_ref(value: Any, label: str, *, optional: bool = False) -> None:
         return
     if not isinstance(value, str) or not value.startswith("private-enrollment:"):
         raise DiscordCutoverAuditError(f"{label} must be a private enrollment ref")
+
+
+def _role_ref(value: Any, label: str, *, optional: bool = False) -> None:
+    if optional and value is None:
+        return
+    if not isinstance(value, str) or not value.startswith(
+        ("private-enrollment:", "policy:")
+    ):
+        raise DiscordCutoverAuditError(
+            f"{label} must be a private enrollment or root policy ref"
+        )
 
 
 def _validate_source_pins(pins: Any, repository_root: Path) -> dict[str, str]:
@@ -253,11 +270,13 @@ def _validate_profiles(rows: Any) -> dict[str, Any]:
             )
             if expected["hasConsumer"] and row[field] is None:
                 raise DiscordCutoverAuditError(f"consumer identity missing for {name}")
-        _private_ref(row["allowedRolesRef"], f"{name}.allowedRolesRef", optional=True)
+        _role_ref(row["allowedRolesRef"], f"{name}.allowedRolesRef", optional=True)
         _private_ref(row["allowedUsersRef"], f"{name}.allowedUsersRef", optional=True)
         _private_ref(row["homeChannelRef"], f"{name}.homeChannelRef", optional=True)
         if expected["requiresAllowedUsers"] != (row["allowedUsersRef"] is not None):
             raise DiscordCutoverAuditError(f"allowed-user policy drift for {name}")
+        if expected["requiresAllowedRoles"] != (row["allowedRolesRef"] is not None):
+            raise DiscordCutoverAuditError(f"allowed-role policy drift for {name}")
         if expected["requiresHomeChannel"] != (row["homeChannelRef"] is not None):
             raise DiscordCutoverAuditError(f"home-channel policy drift for {name}")
         if row["regularUserCommands"] != []:
@@ -277,11 +296,11 @@ def _validate_profiles(rows: Any) -> dict[str, Any]:
                 f"shared profile field is forbidden: {field}"
             )
     for field, values in unique_consumer_fields.items():
-        if len(values) != 2:
+        if len(values) != 3:
             raise DiscordCutoverAuditError(
                 f"Discord consumer field is not distinct: {field}"
             )
-    return {"profiles": sorted(seen_names), "distinctIdentities": 2}
+    return {"profiles": sorted(seen_names), "distinctIdentities": 3}
 
 
 def _validate_cutover(cutover: Any) -> None:
@@ -321,11 +340,11 @@ def _validate_cutover(cutover: Any) -> None:
         raise DiscordCutoverAuditError("single-consumer success proof is missing")
     if success.get("openclawState") != "preserved-restorable":
         raise DiscordCutoverAuditError("OpenClaw rollback state is not preserved")
-    if success.get("hermesGateways") != "two-active-distinct-identities":
+    if success.get("hermesGateways") != "three-active-distinct-identities":
         raise DiscordCutoverAuditError("Discord consumer topology drift")
     if success.get("logicalProfiles") != "astra-dubble-rigel":
         raise DiscordCutoverAuditError("logical profile topology drift")
-    if success.get("rigelDelivery") != "astra-single-consumer-channel-persona":
+    if success.get("rigelDelivery") != "rigel-dedicated-consumer":
         raise DiscordCutoverAuditError("Rigel delivery topology drift")
 
 

@@ -1,0 +1,505 @@
+---
+# Purpose: Provision non-root Astra SSH inspection access on managed Linux.
+# Hosts: hermes_hosts and linux_hosts excluding the Hermes host.
+# Key vars: hermes_remote_access_*.
+# Templates: templates/hermes/astra-ssh-config.j2.
+# Validation: syntax-check, check-mode, then full inventory smoke.
+
+- name: Prepare the native Astra SSH identity
+  hosts: hermes_hosts
+  become: true
+  gather_facts: true
+
+  vars:
+    hermes_remote_access_local_backup_id: >-
+      {{ ansible_facts['date_time']['iso8601_basic_short'] }}-pre-hermes-astra-access
+    hermes_remote_access_local_backup_root: >-
+      {{
+        hermes_remote_access_rollback_root ~ '/' ~ inventory_hostname
+        ~ '/hermes-astra-access/' ~ hermes_remote_access_local_backup_id
+      }}
+
+  tasks:
+    - name: Validate Hermes remote access mode
+      ansible.builtin.assert:
+        that:
+          - hermes_remote_access_mode in ['disabled', 'converge']
+        fail_msg: hermes_remote_access_mode must be disabled or converge.
+
+    - name: Skip hosts without Hermes remote access approval
+      ansible.builtin.meta: end_host
+      when: hermes_remote_access_mode == 'disabled'
+
+    - name: Require exact Hermes remote access authorization
+      ansible.builtin.assert:
+        that:
+          - hermes_remote_access_approved | bool
+          - >-
+            hermes_remote_access_confirmation
+            == hermes_remote_access_required_confirmation
+          - inventory_hostname == 'jn-t14s-lin'
+          - hermes_remote_access_key == '/var/lib/hermes/astra/.ssh/id_ed25519'
+          - groups['linux_hosts'] | difference(groups['hermes_hosts']) | length > 0
+          - >-
+            hermes_remote_access_required_hosts
+            | difference(groups['linux_hosts'])
+            | length == 0
+        fail_msg: >-
+          Non-root Astra remote access requires the exact host-specific
+          authorization.
+
+    - name: Stop after read-only Astra access check-mode preflight
+      ansible.builtin.meta: end_play
+      when: ansible_check_mode
+
+    - name: Create controller-side Astra access rollback directory
+      ansible.builtin.file:
+        path: "{{ hermes_remote_access_local_backup_root }}"
+        state: directory
+        owner: root
+        group: root
+        mode: '0700'
+
+    - name: Inspect prior local Astra access state
+      ansible.builtin.stat:
+        path: "{{ item }}"
+        follow: false
+      loop:
+        - "{{ hermes_remote_access_key }}"
+        - "{{ hermes_remote_access_public_key }}"
+        - "{{ hermes_remote_access_known_hosts_live }}"
+        - "{{ hermes_remote_access_config_live }}"
+        - "{{ hermes_remote_access_state_live }}"
+      register: hermes_remote_access_local_prior_state
+
+    - name: Preserve prior local Astra access files
+      ansible.builtin.copy:
+        src: "{{ item.item }}"
+        dest: >-
+          {{ hermes_remote_access_local_backup_root }}/{{ item.item | basename }}
+        remote_src: true
+        owner: root
+        group: root
+        mode: '0600'
+      loop: >-
+        {{
+          hermes_remote_access_local_prior_state.results
+          | selectattr('stat.exists')
+          | list
+        }}
+      loop_control:
+        label: "{{ item.item }}"
+
+    - name: Record prior local Astra access inventory
+      ansible.builtin.copy:
+        content: >-
+          {{
+            {
+              'host': inventory_hostname,
+              'paths': (
+                hermes_remote_access_local_prior_state.results
+                | map(attribute='item')
+                | zip(
+                    hermes_remote_access_local_prior_state.results
+                    | map(attribute='stat.exists')
+                  )
+                | list
+              ),
+              'observedAt': ansible_facts.date_time.iso8601
+            } | to_nice_json
+          }}
+        dest: "{{ hermes_remote_access_local_backup_root }}/prior-state.json"
+        owner: root
+        group: root
+        mode: '0600'
+
+    - name: Create Astra private SSH directory
+      ansible.builtin.file:
+        path: /var/lib/hermes/astra/.ssh
+        state: directory
+        owner: hermes-astra
+        group: hermes-astra
+        mode: '0700'
+
+    - name: Inspect local read-only operational log groups
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/getent
+          - group
+          - "{{ item }}"
+      loop:
+        - adm
+        - systemd-journal
+      register: hermes_remote_access_local_read_groups
+      changed_when: false
+      failed_when: false
+
+    - name: Grant Astra available read-only local operational log groups
+      ansible.builtin.user:
+        name: hermes-astra
+        groups: >-
+          {{
+            hermes_remote_access_local_read_groups.results
+            | selectattr('rc', 'equalto', 0)
+            | map(attribute='item')
+            | list
+          }}
+        append: true
+
+    - name: Inspect existing Astra SSH private key
+      ansible.builtin.stat:
+        path: "{{ hermes_remote_access_key }}"
+        follow: false
+      register: hermes_remote_access_existing_key
+
+    - name: Reject unsafe existing Astra SSH private key
+      ansible.builtin.assert:
+        that:
+          - >-
+            not hermes_remote_access_existing_key.stat.exists
+            or (
+              hermes_remote_access_existing_key.stat.isreg
+              and not hermes_remote_access_existing_key.stat.islnk
+              and hermes_remote_access_existing_key.stat.pw_name == 'hermes-astra'
+            )
+        fail_msg: The Astra SSH private-key path is unsafe.
+
+    - name: Generate Astra non-root SSH identity
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/ssh-keygen
+          - -q
+          - -t
+          - ed25519
+          - -N
+          - ''
+          - -C
+          - hermes-astra@jn-t14s-lin
+          - -f
+          - "{{ hermes_remote_access_key }}"
+        creates: "{{ hermes_remote_access_key }}"
+
+    - name: Normalize Astra SSH identity authority
+      ansible.builtin.file:
+        path: "{{ item.path }}"
+        owner: hermes-astra
+        group: hermes-astra
+        mode: "{{ item.mode }}"
+      loop:
+        - path: "{{ hermes_remote_access_key }}"
+          mode: '0600'
+        - path: "{{ hermes_remote_access_public_key }}"
+          mode: '0644'
+
+    - name: Read Astra public key for managed hosts
+      ansible.builtin.slurp:
+        src: "{{ hermes_remote_access_public_key }}"
+      register: hermes_remote_access_public_key_data
+
+    - name: Publish Astra public key for the next play
+      ansible.builtin.set_fact:
+        hermes_remote_access_authorized_key: >-
+          {{ hermes_remote_access_public_key_data.content | b64decode | trim }}
+
+- name: Provision the non-root Astra identity on managed Linux
+  hosts: linux_hosts:!hermes_hosts
+  become: true
+  gather_facts: true
+  serial: 4
+  ignore_unreachable: true
+
+  vars:
+    hermes_remote_access_authorized_key: >-
+      {{ hostvars[groups['hermes_hosts'][0]].hermes_remote_access_authorized_key }}
+    hermes_remote_access_backup_id: >-
+      {{ ansible_facts['date_time']['iso8601_basic_short'] }}-pre-hermes-astra-access
+    hermes_remote_access_backup_root: >-
+      {{
+        hostvars[groups['hermes_hosts'][0]].hermes_remote_access_rollback_root
+        ~ '/' ~ inventory_hostname ~ '/hermes-astra-access/'
+        ~ hermes_remote_access_backup_id
+      }}
+
+  pre_tasks:
+    - name: End remote hosts when access convergence is disabled
+      ansible.builtin.meta: end_host
+      when: >-
+        hostvars[groups['hermes_hosts'][0]].hermes_remote_access_mode
+        == 'disabled'
+
+    - name: Stop remote hosts after check-mode authorization preflight
+      ansible.builtin.meta: end_play
+      when: ansible_check_mode
+
+    - name: End currently unreachable remote hosts without hiding coverage
+      ansible.builtin.meta: end_host
+      when: "'date_time' not in ansible_facts"
+
+    - name: Require propagated exact remote access authorization
+      ansible.builtin.assert:
+        that:
+          - hostvars[groups['hermes_hosts'][0]].hermes_remote_access_approved | bool
+          - >-
+            hostvars[groups['hermes_hosts'][0]].hermes_remote_access_confirmation
+            == hostvars[groups['hermes_hosts'][0]].hermes_remote_access_required_confirmation
+          - hermes_remote_access_authorized_key is match('^ssh-ed25519 ')
+
+  tasks:
+    - name: Inspect prior Astra remote account
+      ansible.builtin.getent:
+        database: passwd
+        key: hermes-astra
+        fail_key: false
+      register: hermes_remote_access_prior_account
+
+    - name: Inspect prior Astra remote authorized key
+      ansible.builtin.stat:
+        path: /var/lib/hermes-astra/.ssh/authorized_keys
+        follow: false
+      register: hermes_remote_access_prior_authorized_key
+
+    - name: Read prior Astra remote authorized key
+      ansible.builtin.slurp:
+        src: /var/lib/hermes-astra/.ssh/authorized_keys
+      register: hermes_remote_access_prior_authorized_key_data
+      when: hermes_remote_access_prior_authorized_key.stat.exists
+      no_log: true
+
+    - name: Create targeted Astra remote access rollback directory
+      ansible.builtin.file:
+        path: "{{ hermes_remote_access_backup_root }}"
+        state: directory
+        owner: root
+        group: root
+        mode: '0700'
+      delegate_to: "{{ groups['hermes_hosts'][0] }}"
+
+    - name: Record prior Astra remote account state
+      ansible.builtin.copy:
+        content: >-
+          {{
+            {
+              'host': inventory_hostname,
+              'address': ansible_host,
+              'passwd': ansible_facts.getent_passwd.get('hermes-astra'),
+              'observedAt': ansible_facts.date_time.iso8601
+            } | to_nice_json
+          }}
+        dest: "{{ hermes_remote_access_backup_root }}/account.json"
+        owner: root
+        group: root
+        mode: '0600'
+      delegate_to: "{{ groups['hermes_hosts'][0] }}"
+
+    - name: Preserve prior Astra remote authorized key
+      ansible.builtin.copy:
+        content: >-
+          {{ hermes_remote_access_prior_authorized_key_data.content | b64decode }}
+        dest: "{{ hermes_remote_access_backup_root }}/authorized_keys"
+        owner: root
+        group: root
+        mode: '0600'
+      when: hermes_remote_access_prior_authorized_key.stat.exists
+      delegate_to: "{{ groups['hermes_hosts'][0] }}"
+      no_log: true
+
+    - name: Inspect remote read-only operational log groups
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/getent
+          - group
+          - "{{ item }}"
+      loop:
+        - adm
+        - systemd-journal
+      register: hermes_remote_access_read_groups
+      changed_when: false
+      failed_when: false
+
+    - name: Create dedicated non-root Astra account
+      ansible.builtin.user:
+        name: hermes-astra
+        system: true
+        create_home: true
+        home: /var/lib/hermes-astra
+        shell: /bin/bash
+        groups: >-
+          {{
+            hermes_remote_access_read_groups.results
+            | selectattr('rc', 'equalto', 0)
+            | map(attribute='item')
+            | list
+          }}
+        append: false
+        password_lock: true
+        state: present
+
+    - name: Create Astra remote SSH directory
+      ansible.builtin.file:
+        path: /var/lib/hermes-astra/.ssh
+        state: directory
+        owner: hermes-astra
+        group: hermes-astra
+        mode: '0700'
+
+    - name: Install the single Astra public key
+      ansible.builtin.copy:
+        content: "{{ hermes_remote_access_authorized_key }}\n"
+        dest: /var/lib/hermes-astra/.ssh/authorized_keys
+        owner: hermes-astra
+        group: hermes-astra
+        mode: '0600'
+
+    - name: Remove any Astra sudo policy
+      ansible.builtin.file:
+        path: /etc/sudoers.d/hermes-astra
+        state: absent
+
+    - name: Verify Astra has only approved read-only operational groups
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/id
+          - -Gn
+          - hermes-astra
+      register: hermes_remote_access_groups
+      changed_when: false
+
+    - name: Require only Astra and read-only operational groups
+      ansible.builtin.assert:
+        that:
+          - >-
+            hermes_remote_access_groups.stdout.split() | sort
+            == (
+              ['hermes-astra']
+              + (
+                hermes_remote_access_read_groups.results
+                | selectattr('rc', 'equalto', 0)
+                | map(attribute='item')
+                | list
+              )
+            ) | sort
+          - "'sudo' not in hermes_remote_access_groups.stdout.split()"
+          - "'docker' not in hermes_remote_access_groups.stdout.split()"
+          - "'podman' not in hermes_remote_access_groups.stdout.split()"
+        fail_msg: Astra inherited an unapproved privilege group.
+
+    - name: Mark reachable host Astra access as provisioned
+      ansible.builtin.set_fact:
+        hermes_remote_access_provisioned: true
+
+- name: Finalize and verify native Astra SSH access
+  hosts: hermes_hosts
+  become: true
+  gather_facts: false
+
+  tasks:
+    - name: End finalization when access convergence is disabled
+      ansible.builtin.meta: end_host
+      when: hermes_remote_access_mode == 'disabled'
+
+    - name: Stop finalization after check-mode authorization preflight
+      ansible.builtin.meta: end_play
+      when: ansible_check_mode
+
+    - name: Initialize Astra remote access result sets
+      ansible.builtin.set_fact:
+        hermes_remote_access_provisioned_hosts: []
+        hermes_remote_access_unavailable_hosts: []
+
+    - name: Record provisioned Astra remote hosts
+      ansible.builtin.set_fact:
+        hermes_remote_access_provisioned_hosts: >-
+          {{ hermes_remote_access_provisioned_hosts + [item] }}
+      loop: >-
+        {{ groups['linux_hosts'] | difference(groups['hermes_hosts']) | sort }}
+      when: >-
+        hostvars[item].hermes_remote_access_provisioned | default(false)
+
+    - name: Record unavailable Astra remote hosts
+      ansible.builtin.set_fact:
+        hermes_remote_access_unavailable_hosts: >-
+          {{ hermes_remote_access_unavailable_hosts + [item] }}
+      loop: >-
+        {{ groups['linux_hosts'] | difference(groups['hermes_hosts']) | sort }}
+      when: >-
+        not (hostvars[item].hermes_remote_access_provisioned | default(false))
+
+    - name: Require every critical Astra collector host
+      ansible.builtin.assert:
+        that:
+          - >-
+            hermes_remote_access_required_hosts
+            | difference(hermes_remote_access_provisioned_hosts)
+            | length == 0
+        fail_msg: >-
+          A critical media, storage, or Plex collector host is unavailable;
+          refusing to declare native Astra access usable.
+
+    - name: Copy the owner's already-trusted host keys for Astra
+      ansible.builtin.copy:
+        src: "{{ hermes_remote_access_known_hosts_source }}"
+        dest: "{{ hermes_remote_access_known_hosts_live }}"
+        remote_src: true
+        owner: hermes-astra
+        group: hermes-astra
+        mode: '0600'
+
+    - name: Deploy Astra strict SSH client configuration
+      ansible.builtin.template:
+        src: "{{ playbook_dir }}/../../templates/hermes/astra-ssh-config.j2"
+        dest: "{{ hermes_remote_access_config_live }}"
+        owner: hermes-astra
+        group: hermes-astra
+        mode: '0600'
+
+    - name: Verify each managed Linux host as Astra
+      ansible.builtin.command:
+        argv:
+          - /usr/sbin/runuser
+          - --user
+          - hermes-astra
+          - --
+          - /usr/bin/ssh
+          - "{{ item }}"
+          - /usr/bin/id
+          - -un
+      loop: "{{ hermes_remote_access_provisioned_hosts }}"
+      register: hermes_remote_access_smoke
+      changed_when: false
+
+    - name: Require every remote command to run as hermes-astra
+      ansible.builtin.assert:
+        that:
+          - item.stdout == 'hermes-astra'
+      loop: "{{ hermes_remote_access_smoke.results }}"
+      loop_control:
+        label: "{{ item.item }}"
+
+    - name: Create Astra native state directory
+      ansible.builtin.file:
+        path: "{{ hermes_remote_access_state_live | dirname }}"
+        state: directory
+        owner: hermes-astra
+        group: hermes-astra
+        mode: '0700'
+
+    - name: Record complete native Astra remote access coverage
+      ansible.builtin.copy:
+        content: >-
+          {{
+            {
+              'schemaVersion': 1,
+              'status': (
+                'complete'
+                if hermes_remote_access_unavailable_hosts | length == 0
+                else 'partial'
+              ),
+              'provisionedHosts': hermes_remote_access_provisioned_hosts,
+              'unavailableHosts': hermes_remote_access_unavailable_hosts,
+              'requiredHosts': hermes_remote_access_required_hosts
+            } | to_nice_json
+          }}
+        dest: "{{ hermes_remote_access_state_live }}"
+        owner: hermes-astra
+        group: hermes-astra
+        mode: '0600'

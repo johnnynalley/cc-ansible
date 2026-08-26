@@ -20,6 +20,7 @@
     hermes_cutover_enrollment_backup: >-
       {{ hermes_production_cutover_rollback_root
          }}/{{ hermes_cutover_run_id }}-private-enrollment
+    hermes_cutover_rigel_token_file: /run/hermes-rigel-discord-token
     hermes_cutover_user_environment:
       XDG_RUNTIME_DIR: >-
         /run/user/{{ hermes_production_cutover_user_uid }}
@@ -63,6 +64,10 @@
           - inventory_hostname == 'jn-t14s-lin'
           - hermes_shadow_profiles | map(attribute='name') | list
             == ['astra', 'dubble', 'rigel']
+          - hermes_rigel_dedicated_discord_enabled | bool
+          - hermes_rigel_discord_bot_token | length >= 20
+          - hermes_rigel_discord_bot_token | length <= 4096
+          - hermes_rigel_discord_bot_token is not search('[\r\n]')
         fail_msg: >-
           Production cutover requires the host-specific approval and exact
           confirmation string.
@@ -77,7 +82,6 @@
             hermes_production_cutover_source_env,
             hermes_production_cutover_source_config,
             hermes_production_cutover_source_database,
-            hermes_production_cutover_rigel_source,
             hermes_discord_enroll_live,
             hermes_delivery_reconcile_live,
             '/usr/local/libexec/openclaw-delivery-cutover-audit.py'
@@ -438,7 +442,16 @@
           register: hermes_cutover_delivery_audit
           changed_when: false
 
-        - name: Enroll existing Discord identities only after source stop proof
+        - name: Stage the private dedicated Rigel credential for enrollment
+          ansible.builtin.copy:
+            content: "{{ hermes_rigel_discord_bot_token }}\n"
+            dest: "{{ hermes_cutover_rigel_token_file }}"
+            owner: root
+            group: root
+            mode: "0400"
+          no_log: true
+
+        - name: Enroll three Discord identities only after source stop proof
           ansible.builtin.command:
             argv:
               - "{{ hermes_discord_enroll_live }}"
@@ -454,8 +467,16 @@
               - "{{ hermes_production_cutover_enrollment }}"
               - --backup-dir
               - "{{ hermes_cutover_enrollment_backup }}"
+              - --rigel-token-file
+              - "{{ hermes_cutover_rigel_token_file }}"
           register: hermes_cutover_enrollment_result
           changed_when: true
+          no_log: true
+
+        - name: Remove the staged dedicated Rigel credential
+          ansible.builtin.file:
+            path: "{{ hermes_cutover_rigel_token_file }}"
+            state: absent
           no_log: true
 
         - name: Read private Hermes Discord enrollment
@@ -474,17 +495,20 @@
               }}
           no_log: true
 
-        - name: Require two consumers and three logical profiles
+        - name: Require three consumers and three logical profiles
           ansible.builtin.assert:
             that:
               - hermes_cutover_enrollment.schemaVersion == 1
-              - hermes_cutover_enrollment.consumerCount == 2
+              - hermes_cutover_enrollment.consumerCount == 3
               - >-
                 hermes_cutover_enrollment.logicalProfiles
                 == ['astra', 'dubble', 'rigel']
               - >-
                 hermes_cutover_enrollment.profiles.rigel.discordConsumer
-                == 'astra'
+                == 'rigel'
+              - >-
+                hermes_cutover_enrollment.botIdentityFingerprints
+                | unique | length == 3
           no_log: true
 
         - name: Initialize production Hermes profiles
@@ -593,35 +617,17 @@
             label: "{{ item.item.name }}"
           no_log: true
 
-        - name: Create neutral Rigel channel-state boundary
-          ansible.builtin.file:
-            path: "{{ hermes_production_cutover_rigel_root }}"
-            state: directory
-            owner: root
-            group: hermes-astra
-            mode: "0750"
-
-        - name: Copy normalized academic state into Astra's Rigel boundary
-          ansible.builtin.copy:
-            src: "{{ hermes_production_cutover_rigel_source }}"
-            dest: >-
-              {{ hermes_production_cutover_rigel_root }}/academic-state.json
-            remote_src: true
-            owner: root
-            group: hermes-astra
-            mode: "0440"
-
-        - name: Deploy Rigel deterministic scheduler under Astra
+        - name: Deploy Rigel deterministic scheduler under Rigel
           ansible.builtin.copy:
             src: >-
               {{ playbook_dir }}/../../{{ hermes_rigel_schedule_source }}
             dest: >-
               {{
-                '/var/lib/hermes/astra/.hermes/profiles/astra/scripts/'
+                '/var/lib/hermes/rigel/.hermes/profiles/rigel/scripts/'
                 ~ 'hermes-rigel-schedule.py'
               }}
             owner: root
-            group: hermes-astra
+            group: hermes-rigel
             mode: "0550"
             backup: true
 
@@ -630,13 +636,13 @@
             argv:
               - /usr/sbin/runuser
               - --user
-              - hermes-astra
+              - hermes-rigel
               - --
               - /usr/bin/env
-              - HOME=/var/lib/hermes/astra
-              - HERMES_HOME=/var/lib/hermes/astra/.hermes/profiles/astra
+              - HOME=/var/lib/hermes/rigel
+              - HERMES_HOME=/var/lib/hermes/rigel/.hermes/profiles/rigel
               - /usr/bin/python3
-              - /var/lib/hermes/astra/.hermes/profiles/astra/scripts/hermes-rigel-schedule.py
+              - /var/lib/hermes/rigel/.hermes/profiles/rigel/scripts/hermes-rigel-schedule.py
           register: hermes_cutover_rigel_idle
           changed_when: false
 
@@ -648,19 +654,19 @@
             fail_msg: >-
               Rigel emitted output during the current inactive-semester tick.
 
-        - name: Inspect current Astra native cron store
+        - name: Inspect current Rigel native cron store
           ansible.builtin.stat:
-            path: /var/lib/hermes/astra/.hermes/profiles/astra/cron/jobs.json
+            path: /var/lib/hermes/rigel/.hermes/profiles/rigel/cron/jobs.json
             follow: false
           register: hermes_cutover_cron_store
 
-        - name: Read current Astra native cron store
+        - name: Read current Rigel native cron store
           ansible.builtin.slurp:
-            src: /var/lib/hermes/astra/.hermes/profiles/astra/cron/jobs.json
+            src: /var/lib/hermes/rigel/.hermes/profiles/rigel/cron/jobs.json
           register: hermes_cutover_cron_store_content
           when: hermes_cutover_cron_store.stat.exists
 
-        - name: Decode current Astra native cron jobs
+        - name: Decode current Rigel native cron jobs
           ansible.builtin.set_fact:
             hermes_cutover_cron_jobs: >-
               {{
@@ -702,12 +708,12 @@
             argv:
               - /usr/sbin/runuser
               - --user
-              - hermes-astra
+              - hermes-rigel
               - --
               - /usr/bin/env
-              - HOME=/var/lib/hermes/astra
-              - HERMES_HOME=/var/lib/hermes/astra/.hermes/profiles/astra
-              - HERMES_MANAGED_DIR=/etc/hermes/astra
+              - HOME=/var/lib/hermes/rigel
+              - HERMES_HOME=/var/lib/hermes/rigel/.hermes/profiles/rigel
+              - HERMES_MANAGED_DIR=/etc/hermes/rigel
               - "{{ hermes_shadow_runtime_binary }}"
               - cron
               - create
@@ -728,9 +734,9 @@
           changed_when: true
           no_log: true
 
-        - name: Read resulting Astra native cron store
+        - name: Read resulting Rigel native cron store
           ansible.builtin.slurp:
-            src: /var/lib/hermes/astra/.hermes/profiles/astra/cron/jobs.json
+            src: /var/lib/hermes/rigel/.hermes/profiles/rigel/cron/jobs.json
           register: hermes_cutover_resulting_cron_store
           no_log: true
 
@@ -783,7 +789,7 @@
           loop_control:
             label: "{{ item.name }}"
 
-        - name: Create readiness markers for the two Discord consumers
+        - name: Create readiness markers for all three Discord consumers
           ansible.builtin.file:
             path: >-
               /etc/hermes/{{ item }}/{{ hermes_gateway_readiness_marker }}
@@ -794,12 +800,7 @@
           loop:
             - astra
             - dubble
-
-        - name: Keep preserved Rigel gateway stopped and disabled
-          ansible.builtin.systemd_service:
-            name: hermes-gateway-rigel.service
-            state: stopped
-            enabled: false
+            - rigel
 
         - name: Start and enable Astra Discord consumer
           ansible.builtin.systemd_service:
@@ -810,6 +811,12 @@
         - name: Start and enable Dubble Discord consumer
           ansible.builtin.systemd_service:
             name: hermes-gateway-dubble.service
+            state: started
+            enabled: true
+
+        - name: Start and enable Rigel Discord consumer
+          ansible.builtin.systemd_service:
+            name: hermes-gateway-rigel.service
             state: started
             enabled: true
 
@@ -831,38 +838,19 @@
           loop:
             - hermes-gateway-astra.service
             - hermes-gateway-dubble.service
+            - hermes-gateway-rigel.service
             - "{{ hermes_native_update_timer }}"
             - "{{ hermes_tirith_update_timer }}"
           register: hermes_cutover_promoted_units
           changed_when: false
 
-        - name: Require two live consumers and both native update timers
+        - name: Require three live consumers and both native update timers
           ansible.builtin.assert:
             that:
               - item.stdout == 'active'
           loop: "{{ hermes_cutover_promoted_units.results }}"
           loop_control:
             label: "{{ item.item }}"
-
-        - name: Verify preserved Rigel gateway remains inactive
-          ansible.builtin.command:
-            argv:
-              - /usr/bin/systemctl
-              - is-active
-              - hermes-gateway-rigel.service
-          register: hermes_cutover_rigel_gateway_state
-          changed_when: false
-          failed_when: false
-
-        - name: Require no third Discord consumer
-          ansible.builtin.assert:
-            that:
-              - >-
-                hermes_cutover_rigel_gateway_state.stdout
-                in ['inactive', 'failed']
-            fail_msg: >-
-              The preserved Rigel gateway unexpectedly became a third
-              Discord consumer.
 
         - name: Verify Health receiver stayed active through cutover
           ansible.builtin.command:
@@ -932,9 +920,9 @@
                 "schemaVersion": 1,
                 "status": "ok",
                 "source": "openclaw-stopped-preserved",
-                "discordConsumers": 2,
+                "discordConsumers": 3,
                 "logicalProfiles": 3,
-                "rigelGateway": "stopped",
+                "rigelGateway": "active-dedicated",
                 "rigelScheduler": "native-no-agent",
                 "healthReceiver": "active",
                 "nativeUpdates": "automatic"
@@ -945,6 +933,13 @@
             mode: "0600"
 
       rescue:
+        - name: Remove staged dedicated Rigel credential after failure
+          ansible.builtin.file:
+            path: "{{ hermes_cutover_rigel_token_file }}"
+            state: absent
+          failed_when: false
+          no_log: true
+
         - name: Stop Hermes gateways after failed promotion
           ansible.builtin.systemd_service:
             name: "{{ item.unit }}"

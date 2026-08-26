@@ -1,0 +1,645 @@
+{
+  "schemaVersion": 1,
+  "scope": {
+    "sourceGlobs": [
+      "playbooks/agents/hermes*.yml",
+      "playbooks/backup-sync/local-restic.yml",
+      "inventory/group_vars/hermes_hosts/vars.yml",
+      "inventory/host_vars/jn-t14s-lin/backup.yml",
+      "inventory/host_vars/ts440/backup.yml"
+    ],
+    "requiredClassifications": [
+      "platform",
+      "bootstrap-seed",
+      "mutable-native",
+      "migration",
+      "restore-only",
+      "evidence",
+      "rollback",
+      "transient",
+      "cache",
+      "external-readonly",
+      "legacy-retirement",
+      "forbidden-interface"
+    ],
+    "unclassifiedReferenceAllowed": false
+  },
+  "rules": [
+    {
+      "id": "astra-native-profile",
+      "prefix": "/var/lib/hermes/astra/.hermes/profiles/astra",
+      "classification": "mutable-native",
+      "owner": "hermes-astra",
+      "normalConvergence": "preserve",
+      "backup": "native-and-restic"
+    },
+    {
+      "id": "dubble-native-profile",
+      "prefix": "/var/lib/hermes/dubble/.hermes/profiles/dubble",
+      "classification": "mutable-native",
+      "owner": "hermes-dubble",
+      "normalConvergence": "preserve",
+      "backup": "native-and-restic"
+    },
+    {
+      "id": "rigel-native-profile",
+      "prefix": "/var/lib/hermes/rigel/.hermes/profiles/rigel",
+      "classification": "mutable-native",
+      "owner": "hermes-rigel",
+      "normalConvergence": "preserve",
+      "backup": "native-and-restic"
+    },
+    {
+      "id": "astra-native-adjunct-config",
+      "prefix": "/var/lib/hermes/astra/.config",
+      "classification": "mutable-native",
+      "owner": "hermes-astra",
+      "normalConvergence": "preserve",
+      "backup": "restic"
+    },
+    {
+      "id": "astra-native-workspaces",
+      "prefix": "/var/lib/hermes/astra/workspaces",
+      "classification": "mutable-native",
+      "owner": "hermes-astra",
+      "normalConvergence": "preserve",
+      "backup": "restic-with-reviewed-exclusions"
+    },
+    {
+      "id": "astra-native-calendar-cache",
+      "prefix": "/var/lib/hermes/astra/.local/share/vdirsyncer",
+      "classification": "mutable-native",
+      "owner": "hermes-astra",
+      "normalConvergence": "preserve",
+      "backup": "restic"
+    },
+    {
+      "id": "astra-platform-credentials",
+      "prefix": "/var/lib/hermes/astra/.ssh",
+      "classification": "platform",
+      "owner": "root",
+      "normalConvergence": "exact",
+      "backup": "restic"
+    },
+    {
+      "id": "astra-platform-tools",
+      "prefix": "/var/lib/hermes/astra/bin",
+      "classification": "platform",
+      "owner": "root",
+      "normalConvergence": "exact",
+      "backup": "rebuildable"
+    },
+    {
+      "id": "astra-service-account-root",
+      "prefix": "/var/lib/hermes/astra",
+      "classification": "platform",
+      "owner": "root-and-hermes-astra",
+      "normalConvergence": "bounded",
+      "backup": "restic"
+    },
+    {
+      "id": "dubble-service-account-root",
+      "prefix": "/var/lib/hermes/dubble",
+      "classification": "platform",
+      "owner": "root-and-hermes-dubble",
+      "normalConvergence": "bounded",
+      "backup": "restic"
+    },
+    {
+      "id": "rigel-service-account-root",
+      "prefix": "/var/lib/hermes/rigel",
+      "classification": "platform",
+      "owner": "root-and-hermes-rigel",
+      "normalConvergence": "bounded",
+      "backup": "restic"
+    },
+    {
+      "id": "astra-profile-data-writable",
+      "prefix": "/var/lib/hermes/profile-data/astra/writable",
+      "classification": "mutable-native",
+      "owner": "hermes-astra",
+      "normalConvergence": "preserve",
+      "backup": "restic"
+    },
+    {
+      "id": "dubble-profile-data-writable",
+      "prefix": "/var/lib/hermes/profile-data/dubble/writable",
+      "classification": "mutable-native",
+      "owner": "hermes-dubble",
+      "normalConvergence": "preserve",
+      "backup": "restic"
+    },
+    {
+      "id": "rigel-profile-data-writable",
+      "prefix": "/var/lib/hermes/profile-data/rigel/writable",
+      "classification": "mutable-native",
+      "owner": "hermes-rigel",
+      "normalConvergence": "preserve",
+      "backup": "restic"
+    },
+    {
+      "id": "profile-data-migration-root",
+      "prefix": "/var/lib/hermes/profile-data",
+      "classification": "migration",
+      "owner": "root",
+      "normalConvergence": "explicit-only",
+      "backup": "restic"
+    },
+    {
+      "id": "profile-data-stage",
+      "prefix": "/var/lib/hermes/.profile-data-stage-",
+      "classification": "transient",
+      "owner": "root",
+      "normalConvergence": "transaction-only",
+      "backup": "excluded"
+    },
+    {
+      "id": "profile-transform-stage",
+      "prefix": "/var/lib/hermes/.profile-transforms-stage-",
+      "classification": "transient",
+      "owner": "root",
+      "normalConvergence": "transaction-only",
+      "backup": "excluded"
+    },
+    {
+      "id": "migration-bootstrap",
+      "prefix": "/var/lib/hermes/bootstrap",
+      "classification": "migration",
+      "owner": "root",
+      "normalConvergence": "explicit-only",
+      "backup": "excluded-after-verified-publication"
+    },
+    {
+      "id": "openclaw-evidence",
+      "prefix": "/var/lib/hermes/openclaw-evidence",
+      "classification": "evidence",
+      "owner": "root",
+      "normalConvergence": "explicit-only",
+      "backup": "canonical-source-backed"
+    },
+    {
+      "id": "hermes-platform-layout",
+      "prefix": "/var/lib/hermes",
+      "classification": "platform",
+      "owner": "root",
+      "normalConvergence": "exact-layout-only",
+      "backup": "restic"
+    },
+    {
+      "id": "automation-operational-state",
+      "prefix": "/var/lib/hermes-automation",
+      "classification": "mutable-native",
+      "owner": "hermes-automation",
+      "normalConvergence": "preserve-data",
+      "backup": "restic"
+    },
+    {
+      "id": "astra-remote-access-identity",
+      "prefix": "/var/lib/hermes-astra",
+      "classification": "platform",
+      "owner": "root-and-hermes-astra",
+      "normalConvergence": "exact-authority",
+      "backup": "restic"
+    },
+    {
+      "id": "native-updater-state",
+      "prefix": "/var/lib/hermes-updater",
+      "classification": "platform",
+      "owner": "root",
+      "normalConvergence": "native-update",
+      "backup": "rebuildable"
+    },
+    {
+      "id": "retained-rigel-route-state",
+      "prefix": "/var/lib/hermes/rigel-channel-state",
+      "classification": "migration",
+      "owner": "root",
+      "normalConvergence": "explicit-only",
+      "backup": "restic"
+    },
+    {
+      "id": "root-hermes-policy",
+      "prefix": "/etc/hermes",
+      "classification": "platform",
+      "owner": "root",
+      "normalConvergence": "exact-security-floor",
+      "backup": "restic"
+    },
+    {
+      "id": "restic-platform-policy",
+      "prefix": "/etc/restic",
+      "classification": "platform",
+      "owner": "root",
+      "normalConvergence": "exact-security-floor",
+      "backup": "rebuildable-with-secrets-restored"
+    },
+    {
+      "id": "gateway-units",
+      "prefix": "/etc/systemd/system/hermes-",
+      "classification": "platform",
+      "owner": "root",
+      "normalConvergence": "native-unit-plus-managed-dropins",
+      "backup": "rebuildable"
+    },
+    {
+      "id": "legacy-openclaw-system-units",
+      "prefix": "/etc/systemd/system/openclaw-",
+      "classification": "legacy-retirement",
+      "owner": "root",
+      "normalConvergence": "stopped-disabled",
+      "backup": "source-evidence"
+    },
+    {
+      "id": "other-system-units",
+      "prefix": "/etc/systemd/system",
+      "classification": "platform",
+      "owner": "root",
+      "normalConvergence": "exact",
+      "backup": "rebuildable"
+    },
+    {
+      "id": "sudo-policy",
+      "prefix": "/etc/sudoers.d/hermes-",
+      "classification": "platform",
+      "owner": "root",
+      "normalConvergence": "exact-security-floor",
+      "backup": "restic"
+    },
+    {
+      "id": "subordinate-id-policy",
+      "prefix": "/etc/sub",
+      "classification": "platform",
+      "owner": "root",
+      "normalConvergence": "exact-security-floor",
+      "backup": "rebuildable"
+    },
+    {
+      "id": "host-ssh-public-metadata",
+      "prefix": "/etc/ssh",
+      "classification": "external-readonly",
+      "owner": "root",
+      "normalConvergence": "read-only",
+      "backup": "external-owner"
+    },
+    {
+      "id": "hermes-runtime",
+      "prefix": "/usr/local/lib/hermes-agent",
+      "classification": "platform",
+      "owner": "root",
+      "normalConvergence": "native-update",
+      "backup": "rebuildable-with-rollback"
+    },
+    {
+      "id": "hermes-native-update-python",
+      "prefix": "/usr/local/lib/hermes-native-update-python",
+      "classification": "platform",
+      "owner": "root",
+      "normalConvergence": "native-update",
+      "backup": "rebuildable-with-rollback"
+    },
+    {
+      "id": "hermes-managed-helpers",
+      "prefix": "/usr/local/libexec",
+      "classification": "platform",
+      "owner": "root",
+      "normalConvergence": "exact",
+      "backup": "rebuildable"
+    },
+    {
+      "id": "hermes-launchers",
+      "prefix": "/usr/local/bin",
+      "classification": "platform",
+      "owner": "root",
+      "normalConvergence": "native-update",
+      "backup": "rebuildable-with-rollback"
+    },
+    {
+      "id": "hermes-bootstrap-seeds",
+      "prefix": "/usr/local/share/hermes-shadow/repository/files/hermes",
+      "classification": "bootstrap-seed",
+      "owner": "root",
+      "normalConvergence": "seed-or-explicit-restore",
+      "backup": "rebuildable"
+    },
+    {
+      "id": "hermes-retained-source",
+      "prefix": "/usr/local/share/hermes-shadow",
+      "classification": "restore-only",
+      "owner": "root",
+      "normalConvergence": "explicit-only",
+      "backup": "rebuildable"
+    },
+    {
+      "id": "hermes-native-plugins",
+      "prefix": "/usr/local/share/hermes-plugins",
+      "classification": "platform",
+      "owner": "root",
+      "normalConvergence": "native-update",
+      "backup": "rebuildable-with-rollback"
+    },
+    {
+      "id": "hermes-managed-source-patches",
+      "prefix": "/usr/local/share/hermes-managed-patches",
+      "classification": "platform",
+      "owner": "root",
+      "normalConvergence": "reviewed-native-source-promotion",
+      "backup": "rebuildable-with-rollback"
+    },
+    {
+      "id": "uv-platform-runtime",
+      "prefix": "/usr/local/share/uv",
+      "classification": "cache",
+      "owner": "root",
+      "normalConvergence": "native-update",
+      "backup": "excluded"
+    },
+    {
+      "id": "managed-sbin",
+      "prefix": "/usr/local/sbin",
+      "classification": "platform",
+      "owner": "root",
+      "normalConvergence": "exact",
+      "backup": "rebuildable"
+    },
+    {
+      "id": "system-command-dependencies",
+      "prefix": "/usr/bin",
+      "classification": "external-readonly",
+      "owner": "distribution",
+      "normalConvergence": "read-only-or-package-owned",
+      "backup": "rebuildable"
+    },
+    {
+      "id": "system-administration-dependencies",
+      "prefix": "/usr/sbin",
+      "classification": "external-readonly",
+      "owner": "distribution",
+      "normalConvergence": "read-only-or-package-owned",
+      "backup": "rebuildable"
+    },
+    {
+      "id": "legacy-system-administration-dependencies",
+      "prefix": "/sbin",
+      "classification": "external-readonly",
+      "owner": "distribution",
+      "normalConvergence": "read-only-or-package-owned",
+      "backup": "rebuildable"
+    },
+    {
+      "id": "legacy-bin-dependencies",
+      "prefix": "/bin",
+      "classification": "external-readonly",
+      "owner": "distribution",
+      "normalConvergence": "read-only",
+      "backup": "rebuildable"
+    },
+    {
+      "id": "device-dependencies",
+      "prefix": "/dev",
+      "classification": "external-readonly",
+      "owner": "kernel",
+      "normalConvergence": "read-only-or-device-use",
+      "backup": "excluded"
+    },
+    {
+      "id": "process-metadata",
+      "prefix": "/proc",
+      "classification": "external-readonly",
+      "owner": "kernel",
+      "normalConvergence": "read-only",
+      "backup": "excluded"
+    },
+    {
+      "id": "system-metadata",
+      "prefix": "/sys",
+      "classification": "external-readonly",
+      "owner": "kernel",
+      "normalConvergence": "read-only",
+      "backup": "excluded"
+    },
+    {
+      "id": "ollama-platform-runtime",
+      "prefix": "/usr/local/lib/ollama",
+      "classification": "platform",
+      "owner": "root",
+      "normalConvergence": "stable-native-update",
+      "backup": "rebuildable-with-rollback"
+    },
+    {
+      "id": "snap-application-dependencies",
+      "prefix": "/snap",
+      "classification": "external-readonly",
+      "owner": "snapd",
+      "normalConvergence": "read-only",
+      "backup": "rebuildable"
+    },
+    {
+      "id": "rollback-publication",
+      "prefix": "/srv/live-rollbacks",
+      "classification": "rollback",
+      "owner": "root",
+      "normalConvergence": "append-only-transaction",
+      "backup": "off-host-zfs"
+    },
+    {
+      "id": "nas-zfs-recovery-root",
+      "prefix": "/srv/nas-zfs",
+      "classification": "external-readonly",
+      "owner": "nas-zfs",
+      "normalConvergence": "backup-destination-or-source",
+      "backup": "zfs-and-restic-policy"
+    },
+    {
+      "id": "restic-recovery-stage",
+      "prefix": "/var/backups/hermes-disaster-recovery",
+      "classification": "rollback",
+      "owner": "root",
+      "normalConvergence": "atomic-stage",
+      "backup": "restic"
+    },
+    {
+      "id": "local-rollback-artifacts",
+      "prefix": "/var/backups/hermes-",
+      "classification": "rollback",
+      "owner": "root",
+      "normalConvergence": "append-only-transaction",
+      "backup": "short-horizon"
+    },
+    {
+      "id": "hermes-runtime-cache",
+      "prefix": "/var/cache/hermes",
+      "classification": "cache",
+      "owner": "root-and-profile-services",
+      "normalConvergence": "generated",
+      "backup": "excluded"
+    },
+    {
+      "id": "restic-runtime-cache",
+      "prefix": "/var/cache/restic",
+      "classification": "cache",
+      "owner": "restic-services",
+      "normalConvergence": "generated",
+      "backup": "excluded"
+    },
+    {
+      "id": "restic-monitor-state",
+      "prefix": "/var/lib/restic",
+      "classification": "platform",
+      "owner": "restic-services",
+      "normalConvergence": "generated-state",
+      "backup": "rebuildable"
+    },
+    {
+      "id": "hermes-runtime-logs",
+      "prefix": "/var/log/hermes",
+      "classification": "transient",
+      "owner": "root-and-profile-services",
+      "normalConvergence": "generated",
+      "backup": "retention-policy"
+    },
+    {
+      "id": "forbidden-docker-socket",
+      "prefix": "/var/run/docker.sock",
+      "classification": "forbidden-interface",
+      "owner": "root-docker",
+      "normalConvergence": "must-remain-unavailable-to-agents",
+      "backup": "none"
+    },
+    {
+      "id": "hermes-runtime-sockets",
+      "prefix": "/run/hermes-",
+      "classification": "transient",
+      "owner": "root-and-profile-services",
+      "normalConvergence": "generated",
+      "backup": "excluded"
+    },
+    {
+      "id": "owner-session-runtime",
+      "prefix": "/run/user",
+      "classification": "external-readonly",
+      "owner": "owner-session",
+      "normalConvergence": "read-only",
+      "backup": "excluded"
+    },
+    {
+      "id": "other-runtime-state",
+      "prefix": "/run",
+      "classification": "transient",
+      "owner": "system-services",
+      "normalConvergence": "generated",
+      "backup": "excluded"
+    },
+    {
+      "id": "openclaw-source-tree",
+      "prefix": "/home/johnny/.openclaw",
+      "classification": "evidence",
+      "owner": "johnny",
+      "normalConvergence": "read-only-offline",
+      "backup": "restic"
+    },
+    {
+      "id": "openclaw-owner-unit",
+      "prefix": "/home/johnny/.config/systemd/user/openclaw-",
+      "classification": "legacy-retirement",
+      "owner": "johnny",
+      "normalConvergence": "stopped-disabled",
+      "backup": "restic"
+    },
+    {
+      "id": "owner-calendar-source",
+      "prefix": "/home/johnny/.local/share/vdirsyncer",
+      "classification": "external-readonly",
+      "owner": "johnny",
+      "normalConvergence": "read-only-migration-source",
+      "backup": "restic"
+    },
+    {
+      "id": "controller-repository",
+      "prefix": "/home/johnny/cc-ansible",
+      "classification": "external-readonly",
+      "owner": "johnny",
+      "normalConvergence": "controller-source",
+      "backup": "git-and-restic"
+    },
+    {
+      "id": "owner-home-recovery-root",
+      "prefix": "/home/johnny",
+      "classification": "external-readonly",
+      "owner": "johnny",
+      "normalConvergence": "source-or-backup-root",
+      "backup": "restic"
+    },
+    {
+      "id": "root-home-backup-source",
+      "prefix": "/root",
+      "classification": "external-readonly",
+      "owner": "root",
+      "normalConvergence": "backup-source",
+      "backup": "restic"
+    },
+    {
+      "id": "proxmox-cluster-backup-source",
+      "prefix": "/etc/pve",
+      "classification": "external-readonly",
+      "owner": "proxmox",
+      "normalConvergence": "backup-source",
+      "backup": "restic"
+    },
+    {
+      "id": "controller-recovery-copy",
+      "prefix": "/opt/cc-ansible",
+      "classification": "platform",
+      "owner": "root",
+      "normalConvergence": "controller-sync",
+      "backup": "restic"
+    },
+    {
+      "id": "opt-platform-layout",
+      "prefix": "/opt",
+      "classification": "platform",
+      "owner": "root-and-application-services",
+      "normalConvergence": "bounded-layout",
+      "backup": "application-specific"
+    },
+    {
+      "id": "qdrant-runtime",
+      "prefix": "/opt/qdrant",
+      "classification": "external-readonly",
+      "owner": "qdrant",
+      "normalConvergence": "application-owned",
+      "backup": "qdrant-snapshot"
+    },
+    {
+      "id": "media-stack-api-config",
+      "prefix": "/opt/media-stack",
+      "classification": "external-readonly",
+      "owner": "media-stack",
+      "normalConvergence": "read-only-credential-migration",
+      "backup": "external-owner"
+    },
+    {
+      "id": "seerr-api-config",
+      "prefix": "/opt/seerr",
+      "classification": "external-readonly",
+      "owner": "seerr",
+      "normalConvergence": "read-only-credential-migration",
+      "backup": "external-owner"
+    },
+    {
+      "id": "integration-api-routes",
+      "prefix": "/api",
+      "classification": "external-readonly",
+      "owner": "integration-api",
+      "normalConvergence": "request-route",
+      "backup": "none"
+    },
+    {
+      "id": "temporary-transaction-state",
+      "prefix": "/tmp",
+      "classification": "transient",
+      "owner": "transaction",
+      "normalConvergence": "generated",
+      "backup": "excluded"
+    }
+  ]
+}

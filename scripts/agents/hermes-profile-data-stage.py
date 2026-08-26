@@ -83,7 +83,12 @@ OWNERSHIP_KEYS = {
     "managedDirectoryMode",
     "managedFileMode",
 }
-LIMIT_KEYS = {"maxObjects", "maxTotalBytes", "maxSingleFileBytes"}
+LIMIT_KEYS = {
+    "selectedMappingCount",
+    "maxObjects",
+    "maxTotalBytes",
+    "maxSingleFileBytes",
+}
 
 
 class ProfileDataError(RuntimeError):
@@ -223,7 +228,12 @@ def _validate_contract(
     if not isinstance(limits, dict) or set(limits) != LIMIT_KEYS or any(
         not isinstance(limits.get(key), int) or isinstance(limits.get(key), bool)
         or limits[key] <= 0
-        for key in ("maxObjects", "maxTotalBytes", "maxSingleFileBytes")
+        for key in (
+            "selectedMappingCount",
+            "maxObjects",
+            "maxTotalBytes",
+            "maxSingleFileBytes",
+        )
     ):
         raise ProfileDataError("contract-limits-invalid")
     profiles = contract.get("profiles")
@@ -324,7 +334,9 @@ def _validate_contract(
 
 
 def _selected_mappings(
-    profile_import: dict[str, Any], workspace_policy: dict[str, Any]
+    profile_import: dict[str, Any],
+    workspace_policy: dict[str, Any],
+    expected_count: int,
 ) -> list[dict[str, Any]]:
     if profile_import.get("schemaVersion") != 1 or workspace_policy.get("schemaVersion") != 1:
         raise ProfileDataError("source-contract-schema-invalid")
@@ -367,7 +379,10 @@ def _selected_mappings(
                 "bucket": BUCKET_BY_MODE[mapping["importMode"]],
             }
         )
-    if len(selected) != 20 or len({row["id"] for row in selected}) != 20:
+    if (
+        len(selected) != expected_count
+        or len({row["id"] for row in selected}) != expected_count
+    ):
         raise ProfileDataError("selected-mapping-inventory-invalid")
     return selected
 
@@ -568,7 +583,11 @@ def plan(
     if source_root.resolve() != Path(contract["sourceRoot"]).resolve():
         raise ProfileDataError("source-root-contract-mismatch")
     source = _directory(source_root, "source-root")
-    mappings = _selected_mappings(profile_import, workspace_policy)
+    mappings = _selected_mappings(
+        profile_import,
+        workspace_policy,
+        contract["limits"]["selectedMappingCount"],
+    )
     records = _snapshot(source, mappings)
     _enforce_limits(contract, records)
     return contract, profile_import, mappings, records, contract_hash
@@ -628,12 +647,160 @@ def _seal_managed_directories(contract: dict[str, Any], target_root: Path) -> No
             os.chmod(path, _mode(contract, "managed", "directory"))
 
 
+def _preserved_writable_baseline(
+    manifest_path: Path, profiles: set[str]
+) -> set[tuple[str, PurePosixPath]]:
+    manifest = _load_json(manifest_path, "preserve-manifest")
+    if (
+        manifest.get("schemaVersion") != 1
+        or manifest.get("status") != "ok"
+        or not isinstance(manifest.get("files"), list)
+    ):
+        raise ProfileDataError("preserve-manifest-invalid")
+    baseline: set[tuple[str, PurePosixPath]] = set()
+    for row in manifest["files"]:
+        if not isinstance(row, dict) or row.get("bucket") != "writable":
+            continue
+        profile = row.get("profile")
+        if profile not in profiles:
+            raise ProfileDataError("preserve-manifest-profile-invalid")
+        relative = _safe_relative(row.get("targetRelative"), "preserve-manifest")
+        key = (profile, relative)
+        if key in baseline:
+            raise ProfileDataError("preserve-manifest-path-duplicate")
+        baseline.add(key)
+    return baseline
+
+
+def _preserve_writable_generation(
+    contract: dict[str, Any],
+    current_root: Path,
+    current_manifest: Path,
+    target_root: Path,
+) -> dict[str, int]:
+    current = _directory(current_root, "preserve-root")
+    target = _directory(target_root, "preserve-target")
+    if current.resolve() == target.resolve():
+        raise ProfileDataError("preserve-root-target-conflict")
+    profiles = set(contract["profiles"])
+    old_baseline = _preserved_writable_baseline(current_manifest, profiles)
+    current_files: dict[tuple[str, PurePosixPath], tuple[Path, os.stat_result]] = {}
+    current_directories: list[tuple[str, PurePosixPath]] = []
+
+    for profile in sorted(profiles):
+        profile_root = _directory(current / profile, f"preserve-{profile}")
+        writable_root = _directory(
+            profile_root / "writable", f"preserve-{profile}-writable"
+        )
+        expected_uid, expected_gid = _ids(contract, profile, "writable")
+        _require_directory_metadata(
+            writable_root,
+            expected_uid,
+            expected_gid,
+            _mode(contract, "writable", "directory"),
+            f"preserve-{profile}-writable",
+        )
+        for path, metadata, kind in _walk_generation(writable_root):
+            if kind in {"symlink", "special"}:
+                raise ProfileDataError("preserve-object-kind-rejected")
+            if metadata.st_uid != expected_uid or metadata.st_gid != expected_gid:
+                raise ProfileDataError("preserve-object-owner-drift")
+            allowed_mode = _mode(contract, "writable", kind)
+            mode = stat.S_IMODE(metadata.st_mode)
+            if mode & ~allowed_mode or mode & 0o022:
+                raise ProfileDataError("preserve-object-mode-unsafe")
+            relative = PurePosixPath(path.relative_to(writable_root).as_posix())
+            if kind == "directory":
+                current_directories.append((profile, relative))
+            else:
+                current_files[(profile, relative)] = (path, metadata)
+
+    deleted = 0
+    for profile, relative in sorted(old_baseline, key=lambda row: (row[0], str(row[1]))):
+        if (profile, relative) in current_files:
+            continue
+        destination = target / profile / "writable" / relative.as_posix()
+        if destination.is_symlink():
+            raise ProfileDataError("preserve-target-symlink-rejected")
+        if destination.is_file():
+            destination.unlink()
+            deleted += 1
+        elif destination.exists() and not destination.is_dir():
+            raise ProfileDataError("preserve-target-kind-conflict")
+
+    for profile, relative in sorted(
+        current_directories, key=lambda row: (row[0], len(row[1].parts), str(row[1]))
+    ):
+        destination = target / profile / "writable" / relative.as_posix()
+        if destination.exists() and not destination.is_dir():
+            raise ProfileDataError("preserve-target-kind-conflict")
+        destination.mkdir(parents=True, exist_ok=True)
+        uid, gid = _ids(contract, profile, "writable")
+        os.chown(destination, uid, gid, follow_symlinks=False)
+        os.chmod(destination, _mode(contract, "writable", "directory"))
+
+    copied_files = 0
+    copied_bytes = 0
+    for (profile, relative), (source, metadata) in sorted(
+        current_files.items(), key=lambda row: (row[0][0], str(row[0][1]))
+    ):
+        destination = target / profile / "writable" / relative.as_posix()
+        if destination.is_symlink():
+            raise ProfileDataError("preserve-target-symlink-rejected")
+        if destination.is_file():
+            destination.unlink()
+        elif destination.exists():
+            raise ProfileDataError("preserve-target-kind-conflict")
+        expected = Record(
+            source_relative=relative.as_posix(),
+            target_relative=relative.as_posix(),
+            profile=profile,
+            bucket="writable",
+            kind="file",
+            device=metadata.st_dev,
+            inode=metadata.st_ino,
+            size=metadata.st_size,
+            mtime_ns=metadata.st_mtime_ns,
+            mode=stat.S_IMODE(metadata.st_mode),
+            uid=metadata.st_uid,
+            gid=metadata.st_gid,
+            source=source,
+        )
+        copied, digest = _copy_regular(source, destination, expected)
+        uid, gid = _ids(contract, profile, "writable")
+        os.chown(destination, uid, gid, follow_symlinks=False)
+        os.chmod(destination, _mode(contract, "writable", "file"))
+        if _sha256(destination) != digest:
+            raise ProfileDataError("preserve-copy-hash-mismatch")
+        copied_files += 1
+        copied_bytes += copied
+
+    rows = [
+        row
+        for profile in sorted(profiles)
+        for bucket in ("writable", "managed")
+        for row in _walk_generation(target / profile / bucket)
+    ]
+    files = [metadata for _, metadata, kind in rows if kind == "file"]
+    if len(rows) > contract["limits"]["maxObjects"]:
+        raise ProfileDataError("preserved-writable-object-limit-exceeded")
+    if sum(metadata.st_size for metadata in files) > contract["limits"]["maxTotalBytes"]:
+        raise ProfileDataError("preserved-writable-byte-limit-exceeded")
+    return {
+        "files": copied_files,
+        "bytes": copied_bytes,
+        "baselineDeletions": deleted,
+    }
+
+
 def stage(
     contract_path: Path,
     repository_root: Path,
     source_root: Path,
     target_root: Path,
     manifest_path: Path,
+    preserve_writable_from: Path | None = None,
+    preserve_writable_manifest: Path | None = None,
 ) -> dict[str, Any]:
     contract, _, mappings, before, contract_hash = plan(
         contract_path, repository_root, source_root
@@ -696,7 +863,18 @@ def stage(
     }
     _write_json_atomic(manifest_path, manifest)
     verify(contract_path, repository_root, target, manifest_path, writable_drift=False)
-    return manifest["summary"]
+    summary = dict(manifest["summary"])
+    if (preserve_writable_from is None) != (preserve_writable_manifest is None):
+        raise ProfileDataError("preserve-writable-arguments-incomplete")
+    if preserve_writable_from is not None and preserve_writable_manifest is not None:
+        summary["preservedWritable"] = _preserve_writable_generation(
+            contract,
+            preserve_writable_from,
+            preserve_writable_manifest,
+            target,
+        )
+        verify(contract_path, repository_root, target, manifest_path, writable_drift=True)
+    return summary
 
 
 def _walk_generation(root: Path) -> list[tuple[Path, os.stat_result, str]]:
@@ -1048,6 +1226,8 @@ def main() -> int:
     parser.add_argument("--source-root", type=Path)
     parser.add_argument("--target-root", type=Path)
     parser.add_argument("--manifest", type=Path)
+    parser.add_argument("--preserve-writable-from", type=Path)
+    parser.add_argument("--preserve-writable-manifest", type=Path)
     parser.add_argument(
         "--mode", choices=("plan", "stage", "verify", "runtime"), required=True
     )
@@ -1071,6 +1251,8 @@ def main() -> int:
                 arguments.source_root,
                 arguments.target_root,
                 arguments.manifest,
+                arguments.preserve_writable_from,
+                arguments.preserve_writable_manifest,
             )
             result = {"status": "ok", "mode": "stage", "summary": summary}
         elif arguments.mode == "verify":

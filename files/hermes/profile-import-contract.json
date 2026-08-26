@@ -4,11 +4,11 @@
   "sourceContracts": {
     "workspacePolicy": {
       "path": "files/openclaw/workspace-migration-policy.json",
-      "sha256": "08e30aa55c72a54a6ac0e7c67e6d99b5557bd0fed75e8b16a19af556ee20e211"
+      "sha256": "9920d1299ffe1dcaf2e290c5ed044dca1413e8d93ebc9146cd043f08ecdac839"
     },
     "stateMigration": {
       "path": "files/hermes/openclaw-state-migration-contract.json",
-      "sha256": "ace3d5f6b0f97abb15e523fad624175272962a4a04d5cc5cc8a125938da81cbd"
+      "sha256": "b52d41e2890497c349f9268f3b81c3c26ce6ab977ef717175442fe8db0aa4f88"
     }
   },
   "safety": {
@@ -223,27 +223,45 @@
     {
       "sourceRuleId": "rigel-courses",
       "profile": "rigel",
-      "targetNamespace": "imports/courses",
-      "ownerClass": "operator-readonly",
-      "importMode": "structured-transform",
-      "exposure": "schedule-input",
+      "targetNamespace": "courses",
+      "ownerClass": "executor-writable",
+      "importMode": "data-stage",
+      "exposure": "on-demand",
       "rawPromptInjection": false
     },
     {
       "sourceRuleId": "rigel-memory",
       "profile": "rigel",
-      "targetNamespace": "imports/memory",
+      "targetNamespace": "memory",
       "ownerClass": "executor-writable",
-      "importMode": "memory-curation",
-      "exposure": "approved-memory",
+      "importMode": "data-stage",
+      "exposure": "on-demand",
       "rawPromptInjection": false
     },
     {
       "sourceRuleId": "rigel-syllabus",
       "profile": "rigel",
-      "targetNamespace": "imports/courses/dracula-syllabus.pdf",
-      "ownerClass": "operator-readonly",
-      "importMode": "operator-reference",
+      "targetNamespace": "courses/_legacy-inbox/dracula-syllabus.pdf",
+      "ownerClass": "executor-writable",
+      "importMode": "data-stage",
+      "exposure": "on-demand",
+      "rawPromptInjection": false
+    },
+    {
+      "sourceRuleId": "rigel-ecs2390-inbound",
+      "profile": "rigel",
+      "targetNamespace": "courses/_legacy-inbox/ecs-2390",
+      "ownerClass": "executor-writable",
+      "importMode": "data-stage",
+      "exposure": "on-demand",
+      "rawPromptInjection": false
+    },
+    {
+      "sourceRuleId": "rigel-general-inbound",
+      "profile": "rigel",
+      "targetNamespace": "courses/_legacy-inbox/inbound",
+      "ownerClass": "executor-writable",
+      "importMode": "data-stage",
       "exposure": "on-demand",
       "rawPromptInjection": false
     },

@@ -1,0 +1,16 @@
+{
+  "course_id": "",
+  "updated_at": "YYYY-MM-DD",
+  "sources": [
+    {
+      "id": "",
+      "type": "syllabus|schedule|lecture|reading|notes|scorecard|reference|exam_prompt|other",
+      "path": "courses/[course-id]/...",
+      "title": "",
+      "date": "",
+      "covers": [],
+      "authority": "high|medium|low",
+      "notes": ""
+    }
+  ]
+}

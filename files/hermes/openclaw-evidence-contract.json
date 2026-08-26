@@ -1,0 +1,244 @@
+{
+  "schemaVersion": 1,
+  "mode": "complete-readonly-redacted",
+  "sourceRoot": "/home/johnny/.openclaw",
+  "runtime": {
+    "stateRoot": "/var/lib/hermes/openclaw-evidence",
+    "upperRoot": "/var/lib/hermes/openclaw-evidence/upper",
+    "workRoot": "/var/lib/hermes/openclaw-evidence/work",
+    "mergedRoot": "/var/lib/hermes/openclaw-evidence/merged",
+    "manifestPath": "/var/lib/hermes/openclaw-evidence/manifest.json",
+    "viewRoot": "/run/hermes-openclaw-evidence/view",
+    "profilePath": "/var/lib/hermes/astra/.hermes/profiles/astra/legacy-openclaw",
+    "profileUser": "hermes-astra",
+    "profileGroup": "hermes-astra"
+  },
+  "completeness": {
+    "defaultDisposition": "visible-readonly",
+    "everySourcePathInventoried": true,
+    "sourceMutationAllowed": false,
+    "sourceContentCopied": false,
+    "sourceSymlinksFollowed": false,
+    "unclassifiedOmissionAllowed": false,
+    "secretSourceDeletionAllowed": false,
+    "redactedPathInventoryRequired": true,
+    "runtimeMountRequired": true
+  },
+  "redactions": [
+    {
+      "id": "root-backups",
+      "scope": "tree",
+      "pattern": "backups",
+      "strategy": "opaque-inventory",
+      "reason": "Backup containers can include historical credentials and unredacted configuration."
+    },
+    {
+      "id": "workspace-backups",
+      "scope": "tree",
+      "pattern": "workspace/backups",
+      "strategy": "opaque-inventory",
+      "reason": "Workspace backup containers can include historical credentials and unredacted configuration."
+    },
+    {
+      "id": "credential-store",
+      "scope": "tree",
+      "pattern": "credentials",
+      "strategy": "opaque-inventory",
+      "reason": "OpenClaw pairing and provider credential store."
+    },
+    {
+      "id": "secret-store",
+      "scope": "tree",
+      "pattern": "secrets",
+      "strategy": "opaque-inventory",
+      "reason": "OpenClaw integration secret store."
+    },
+    {
+      "id": "device-identity",
+      "scope": "tree",
+      "pattern": "identity",
+      "strategy": "opaque-inventory",
+      "reason": "OpenClaw device identity and authentication material."
+    },
+    {
+      "id": "paired-devices",
+      "scope": "tree",
+      "pattern": "devices",
+      "strategy": "opaque-inventory",
+      "reason": "OpenClaw pairing records can contain bearer credentials."
+    },
+    {
+      "id": "paired-nodes",
+      "scope": "tree",
+      "pattern": "nodes",
+      "strategy": "opaque-inventory",
+      "reason": "OpenClaw node pairing records can contain bearer credentials."
+    },
+    {
+      "id": "browser-profile",
+      "scope": "tree",
+      "pattern": "browser/openclaw/user-data",
+      "strategy": "opaque-inventory",
+      "reason": "Browser profiles can contain cookies, account identifiers, and authenticated session state."
+    },
+    {
+      "id": "workspace-credential-store",
+      "scope": "tree",
+      "pattern": "workspace/credentials",
+      "strategy": "opaque-inventory",
+      "reason": "Legacy workspace integration credentials."
+    },
+    {
+      "id": "dubble-credential-store",
+      "scope": "tree",
+      "pattern": "workspace/dubble/credentials",
+      "strategy": "opaque-inventory",
+      "reason": "Legacy Dubble integration credentials."
+    },
+    {
+      "id": "environment-files",
+      "scope": "basename-glob",
+      "pattern": ".env",
+      "strategy": "marker",
+      "reason": "Environment files contain provider and integration secrets."
+    },
+    {
+      "id": "environment-backups",
+      "scope": "basename-glob",
+      "pattern": ".env.bak*",
+      "strategy": "marker",
+      "reason": "Environment backups contain historical provider and integration secrets."
+    },
+    {
+      "id": "environment-prechange",
+      "scope": "basename-glob",
+      "pattern": ".env.pre-*",
+      "strategy": "marker",
+      "reason": "Environment pre-change files contain historical provider and integration secrets."
+    },
+    {
+      "id": "agent-auth-profiles",
+      "scope": "basename-glob",
+      "pattern": "auth-profiles.json*",
+      "strategy": "marker",
+      "reason": "Agent provider authentication profiles and their historical copies contain credentials."
+    },
+    {
+      "id": "agent-auth-state",
+      "scope": "basename-glob",
+      "pattern": "auth-state.json*",
+      "strategy": "marker",
+      "reason": "Agent provider authentication state and its historical copies can contain credentials."
+    },
+    {
+      "id": "agent-model-config",
+      "scope": "basename-glob",
+      "pattern": "models.json",
+      "strategy": "sanitized-json",
+      "reason": "Agent model configuration can contain provider credentials; preserve its structure with credential values removed."
+    },
+    {
+      "id": "token-cache-files",
+      "scope": "basename-glob",
+      "pattern": "*_token_cache.json",
+      "strategy": "marker",
+      "reason": "Provider token caches contain active or historical bearer credentials."
+    },
+    {
+      "id": "private-key-files",
+      "scope": "basename-glob",
+      "pattern": "*.key",
+      "strategy": "marker",
+      "reason": "Key files are treated as secret unless separately reconstructed from a public source."
+    },
+    {
+      "id": "token-files",
+      "scope": "basename-glob",
+      "pattern": "*.token",
+      "strategy": "marker",
+      "reason": "Token files contain bearer credentials."
+    },
+    {
+      "id": "npm-auth-files",
+      "scope": "basename-glob",
+      "pattern": ".npmrc",
+      "strategy": "marker",
+      "reason": "NPM configuration can contain registry credentials."
+    },
+    {
+      "id": "netrc-auth-files",
+      "scope": "basename-glob",
+      "pattern": ".netrc",
+      "strategy": "marker",
+      "reason": "Netrc files contain host credentials."
+    },
+    {
+      "id": "openclaw-config",
+      "scope": "root-glob",
+      "pattern": "openclaw.json*",
+      "strategy": "sanitized-json",
+      "reason": "Preserve complete configuration structure while redacting credential-valued fields."
+    },
+    {
+      "id": "gateway-environment",
+      "scope": "exact",
+      "pattern": "gateway.systemd.env",
+      "strategy": "marker",
+      "reason": "Gateway environment files can contain credentials."
+    },
+    {
+      "id": "temporary-config-dumps",
+      "scope": "root-glob",
+      "pattern": "tmp-config*",
+      "strategy": "sanitized-json-or-marker",
+      "reason": "Temporary configuration dumps can contain unredacted provider settings."
+    },
+    {
+      "id": "temporary-mem0-config-dumps",
+      "scope": "root-glob",
+      "pattern": "tmp-mem0-config*",
+      "strategy": "sanitized-json-or-marker",
+      "reason": "Temporary Mem0 configuration dumps can contain provider credentials."
+    },
+    {
+      "id": "temporary-mem0-show-dump",
+      "scope": "exact",
+      "pattern": "tmp-mem0-show.json",
+      "strategy": "sanitized-json-or-marker",
+      "reason": "Temporary Mem0 status output includes terminal prefixes and credential-valued configuration fields; use a marker if strict JSON sanitization is impossible."
+    }
+  ],
+  "sanitization": {
+    "redactedValue": "[REDACTED]",
+    "secretKeyPattern": "(?i)(api[-_]?key|app[-_]?password|authorization|bearer|client[-_]?secret|cookie|credential|device[-_]?secret|password|private[-_]?key|refresh[-_]?token|secret|session[-_]?token|token)",
+    "secretValuePatterns": [
+      "(?i)^(sk|xox[baprs]|gh[pousr]|github_pat|AIza|ya29|eyJ)[-_A-Za-z0-9.]{12,}$",
+      "(?i)^[a-z][a-z0-9+.-]*://[^/@:]+:[^/@]+@"
+    ]
+  },
+  "requiredVisiblePaths": [
+    "AGENTS.md",
+    "agents",
+    "cron",
+    "lcm-files",
+    "lcm.db",
+    "memory",
+    "skills",
+    "state",
+    "workspace",
+    "workspace/AGENTS.md",
+    "workspace/CHARTER.md",
+    "workspace/COMMS.md",
+    "workspace/HEARTBEAT.md",
+    "workspace/IDENTITY.md",
+    "workspace/JOB.md",
+    "workspace/MEMORY.md",
+    "workspace/MOTIVATIONS.md",
+    "workspace/SOUL.md",
+    "workspace/TOOLS.md",
+    "workspace/USER.md",
+    "workspace/references",
+    "workspace/scripts",
+    "workspace/skills"
+  ]
+}

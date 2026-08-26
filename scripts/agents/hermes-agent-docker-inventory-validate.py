@@ -8,8 +8,10 @@ import hashlib
 import importlib.util
 import json
 import os
+import re
 import stat
 import sys
+from ipaddress import ip_address
 from pathlib import Path
 from typing import Any
 
@@ -19,14 +21,7 @@ sys.dont_write_bytecode = True
 
 PLUGIN = "agent-docker-inventory"
 EXPECTED_FILES = ("__init__.py", "plugin.yaml")
-EXPECTED_ENABLED = ["star-dispatch-privacy", PLUGIN, "hermes-lcm"]
-EXPECTED_REPORT_ENDPOINTS = {
-    "192.168.1.153",
-    "192.168.1.136",
-    "192.168.1.78",
-    "192.168.1.31",
-}
-EXPECTED_UPDATE_HOSTS = ["all", "docker-vm", "media-vm", "nextcloud-vm"]
+EXPECTED_HOST_PATTERN = r"^(all|[A-Za-z0-9][A-Za-z0-9_.-]{0,127})$"
 
 
 class ValidationError(RuntimeError):
@@ -75,13 +70,65 @@ class ToolContext:
         self.hooks.append(name)
 
 
-def validate_plugin(runtime_root: Path) -> list[str]:
+def validate_endpoint_manifest(path: Path) -> tuple[dict[str, str], dict[str, str]]:
+    require(path.is_absolute(), "endpoints-not-absolute")
+    info = os.lstat(path)
+    require(stat.S_ISREG(info.st_mode), "endpoints-not-file")
+    require(not stat.S_ISLNK(info.st_mode), "endpoints-symlink")
+    require(info.st_uid == 0, "endpoints-owner")
+    require(stat.S_IMODE(info.st_mode) == 0o440, "endpoints-mode")
+    value = json.loads(path.read_text(encoding="ascii"))
+    require(
+        isinstance(value, dict) and set(value) == {"schemaVersion", "hosts"},
+        "endpoints-shape",
+    )
+    require(value.get("schemaVersion") == 1, "endpoints-version")
+    hosts = value.get("hosts")
+    require(isinstance(hosts, list) and 0 < len(hosts) <= 128, "endpoints-count")
+    reports: dict[str, str] = {}
+    updates: dict[str, str] = {}
+    addresses: set[str] = set()
+    for item in hosts:
+        require(
+            isinstance(item, dict)
+            and set(item) == {"name", "address", "report", "update"},
+            "endpoint-shape",
+        )
+        name = item["name"]
+        address = item["address"]
+        require(
+            isinstance(name, str)
+            and re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,127}", name) is not None
+            and name != "all",
+            "endpoint-name",
+        )
+        require(isinstance(address, str) and len(address) <= 64, "endpoint-address")
+        try:
+            ip_address(address)
+        except ValueError as exc:
+            raise ValidationError("endpoint-address") from exc
+        require(
+            item["report"] is True
+            and isinstance(item["update"], bool),
+            "endpoint-capability",
+        )
+        require(name not in reports and address not in addresses, "endpoint-duplicate")
+        addresses.add(address)
+        reports[name] = address
+        if item["update"]:
+            updates[name] = address
+    require(bool(reports), "endpoint-no-report-hosts")
+    return reports, updates
+
+
+def validate_plugin(runtime_root: Path, endpoints: Path) -> list[str]:
     spec = importlib.util.spec_from_file_location(
         "hermes_agent_docker_inventory", runtime_root / "__init__.py"
     )
     require(spec is not None and spec.loader is not None, "plugin-import-spec")
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
+    module._ENDPOINTS = str(endpoints)
     context = ToolContext()
     module.register(context)
     require(context.hooks == ["pre_tool_call"], "plugin-hook-set-drift")
@@ -103,9 +150,10 @@ def validate_plugin(runtime_root: Path) -> list[str]:
     require(parameters.get("additionalProperties") is False, "plugin-schema-open")
     host = parameters.get("properties", {}).get("host", {})
     require(
-        host.get("enum")
-        == ["all", "docker-vm", "media-vm", "nextcloud-vm", "jn-t14s-lin"],
-        "plugin-host-allowlist-drift",
+        host.get("pattern") == EXPECTED_HOST_PATTERN
+        and host.get("maxLength") == 128
+        and "enum" not in host,
+        "plugin-host-schema-drift",
     )
     update = context.tools[1]
     require(update.get("toolset") == "agent_docker", "update-toolset-drift")
@@ -121,8 +169,10 @@ def validate_plugin(runtime_root: Path) -> list[str]:
     )
     update_properties = update_parameters.get("properties", {})
     require(
-        update_properties.get("host", {}).get("enum") == EXPECTED_UPDATE_HOSTS,
-        "update-host-allowlist-drift",
+        update_properties.get("host", {}).get("pattern") == EXPECTED_HOST_PATTERN
+        and update_properties.get("host", {}).get("maxLength") == 128
+        and "enum" not in update_properties.get("host", {}),
+        "update-host-schema-drift",
     )
     require(
         update_properties.get("action", {}).get("enum") == ["status", "run"],
@@ -137,23 +187,36 @@ def validate_config(path: Path) -> None:
     require(isinstance(config, dict), "config-invalid")
     plugins = config.get("plugins")
     require(isinstance(plugins, dict), "plugins-config-missing")
-    require(plugins.get("enabled") == EXPECTED_ENABLED, "plugin-set-or-order-drift")
+    enabled = plugins.get("enabled")
+    require(
+        isinstance(enabled, list)
+        and all(isinstance(item, str) for item in enabled)
+        and len(enabled) == len(set(enabled))
+        and PLUGIN in enabled,
+        "plugin-enable-state-drift",
+    )
     require(plugins.get("disabled") == [], "plugin-disabled-drift")
     toolsets = config.get("toolsets", [])
     require(isinstance(toolsets, list), "toolsets-config-invalid")
-    for toolset in ("agent_docker", "terminal", "file", "code_execution", "cronjob"):
+    for toolset in (
+        "agent_docker", "terminal", "file", "code_execution", "cronjob",
+        "discord", "discord_admin", "discord_parity",
+    ):
         require(toolset in toolsets, f"toolset-not-enabled:{toolset}")
     disabled = config.get("agent", {}).get("disabled_toolsets", [])
     require(isinstance(disabled, list), "disabled-toolsets-config-invalid")
-    for toolset in ("computer_use", "discord_admin", "homeassistant"):
+    for toolset in ("computer_use", "homeassistant"):
         require(toolset in disabled, f"restricted-toolset-enabled:{toolset}")
-    for toolset in ("terminal", "file", "code_execution", "cronjob"):
+    for toolset in (
+        "terminal", "file", "code_execution", "cronjob", "discord",
+        "discord_admin", "discord_parity",
+    ):
         require(toolset not in disabled, f"native-toolset-disabled:{toolset}")
     terminal = config.get("terminal", {})
     require(terminal.get("backend") == "local", "terminal-backend-not-local")
     require(
         terminal.get("cwd")
-        == "/var/lib/hermes/astra/.hermes/profiles/astra/imported-data",
+        == "/var/lib/hermes/astra/.hermes/profiles/astra",
         "terminal-cwd-drift",
     )
     deny = config.get("approvals", {}).get("deny", [])
@@ -162,7 +225,7 @@ def validate_config(path: Path) -> None:
         require(pattern in deny, f"approval-deny-missing:{pattern}")
 
 
-def validate_known_hosts(path: Path) -> None:
+def validate_known_hosts(path: Path, expected_endpoints: set[str]) -> None:
     require(path.is_absolute(), "known-hosts-not-absolute")
     info = os.lstat(path)
     require(stat.S_ISREG(info.st_mode), "known-hosts-not-file")
@@ -170,14 +233,14 @@ def validate_known_hosts(path: Path) -> None:
     require(info.st_uid == 0, "known-hosts-owner")
     require(stat.S_IMODE(info.st_mode) == 0o440, "known-hosts-mode")
     lines = [line for line in path.read_text(encoding="ascii").splitlines() if line]
-    require(len(lines) == 4, "known-hosts-count-drift")
+    require(len(lines) == len(expected_endpoints), "known-hosts-count-drift")
     actual = set()
     for line in lines:
         parts = line.split()
         require(len(parts) == 3, "known-hosts-shape")
         require(parts[1] == "ssh-ed25519", "known-hosts-key-type")
         actual.add(parts[0])
-    require(actual == EXPECTED_REPORT_ENDPOINTS, "known-hosts-host-drift")
+    require(actual == expected_endpoints, "known-hosts-host-drift")
 
 
 def main() -> int:
@@ -186,14 +249,20 @@ def main() -> int:
     parser.add_argument("--runtime-root", type=Path, required=True)
     parser.add_argument("--config", type=Path, required=True)
     parser.add_argument("--known-hosts", type=Path, required=True)
+    parser.add_argument(
+        "--endpoints",
+        type=Path,
+        default=Path("/etc/hermes/astra/docker-endpoints.json"),
+    )
     args = parser.parse_args()
     try:
         source_hashes = validate_tree(args.source_root)
         runtime_hashes = validate_tree(args.runtime_root)
         require(source_hashes == runtime_hashes, "plugin-runtime-hash-drift")
         validate_config(args.config)
-        validate_known_hosts(args.known_hosts)
-        tools = validate_plugin(args.runtime_root)
+        reports, _ = validate_endpoint_manifest(args.endpoints)
+        validate_known_hosts(args.known_hosts, set(reports.values()))
+        tools = validate_plugin(args.runtime_root, args.endpoints)
     except Exception as exc:
         print(json.dumps({"status": "error", "error": str(exc)}, sort_keys=True))
         return 1

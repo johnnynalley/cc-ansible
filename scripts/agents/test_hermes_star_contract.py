@@ -15,6 +15,7 @@ EXPECTED_CASES = {
     "purchased-item-reversal",
     "reviewer-failure",
     "reviewer-independence",
+    "reversible-pilot-bypass",
     "seeded-premise-error",
     "single-normal-answer",
 }
@@ -70,6 +71,12 @@ class HermesStarContractTests(unittest.TestCase):
         self.assertTrue(selection["useForMateriallyUncertainCurrentFacts"])
         self.assertTrue(selection["useWhenExplicitlyRequested"])
         self.assertTrue(selection["skipForTrivialOrMechanicalAnswers"])
+        self.assertTrue(selection["materialCommitmentRequired"])
+        self.assertFalse(selection["ordinaryReversibleAnswerMayBeWithheldForReview"])
+        self.assertEqual(
+            selection["ordinaryReversibleRecommendationDisposition"],
+            "answer-immediately-with-evidence-caveat",
+        )
 
     def test_reviewers_have_independent_opposing_jobs(self) -> None:
         reviewers = self.contract["reviewers"]

@@ -1,0 +1,744 @@
+---
+# Purpose: Promote credential-isolated managed Arr API access for Astra.
+# Hosts: hermes_hosts, with read-only credential extraction delegated to source hosts.
+# Key vars: hermes_arr_api_*.
+# Templates: templates/hermes/hermes-arr-api-broker.service.j2 and Hermes policy/drop-in.
+# Scripts: scripts/agents/hermes-arr-*.py.
+# Validation: syntax-check, list-tasks, check-mode, focused tests, then live smoke.
+
+- name: Promote credential-isolated Arr API access for Astra
+  hosts: hermes_hosts
+  become: true
+  gather_facts: true
+
+  vars:
+    hermes_arr_api_astra_profile: >-
+      {{ hermes_shadow_profiles | selectattr('name', 'equalto', 'astra') | first }}
+    hermes_arr_api_backup_id: >-
+      {{ ansible_facts.date_time.iso8601_basic_short }}-pre-arr-api
+    hermes_arr_api_backup_root: >-
+      /srv/live-rollbacks/{{ inventory_hostname }}/hermes-migration/{{ hermes_arr_api_backup_id }}
+    hermes_arr_api_backup_archive: >-
+      {{ hermes_arr_api_backup_root }}/hermes-arr-api.tar
+    hermes_arr_api_dropin: >-
+      /etc/systemd/system/hermes-gateway-astra.service.d/10-managed.conf
+    hermes_arr_api_candidate_paths:
+      - "{{ hermes_arr_api_private_root }}"
+      - "{{ hermes_arr_api_broker_live }}"
+      - "{{ hermes_arr_api_validator_live }}"
+      - "{{ hermes_arr_api_smoke_live }}"
+      - "{{ hermes_star_privacy_validator_live }}"
+      - "{{ hermes_docker_inventory_validator_live }}"
+      - "{{ hermes_discord_parity_validator_live }}"
+      - "{{ hermes_arr_api_service_unit }}"
+      - "{{ hermes_arr_api_plugin_managed_root }}"
+      - "{{ hermes_arr_api_plugin_runtime_root }}"
+      - /etc/hermes/astra/config.yaml
+      - /etc/hermes/astra/managed-policy.sha256
+      - "{{ hermes_arr_api_dropin }}"
+
+  tasks:
+    - name: Validate Hermes Arr API rollout mode
+      ansible.builtin.assert:
+        that:
+          - hermes_arr_api_mode in ['disabled', 'converge']
+
+    - name: Skip Arr API promotion when disabled
+      ansible.builtin.meta: end_host
+      when: hermes_arr_api_mode == 'disabled'
+
+    - name: Require exact Arr API promotion authorization
+      ansible.builtin.assert:
+        that:
+          - hermes_arr_api_approved | bool
+          - hermes_arr_api_confirmation == hermes_arr_api_required_confirmation
+          - inventory_hostname == 'jn-t14s-lin'
+          - hermes_arr_api_services | length >= 4
+          - hermes_arr_api_services | length <= 16
+          - >-
+            hermes_arr_api_services | map(attribute='name') | list | unique | length
+            == hermes_arr_api_services | length
+          - >-
+            hermes_arr_api_services | map(attribute='source_host')
+            | difference(groups['docker_hosts']) | length == 0
+        fail_msg: Arr API promotion requires the exact reviewed authorization and service inventory.
+
+    - name: Read live Astra service UID
+      ansible.builtin.command:
+        argv: [/usr/bin/id, -u, hermes-astra]
+      register: hermes_arr_api_live_astra_uid
+      changed_when: false
+      check_mode: false
+
+    - name: Require managed Astra UID to match the live service identity
+      ansible.builtin.assert:
+        that:
+          - hermes_arr_api_live_astra_uid.stdout | int == hermes_arr_api_astra_profile.uid | int
+        fail_msg: Arr API peer authorization UID does not match the live Astra account.
+
+    - name: Require OpenClaw delivery to remain offline
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/systemctl
+          - is-active
+          - openclaw-isolated-gateway.service
+      register: hermes_arr_api_openclaw_state
+      changed_when: false
+      check_mode: false
+      failed_when: hermes_arr_api_openclaw_state.stdout not in ['inactive', 'failed', 'unknown']
+
+    - name: Inspect managed Arr source configurations
+      ansible.builtin.stat:
+        path: "{{ item.config }}"
+        follow: false
+      loop: "{{ hermes_arr_api_services }}"
+      delegate_to: "{{ item.source_host }}"
+      register: hermes_arr_api_source_configs
+
+    - name: Require safe regular Arr source configurations
+      ansible.builtin.assert:
+        that:
+          - item.stat.exists | default(false)
+          - item.stat.isreg | default(false)
+          - not (item.stat.islnk | default(false))
+          - item.stat.size | int > 0
+          - item.stat.size | int < 10485760
+      loop: "{{ hermes_arr_api_source_configs.results }}"
+      loop_control:
+        label: "{{ item.item.name }}"
+
+    - name: Extract bounded Arr API credentials from native configs
+      ansible.builtin.script:
+        cmd: >-
+          {{ playbook_dir }}/../../{{ hermes_arr_api_extractor_source }}
+          --service {{ item.name | quote }}
+          --config {{ item.config | quote }}
+          --format {{ item.format | quote }}
+          --base-url {{ ('http://' ~ hostvars[item.source_host].ansible_host ~ ':' ~ (item.port | string)) | quote }}
+          --api-header {{ item.api_header | quote }}
+          {% for prefix in item.path_prefixes %}--path-prefix {{ prefix | quote }} {% endfor %}
+          --status-path {{ item.status_path | quote }}
+      loop: "{{ hermes_arr_api_services }}"
+      loop_control:
+        label: "{{ item.name }}"
+      delegate_to: "{{ item.source_host }}"
+      register: hermes_arr_api_extracted
+      changed_when: false
+      check_mode: false
+      no_log: true
+
+    - name: Require exact bounded Arr credential objects
+      ansible.builtin.assert:
+        that:
+          - (item.stdout | from_json).schemaVersion == 1
+          - (item.stdout | from_json).service == item.item.name
+          - (item.stdout | from_json).apiKey | length >= 16
+          - (item.stdout | from_json).baseUrl is match('^https?://')
+          - (item.stdout | from_json).statusPath == item.item.status_path
+      loop: "{{ hermes_arr_api_extracted.results }}"
+      no_log: true
+
+    - name: Verify every Arr credential against its read-only status endpoint
+      ansible.builtin.uri:
+        url: >-
+          {{ (item.stdout | from_json).baseUrl }}{{ (item.stdout | from_json).statusPath }}
+        method: GET
+        headers: >-
+          {{
+            {
+              (item.stdout | from_json).apiHeader:
+                (item.stdout | from_json).apiKey,
+              'Accept': 'application/json',
+              'User-Agent': 'Hermes-Arr-Preflight/1.0'
+            }
+          }}
+        follow_redirects: none
+        return_content: false
+        status_code: 200
+        timeout: 15
+      loop: "{{ hermes_arr_api_extracted.results }}"
+      delegate_to: "{{ inventory_hostname }}"
+      changed_when: false
+      check_mode: false
+      no_log: true
+
+    - name: Stop after read-only Arr API check-mode preflight
+      ansible.builtin.meta: end_play
+      when: ansible_check_mode
+
+    - name: Inspect prior Arr API service account
+      ansible.builtin.getent:
+        database: passwd
+        key: "{{ hermes_arr_api_user }}"
+        fail_key: false
+      register: hermes_arr_api_prior_user
+
+    - name: Inspect prior Arr API shared group
+      ansible.builtin.getent:
+        database: group
+        key: "{{ hermes_arr_api_group }}"
+        fail_key: false
+      register: hermes_arr_api_prior_group
+
+    - name: Read prior Astra supplementary groups
+      ansible.builtin.command:
+        argv: [/usr/bin/id, -Gn, hermes-astra]
+      register: hermes_arr_api_prior_astra_groups
+      changed_when: false
+
+    - name: Read prior broker service state
+      ansible.builtin.command:
+        argv: [/usr/bin/systemctl, is-active, hermes-arr-api-broker.service]
+      register: hermes_arr_api_prior_broker_state
+      changed_when: false
+      failed_when: false
+
+    - name: Read prior Astra Gateway state
+      ansible.builtin.command:
+        argv: [/usr/bin/systemctl, is-active, hermes-gateway-astra.service]
+      register: hermes_arr_api_prior_astra_state
+      changed_when: false
+
+    - name: Inspect Arr API promotion paths
+      ansible.builtin.stat:
+        path: "{{ item }}"
+        follow: false
+      loop: "{{ hermes_arr_api_candidate_paths }}"
+      register: hermes_arr_api_prior_paths
+
+    - name: Select existing Arr API promotion paths
+      ansible.builtin.set_fact:
+        hermes_arr_api_existing_paths: >-
+          {{
+            hermes_arr_api_prior_paths.results
+            | selectattr('stat.exists')
+            | map(attribute='item')
+            | list
+          }}
+        hermes_arr_api_new_paths: >-
+          {{
+            hermes_arr_api_prior_paths.results
+            | rejectattr('stat.exists')
+            | map(attribute='item')
+            | list
+          }}
+        hermes_arr_api_restart_attempted: false
+
+    - name: Verify live rollback storage before Arr API promotion
+      ansible.builtin.command:
+        argv: [/usr/bin/mountpoint, -q, /srv/live-rollbacks]
+      changed_when: false
+
+    - name: Create targeted Arr API rollback directory
+      ansible.builtin.file:
+        path: "{{ hermes_arr_api_backup_root }}"
+        state: directory
+        owner: root
+        group: root
+        mode: "0700"
+
+    - name: Back up current Arr API and Astra policy paths
+      ansible.builtin.command:
+        argv: >-
+          {{
+            ['/usr/bin/tar', '--acls', '--xattrs', '-C', '/', '-cpf',
+             hermes_arr_api_backup_archive]
+            + (hermes_arr_api_existing_paths | map('regex_replace', '^/', '') | list)
+          }}
+      when: hermes_arr_api_existing_paths | length > 0
+      changed_when: true
+      no_log: true
+
+    - name: Promote credential-isolated Arr API transaction
+      block:
+        - name: Create dedicated Arr API shared group
+          ansible.builtin.group:
+            name: "{{ hermes_arr_api_group }}"
+            system: true
+            state: present
+
+        - name: Create dedicated Arr API broker account
+          ansible.builtin.user:
+            name: "{{ hermes_arr_api_user }}"
+            group: "{{ hermes_arr_api_group }}"
+            groups: ""
+            append: false
+            system: true
+            create_home: false
+            home: /nonexistent
+            shell: /usr/sbin/nologin
+            password_lock: true
+            state: present
+
+        - name: Grant only Astra access to the Arr API socket group
+          ansible.builtin.user:
+            name: hermes-astra
+            groups: "{{ hermes_arr_api_group }}"
+            append: true
+
+        - name: Create root-private Arr API credential directory
+          ansible.builtin.file:
+            path: "{{ hermes_arr_api_private_root }}"
+            state: directory
+            owner: root
+            group: root
+            mode: "0700"
+
+        - name: Publish root-private Arr API systemd credentials
+          ansible.builtin.copy:
+            content: "{{ item.stdout | from_json | to_json }}\n"
+            dest: "{{ hermes_arr_api_private_root }}/{{ item.item.name }}.json"
+            owner: root
+            group: root
+            mode: "0400"
+          loop: "{{ hermes_arr_api_extracted.results }}"
+          loop_control:
+            label: "{{ item.item.name }}"
+          register: hermes_arr_api_credential_copies
+          no_log: true
+
+        - name: Remove unmanaged Arr API credential files
+          ansible.builtin.find:
+            paths: "{{ hermes_arr_api_private_root }}"
+            file_type: file
+            recurse: false
+          register: hermes_arr_api_private_files
+
+        - name: Reject unmanaged Arr API credential inventory
+          ansible.builtin.assert:
+            that:
+              - hermes_arr_api_private_files.files | length == hermes_arr_api_services | length
+              - >-
+                hermes_arr_api_private_files.files
+                | map(attribute='path') | map('basename') | sort
+                == hermes_arr_api_services
+                   | map(attribute='name')
+                   | map('regex_replace', '$', '.json')
+                   | sort
+
+        - name: Deploy Arr API broker and validation scripts
+          ansible.builtin.copy:
+            src: "{{ playbook_dir }}/../../{{ item.source }}"
+            dest: "{{ item.destination }}"
+            owner: root
+            group: root
+            mode: "0555"
+          loop:
+            - source: "{{ hermes_arr_api_broker_source }}"
+              destination: "{{ hermes_arr_api_broker_live }}"
+            - source: "{{ hermes_arr_api_validator_source }}"
+              destination: "{{ hermes_arr_api_validator_live }}"
+            - source: "{{ hermes_arr_api_smoke_source }}"
+              destination: "{{ hermes_arr_api_smoke_live }}"
+          register: hermes_arr_api_script_copies
+
+        - name: Deploy additive-safe managed plugin validators
+          ansible.builtin.copy:
+            src: "{{ playbook_dir }}/../../{{ item.source }}"
+            dest: "{{ item.destination }}"
+            owner: root
+            group: root
+            mode: "0555"
+          loop:
+            - source: "{{ hermes_star_privacy_validator_source }}"
+              destination: "{{ hermes_star_privacy_validator_live }}"
+            - source: "{{ hermes_docker_inventory_validator_source }}"
+              destination: "{{ hermes_docker_inventory_validator_live }}"
+            - source: "{{ hermes_discord_parity_validator_source }}"
+              destination: "{{ hermes_discord_parity_validator_live }}"
+          register: hermes_arr_api_compat_validator_copies
+
+        - name: Deploy Arr API broker service
+          ansible.builtin.template:
+            src: "{{ playbook_dir }}/../../templates/hermes/hermes-arr-api-broker.service.j2"
+            dest: "{{ hermes_arr_api_service_unit }}"
+            owner: root
+            group: root
+            mode: "0644"
+          register: hermes_arr_api_service_copy
+
+        - name: Create root-owned Arr API plugin directories
+          ansible.builtin.file:
+            path: "{{ item }}"
+            state: directory
+            owner: root
+            group: hermes-astra
+            mode: "0750"
+          loop:
+            - "{{ hermes_arr_api_plugin_managed_root }}"
+            - "{{ hermes_arr_api_plugin_runtime_root }}"
+
+        - name: Deploy root-owned Arr API plugin copies
+          ansible.builtin.copy:
+            src: >-
+              {{ playbook_dir }}/../../{{ hermes_arr_api_plugin_source }}/{{ item.1 }}
+            dest: "{{ item.0 }}/{{ item.1 }}"
+            owner: root
+            group: hermes-astra
+            mode: "0440"
+          loop: >-
+            {{
+              [hermes_arr_api_plugin_managed_root, hermes_arr_api_plugin_runtime_root]
+              | product(['__init__.py', 'plugin.yaml']) | list
+            }}
+          register: hermes_arr_api_plugin_copies
+
+        - name: Remove stale Arr API plugin bytecode
+          ansible.builtin.file:
+            path: "{{ item }}/__pycache__"
+            state: absent
+          loop:
+            - "{{ hermes_arr_api_plugin_managed_root }}"
+            - "{{ hermes_arr_api_plugin_runtime_root }}"
+
+        - name: Stage non-propagating Astra Arr broker dependency
+          ansible.builtin.template:
+            src: "{{ playbook_dir }}/../../templates/hermes/hermes-gateway-hardening.conf.j2"
+            dest: "{{ hermes_arr_api_dropin }}"
+            owner: root
+            group: root
+            mode: "0644"
+          vars:
+            hermes_profile: "{{ hermes_arr_api_astra_profile }}"
+          register: hermes_arr_api_dropin_copy
+
+        - name: Reload systemd for the isolated Arr API broker
+          ansible.builtin.systemd_service:
+            daemon_reload: true
+
+        - name: Restart changed Arr API broker or ensure it is active
+          ansible.builtin.systemd_service:
+            name: hermes-arr-api-broker.service
+            state: >-
+              {{
+                'restarted'
+                if (
+                  hermes_arr_api_service_copy.changed
+                  or hermes_arr_api_script_copies.results | selectattr('changed') | list | length > 0
+                  or hermes_arr_api_credential_copies.results | selectattr('changed') | list | length > 0
+                )
+                else 'started'
+              }}
+            enabled: true
+
+        - name: Wait for the isolated Arr API broker socket
+          ansible.builtin.wait_for:
+            path: "{{ hermes_arr_api_socket }}"
+            state: present
+            timeout: 30
+
+        - name: Exercise Arr APIs as Astra before the planned Gateway restart
+          ansible.builtin.command:
+            argv:
+              - /usr/sbin/runuser
+              - --user
+              - hermes-astra
+              - --
+              - "{{ hermes_shadow_runtime_venv }}/bin/python"
+              - "{{ hermes_arr_api_smoke_live }}"
+              - --plugin
+              - "{{ hermes_arr_api_plugin_runtime_root }}"
+          register: hermes_arr_api_pre_attach_smoke
+          changed_when: false
+
+        - name: Require exact pre-restart Arr API coverage
+          ansible.builtin.assert:
+            that:
+              - (hermes_arr_api_pre_attach_smoke.stdout | from_json).status == 'ok'
+              - >-
+                (hermes_arr_api_pre_attach_smoke.stdout | from_json).results
+                | map(attribute='service') | sort
+                == hermes_arr_api_services | map(attribute='name') | sort
+
+        - name: Render Astra managed policy with Arr API toolset
+          ansible.builtin.template:
+            src: "{{ playbook_dir }}/../../templates/hermes/hermes-managed-config.yaml.j2"
+            dest: /etc/hermes/astra/config.yaml
+            owner: root
+            group: hermes-astra
+            mode: "0440"
+          vars:
+            hermes_profile: "{{ hermes_arr_api_astra_profile }}"
+          register: hermes_arr_api_managed_policy
+
+        - name: Hash Astra managed policy and environment
+          ansible.builtin.command:
+            argv:
+              - /usr/bin/sha256sum
+              - /etc/hermes/astra/config.yaml
+              - /etc/hermes/astra/.env
+          register: hermes_arr_api_policy_hash
+          changed_when: false
+          no_log: true
+
+        - name: Publish Astra managed policy checksum
+          ansible.builtin.copy:
+            content: "{{ hermes_arr_api_policy_hash.stdout }}\n"
+            dest: /etc/hermes/astra/managed-policy.sha256
+            owner: root
+            group: hermes-astra
+            mode: "0440"
+          register: hermes_arr_api_policy_checksum
+          no_log: true
+
+        - name: Reload systemd after Astra Arr API dependency promotion
+          ansible.builtin.systemd_service:
+            daemon_reload: true
+
+        - name: Validate merged Astra config as its service identity
+          ansible.builtin.command:
+            argv:
+              - /usr/sbin/runuser
+              - --user
+              - hermes-astra
+              - --
+              - /usr/bin/env
+              - HOME=/var/lib/hermes/astra
+              - HERMES_HOME=/var/lib/hermes/astra/.hermes/profiles/astra
+              - HERMES_MANAGED_DIR=/etc/hermes/astra
+              - HERMES_DOCKER_BINARY=/usr/bin/podman
+              - "{{ hermes_shadow_runtime_binary }}"
+              - config
+              - check
+          changed_when: false
+          no_log: true
+
+        - name: Validate promoted Arr API plugin and broker boundary
+          ansible.builtin.command:
+            argv:
+              - "{{ hermes_shadow_runtime_venv }}/bin/python"
+              - "{{ hermes_arr_api_validator_live }}"
+              - --source-root
+              - "{{ hermes_arr_api_plugin_managed_root }}"
+              - --runtime-root
+              - "{{ hermes_arr_api_plugin_runtime_root }}"
+              - --config
+              - /etc/hermes/astra/config.yaml
+              - --socket
+              - "{{ hermes_arr_api_socket }}"
+              - --socket-group
+              - "{{ hermes_arr_api_group }}"
+          changed_when: false
+
+        - name: Determine whether Astra needs one planned Arr API restart
+          ansible.builtin.set_fact:
+            hermes_arr_api_restart_required: >-
+              {{
+                hermes_arr_api_managed_policy.changed
+                or hermes_arr_api_dropin_copy.changed
+                or hermes_arr_api_policy_checksum.changed
+                or hermes_arr_api_plugin_copies.results
+                   | selectattr('changed') | list | length > 0
+              }}
+
+        - name: Prepare Astra planned-stop marker for Arr API promotion
+          ansible.builtin.include_tasks:
+            file: ../../tasks/hermes-planned-stop-marker.yml
+          vars:
+            hermes_planned_stop_profile: "{{ hermes_arr_api_astra_profile }}"
+          when: hermes_arr_api_restart_required | bool
+
+        - name: Record Astra Arr API restart attempt
+          ansible.builtin.set_fact:
+            hermes_arr_api_restart_attempted: true
+          when: hermes_arr_api_restart_required | bool
+
+        - name: Restart Astra once for Arr API promotion
+          ansible.builtin.systemd_service:
+            name: hermes-gateway-astra.service
+            state: restarted
+          when: hermes_arr_api_restart_required | bool
+
+        - name: Wait for Astra native readiness after Arr API promotion
+          ansible.builtin.command:
+            argv: [/usr/bin/systemctl, is-active, hermes-gateway-astra.service]
+          register: hermes_arr_api_promoted_astra_state
+          retries: 45
+          delay: 2
+          until:
+            - hermes_arr_api_promoted_astra_state.rc == 0
+            - hermes_arr_api_promoted_astra_state.stdout == 'active'
+          changed_when: false
+
+        - name: Exercise every Arr API as the real Astra identity
+          ansible.builtin.command:
+            argv:
+              - /usr/sbin/runuser
+              - --user
+              - hermes-astra
+              - --
+              - "{{ hermes_shadow_runtime_venv }}/bin/python"
+              - "{{ hermes_arr_api_smoke_live }}"
+              - --plugin
+              - "{{ hermes_arr_api_plugin_runtime_root }}"
+          register: hermes_arr_api_live_smoke
+          changed_when: false
+
+        - name: Require exact Arr API smoke coverage
+          ansible.builtin.assert:
+            that:
+              - (hermes_arr_api_live_smoke.stdout | from_json).status == 'ok'
+              - >-
+                (hermes_arr_api_live_smoke.stdout | from_json).results
+                | map(attribute='service') | sort
+                == hermes_arr_api_services | map(attribute='name') | sort
+
+        - name: Remove validation bytecode after Arr API acceptance
+          ansible.builtin.file:
+            path: "{{ item }}/__pycache__"
+            state: absent
+          loop:
+            - "{{ hermes_arr_api_plugin_managed_root }}"
+            - "{{ hermes_arr_api_plugin_runtime_root }}"
+
+        - name: Require Astra and Arr API broker active
+          ansible.builtin.command:
+            argv: [/usr/bin/systemctl, is-active, "{{ item }}"]
+          loop:
+            - hermes-arr-api-broker.service
+            - hermes-gateway-astra.service
+          changed_when: false
+
+      rescue:
+        - name: Restore prior Arr API and Astra policy archive
+          ansible.builtin.command:
+            argv:
+              - /usr/bin/tar
+              - --acls
+              - --xattrs
+              - -C
+              - /
+              - -xpf
+              - "{{ hermes_arr_api_backup_archive }}"
+          when: hermes_arr_api_existing_paths | default([]) | length > 0
+          changed_when: true
+
+        - name: Reload prior Astra dependency state before stopping broker
+          ansible.builtin.systemd_service:
+            daemon_reload: true
+          failed_when: false
+
+        - name: Stop failed Arr API broker after dependency rollback
+          ansible.builtin.systemd_service:
+            name: hermes-arr-api-broker.service
+            state: stopped
+          failed_when: false
+
+        - name: Remove paths created only by the failed Arr API promotion
+          ansible.builtin.file:
+            path: "{{ item }}"
+            state: absent
+          loop: "{{ hermes_arr_api_new_paths | default([]) }}"
+          failed_when: false
+
+        - name: Restore prior Astra supplementary groups
+          ansible.builtin.user:
+            name: hermes-astra
+            groups: >-
+              {{
+                hermes_arr_api_prior_astra_groups.stdout.split()
+                | difference(['hermes-astra'])
+                | join(',')
+              }}
+            append: false
+          failed_when: false
+
+        - name: Remove newly created Arr API broker account
+          ansible.builtin.user:
+            name: "{{ hermes_arr_api_user }}"
+            state: absent
+          when: >-
+            hermes_arr_api_prior_user.ansible_facts.getent_passwd
+            .get(hermes_arr_api_user) is none
+          failed_when: false
+
+        - name: Remove newly created Arr API shared group
+          ansible.builtin.group:
+            name: "{{ hermes_arr_api_group }}"
+            state: absent
+          when: >-
+            hermes_arr_api_prior_group.ansible_facts.getent_group
+            .get(hermes_arr_api_group) is none
+          failed_when: false
+
+        - name: Reload restored systemd state
+          ansible.builtin.systemd_service:
+            daemon_reload: true
+          failed_when: false
+
+        - name: Restore prior Arr API broker activity
+          ansible.builtin.systemd_service:
+            name: hermes-arr-api-broker.service
+            state: >-
+              {{ 'started' if hermes_arr_api_prior_broker_state.stdout == 'active' else 'stopped' }}
+          when: hermes_arr_api_prior_broker_state.stdout == 'active'
+          failed_when: false
+
+        - name: Inspect Astra state after Arr API rollback
+          ansible.builtin.command:
+            argv: [/usr/bin/systemctl, is-active, hermes-gateway-astra.service]
+          register: hermes_arr_api_rollback_astra_state
+          changed_when: false
+          failed_when: false
+
+        - name: Prepare planned marker before Astra rollback restart
+          ansible.builtin.include_tasks:
+            file: ../../tasks/hermes-planned-stop-marker.yml
+          vars:
+            hermes_planned_stop_profile: "{{ hermes_arr_api_astra_profile }}"
+          when:
+            - hermes_arr_api_restart_attempted | default(false) | bool
+            - hermes_arr_api_prior_astra_state.stdout == 'active'
+            - hermes_arr_api_rollback_astra_state.stdout == 'active'
+
+        - name: Restart Astra after Arr API rollback
+          ansible.builtin.systemd_service:
+            name: hermes-gateway-astra.service
+            state: restarted
+          when:
+            - hermes_arr_api_restart_attempted | default(false) | bool
+            - hermes_arr_api_prior_astra_state.stdout == 'active'
+            - hermes_arr_api_rollback_astra_state.stdout == 'active'
+          failed_when: false
+
+        - name: Reset propagated Astra dependency failure before recovery
+          ansible.builtin.command:
+            argv: [/usr/bin/systemctl, reset-failed, hermes-gateway-astra.service]
+          when:
+            - hermes_arr_api_prior_astra_state.stdout == 'active'
+            - hermes_arr_api_rollback_astra_state.stdout != 'active'
+          changed_when: true
+          failed_when: false
+
+        - name: Restore Astra when dependency failure stopped it
+          ansible.builtin.systemd_service:
+            name: hermes-gateway-astra.service
+            state: started
+            enabled: true
+          when:
+            - hermes_arr_api_prior_astra_state.stdout == 'active'
+            - hermes_arr_api_rollback_astra_state.stdout != 'active'
+          failed_when: false
+
+        - name: Preserve a previously inactive Astra state
+          ansible.builtin.systemd_service:
+            name: hermes-gateway-astra.service
+            state: stopped
+          when: hermes_arr_api_prior_astra_state.stdout != 'active'
+          failed_when: false
+
+        - name: Require prior active Astra state restored
+          ansible.builtin.command:
+            argv: [/usr/bin/systemctl, is-active, hermes-gateway-astra.service]
+          register: hermes_arr_api_restored_astra_state
+          retries: 45
+          delay: 2
+          until:
+            - hermes_arr_api_restored_astra_state.rc == 0
+            - hermes_arr_api_restored_astra_state.stdout == 'active'
+          when: hermes_arr_api_prior_astra_state.stdout == 'active'
+          changed_when: false
+
+        - name: Fail after Arr API rollback
+          ansible.builtin.fail:
+            msg: Arr API promotion failed and prior state was restored.

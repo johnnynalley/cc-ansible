@@ -524,27 +524,45 @@
       "scope": "tree",
       "pattern": "rigel/courses",
       "disposition": "retain",
-      "target": "rigel/courses",
-      "ownerClass": "operator-readonly",
-      "reason": "Canonical course and calendar-request state remains the source for always-on academic checks."
+      "target": "courses",
+      "ownerClass": "executor-writable",
+      "reason": "Complete course corpus and canonical academic state become Rigel-owned native Hermes data."
     },
     {
       "id": "rigel-memory",
       "scope": "tree",
       "pattern": "rigel/memory",
       "disposition": "retain",
-      "target": "rigel/memory",
+      "target": "memory",
       "ownerClass": "executor-writable",
-      "reason": "Academic session memory remains mutable data."
+      "reason": "Academic session and learning memory remain isolated Rigel-owned native data."
     },
     {
       "id": "rigel-syllabus",
       "scope": "exact",
       "pattern": "rigel/dracula-syllabus.pdf",
       "disposition": "retain",
-      "target": "rigel/courses/dracula-syllabus.pdf",
-      "ownerClass": "operator-readonly",
-      "reason": "Course source material remains canonical read-only academic data."
+      "target": "courses/_legacy-inbox/dracula-syllabus.pdf",
+      "ownerClass": "executor-writable",
+      "reason": "Standalone course source material remains available in Rigel's native legacy inbox."
+    },
+    {
+      "id": "rigel-ecs2390-inbound",
+      "scope": "tree",
+      "pattern": "rigel/tmp_ecs2390",
+      "disposition": "retain",
+      "target": "courses/_legacy-inbox/ecs-2390",
+      "ownerClass": "executor-writable",
+      "reason": "Previously staged ECS 2390 materials remain part of Rigel's native course corpus."
+    },
+    {
+      "id": "rigel-general-inbound",
+      "scope": "tree",
+      "pattern": "rigel/tmp_inbound",
+      "disposition": "retain",
+      "target": "courses/_legacy-inbox/inbound",
+      "ownerClass": "executor-writable",
+      "reason": "Previously staged academic inbound files remain available for native course classification."
     },
     {
       "id": "legacy-executable-scripts",

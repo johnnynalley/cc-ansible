@@ -215,10 +215,11 @@
           - hermes_profile_data_plan.summary.bytes <= hermes_profile_data_contract.limits.maxTotalBytes
           - hermes_profile_data_plan.summary.profiles.astra.files > 0
           - hermes_profile_data_plan.summary.profiles.dubble.files > 0
-          - hermes_profile_data_plan.summary.profiles.rigel.managedFiles > 0
+          - hermes_profile_data_plan.summary.profiles.rigel.writableFiles > 0
         fail_msg: >-
           The selected data/reference inventory is empty, too large, or missing
-          a required profile. Memory and structured-transform rows are excluded.
+          a required profile. Only reviewed native data and operator references
+          are staged; memory-provider and structured-transform rows are excluded.
 
     - name: Report Hermes profile-data check-mode boundary
       ansible.builtin.debug:
@@ -304,6 +305,35 @@
           {{ hermes_profile_data_existing_verify.stdout | from_json }}
       when: hermes_profile_data_targets_before.results[0].stat.exists
 
+    - name: Validate reviewed existing writable inventory drift is otherwise safe
+      ansible.builtin.command:
+        argv:
+          - "{{ hermes_profile_data_stager_live }}"
+          - --contract
+          - "{{ hermes_profile_data_contract_live }}"
+          - --repository-root
+          - "{{ hermes_profile_data_repository_root }}"
+          - --target-root
+          - "{{ hermes_profile_data_root }}"
+          - --manifest
+          - "{{ hermes_profile_data_manifest_live }}"
+          - --mode
+          - verify
+          - --allow-writable-drift
+      register: hermes_profile_data_existing_relaxed_verify
+      check_mode: false
+      changed_when: false
+      failed_when: false
+      when:
+        - hermes_profile_data_targets_before.results[0].stat.exists
+        - hermes_profile_data_existing_verify_result.status == 'error'
+        - >-
+          hermes_profile_data_existing_verify_result.error in
+          ['manifest-file-missing',
+           'manifest-file-hash-drift',
+           'writable-file-inventory-drift',
+           'writable-directory-inventory-drift']
+
     - name: Classify existing Hermes profile-data generation
       ansible.builtin.assert:
         that:
@@ -312,9 +342,19 @@
             or (hermes_profile_data_existing_verify_result.status == 'error'
                 and hermes_profile_data_existing_verify_result.error
                     == 'manifest-contract-invalid')
+            or (hermes_profile_data_existing_verify_result.status == 'error'
+                and hermes_profile_data_existing_verify_result.error in
+                    ['manifest-file-missing',
+                     'manifest-file-hash-drift',
+                     'writable-file-inventory-drift',
+                     'writable-directory-inventory-drift']
+                and hermes_profile_data_preserve_reviewed_writable_drift | bool
+                and hermes_profile_data_existing_relaxed_verify.rc == 0)
         fail_msg: >-
           Existing Hermes profile data failed verification for a reason other
-          than an expected managed-contract migration. Refusing convergence.
+          than an expected managed-contract migration or explicitly reviewed,
+          otherwise-safe writable drift that will be preserved. Refusing
+          convergence.
       when: hermes_profile_data_targets_before.results[0].stat.exists
 
     - name: Record existing Hermes profile-data generation status
@@ -324,6 +364,8 @@
           absent
           {% elif hermes_profile_data_existing_verify.rc == 0 %}
           verified
+          {% elif hermes_profile_data_existing_verify_result.error in ['manifest-file-missing', 'manifest-file-hash-drift', 'writable-file-inventory-drift', 'writable-directory-inventory-drift'] %}
+          preserved-writable-drift
           {% else %}
           stale-contract
           {% endif %}
@@ -368,20 +410,20 @@
 
         - name: Stage and verify complete Hermes profile-data generation
           ansible.builtin.command:
-            argv:
-              - "{{ hermes_profile_data_stager_live }}"
-              - --contract
-              - "{{ hermes_profile_data_contract_live }}"
-              - --repository-root
-              - "{{ hermes_profile_data_repository_root }}"
-              - --source-root
-              - "{{ hermes_profile_data_contract.sourceRoot }}"
-              - --target-root
-              - "{{ hermes_profile_data_stage_generation }}"
-              - --manifest
-              - "{{ hermes_profile_data_stage_manifest }}"
-              - --mode
-              - stage
+            argv: >-
+              {{
+                [hermes_profile_data_stager_live,
+                 '--contract', hermes_profile_data_contract_live,
+                 '--repository-root', hermes_profile_data_repository_root,
+                 '--source-root', hermes_profile_data_contract.sourceRoot,
+                 '--target-root', hermes_profile_data_stage_generation,
+                 '--manifest', hermes_profile_data_stage_manifest,
+                 '--mode', 'stage']
+                + (['--preserve-writable-from', hermes_profile_data_root,
+                    '--preserve-writable-manifest', hermes_profile_data_manifest_live]
+                   if hermes_profile_data_targets_before.results[0].stat.exists
+                   else [])
+              }}
           register: hermes_profile_data_stage_command
           changed_when: true
 
@@ -396,6 +438,9 @@
               - hermes_profile_data_stage_result.mode == 'stage'
               - hermes_profile_data_stage_result.summary.files == hermes_profile_data_plan.summary.files
               - hermes_profile_data_stage_result.summary.bytes == hermes_profile_data_plan.summary.bytes
+              - >-
+                not hermes_profile_data_targets_before.results[0].stat.exists
+                or hermes_profile_data_stage_result.summary.preservedWritable.files >= 0
             fail_msg: >-
               The copied generation does not match the accepted shape-only plan.
       rescue:

@@ -1,0 +1,4 @@
+name: host-admin
+version: 1.0.0
+description: Bounded inventory-driven Linux host administration with forced-command isolation
+module: __init__

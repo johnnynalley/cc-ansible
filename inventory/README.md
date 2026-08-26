@@ -6,6 +6,9 @@ and encrypted inventory secrets.
 ## Layout
 
 - `hosts.ini`: inventory group hierarchy and host membership.
+- `hermes-replacement-rehearsal.ini`: credential-free controller-only
+  inventory for the attended disposable Hermes node-loss bootstrap proof. It
+  contains no production target.
 - `group_vars/all/`: global defaults and global vault material.
 - `group_vars/<group>/`: group-wide defaults for OS, platform, or role groups.
 - `host_vars/<hostname>/`: host-specific overrides, split by concern.

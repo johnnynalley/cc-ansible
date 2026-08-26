@@ -7,6 +7,9 @@ useDefault = true
 description = "Repository-specific false positives"
 paths = [
   '''(^|/)inventory/(group_vars|host_vars)/.*/vault\.yml$''',
+  '''(^|/)\.codex/''',
+  '''(^|/)__pycache__/''',
+  '''\.pyc$''',
 ]
 
 regexes = [

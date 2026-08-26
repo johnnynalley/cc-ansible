@@ -12,7 +12,7 @@
   },
   "workspace": {
     "policy": "files/openclaw/workspace-migration-policy.json",
-    "policySha256": "08e30aa55c72a54a6ac0e7c67e6d99b5557bd0fed75e8b16a19af556ee20e211",
+    "policySha256": "9920d1299ffe1dcaf2e290c5ed044dca1413e8d93ebc9146cd043f08ecdac839",
     "dispositionHandlers": {
       "retain": {
         "action": "curated-import",

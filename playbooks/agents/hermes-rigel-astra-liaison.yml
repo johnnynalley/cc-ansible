@@ -1,0 +1,815 @@
+---
+# Purpose: Promote Rigel's privacy-isolated, typed Astra calendar liaison.
+# Hosts: hermes_hosts.
+# Key vars: hermes_rigel_astra_liaison_*.
+# Validation: focused tests, syntax/list/check, live read-only smoke, zero drift.
+
+- name: Promote Rigel's privacy-isolated Astra calendar liaison
+  hosts: hermes_hosts
+  become: true
+  gather_facts: true
+
+  vars:
+    hermes_rigel_profile: >-
+      {{ hermes_shadow_profiles | selectattr('name', 'equalto', 'rigel') | first }}
+    hermes_rigel_astra_liaison_backup_id: >-
+      {{ ansible_facts.date_time.iso8601_basic_short }}-pre-rigel-astra-liaison
+    hermes_rigel_astra_liaison_backup_root: >-
+      {{ hermes_rigel_astra_liaison_rollback_root }}/{{ hermes_rigel_astra_liaison_backup_id }}
+    hermes_rigel_astra_liaison_backup_archive: >-
+      {{ hermes_rigel_astra_liaison_backup_root }}/files.tar
+    hermes_rigel_astra_liaison_dropin: >-
+      /etc/systemd/system/hermes-gateway-rigel.service.d/10-managed.conf
+    hermes_rigel_environment_file: >-
+      {{
+        hermes_rigel_profile.environment_file
+        | default('/etc/hermes/rigel/.env')
+      }}
+    hermes_rigel_astra_liaison_candidate_paths:
+      - "{{ hermes_rigel_astra_liaison_private_root }}"
+      - "{{ hermes_rigel_astra_liaison_home }}"
+      - "{{ hermes_rigel_astra_liaison_broker_live }}"
+      - "{{ hermes_rigel_astra_liaison_validator_live }}"
+      - "{{ hermes_rigel_astra_liaison_smoke_live }}"
+      - "{{ hermes_rigel_astra_liaison_service_unit }}"
+      - "{{ hermes_rigel_astra_liaison_policy_live }}"
+      - "{{ hermes_rigel_astra_liaison_plugin_managed_root }}"
+      - "{{ hermes_rigel_astra_liaison_plugin_runtime_root }}"
+      - /etc/hermes/rigel/config.yaml
+      - /etc/hermes/rigel/.env
+      - "{{ hermes_rigel_environment_file }}"
+      - /etc/hermes/rigel/managed-policy.sha256
+      - "{{ hermes_rigel_astra_liaison_dropin }}"
+
+  tasks:
+    - name: Validate Rigel liaison rollout mode
+      ansible.builtin.assert:
+        that:
+          - hermes_rigel_astra_liaison_mode in ['disabled', 'converge']
+
+    - name: Skip Rigel liaison promotion when disabled
+      ansible.builtin.meta: end_host
+      when: hermes_rigel_astra_liaison_mode == 'disabled'
+
+    - name: Require exact Rigel liaison promotion authorization
+      ansible.builtin.assert:
+        that:
+          - hermes_rigel_astra_liaison_approved | bool
+          - >-
+            hermes_rigel_astra_liaison_confirmation
+            == hermes_rigel_astra_liaison_required_confirmation
+          - inventory_hostname == 'jn-t14s-lin'
+          - hermes_rigel_dedicated_discord_enabled | bool
+          - hermes_rigel_discord_guild_id is match('^[0-9]+$')
+          - hermes_rigel_discord_channel_id is match('^[0-9]+$')
+          - hermes_automation_owner_user_id is match('^[0-9]+$')
+        fail_msg: Rigel liaison promotion requires exact reviewed authorization and Discord provenance.
+
+    - name: Read live Rigel service UID
+      ansible.builtin.command:
+        argv: [/usr/bin/id, -u, hermes-rigel]
+      register: hermes_rigel_astra_liaison_live_rigel_uid
+      changed_when: false
+      check_mode: false
+
+    - name: Require managed Rigel UID to match live identity
+      ansible.builtin.assert:
+        that:
+          - >-
+            hermes_rigel_astra_liaison_live_rigel_uid.stdout | int
+            == hermes_rigel_profile.uid | int
+
+    - name: Inspect calendar liaison dependencies
+      ansible.builtin.stat:
+        path: "{{ item }}"
+        follow: false
+      loop:
+        - /usr/bin/khal
+        - /usr/bin/vdirsyncer
+        - /etc/hermes/astra/.env
+        - "{{ hermes_rigel_profile.home }}/state.db"
+      register: hermes_rigel_astra_liaison_dependencies
+
+    - name: Require safe calendar liaison dependencies
+      ansible.builtin.assert:
+        that:
+          - item.stat.exists | default(false)
+          - item.stat.isreg | default(false)
+          - not (item.stat.islnk | default(false))
+          - item.stat.size | int > 0
+      loop: "{{ hermes_rigel_astra_liaison_dependencies.results }}"
+      loop_control:
+        label: "{{ item.item }}"
+
+    - name: Require OpenClaw delivery to remain offline
+      ansible.builtin.command:
+        argv: [/usr/bin/systemctl, is-active, openclaw-isolated-gateway.service]
+      register: hermes_rigel_astra_liaison_openclaw_state
+      changed_when: false
+      check_mode: false
+      failed_when: >-
+        hermes_rigel_astra_liaison_openclaw_state.stdout
+        not in ['inactive', 'failed', 'unknown']
+
+    - name: Stop after read-only Rigel liaison check-mode preflight
+      ansible.builtin.meta: end_play
+      when: ansible_check_mode
+
+    - name: Extract only the current CalDAV app password
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/awk
+          - >-
+            /^NEXTCLOUD_CALDAV_APP_PASSWORD=/{print substr($0,index($0,"=")+1); exit}
+          - /etc/hermes/astra/.env
+      register: hermes_rigel_astra_liaison_caldav_password
+      changed_when: false
+      no_log: true
+
+    - name: Require one bounded CalDAV credential
+      ansible.builtin.assert:
+        that:
+          - hermes_rigel_astra_liaison_caldav_password.stdout | length >= 12
+          - hermes_rigel_astra_liaison_caldav_password.stdout | length <= 512
+          - "'\n' not in hermes_rigel_astra_liaison_caldav_password.stdout"
+      no_log: true
+
+    - name: Inspect prior liaison service account
+      ansible.builtin.getent:
+        database: passwd
+        key: "{{ hermes_rigel_astra_liaison_user }}"
+        fail_key: false
+      register: hermes_rigel_astra_liaison_prior_user
+
+    - name: Inspect prior liaison service group
+      ansible.builtin.getent:
+        database: group
+        key: "{{ hermes_rigel_astra_liaison_group }}"
+        fail_key: false
+      register: hermes_rigel_astra_liaison_prior_group
+
+    - name: Read prior Rigel supplementary groups
+      ansible.builtin.command:
+        argv: [/usr/bin/id, -Gn, hermes-rigel]
+      register: hermes_rigel_astra_liaison_prior_rigel_groups
+      changed_when: false
+
+    - name: Read prior liaison broker state
+      ansible.builtin.command:
+        argv: [/usr/bin/systemctl, is-active, hermes-rigel-astra-calendar-broker.service]
+      register: hermes_rigel_astra_liaison_prior_broker_state
+      changed_when: false
+      failed_when: false
+
+    - name: Read prior Rigel Gateway state
+      ansible.builtin.command:
+        argv: [/usr/bin/systemctl, is-active, hermes-gateway-rigel.service]
+      register: hermes_rigel_astra_liaison_prior_rigel_state
+      changed_when: false
+
+    - name: Inspect liaison promotion paths
+      ansible.builtin.stat:
+        path: "{{ item }}"
+        follow: false
+      loop: "{{ hermes_rigel_astra_liaison_candidate_paths }}"
+      register: hermes_rigel_astra_liaison_prior_paths
+
+    - name: Classify existing liaison promotion paths
+      ansible.builtin.set_fact:
+        hermes_rigel_astra_liaison_existing_paths: >-
+          {{
+            hermes_rigel_astra_liaison_prior_paths.results
+            | selectattr('stat.exists') | map(attribute='item') | list
+          }}
+        hermes_rigel_astra_liaison_new_paths: >-
+          {{
+            hermes_rigel_astra_liaison_prior_paths.results
+            | rejectattr('stat.exists') | map(attribute='item') | list
+          }}
+        hermes_rigel_astra_liaison_restart_attempted: false
+
+    - name: Verify off-host rollback mount before liaison promotion
+      ansible.builtin.command:
+        argv: [/usr/bin/mountpoint, -q, /srv/live-rollbacks]
+      changed_when: false
+
+    - name: Create targeted liaison rollback directory
+      ansible.builtin.file:
+        path: "{{ hermes_rigel_astra_liaison_backup_root }}"
+        state: directory
+        owner: root
+        group: root
+        mode: "0700"
+
+    - name: Back up current liaison and Rigel policy paths
+      ansible.builtin.command:
+        argv: >-
+          {{
+            ['/usr/bin/tar', '--acls', '--xattrs', '-C', '/', '-cpf',
+             hermes_rigel_astra_liaison_backup_archive]
+            + (hermes_rigel_astra_liaison_existing_paths
+               | map('regex_replace', '^/', '') | list)
+          }}
+      when: hermes_rigel_astra_liaison_existing_paths | length > 0
+      changed_when: true
+      no_log: true
+
+    - name: Promote privacy-isolated Rigel calendar liaison
+      block:
+        - name: Create dedicated calendar liaison group
+          ansible.builtin.group:
+            name: "{{ hermes_rigel_astra_liaison_group }}"
+            system: true
+            state: present
+
+        - name: Create dedicated calendar liaison account
+          ansible.builtin.user:
+            name: "{{ hermes_rigel_astra_liaison_user }}"
+            group: "{{ hermes_rigel_astra_liaison_group }}"
+            groups: ""
+            append: false
+            system: true
+            create_home: true
+            home: "{{ hermes_rigel_astra_liaison_home }}"
+            shell: /usr/sbin/nologin
+            password_lock: true
+            state: present
+
+        - name: Grant only Rigel access to the liaison socket group
+          ansible.builtin.user:
+            name: hermes-rigel
+            groups: "{{ hermes_rigel_astra_liaison_group }}"
+            append: true
+
+        - name: Secure calendar liaison home and config directories
+          ansible.builtin.file:
+            path: "{{ item }}"
+            state: directory
+            owner: "{{ hermes_rigel_astra_liaison_user }}"
+            group: "{{ hermes_rigel_astra_liaison_group }}"
+            mode: "0700"
+          loop:
+            - "{{ hermes_rigel_astra_liaison_home }}"
+            - "{{ hermes_rigel_astra_liaison_home }}/.config"
+            - "{{ hermes_rigel_astra_liaison_home }}/.config/vdirsyncer"
+            - "{{ hermes_rigel_astra_liaison_home }}/.config/khal"
+            - "{{ hermes_rigel_astra_liaison_home }}/.local"
+            - "{{ hermes_rigel_astra_liaison_home }}/.local/share"
+            - "{{ hermes_rigel_astra_liaison_home }}/.local/share/vdirsyncer"
+            - "{{ hermes_rigel_astra_liaison_home }}/.local/share/vdirsyncer/status"
+            - "{{ hermes_rigel_astra_liaison_home }}/.local/share/vdirsyncer/calendars"
+
+        - name: Create root-private liaison credential directory
+          ansible.builtin.file:
+            path: "{{ hermes_rigel_astra_liaison_private_root }}"
+            state: directory
+            owner: root
+            group: root
+            mode: "0700"
+
+        - name: Publish only the CalDAV systemd credential
+          ansible.builtin.copy:
+            content: "{{ hermes_rigel_astra_liaison_caldav_password.stdout }}\n"
+            dest: "{{ hermes_rigel_astra_liaison_private_root }}/caldav-password"
+            owner: root
+            group: root
+            mode: "0400"
+          register: hermes_rigel_astra_liaison_credential_copy
+          no_log: true
+
+        - name: Deploy isolated liaison calendar configurations
+          ansible.builtin.template:
+            src: "{{ playbook_dir }}/../../templates/hermes/{{ item.source }}"
+            dest: "{{ item.destination }}"
+            owner: "{{ hermes_rigel_astra_liaison_user }}"
+            group: "{{ hermes_rigel_astra_liaison_group }}"
+            mode: "0600"
+          loop:
+            - source: rigel-astra-liaison-vdirsyncer.conf.j2
+              destination: "{{ hermes_rigel_astra_liaison_home }}/.config/vdirsyncer/config"
+            - source: rigel-astra-liaison-khal.conf.j2
+              destination: "{{ hermes_rigel_astra_liaison_home }}/.config/khal/config"
+          register: hermes_rigel_astra_liaison_calendar_configs
+
+        - name: Deploy liaison broker validation and smoke scripts
+          ansible.builtin.copy:
+            src: "{{ playbook_dir }}/../../{{ item.source }}"
+            dest: "{{ item.destination }}"
+            owner: root
+            group: root
+            mode: "0555"
+          loop:
+            - source: "{{ hermes_rigel_astra_liaison_broker_source }}"
+              destination: "{{ hermes_rigel_astra_liaison_broker_live }}"
+            - source: "{{ hermes_rigel_astra_liaison_validator_source }}"
+              destination: "{{ hermes_rigel_astra_liaison_validator_live }}"
+            - source: "{{ hermes_rigel_astra_liaison_smoke_source }}"
+              destination: "{{ hermes_rigel_astra_liaison_smoke_live }}"
+          register: hermes_rigel_astra_liaison_script_copies
+
+        - name: Deploy isolated calendar broker service
+          ansible.builtin.template:
+            src: >-
+              {{ playbook_dir }}/../../templates/hermes/hermes-rigel-astra-calendar-broker.service.j2
+            dest: "{{ hermes_rigel_astra_liaison_service_unit }}"
+            owner: root
+            group: root
+            mode: "0644"
+          register: hermes_rigel_astra_liaison_service_copy
+
+        - name: Create root-owned liaison plugin directories
+          ansible.builtin.file:
+            path: "{{ item }}"
+            state: directory
+            owner: root
+            group: "{{ hermes_rigel_profile.group }}"
+            mode: "0750"
+          loop:
+            - "{{ hermes_rigel_astra_liaison_plugin_managed_root }}"
+            - "{{ hermes_rigel_astra_liaison_plugin_runtime_root }}"
+
+        - name: Deploy root-owned liaison plugin copies
+          ansible.builtin.copy:
+            src: >-
+              {{ playbook_dir }}/../../{{ hermes_rigel_astra_liaison_plugin_source }}/{{ item.1 }}
+            dest: "{{ item.0 }}/{{ item.1 }}"
+            owner: root
+            group: "{{ hermes_rigel_profile.group }}"
+            mode: "0440"
+          loop: >-
+            {{
+              [hermes_rigel_astra_liaison_plugin_managed_root,
+               hermes_rigel_astra_liaison_plugin_runtime_root]
+              | product(['__init__.py', 'plugin.yaml']) | list
+            }}
+          register: hermes_rigel_astra_liaison_plugin_copies
+
+        - name: Remove stale liaison plugin bytecode
+          ansible.builtin.file:
+            path: "{{ item }}/__pycache__"
+            state: absent
+          loop:
+            - "{{ hermes_rigel_astra_liaison_plugin_managed_root }}"
+            - "{{ hermes_rigel_astra_liaison_plugin_runtime_root }}"
+
+        - name: Deploy exact Discord provenance policy
+          ansible.builtin.template:
+            src: >-
+              {{ playbook_dir }}/../../templates/hermes/rigel-astra-liaison-policy.json.j2
+            dest: "{{ hermes_rigel_astra_liaison_policy_live }}"
+            owner: root
+            group: "{{ hermes_rigel_profile.group }}"
+            mode: "0440"
+          register: hermes_rigel_astra_liaison_policy_copy
+
+        - name: Render Rigel policy with liaison toolset
+          ansible.builtin.template:
+            src: "{{ playbook_dir }}/../../templates/hermes/hermes-managed-config.yaml.j2"
+            dest: /etc/hermes/rigel/config.yaml
+            owner: root
+            group: "{{ hermes_rigel_profile.group }}"
+            mode: "0440"
+          vars:
+            hermes_profile: "{{ hermes_rigel_profile }}"
+          register: hermes_rigel_astra_liaison_managed_policy
+
+        - name: Deploy Rigel hardening with liaison dependency
+          ansible.builtin.template:
+            src: >-
+              {{ playbook_dir }}/../../templates/hermes/hermes-gateway-hardening.conf.j2
+            dest: "{{ hermes_rigel_astra_liaison_dropin }}"
+            owner: root
+            group: root
+            mode: "0644"
+          vars:
+            hermes_profile: "{{ hermes_rigel_profile }}"
+          register: hermes_rigel_astra_liaison_dropin_copy
+
+        - name: Create root-private profile environment directory
+          ansible.builtin.file:
+            path: "{{ hermes_rigel_environment_file | dirname }}"
+            state: directory
+            owner: root
+            group: root
+            mode: "0700"
+
+        - name: Inspect legacy and private Rigel environment paths
+          ansible.builtin.stat:
+            path: "{{ item }}"
+            follow: false
+          loop:
+            - /etc/hermes/rigel/.env
+            - "{{ hermes_rigel_environment_file }}"
+          register: hermes_rigel_astra_liaison_environment_paths
+
+        - name: Require one unambiguous Rigel environment source
+          ansible.builtin.assert:
+            that:
+              - >-
+                hermes_rigel_astra_liaison_environment_paths.results[0].stat.exists
+                or hermes_rigel_astra_liaison_environment_paths.results[1].stat.exists
+              - >-
+                not (
+                  hermes_rigel_astra_liaison_environment_paths.results[0].stat.exists
+                  and hermes_rigel_astra_liaison_environment_paths.results[1].stat.exists
+                )
+                or (
+                  hermes_rigel_astra_liaison_environment_paths.results[0].stat.checksum
+                  == hermes_rigel_astra_liaison_environment_paths.results[1].stat.checksum
+                )
+            fail_msg: >-
+              Rigel's legacy and private environment files disagree; refusing
+              to choose or delete either credential source.
+          no_log: true
+
+        - name: Seed private Rigel environment from the legacy managed path
+          ansible.builtin.copy:
+            src: /etc/hermes/rigel/.env
+            dest: "{{ hermes_rigel_environment_file }}"
+            remote_src: true
+            owner: root
+            group: root
+            mode: "0400"
+          when:
+            - hermes_rigel_environment_file != '/etc/hermes/rigel/.env'
+            - hermes_rigel_astra_liaison_environment_paths.results[0].stat.exists
+            - not hermes_rigel_astra_liaison_environment_paths.results[1].stat.exists
+          no_log: true
+
+        - name: Restrict Rigel service environment to the system manager
+          ansible.builtin.file:
+            path: "{{ hermes_rigel_environment_file }}"
+            state: file
+            owner: root
+            group: root
+            mode: "0400"
+          register: hermes_rigel_astra_liaison_environment_permissions
+
+        - name: Remove legacy managed Rigel environment path
+          ansible.builtin.file:
+            path: /etc/hermes/rigel/.env
+            state: absent
+          when: hermes_rigel_environment_file != '/etc/hermes/rigel/.env'
+
+        - name: Hash Rigel managed policy and environment
+          ansible.builtin.command:
+            argv:
+              - /usr/bin/sha256sum
+              - /etc/hermes/rigel/config.yaml
+              - "{{ hermes_rigel_environment_file }}"
+          register: hermes_rigel_astra_liaison_policy_hash
+          changed_when: false
+          no_log: true
+
+        - name: Publish Rigel managed policy checksum
+          ansible.builtin.copy:
+            content: "{{ hermes_rigel_astra_liaison_policy_hash.stdout }}\n"
+            dest: /etc/hermes/rigel/managed-policy.sha256
+            owner: root
+            group: "{{ hermes_rigel_profile.group }}"
+            mode: "0440"
+          register: hermes_rigel_astra_liaison_policy_checksum
+          no_log: true
+
+        - name: Reload systemd after liaison staging
+          ansible.builtin.systemd_service:
+            daemon_reload: true
+
+        - name: Record whether liaison broker process replacement is required
+          ansible.builtin.set_fact:
+            hermes_rigel_astra_liaison_broker_restart_attempted: >-
+              {{
+                hermes_rigel_astra_liaison_service_copy.changed
+                or hermes_rigel_astra_liaison_credential_copy.changed
+                or hermes_rigel_astra_liaison_calendar_configs.results
+                   | selectattr('changed') | list | length > 0
+                or hermes_rigel_astra_liaison_script_copies.results
+                   | selectattr('changed') | list | length > 0
+              }}
+
+        - name: Restart changed liaison broker or ensure it is active
+          ansible.builtin.systemd_service:
+            name: hermes-rigel-astra-calendar-broker.service
+            state: >-
+              {{
+                'restarted'
+                if hermes_rigel_astra_liaison_broker_restart_attempted | bool
+                else 'started'
+              }}
+            enabled: true
+
+        - name: Wait for isolated liaison broker socket
+          ansible.builtin.wait_for:
+            path: "{{ hermes_rigel_astra_liaison_socket }}"
+            state: present
+            timeout: 30
+
+        - name: Validate Rigel merged configuration as its service identity
+          ansible.builtin.command:
+            argv:
+              - /usr/bin/systemd-run
+              - --quiet
+              - --wait
+              - --collect
+              - --pipe
+              - --service-type=exec
+              - --uid=hermes-rigel
+              - --gid=hermes-rigel
+              - --property=SupplementaryGroups=hermes-runtime-readers
+              - --property=EnvironmentFile={{ hermes_rigel_environment_file }}
+              - --setenv=HOME={{ hermes_rigel_profile.account_home }}
+              - --setenv=HERMES_HOME={{ hermes_rigel_profile.home }}
+              - --setenv=HERMES_MANAGED_DIR=/etc/hermes/rigel
+              - "{{ hermes_shadow_runtime_binary }}"
+              - config
+              - check
+          changed_when: false
+          no_log: true
+
+        - name: Validate staged liaison plugin and broker boundary
+          ansible.builtin.command:
+            argv:
+              - /usr/sbin/runuser
+              - --user
+              - hermes-rigel
+              - --
+              - "{{ hermes_shadow_runtime_venv }}/bin/python"
+              - "{{ hermes_rigel_astra_liaison_validator_live }}"
+              - --source-root
+              - "{{ hermes_rigel_astra_liaison_plugin_managed_root }}"
+              - --runtime-root
+              - "{{ hermes_rigel_astra_liaison_plugin_runtime_root }}"
+              - --config
+              - /etc/hermes/rigel/config.yaml
+              - --policy
+              - "{{ hermes_rigel_astra_liaison_policy_live }}"
+              - --socket
+              - "{{ hermes_rigel_astra_liaison_socket }}"
+              - --socket-group
+              - "{{ hermes_rigel_astra_liaison_group }}"
+          changed_when: false
+
+        - name: Exercise read-only liaison before Gateway attachment
+          ansible.builtin.command:
+            argv:
+              - /usr/sbin/runuser
+              - --user
+              - hermes-rigel
+              - --
+              - "{{ hermes_shadow_runtime_venv }}/bin/python"
+              - "{{ hermes_rigel_astra_liaison_smoke_live }}"
+              - --plugin
+              - "{{ hermes_rigel_astra_liaison_plugin_runtime_root }}"
+          register: hermes_rigel_astra_liaison_pre_attach_smoke
+          changed_when: false
+
+        - name: Require exact read-only liaison smoke result
+          ansible.builtin.assert:
+            that:
+              - (hermes_rigel_astra_liaison_pre_attach_smoke.stdout | from_json).status == 'ok'
+              - >-
+                (hermes_rigel_astra_liaison_pre_attach_smoke.stdout | from_json)
+                .missingProvenanceDenied | bool
+              - >-
+                (hermes_rigel_astra_liaison_pre_attach_smoke.stdout | from_json)
+                .states == ['NOT_ON_CALENDAR']
+
+        - name: Determine whether Rigel needs one planned liaison restart
+          ansible.builtin.set_fact:
+            hermes_rigel_astra_liaison_restart_required: >-
+              {{
+                hermes_rigel_astra_liaison_managed_policy.changed
+                or hermes_rigel_astra_liaison_dropin_copy.changed
+                or hermes_rigel_astra_liaison_policy_checksum.changed
+                or hermes_rigel_astra_liaison_plugin_copies.results
+                   | selectattr('changed') | list | length > 0
+              }}
+
+        - name: Prepare Rigel planned-stop marker for liaison promotion
+          ansible.builtin.include_tasks:
+            file: ../../tasks/hermes-planned-stop-marker.yml
+          vars:
+            hermes_planned_stop_profile: "{{ hermes_rigel_profile }}"
+          when: hermes_rigel_astra_liaison_restart_required | bool
+
+        - name: Record Rigel liaison restart attempt
+          ansible.builtin.set_fact:
+            hermes_rigel_astra_liaison_restart_attempted: true
+          when: hermes_rigel_astra_liaison_restart_required | bool
+
+        - name: Restart Rigel once for liaison promotion
+          ansible.builtin.systemd_service:
+            name: hermes-gateway-rigel.service
+            state: restarted
+          when: hermes_rigel_astra_liaison_restart_required | bool
+
+        - name: Wait for Rigel native readiness after liaison promotion
+          ansible.builtin.command:
+            argv: [/usr/bin/systemctl, is-active, hermes-gateway-rigel.service]
+          register: hermes_rigel_astra_liaison_promoted_state
+          retries: 45
+          delay: 2
+          until:
+            - hermes_rigel_astra_liaison_promoted_state.rc == 0
+            - hermes_rigel_astra_liaison_promoted_state.stdout == 'active'
+          changed_when: false
+
+        - name: Read isolated broker main PID
+          ansible.builtin.command:
+            argv:
+              - /usr/bin/systemctl
+              - show
+              - --property=MainPID
+              - --value
+              - hermes-rigel-astra-calendar-broker.service
+          register: hermes_rigel_astra_liaison_broker_pid
+          changed_when: false
+
+        - name: Prove broker namespace cannot see Astra private profile
+          ansible.builtin.command:
+            argv:
+              - /usr/bin/nsenter
+              - --mount
+              - --target
+              - "{{ hermes_rigel_astra_liaison_broker_pid.stdout }}"
+              - --
+              - /usr/bin/stat
+              - /var/lib/hermes/astra/.hermes
+          register: hermes_rigel_astra_liaison_private_probe
+          changed_when: false
+          failed_when: hermes_rigel_astra_liaison_private_probe.rc == 0
+
+        - name: Prove broker identity cannot access Docker socket
+          ansible.builtin.command:
+            argv:
+              - /usr/bin/nsenter
+              - --mount
+              - --target
+              - "{{ hermes_rigel_astra_liaison_broker_pid.stdout }}"
+              - --
+              - /usr/sbin/runuser
+              - --user
+              - "{{ hermes_rigel_astra_liaison_user }}"
+              - --
+              - /usr/bin/python3
+              - "{{ hermes_rigel_astra_liaison_validator_live }}"
+              - --probe-forbidden-socket
+              - /var/run/docker.sock
+          register: hermes_rigel_astra_liaison_docker_probe
+          changed_when: false
+          failed_when: >-
+            hermes_rigel_astra_liaison_docker_probe.rc != 0
+            or (
+              hermes_rigel_astra_liaison_docker_probe.stdout | from_json
+            ).socketAccessible | bool
+
+        - name: Exercise read-only liaison after Rigel restart
+          ansible.builtin.command:
+            argv:
+              - /usr/sbin/runuser
+              - --user
+              - hermes-rigel
+              - --
+              - "{{ hermes_shadow_runtime_venv }}/bin/python"
+              - "{{ hermes_rigel_astra_liaison_smoke_live }}"
+              - --plugin
+              - "{{ hermes_rigel_astra_liaison_plugin_runtime_root }}"
+          register: hermes_rigel_astra_liaison_live_smoke
+          changed_when: false
+
+        - name: Require liaison and Rigel services active
+          ansible.builtin.command:
+            argv: [/usr/bin/systemctl, is-active, "{{ item }}"]
+          loop:
+            - hermes-rigel-astra-calendar-broker.service
+            - hermes-gateway-rigel.service
+          changed_when: false
+
+      rescue:
+        - name: Restore prior liaison and Rigel policy archive
+          ansible.builtin.command:
+            argv:
+              - /usr/bin/tar
+              - --acls
+              - --xattrs
+              - -C
+              - /
+              - -xpf
+              - "{{ hermes_rigel_astra_liaison_backup_archive }}"
+          when: hermes_rigel_astra_liaison_existing_paths | default([]) | length > 0
+          changed_when: true
+
+        - name: Reload restored Rigel dependency state
+          ansible.builtin.systemd_service:
+            daemon_reload: true
+          failed_when: false
+
+        - name: Stop failed liaison broker
+          ansible.builtin.systemd_service:
+            name: hermes-rigel-astra-calendar-broker.service
+            state: stopped
+          when: hermes_rigel_astra_liaison_prior_broker_state.stdout != 'active'
+          failed_when: false
+
+        - name: Remove paths created only by failed liaison promotion
+          ansible.builtin.file:
+            path: "{{ item }}"
+            state: absent
+          loop: "{{ hermes_rigel_astra_liaison_new_paths | default([]) }}"
+          failed_when: false
+
+        - name: Remove newly created liaison account
+          ansible.builtin.user:
+            name: "{{ hermes_rigel_astra_liaison_user }}"
+            state: absent
+          when: >-
+            hermes_rigel_astra_liaison_prior_user.ansible_facts.getent_passwd
+            .get(hermes_rigel_astra_liaison_user) is none
+          failed_when: false
+
+        - name: Restore prior Rigel supplementary groups
+          ansible.builtin.user:
+            name: hermes-rigel
+            groups: >-
+              {{
+                hermes_rigel_astra_liaison_prior_rigel_groups.stdout.split()
+                | difference([hermes_rigel_profile.group])
+                | join(',')
+              }}
+            append: false
+          failed_when: false
+
+        - name: Remove newly created liaison group
+          ansible.builtin.group:
+            name: "{{ hermes_rigel_astra_liaison_group }}"
+            state: absent
+          when: >-
+            hermes_rigel_astra_liaison_prior_group.ansible_facts.getent_group
+            .get(hermes_rigel_astra_liaison_group) is none
+          failed_when: false
+
+        - name: Reload systemd after liaison rollback
+          ansible.builtin.systemd_service:
+            daemon_reload: true
+          failed_when: false
+
+        - name: Restore prior liaison broker activity
+          ansible.builtin.systemd_service:
+            name: hermes-rigel-astra-calendar-broker.service
+            state: >-
+              {{
+                'restarted'
+                if hermes_rigel_astra_liaison_broker_restart_attempted
+                   | default(false) | bool
+                else 'started'
+              }}
+          when: hermes_rigel_astra_liaison_prior_broker_state.stdout == 'active'
+          failed_when: false
+
+        - name: Inspect Rigel state after liaison rollback
+          ansible.builtin.command:
+            argv: [/usr/bin/systemctl, is-active, hermes-gateway-rigel.service]
+          register: hermes_rigel_astra_liaison_rollback_rigel_state
+          changed_when: false
+          failed_when: false
+
+        - name: Prepare planned marker before Rigel rollback restart
+          ansible.builtin.include_tasks:
+            file: ../../tasks/hermes-planned-stop-marker.yml
+          vars:
+            hermes_planned_stop_profile: "{{ hermes_rigel_profile }}"
+          when:
+            - hermes_rigel_astra_liaison_restart_attempted | default(false) | bool
+            - hermes_rigel_astra_liaison_prior_rigel_state.stdout == 'active'
+            - hermes_rigel_astra_liaison_rollback_rigel_state.stdout == 'active'
+
+        - name: Restart Rigel after liaison rollback
+          ansible.builtin.systemd_service:
+            name: hermes-gateway-rigel.service
+            state: restarted
+          when:
+            - hermes_rigel_astra_liaison_restart_attempted | default(false) | bool
+            - hermes_rigel_astra_liaison_prior_rigel_state.stdout == 'active'
+            - hermes_rigel_astra_liaison_rollback_rigel_state.stdout == 'active'
+          failed_when: false
+
+        - name: Restore prior active Rigel state
+          ansible.builtin.systemd_service:
+            name: hermes-gateway-rigel.service
+            state: started
+            enabled: true
+          when:
+            - hermes_rigel_astra_liaison_prior_rigel_state.stdout == 'active'
+            - hermes_rigel_astra_liaison_rollback_rigel_state.stdout != 'active'
+          failed_when: false
+
+        - name: Preserve prior inactive Rigel state
+          ansible.builtin.systemd_service:
+            name: hermes-gateway-rigel.service
+            state: stopped
+          when: hermes_rigel_astra_liaison_prior_rigel_state.stdout != 'active'
+          failed_when: false
+
+        - name: Fail after liaison rollback
+          ansible.builtin.fail:
+            msg: Rigel calendar liaison promotion failed and prior state was restored.

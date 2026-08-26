@@ -7,8 +7,10 @@ import importlib.machinery
 import importlib.util
 import json
 import re
+import subprocess
 import tempfile
 import unittest
+from unittest import mock
 from pathlib import Path
 
 
@@ -34,7 +36,10 @@ class RepoAuditReferenceTests(unittest.TestCase):
     def write_contract(self, include_support: bool = True) -> Path:
         skill_root = self.root / "files/hermes/profile-skills/rigel/academic"
         skill_root.mkdir(parents=True)
-        (skill_root / "SKILL.md").write_text("---\nname: academic\n---\n")
+        (skill_root / "SKILL.md").write_text(
+            "---\nname: academic\n---\n"
+            "Use `templates/course-state/academic-state.json`.\n"
+        )
         if include_support:
             support = skill_root / "templates/course-state/academic-state.json"
             support.parent.mkdir(parents=True)
@@ -84,8 +89,24 @@ class RepoAuditReferenceTests(unittest.TestCase):
             ),
             ignored,
         )
+        self.assertIn(
+            (
+                "files/hermes/profile-skills/rigel/academic/SKILL.md",
+                "templates/course-state/academic-state.json",
+            ),
+            ignored,
+        )
         generic_errors = repo_audit.reference_errors(
             [contract_path],
+            "templates",
+            re.compile(r"(?:templates/|\.\./templates/)([^\s`'\")\]\(]+)"),
+            ignored_references=ignored,
+        )
+        self.assertEqual(generic_errors, [])
+
+        skill_path = contract_path.parent / "profile-skills/rigel/academic/SKILL.md"
+        generic_errors = repo_audit.reference_errors(
+            [skill_path],
             "templates",
             re.compile(r"(?:templates/|\.\./templates/)([^\s`'\")\]\(]+)"),
             ignored_references=ignored,
@@ -113,6 +134,63 @@ class RepoAuditReferenceTests(unittest.TestCase):
             errors,
             ["docs/example.md references missing templates/hermes/missing.j2"],
         )
+
+    def test_reviewed_upstream_source_path_is_not_a_local_repo_reference(self) -> None:
+        source = self.root / "inventory/group_vars/hermes_hosts/vars.yml"
+        source.parent.mkdir(parents=True)
+        reference = "scripts/ci/test_install_ps1_path_migration.ps1"
+        source.write_text(f"upstream_paths:\n  - {reference}\n")
+        errors = repo_audit.reference_errors(
+            [source],
+            "scripts",
+            re.compile(r"(?<!/)scripts/([^\s`'\")\]\(]+)"),
+            ignored_references=repo_audit.UPSTREAM_REPOSITORY_REFERENCES,
+        )
+        self.assertEqual(errors, [])
+
+    def test_reviewed_profile_runtime_path_is_not_a_repo_reference(self) -> None:
+        source = self.root / "scripts/agents/hermes-rigel-workflow-smoke.py"
+        source.parent.mkdir(parents=True)
+        source.write_text(
+            'schedule = CANONICAL_PROFILE / "scripts/hermes-rigel-schedule.py"\n'
+        )
+        errors = repo_audit.reference_errors(
+            [source],
+            "scripts",
+            re.compile(r"(?<!/)scripts/([^\s`'\")\]\(]+)"),
+            ignored_references=repo_audit.PROFILE_RUNTIME_REFERENCES,
+        )
+        self.assertEqual(errors, [])
+
+    def test_unreviewed_upstream_shaped_path_still_fails(self) -> None:
+        source = self.root / "inventory/group_vars/hermes_hosts/other.yml"
+        source.parent.mkdir(parents=True)
+        source.write_text("upstream_paths:\n  - scripts/tests/missing.ps1\n")
+        errors = repo_audit.reference_errors(
+            [source],
+            "scripts",
+            re.compile(r"(?<!/)scripts/([^\s`'\")\]\(]+)"),
+            ignored_references=repo_audit.UPSTREAM_REPOSITORY_REFERENCES,
+        )
+        self.assertEqual(
+            errors,
+            [
+                "inventory/group_vars/hermes_hosts/other.yml references missing "
+                "scripts/tests/missing.ps1"
+            ],
+        )
+
+    def test_hermes_ownership_audit_failure_is_propagated(self) -> None:
+        failure = subprocess.CompletedProcess(
+            args=[],
+            returncode=1,
+            stdout="hermes-ownership-audit-error:unclassified-path-reference\n",
+        )
+        with mock.patch.object(repo_audit.subprocess, "run", return_value=failure):
+            self.assertEqual(
+                repo_audit.run_hermes_ownership_audit(),
+                ["hermes-ownership-audit-error:unclassified-path-reference"],
+            )
 
 
 if __name__ == "__main__":

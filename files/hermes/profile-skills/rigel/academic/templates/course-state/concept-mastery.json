@@ -1,0 +1,20 @@
+{
+  "course_id": "",
+  "updated_at": "YYYY-MM-DDTHH:MM:SS-05:00",
+  "concepts": {
+    "concept-id": {
+      "name": "",
+      "symbol": "[_]",
+      "correct_count": 0,
+      "partial_count": 0,
+      "miss_count": 0,
+      "last_tested": null,
+      "last_correct": null,
+      "last_prompt_type": null,
+      "prompt_forms_correct": [],
+      "lucky_or_familiarity_risk": false,
+      "prerequisites": [],
+      "notes": ""
+    }
+  }
+}

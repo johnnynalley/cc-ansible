@@ -1,0 +1,5 @@
+---
+name: fleet-admin
+version: "1.0.0"
+description: Owner-provenance-gated administration of Dubble and Rigel.
+module: __init__

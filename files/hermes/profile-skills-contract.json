@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "mode": "reviewed-native-seed",
+  "mode": "reviewed-native-parity",
   "source": {
     "rootReviewed": true,
     "declarativeMarkdownOnly": true,
@@ -17,7 +17,8 @@
     "descriptionPromptLimit": 57,
     "exactContentHashRequired": true,
     "symlinkAllowed": false,
-    "supportingFilesAllowed": false,
+    "supportingFilesAllowed": true,
+    "supportingFileSuffixes": [".md", ".json", ".jsonl"],
     "executableAllowed": false,
     "inlineCommandExpansionAllowed": false,
     "blueprintAllowed": false,
@@ -27,7 +28,8 @@
   "execution": {
     "backupRequired": true,
     "transactionRollbackRequired": true,
-    "managedRootExclusive": true,
+    "nativeProfileOwnershipRequired": true,
+    "managedProjectionActive": false,
     "gatewayActivationAllowed": false,
     "schedulerActivationAllowed": false,
     "messagingActivationAllowed": false,
@@ -36,6 +38,11 @@
     "automaticSkillApprovalAllowed": false,
     "legacySourceMutationAllowed": false
   },
+  "nativeOwnership": {
+    "canonicalSharedSkill": "self-evolution",
+    "writerProfile": "astra",
+    "readOnlyProfiles": ["dubble", "rigel"]
+  },
   "profiles": {
     "astra": {
       "user": "hermes-astra",
@@ -43,7 +50,50 @@
       "home": "/var/lib/hermes/astra/.hermes/profiles/astra",
       "managedRoot": "/etc/hermes/astra/skills",
       "runtimeRoot": "/var/lib/hermes/astra/.hermes/profiles/astra/skills/managed",
+      "nativeRoot": "/var/lib/hermes/astra/.hermes/profiles/astra/skills",
       "skills": [
+        {
+          "name": "caldav-calendar",
+          "description": "Use for calendar sync, queries, and event changes.",
+          "source": "files/hermes/profile-skills/astra/caldav-calendar/SKILL.md",
+          "sha256": "3ba9ba8f78f52aaafd3f5be2bfa11975718944fd5ba50fe0a65992ebb642a8f9"
+        },
+        {
+          "name": "clawhub",
+          "description": "Use when finding, reviewing, or installing a skill.",
+          "source": "files/hermes/profile-skills/astra/clawhub/SKILL.md",
+          "sha256": "66e3f1d95feb685b33e5e7527c70f32ac652a8fbbb797d778075308d14c30722"
+        },
+        {
+          "name": "compute-corner-administration",
+          "description": "Use for Compute Corner operations and approved changes.",
+          "source": "files/hermes/profile-skills/astra/compute-corner-administration/SKILL.md",
+          "sha256": "3f734bd56d637b72578a23571e9f24ef1b270292d3ee83d8b2f12ace3e851333"
+        },
+        {
+          "name": "consequential-recommendation",
+          "description": "Use when advice may cause a consequential commitment.",
+          "source": "files/hermes/profile-skills/astra/consequential-recommendation/SKILL.md",
+          "sha256": "139750cf864d5d930b89e1f5fbddc107279c210b99779c01dbf4edc4de8fa55b"
+        },
+        {
+          "name": "daily-summary-thread",
+          "description": "Use for Daily Summary thread reads and updates.",
+          "source": "files/hermes/profile-skills/astra/daily-summary-thread/SKILL.md",
+          "sha256": "e287eb95251bbe943a45dc7f78ed19068b1341740edc1e170e5af9eaff213b34"
+        },
+        {
+          "name": "diagram-maker",
+          "description": "Use for diagrams, architecture, and flow visuals.",
+          "source": "files/hermes/profile-skills/astra/diagram-maker/SKILL.md",
+          "sha256": "c685f2cd796061d6036eef64568943ffc907d704ff9e1d7acf0e1f473a613766"
+        },
+        {
+          "name": "discord",
+          "description": "Use for Discord history, threads, pins, and reactions.",
+          "source": "files/hermes/profile-skills/astra/discord/SKILL.md",
+          "sha256": "72b890e8e35da7c5aae3887877336694dd35d46ae3016b5d79a9cb58e2912395"
+        },
         {
           "name": "evidence-led-investigation",
           "description": "Use when behavior needs a causal explanation.",
@@ -51,10 +101,16 @@
           "sha256": "8aab70ffb91890863ea90e634c98a7ffd5568cffc6cdc2327453bfd41bb53904"
         },
         {
-          "name": "consequential-recommendation",
-          "description": "Use when advice may cause a consequential commitment.",
-          "source": "files/hermes/profile-skills/astra/consequential-recommendation/SKILL.md",
-          "sha256": "d5030090a870af8b947cbcca764f3598078ba21abc728b90b1e7a0b32d8bc906"
+          "name": "financial-decision-support",
+          "description": "Use for consequential personal finance decisions.",
+          "source": "files/hermes/profile-skills/astra/financial-decision-support/SKILL.md",
+          "sha256": "6db17125829cfa80e2b0bf01e4b35a7f9599a73d93b8f262e6b601ea8f51f79e"
+        },
+        {
+          "name": "fortnite-tracker",
+          "description": "Use for Fortnite progress, events, locker, and UEFN.",
+          "source": "files/hermes/profile-skills/astra/fortnite-tracker/SKILL.md",
+          "sha256": "efeed4ee3e6fbc987674d5505f90fc10c03540002da5d0bbc054c855dcb80924"
         },
         {
           "name": "guided-operation",
@@ -62,18 +118,150 @@
           "source": "files/hermes/profile-skills/astra/guided-operation/SKILL.md",
           "sha256": "3f209da0a5be141f4161fe160da2c44f6bf7bbb7e6bbfd2de172ba71d88c1939"
         },
-      {
-        "name": "source-grounded-study",
-        "description": "Use for tutoring and verified academic event tracking.",
-        "source": "files/hermes/profile-skills/astra/source-grounded-study/SKILL.md",
-        "sha256": "41b3ab47505bf845303fbdca8d75c4f928505e8ae97812b5a2a9ceea4fca9b7c"
-      },
-      {
-        "name": "fortnite-tracker",
-        "description": "Use for Fortnite progress, events, locker, and UEFN.",
-        "source": "files/hermes/profile-skills/astra/fortnite-tracker/SKILL.md",
-        "sha256": "2e95dae05a08b4ce09b0f1e64575f18418a56ddcc7e032a0a49989eaba6385cc"
-      }
+        {
+          "name": "guided-software-walkthrough",
+          "description": "Use for live work in an unfamiliar interface.",
+          "source": "files/hermes/profile-skills/astra/guided-software-walkthrough/SKILL.md",
+          "sha256": "e807700f5fa4ce86fc17cedce09ac766cd4d5ad4929c7f28bc963ee221a81e4f"
+        },
+        {
+          "name": "hardware-inventory",
+          "description": "Use for owned hardware, spare parts, and build inventory.",
+          "source": "files/hermes/profile-skills/astra/hardware-inventory/SKILL.md",
+          "sha256": "b419125c8f66a9d63604cbf4d45f5cc50fbde0b01ff1aab783a66b736c9b31c7"
+        },
+        {
+          "name": "hardware-planning",
+          "description": "Use for consequential hardware and deployment choices.",
+          "source": "files/hermes/profile-skills/astra/hardware-planning/SKILL.md",
+          "sha256": "b94491aba4f119a7f51c84d5f683172a15f438ca66329f6abc9070788934b632"
+        },
+        {
+          "name": "healthcheck",
+          "description": "Use for host security and operational health reviews.",
+          "source": "files/hermes/profile-skills/astra/healthcheck/SKILL.md",
+          "sha256": "508b2efaf7dc9d5aaf28280508eb708c089e7d856ee585f62b835a265d83220f"
+        },
+        {
+          "name": "himalaya",
+          "description": "Use for private mailbox listing, reading, and replies.",
+          "source": "files/hermes/profile-skills/astra/himalaya/SKILL.md",
+          "sha256": "a8a475209d61adeb871a37d96ef7513b97edde2d640d0826564ce005502a9fd1"
+        },
+        {
+          "name": "immich-media-inbox",
+          "description": "Use for the private Immich movie and TV review inbox.",
+          "source": "files/hermes/profile-skills/astra/immich-media-inbox/SKILL.md",
+          "sha256": "9ce4842f840e86030a6cc5665774439d752688ddfa5b531ff9a747d0094834d7"
+        },
+        {
+          "name": "job-application-tracker",
+          "description": "Use for job applications, resumes, and career follow-up.",
+          "source": "files/hermes/profile-skills/astra/job-application-tracker/SKILL.md",
+          "sha256": "cfdec4087a8d25c68976ff132f31e906df4d546c525e659145de0709af0f13cd"
+        },
+        {
+          "name": "live-task-ledger",
+          "description": "Use for consequential tasks with changing live state.",
+          "source": "files/hermes/profile-skills/astra/live-task-ledger/SKILL.md",
+          "sha256": "f5aded21eb72b23046c2e64fad655e6a32a225ef1ab89de82af19b85df5f85ad"
+        },
+        {
+          "name": "lossless-claw",
+          "description": "Use for Hermes LCM recall, health, and configuration.",
+          "source": "files/hermes/profile-skills/astra/lossless-claw/SKILL.md",
+          "sha256": "ed3515c681556c1269e0f27cabfe29fdadec2ebf0d5e8ee6e81de6b477d7c682"
+        },
+        {
+          "name": "meme-maker",
+          "description": "Use for finding or generating an image meme.",
+          "source": "files/hermes/profile-skills/astra/meme-maker/SKILL.md",
+          "sha256": "a3786bef14447945e1aa013d946558577285941ceed540f4a7e7d37c0e93e6f4"
+        },
+        {
+          "name": "node-connect",
+          "description": "Use for Hermes gateway, peer, and device pairing.",
+          "source": "files/hermes/profile-skills/astra/node-connect/SKILL.md",
+          "sha256": "ae8fa4cc44bdf473f5f1830dc589035278be89b82a4cca8961f9ebe8f2ebbde4"
+        },
+        {
+          "name": "node-inspect-debugger",
+          "description": "Use for Node.js inspect, CDP, heap, and CPU debugging.",
+          "source": "files/hermes/profile-skills/astra/node-inspect-debugger/SKILL.md",
+          "sha256": "065325a71011fb06126679359ed01456b72e6c3cfe35affdf23b49d7e479be3e"
+        },
+        {
+          "name": "operational-heartbeat",
+          "description": "Use for Astra's stateful operational heartbeat.",
+          "source": "files/hermes/profile-skills/astra/operational-heartbeat/SKILL.md",
+          "sha256": "f0f8704cdb48c78df27b32c28f5cb8fcfa9802d5c986d18a74445261f13850c0"
+        },
+        {
+          "name": "price-lookup",
+          "description": "Use for current product prices and public listings.",
+          "source": "files/hermes/profile-skills/astra/price-lookup/SKILL.md",
+          "sha256": "37d8ee8152b55515a0346f8ddea84af5aed54af61ca8d12cb8fa685d5bf27f95"
+        },
+        {
+          "name": "python-debugpy",
+          "description": "Use for Python breakpoints and debugpy inspection.",
+          "source": "files/hermes/profile-skills/astra/python-debugpy/SKILL.md",
+          "sha256": "f65f53b9ff1956c2de0711c430b2915671448667f5e4f7b969225e4845614ed5"
+        },
+        {
+          "name": "self-evolution",
+          "description": "Use when a reusable agent behavior failure is exposed.",
+          "source": "files/hermes/profile-skills/shared/self-evolution/SKILL.md",
+          "sha256": "ccfb80a9d159ce1fb62ca3d14d389d2a3b6ddc3d41b67beb7efbed076b12469e"
+        },
+        {
+          "name": "skill-creator",
+          "description": "Use for creating or revising a Hermes skill.",
+          "source": "files/hermes/profile-skills/astra/skill-creator/SKILL.md",
+          "sha256": "96743ce41727dde786c23bd90e0e086449e9867c270d95d759117ef40908fcee"
+        },
+        {
+          "name": "sober-tracker",
+          "description": "Use for private sobriety check-ins and milestones.",
+          "source": "files/hermes/profile-skills/astra/sober-tracker/SKILL.md",
+          "sha256": "2bcc56ec34a9e6699cc0d195de5c06bdbc6668767bedef70a975e57dc5feecc7"
+        },
+        {
+          "name": "source-grounded-study",
+          "description": "Use for tutoring and verified academic event tracking.",
+          "source": "files/hermes/profile-skills/astra/source-grounded-study/SKILL.md",
+          "sha256": "41b3ab47505bf845303fbdca8d75c4f928505e8ae97812b5a2a9ceea4fca9b7c"
+        },
+        {
+          "name": "spike",
+          "description": "Use for a bounded throwaway feasibility prototype.",
+          "source": "files/hermes/profile-skills/astra/spike/SKILL.md",
+          "sha256": "d1373ef4969e0c21071e7d761147c94cc1b58e345704f0ec47b7b25402da27fe"
+        },
+        {
+          "name": "taskflow",
+          "description": "Use for durable multi-step and delegated task work.",
+          "source": "files/hermes/profile-skills/astra/taskflow/SKILL.md",
+          "sha256": "95a6cdc7b103cec270697c24b6de232b5c7c2292edec83dae9a07f3df599f5c4"
+        },
+        {
+          "name": "taskflow-inbox-triage",
+          "description": "Use for durable inbox triage with later follow-up.",
+          "source": "files/hermes/profile-skills/astra/taskflow-inbox-triage/SKILL.md",
+          "sha256": "67e4fe556b5afaa65a60b8d646eb9f5e5fefc2b38876fc5442b441e5f0bc5da0"
+        },
+        {
+          "name": "tmux",
+          "description": "Use for persistent interactive terminal sessions.",
+          "source": "files/hermes/profile-skills/astra/tmux/SKILL.md",
+          "sha256": "6e3a2a8081adba345c4e6672d28f71a909239679f9ac51e6f9da5afed40cfe2e"
+        },
+        {
+          "name": "weather",
+          "description": "Use for current weather and forecast questions.",
+          "source": "files/hermes/profile-skills/astra/weather/SKILL.md",
+          "sha256": "b2460463506804cbda986c4b907276746bfb9a416ee8f7520d98dbe27973457b"
+        }
       ]
     },
     "dubble": {
@@ -82,12 +270,19 @@
       "home": "/var/lib/hermes/dubble/.hermes/profiles/dubble",
       "managedRoot": "/etc/hermes/dubble/skills",
       "runtimeRoot": "/var/lib/hermes/dubble/.hermes/profiles/dubble/skills/managed",
+      "nativeRoot": "/var/lib/hermes/dubble/.hermes/profiles/dubble/skills",
       "skills": [
         {
           "name": "public-support-triage",
           "description": "Use when resolving a public support or policy question.",
           "source": "files/hermes/profile-skills/dubble/public-support-triage/SKILL.md",
           "sha256": "b5448fce2ef788806769e949904defc1e7ef8874d37815349e40249f70441ebb"
+        },
+        {
+          "name": "self-evolution",
+          "description": "Use when a reusable agent behavior failure is exposed.",
+          "source": "files/hermes/profile-skills/shared/self-evolution/SKILL.md",
+          "sha256": "ccfb80a9d159ce1fb62ca3d14d389d2a3b6ddc3d41b67beb7efbed076b12469e"
         }
       ]
     },
@@ -97,12 +292,34 @@
       "home": "/var/lib/hermes/rigel/.hermes/profiles/rigel",
       "managedRoot": "/etc/hermes/rigel/skills",
       "runtimeRoot": "/var/lib/hermes/rigel/.hermes/profiles/rigel/skills/managed",
+      "nativeRoot": "/var/lib/hermes/rigel/.hermes/profiles/rigel/skills",
       "skills": [
         {
-          "name": "source-grounded-study",
-          "description": "Use for tutoring and verified academic event tracking.",
-          "source": "files/hermes/profile-skills/rigel/source-grounded-study/SKILL.md",
-          "sha256": "41b3ab47505bf845303fbdca8d75c4f928505e8ae97812b5a2a9ceea4fca9b7c"
+          "name": "academic",
+          "description": "Use for course-grounded learning and syllabus ingestion.",
+          "source": "files/hermes/profile-skills/rigel/academic/SKILL.md",
+          "sha256": "50bce54624991115936d36bfbfafa43845ea36b2669f1eb1ad42119a24bb338b",
+          "supportingFiles": [
+            {"path": "protocols/adaptive-learning-system.md", "sha256": "5d558ad8da020e3e6e00fb85555f25101be2dd2456a499cd6e9bef7c66074ca6"},
+            {"path": "protocols/batch-cram.md", "sha256": "a563cb82c8acc5a0a378b268f44d9bbe36c7dc45172c36062b0abf6d367a2177"},
+            {"path": "protocols/material-first-retrieval.md", "sha256": "1340c3dd670194313cd647183b819c76755a4058a135ce0ad48bbe4dcd4a21ff"},
+            {"path": "templates/course-state/README.md", "sha256": "d6a727f0b7258c88236a1fa281da77229c99f8983692585fab8dad10154eb706"},
+            {"path": "templates/course-state/academic-state.json", "sha256": "299492f01c3754a9d16b2f874f8cb9c8299130c4ae4520ebe72cfd601cc4cac7"},
+            {"path": "templates/course-state/concept-mastery.json", "sha256": "d7e90104ea284b8b1b146477d64b71c945ad60d18e6df5bf5da63d34c9c840c0"},
+            {"path": "templates/course-state/course-model.md", "sha256": "f2abed77a2c452c9736e245d9f886cb1ebae14a844ffbe2e2d088291fc5e7516"},
+            {"path": "templates/course-state/due-reviews.json", "sha256": "a75476cf7bf51d1191a7c04abab793bec2bbc75df94645b6467ae69d9db1333d"},
+            {"path": "templates/course-state/exam-objectives.md", "sha256": "588ebcfd49160018565d3f7cbc58d33d8f2bb6395173996d112d232aed18e71f"},
+            {"path": "templates/course-state/question-history.jsonl", "sha256": "05b3f84f485003660dcdeed76d13eee1e2c51645b8beca4132f29927015d558a"},
+            {"path": "templates/course-state/schedule.md", "sha256": "6d59fdc7cc83b0b8130bcfbda4c844d99d24f347c29d06de3e65e5e4ad3fe265"},
+            {"path": "templates/course-state/source-index.json", "sha256": "d313ea511537976b855e223a1c3c35bd9f932b583768dc425faa64adfc9c1975"},
+            {"path": "templates/course-state/weak-areas.md", "sha256": "3cb38bbf73bd91f9f9d4bfbd5a6b74f4aa6ecd2523cdb6f8b1937ea97afb35a0"}
+          ]
+        },
+        {
+          "name": "self-evolution",
+          "description": "Use when a reusable agent behavior failure is exposed.",
+          "source": "files/hermes/profile-skills/shared/self-evolution/SKILL.md",
+          "sha256": "ccfb80a9d159ce1fb62ca3d14d389d2a3b6ddc3d41b67beb7efbed076b12469e"
         }
       ]
     }

@@ -22,7 +22,7 @@ class HermesProfileMemoryTests(unittest.TestCase):
     def setUp(self) -> None:
         self.contract = json.loads(CONTRACT.read_text(encoding="utf-8"))
 
-    def test_contract_is_curated_and_inert(self) -> None:
+    def test_contract_is_curated_and_only_native_writes_are_automatic(self) -> None:
         self.assertEqual(self.contract["mode"], "curated-seed")
         self.assertTrue(self.contract["source"]["vaultEncrypted"])
         self.assertFalse(self.contract["source"]["rawLegacyMemoryCopied"])
@@ -30,8 +30,15 @@ class HermesProfileMemoryTests(unittest.TestCase):
         self.assertFalse(self.contract["source"]["rawTranscriptsCopied"])
         self.assertTrue(self.contract["execution"]["backupRequired"])
         self.assertTrue(self.contract["execution"]["transactionRollbackRequired"])
+        self.assertTrue(
+            self.contract["execution"]["automaticMemoryApprovalAllowed"]
+        )
         for key, value in self.contract["execution"].items():
-            if key not in {"backupRequired", "transactionRollbackRequired"}:
+            if key not in {
+                "backupRequired",
+                "transactionRollbackRequired",
+                "automaticMemoryApprovalAllowed",
+            }:
                 self.assertFalse(value, key)
 
     def test_profiles_are_isolated_and_seed_names_are_bounded(self) -> None:
@@ -63,7 +70,7 @@ class HermesProfileMemoryTests(unittest.TestCase):
             self.assertEqual(len(profile["seeds"]), count)
             for seed in profile["seeds"]:
                 self.assertIn(seed["name"], {"MEMORY.md", "USER.md"})
-                self.assertIn(seed["charLimit"], {1375, 2200})
+                self.assertIn(seed["charLimit"], {1375, 2200, 6000})
                 self.assertTrue(seed["source"].endswith(".vault"))
                 sources.append(seed["source"])
         self.assertEqual(len(sources), len(set(sources)))
@@ -76,13 +83,17 @@ class HermesProfileMemoryTests(unittest.TestCase):
                 self.assertNotIn("Johnny", content)
                 self.assertNotIn("OpenClaw", content)
 
-    def test_template_uses_documented_compact_limits_and_approval(self) -> None:
+    def test_template_uses_documented_limits_and_profile_scoped_approval(self) -> None:
         template = TEMPLATE.read_text(encoding="utf-8")
-        self.assertIn("memory_char_limit: 2200", template)
-        self.assertIn("user_char_limit: 1375", template)
-        self.assertIn("write_approval: true", template)
-        self.assertNotIn("memory_char_limit: 4000", template)
-        self.assertNotIn("user_char_limit: 2500", template)
+        variables = yaml.safe_load(VARS.read_text(encoding="utf-8"))
+        astra = variables["hermes_shadow_profiles"][0]
+        self.assertIn("hermes_profile.memory_char_limit | default(2200)", template)
+        self.assertIn("hermes_profile.user_char_limit | default(1375)", template)
+        self.assertIn("hermes_profile.memory_write_approval", template)
+        self.assertFalse(astra["memory_write_approval"])
+        self.assertEqual(astra["memory_nudge_interval"], 10)
+        self.assertEqual(astra["memory_char_limit"], 6000)
+        self.assertEqual(astra["user_char_limit"], 6000)
 
     def test_playbook_is_disabled_transactional_and_does_not_start_gateway(self) -> None:
         variables = yaml.safe_load(VARS.read_text(encoding="utf-8"))

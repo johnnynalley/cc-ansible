@@ -7,9 +7,11 @@ import argparse
 import hashlib
 import importlib.util
 import json
+import subprocess
 import re
 import sys
 from datetime import datetime, timedelta, timezone
+from importlib.machinery import SourceFileLoader
 from pathlib import Path
 from typing import Any
 
@@ -18,6 +20,35 @@ DIGEST_RE = re.compile(r"^[0-9a-f]{64}$")
 SOURCE_URL = "https://www.fortnite.com/competitive/schedule?region=NAC"
 MAX_SCHEDULE_AGE = timedelta(minutes=15)
 MAX_SCHEDULE_BYTES = 8 * 1024 * 1024
+
+
+def read_env_value(path: Path, key: str) -> str:
+    metadata = path.lstat()
+    if path.is_symlink() or not path.is_file() or metadata.st_size > 1_048_576:
+        raise RuntimeError("credential-file")
+    matches: list[str] = []
+    for line in path.read_text(encoding="utf-8").splitlines():
+        if line.startswith(f"{key}="):
+            matches.append(line.split("=", 1)[1])
+    if len(matches) != 1 or not matches[0]:
+        raise RuntimeError("credential-value")
+    return matches[0]
+
+
+def native_vdirsyncer_sync(calendar_root: Path) -> None:
+    calendar_root.mkdir(parents=True, exist_ok=True)
+    result = subprocess.run(
+        ["/usr/bin/vdirsyncer", "sync", "personal"],
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        timeout=240,
+        check=False,
+    )
+    if result.returncode != 0:
+        detail = (result.stderr or result.stdout or "sync-failed").strip()
+        raise RuntimeError(f"vdirsyncer:{result.returncode}:{detail[:240]}")
 
 
 def load_schedule(path: Path) -> list[dict[str, object]]:
@@ -48,13 +79,15 @@ def load_schedule(path: Path) -> list[dict[str, object]]:
     return days
 
 
-def load_legacy(script: Path) -> Any:
+def load_native(script: Path) -> Any:
     metadata = script.lstat()
     if script.is_symlink() or not script.is_file() or metadata.st_size > 2 * 1024 * 1024:
-        raise RuntimeError("legacy-script")
-    spec = importlib.util.spec_from_file_location("hermes_fortnite_calendar_legacy", script)
+        raise RuntimeError("native-script")
+    name = "hermes_fortnite_calendar_native"
+    loader = SourceFileLoader(name, str(script))
+    spec = importlib.util.spec_from_loader(name, loader)
     if not spec or not spec.loader:
-        raise RuntimeError("legacy-import")
+        raise RuntimeError("native-import")
     module = importlib.util.module_from_spec(spec)
     sys.modules[spec.name] = module
     spec.loader.exec_module(module)
@@ -84,10 +117,23 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--script", type=Path, required=True)
     parser.add_argument("--schedule-file", type=Path, required=True)
+    parser.add_argument("--data-root", type=Path, required=True)
+    parser.add_argument("--scratch-root", type=Path, required=True)
+    parser.add_argument("--env-file", type=Path, required=True)
+    parser.add_argument("--calendar-root", type=Path, required=True)
     args = parser.parse_args()
     try:
         schedule_days = load_schedule(args.schedule_file)
-        module = load_legacy(args.script)
+        module = load_native(args.script)
+        module.WORKSPACE = args.data_root
+        module.STATE_PATH = args.data_root / "tournaments/calendar-sync-state.json"
+        module.ELIGIBILITY_PATH = args.data_root / "tournaments/eligibility.json"
+        module.CANDIDATE_PLAN_PATH = args.scratch_root / "fortnite-candidate-plan.json"
+        module.LOCAL_CALENDAR_DIR = args.calendar_root
+        module.get_caldav_password = lambda: read_env_value(
+            args.env_file, "NEXTCLOUD_CALDAV_APP_PASSWORD"
+        )
+        module.vdirsyncer_sync = lambda: native_vdirsyncer_sync(args.calendar_root)
         module.fetch_official_schedule_days = lambda **_kwargs: schedule_days
         self_test = module.self_test()
         if self_test.get("tests", 0) < 15:

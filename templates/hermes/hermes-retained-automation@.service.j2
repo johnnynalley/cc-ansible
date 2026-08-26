@@ -5,33 +5,32 @@ Wants=network-online.target
 
 [Service]
 Type=oneshot
-User={{ hermes_production_cutover_user }}
-Group={{ hermes_production_cutover_user }}
+User=hermes-astra
+Group=hermes-astra
 SupplementaryGroups={{ hermes_automation_readers_group }}
-WorkingDirectory={{ hermes_automation_legacy_workspace }}
-ExecStart=/usr/bin/python3 {{ hermes_retained_automation_live }} %i --workspace {{ hermes_automation_legacy_workspace }} --output-root {{ hermes_automation_output_root }}
+WorkingDirectory={{ hermes_automation_native_workspace }}
+ExecStart=/usr/bin/python3 {{ hermes_retained_automation_live }} %i --workspace {{ hermes_automation_native_workspace }} --output-root {{ hermes_automation_output_root }} --freshrss-root {{ hermes_astra_freshrss_live_root }}
+Environment=HOME=/var/lib/hermes/astra
+Environment=HERMES_HOME={{ hermes_native_update_profile_home }}
+Environment=HERMES_MANAGED_DIR=/etc/hermes/astra
+Environment=HERMES_AUTOMATION_WORKSPACE={{ hermes_automation_native_workspace }}
+Environment=HERMES_CALENDAR_ROOT={{ hermes_astra_calendar_live_root }}/calendars
+Environment=HERMES_OPS_REPOSITORY={{ hermes_astra_workspace_live }}
+Environment=HERMES_HEALTH_DB={{ hermes_profile_data_root }}/astra/writable/data/health.db
+Environment=HERMES_HEALTH_SUMMARY={{ hermes_health_summary_live }}
+Environment=HERMES_FORTNITE_NORMALIZER={{ hermes_fortnite_normalize_live }}
+EnvironmentFile={{ hermes_retained_collector_environment_live }}
 UMask=0027
 NoNewPrivileges=true
 ProtectSystem=strict
 ProtectHome=tmpfs
-BindReadOnlyPaths={{ hermes_automation_legacy_workspace }}/scripts
-BindReadOnlyPaths=-{{ hermes_automation_legacy_workspace }}/MEMORY.md
-BindReadOnlyPaths=-{{ hermes_automation_legacy_workspace }}/memory/warframe-drops-state.json
-BindReadOnlyPaths={{ hermes_production_cutover_source_env }}
-BindReadOnlyPaths=-/home/{{ hermes_production_cutover_user }}/.openclaw/.env.d
-BindReadOnlyPaths=-/home/{{ hermes_production_cutover_user }}/.config/himalaya
-BindReadOnlyPaths=-/home/{{ hermes_production_cutover_user }}/.config/vdirsyncer
-BindReadOnlyPaths=-/home/{{ hermes_production_cutover_user }}/.config/khal
-BindReadOnlyPaths=-/home/{{ hermes_production_cutover_user }}/.local/bin/himalaya
-BindReadOnlyPaths=-/home/{{ hermes_production_cutover_user }}/.local/share/vdirsyncer/calendars
-BindReadOnlyPaths=-/home/{{ hermes_production_cutover_user }}/.ssh/known_hosts
-BindReadOnlyPaths=-/home/{{ hermes_production_cutover_user }}/.ssh/id_ed25519
-BindReadOnlyPaths=-{{ hermes_automation_legacy_workspace }}/data/health.db
 BindReadOnlyPaths=-/home/{{ hermes_production_cutover_user }}/cc-ansible
-BindPaths={{ hermes_automation_legacy_workspace }}/memory/daily-summary-sections
-BindPaths={{ hermes_automation_legacy_workspace }}/fortnite-progress
+BindPaths={{ hermes_automation_output_root }}/daily-summary-sections:{{ hermes_automation_native_workspace }}/memory/daily-summary-sections
+BindPaths={{ hermes_profile_data_root }}/astra/writable/data/fortnite-progress:{{ hermes_automation_native_workspace }}/fortnite-progress
 ReadOnlyPaths=-/opt/seerr/config/settings.json
 ReadWritePaths={{ hermes_automation_output_root }}
+ReadWritePaths={{ hermes_astra_freshrss_live_root }}
+ReadWritePaths={{ hermes_profile_data_root }}/astra/writable/data/fortnite-progress
 PrivateTmp=true
 PrivateDevices=true
 ProtectClock=true

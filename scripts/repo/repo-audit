@@ -29,6 +29,31 @@ TEXT_SUFFIXES = {
     ".yaml",
     ".yml",
 }
+UPSTREAM_REPOSITORY_REFERENCES = {
+    (
+        source,
+        reference,
+    )
+    for source in (
+        "inventory/group_vars/hermes_hosts/vars.yml",
+        "scripts/agents/test_hermes_shadow_playbook.py",
+    )
+    for reference in (
+        "scripts/ci/test_install_ps1_path_migration.ps1",
+        "scripts/tests/test-install-ps1-gitbash-compatibility.ps1",
+        "scripts/tests/test-install-ps1-stage-protocol.ps1",
+    )
+}
+PROFILE_RUNTIME_REFERENCES = {
+    (
+        "files/hermes/profile-skills/astra/operational-heartbeat/SKILL.md",
+        "scripts/hermes-heartbeat-state.py",
+    ),
+    (
+        "scripts/agents/hermes-rigel-workflow-smoke.py",
+        "scripts/hermes-rigel-schedule.py",
+    ),
+}
 
 
 def host_agent_npm_prefix_errors() -> list[str]:
@@ -136,6 +161,7 @@ def profile_skill_contract_reference_errors(
                     )
                 if relative_value.startswith("templates/"):
                     ignored_generic_refs.add((contract_relative, relative_value))
+                    ignored_generic_refs.add((source_value, relative_value))
 
     return errors, ignored_generic_refs
 
@@ -158,6 +184,9 @@ def reference_errors(
             if (path.relative_to(ROOT).as_posix(), reference) in ignored_references:
                 continue
             if any(token in ref for token in ("{{", "{%", "*", "<", ">")):
+                continue
+            source_relative_target = path.parent / reference
+            if source_relative_target.exists():
                 continue
             if "/" not in ref and "." not in ref and not (ROOT / prefix / ref).exists():
                 continue
@@ -185,6 +214,26 @@ def run_secrets_scan(require_gitleaks: bool) -> list[str]:
     output = result.stdout.strip()
     if not output:
         return ["secrets-scan failed without output"]
+    return output.splitlines()
+
+
+def run_hermes_ownership_audit() -> list[str]:
+    command = [
+        sys.executable,
+        str(ROOT / "scripts" / "agents" / "hermes-ansible-ownership-audit.py"),
+    ]
+    result = subprocess.run(
+        command,
+        cwd=ROOT,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+    )
+    if result.returncode == 0:
+        return []
+    output = result.stdout.strip()
+    if not output:
+        return ["Hermes Ansible ownership audit failed without output"]
     return output.splitlines()
 
 
@@ -220,6 +269,7 @@ def main() -> int:
             errors.append(f"flat playbook file is not allowed: {path.relative_to(ROOT)}")
 
     errors.extend(host_agent_npm_prefix_errors())
+    errors.extend(run_hermes_ownership_audit())
 
     skill_contract_errors, skill_contract_relative_refs = (
         profile_skill_contract_reference_errors(files)
@@ -239,6 +289,9 @@ def main() -> int:
             files,
             "scripts",
             re.compile(r"(?<!/)scripts/([^\s`'\")\]\(]+)"),
+            ignored_references=(
+                UPSTREAM_REPOSITORY_REFERENCES | PROFILE_RUNTIME_REFERENCES
+            ),
         )
     )
     errors.extend(

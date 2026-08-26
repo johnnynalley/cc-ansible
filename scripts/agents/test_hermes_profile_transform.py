@@ -177,21 +177,20 @@ class HermesProfileTransformTests(unittest.TestCase):
         self.assertEqual(contract["ownership"]["operatorUid"], 0)
         self.assertEqual(contract["ownership"]["generationRootMode"], "0711")
 
-    def test_plan_normalizes_exactly_six_outputs_without_raw_course_tree(self) -> None:
+    def test_plan_normalizes_exactly_five_outputs_without_rigel_course_data(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             paths = self.fixture(Path(directory))
             _, _, inputs, outputs = MODULE.plan(
                 paths["contract"], paths["repository"], paths["source"]
             )
-            self.assertEqual(len(inputs), 7)
-            self.assertEqual(len(outputs), 6)
+            self.assertEqual(len(inputs), 5)
+            self.assertEqual(len(outputs), 5)
             self.assertEqual(
                 {item.target_relative for item in outputs},
                 {
                     "data/users/index.json",
                     "data/integrations/freshrss/state.json",
                     "data/integrations/reddit/sync-state.json",
-                    "imports/courses/academic-state.json",
                     "data/sober-tracking/state.json",
                     "data/tasks/nextcloud-tasks.json",
                 },
@@ -209,16 +208,7 @@ class HermesProfileTransformTests(unittest.TestCase):
                 paths["target"],
                 manifest,
             )
-            self.assertEqual(summary["outputs"], 6)
-            academic = json.loads(
-                (
-                    paths["target"]
-                    / "rigel/managed/imports/courses/academic-state.json"
-                ).read_text(encoding="utf-8")
-            )
-            self.assertEqual(academic["semester"]["status"], "completed")
-            self.assertEqual(academic["events"], [])
-            self.assertEqual(academic["calendarRequests"], [])
+            self.assertEqual(summary["outputs"], 5)
             sobriety = json.loads(
                 (
                     paths["target"]
@@ -234,53 +224,7 @@ class HermesProfileTransformTests(unittest.TestCase):
                 manifest,
                 allow_writable_drift=False,
             )
-            self.assertEqual(result["profiles"]["rigel"]["managedOutputs"], 1)
-
-    def test_completed_rigel_state_is_idle_under_the_real_evaluator(self) -> None:
-        with tempfile.TemporaryDirectory() as directory:
-            paths = self.fixture(Path(directory))
-            _, _, _, outputs = MODULE.plan(
-                paths["contract"], paths["repository"], paths["source"]
-            )
-            academic = next(item for item in outputs if item.transform_id == "rigel-courses")
-            value = json.loads(academic.payload)
-            rigel_spec = importlib.util.spec_from_file_location(
-                "hermes_rigel_schedule_for_transform_test",
-                ROOT / "scripts" / "agents" / "hermes-rigel-schedule.py",
-            )
-            assert rigel_spec and rigel_spec.loader
-            rigel = importlib.util.module_from_spec(rigel_spec)
-            rigel_spec.loader.exec_module(rigel)
-            events, pending = rigel.validate_source(value)
-            self.assertEqual(events, [])
-            self.assertEqual(pending, 0)
-
-    def test_rigel_active_or_pending_legacy_state_is_rejected(self) -> None:
-        with tempfile.TemporaryDirectory() as directory:
-            paths = self.fixture(Path(directory))
-            context = paths["source"] / "rigel/courses/semester-context.md"
-            context.write_text(
-                "## Current Semester: Fall 2026\n\n"
-                "## Active Courses\n\n- CS 1\n\n"
-                "## Upcoming Exams\n\n- Final: 2026-12-01\n",
-                encoding="utf-8",
-            )
-            with self.assertRaisesRegex(MODULE.TransformError, "not-safely-completed"):
-                MODULE.plan(paths["contract"], paths["repository"], paths["source"])
-            context.write_text(
-                "## Current Semester: Spring 2026\n\n"
-                "_None - Spring 2026 is complete as of 2026-05-15._\n\n"
-                "## Upcoming Exams\n\n"
-                "_None - Spring 2026 is complete as of 2026-05-15._\n",
-                encoding="utf-8",
-            )
-            pending = paths["source"] / "rigel/courses/pending-calendar-requests.md"
-            pending.write_text(
-                "<!-- New entries go below this line -->\nconfirmed: true\n",
-                encoding="utf-8",
-            )
-            with self.assertRaisesRegex(MODULE.TransformError, "pending-requests-not-empty"):
-                MODULE.plan(paths["contract"], paths["repository"], paths["source"])
+            self.assertEqual(result["profiles"]["rigel"]["outputs"], 0)
 
     def test_symlink_and_nonempty_dubble_registry_are_rejected(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -307,7 +251,7 @@ class HermesProfileTransformTests(unittest.TestCase):
             with self.assertRaisesRegex(MODULE.TransformError, "layout-drift"):
                 MODULE.plan(paths["contract"], paths["repository"], paths["source"])
 
-    def test_writable_drift_is_bounded_while_managed_drift_fails(self) -> None:
+    def test_writable_drift_is_bounded_by_explicit_verify_mode(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             paths = self.fixture(Path(directory))
             manifest = paths["output"] / "manifest.json"
@@ -327,17 +271,13 @@ class HermesProfileTransformTests(unittest.TestCase):
                 manifest,
                 allow_writable_drift=True,
             )
-            managed = paths["target"] / "rigel/managed/imports/courses/academic-state.json"
-            managed.chmod(0o640)
-            managed.write_text("{}\n", encoding="utf-8")
-            managed.chmod(0o440)
             with self.assertRaisesRegex(MODULE.TransformError, "content-drift"):
                 MODULE.verify(
                     paths["contract"],
                     paths["repository"],
                     paths["target"],
                     manifest,
-                    allow_writable_drift=True,
+                    allow_writable_drift=False,
                 )
 
     def test_runtime_verifier_rejects_the_wrong_profile_identity(self) -> None:
@@ -387,7 +327,7 @@ class HermesProfileTransformTests(unittest.TestCase):
         self.assertIn("BindReadOnlyPaths={{ hermes_profile_transforms_root }}", unit)
         self.assertEqual(
             job["source"],
-            "transformed-managed/imports/courses/academic-state.json",
+            "imported-data/courses/academic-state.json",
         )
 
 

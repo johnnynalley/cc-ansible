@@ -1,0 +1,196 @@
+---
+# Purpose: Open or recover the bounded offline window for profile projections.
+# Hosts: hermes_hosts.
+# Key vars: hermes_parity_offline_* and hermes_shadow_profiles.
+# Validation: syntax-check, then use the exact attended confirmation string.
+
+- name: Manage the Hermes parity maintenance window
+  hosts: hermes_hosts
+  become: true
+  gather_facts: true
+
+  vars:
+    hermes_parity_offline_id: >-
+      {{ ansible_facts['date_time']['iso8601_basic_short'] }}-parity-window
+    hermes_parity_offline_backup_dir: >-
+      {{ hermes_parity_offline_rollback_root }}/{{ hermes_parity_offline_id }}
+
+  tasks:
+    - name: Validate Hermes parity maintenance mode
+      ansible.builtin.assert:
+        that:
+          - hermes_parity_offline_mode in ['disabled', 'stop', 'resume']
+
+    - name: Skip hosts without parity maintenance approval
+      ansible.builtin.meta: end_host
+      when: hermes_parity_offline_mode == 'disabled'
+
+    - name: Require exact Hermes parity maintenance authorization
+      ansible.builtin.assert:
+        that:
+          - hermes_parity_offline_approved | bool
+          - >-
+            hermes_parity_offline_confirmation
+            == hermes_parity_offline_required_confirmation
+          - inventory_hostname == 'jn-t14s-lin'
+          - hermes_shadow_profiles | map(attribute='name') | list
+            == ['astra', 'dubble', 'rigel']
+
+    - name: Inspect production Hermes service state
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/systemctl
+          - show
+          - "{{ item.unit }}"
+          - --property=ActiveState
+          - --property=UnitFileState
+          - --property=MainPID
+      loop: "{{ hermes_shadow_profiles }}"
+      loop_control:
+        label: "{{ item.name }}"
+      register: hermes_parity_offline_prior_state
+      changed_when: false
+      check_mode: false
+
+    - name: Create private parity maintenance record directory
+      ansible.builtin.file:
+        path: "{{ hermes_parity_offline_backup_dir }}"
+        state: directory
+        owner: root
+        group: root
+        mode: '0700'
+      when:
+        - hermes_parity_offline_mode == 'stop'
+        - not ansible_check_mode
+
+    - name: Record prior parity maintenance service state
+      ansible.builtin.copy:
+        dest: "{{ hermes_parity_offline_backup_dir }}/service-state.json"
+        owner: root
+        group: root
+        mode: '0600'
+        content: >-
+          {{ {
+            'schemaVersion': 1,
+            'host': inventory_hostname,
+            'observedAt': ansible_facts.date_time.iso8601,
+            'services': hermes_parity_offline_prior_state.results
+              | map(attribute='stdout') | list
+          } | to_nice_json }}
+      when:
+        - hermes_parity_offline_mode == 'stop'
+        - not ansible_check_mode
+
+    - name: Prepare planned-stop markers for the parity window
+      ansible.builtin.include_tasks:
+        file: ../../tasks/hermes-planned-stop-marker.yml
+      vars:
+        hermes_planned_stop_profile: "{{ item }}"
+      loop: "{{ hermes_production_consumer_profiles }}"
+      loop_control:
+        label: "{{ item.name }}"
+      when: hermes_parity_offline_mode == 'stop'
+
+    - name: Stop production Gateways natively for profile projection
+      ansible.builtin.command:
+        argv:
+          - "{{ hermes_shadow_runtime_binary }}"
+          - gateway
+          - stop
+          - --system
+      environment:
+        HOME: "{{ item.account_home }}"
+        HERMES_HOME: "{{ item.home }}"
+        HERMES_MANAGED_DIR: "/etc/hermes/{{ item.name }}"
+      loop: "{{ hermes_production_consumer_profiles }}"
+      loop_control:
+        label: "{{ item.name }}"
+      changed_when: true
+      when:
+        - hermes_parity_offline_mode == 'stop'
+        - not ansible_check_mode
+
+    - name: Clear stopped Gateway failure state for maintenance
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/systemctl
+          - reset-failed
+          - "{{ item.unit }}"
+      loop: "{{ hermes_production_consumer_profiles }}"
+      loop_control:
+        label: "{{ item.name }}"
+      changed_when: true
+      when:
+        - hermes_parity_offline_mode == 'stop'
+        - not ansible_check_mode
+
+    - name: Validate merged production configs before recovery
+      ansible.builtin.command:
+        argv:
+          - /usr/sbin/runuser
+          - --user
+          - "{{ item.user }}"
+          - --
+          - /usr/bin/env
+          - "HOME={{ item.account_home }}"
+          - "HERMES_HOME={{ item.home }}"
+          - "HERMES_MANAGED_DIR=/etc/hermes/{{ item.name }}"
+          - "{{ hermes_shadow_runtime_binary }}"
+          - config
+          - check
+      loop: "{{ hermes_production_consumer_profiles }}"
+      loop_control:
+        label: "{{ item.name }}"
+      changed_when: false
+      when: hermes_parity_offline_mode == 'resume'
+
+    - name: Resume production Gateways after parity maintenance
+      ansible.builtin.command:
+        argv:
+          - "{{ hermes_shadow_runtime_binary }}"
+          - gateway
+          - start
+          - --system
+      environment:
+        HOME: "{{ item.account_home }}"
+        HERMES_HOME: "{{ item.home }}"
+        HERMES_MANAGED_DIR: "/etc/hermes/{{ item.name }}"
+      loop: "{{ hermes_production_consumer_profiles }}"
+      loop_control:
+        label: "{{ item.name }}"
+      changed_when: true
+      when:
+        - hermes_parity_offline_mode == 'resume'
+        - not ansible_check_mode
+
+    - name: Inspect parity maintenance target state
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/systemctl
+          - is-active
+          - "{{ item.unit }}"
+      loop: "{{ hermes_production_consumer_profiles }}"
+      loop_control:
+        label: "{{ item.name }}"
+      register: hermes_parity_offline_target_state
+      changed_when: false
+      failed_when: false
+      check_mode: false
+
+    - name: Require requested parity maintenance state
+      ansible.builtin.assert:
+        that:
+          - >-
+            (
+              hermes_parity_offline_mode == 'stop'
+              and item.stdout == 'inactive'
+            )
+            or
+            (
+              hermes_parity_offline_mode == 'resume'
+              and item.stdout == 'active'
+            )
+      loop: "{{ hermes_parity_offline_target_state.results }}"
+      loop_control:
+        label: "{{ item.item.name }}"
+      when: not ansible_check_mode

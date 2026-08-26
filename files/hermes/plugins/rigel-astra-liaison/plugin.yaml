@@ -1,0 +1,5 @@
+---
+name: rigel-astra-liaison
+version: "1.0.0"
+description: Provenance-gated calendar liaison from Rigel to Astra.
+module: __init__

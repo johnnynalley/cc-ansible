@@ -2,6 +2,9 @@
 set -euo pipefail
 
 root="/srv/live-rollbacks"
+default_root="/srv/live-rollbacks"
+origin_marker=".live-rollback-origin"
+expected_origin="dataset=nas_zfs/backups/live-rollbacks"
 host="$(hostname -s)"
 domain="general"
 name=""
@@ -87,6 +90,27 @@ fi
 if [[ ! -d "$root" || ! -w "$root" ]]; then
   printf 'Rollback root is missing or not writable: %s\n' "$root" >&2
   exit 1
+fi
+
+if [[ "$root" == "$default_root" ]]; then
+  rollback_fstype="$(
+    findmnt -n --types nfs,nfs4 -o FSTYPE --target "$root" 2>/dev/null || true
+  )"
+  case "$rollback_fstype" in
+    nfs|nfs4) ;;
+    *)
+      printf 'Rollback root is not an NFS mount: %s (%s)\n' \
+        "$root" "${rollback_fstype:-unknown}" >&2
+      exit 1
+      ;;
+  esac
+
+  if [[ ! -f "$root/$origin_marker" ]] ||
+     ! grep -Fxq -- "$expected_origin" "$root/$origin_marker"; then
+    printf 'Rollback root does not expose the managed ZFS origin marker: %s\n' \
+      "$root/$origin_marker" >&2
+    exit 1
+  fi
 fi
 
 tar_paths=()

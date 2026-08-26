@@ -1,0 +1,52 @@
+[Unit]
+Description=Populate Astra LCM {{ hermes_lcm_backfill_lane.corpus }} embeddings locally
+After=network-online.target ollama.service
+Wants=network-online.target
+Requires=ollama.service
+ConditionPathExists={{ hermes_lcm_target_database }}
+
+[Service]
+Type=oneshot
+User={{ hermes_lcm_backfill_profile.user }}
+Group={{ hermes_lcm_backfill_profile.group }}
+Environment=HOME={{ hermes_lcm_backfill_profile.account_home }}
+Environment=HERMES_HOME={{ hermes_lcm_backfill_profile.home }}
+Environment=LCM_DATABASE_PATH={{ hermes_lcm_target_database }}
+Environment=LCM_EMBEDDINGS_ENABLED=true
+Environment=LCM_EMBEDDING_PROVIDER={{ hermes_lcm_embedding_provider }}
+Environment=LCM_EMBEDDING_MODEL={{ hermes_lcm_embedding_model }}
+Environment=LCM_OLLAMA_BASE_URL={{ hermes_lcm_ollama_base_url }}
+Environment=LCM_EMBEDDING_STORAGE_DTYPE={{ hermes_lcm_embedding_storage_dtype }}
+Environment=LCM_EMBEDDING_STORE_DIM={{ hermes_lcm_embedding_store_dim }}
+Environment=LCM_EMBEDDING_BINARY_PRESCREEN={{ hermes_lcm_embedding_binary_prescreen | ternary('true', 'false') }}
+Environment=LCM_EMBED_CONTENT_POLICY={{ hermes_lcm_embedding_content_policy }}
+Environment=LCM_EMBEDDING_MAX_BATCH_ITEMS={{ hermes_lcm_embedding_max_batch_items }}
+Environment=LCM_EMBEDDING_BACKFILL_TIMEOUT_S={{ hermes_lcm_embedding_backfill_timeout_s }}
+Environment=LCM_EMBEDDING_BACKFILL_BUDGET_S=0
+ExecStartPre={{ hermes_shadow_runtime_venv }}/bin/python {{ hermes_lcm_native_maintenance_live }} backfill-bounded --corpus {{ hermes_lcm_backfill_lane.corpus }} --limit {{ hermes_lcm_backfill_uncertain_retry_batch }} --max-passes {{ hermes_lcm_backfill_uncertain_retry_max_passes }} --apply --retry-uncertain --approved --confirmation {{ hermes_lcm_native_maintenance_confirmation }}
+ExecStart={{ hermes_shadow_runtime_venv }}/bin/python {{ hermes_lcm_native_maintenance_live }} backfill-bounded --corpus {{ hermes_lcm_backfill_lane.corpus }} --limit {{ hermes_lcm_native_backfill_batch }} --max-passes {{ hermes_lcm_backfill_passes_per_run }} --apply --approved --confirmation {{ hermes_lcm_native_maintenance_confirmation }}
+TimeoutStartSec={{ hermes_lcm_backfill_timeout_start_sec }}
+Nice=10
+CPUWeight=20
+IOWeight=20
+UMask=0077
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths={{ hermes_lcm_backfill_profile.home }}
+PrivateTmp=true
+ProtectClock=true
+ProtectControlGroups=true
+ProtectHostname=true
+ProtectKernelLogs=true
+ProtectKernelModules=true
+ProtectKernelTunables=true
+ProtectProc=invisible
+LockPersonality=true
+MemoryDenyWriteExecute=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+RestrictNamespaces=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+CapabilityBoundingSet=
+AmbientCapabilities=

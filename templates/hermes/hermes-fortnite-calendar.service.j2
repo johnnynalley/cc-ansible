@@ -6,21 +6,20 @@ Requires=hermes-fortnite-calendar-fetch.service
 
 [Service]
 Type=oneshot
-User={{ hermes_production_cutover_user }}
-Group={{ hermes_production_cutover_user }}
+User=hermes-astra
+Group=hermes-astra
+SupplementaryGroups={{ hermes_automation_readers_group }}
 WorkingDirectory={{ hermes_automation_output_root }}
-Environment=HOME=/home/{{ hermes_production_cutover_user }}
-ExecStart=/usr/bin/python3 {{ hermes_fortnite_calendar_compat_live }} --script {{ hermes_automation_legacy_workspace }}/scripts/fortnite-tournament-calendar-sync.py --schedule-file {{ hermes_fortnite_calendar_schedule_live }}
+Environment=HOME=/var/lib/hermes/astra
+ExecStart=/usr/bin/python3 {{ hermes_fortnite_calendar_compat_live }} --script {{ hermes_fortnite_calendar_sync_live }} --schedule-file {{ hermes_fortnite_calendar_schedule_live }} --data-root {{ hermes_profile_data_root }}/astra/writable/data/fortnite-progress --scratch-root {{ hermes_automation_output_root }} --env-file /etc/hermes/astra/.env --calendar-root {{ hermes_astra_calendar_live_root }}/calendars/fortnite-tournaments
 UMask=0077
 NoNewPrivileges=true
 ProtectSystem=strict
 ProtectHome=tmpfs
-BindReadOnlyPaths={{ hermes_automation_legacy_workspace }}/scripts
-BindReadOnlyPaths={{ hermes_production_cutover_source_env }}
-BindReadOnlyPaths=-/home/{{ hermes_production_cutover_user }}/.config/khal
-BindPaths=-/home/{{ hermes_production_cutover_user }}/.local/share/vdirsyncer/calendars
-BindPaths={{ hermes_automation_legacy_workspace }}/fortnite-progress/tournaments
+BindReadOnlyPaths=/etc/hermes/astra/.env
 ReadWritePaths={{ hermes_automation_output_root }}
+ReadWritePaths={{ hermes_profile_data_root }}/astra/writable/data/fortnite-progress
+ReadWritePaths={{ hermes_astra_calendar_live_root }}
 PrivateTmp=true
 PrivateDevices=true
 ProtectClock=true

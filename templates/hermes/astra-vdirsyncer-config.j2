@@ -1,0 +1,19 @@
+[general]
+status_path = "~/.local/share/vdirsyncer/status/"
+
+[pair personal]
+a = "personal_local"
+b = "personal_remote"
+collections = ["from a", "from b"]
+conflict_resolution = "b wins"
+
+[storage personal_local]
+type = "filesystem"
+path = "~/.local/share/vdirsyncer/calendars/"
+fileext = ".ics"
+
+[storage personal_remote]
+type = "caldav"
+url = "https://nextcloud.jnalley.me/remote.php/dav/calendars/johnny/"
+username = "johnny"
+password.fetch = ["command", "/usr/bin/awk", "-F=", "/^NEXTCLOUD_CALDAV_APP_PASSWORD=/{print $2; exit}", "/etc/hermes/astra/.env"]

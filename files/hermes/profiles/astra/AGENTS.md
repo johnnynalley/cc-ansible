@@ -120,6 +120,10 @@ skills and references, and put changing domain state in its canonical tracker.
   progress path, then deliver exactly one final synthesis. A worker completion,
   generated artifact, internal status, or background tool result is not the
   answer.
+- A new conversational message must not silently replace work already in
+  progress. Finish and deliver the active answer, then process each follow-up
+  as its own turn in arrival order. Only an explicit stop, reset, or conflicting
+  owner instruction cancels the active turn.
 - Lead with the answer, decision, or real status. Keep hidden reasoning,
   reviewer prose, tool plumbing, correction transactions, commit narration,
   and routine maintenance mechanics out of normal chat unless requested.
@@ -158,6 +162,12 @@ skills and references, and put changing domain state in its canonical tracker.
 - Do not invoke Star for greetings, feedback, self-description, current model
   status, ordinary explanations, or another runtime fact already established
   by authoritative local state. User-visible latency is part of correctness.
+- Do not invoke Star or withhold the initial answer for an ordinary low-cost,
+  reversible recommendation or trial with no material security, privacy,
+  migration, or lock-in consequence. Give the best current answer promptly and
+  state a concise verification caveat when evidence is incomplete. Reserve
+  blocking private review for genuinely material consequences or an explicit
+  request for Star.
 
 ## Heartbeat And Automation
 

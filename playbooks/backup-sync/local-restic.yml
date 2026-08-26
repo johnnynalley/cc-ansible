@@ -26,6 +26,7 @@
       {{ local_restic_retry_start_limit_interval | default('30min') }}
     local_restic_retry_burst_effective: >-
       {{ local_restic_retry_start_limit_burst | default(3) }}
+    hermes_disaster_recovery_script: /usr/local/libexec/hermes-disaster-recovery-stage
 
   tasks:
     # =========================================================================
@@ -85,6 +86,26 @@
         owner: root
         group: root
         mode: "0700"
+      tags: [config]
+
+    - name: Install Hermes disaster-recovery staging helper
+      ansible.builtin.copy:
+        src: ../../scripts/agents/hermes-disaster-recovery-stage.py
+        dest: "{{ hermes_disaster_recovery_script }}"
+        owner: root
+        group: root
+        mode: "0700"
+      when: hermes_disaster_recovery_enabled | default(false)
+      tags: [config, script]
+
+    - name: Create private Hermes disaster-recovery staging root
+      ansible.builtin.file:
+        path: /var/backups/hermes-disaster-recovery
+        state: directory
+        owner: root
+        group: root
+        mode: "0700"
+      when: hermes_disaster_recovery_enabled | default(false)
       tags: [config]
 
     # =========================================================================
@@ -205,6 +226,22 @@
 
           log "Starting local backup for {{ inventory_hostname }}..."
 
+          {% if hermes_disaster_recovery_enabled | default(false) %}
+          record_hermes_backup_failure() {
+            rc=$?
+            if (( rc != 0 )); then
+              {{ hermes_disaster_recovery_script }} status \
+                --result failed --phase restic --exit-code "$rc" || true
+            fi
+          }
+          trap record_hermes_backup_failure EXIT
+
+          log "Staging application-consistent Hermes recovery artifacts..."
+          {{ hermes_disaster_recovery_script }} stage
+          {{ hermes_disaster_recovery_script }} verify
+
+          {% endif -%}
+
           {% if local_restic_run_retention | default(true) %}
           # Clear locks whose owning process/host is no longer active. Restic
           # preserves live locks, so this prevents an interrupted backup from
@@ -240,6 +277,12 @@
           log "Local backup and maintenance complete"
           {% else %}
           log "Backup complete. Skipping client-side retention for append-only repository."
+          {% endif %}
+          {% if hermes_disaster_recovery_enabled | default(false) %}
+
+          {{ hermes_disaster_recovery_script }} status \
+            --result ok --phase complete --exit-code 0
+          trap - EXIT
           {% endif %}
         dest: "{{ local_restic_script }}"
         owner: root
@@ -349,6 +392,16 @@
   become: true
   gather_facts: false
 
+  vars:
+    local_restic_freshness_checker: /usr/local/libexec/restic-snapshot-freshness
+    local_restic_freshness_config_dir: /etc/restic-snapshot-freshness
+    local_restic_freshness_cache_root: /var/cache/restic-snapshot-freshness
+    local_restic_freshness_state_root: /var/lib/restic-snapshot-freshness
+    local_restic_freshness_runner: /usr/local/sbin/restic-snapshot-freshness-monitor
+    local_restic_freshness_state_markers:
+      - unhealthy
+      - last-alert
+
   tasks:
     - name: Ensure backup public key is authorized
       ansible.posix.authorized_key:
@@ -366,6 +419,341 @@
         group: johnny
         mode: "0755"
       tags: [config]
+
+    - name: Validate server-side Restic freshness monitor declarations
+      ansible.builtin.assert:
+        that:
+          - item.name is match('^[a-z0-9][a-z0-9-]+$')
+          - item.source_host is string
+          - item.source_host | length > 0
+          - item.repository is match('^/srv/nas-zfs/backups/[A-Za-z0-9._-]+$')
+          - item.max_age_seconds | int >= 3600
+          - item.alert_dedup_seconds | int >= 3600
+          - item.required_paths is sequence
+          - item.required_paths | length > 0
+        fail_msg: "Invalid server-side Restic freshness monitor declaration"
+        quiet: true
+      loop: "{{ local_restic_freshness_monitors | default([]) }}"
+      loop_control:
+        label: "{{ item.name | default('invalid') }}"
+      tags: [monitoring]
+
+    - name: Install Restic snapshot freshness checker
+      ansible.builtin.copy:
+        src: ../../scripts/storage/restic-snapshot-freshness.py
+        dest: "{{ local_restic_freshness_checker }}"
+        owner: root
+        group: root
+        mode: "0755"
+      when: local_restic_freshness_monitors | default([]) | length > 0
+      tags: [monitoring, script]
+
+    - name: Create private Restic freshness monitor roots
+      ansible.builtin.file:
+        path: "{{ item.path }}"
+        state: directory
+        owner: root
+        group: johnny
+        mode: "0750"
+      loop:
+        - { path: "{{ local_restic_freshness_config_dir }}" }
+        - { path: "{{ local_restic_freshness_cache_root }}" }
+        - { path: "{{ local_restic_freshness_state_root }}" }
+      when: local_restic_freshness_monitors | default([]) | length > 0
+      tags: [monitoring]
+
+    - name: Create per-repository Restic freshness cache and state directories
+      ansible.builtin.file:
+        path: "{{ item.0 }}/{{ item.1.name }}"
+        state: directory
+        owner: johnny
+        group: johnny
+        mode: "0700"
+      loop: >-
+        {{
+          [local_restic_freshness_cache_root, local_restic_freshness_state_root]
+          | product(local_restic_freshness_monitors | default([]))
+          | list
+        }}
+      loop_control:
+        label: "{{ item.1.name }}:{{ item.0 }}"
+      tags: [monitoring]
+
+    - name: Inspect dedicated Restic freshness cache trees
+      ansible.builtin.find:
+        paths: "{{ local_restic_freshness_cache_root }}/{{ item.name }}"
+        file_type: any
+        recurse: true
+        hidden: true
+        follow: false
+      loop: "{{ local_restic_freshness_monitors | default([]) }}"
+      loop_control:
+        label: "{{ item.name }}"
+      register: local_restic_freshness_cache_trees
+      tags: [monitoring]
+
+    - name: Reject unsafe Restic freshness cache tree entries
+      ansible.builtin.assert:
+        that:
+          - item.1.isreg | default(false) or item.1.isdir | default(false)
+          - not (item.1.islnk | default(false))
+        fail_msg: >-
+          Refusing to normalize an unsafe Restic freshness cache entry:
+          {{ item.1.path | default('unknown') }}
+        quiet: true
+      loop: >-
+        {{
+          query(
+            'subelements',
+            local_restic_freshness_cache_trees.results,
+            'files',
+            {'skip_missing': true}
+          )
+        }}
+      loop_control:
+        label: "{{ item.1.path | default('unknown') }}"
+      tags: [monitoring]
+
+    - name: Normalize dedicated Restic freshness cache ownership
+      ansible.builtin.file:
+        path: "{{ local_restic_freshness_cache_root }}/{{ item.name }}"
+        state: directory
+        owner: johnny
+        group: johnny
+        recurse: true
+      loop: "{{ local_restic_freshness_monitors | default([]) }}"
+      loop_control:
+        label: "{{ item.name }}"
+      tags: [monitoring]
+
+    - name: Inspect known Restic freshness monitor state markers
+      ansible.builtin.stat:
+        path: >-
+          {{ local_restic_freshness_state_root }}/{{ item.0.name }}/{{ item.1 }}
+        follow: false
+      loop: >-
+        {{
+          local_restic_freshness_monitors | default([])
+          | product(local_restic_freshness_state_markers)
+          | list
+        }}
+      loop_control:
+        label: "{{ item.0.name }}:{{ item.1 }}"
+      register: local_restic_freshness_state_marker_stats
+      tags: [monitoring]
+
+    - name: Reject unsafe Restic freshness monitor state markers
+      ansible.builtin.assert:
+        that:
+          - not item.stat.exists or item.stat.isreg | default(false)
+          - not item.stat.exists or not (item.stat.islnk | default(false))
+        fail_msg: >-
+          Refusing to normalize a non-regular Restic freshness state marker:
+          {{ item.item.0.name }}:{{ item.item.1 }}
+      loop: "{{ local_restic_freshness_state_marker_stats.results }}"
+      loop_control:
+        label: "{{ item.item.0.name }}:{{ item.item.1 }}"
+      tags: [monitoring]
+
+    - name: Normalize existing Restic freshness monitor state marker ownership
+      ansible.builtin.file:
+        path: >-
+          {{ local_restic_freshness_state_root }}/{{ item.item.0.name }}/{{ item.item.1 }}
+        state: file
+        owner: johnny
+        group: johnny
+        mode: "0600"
+      loop: "{{ local_restic_freshness_state_marker_stats.results }}"
+      loop_control:
+        label: "{{ item.item.0.name }}:{{ item.item.1 }}"
+      when: item.stat.exists
+      tags: [monitoring]
+
+    - name: Create private Restic freshness monitor environments
+      ansible.builtin.copy:
+        dest: "{{ local_restic_freshness_config_dir }}/{{ item.name }}.env"
+        owner: root
+        group: johnny
+        mode: "0640"
+        content: |
+          SOURCE_HOST={{ item.source_host | quote }}
+          MAX_AGE_SECONDS={{ item.max_age_seconds | int }}
+          ALERT_DEDUP_SECONDS={{ item.alert_dedup_seconds | int }}
+          RESTIC_REPOSITORY={{ item.repository | quote }}
+          RESTIC_PASSWORD={{ restic_password | quote }}
+          RESTIC_CACHE_DIR={{ (local_restic_freshness_cache_root ~ '/' ~ item.name) | quote }}
+          APPRISE_ENDPOINT={{ apprise_endpoint | quote }}
+          APPRISE_TOKEN={{ apprise_token | quote }}
+          APPRISE_TAGS={{ apprise_alert_tags | quote }}
+      loop: "{{ local_restic_freshness_monitors | default([]) }}"
+      loop_control:
+        label: "{{ item.name }}"
+      no_log: true
+      tags: [monitoring]
+
+    - name: Create required-path declarations for Restic freshness monitors
+      ansible.builtin.copy:
+        dest: "{{ local_restic_freshness_config_dir }}/{{ item.name }}.paths"
+        owner: root
+        group: johnny
+        mode: "0640"
+        content: |
+          {% for path in item.required_paths %}
+          {{ path }}
+          {% endfor %}
+      loop: "{{ local_restic_freshness_monitors | default([]) }}"
+      loop_control:
+        label: "{{ item.name }}"
+      tags: [monitoring]
+
+    - name: Remove obsolete nested Restic freshness config root
+      ansible.builtin.file:
+        path: /etc/restic/freshness
+        state: absent
+      when: local_restic_freshness_monitors | default([]) | length > 0
+      tags: [monitoring]
+
+    - name: Install Restic freshness monitor runner
+      ansible.builtin.copy:
+        dest: "{{ local_restic_freshness_runner }}"
+        owner: root
+        group: root
+        mode: "0755"
+        content: |
+          #!/bin/bash
+          set -uo pipefail
+
+          name="${1:-}"
+          [[ "$name" =~ ^[a-z0-9][a-z0-9-]+$ ]] || exit 2
+
+          config_root={{ local_restic_freshness_config_dir | quote }}
+          state_root={{ local_restic_freshness_state_root | quote }}
+          checker={{ local_restic_freshness_checker | quote }}
+          env_file="${config_root}/${name}.env"
+          paths_file="${config_root}/${name}.paths"
+          state_dir="${state_root}/${name}"
+
+          [[ -r "$env_file" && -r "$paths_file" && -d "$state_dir" ]] || exit 2
+          set -a
+          source "$env_file"
+          set +a
+          export HOME="$state_dir"
+
+          log() { logger -t "restic-snapshot-freshness/${name}" "$*"; }
+          send_alert() {
+            local title="$1" body="$2" type="$3" tags="$4"
+            curl -fsS -o /dev/null \
+              -X POST "${APPRISE_ENDPOINT}/notify/${APPRISE_TOKEN}" \
+              --form-string "title=${title}" \
+              --form-string "body=${body}" \
+              --form-string "tag=${tags}" \
+              --form-string "type=${type}" \
+              --max-time 10 \
+              --retry 2 \
+              --retry-delay 3
+          }
+
+          args=(
+            --host "$SOURCE_HOST"
+            --max-age-seconds "$MAX_AGE_SECONDS"
+          )
+          while IFS= read -r required_path; do
+            [[ -n "$required_path" ]] || continue
+            args+=(--require-path "$required_path")
+          done < "$paths_file"
+
+          if result="$($checker "${args[@]}" 2>&1)"; then
+            log "healthy ${result}"
+            if [[ -f "$state_dir/unhealthy" ]]; then
+              send_alert \
+                "Hermes backup freshness recovered" \
+                "TS440 again verifies a fresh, complete ${SOURCE_HOST} Hermes disaster-recovery snapshot." \
+                success push-quiet || true
+            fi
+            rm -f "$state_dir/unhealthy" "$state_dir/last-alert"
+            exit 0
+          fi
+
+          log "unhealthy ${result}"
+          touch "$state_dir/unhealthy"
+          now=$(date +%s)
+          last_alert=0
+          [[ -r "$state_dir/last-alert" ]] && read -r last_alert < "$state_dir/last-alert"
+          if (( now - last_alert >= ALERT_DEDUP_SECONDS )); then
+            if send_alert \
+              "Hermes disaster-recovery backup is stale" \
+              "TS440 cannot verify a fresh, complete ${SOURCE_HOST} Hermes snapshot in the encrypted local Restic repository. Inspect the source backup service and NAS repository before relying on node-loss recovery." \
+              warning "$APPRISE_TAGS"; then
+              printf '%s\n' "$now" > "$state_dir/last-alert"
+            fi
+          fi
+          exit 1
+      when: local_restic_freshness_monitors | default([]) | length > 0
+      tags: [monitoring, script]
+
+    - name: Install Restic snapshot freshness service
+      ansible.builtin.copy:
+        dest: /etc/systemd/system/restic-snapshot-freshness@.service
+        owner: root
+        group: root
+        mode: "0644"
+        content: |
+          [Unit]
+          Description=Validate Restic snapshot freshness for %i
+          After=network-online.target zfs.target
+          Wants=network-online.target
+
+          [Service]
+          Type=oneshot
+          User=johnny
+          Group=johnny
+          ExecStart={{ local_restic_freshness_runner }} %i
+          NoNewPrivileges=true
+          PrivateTmp=true
+          ProtectHome=true
+          ProtectSystem=strict
+          ReadWritePaths={{ local_restic_freshness_cache_root }} {{ local_restic_freshness_state_root }}
+          CapabilityBoundingSet=
+          LockPersonality=true
+          MemoryDenyWriteExecute=true
+          RestrictSUIDSGID=true
+          StandardOutput=journal
+          StandardError=journal
+          TimeoutStartSec=180
+      when: local_restic_freshness_monitors | default([]) | length > 0
+      tags: [monitoring, systemd]
+
+    - name: Install Restic snapshot freshness timer
+      ansible.builtin.copy:
+        dest: /etc/systemd/system/restic-snapshot-freshness@.timer
+        owner: root
+        group: root
+        mode: "0644"
+        content: |
+          [Unit]
+          Description=Hourly Restic snapshot freshness check for %i
+
+          [Timer]
+          OnCalendar=hourly
+          RandomizedDelaySec=5m
+          Persistent=true
+
+          [Install]
+          WantedBy=timers.target
+      when: local_restic_freshness_monitors | default([]) | length > 0
+      tags: [monitoring, systemd]
+
+    - name: Enable server-side Restic freshness monitor timers
+      ansible.builtin.systemd_service:
+        name: "restic-snapshot-freshness@{{ item.name }}.timer"
+        enabled: true
+        state: started
+        daemon_reload: true
+      loop: "{{ local_restic_freshness_monitors | default([]) }}"
+      loop_control:
+        label: "{{ item.name }}"
+      when: not ansible_check_mode
+      tags: [monitoring, systemd]
 
 # =============================================================================
 # Restic REST server on ts440 (for hosts without SSH access)

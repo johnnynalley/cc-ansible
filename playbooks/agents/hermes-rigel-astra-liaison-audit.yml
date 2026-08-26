@@ -1,0 +1,99 @@
+---
+# Purpose: Read-only preflight for Rigel's privacy-isolated calendar liaison.
+# Hosts: hermes_hosts.
+# Mutation: none.
+
+- name: Audit Rigel's privacy-isolated calendar liaison prerequisites
+  hosts: hermes_hosts
+  become: true
+  gather_facts: false
+
+  vars:
+    hermes_rigel_profile: >-
+      {{ hermes_shadow_profiles | selectattr('name', 'equalto', 'rigel') | first }}
+
+  tasks:
+    - name: Require exact Rigel liaison audit scope
+      ansible.builtin.assert:
+        that:
+          - inventory_hostname == 'jn-t14s-lin'
+          - hermes_rigel_dedicated_discord_enabled | bool
+          - hermes_rigel_discord_guild_id is match('^[0-9]+$')
+          - hermes_rigel_discord_channel_id is match('^[0-9]+$')
+          - hermes_automation_owner_user_id is match('^[0-9]+$')
+
+    - name: Read live Rigel service UID
+      ansible.builtin.command:
+        argv: [/usr/bin/id, -u, hermes-rigel]
+      register: hermes_rigel_liaison_audit_uid
+      changed_when: false
+
+    - name: Require managed Rigel UID to match live identity
+      ansible.builtin.assert:
+        that:
+          - hermes_rigel_liaison_audit_uid.stdout | int == hermes_rigel_profile.uid | int
+
+    - name: Inspect liaison dependencies without following links
+      ansible.builtin.stat:
+        path: "{{ item }}"
+        follow: false
+      loop:
+        - /usr/bin/khal
+        - /usr/bin/vdirsyncer
+        - /etc/hermes/astra/.env
+        - "{{ hermes_rigel_profile.home }}/state.db"
+      register: hermes_rigel_liaison_audit_dependencies
+
+    - name: Require safe regular liaison dependencies
+      ansible.builtin.assert:
+        that:
+          - item.stat.exists | default(false)
+          - item.stat.isreg | default(false)
+          - not (item.stat.islnk | default(false))
+          - item.stat.size | int > 0
+      loop: "{{ hermes_rigel_liaison_audit_dependencies.results }}"
+      loop_control:
+        label: "{{ item.item }}"
+
+    - name: Verify CalDAV credential key exists without reading its value
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/awk
+          - >-
+            /^NEXTCLOUD_CALDAV_APP_PASSWORD=.+$/{found=1} END{exit !found}
+          - /etc/hermes/astra/.env
+      changed_when: false
+      no_log: true
+
+    - name: Read retired OpenClaw Gateway state
+      ansible.builtin.command:
+        argv: [/usr/bin/systemctl, is-active, openclaw-isolated-gateway.service]
+      register: hermes_rigel_liaison_audit_openclaw
+      changed_when: false
+      failed_when: >-
+        hermes_rigel_liaison_audit_openclaw.stdout
+        not in ['inactive', 'failed', 'unknown']
+
+    - name: Verify off-host rollback mount is available
+      ansible.builtin.command:
+        argv: [/usr/bin/mountpoint, -q, /srv/live-rollbacks]
+      changed_when: false
+
+    - name: Read current Hermes Gateway states
+      ansible.builtin.command:
+        argv: [/usr/bin/systemctl, is-active, "{{ item }}"]
+      loop:
+        - hermes-gateway-astra.service
+        - hermes-gateway-dubble.service
+        - hermes-gateway-rigel.service
+      changed_when: false
+
+    - name: Report content-free liaison preflight result
+      ansible.builtin.debug:
+        msg:
+          status: ok
+          rigelUidMatched: true
+          dependencies: 4
+          caldavCredentialPresent: true
+          rollbackMountAvailable: true
+          gatewaysActive: 3

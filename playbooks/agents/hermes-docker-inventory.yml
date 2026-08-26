@@ -25,21 +25,14 @@
       {{ hermes_docker_inventory_backup_root }}/runtime-policy.tar
     hermes_docker_inventory_candidate_paths:
       - /etc/hermes/astra/config.yaml
-      - /etc/hermes/dubble/config.yaml
-      - /etc/hermes/rigel/config.yaml
       - /etc/hermes/astra/managed-policy.sha256
-      - /etc/hermes/dubble/managed-policy.sha256
-      - /etc/hermes/rigel/managed-policy.sha256
       - /var/lib/hermes/astra/.hermes/profiles/astra/config.yaml
-      - /var/lib/hermes/dubble/.hermes/profiles/dubble/config.yaml
-      - /var/lib/hermes/rigel/.hermes/profiles/rigel/config.yaml
       - /etc/systemd/system/hermes-gateway-astra.service
-      - /etc/systemd/system/hermes-gateway-dubble.service
-      - /etc/systemd/system/hermes-gateway-rigel.service
       - "{{ hermes_star_privacy_validator_live }}"
       - "{{ hermes_docker_inventory_validator_live }}"
       - "{{ hermes_docker_inventory_smoke_live }}"
       - "{{ hermes_docker_inventory_known_hosts }}"
+      - "{{ hermes_docker_inventory_endpoints }}"
       - "{{ hermes_docker_inventory_plugin_managed_root }}"
       - "{{ hermes_docker_inventory_plugin_runtime_root }}"
       - "{{ hermes_star_privacy_plugin_managed_root }}/__pycache__"
@@ -49,6 +42,12 @@
         /run/user/{{ hermes_production_cutover_user_uid }}
       DBUS_SESSION_BUS_ADDRESS: >-
         unix:path=/run/user/{{ hermes_production_cutover_user_uid }}/bus
+    hermes_docker_inventory_astra_profile: >-
+      {{
+        hermes_shadow_profiles
+        | selectattr('name', 'equalto', 'astra')
+        | first
+      }}
 
   tasks:
     - name: Validate Hermes Docker inventory rollout mode
@@ -224,21 +223,80 @@
       ansible.builtin.meta: end_host
       when: hermes_docker_inventory_mode == 'key-bootstrap'
 
-    - name: Require complete pinned Docker host-key inventory
+    - name: Collect managed Docker host network facts
+      ansible.builtin.setup:
+        gather_subset:
+          - "!all"
+          - network
+      delegate_to: "{{ item }}"
+      loop: "{{ groups['docker_hosts'] | sort }}"
+      register: hermes_docker_inventory_network_facts
+      check_mode: false
+
+    - name: Read managed Docker host Ed25519 public keys
+      ansible.builtin.slurp:
+        src: /etc/ssh/ssh_host_ed25519_key.pub
+      delegate_to: "{{ item }}"
+      loop: "{{ groups['docker_hosts'] | sort }}"
+      register: hermes_docker_inventory_host_public_keys
+      no_log: true
+      check_mode: false
+
+    - name: Initialize managed Docker endpoint inventory
+      ansible.builtin.set_fact:
+        hermes_docker_inventory_endpoint_records: []
+        hermes_docker_inventory_host_key_records: {}
+
+    - name: Build managed Docker endpoint inventory
+      ansible.builtin.set_fact:
+        hermes_docker_inventory_endpoint_records: >-
+          {{
+            hermes_docker_inventory_endpoint_records
+            + [{
+              'name': item.item,
+              'address': item.ansible_facts.ansible_default_ipv4.address,
+              'report': true,
+              'update': (
+                hostvars[item.item].docker_auto_update_enabled
+                | default(false) | bool
+              )
+            }]
+          }}
+      loop: "{{ hermes_docker_inventory_network_facts.results }}"
+      no_log: true
+
+    - name: Build managed Docker host-key inventory
+      ansible.builtin.set_fact:
+        hermes_docker_inventory_host_key_records: >-
+          {{
+            hermes_docker_inventory_host_key_records
+            | combine({
+              item.item: (
+                item.content | b64decode | trim
+              ).split()[0:2] | join(' ')
+            })
+          }}
+      loop: "{{ hermes_docker_inventory_host_public_keys.results }}"
+      no_log: true
+
+    - name: Require complete dynamic Docker host inventory
       ansible.builtin.assert:
         that:
           - >-
-            hermes_docker_inventory_host_keys.keys() | sort
-            == [
-              '192.168.1.136',
-              '192.168.1.153',
-              '192.168.1.31',
-              '192.168.1.78'
-            ]
+            hermes_docker_inventory_endpoint_records
+            | map(attribute='name') | sort
+            == groups['docker_hosts'] | sort
           - >-
-            hermes_docker_inventory_host_keys.values()
+            hermes_docker_inventory_endpoint_records
+            | map(attribute='address') | unique | list | length
+            == groups['docker_hosts'] | length
+          - >-
+            hermes_docker_inventory_host_key_records.keys() | sort
+            == groups['docker_hosts'] | sort
+          - >-
+            hermes_docker_inventory_host_key_records.values()
             | select('match', '^ssh-ed25519 [A-Za-z0-9+/]+={0,3}$')
-            | list | length == 4
+            | list | length == groups['docker_hosts'] | length
           - agent_docker_report_enabled | bool
           - agent_docker_report_rollout_approved | bool
           - agent_docker_update_trigger_rollout_approved | bool
@@ -248,8 +306,9 @@
             agent_docker_update_trigger_source_cidrs
             == ['192.168.1.31/32']
         fail_msg: >-
-          Convergence requires four trusted Ed25519 host keys plus enabled
-          report and update boundaries.
+          Convergence requires every current docker_hosts member, its live
+          default IPv4 address, its Ed25519 host key, and enabled report/update
+          boundaries.
 
     - name: Read generated Docker report reader public key
       ansible.builtin.slurp:
@@ -366,6 +425,7 @@
                hermes_docker_inventory_plugin_runtime_root]
               | product(['__init__.py', 'plugin.yaml']) | list
             }}
+          register: hermes_docker_inventory_plugin_copies
 
         - name: Deploy Docker inventory validator and smoke probe
           ansible.builtin.copy:
@@ -407,8 +467,8 @@
           ansible.builtin.copy:
             # yamllint disable rule:line-length
             content: |
-              {% for host, key in hermes_docker_inventory_host_keys | dictsort %}
-              {{ host }} {{ key }}
+              {% for endpoint in hermes_docker_inventory_endpoint_records | sort(attribute='name') %}
+              {{ endpoint.address }} {{ hermes_docker_inventory_host_key_records[endpoint.name] }}
               {% endfor %}
             # yamllint enable rule:line-length
             dest: "{{ hermes_docker_inventory_known_hosts }}"
@@ -416,10 +476,28 @@
             group: hermes-astra
             mode: "0440"
 
+        - name: Publish managed Docker endpoint manifest
+          ansible.builtin.copy:
+            content: >-
+              {{
+                {
+                  'schemaVersion': 1,
+                  'hosts': (
+                    hermes_docker_inventory_endpoint_records
+                    | sort(attribute='name')
+                  )
+                } | to_nice_json
+              }}
+            dest: "{{ hermes_docker_inventory_endpoints }}"
+            owner: root
+            group: hermes-astra
+            mode: "0440"
+
         - name: Read mutable Hermes configs before schema promotion
           ansible.builtin.slurp:
             src: "{{ item.home }}/config.yaml"
-          loop: "{{ hermes_shadow_profiles }}"
+          loop:
+            - "{{ hermes_docker_inventory_astra_profile }}"
           register: hermes_docker_inventory_mutable_configs
           no_log: true
 
@@ -452,6 +530,7 @@
             (item.content | b64decode | from_yaml)._config_version | int
             == hermes_shadow_version_only_migration_from | int
           no_log: true
+          register: hermes_docker_inventory_schema_promotions
 
         - name: Render promoted per-profile Hermes managed policy
           ansible.builtin.template:
@@ -462,9 +541,11 @@
             owner: root
             group: "{{ hermes_profile.group }}"
             mode: "0440"
-          loop: "{{ hermes_shadow_profiles }}"
+          loop:
+            - "{{ hermes_docker_inventory_astra_profile }}"
           loop_control:
             loop_var: hermes_profile
+          register: hermes_docker_inventory_managed_policies
 
         - name: Validate merged Hermes configs as service identities
           ansible.builtin.command:
@@ -481,7 +562,8 @@
               - "{{ hermes_shadow_runtime_binary }}"
               - config
               - check
-          loop: "{{ hermes_shadow_profiles }}"
+          loop:
+            - "{{ hermes_docker_inventory_astra_profile }}"
           changed_when: false
           no_log: true
 
@@ -507,6 +589,8 @@
               - /etc/hermes/astra/config.yaml
               - --known-hosts
               - "{{ hermes_docker_inventory_known_hosts }}"
+              - --endpoints
+              - "{{ hermes_docker_inventory_endpoints }}"
           changed_when: false
 
         - name: Hash promoted Hermes policy and environment
@@ -515,7 +599,8 @@
               - /usr/bin/sha256sum
               - "/etc/hermes/{{ item.name }}/config.yaml"
               - "/etc/hermes/{{ item.name }}/.env"
-          loop: "{{ hermes_shadow_profiles }}"
+          loop:
+            - "{{ hermes_docker_inventory_astra_profile }}"
           register: hermes_docker_inventory_policy_hashes
           changed_when: false
           no_log: true
@@ -530,6 +615,25 @@
           loop: "{{ hermes_docker_inventory_policy_hashes.results }}"
           no_log: true
 
+        - name: Determine whether Astra needs one planned restart
+          ansible.builtin.set_fact:
+            hermes_docker_inventory_restart_required: >-
+              {{
+                (
+                  hermes_docker_inventory_plugin_copies.results
+                  | selectattr('changed') | list | length > 0
+                )
+                or (
+                  hermes_docker_inventory_schema_promotions.results
+                  | selectattr('changed') | list | length > 0
+                )
+                or (
+                  hermes_docker_inventory_managed_policies.results
+                  | selectattr('changed') | list | length > 0
+                )
+              }}
+            hermes_docker_inventory_restart_attempted: false
+
         - name: Reload promoted Hermes units
           ansible.builtin.systemd_service:
             daemon_reload: true
@@ -539,11 +643,18 @@
             file: ../../tasks/hermes-planned-stop-marker.yml
           vars:
             hermes_planned_stop_profile: "{{ item }}"
-          loop: "{{ hermes_shadow_profiles[:2] }}"
+          loop:
+            - "{{ hermes_docker_inventory_astra_profile }}"
           loop_control:
             label: "{{ item.name }}"
+          when: hermes_docker_inventory_restart_required | bool
 
-        - name: Restart promoted Astra and Dubble consumers natively
+        - name: Record planned Astra restart attempt
+          ansible.builtin.set_fact:
+            hermes_docker_inventory_restart_attempted: true
+          when: hermes_docker_inventory_restart_required | bool
+
+        - name: Restart promoted production consumers natively
           ansible.builtin.command:
             argv:
               - "{{ hermes_shadow_runtime_binary }}"
@@ -554,16 +665,12 @@
             HOME: "{{ item.account_home }}"
             HERMES_HOME: "{{ item.home }}"
             HERMES_MANAGED_DIR: "/etc/hermes/{{ item.name }}"
-          loop: "{{ hermes_shadow_profiles[:2] }}"
+          loop:
+            - "{{ hermes_docker_inventory_astra_profile }}"
           loop_control:
             label: "{{ item.name }}"
           changed_when: true
-
-        - name: Keep standalone Rigel Gateway stopped and disabled
-          ansible.builtin.systemd_service:
-            name: hermes-gateway-rigel.service
-            state: stopped
-            enabled: false
+          when: hermes_docker_inventory_restart_required | bool
 
         - name: Exercise Docker inventory as the real Astra identity
           ansible.builtin.command:
@@ -587,6 +694,16 @@
               - --plugin
               - "{{ hermes_docker_inventory_plugin_runtime_root }}"
           changed_when: false
+
+        - name: Remove validation bytecode after Docker acceptance
+          ansible.builtin.file:
+            path: "{{ item }}/__pycache__"
+            state: absent
+          loop:
+            - "{{ hermes_star_privacy_plugin_managed_root }}"
+            - "{{ hermes_star_privacy_plugin_runtime_root }}"
+            - "{{ hermes_docker_inventory_plugin_managed_root }}"
+            - "{{ hermes_docker_inventory_plugin_runtime_root }}"
 
         - name: Require promoted consumers and Health active
           ansible.builtin.command:
@@ -644,11 +761,13 @@
           vars:
             hermes_planned_stop_profile: "{{ item }}"
             hermes_planned_stop_strict: false
-          loop: "{{ hermes_shadow_profiles[:2] }}"
+          loop:
+            - "{{ hermes_docker_inventory_astra_profile }}"
           loop_control:
             label: "{{ item.name }}"
+          when: hermes_docker_inventory_restart_attempted | default(false) | bool
 
-        - name: Restore Astra and Dubble natively after promotion failure
+        - name: Restore production consumers natively after promotion failure
           ansible.builtin.command:
             argv:
               - "{{ hermes_shadow_runtime_binary }}"
@@ -659,11 +778,13 @@
             HOME: "{{ item.account_home }}"
             HERMES_HOME: "{{ item.home }}"
             HERMES_MANAGED_DIR: "/etc/hermes/{{ item.name }}"
-          loop: "{{ hermes_shadow_profiles[:2] }}"
+          loop:
+            - "{{ hermes_docker_inventory_astra_profile }}"
           loop_control:
             label: "{{ item.name }}"
           changed_when: true
           failed_when: false
+          when: hermes_docker_inventory_restart_attempted | default(false) | bool
 
         - name: Fail after restoring pre-promotion Hermes state
           ansible.builtin.fail:

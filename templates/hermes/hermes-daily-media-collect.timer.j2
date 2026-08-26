@@ -1,0 +1,11 @@
+[Unit]
+Description=Collect Hermes Daily Summary media inputs
+
+[Timer]
+OnCalendar=*-*-* 06:30:00 America/Chicago
+Persistent=true
+AccuracySec=1s
+Unit=hermes-retained-automation@daily-media.service
+
+[Install]
+WantedBy=timers.target

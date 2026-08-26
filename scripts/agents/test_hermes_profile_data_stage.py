@@ -134,6 +134,7 @@ class HermesProfileDataStageTests(unittest.TestCase):
         gid = os.getegid()
         contract["ownership"]["operatorUid"] = uid
         contract["ownership"]["operatorGid"] = gid
+        contract["limits"]["selectedMappingCount"] = 20
         for index, profile in enumerate(profiles):
             contract["profiles"][profile] = {
                 "uid": uid,
@@ -176,7 +177,10 @@ class HermesProfileDataStageTests(unittest.TestCase):
             for row in profile_import["workspaceMappings"]
             if row["importMode"] in set(contract["selectedImportModes"])
         ]
-        self.assertEqual(len(selected), 20)
+        self.assertEqual(
+            len(selected), contract["limits"]["selectedMappingCount"]
+        )
+        self.assertEqual(len(selected), 24)
 
     def test_playbook_is_transactional_disabled_and_never_starts_a_gateway(self) -> None:
         import yaml
@@ -186,6 +190,11 @@ class HermesProfileDataStageTests(unittest.TestCase):
         unit = UNIT.read_text(encoding="utf-8")
         self.assertEqual(variables["hermes_profile_data_mode"], "disabled")
         self.assertFalse(variables["hermes_profile_data_approved"])
+        self.assertFalse(
+            variables[
+                "hermes_profile_data_preserve_reviewed_writable_drift"
+            ]
+        )
         self.assertIn("Back up current Hermes profile data", playbook)
         self.assertIn("Restore prior Hermes profile data", playbook)
         self.assertIn("Remove incomplete Hermes profile-data staging root", playbook)
@@ -197,6 +206,17 @@ class HermesProfileDataStageTests(unittest.TestCase):
         self.assertIn("Classify existing Hermes profile-data generation", playbook)
         self.assertIn("existing_verify.stdout | from_json", playbook)
         self.assertIn("== 'manifest-contract-invalid'", playbook)
+        self.assertIn("'manifest-file-hash-drift'", playbook)
+        self.assertIn("'writable-file-inventory-drift'", playbook)
+        self.assertIn(
+            "hermes_profile_data_preserve_reviewed_writable_drift | bool",
+            playbook,
+        )
+        self.assertIn("--allow-writable-drift", playbook)
+        self.assertIn("--preserve-writable-from", playbook)
+        self.assertIn("--preserve-writable-manifest", playbook)
+        self.assertIn("summary.preservedWritable.files", playbook)
+        self.assertIn("preserved-writable-drift", playbook)
         self.assertIn("existingGenerationStatus", playbook)
         self.assertIn(
             "results[0].stat.exists\n            == hermes_profile_data_targets_before.results[1].stat.exists",
@@ -321,6 +341,99 @@ class HermesProfileDataStageTests(unittest.TestCase):
             with self.assertRaisesRegex(MODULE.ProfileDataError, "hash-drift|mode-drift"):
                 MODULE.verify(
                     paths["contract"], paths["repository"], paths["target"], manifest, True
+                )
+
+    def test_stage_preserves_writable_edits_additions_and_deletions(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            paths = self.fixture(root)
+            current_manifest = paths["output"] / "current-manifest.json"
+            MODULE.stage(
+                paths["contract"],
+                paths["repository"],
+                paths["source"],
+                paths["target"],
+                current_manifest,
+            )
+            changed = (
+                paths["target"]
+                / "astra"
+                / "writable"
+                / "namespace-00"
+                / "payload.txt"
+            )
+            changed.write_text("native edit\n", encoding="utf-8")
+            added = paths["target"] / "astra" / "writable" / "native-added.md"
+            added.write_text("native addition\n", encoding="utf-8")
+            added.chmod(0o640)
+            deleted = (
+                paths["target"]
+                / "astra"
+                / "writable"
+                / "namespace-03"
+                / "payload.txt"
+            )
+            deleted.unlink()
+
+            next_target = root / "next-target"
+            next_target.mkdir(mode=0o700)
+            next_manifest = paths["output"] / "next-manifest.json"
+            summary = MODULE.stage(
+                paths["contract"],
+                paths["repository"],
+                paths["source"],
+                next_target,
+                next_manifest,
+                preserve_writable_from=paths["target"],
+                preserve_writable_manifest=current_manifest,
+            )
+
+            self.assertEqual(
+                (next_target / "astra" / "writable" / "namespace-00" / "payload.txt").read_text(),
+                "native edit\n",
+            )
+            self.assertEqual(
+                (next_target / "astra" / "writable" / "native-added.md").read_text(),
+                "native addition\n",
+            )
+            self.assertFalse(
+                (next_target / "astra" / "writable" / "namespace-03" / "payload.txt").exists()
+            )
+            self.assertGreater(summary["preservedWritable"]["files"], 0)
+            self.assertEqual(summary["preservedWritable"]["baselineDeletions"], 1)
+            MODULE.verify(
+                paths["contract"],
+                paths["repository"],
+                next_target,
+                next_manifest,
+                writable_drift=True,
+            )
+
+    def test_stage_rejects_unsafe_preserved_writable_object(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            paths = self.fixture(root)
+            current_manifest = paths["output"] / "current-manifest.json"
+            MODULE.stage(
+                paths["contract"],
+                paths["repository"],
+                paths["source"],
+                paths["target"],
+                current_manifest,
+            )
+            unsafe = paths["target"] / "astra" / "writable" / "unsafe-link"
+            unsafe.symlink_to("namespace-00/payload.txt")
+            next_target = root / "next-target"
+            next_target.mkdir(mode=0o700)
+            with self.assertRaisesRegex(MODULE.ProfileDataError, "object-kind-rejected"):
+                MODULE.stage(
+                    paths["contract"],
+                    paths["repository"],
+                    paths["source"],
+                    next_target,
+                    paths["output"] / "next-manifest.json",
+                    preserve_writable_from=paths["target"],
+                    preserve_writable_manifest=current_manifest,
                 )
 
     def test_unexpected_managed_directory_is_rejected(self) -> None:

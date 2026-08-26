@@ -438,16 +438,7 @@ def unhandled_error_code(exc: BaseException) -> str:
 
 def run(home: Path, now: datetime) -> str:
     require(home.is_absolute(), "home-not-absolute")
-    channel_source = home / "rigel-channel-state" / "academic-state.json"
-    source_path = (
-        channel_source
-        if channel_source.exists()
-        else home
-        / "transformed-managed"
-        / "imports"
-        / "courses"
-        / "academic-state.json"
-    )
+    source_path = home / "imported-data" / "courses" / "academic-state.json"
     ledger_path = home / "state" / "rigel-schedule-state.json"
     health_path = home / "state" / "rigel-schedule-health.json"
     zone = ZoneInfo(TIMEZONE)
@@ -455,8 +446,17 @@ def run(home: Path, now: datetime) -> str:
 
     with schedule_lock(home):
         try:
-            source = read_json(source_path)
-            assert source is not None
+            source = read_json(source_path, optional=True)
+            if source is None:
+                atomic_json(
+                    health_path,
+                    status_payload(
+                        now,
+                        healthy=True,
+                        status_value="idle-uninitialized",
+                    ),
+                )
+                return ""
             source_digest = hashlib.sha256(
                 json.dumps(source, sort_keys=True, separators=(",", ":")).encode()
             ).hexdigest()

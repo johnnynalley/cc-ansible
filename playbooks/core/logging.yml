@@ -85,6 +85,57 @@
       tags: [drkonqi-coredump-guard]
       notify: Reload guarded DrKonqi user socket
 
+    - name: Retain only recent DrKonqi crash cache records
+      ansible.builtin.copy:
+        dest: /etc/tmpfiles.d/drkonqi-crash-cache.conf
+        owner: root
+        group: root
+        mode: "0644"
+        content: |
+          d /home/{{ admin_user }}/.cache/drkonqi/crashes 0700 {{ admin_user }} {{ admin_user }} {{ drkonqi_crash_cache_retention_days }}d -
+      when:
+        - drkonqi_coredump_recursion_guard | default(false) | bool
+        - drkonqi_crash_cache_retention_days is defined
+      tags: [drkonqi-coredump-guard]
+
+    - name: Detect expired DrKonqi crash cache records
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/find
+          - /home/{{ admin_user }}/.cache/drkonqi/crashes
+          - -type
+          - f
+          - -mtime
+          - +{{ drkonqi_crash_cache_retention_days }}
+          - -print
+          - -quit
+      register: drkonqi_expired_cache_probe
+      changed_when: false
+      failed_when: drkonqi_expired_cache_probe.rc not in [0, 1]
+      check_mode: false
+      when:
+        - drkonqi_coredump_recursion_guard | default(false) | bool
+        - drkonqi_crash_cache_retention_days is defined
+      tags: [drkonqi-coredump-guard]
+
+    - name: Clean expired DrKonqi crash cache records
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/find
+          - /home/{{ admin_user }}/.cache/drkonqi/crashes
+          - -type
+          - f
+          - -mtime
+          - +{{ drkonqi_crash_cache_retention_days }}
+          - -delete
+      changed_when: drkonqi_expired_cache_probe.stdout | length > 0
+      when:
+        - not ansible_check_mode
+        - drkonqi_coredump_recursion_guard | default(false) | bool
+        - drkonqi_crash_cache_retention_days is defined
+        - drkonqi_expired_cache_probe.stdout | length > 0
+      tags: [drkonqi-coredump-guard]
+
     - name: Remove DrKonqi coredump recursion guard when disabled
       ansible.builtin.file:
         path: /home/{{ admin_user }}/.config/systemd/user/drkonqi-coredump-launcher.socket.d/recursion-guard.conf
@@ -94,6 +145,15 @@
         - not (drkonqi_coredump_recursion_guard | bool)
       tags: [drkonqi-coredump-guard]
       notify: Reload guarded DrKonqi user socket
+
+    - name: Remove DrKonqi crash cache retention when disabled
+      ansible.builtin.file:
+        path: /etc/tmpfiles.d/drkonqi-crash-cache.conf
+        state: absent
+      when:
+        - drkonqi_coredump_recursion_guard is defined
+        - not (drkonqi_coredump_recursion_guard | bool)
+      tags: [drkonqi-coredump-guard]
 
   handlers:
     - name: Reload guarded DrKonqi user socket
@@ -114,6 +174,7 @@
   become: true
   gather_facts: true
   serial: 1
+  tags: [alloy]
 
   tasks:
     # =========================================================================
@@ -306,6 +367,7 @@
   become: false
   gather_facts: true
   serial: 1
+  tags: [alloy]
 
   vars:
     alloy_home: "{{ ansible_facts.env.HOME }}"
