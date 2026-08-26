@@ -8,6 +8,9 @@ ConditionPathIsDirectory={{ hermes_openclaw_evidence_contract.sourceRoot }}
 
 [Service]
 Type=simple
+RuntimeDirectory=hermes-openclaw-evidence
+RuntimeDirectoryMode=0700
+ExecStartPre=+/usr/bin/install -d -o root -g {{ hermes_openclaw_evidence_contract.runtime.profileGroup }} -m 0710 {{ hermes_openclaw_evidence_contract.runtime.viewRoot }}
 ExecStartPre=-/usr/bin/fusermount3 -u {{ hermes_openclaw_evidence_contract.runtime.viewRoot }}
 ExecStartPre=-/usr/bin/umount {{ hermes_openclaw_evidence_contract.runtime.mergedRoot }}
 ExecStartPre=+{{ hermes_openclaw_evidence_script_live }} prepare --contract {{ hermes_openclaw_evidence_contract_live }}

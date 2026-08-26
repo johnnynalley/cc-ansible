@@ -404,6 +404,19 @@ class OpenClawEvidenceTests(unittest.TestCase):
         ):
             self.assertNotIn(excluded_capability, service)
         self.assertIn("Documentation=file:", service)
+        self.assertIn("RuntimeDirectory=hermes-openclaw-evidence", service)
+        self.assertIn("RuntimeDirectoryMode=0700", service)
+        view_root_create = (
+            "ExecStartPre=+/usr/bin/install -d -o root -g "
+            "{{ hermes_openclaw_evidence_contract.runtime.profileGroup }} "
+            "-m 0710 "
+            "{{ hermes_openclaw_evidence_contract.runtime.viewRoot }}"
+        )
+        self.assertIn(view_root_create, service)
+        self.assertLess(
+            service.index(view_root_create),
+            service.index("ExecStartPre=-/usr/bin/fusermount3"),
+        )
         for namespace_directive in (
             "ProtectSystem=",
             "PrivateMounts=",
