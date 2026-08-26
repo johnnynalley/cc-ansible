@@ -119,6 +119,7 @@ class NativeGatewayMigrationTests(unittest.TestCase):
         ):
             self.assertNotIn(forbidden, self.hardening)
         self.assertEqual(self.hardening.count("WorkingDirectory="), 1)
+        self.assertIn("SuccessExitStatus=75", self.hardening)
         self.assertIn(
             "{% if hermes_profile.gateway_working_directory is defined %}",
             self.hardening,

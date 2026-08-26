@@ -1,0 +1,15 @@
+# =============================================================================
+# jn-t14s-lin - Local Filesystem Mounts
+# =============================================================================
+
+filesystem_mounts:
+  # Complete retired OpenClaw evidence is stored once on nas-zfs and mounted
+  # read-only at its historical contract path. Ansible owns only this platform
+  # mount; it does not generate or rewrite the immutable evidence image.
+  - path: /home/johnny/.openclaw
+    src: /srv/live-rollbacks/jn-t14s-lin/hermes-openclaw-evidence/20260826T192343Z/openclaw-complete.sqfs
+    fstype: squashfs
+    opts: "loop,ro,nosuid,nodev,noexec,nofail,_netdev,x-systemd.requires-mounts-for=/srv/live-rollbacks,x-systemd.after=network-online.target"
+    owner: johnny
+    group: johnny
+    mode: "0700"

@@ -137,6 +137,19 @@ of the source node. It requires a snapshot no older than three hours containing
 alert when the proof is missing or stale. This is the source-node-loss alert;
 the source-side status file alone is not sufficient when the T14s is offline.
 
+The retired complete OpenClaw source is preserved once as the root-only,
+SHA-256-verified SquashFS image under
+`/srv/live-rollbacks/jn-t14s-lin/hermes-openclaw-evidence/20260826T192343Z/`.
+T14s mounts that immutable image read-only at `/home/johnny/.openclaw`; the
+redaction overlay and Astra-only bindfs view continue to consume the historical
+contract path. The mount is rebuildable platform state in
+`inventory/host_vars/jn-t14s-lin/mounts.yml`, while the image is retained data
+owned by nas-zfs snapshots rather than Ansible. Restore `/srv/live-rollbacks`
+first, run the filesystem-mount playbook second, and converge the Hermes
+OpenClaw evidence playbook third. Local Restic excludes the loopback view
+because its immutable backing image is already on nas-zfs; normal offsite
+backup policy for `/home/johnny` remains independent.
+
 Hermes currently has a native `backup` command but no native `restore`
 subcommand. A profile rollback therefore extracts its full archive into a new
 private Hermes root, restores the service identity ownership, runs static

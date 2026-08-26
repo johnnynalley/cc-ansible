@@ -9,6 +9,9 @@ After=hermes-rigel-astra-calendar-broker.service
 {% endif %}
 
 [Service]
+# Hermes exits 75 for an intentional gateway recycle. The native unit still
+# restarts it, but systemd should record planned maintenance as successful.
+SuccessExitStatus=75
 {% if hermes_profile.gateway_working_directory is defined %}
 WorkingDirectory={{ hermes_profile.gateway_working_directory }}
 Environment=TERMINAL_CWD={{ hermes_profile.terminal_cwd }}

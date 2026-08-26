@@ -27,6 +27,9 @@ local_restic_backup_paths:
 hermes_disaster_recovery_enabled: true
 
 local_restic_excludes_extra:
+  # This path is an immutable loopback view of the archive already stored on
+  # nas-zfs. Avoid rereading 35 GiB from and back to the same NAS every hour.
+  - /home/johnny/.openclaw
   - /var/lib/hermes/openclaw-evidence/merged
   - /var/lib/hermes/openclaw-evidence/work
   - /var/lib/hermes/astra/workspaces/cc-ansible

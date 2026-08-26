@@ -440,6 +440,28 @@ class OpenClawEvidenceTests(unittest.TestCase):
             audit,
         )
 
+    def test_preserved_source_is_an_offhost_readonly_platform_mount(self):
+        mounts = (
+            ROOT / "inventory/host_vars/jn-t14s-lin/mounts.yml"
+        ).read_text(encoding="utf-8")
+        backup = (
+            ROOT / "inventory/host_vars/jn-t14s-lin/backup.yml"
+        ).read_text(encoding="utf-8")
+        self.assertIn("path: /home/johnny/.openclaw", mounts)
+        self.assertIn("/srv/live-rollbacks/jn-t14s-lin/hermes-openclaw-evidence/", mounts)
+        self.assertIn("fstype: squashfs", mounts)
+        for required_option in (
+            "loop",
+            "ro",
+            "nosuid",
+            "nodev",
+            "noexec",
+            "_netdev",
+            "x-systemd.requires-mounts-for=/srv/live-rollbacks",
+        ):
+            self.assertIn(required_option, mounts)
+        self.assertIn("- /home/johnny/.openclaw", backup)
+
 
 if __name__ == "__main__":
     unittest.main()
