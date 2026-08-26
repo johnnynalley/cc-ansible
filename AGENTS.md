@@ -135,6 +135,19 @@ bootstrap seed, or mutable native state and document why Ansible ownership is
 required; default to mutable native ownership when the behavior is expected to
 evolve during normal agent use.
 
+Apply the same boundary to application state outside Hermes. One-time native
+configuration such as Arr indexers, priorities, profiles, tracker settings,
+dashboard preferences, and other operator-managed application records belongs
+in the application's supported API, UI, or database and in complete backups.
+Do not create an Ansible variable, policy helper, template, or convergence task
+for ordinary mutable application configuration merely to make a completed live
+change look declarative. Before editing such state, confirm recent native/local
+rollback coverage and regular off-host `nas-zfs` recovery coverage; repair the
+backup contract if absent, then make and verify the native change. Ansible may
+install the service, storage, secret boundary, backup machinery, and an initial
+bootstrap required to rebuild it, but it must not continuously own normal
+operator choices unless the user explicitly requests that policy enforcement.
+
 Hermes recovery requires two independent backup layers with different failure
 domains. Product-native profile backups are short-horizon operational rollback
 artifacts for quickly undoing a bad agent or configuration change; they are not
@@ -293,7 +306,7 @@ afterward without explicit user approval; report the exact captured paths.
 
 Do not commit real secrets. Encrypted values belong in `vault.yml` files beside the relevant `vars.yml`; examples may use `vault.yml.example`. The configured vault password path is `~/.ansible/vault_pass.txt`. Run `scripts/repo/repo-audit` before committing repo layout or source changes; it calls `scripts/repo/secrets-scan` by default so secret scanning is part of the normal audit path. Use `scripts/repo/repo-audit --require-gitleaks` when Gitleaks must be present, such as CI parity checks. Do not leave `repo-audit` failing because of a known false positive; a noisy audit hides real failures. Fix the scanner/check, add a narrow documented exception with regression coverage, or explicitly report the blocker before continuing. Prefer full-playbook `--check --diff` runs for changes touching Proxmox, storage, firewall, backup, or Docker automation.
 
-When rotating credentials, app passwords, OAuth tokens, API keys, or service auth tokens, plan for a single intended surviving credential per client before generation. Do not leave failed, test, duplicate, migrated, or legacy tokens active. If a generated secret is printed to stdout, pasted into chat, captured in logs, or otherwise exposed, treat it as compromised and revoke it immediately. Before closing the task, verify the provider's token list, delete every unused token, confirm the intended replacement still works, and report which token names/IDs were retired without revealing secret values.
+When rotating credentials, app passwords, OAuth tokens, API keys, or service auth tokens, plan for a single intended surviving credential per client before generation. Do not leave failed, test, duplicate, migrated, or legacy tokens active. A credential pasted by the owner into this private Codex conversation is authorized private input, not public exposure by itself: use it without echoing it, committing it, or placing it in logs, and do not force rotation solely because it appeared here. If a generated secret is printed to broader stdout, captured in retained logs, committed, posted to a public or unauthorized Discord surface, or otherwise becomes accessible to an unauthorized party, treat it as compromised and revoke it immediately. Before closing an actual rotation task, verify the provider's token list, delete every unused token, confirm the intended replacement still works, and report which token names/IDs were retired without revealing secret values.
 
 Never run `ansible-inventory --host` or `ansible-inventory --list` unfiltered in
 an agent session or any command path whose stdout is captured. Those commands
