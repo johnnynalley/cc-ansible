@@ -441,10 +441,10 @@ hermes_memory_servers_ollama_asset_name: ollama-linux-amd64.tar.zst
 hermes_memory_servers_ollama_binary: /usr/local/bin/ollama
 hermes_memory_servers_ollama_library: /usr/local/lib/ollama
 hermes_memory_servers_ollama_unit: /etc/systemd/system/ollama.service
-# Retained LCM chunks can exceed Ollama's 8K default after exact tokenizer
-# expansion. Both approved Qwen models declare at least 32K; use the smallest
-# validated 16K server context so local recall preserves those chunks without
-# the RAM growth of enabling their full model context.
+# The reviewed stable LCM hotfix bounds pathological atomic spans at 600 tokens
+# and 4,096 characters, while retained summary embeddings can exceed Ollama's
+# 8K default. Keep the validated 16K server context for lossless local recall
+# without reserving the embedding model's full 32K KV cache on this 16 GB host.
 hermes_memory_servers_ollama_context_length: 16384
 hermes_memory_continuity_policy_files:
   - source: "{{ hermes_star_privacy_validator_source }}"

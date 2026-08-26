@@ -1265,6 +1265,30 @@ rollback and for a later separately reviewed profile-specific import. Re-running
 the migration is idempotent only when the target count and digest match exactly;
 an inconsistent nonempty target is a hard failure.
 
+The 2026-08-26 local chunk backfill exposed a stable-plugin boundary defect:
+`hermes-lcm` v0.20.0 treated one punctuation-free sentence as one atomic chunk,
+so Qwen rejected retained spans whose real tokenizer expansion exceeded its
+32K context even though LCM's `cl100k` estimate remained below 16K. The reviewed
+temporary patch at
+`files/hermes/patches/hermes-lcm-oversized-sentence.patch` bounds only those
+atomic spans at 600 estimated tokens and 4,096 characters without truncating,
+dropping, or reordering retained text. It is promoted as clean local plugin
+commit `057614f6f550418eba519eec24a5bddfbe8f6e6f` atop official stable v0.20.0;
+all 27 upstream chunking tests pass. Retire that commit and patch when a newer
+production-stable upstream tag includes equivalent behavior.
+
+The content-private `reconcile-chunks` maintenance operation compares active
+chunk metadata with the current chunker and re-embeds only mismatched rows. It
+refuses cloud providers, missing source reconstructions, approval omissions,
+and an owner-selected repair limit. Seven stale rows across three messages were
+repaired after a SQLite-consistent, hash-verified off-host backup at
+`/srv/live-rollbacks/jn-t14s-lin/hermes-lcm-hotfix/20260826T230436Z-pre-lcm-atomic-span-hotfix/`.
+Post-repair reconciliation reports zero mismatches, both LCM databases pass
+`quick_check`, the uncertain ledger is empty, and a 16K Ollama proof run embedded
+another 128 chunks successfully. The 16K service context is therefore retained
+to avoid unnecessary KV-cache pressure on the 16 GB host; background bounded
+backfill continues from 4,323 chunk vectors with 67,734 chunks remaining.
+
 ## Reviewed Profile Skills And Data
 
 The retained contract describes 39 profile skill instances from 37 reviewed

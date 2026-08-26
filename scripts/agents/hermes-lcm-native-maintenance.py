@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 from contextlib import closing
+import dataclasses
 import hashlib
 import importlib.util
 import json
@@ -268,6 +269,173 @@ def database_inventory(database: Path, state_database: Path) -> dict[str, Any]:
         "backfill_inflight_summary_tokens": backfill_inflight_summary_tokens,
         "state_database": state_inventory,
     }
+
+
+def chunk_metadata_mismatches(
+    connection: sqlite3.Connection,
+    identity_hash: str,
+    chunker: Any,
+    policy: str,
+) -> tuple[list[dict[str, Any]], int, dict[str, int]]:
+    """Return content-private chunk rows whose persisted spans are stale."""
+    rows = connection.execute(
+        "SELECT chunk_id, store_id, chunk_index, char_start, char_end, "
+        "token_estimate FROM lcm_chunk_meta "
+        "WHERE identity_hash = ? AND archived = 0 "
+        "ORDER BY store_id, chunk_index",
+        (identity_hash,),
+    ).fetchall()
+    by_store: dict[int, list[sqlite3.Row]] = {}
+    for row in rows:
+        by_store.setdefault(int(row["store_id"]), []).append(row)
+
+    mismatches: list[dict[str, Any]] = []
+    missing = 0
+    max_chars = 0
+    max_tokens = 0
+    for store_id, metadata in by_store.items():
+        message = connection.execute(
+            "SELECT role, content FROM messages WHERE store_id = ?", (store_id,)
+        ).fetchone()
+        if message is None:
+            missing += len(metadata)
+            continue
+        expected = {
+            int(chunk.chunk_index): chunk
+            for chunk in chunker(
+                store_id,
+                message["role"],
+                message["content"],
+                policy=policy,
+            )
+        }
+        for row in metadata:
+            chunk = expected.get(int(row["chunk_index"]))
+            if chunk is None:
+                missing += 1
+                continue
+            max_chars = max(max_chars, len(chunk.text))
+            max_tokens = max(max_tokens, int(chunk.token_estimate))
+            if (
+                int(row["char_start"]) == int(chunk.char_start)
+                and int(row["char_end"]) == int(chunk.char_end)
+                and int(row["token_estimate"]) == int(chunk.token_estimate)
+            ):
+                continue
+            mismatches.append(
+                {
+                    "chunk_id": str(row["chunk_id"]),
+                    "text": str(chunk.text),
+                    "store_id": store_id,
+                    "chunk_index": int(chunk.chunk_index),
+                    "char_start": int(chunk.char_start),
+                    "char_end": int(chunk.char_end),
+                    "token_estimate": int(chunk.token_estimate),
+                }
+            )
+    return mismatches, missing, {
+        "metadata_rows": len(rows),
+        "source_messages": len(by_store),
+        "max_reconstructed_chars": max_chars,
+        "max_reconstructed_tokens": max_tokens,
+    }
+
+
+def reconcile_chunk_metadata(
+    engine: Any,
+    database: Path,
+    *,
+    policy: str,
+    apply: bool,
+    limit: int,
+) -> dict[str, Any]:
+    """Re-embed only active chunk rows made stale by chunk-boundary changes."""
+    from hermes_lcm.chunking import chunk_message, normalize_content_policy
+    from hermes_lcm.embedding_provider import resolve_provider
+    from hermes_lcm.vector_store import EmbeddingIdentity, VectorStore
+
+    normalized_policy = normalize_content_policy(policy)
+    with closing(connect_read_only(database)) as connection:
+        profile = connection.execute(
+            "SELECT identity_hash, provider, model_name, revision, dim, dtype, "
+            "byteorder FROM lcm_embedding_profile "
+            "WHERE active = 1 AND archived_at IS NULL AND task = 'chunk' "
+            "ORDER BY registered_at DESC, identity_hash DESC LIMIT 1"
+        ).fetchone()
+        if profile is None:
+            raise RuntimeError("active chunk embedding profile is missing")
+        mismatches, missing, metrics = chunk_metadata_mismatches(
+            connection,
+            str(profile["identity_hash"]),
+            chunk_message,
+            normalized_policy,
+        )
+
+    report: dict[str, Any] = {
+        "status": "ready" if mismatches else "current",
+        "mode": "apply" if apply else "dry-run",
+        "policy": normalized_policy,
+        "mismatched_rows": len(mismatches),
+        "missing_reconstruction_rows": missing,
+        "repaired_rows": 0,
+        **metrics,
+    }
+    if not apply or not mismatches:
+        return report
+    if missing:
+        raise RuntimeError(
+            "chunk metadata reconciliation refused: source reconstruction is missing"
+        )
+    if len(mismatches) > limit:
+        raise RuntimeError(
+            "chunk metadata reconciliation refused: "
+            f"mismatches={len(mismatches)} exceeds limit={limit}"
+        )
+
+    provider_name = str(profile["provider"] or "").strip().lower()
+    if provider_name not in {"fastembed", "ollama"}:
+        raise RuntimeError(
+            "chunk metadata reconciliation requires a local embedding provider"
+        )
+    model = str(profile["model_name"] or "").strip()
+    provider_config = dataclasses.replace(engine._config, embedding_model=model)
+    provider = resolve_provider(provider_config, for_backfill=True)
+    if provider is None or str(provider.provider_id).lower() != provider_name:
+        raise RuntimeError("active chunk embedding provider could not be resolved")
+    vectors = provider.embed_documents([row["text"] for row in mismatches])
+    if len(vectors) != len(mismatches):
+        raise RuntimeError("embedding provider returned an incomplete repair batch")
+
+    identity = EmbeddingIdentity.canonical(
+        provider_name,
+        model,
+        str(profile["revision"] or ""),
+        int(profile["dim"]),
+        str(profile["dtype"] or "float32"),
+        str(profile["byteorder"] or "little"),
+        "chunk",
+    )
+    if identity.identity_hash != str(profile["identity_hash"]):
+        raise RuntimeError("active chunk embedding identity changed before repair")
+    store = VectorStore(database, config=engine._config)
+    try:
+        for row, vector in zip(mismatches, vectors):
+            store.record_chunk_embedding(
+                row["chunk_id"],
+                model,
+                vector,
+                store_id=row["store_id"],
+                chunk_index=row["chunk_index"],
+                char_start=row["char_start"],
+                char_end=row["char_end"],
+                token_estimate=row["token_estimate"],
+                identity=identity,
+            )
+            report["repaired_rows"] += 1
+    finally:
+        store.close()
+    report["status"] = "complete"
+    return report
 
 
 def continuity_audit(database: Path, state_database: Path) -> dict[str, Any]:
@@ -596,6 +764,7 @@ def main() -> int:
             "recall-embedded-smoke",
             "proactive-smoke",
             "grep-smoke",
+            "reconcile-chunks",
         ),
     )
     parser.add_argument(
@@ -644,7 +813,7 @@ def main() -> int:
     if args.operation in {"backup", "warmup"} or (
         args.operation in {"backfill", "backfill-all", "backfill-bounded"}
         and args.apply
-    ):
+    ) or (args.operation == "reconcile-chunks" and args.apply):
         require_mutation_approval(args)
 
     if args.operation == "backup":
@@ -662,6 +831,20 @@ def main() -> int:
     try:
         from hermes_lcm.command import handle_lcm_command
 
+        if args.operation == "reconcile-chunks":
+            print(
+                json.dumps(
+                    reconcile_chunk_metadata(
+                        engine,
+                        args.database,
+                        policy=args.policy or "conversational",
+                        apply=args.apply,
+                        limit=args.limit,
+                    ),
+                    sort_keys=True,
+                )
+            )
+            return 0
         if args.operation == "config":
             config = engine._config
             print(

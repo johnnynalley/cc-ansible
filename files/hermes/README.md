@@ -22,6 +22,13 @@ reviewed Ansible Vault ciphertext seeds declared by
   promotes the combined patch as one committed maintained branch; Hermes's
   supported `update_in_place` updater strategy merges stable upstream changes
   without discarding it.
+- `patches/hermes-lcm-oversized-sentence.patch` is a temporary stable-release
+  hotfix for the upstream chunker path that otherwise emits one unbounded chunk
+  when a message contains a sentence without punctuation. It bounds those rare
+  atomic spans without truncating or reordering retained content and adds an
+  upstream-style regression. Retire the patch when an official production-
+  stable `hermes-lcm` tag includes equivalent coverage; do not carry it across
+  that fix merely because an older local branch exists.
 
 - `shadow-target.json` is the Gate 3 target declaration. It keeps Hermes in a
   tokenless, delivery-disabled, scheduler-disabled shadow state and records the

@@ -259,6 +259,48 @@ class HermesLcmNativeMaintenanceTests(unittest.TestCase):
         self.assertEqual(report["remaining"], "5")
         self.assertNotIn("failed_detail", report)
 
+    def test_chunk_metadata_mismatch_inventory_drops_content_and_ids(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            database = Path(tmp) / "lcm.db"
+            with closing(sqlite3.connect(database)) as connection:
+                connection.row_factory = sqlite3.Row
+                connection.executescript(
+                    "CREATE TABLE messages (store_id INTEGER, role TEXT, content TEXT);"
+                    "CREATE TABLE lcm_chunk_meta ("
+                    "chunk_id TEXT, identity_hash TEXT, store_id INTEGER, "
+                    "chunk_index INTEGER, char_start INTEGER, char_end INTEGER, "
+                    "token_estimate INTEGER, archived INTEGER);"
+                )
+                connection.execute(
+                    "INSERT INTO messages VALUES (1, 'user', 'private source text')"
+                )
+                connection.execute(
+                    "INSERT INTO lcm_chunk_meta VALUES "
+                    "('private-id', 'identity', 1, 0, 0, 19, 99, 0)"
+                )
+                connection.commit()
+
+                class Chunk:
+                    chunk_index = 0
+                    char_start = 0
+                    char_end = 7
+                    token_estimate = 2
+                    text = "private"
+
+                mismatches, missing, metrics = self.module.chunk_metadata_mismatches(
+                    connection,
+                    "identity",
+                    lambda *_args, **_kwargs: [Chunk()],
+                    "conversational",
+                )
+            self.assertEqual(len(mismatches), 1)
+            self.assertEqual(missing, 0)
+            self.assertEqual(metrics["metadata_rows"], 1)
+            self.assertEqual(mismatches[0]["char_end"], 7)
+            rendered_metrics = json.dumps(metrics)
+            self.assertNotIn("private source text", rendered_metrics)
+            self.assertNotIn("private-id", rendered_metrics)
+
     def test_uncertain_retry_uses_native_bounded_flag(self) -> None:
         args = SimpleNamespace(
             operation="backfill",
