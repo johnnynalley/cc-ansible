@@ -71,6 +71,9 @@ DISPLAY_MANAGER_SERVICE = os.environ.get("PLEX_APPLIANCE_HDMI_DISPLAY_MANAGER_SE
 STOP_DISPLAY_MANAGER_DURING_PLAYBACK = (
     os.environ.get("PLEX_APPLIANCE_HDMI_STOP_DISPLAY_MANAGER_DURING_PLAYBACK", "false").lower() == "true"
 )
+LOCKED_SESSION_VT_ENABLED = (
+    os.environ.get("PLEX_APPLIANCE_HDMI_LOCKED_SESSION_VT", "false").lower() == "true"
+)
 RESET_PLASMA_USER_SERVICES = os.environ.get("PLEX_APPLIANCE_HDMI_RESET_PLASMA_USER_SERVICES", "false").lower() == "true"
 SKIP_WHEN_LOCAL_USER_ACTIVE = os.environ.get("PLEX_APPLIANCE_HDMI_SKIP_WHEN_LOCAL_USER_ACTIVE", "false").lower() == "true"
 APPLIANCE_USER = os.environ.get("PLEX_APPLIANCE_USER", "").strip()
@@ -83,6 +86,7 @@ GETTY_SERVICE = f"getty@tty{TV_VT}.service"
 return_vt: Optional[str] = None
 was_connected = False
 display_manager_stopped = False
+preserved_locked_session = False
 
 
 def hdmi_connected(require_audio: bool = True) -> bool:
@@ -160,12 +164,15 @@ def restore_getty() -> None:
         run(["systemctl", "start", GETTY_SERVICE], timeout=10)
 
 
-def classify_session_properties(properties: Dict[str, str], appliance_uid: str) -> tuple[bool, bool]:
+def classify_session_properties(
+    properties: Dict[str, str], appliance_uid: str
+) -> tuple[bool, bool, bool, Optional[str]]:
     session_class = properties.get("Class", "")
     session_state = properties.get("State", "")
     session_type = properties.get("Type", "")
     session_tty = properties.get("TTY", "")
     session_uid = properties.get("User", "")
+    session_locked = properties.get("LockedHint", "").lower() == "yes"
 
     local_active = (
         session_state != "closing"
@@ -178,53 +185,89 @@ def classify_session_properties(properties: Dict[str, str], appliance_uid: str) 
         and session_uid == appliance_uid
         and session_type in {"wayland", "x11"}
     )
-    return local_active, graphical_active
+    graphical_vt = None
+    if graphical_active and session_tty:
+        try:
+            graphical_vt = tty_number(session_tty)
+        except ValueError:
+            pass
+    return local_active, graphical_active, graphical_active and session_locked, graphical_vt
 
 
-def local_user_session_state() -> tuple[bool, bool]:
-    completed = run(
-        ["loginctl", "show-seat", "seat0", "--property=ActiveSession", "--value"],
-        timeout=10,
-    )
-    if completed.returncode != 0:
-        return True, False
-
-    session_id = completed.stdout.strip()
-    if not session_id or session_id == "n/a":
-        return False, False
-
+def local_user_session_state() -> tuple[bool, bool, bool, Optional[str]]:
     completed = run(
         [
             "loginctl",
-            "show-session",
-            session_id,
-            "--property=User",
-            "--property=Class",
-            "--property=Type",
-            "--property=State",
-            "--property=TTY",
+            "show-seat",
+            "seat0",
+            "--property=ActiveSession",
+            "--property=Sessions",
         ],
         timeout=10,
     )
     if completed.returncode != 0:
-        return True, False
+        return True, False, False, None
 
-    properties = {
+    seat_properties = {
         key: value
         for line in completed.stdout.splitlines()
         if "=" in line
         for key, value in [line.split("=", 1)]
     }
+    active_session_id = seat_properties.get("ActiveSession", "").strip()
+    session_ids = seat_properties.get("Sessions", "").split()
+    if active_session_id and active_session_id != "n/a":
+        session_ids = [
+            active_session_id,
+            *[item for item in session_ids if item != active_session_id],
+        ]
+
+    if not session_ids:
+        return False, False, False, None
 
     try:
         appliance_uid = str(pwd.getpwnam(APPLIANCE_USER).pw_uid)
     except KeyError:
-        return True, False
-    return classify_session_properties(properties, appliance_uid)
+        return True, False, False, None
+
+    local_active = False
+    for session_id in session_ids:
+        completed = run(
+            [
+                "loginctl",
+                "show-session",
+                session_id,
+                "--property=User",
+                "--property=Class",
+                "--property=Type",
+                "--property=State",
+                "--property=TTY",
+                "--property=LockedHint",
+            ],
+            timeout=10,
+        )
+        if completed.returncode != 0:
+            if session_id == active_session_id:
+                local_active = True
+            continue
+
+        properties = {
+            key: value
+            for line in completed.stdout.splitlines()
+            if "=" in line
+            for key, value in [line.split("=", 1)]
+        }
+        session_state = classify_session_properties(properties, appliance_uid)
+        session_local, graphical_active, graphical_locked, graphical_vt = session_state
+        local_active = local_active or session_local
+        if graphical_active:
+            return True, True, graphical_locked, graphical_vt
+
+    return local_active, False, False, None
 
 
 def local_user_seat_active() -> bool:
-    local_active, _graphical_active = local_user_session_state()
+    local_active, _graphical_active, _graphical_locked, _graphical_vt = local_user_session_state()
     return local_active
 
 
@@ -232,16 +275,28 @@ def select_playback_mode(
     connected: bool,
     local_active: bool,
     graphical_active: bool,
+    graphical_locked: bool,
     session_playback_enabled: bool,
+    locked_session_vt_enabled: bool,
     skip_when_local_active: bool,
 ) -> str:
     if not connected:
         return "none"
     if session_playback_enabled and graphical_active:
+        if graphical_locked and locked_session_vt_enabled:
+            return "locked-vt"
         return "session"
     if local_active and skip_when_local_active:
         return "skip"
     return "vt"
+
+
+def hdmi_audio_required(session_playback_enabled: bool, graphical_active: bool) -> bool:
+    # A known graphical session supplies connector identity even when its lock
+    # surface has released HDMI audio. Requiring ELD before locked-session VT
+    # playback starts would make ELD restoration depend on an already-running
+    # direct player.
+    return not (session_playback_enabled and graphical_active)
 
 
 def restart_display_manager_if_safe() -> None:
@@ -376,7 +431,9 @@ def stop_player() -> None:
 
 
 def cleanup_display(recover_display: bool = False, stop_session: bool = True) -> None:
-    global return_vt, was_connected, display_manager_stopped
+    global return_vt, was_connected, display_manager_stopped, preserved_locked_session
+
+    preserve_display_manager = preserved_locked_session
 
     if stop_session:
         stop_session_player()
@@ -391,11 +448,16 @@ def cleanup_display(recover_display: bool = False, stop_session: bool = True) ->
         switch_vt(target_vt)
 
     restore_getty()
-    if (display_manager_stopped or recover_display) and (was_connected or had_player):
+    if (
+        not preserve_display_manager
+        and (display_manager_stopped or recover_display)
+        and (was_connected or had_player)
+    ):
         restart_display_manager_if_safe()
     return_vt = None
     was_connected = False
     display_manager_stopped = False
+    preserved_locked_session = False
 
 
 def handle_shutdown(signum: int, _frame: object) -> None:
@@ -405,22 +467,25 @@ def handle_shutdown(signum: int, _frame: object) -> None:
 
 
 def main() -> int:
-    global return_vt, was_connected
+    global return_vt, was_connected, preserved_locked_session
 
     signal.signal(signal.SIGINT, handle_shutdown)
     signal.signal(signal.SIGTERM, handle_shutdown)
     last_mode = ""
 
     while True:
-        local_active, graphical_active = local_user_session_state()
+        session_state = local_user_session_state()
+        local_active, graphical_active, graphical_locked, graphical_vt = session_state
         connected = hdmi_connected(
-            require_audio=not (SESSION_PLAYBACK_ENABLED and graphical_active)
+            require_audio=hdmi_audio_required(SESSION_PLAYBACK_ENABLED, graphical_active)
         )
         mode = select_playback_mode(
             connected,
             local_active,
             graphical_active,
+            graphical_locked,
             SESSION_PLAYBACK_ENABLED,
+            LOCKED_SESSION_VT_ENABLED,
             SKIP_WHEN_LOCAL_USER_ACTIVE,
         )
 
@@ -456,13 +521,35 @@ def main() -> int:
             time.sleep(POLL_SECONDS)
             continue
 
-        if mode == "vt":
+        if mode in {"vt", "locked-vt"}:
             if not was_connected:
                 current_vt = active_vt()
-                if current_vt and current_vt != TV_VT:
+                if mode == "locked-vt":
+                    preserved_locked_session = True
+                    return_vt = graphical_vt or (
+                        current_vt if current_vt and current_vt != TV_VT else None
+                    )
+                    log(
+                        "HDMI connected while Plasma is locked; preserving the locked session "
+                        f"and using VT {TV_VT} for Plex TV playback"
+                    )
+                elif current_vt and current_vt != TV_VT:
                     return_vt = current_vt
-                log(f"HDMI connected; using VT {TV_VT} for Plex TV playback")
+                    preserved_locked_session = False
+                    log(f"HDMI connected; using VT {TV_VT} for Plex TV playback")
                 stop_getty()
+                if mode == "vt" and not stop_display_manager_for_playback():
+                    restore_getty()
+                    was_connected = False
+                    time.sleep(POLL_SECONDS)
+                    continue
+                switch_vt(TV_VT)
+
+            elif mode == "vt" and preserved_locked_session:
+                log("Locked Plasma session ended; converting Plex VT playback to no-session ownership")
+                if service_active(PLAYER_SERVICE):
+                    stop_player()
+                preserved_locked_session = False
                 if not stop_display_manager_for_playback():
                     restore_getty()
                     was_connected = False
@@ -487,23 +574,49 @@ def main() -> int:
 
 
 def run_self_test() -> int:
-    active, graphical = classify_session_properties(
-        {"User": "1000", "Class": "user", "Type": "wayland", "State": "active", "TTY": "tty2"},
+    active, graphical, locked, graphical_vt = classify_session_properties(
+        {
+            "User": "1000",
+            "Class": "user",
+            "Type": "wayland",
+            "State": "active",
+            "TTY": "tty2",
+            "LockedHint": "no",
+        },
         "1000",
     )
-    assert (active, graphical) == (True, True)
+    assert (active, graphical, locked, graphical_vt) == (True, True, False, "2")
+    assert classify_session_properties(
+        {
+            "User": "1000",
+            "Class": "user",
+            "Type": "wayland",
+            "State": "online",
+            "TTY": "tty2",
+            "LockedHint": "yes",
+        },
+        "1000",
+    ) == (True, True, True, "2")
     assert classify_session_properties(
         {"User": "1000", "Class": "greeter", "Type": "wayland", "State": "active", "TTY": "tty1"},
         "1000",
-    ) == (False, False)
+    ) == (False, False, False, None)
     assert classify_session_properties(
         {"User": "1000", "Class": "user", "Type": "tty", "State": "active", "TTY": "tty2"},
         "1000",
-    ) == (True, False)
-    assert select_playback_mode(True, True, True, True, True) == "session"
-    assert select_playback_mode(True, True, False, True, True) == "skip"
-    assert select_playback_mode(True, False, False, True, True) == "vt"
-    assert select_playback_mode(False, True, True, True, True) == "none"
+    ) == (True, False, False, None)
+    assert classify_session_properties(
+        {"User": "1000", "Class": "user", "Type": "tty", "State": "active", "TTY": f"tty{TV_VT}"},
+        "1000",
+    ) == (False, False, False, None)
+    assert select_playback_mode(True, True, True, False, True, True, True) == "session"
+    assert select_playback_mode(True, True, True, True, True, True, True) == "locked-vt"
+    assert select_playback_mode(True, True, True, True, True, False, True) == "session"
+    assert select_playback_mode(True, True, False, False, True, True, True) == "skip"
+    assert select_playback_mode(True, False, False, False, True, True, True) == "vt"
+    assert select_playback_mode(False, True, True, True, True, True, True) == "none"
+    assert hdmi_audio_required(True, True) is False
+    assert hdmi_audio_required(True, False) is True
     print("plex-appliance-hdmi-vt-watcher self-test: PASS")
     return 0
 

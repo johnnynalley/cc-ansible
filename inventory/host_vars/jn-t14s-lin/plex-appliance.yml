@@ -9,9 +9,11 @@ plex_appliance_server_url: "http://100.66.6.113:32400"
 plex_appliance_library: "Shows"
 plex_appliance_collection: "Adult Swim Collection"
 
-# T14s uses the existing appliance player in two display contexts. A logged-in
-# Plasma session launches it fullscreen on HDMI while leaving eDP usable. With
-# no local session, the root watcher retains the no-login direct-DRM VT8 path.
+# T14s uses the existing appliance player in three display contexts. An
+# unlocked Plasma session launches it fullscreen on HDMI while leaving eDP
+# usable. A locked Plasma session stays locked and preserved on its own VT while
+# direct-DRM playback owns VT8. With no local session, the root watcher retains
+# the established direct-DRM VT8 path and may stop SDDM to avoid DRM contention.
 plex_appliance_audio_languages:
   - eng
 plex_appliance_subtitle_languages:
@@ -47,6 +49,7 @@ plex_appliance_hdmi_restore_getty: true
 plex_appliance_hdmi_restart_display_manager: true
 plex_appliance_hdmi_display_manager_service: sddm.service
 plex_appliance_hdmi_stop_display_manager_during_playback: true
+plex_appliance_hdmi_locked_session_vt: true
 plex_appliance_hdmi_reset_plasma_user_services: true
 plex_appliance_hdmi_skip_when_local_user_active: true
 plex_appliance_hdmi_poll_seconds: 5

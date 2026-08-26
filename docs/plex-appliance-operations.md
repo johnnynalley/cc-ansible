@@ -177,7 +177,7 @@ decodes or Plex transport failures as watched.
 The T14s HDMI appliance has one queue/player and two display paths selected by
 the root HDMI watcher:
 
-- With Johnny's Plasma Wayland session active, the watcher starts
+- With Johnny's Plasma Wayland session active and unlocked, the watcher starts
   `plex-appliance-hdmi.service` in the existing user service manager. That unit
   runs the normal `plex-appliance-player` fullscreen on `HDMI-A-1`; the internal
   eDP panel and its Plasma desktop stay enabled and usable. Plug detection comes
@@ -186,14 +186,23 @@ the root HDMI watcher:
   graphical path accepts a connected output with valid EDID even while the
   kernel HDMI-audio ELD is temporarily stale; the no-login direct-DRM path still
   requires valid ELD before it claims the display.
+- When that Plasma session is locked, the lock screen must remain private on
+  its own VT and must not become the TV appliance surface. The watcher stops
+  only the graphical Plex window, preserves the locked Plasma session, switches
+  display ownership to VT8, and starts `plex-appliance-tv.service`. It does not
+  unlock the session, stop SDDM, restart KWin, or end the user's session. When
+  VT8 exits, it returns to the preserved, still-locked Plasma VT.
 - With no real local seat session active, the watcher keeps the established
   direct-DRM path: it stops `sddm.service`, switches to VT8, and starts
   `plex-appliance-tv.service`. It starts SDDM again when appliance mode exits.
 
-Both paths run the same player against the same shuffle state and Plex session
-identity. They must never run simultaneously. Logging out with HDMI connected
-transitions from the graphical service to VT8; logging in before attaching HDMI
-uses the graphical service. Unplugging HDMI stops whichever player owns it.
+All paths run the same player against the same shuffle state and Plex session
+identity. They must never run simultaneously. Locking an active session moves
+playback from its graphical window to VT8 without unlocking or logging out;
+unlocking moves it back. Logging out with HDMI connected transitions to the
+no-session VT8 ownership path; logging in before attaching HDMI uses the
+graphical service. Unplugging HDMI stops whichever player owns it and returns
+to the preserved Plasma VT when one exists.
 
 Do not replace the hybrid controller with the old KScreen polling backend on
 the T14s. On 2026-08-25, `kscreen-doctor -j` hung after rejecting Plasma's
@@ -210,6 +219,14 @@ signature that led to this rule was:
   restart messages.
 - Kernel logs show AMDGPU/DMCUB DRM errors near the same timestamp.
 - mpv logs show video configuration or AMDGPU initialization failures.
+
+Do not apply that no-session SDDM stop to the locked-session path. A controlled
+2026-08-26 proof switched locked session 124 from tty2 to direct-DRM playback on
+VT8 while its original SDDM and KWin PIDs remained alive, `LockedHint` remained
+`yes`, mpv reported `vo-configured=true`, playback position advanced, and mpv
+owned the running HDMI PCM. Requiring the owner to unlock, automatically
+unlocking Plasma, or terminating the locked session violates the Bedroom
+appliance contract.
 
 Do not treat a player restart or VT switch as the fix for this class of
 incident. Preserve the logs and prove which process owned the display stack

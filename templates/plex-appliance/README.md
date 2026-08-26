@@ -33,8 +33,11 @@
 - These templates affect both Plex appliances. Preserve visible session
   behavior and validate service/user context before applying changes.
 - Hybrid mode must keep the graphical player and direct-DRM player mutually
-  exclusive. Do not stop SDDM or claim DRM ownership while a user seat is
-  active, and do not require KScreen inspection for the configured HDMI path.
+  exclusive. An unlocked graphical session uses the user player. A locked
+  graphical session remains locked and preserved while VT8 owns direct DRM;
+  do not stop SDDM or unlock/terminate that session. Only the no-session VT
+  path may stop SDDM. Do not require KScreen inspection for the configured
+  HDMI path.
 - Missing Plex metadata IDs must trigger collection reconciliation. Never mark
   a stale ID watched or corrupt; rebind only on one unique identity/title match,
   otherwise leave current replacements eligible in the refreshed queue.
