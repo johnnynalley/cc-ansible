@@ -214,6 +214,16 @@ path so operator maintenance is not misclassified as an unexpected signal,
 and verify both that a changed transaction restarts exactly once and that an
 unchanged transaction produces no user-visible interruption.
 
+For Codex `already has an active writer` resume failures, distinguish kernel
+lock ownership from a genuinely usable active client. A live PID and `FLOCK`
+prove only that a process still retains the writer. Correlate the owner with its
+login ancestry, controlling TTY, foreground process group, terminal activity,
+and stuck descendants. If the terminal is disconnected or long-idle while the
+process tree survives, describe it as a stranded process rather than telling
+the user another session is open. Never delete the lock path while its owner is
+alive; obtain approval before terminating the stranded process tree, then
+verify lock release and successful resume.
+
 ### Session Naming
 
 When the user asks Codex to name a session, consider the full context of the session before proposing a title. Use a natural-language title that describes what the session was really about; do not force lowercase slugs or replace spaces with hyphens unless the user explicitly asks for a filename-safe form.
