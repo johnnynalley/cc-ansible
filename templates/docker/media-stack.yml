@@ -1,3 +1,4 @@
+---
 services:
   tautulli:
     image: lscr.io/linuxserver/tautulli:latest
@@ -8,7 +9,9 @@ services:
       - TZ=America/Chicago
     volumes:
       - ./tautulli:/config
-      - "./plex/Library/Application Support/Plex Media Server/Logs:/plex-logs:ro"
+      - >-
+        ./plex/Library/Application Support/Plex Media
+        Server/Logs:/plex-logs:ro
     ports:
       - 8181:8181
     restart: unless-stopped
@@ -16,6 +19,10 @@ services:
   plex:
     image: lscr.io/linuxserver/plex:latest
     container_name: plex
+    # Let Plex advertise media-vm's reachable LAN/WAN addresses directly.
+    # Proxmox VM 100 firewall policy exposes only TCP 32400, where Plex gates
+    # content behind authentication; auxiliary listeners stay blocked.
+    network_mode: host
     runtime: nvidia
     environment:
       - PUID=1000
@@ -29,8 +36,6 @@ services:
       - /var/lib/plex-transcode:/transcode
       - /srv/plex:/data:ro
       - /srv/archive:/archive
-    ports:
-      - 32400:32400
     restart: unless-stopped
 
   audiobookshelf:
