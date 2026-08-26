@@ -72,6 +72,8 @@ Prowlarr uses these indexer priority tie-breaker bands:
 
 - Usenet indexers: `1`
 - Seedpool: `10`
+- SeedCore: `11`
+- HD-Space: `12`
 - Nyaa and AnimeTosho specialist anime sources: `15`
 - Generic public torrent trackers: `25`
 
@@ -80,34 +82,20 @@ format score, and preferred protocol in the Arr comparison order; it does not
 allow a lower-quality release from a preferred indexer to override a better
 candidate.
 
-Seedpool Query Limit and Grab Limit remain blank. Its current Prowlarr
-definition declares no account quota, while Prowlarr's fields are hard usage
-caps rather than request pacing. The other reviewed defaults remain unchanged:
-Apps Minimum Seeders inherits `1`, freeleech-only is disabled, TMDB-only search
-and single-file filename titles are enabled, results sort newest first, and
-torrent-file links are preferred over magnets.
+SeedCore uses ratio `5.0` with Seed Time and Pack Seed Time unset. Seedpool's
+existing seeding values remain untouched at ratio `999999` and `43,200`
+minutes for both time fields. Query Limit and Grab Limit remain blank for both.
+These values and the priority bands above describe the live configuration
+verified on 2026-08-26; they are not a declarative policy for Ansible to
+reapply.
 
-Seedpool's definition supplies `minimumseedtime=864000` (10 days) on Torznab
-results. The user also wants to seed for at least 20 days and until ratio `5`,
-even when reaching that ratio takes months. That combined policy is not yet
-applied: qBittorrent `5.2.1` uses match-any share limits, so entering both
-values would stop at the first reached limit rather than require both. Keep
-this as an explicit pending decision until qBittorrent's Match All behavior is
-available in a stable release or a separately reviewed managed cleanup gate is
-approved. Do not describe the current ratio/time settings as an AND policy.
-
-Manage and audit the implemented source-order policy with
-`scripts/media-release/arr_indexer_preference_policy.py`. Apply requires a
-marked Sanoid-backed rollback path:
-
-```bash
-ansible docker-vm -b -m script -a \
-  "scripts/media-release/arr_indexer_preference_policy.py"
-
-ansible docker-vm -b -m script -a \
-  "scripts/media-release/arr_indexer_preference_policy.py --apply \
-  --backup-path /srv/live-rollbacks/docker-vm/arr-policy/<artifact>"
-```
+Prowlarr indexers, priorities, and tracker settings are mutable native
+application state. Change them through Prowlarr's API/UI or Astra's
+credential-isolated `arr-api` capability after creating an application-native
+backup and confirming off-host backup freshness. Then verify Prowlarr's own
+indexer test plus the synchronized copies in Sonarr and Radarr. Do not encode
+ordinary tracker choices in an Ansible convergence task or hardcoded policy
+helper unless the owner explicitly requests continuous enforcement.
 
 Recyclarr is no longer part of the active release-policy path. Local custom
 formats created directly in Sonarr/Radarr are still valid, but they must be
