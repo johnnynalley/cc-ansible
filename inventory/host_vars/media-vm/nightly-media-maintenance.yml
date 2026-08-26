@@ -24,11 +24,11 @@ nightly_media_maintenance_plex_library_scan_randomized_delay: 15min
 nightly_media_maintenance_plex_preferences:
   # Plex runs in Docker bridge mode and otherwise publishes its unreachable
   # container address as the only local connection. Publish the VM's LAN URL
-  # alongside the Tailscale URL so LAN clients do not fall back to
-  # Plex Relay when the router does not support NAT loopback.
+  # so LAN clients do not fall back to Plex Relay when the router does not
+  # support NAT loopback. Remote clients use Plex's automatic secure public
+  # direct URL; advertising the Tailscale URL as well made iOS/Infuse race
+  # cellular, Wi-Fi, and Tailnet paths during a single playback session.
   customConnections: "https://192-168-1-136.\
-    2f625c2a233b42319b8df2536e2441e6.plex.direct:32400,\
-    https://100-66-6-113.\
     2f625c2a233b42319b8df2536e2441e6.plex.direct:32400"
   ButlerStartHour: "5"
   ButlerEndHour: "7"
