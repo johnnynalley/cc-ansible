@@ -114,7 +114,10 @@ Hermes recovery has two independent layers with different failure domains:
 
 The Restic snapshot also includes the complete mutable Hermes roots under
 `/var/lib/hermes`, `/var/lib/hermes-automation`, and `/etc/hermes`, plus the
-controller checkout and owner home needed for rebuild reconciliation. Large
+controller checkout and owner home needed for rebuild reconciliation. It also
+retains `/var/lib/tailscale`, which is native mutable node and Serve state
+needed to recover the T14s identity and named service advertisements without
+making Ansible the authority for their contents. Large
 rebuildable caches, duplicated evidence worktrees, rootless container storage,
 and the raw live Qdrant directory are excluded from the local repository;
 Qdrant is recovered from its application-consistent snapshot instead.

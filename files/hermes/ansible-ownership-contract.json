@@ -490,6 +490,14 @@
       "backup": "rebuildable"
     },
     {
+      "id": "tailscale-native-state",
+      "prefix": "/var/lib/tailscale",
+      "classification": "mutable-native",
+      "owner": "root-and-tailscaled",
+      "normalConvergence": "preserve",
+      "backup": "restic"
+    },
+    {
       "id": "hermes-runtime-logs",
       "prefix": "/var/log/hermes",
       "classification": "transient",
