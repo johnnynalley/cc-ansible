@@ -7,6 +7,7 @@ restic_backup_paths_extra:
   - /home/johnny
   - /opt/cc-ansible
   - /opt/qdrant/storage
+  - /var/lib/tailscale
 
 # Local backup to ts440 ZFS (for quick restore)
 local_restic_enabled: true
@@ -18,6 +19,7 @@ local_restic_backup_paths:
   - /opt/cc-ansible
   - /var/lib/hermes
   - /var/lib/hermes-automation
+  - /var/lib/tailscale
   - /etc/hermes
   - /var/backups/hermes-disaster-recovery/current
 
