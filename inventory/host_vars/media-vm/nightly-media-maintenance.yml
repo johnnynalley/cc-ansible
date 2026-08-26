@@ -1,3 +1,4 @@
+---
 # =============================================================================
 # media-vm - Nightly Media Maintenance Endpoint / Plex Maintenance Window
 # =============================================================================
@@ -7,8 +8,11 @@ nightly_media_maintenance_profilarr_ssh_user: johnny
 
 nightly_media_maintenance_plex_preferences_enabled: true
 nightly_media_maintenance_plex_url: http://127.0.0.1:32400
-nightly_media_maintenance_plex_preferences_path: "/opt/media-stack/plex/Library/Application Support/Plex Media Server/Preferences.xml"
-nightly_media_maintenance_plex_backup_root: /opt/media-stack/plex-preference-backups
+nightly_media_maintenance_plex_preferences_path: >-
+  /opt/media-stack/plex/Library/Application
+  Support/Plex Media Server/Preferences.xml
+nightly_media_maintenance_plex_backup_root: >-
+  /opt/media-stack/plex-preference-backups
 
 # Keep Plex library updates and analysis out of normal viewing hours. Live
 # filesystem-triggered scans caused Plex metadata endpoints to time out during
@@ -18,6 +22,14 @@ nightly_media_maintenance_plex_library_scan_enabled: true
 nightly_media_maintenance_plex_library_scan_calendar: "*-*-* 05:15:00"
 nightly_media_maintenance_plex_library_scan_randomized_delay: 15min
 nightly_media_maintenance_plex_preferences:
+  # Plex runs in Docker bridge mode and otherwise publishes its unreachable
+  # container address as the only local connection. Publish the VM's LAN URL
+  # alongside the Tailscale URL so LAN clients do not fall back to
+  # Plex Relay when the router does not support NAT loopback.
+  customConnections: "https://192-168-1-136.\
+    2f625c2a233b42319b8df2536e2441e6.plex.direct:32400,\
+    https://100-66-6-113.\
+    2f625c2a233b42319b8df2536e2441e6.plex.direct:32400"
   ButlerStartHour: "5"
   ButlerEndHour: "7"
   FSEventLibraryUpdatesEnabled: "0"
