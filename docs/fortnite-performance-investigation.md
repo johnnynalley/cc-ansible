@@ -204,6 +204,13 @@ Context:
   low/competitive.
 - Fortnite high-resolution texture install tags remained empty; the main
   Fortnite manifest install size was about 42 GB.
+- Fortnite itself had recent file churn before the bad-FPS session: many
+  install files under `Z:\Epic Games\Fortnite` were written around
+  2026-08-26 10:08 local, including large UEFN pak/ucas files and
+  `ShaderCompileWorker.exe`. Epic manifests for Unreal Editor for Fortnite,
+  LEGO Fortnite Content, and Save the World content were also written at
+  10:08. The main Fortnite manifest was touched at launch time
+  2026-08-26 18:55, which may be normal launcher bookkeeping.
 
 Current-state changes versus the recorded June good baseline:
 
@@ -275,8 +282,9 @@ Interpretation:
   clock, wrong power plan, display refresh cap, Fortnite FPS cap, high-res
   textures, or thermal throttling.
 - The strongest current suspects are recent Windows/RGB-driver interaction
-  from `KB5121003`, currently hot RGB/audio/sync/overlay processes, and the
-  NVIDIA 610.62 driver difference from the last documented good baseline.
+  from `KB5121003`, the same-day Fortnite content/update churn, currently hot
+  RGB/audio/sync/overlay processes, and the NVIDIA 610.62 driver difference
+  from the last documented good baseline.
 - Before changing settings, prefer a clean A/B sequence:
   1. Reboot once, start Fortnite with the same normal workload, and capture a
      clean match segment after startup/transition stalls settle.
