@@ -64,6 +64,13 @@ Fetch the latest capture without stopping anything:
 bin/windows-gaming-benchmark fetch --dest /tmp
 ```
 
+As of the 2026-08-26 regression capture, fetching while a capture is still
+active can fail because `presentmon-console.csv` is held open by the running
+sampler/PresentMon process. If you need an authoritative archive for analysis,
+use `stop --fetch`. For a quick mid-capture peek, read bounded CSV tails or
+summaries from the remote capture directory instead of starting duplicate fetch
+workers.
+
 Fetch a specific Windows capture directory:
 
 ```bash

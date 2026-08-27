@@ -174,6 +174,122 @@ Do not manually delete paks. Use Epic Games Launcher options for this setting.
    - any BIOS/memory change needs stability testing before calling it a Fortnite win
 10. Affinity/CCD/CCX tests are not the immediate recommendation. The current saved benchmark state files all show `AffinityPreset: none`; if affinity was tried earlier, there is no durable capture artifact in the harness. Only revisit with a controlled, documented A/B if Johnny explicitly wants that path or telemetry shows cross-CCD/thread-migration cost.
 
+## 2026-08-26 Fortnite FPS Regression Capture
+
+Capture:
+
+```text
+C:\Users\jn\AppData\Local\WindowsGamingBenchmark\Captures\20260826-194926-fortnite-fps-regression-20260826
+```
+
+Local archive/analyzed copy:
+
+```text
+/tmp/LJ-GAMING-PC-20260826-194926-fortnite-fps-regression-20260826.zip
+/tmp/LJ-GAMING-PC-20260826-194926-fortnite-fps-regression-20260826
+```
+
+Context:
+
+- Johnny reported newly poor Fortnite FPS while in game.
+- The benchmark harness was not already active. The prior status pointed at the
+  June 17 pre-4000D real-workload capture, so there was no continuous always-on
+  FPS log for the current regression.
+- Capture ran from `2026-08-26T19:49:26-05:00` to
+  `2026-08-26T19:57:05-05:00`.
+- No affinity, priority, or power-plan override was applied by the harness.
+- Active power plan remained AMD Ryzen High Performance, memory stayed at
+  DDR4-3200 configured speed, display refresh stayed 200 Hz, Fortnite cap
+  stayed 200 FPS, dynamic resolution was false, and quality settings remained
+  low/competitive.
+- Fortnite high-resolution texture install tags remained empty; the main
+  Fortnite manifest install size was about 42 GB.
+
+Current-state changes versus the recorded June good baseline:
+
+- NVIDIA driver now reports `610.62` / Windows driver `32.0.16.1062`; the
+  investigation's previous recorded driver was `596.49`.
+- Windows update `KB5121003` and update `KB5120708` installed on 2026-08-23.
+  `KB5121003` is the Microsoft-documented build `26200.9168` update with a
+  known issue for some games becoming unresponsive on systems with certain
+  RGB-related drivers/components. The named filename pattern is similar to
+  `inpoutx64`; this machine did not have `inpoutx64.sys`, but it did have
+  running Corsair low-level/HID drivers and `SignalRgbDriver.sys`.
+- Medal `2634.403.1` was installed/updated on 2026-08-23 and `MedalEncoder`
+  was present during the capture.
+- SignalRGB is now `2.5.74` and was one of the hotter background processes in
+  the capture. The custom SignalRGB lock/unlock automation was retired on
+  2026-08-23; normal SignalRGB startup remains.
+
+Visible FPS and frame pacing:
+
+- RTSS all rows: average 165.4 FPS, p50 178.2 FPS, p95 194.9 FPS, p99
+  197.8 FPS.
+- RTSS gameplay-ish `fps >= 140`: average 179.9 FPS, p50 182.1 FPS, p95
+  195.1 FPS, p99 197.8 FPS.
+- This is materially worse than the 2026-06-13/14 loaded good baseline, where
+  gameplay-ish `fps >= 140` averaged 196.5 FPS with p50 198.8 FPS.
+- Full RTSS frame-time p95 was about 9.8 ms with 9 sampled frames over
+  16.67 ms and 6 over 25 ms. The analyzer also saw large transition/stall
+  frames early in the capture; do not compare those directly to a clean
+  marked match segment.
+
+PresentMon validity:
+
+- PresentMon was valid in this capture: all 65,408 rows were
+  `Hardware: Independent Flip`.
+- Trimmed PresentMon gameplay window averaged about 150.6 FPS from frame time.
+  CPU busy averaged 6.34 ms with p95 11.30 ms; GPU busy averaged 4.67 ms with
+  p95 5.83 ms.
+- This points to CPU/frame pacing dominance with occasional GPU participation,
+  not a pure GPU downclock. CPU wait stayed low.
+
+Thermals and clocks:
+
+- CPU temperature averaged 79.7 C and maxed at 81.6 C in the summarized RTSS
+  window; this is warm but below the prior June max and does not show thermal
+  throttling.
+- CPU clocks remained around 4.39-4.44 GHz in system/MAHM rows.
+- GPU clocks, PCIe link, and temperatures looked normal: RTX 3070 around
+  2040-2055 MHz, PCIe Gen4 x16, GPU temp about 56-57 C in the active tail,
+  NVIDIA GPU utilization up to 94%.
+
+Runtime pressure:
+
+- Preflight warning: Memory Compression working set about 2.1 GB, with
+  available memory still healthy at about 6.8 GB. Treat this as capture
+  pollution to watch, not proof of RAM exhaustion.
+- Highest non-Fortnite one-thread CPU pressure in the capture included
+  Nextcloud max 105%, System max 100.5%, Firefox max 92.1%, DWM max 91.4%,
+  SteelSeries Sonar max 75.5%, Explorer max 75.4%, SteelSeries GG Client max
+  58.9%, SignalRGB max 56.3%, audiodg max 45.2%, SearchIndexer max 30%,
+  MedalEncoder max 29.5%, Discord max 29.5%, and Defender `MsMpEng` max 28.1%.
+- Context switches remained high, and the analyzer classified a hot logical
+  processor plus scheduler churn/driver-interrupt pressure. This is similar in
+  shape to the old frame-critical-thread bottleneck, but with more active
+  background pressure than the June good capture.
+
+Interpretation:
+
+- The regression is real in telemetry. It is not explained by a reset RAM
+  clock, wrong power plan, display refresh cap, Fortnite FPS cap, high-res
+  textures, or thermal throttling.
+- The strongest current suspects are recent Windows/RGB-driver interaction
+  from `KB5121003`, currently hot RGB/audio/sync/overlay processes, and the
+  NVIDIA 610.62 driver difference from the last documented good baseline.
+- Before changing settings, prefer a clean A/B sequence:
+  1. Reboot once, start Fortnite with the same normal workload, and capture a
+     clean match segment after startup/transition stalls settle.
+  2. If still bad, test with Medal fully closed/disabled first because it
+     changed on 2026-08-23 and had an encoder process present.
+  3. Test with SignalRGB and Corsair/iCUE background components disabled only
+     for the session, because `KB5121003` has an official RGB-driver/game
+     known issue and this machine has Corsair/SignalRGB kernel drivers loaded.
+  4. If that still fails, compare a known-stable NVIDIA driver rollback against
+     the current 610.62 branch.
+  5. Only after those checks should broader Windows update rollback be
+     considered, because `KB5121003` is a security cumulative update.
+
 ## CPU Upgrade Status
 
 Johnny ordered a Ryzen 7 5700X3D, but the installed CPU is verified as a Ryzen 7 5800X3D. The BIOS, Windows WMI, and `HKLM:\HARDWARE\DESCRIPTION\System\CentralProcessor\0` all report `AMD Ryzen 7 5800X3D 8-Core Processor`. Treat the 5800X3D as the installed and benchmark-relevant CPU.
