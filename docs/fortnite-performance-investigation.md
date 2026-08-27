@@ -472,22 +472,28 @@ Stopped/fetched analysis:
   shaders and recommends clearing the shader cache after closing Epic Games
   Launcher and Fortnite:
   <https://www.epicgames.com/help/c-202300000001636/c-202300000001719/fortnite-stutters-heavily-and-has-below-expected-performance-on-directx-12-a202300000018050>.
-- Local cache inventory supports that path: `C:\Users\jn\AppData\Local\NVIDIA\DXCache`
-  is about 10.2 GB, includes a 4 GB file touched on 2026-08-26, and
-  `C:\Users\jn\AppData\Local\D3DSCache` is about 816 MB. Fortnite's
-  `PersistentDownloadDir` is about 5.3 GB. Do not clear these while Fortnite is
-  running; if approved later, close Fortnite/Epic first, back up or record the
-  touched cache paths, clear only the targeted shader/cache paths, then expect
-  the first match to rebuild shaders and possibly stutter before measuring.
+- Local cache inventory supported that path before maintenance:
+  `C:\Users\jn\AppData\Local\NVIDIA\DXCache` was about 10.2 GB, included a
+  4 GB file touched on 2026-08-26, and `C:\Users\jn\AppData\Local\D3DSCache`
+  was about 816 MB. Fortnite's `PersistentDownloadDir` was about 5.3 GB and was
+  intentionally left alone.
 - A disabled-by-default `shader-cache` maintenance task is now staged in the
   Windows gaming tuning playbook. It refuses to run while Fortnite or Epic
   Launcher processes are active unless forced, writes a JSON manifest under
   `C:\ProgramData\Johnny\LiveRollbacks`, and only targets disposable NVIDIA
-  DX/D3DS cache paths. It has not been run yet.
+  DX/D3DS cache paths.
+- The shader-cache task was run on 2026-08-26 after Fortnite was closed. The
+  first attempt correctly refused because `EpicGamesLauncher` and two
+  `EpicWebHelper` processes were still running. After closing only those Epic
+  processes, the guarded task ran with `ForceClear=false` and wrote manifest
+  `C:\ProgramData\Johnny\LiveRollbacks\shader-cache-before-clear-20260826-214953`.
+  Results: NVIDIA `DXCache` went from 571 files / 10,205.8 MB to 16 locked
+  files / 3.5 MB; `D3DSCache` went from 101 files / 817.7 MB to 0 files; the
+  per-driver NVIDIA DX cache path did not exist. The remaining 16 DXCache files
+  were tiny locked `.nvph` entries and were not forced.
 - The next non-app-disabling remediations are now ranked:
-  1. After Fortnite/Epic are closed and Johnny explicitly approves, clear the
-     official Epic-recommended DX shader cache path for NVIDIA/D3DSCache and
-     run a warmup match plus benchmark.
+  1. Run a warmup match after the shader-cache clear, then capture a benchmark
+     once DX12 shader rebuild settles.
   2. Exclude heavy sync/media folders such as `C:\Users\jn\Nextcloud` from
      Windows Search indexing, or otherwise constrain Search indexing, instead
      of disabling Tracker.gg or Medal.
