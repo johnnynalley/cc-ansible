@@ -385,12 +385,28 @@ Conditions:
   Discord, and other normal workflow apps remained present.
 - Preflight warning: Memory Compression already large at about 2.49 GB.
 
-Partial live findings before the capture was stopped/fetched:
+Stopped/fetched analysis:
 
-- Game Mode alone did not clearly restore the old locked-200 behavior. A
-  rolling slice averaged about 170 FPS with GPU around 90%; a later recovered
-  slice averaged about 176 FPS with GPU around 88.5% and CPU temperature around
-  80.6 C.
+- PresentMon was usable in this capture: all 320,151 PresentMon rows reported
+  `Hardware: Independent Flip`. Unlike the older composed-flip captures, this
+  run can use PresentMon frame-pipeline data as supporting evidence alongside
+  RTSS/MAHM visible FPS.
+- Game Mode alone did not restore the old locked-200 behavior. RTSS visible
+  FPS over the full mixed capture averaged 157.8 FPS with p50 168.3, p95
+  197.0, p99 199.8, and max 200.8. The full average is dragged down by
+  severe stalls and the later 120 FPS lobby/sleep tail.
+- Before the sustained 120 FPS tail, the gameplay-ish `fps >= 140` band
+  averaged 174.2 FPS with p50 175.2, p95 198.0, p99 199.8, and max 200.8.
+  The near-cap `fps >= 180` band averaged 189.7 FPS. Clean stretches still
+  prove the machine can approach or hit the 200 cap: `21:15:29-21:16:59`
+  averaged 195.0 FPS, and `21:26:53-21:28:17` averaged 194.8 FPS with no
+  RTSS frames over 16.67 ms.
+- The problem in this run is intermittent freeze/drop behavior, not simple
+  steady-state throughput. Before the lobby tail, RTSS logged 75 samples over
+  16.67 ms, 49 over 33.33 ms, and 42 over 50 ms. Worst RTSS samples included
+  4,044 ms at `21:00:29`, repeated 2,230 ms samples around `21:08:09-21:08:13`,
+  repeated 2,225 ms samples around `21:24:51-21:24:55`, and 2,092 ms samples
+  around `21:01:37-21:01:42`.
 - The run did briefly hold roughly 192-199 FPS, then suffered a severe collapse
   around `2026-08-26T21:07:10-05:00`; a marker was added:
   `observed-fps-collapse-gpu-high-20260826-210710`.
@@ -408,7 +424,9 @@ Partial live findings before the capture was stopped/fetched:
   full-playbook peek itself, treat it as possibly probe-induced until a final
   stopped/fetched capture proves otherwise. The harness now documents
   `peek --no-deploy` as the lower-overhead active-game check.
-- Windows Application events line up with that collapse: five
+- A read-only event-log query for the capture window found no System/Application
+  warning/error events for display driver resets, WHEA, disk, or OBS/app
+  crashes. The only warning/error entries found were five
   `Microsoft-Windows-Search` event `10024` warnings at `21:07:36-21:07:42`
   reported unresponsive Search filter hosts being forcibly terminated.
   Resolved SearchFilterHost persistent handlers included Open Document Format,
@@ -428,6 +446,18 @@ Partial live findings before the capture was stopped/fetched:
   recent CPU sample set. This does not prove any one app should be disabled,
   but it does explain why the 5800X3D can still show frame-critical contention
   even when total CPU usage looks low.
+- CPU temperature does not look like the root cause in this capture. MAHM CPU
+  temp averaged 80.4 C, p99 was 82.1 C, max was 82.5 C, and CPU clocks stayed
+  around 4.42-4.45 GHz.
+- System counters still show contention signals: p95 max CPU utility was
+  126.1%, p95 context switches were about 298k/sec, p95 DPC was 3.32%, and
+  p95 interrupts were 3.99%. Available memory stayed healthy with a 5.8 GB
+  minimum, so this was not RAM exhaustion despite high committed memory.
+- NVIDIA telemetry showed GPU usage high but not thermally or PCIe limited:
+  SMI GPU util averaged 81.6%, p95 96%, GPU temp max 61 C, VRAM used about
+  3.2 GB, and PCIe stayed Gen4 x16. PresentMon's worst-spike shape had huge
+  frame/GPU-wait time while GPU busy itself stayed low, which points away from
+  pure GPU rendering saturation as the explanation for multi-second stalls.
 - Fortnite's current log shows the active render path is D3D12
   (`Using Default RHI: D3D12`) with NVIDIA driver `610.62`; Microsoft
   "Optimizations for windowed games" mainly targets DX10/DX11 windowed or
@@ -449,6 +479,11 @@ Partial live findings before the capture was stopped/fetched:
   running; if approved later, close Fortnite/Epic first, back up or record the
   touched cache paths, clear only the targeted shader/cache paths, then expect
   the first match to rebuild shaders and possibly stutter before measuring.
+- A disabled-by-default `shader-cache` maintenance task is now staged in the
+  Windows gaming tuning playbook. It refuses to run while Fortnite or Epic
+  Launcher processes are active unless forced, writes a JSON manifest under
+  `C:\ProgramData\Johnny\LiveRollbacks`, and only targets disposable NVIDIA
+  DX/D3DS cache paths. It has not been run yet.
 - The next non-app-disabling remediations are now ranked:
   1. After Fortnite/Epic are closed and Johnny explicitly approves, clear the
      official Epic-recommended DX shader cache path for NVIDIA/D3DSCache and

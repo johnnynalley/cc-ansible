@@ -1,0 +1,17 @@
+---
+# lj-gaming-pc - targeted disposable shader-cache maintenance
+
+windows_gaming_shader_cache_clear_enabled: false
+windows_gaming_shader_cache_clear_force: false
+windows_gaming_shader_cache_manifest_root: 'C:\ProgramData\Johnny\LiveRollbacks'
+windows_gaming_shader_cache_blocking_process_names:
+  - FortniteClient-Win64-Shipping
+  - FortniteClient-Win64-Shipping_EAC_EOS
+  - FortniteLauncher
+  - FortniteLauncher-Win64-Shipping
+  - EpicGamesLauncher
+  - EpicWebHelper
+windows_gaming_shader_cache_clear_paths:
+  - 'C:\Users\jn\AppData\Local\NVIDIA\DXCache'
+  - 'C:\Users\jn\AppData\Local\NVIDIA\PerDriverVersion\DXCache'
+  - 'C:\Users\jn\AppData\Local\D3DSCache'

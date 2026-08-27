@@ -35,6 +35,10 @@ $PresentMonPath = '{{ windows_gaming_benchmark_presentmon_path }}'
 $PmdpProviderPath = '{{ windows_gaming_benchmark_presentmon_provider_path }}'
 $NvidiaSmiEnabled = [System.Convert]::ToBoolean('{{ windows_gaming_benchmark_nvidia_smi_enabled | default(false) }}')
 $NvidiaSmiPath = '{{ windows_gaming_benchmark_nvidia_smi_path }}'
+$EventLogEnabled = [System.Convert]::ToBoolean('{{ windows_gaming_benchmark_event_log_enabled | default(true) }}')
+$EventLogNames = @({{ windows_gaming_benchmark_event_log_names | default(['System', 'Application']) | map('to_json') | join(', ') }})
+$EventLogLevels = @({{ windows_gaming_benchmark_event_log_levels | default([1, 2, 3]) | join(', ') }})
+$EventLogMaxEvents = {{ windows_gaming_benchmark_event_log_max_events | default(1000) | int }}
 $ObsProfilePath = '{{ windows_gaming_benchmark_obs_profile_path | default("") }}'
 $PreflightEnabled = [System.Convert]::ToBoolean('{{ windows_gaming_benchmark_preflight_enabled | default(true) }}')
 $PreflightFailOnWarnings = [System.Convert]::ToBoolean('{{ windows_gaming_benchmark_preflight_fail_on_warnings | default(true) }}')
@@ -463,6 +467,60 @@ function Write-ObsProfileSnapshot {
             Value = $matches[2]
         })
     }
+}
+
+function Write-EventLogSnapshot {
+    param(
+        [object]$State,
+        [datetime]$StartTime,
+        [datetime]$EndTime
+    )
+
+    if (-not $EventLogEnabled -or -not $State.EventLogCsv) {
+        return
+    }
+
+    $rows = @()
+    foreach ($logName in $EventLogNames) {
+        if (-not $logName) {
+            continue
+        }
+        try {
+            $rows += @(Get-WinEvent -FilterHashtable @{
+                LogName = [string]$logName
+                StartTime = $StartTime
+                EndTime = $EndTime
+                Level = $EventLogLevels
+            } -ErrorAction SilentlyContinue)
+        } catch {
+            Write-CsvRow -Path ([string]$State.EventLogCsv) -Row ([pscustomobject]@{
+                TimeCreated = (Get-Date).ToString('o')
+                LogName = [string]$logName
+                ProviderName = 'benchmark-event-log-query'
+                Id = 0
+                LevelDisplayName = 'Error'
+                Message = $_.Exception.Message
+            })
+        }
+    }
+
+    $rows |
+        Sort-Object TimeCreated |
+        Select-Object -Last $EventLogMaxEvents |
+        ForEach-Object {
+            $message = (($_.Message -replace '\s+', ' ').Trim())
+            if ($message.Length -gt 600) {
+                $message = $message.Substring(0, 600)
+            }
+            Write-CsvRow -Path ([string]$State.EventLogCsv) -Row ([pscustomobject]@{
+                TimeCreated = $_.TimeCreated.ToString('o')
+                LogName = $_.LogName
+                ProviderName = $_.ProviderName
+                Id = $_.Id
+                LevelDisplayName = $_.LevelDisplayName
+                Message = $message
+            })
+        }
 }
 
 function Get-ForegroundTargetProcess {
@@ -1560,6 +1618,7 @@ function Start-Benchmark {
         PresentMonStdoutPath = Join-Path $runDir 'presentmon-console.stdout.log'
         PresentMonStderrPath = Join-Path $runDir 'presentmon-console.stderr.log'
         PreflightCsv = Join-Path $runDir 'preflight.csv'
+        EventLogCsv = Join-Path $runDir 'event-log.csv'
         ObsProfileCsv = Join-Path $runDir 'obs-profile.csv'
         ProcessInventoryCsv = Join-Path $runDir 'process-inventory.csv'
         WatchedProcessCsv = Join-Path $runDir 'watched-processes.csv'
@@ -1668,6 +1727,13 @@ function Stop-Benchmark {
         Start-Sleep -Seconds 1
     }
     Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false -ErrorAction SilentlyContinue
+    $eventStart = $null
+    try {
+        $eventStart = [datetime]::Parse([string]$state.StartTime)
+    } catch {
+        $eventStart = $stopTime.AddMinutes(-30)
+    }
+    Write-EventLogSnapshot -State $state -StartTime $eventStart -EndTime (Get-Date)
     Restore-BenchmarkPowerPlan -State $state
     [pscustomobject]@{
         Stopped = $true
@@ -1942,6 +2008,7 @@ function Invoke-Analyze {
                 PmdpCsv = Join-Path $CaptureDir 'presentmon-provider.csv'
                 PmdpStatusCsv = Join-Path $CaptureDir 'presentmon-provider-status.csv'
                 PresentMonCsv = Join-Path $CaptureDir 'presentmon-console.csv'
+                EventLogCsv = Join-Path $CaptureDir 'event-log.csv'
                 PreflightCsv = Join-Path $CaptureDir 'preflight.csv'
                 ObsProfileCsv = Join-Path $CaptureDir 'obs-profile.csv'
                 WatchedProcessCsv = Join-Path $CaptureDir 'watched-processes.csv'
@@ -1972,6 +2039,7 @@ function Invoke-Analyze {
     $pmdp = Import-CsvSafe -Path ([string]$State.PmdpCsv)
     $pmdpStatus = Import-CsvSafe -Path ([string]$State.PmdpStatusCsv)
     $presentMon = Import-CsvSafe -Path ([string]$State.PresentMonCsv)
+    $eventLog = Import-CsvSafe -Path ([string]$State.EventLogCsv)
     $threads = Import-CsvSafe -Path ([string]$State.ThreadCsv)
     $topProcess = Import-CsvSafe -Path ([string]$State.TopProcessCsv)
     $inventory = Import-CsvSafe -Path ([string]$State.ProcessInventoryCsv)
@@ -2026,6 +2094,7 @@ function Invoke-Analyze {
     $lines.Add("PMDPRows: $($pmdp.Count)")
     $lines.Add("PMDPStatusRows: $($pmdpStatus.Count)")
     $lines.Add("PresentMonConsoleRows: $($presentMon.Count)")
+    $lines.Add("EventLogRows: $($eventLog.Count)")
     $lines.Add("SystemRows: $($system.Count)")
     $lines.Add("NvidiaSmiRows: $($nvidiaSmi.Count)")
     $lines.Add("NvidiaSmiStatusRows: $($nvidiaSmiStatus.Count)")
@@ -2107,6 +2176,16 @@ function Invoke-Analyze {
     if ($system.Count -gt 0) {
         $lines.Add((Get-StatsLine -Name 'Disk read latency ms' -Values (Convert-ToDoubleArray -Rows $system -Column 'DiskReadLatencyMs' -Minimum 0 -Maximum 10000) -Format 'N3'))
         $lines.Add((Get-StatsLine -Name 'Available memory MB' -Values (Convert-ToDoubleArray -Rows $system -Column 'AvailableMBytes' -Minimum 0 -Maximum 65536) -Format 'N0'))
+    }
+    if ($eventLog.Count -gt 0) {
+        $lines.Add("Event log warnings/errors:")
+        $eventLog |
+            Group-Object ProviderName, Id, LevelDisplayName |
+            Sort-Object Count -Descending |
+            Select-Object -First 12 |
+            ForEach-Object {
+                $lines.Add("  $($_.Count)x $($_.Name)")
+            }
     }
     if ($threads.Count -gt 0) {
         $hot = $threads | Sort-Object { [double]$_.OneThreadPct } -Descending | Select-Object -First 8

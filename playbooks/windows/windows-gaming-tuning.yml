@@ -441,6 +441,126 @@
         label: "{{ item.name }}"
       when: item.enabled | default(true) | bool
 
+    - name: Clear Windows gaming disposable shader caches
+      ansible.windows.win_powershell:
+        parameters:
+          CachePaths: "{{ windows_gaming_shader_cache_clear_paths | default([]) }}"
+          BlockingProcessNames: "{{ windows_gaming_shader_cache_blocking_process_names | default([]) }}"
+          ManifestRoot: "{{ windows_gaming_shader_cache_manifest_root | default('C:\\ProgramData\\Johnny\\LiveRollbacks') }}"
+          ForceClear: "{{ windows_gaming_shader_cache_clear_force | default(false) }}"
+        script: |
+          [CmdletBinding(SupportsShouldProcess)]
+          param(
+              [string[]]$CachePaths,
+              [string[]]$BlockingProcessNames,
+              [string]$ManifestRoot,
+              [bool]$ForceClear
+          )
+
+          $ErrorActionPreference = 'Stop'
+          $Ansible.Changed = $false
+
+          if (-not $CachePaths -or $CachePaths.Count -eq 0) {
+              return [pscustomobject]@{
+                  Cleared = $false
+                  Reason = 'no-cache-paths-configured'
+              }
+          }
+
+          $blocking = @()
+          foreach ($name in $BlockingProcessNames) {
+              if (-not $name) {
+                  continue
+              }
+              $blocking += @(Get-Process -Name $name -ErrorAction SilentlyContinue |
+                  Select-Object Id, ProcessName, Path)
+          }
+
+          if ($blocking.Count -gt 0 -and -not $ForceClear) {
+              throw "Refusing to clear shader caches while these processes are running: $(@($blocking | ForEach-Object { "$($_.ProcessName):$($_.Id)" }) -join ', ')"
+          }
+
+          $timestamp = Get-Date -Format 'yyyyMMdd-HHmmss'
+          $manifestDir = Join-Path $ManifestRoot "shader-cache-before-clear-$timestamp"
+          if (-not $Ansible.CheckMode) {
+              New-Item -ItemType Directory -Path $manifestDir -Force | Out-Null
+          }
+
+          $results = @()
+          foreach ($path in $CachePaths) {
+              if (-not (Test-Path -LiteralPath $path)) {
+                  $results += [pscustomobject]@{
+                      Path = $path
+                      Exists = $false
+                      BeforeFiles = 0
+                      BeforeBytes = 0
+                      AfterFiles = 0
+                      AfterBytes = 0
+                      RemovedFiles = 0
+                      FailedChildren = @()
+                  }
+                  continue
+              }
+
+              $beforeFiles = @(Get-ChildItem -LiteralPath $path -File -Recurse -Force -ErrorAction SilentlyContinue)
+              $beforeBytes = [int64](($beforeFiles | Measure-Object -Property Length -Sum).Sum)
+              $largest = @($beforeFiles |
+                  Sort-Object Length -Descending |
+                  Select-Object -First 20 FullName, Length, LastWriteTimeUtc)
+
+              $failedChildren = @()
+              if (-not $Ansible.CheckMode) {
+                  $children = @(Get-ChildItem -LiteralPath $path -Force -ErrorAction SilentlyContinue)
+                  foreach ($child in $children) {
+                      try {
+                          Remove-Item -LiteralPath $child.FullName -Recurse -Force -ErrorAction Stop
+                      } catch {
+                          $failedChildren += [pscustomobject]@{
+                              Path = $child.FullName
+                              Error = $_.Exception.Message
+                          }
+                      }
+                  }
+              }
+
+              $afterFiles = @(Get-ChildItem -LiteralPath $path -File -Recurse -Force -ErrorAction SilentlyContinue)
+              $afterBytes = [int64](($afterFiles | Measure-Object -Property Length -Sum).Sum)
+              if ($beforeFiles.Count -ne $afterFiles.Count -or $beforeBytes -ne $afterBytes) {
+                  $Ansible.Changed = $true
+              }
+
+              $results += [pscustomobject]@{
+                  Path = $path
+                  Exists = $true
+                  BeforeFiles = $beforeFiles.Count
+                  BeforeBytes = $beforeBytes
+                  AfterFiles = $afterFiles.Count
+                  AfterBytes = $afterBytes
+                  RemovedFiles = [Math]::Max(0, $beforeFiles.Count - $afterFiles.Count)
+                  FailedChildren = @($failedChildren)
+                  LargestBefore = @($largest)
+              }
+          }
+
+          $summary = [pscustomobject]@{
+              Timestamp = (Get-Date).ToString('o')
+              CheckMode = [bool]$Ansible.CheckMode
+              ManifestDir = $manifestDir
+              ForceClear = $ForceClear
+              BlockingProcesses = @($blocking)
+              Results = @($results)
+          }
+
+          if (-not $Ansible.CheckMode) {
+              $summary |
+                  ConvertTo-Json -Depth 8 |
+                  Set-Content -LiteralPath (Join-Path $manifestDir 'shader-cache-clear-result.json') -Encoding UTF8
+          }
+
+          $summary
+      when: windows_gaming_shader_cache_clear_enabled | default(false) | bool
+      tags: [shader-cache]
+
     - name: Set active Windows gaming power plan
       ansible.windows.win_powershell:
         parameters:

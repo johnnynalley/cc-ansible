@@ -148,6 +148,7 @@ The capture script writes:
 - `target-threads.csv`
 - `process-inventory.csv`
 - `markers.csv`
+- `event-log.csv`
 - `obs-profile.csv`
 - `preflight.csv`
 
@@ -161,6 +162,7 @@ It can collect:
 - NVIDIA SMI: NVIDIA GPU utilization, memory utilization, graphics/memory clocks, power, temperature, VRAM use, and PCIe link state.
 - RTSS shared memory: RTSS FPS and frame-time windows when enabled.
 - MSI Afterburner / MAHM shared memory: OSD FPS/frame time plus hardware-monitoring values such as CPU/GPU clocks, temperatures, power, and usage when enabled.
+- Windows event logs: warning/error/critical System and Application events for the capture window, written at stop time.
 - Process/thread sampling: watched-process CPU/memory, top process deltas, target process hot-thread samples, process inventory, OBS profile snapshot, markers, and preflight warnings.
 
 On `lj-gaming-pc`, the current inventory enables PresentMon, RTSS shared

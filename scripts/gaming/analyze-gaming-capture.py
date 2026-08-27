@@ -350,6 +350,34 @@ def summarize_obs_profile(root):
     }
 
 
+def summarize_event_log(root):
+    rows = list(read_csv(root / "event-log.csv"))
+    by_provider = Counter()
+    by_provider_id = Counter()
+    event_rows = []
+    for row in rows:
+        provider = row.get("ProviderName") or ""
+        event_id = row.get("Id") or ""
+        level = row.get("LevelDisplayName") or ""
+        by_provider[provider] += 1
+        by_provider_id[f"{provider}|{event_id}|{level}"] += 1
+        if len(event_rows) < 50:
+            event_rows.append({
+                "time_created": row.get("TimeCreated"),
+                "log_name": row.get("LogName"),
+                "provider_name": provider,
+                "id": event_id,
+                "level": level,
+                "message": truncate(row.get("Message"), 300),
+            })
+    return {
+        "rows": len(rows),
+        "by_provider": by_provider.most_common(),
+        "by_provider_id_level": by_provider_id.most_common(),
+        "events": event_rows,
+    }
+
+
 def stat_count(value):
     if isinstance(value, dict):
         count = value.get("count")
@@ -423,6 +451,8 @@ def add_diagnosis(result):
     obs_profile = result.get("obs_profile", {})
     obs_settings = obs_profile.get("settings") or {}
     visible_fps = result.get("visible_fps") or {}
+    event_log = result.get("event_log") or {}
+    event_provider_ids = event_log.get("by_provider_id_level") or []
 
     def metric(group, key, stat_name):
         value = (group.get(key) or {}).get(stat_name)
@@ -605,6 +635,34 @@ def add_diagnosis(result):
             "severity": "high",
             "detail": f"{len(result['pollution']['process_inventory_warnings'])} process inventory warning(s) were detected during capture.",
         })
+    if event_log.get("rows"):
+        search_10024_count = 0
+        risky_events = []
+        for key, count in event_provider_ids:
+            provider, event_id, level = (key.split("|", 2) + ["", ""])[:3]
+            provider_lower = provider.lower()
+            if provider == "Microsoft-Windows-Search" and event_id == "10024":
+                search_10024_count += count
+            if (
+                "whea" in provider_lower
+                or "display" in provider_lower
+                or "nvlddmkm" in provider_lower
+                or "disk" in provider_lower
+                or "application hang" in provider_lower
+            ):
+                risky_events.append(f"{count}x {provider} id={event_id} level={level}")
+        if search_10024_count:
+            diagnosis.append({
+                "type": "windows_search_filter_host_warnings",
+                "severity": "medium",
+                "detail": f"Windows Search logged {search_10024_count} filter-host warning(s) during the capture.",
+            })
+        if risky_events:
+            diagnosis.append({
+                "type": "system_or_driver_event_warnings",
+                "severity": "medium",
+                "detail": "; ".join(risky_events[:5]),
+            })
 
     result["diagnosis"] = diagnosis
 
@@ -798,6 +856,7 @@ def main(root):
             "process_inventory_warnings": summarize_inventory_pollution(root),
         },
         "obs_profile": summarize_obs_profile(root),
+        "event_log": summarize_event_log(root),
         "presentmon": {
             "rows": len(rows),
             "first_cpu_start": rows[0]["time_text"] if rows else None,

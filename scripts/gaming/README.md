@@ -11,7 +11,9 @@
   captures. The summary includes visible-FPS bands so lobby/menus, transition
   stalls, and near-cap gameplay can be separated without one-off analysis.
   It also detects a sustained 120 FPS cap tail, useful when a Fortnite capture
-  continues into lobby/sleep mode after gameplay has ended.
+  continues into lobby/sleep mode after gameplay has ended. When `event-log.csv`
+  is present, it summarizes warning/error event providers and flags likely
+  Search, display-driver, WHEA, disk, and app-hang evidence.
   Run locally on fetched capture output, for example
   `python3 scripts/gaming/analyze-gaming-capture.py <path>`.
 - `capture-wasapi-endpoint.ps1`: Records a short diagnostic WAV directly from

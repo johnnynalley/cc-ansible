@@ -35,6 +35,15 @@ windows_gaming_benchmark_presentmon_path: 'C:\Program Files\Intel\PresentMon\Pre
 windows_gaming_benchmark_presentmon_provider_path: 'C:\Program Files (x86)\RivaTuner Statistics Server\Plugins\Client\PresentMonDataProvider\PresentMonDataProvider.exe'
 windows_gaming_benchmark_nvidia_smi_enabled: true
 windows_gaming_benchmark_nvidia_smi_path: 'C:\Windows\System32\nvidia-smi.exe'
+windows_gaming_benchmark_event_log_enabled: true
+windows_gaming_benchmark_event_log_names:
+  - System
+  - Application
+windows_gaming_benchmark_event_log_levels:
+  - 1
+  - 2
+  - 3
+windows_gaming_benchmark_event_log_max_events: 1000
 windows_gaming_benchmark_obs_profile_path: 'C:\Users\jn\AppData\Roaming\obs-studio\basic\profiles\Untitled\basic.ini'
 windows_gaming_benchmark_affinity_presets:
   none: ''

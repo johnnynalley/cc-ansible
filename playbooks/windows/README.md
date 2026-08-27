@@ -15,6 +15,6 @@ Owner area: Windows gaming workstation automation.
 | --- | --- | --- | --- |
 | `windows-gaming-benchmark.yml` | `localhost, windows_gaming_benchmark_targets` | Configure Windows gaming benchmark capture. | `ansible-playbook playbooks/windows/windows-gaming-benchmark.yml --syntax-check` |
 | `windows-gaming-monitoring.yml` | `localhost, windows_gaming_monitoring_targets` | Configure Windows gaming monitoring. | `ansible-playbook playbooks/windows/windows-gaming-monitoring.yml --syntax-check` |
-| `windows-gaming-tuning.yml` | `localhost, windows_gaming_tuning_targets` | Configure Windows gaming tuning and deploy streaming helpers. | `ansible-playbook playbooks/windows/windows-gaming-tuning.yml --syntax-check` |
+| `windows-gaming-tuning.yml` | `localhost, windows_gaming_tuning_targets` | Configure Windows gaming tuning, optional gated shader-cache maintenance, and streaming helpers. | `ansible-playbook playbooks/windows/windows-gaming-tuning.yml --syntax-check` |
 | `windows-performance-mode.yml` | `localhost, windows_performance_mode_targets` | Configure optional/manual Windows Performance Mode scripts and shortcuts; auto watcher can be disabled per host. | `ansible-playbook playbooks/windows/windows-performance-mode.yml --syntax-check` |
 | `windows-signalrgb.yml` | `localhost, windows_signalrgb_targets` | Retire legacy SignalRGB lock/unlock automation and preserve ordinary user startup. | `ansible-playbook playbooks/windows/windows-signalrgb.yml --syntax-check` |
