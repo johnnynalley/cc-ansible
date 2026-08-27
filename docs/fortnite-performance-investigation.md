@@ -289,13 +289,19 @@ Runtime pressure:
   background pressure than the June good capture.
 
 Live follow-up snapshot at `2026-08-26T20:21:00-05:00` while Fortnite was
-running:
+running after Johnny intentionally uncapped gameplay FPS as a headroom test:
 
 - Fortnite's saved config had changed since the capture: `FrameRateLimit=0.000000`
   and `FrontendFrameRateLimit=120`. Treat `FrameRateLimit=0` as uncapped
-  gameplay FPS. This directly explains why the lobby can still look like a
-  120 FPS cap while gameplay drives higher GPU utilization.
+  gameplay FPS. This was a deliberate post-capture test condition, not an
+  accidental cause of the original regression capture.
+- The useful signal from the uncapped test is that Fortnite did not regain the
+  old above-200 FPS headroom. It also explains why GPU utilization looked
+  higher during the follow-up than it would with a strict 200 FPS cap.
 - The config file had a last write time of `2026-08-26 20:19:41` local.
+- Johnny restored the gameplay cap afterward. A read-only check showed
+  `FrameRateLimit=200.000000`, `FrontendFrameRateLimit=120`, and config last
+  write time `2026-08-26 20:29:52` local.
 - HAGS remained disabled through `HwSchMode=1`; MPO stayed at Windows default
   because `OverlayTestMode` was absent.
 - Game Mode-related registry values read `AutoGameModeEnabled=0` and
@@ -311,20 +317,18 @@ Interpretation:
 
 - The regression is real in telemetry. The original capture was not explained
   by a reset RAM clock, wrong power plan, display refresh cap, high-res
-  textures, or thermal throttling. The live follow-up did identify a new
-  gameplay FPS-cap drift that must be corrected before the next comparison.
-- The live follow-up supersedes the earlier "Fortnite FPS cap stayed 200"
-  interpretation for current testing. The capture began with a 200-cap state,
-  but the live config now shows uncapped gameplay. Restore the gameplay cap
-  before blaming Tracker.gg, Medal, or broader Windows/RGB-driver changes.
-- Remaining suspects after restoring the cap are recent Windows/RGB-driver
-  interaction from `KB5121003`, the same-day Fortnite content/update churn,
-  currently hot RGB/audio/sync/overlay processes, HAGS-disabled behavior under
-  heavier GPU load, and the NVIDIA 610.62 driver difference from the last
-  documented good baseline.
+  textures, Fortnite's original 200 FPS cap, or thermal throttling.
+- The uncapped follow-up is still useful: if the same system used to exceed
+  200 FPS uncapped and now cannot, that supports a real headroom regression
+  rather than merely a bad cap setting.
+- Remaining suspects are recent Windows/RGB-driver interaction from
+  `KB5121003`, the same-day Fortnite content/update churn, currently hot
+  RGB/audio/sync/overlay processes, HAGS-disabled behavior under heavier GPU
+  load, and the NVIDIA 610.62 driver difference from the last documented good
+  baseline.
 - Before changing settings, prefer a clean A/B sequence:
-  1. Restore Fortnite's gameplay FPS cap to the intended 200 FPS value through
-     the in-game UI if possible, then capture the same normal workload.
+  1. Use the restored 200 FPS gameplay cap for competitive frame-pacing tests;
+     leave uncapped only when intentionally measuring raw headroom.
   2. Verify Game Mode in the Windows Settings GUI; do not force registry values
      unless the GUI state and registry state are reconciled.
   3. If still bad, run the already-planned HAGS A/B because current GPU load is
