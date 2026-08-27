@@ -404,8 +404,13 @@ class OpenClawEvidenceTests(unittest.TestCase):
         ):
             self.assertNotIn(excluded_capability, service)
         self.assertIn("Documentation=file:", service)
+        self.assertIn("User=root", service)
+        self.assertIn(
+            "Group={{ hermes_openclaw_evidence_contract.runtime.profileGroup }}",
+            service,
+        )
         self.assertIn("RuntimeDirectory=hermes-openclaw-evidence", service)
-        self.assertIn("RuntimeDirectoryMode=0700", service)
+        self.assertIn("RuntimeDirectoryMode=0710", service)
         view_root_create = (
             "ExecStartPre=+/usr/bin/install -d -o root -g "
             "{{ hermes_openclaw_evidence_contract.runtime.profileGroup }} "
@@ -424,6 +429,25 @@ class OpenClawEvidenceTests(unittest.TestCase):
             "ProtectProc=",
         ):
             self.assertNotIn(namespace_directive, service)
+
+        timer = (
+            ROOT / "templates/hermes/hermes-openclaw-evidence-audit.timer.j2"
+        ).read_text(encoding="utf-8")
+        playbook = (
+            ROOT / "playbooks/agents/hermes-openclaw-evidence.yml"
+        ).read_text(encoding="utf-8")
+        self.assertIn("OnActiveSec=1h", timer)
+        self.assertIn("OnUnitActiveSec=6h", timer)
+        self.assertNotIn("OnBootSec=", timer)
+        self.assertIn(
+            "Decide whether the evidence audit timer requires rescheduling",
+            playbook,
+        )
+        self.assertIn("'SubState=waiting' not in", playbook)
+        self.assertIn(
+            "if hermes_openclaw_evidence_audit_timer_restart_required | bool",
+            playbook,
+        )
 
         dropin = (
             ROOT / "templates/hermes/hermes-gateway-openclaw-evidence.conf.j2"

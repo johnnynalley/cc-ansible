@@ -152,9 +152,15 @@ first, run the filesystem-mount playbook second, and converge the Hermes
 OpenClaw evidence playbook third. The projection unit must create its volatile
 `/run/hermes-openclaw-evidence` tree with `RuntimeDirectory=` and recreate the
 Astra-only `view` mountpoint before each bindfs start; never rely on a
-pre-reboot directory under `/run`. Local Restic excludes the loopback view
-because its immutable backing image is already on nas-zfs; normal offsite
-backup policy for `/home/johnny` remains independent.
+pre-reboot directory under `/run`. The service starts as root only to assemble
+the root-only source and redaction overlay, uses the reviewed profile-reader
+group, and exposes the final view through a `0710` runtime parent; this does not
+grant Astra direct access to the sealed source. The periodic audit timer uses
+`OnActiveSec=1h` plus `OnUnitActiveSec=6h`. A changed timer is restarted once
+to establish the first monotonic deadline, while an unchanged waiting timer is
+left alone. Local Restic excludes the loopback view because its immutable
+backing image is already on nas-zfs; normal offsite backup policy for
+`/home/johnny` remains independent.
 
 Hermes currently has a native `backup` command but no native `restore`
 subcommand. A profile rollback therefore extracts its full archive into a new
@@ -1216,15 +1222,26 @@ therefore enables both reviewed continuity mechanisms:
 - `hermes-lcm` runs as Hermes's context engine and imports from a consistent
   backup of the stopped OpenClaw LCM SQLite database. The source database and
   historical sidecars remain unchanged and offline.
-- Hermes's native OSS Mem0 provider uses the existing OpenRouter route for its
-  LLM, Gemini `gemini-embedding-001` at 3,072 dimensions, and a new Qdrant
-  collection named `memories_hermes_astra_v1`.
+- Hermes's native OSS Mem0 provider uses local Ollama
+  `qwen3-embedding:0.6b` at 1,024 dimensions and Qdrant hybrid collections with
+  a BM25/IDF sparse vector. Astra, Dubble, and Rigel have separate v3
+  collections and separate profile-owned LCM databases. No Gemini, OpenRouter,
+  or metered OpenAI API route is part of this memory path.
+
+The `v3` suffix is the reviewed Qdrant collection/schema generation, not a
+Mem0 product major version. The installed production-stable Mem0 package is
+`mem0ai` 2.x. Astra's v3 collection was seeded from the 4,148 owner/Astra
+points selected from the 4,435-point preserved source; subsequent native Mem0
+writes and deletes make the live count mutable. Rigel imported only its 111
+route-scoped points. Dubble started from the one route-proven public
+conversation and an empty Mem0 collection because the remaining retained
+history lacks safe public-agent provenance.
 
 The attended transaction is
 `playbooks/agents/hermes-memory-continuity.yml`. It requires OpenClaw offline,
 Hermes-native system units plus the native planned-stop marker contract, exact
-owner approval, provider credentials already present in the encrypted
-inventory, and source/target backups before any write. It updates the official
+owner approval, the approved local embedding models already present, and
+source/target backups before any write. It updates the official
 Hermes lock with `all`, `messaging`, and `mem0`; installs the reviewed LCM
 plugin from its stable upstream track; runs both importers in dry-run first;
 starts Astra only after SQLite, Qdrant, config, plugin, and native-tool policy
@@ -1250,17 +1267,21 @@ points into the target with canonical digest
 while the 4,435-point source collection and its Qdrant snapshot remained
 unchanged. Native provider recall passed without emitting memory content.
 
-The first provider recall exposed a real optional-dependency gap in
-`mem0ai==2.0.10`: its Gemini embedder imports `google.genai`, but Hermes's
-official `mem0` extra does not install that provider package. The native
-runtime now installs `google-genai>=1.0.0,<2.13.0` without dependency
-re-resolution, then runs `uv pip check`. The upper bound preserves Hermes
-v0.20.4's locked `google-auth==2.55.1`; the accepted environment contains
-`google-genai==2.12.1`, and all 123 installed packages are compatible. The
-accepted conversion rollback is
+The initial Gemini-backed provider attempt exposed an optional-dependency gap
+and was retired rather than made part of production. The accepted local
+embedding path is covered by dependency checks and real dense/BM25
+add-search-delete smokes for each profile. The accepted conversion rollback is
 `/srv/live-rollbacks/jn-t14s-lin/hermes-migration/20260820T044531-pre-memory-continuity`;
 the final provider reconciliation rollback is
 `/srv/live-rollbacks/jn-t14s-lin/hermes-migration/20260820T045620-pre-mem0-provider-reconcile`.
+
+Enabling `context.engine: lcm` is not sufficient when a profile also carries
+an explicit toolset allowlist. Each profile must include `context_engine` in
+that allowlist so Hermes publishes `lcm_doctor`, `lcm_recall`, and the other
+context-engine schemas to the model. Database ingest and proactive recall can
+otherwise remain healthy while direct model-visible LCM tools are absent. Live
+acceptance must therefore prove both database health and an actual recorded
+`lcm_doctor` tool call for Astra, Dubble, and Rigel.
 
 This is a source-preserving conversion, not a shared live store. The old LCM
 database, Mem0 history database, and Qdrant collection remain intact for

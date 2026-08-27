@@ -1393,6 +1393,7 @@ hermes_shadow_profiles:
       - tts
       - skills
       - memory
+      - context_engine
       - session_search
       - todo
       - clarify
@@ -1486,6 +1487,7 @@ hermes_shadow_profiles:
       - safe
       - skills
       - memory
+      - context_engine
       - session_search
       - todo
       - clarify
@@ -1602,6 +1604,7 @@ hermes_shadow_profiles:
       - terminal
       - skills
       - memory
+      - context_engine
       - session_search
       - todo
       - clarify

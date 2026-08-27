@@ -254,8 +254,8 @@ class HermesHealthDeploymentTests(unittest.TestCase):
 
     def test_only_astra_receives_aggregate_report_access(self):
         self.assertIn(
-            "{% if hermes_profile.name == 'astra' %} "
-            "{{ hermes_health_report_group }}{% endif %}",
+            "(' ' ~ hermes_health_report_group) "
+            "if hermes_profile.name == 'astra' else ''",
             self.gateway_hardening,
         )
         self.assertIn(

@@ -16,7 +16,7 @@ SuccessExitStatus=75
 WorkingDirectory={{ hermes_profile.gateway_working_directory }}
 Environment=TERMINAL_CWD={{ hermes_profile.terminal_cwd }}
 {% endif %}
-SupplementaryGroups={{ hermes_runtime_readers_group }}{% if hermes_profile.name == 'astra' %} {{ hermes_health_report_group }}{% endif %}
+SupplementaryGroups={{ hermes_runtime_readers_group }}{{ (' ' ~ hermes_health_report_group) if hermes_profile.name == 'astra' else '' }}
 Environment=HERMES_MANAGED_DIR=/etc/hermes/{{ hermes_profile.name }}
 {% if (hermes_profile.terminal_backend | default('docker')) == 'docker' %}
 Environment=HERMES_DOCKER_BINARY=/usr/bin/podman

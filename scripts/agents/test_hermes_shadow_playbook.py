@@ -219,7 +219,10 @@ class HermesShadowPlaybookTests(unittest.TestCase):
                 "hermes-lcm",
             ],
         )
+        for profile in profiles:
+            self.assertIn("context_engine", profile["toolsets"])
         self.assertIn("arr_api", profiles[0]["toolsets"])
+        self.assertEqual(profiles[0]["toolsets"].count("arr_api"), 1)
         self.assertNotIn("arr_api", profiles[1]["toolsets"])
         self.assertNotIn("arr_api", profiles[2]["toolsets"])
         self.assertEqual(profiles[0]["cron_approval_mode"], "approve")
@@ -902,8 +905,12 @@ class HermesShadowPlaybookTests(unittest.TestCase):
             self.assertNotIn("\nExecStart=", rendered)
             self.assertNotIn("\nExecStop=", rendered)
             self.assertNotIn("\nRestart=", rendered)
+            supplementary_groups = self.variables["hermes_runtime_readers_group"]
+            if profile["name"] == "astra":
+                supplementary_groups += f" {self.variables['hermes_health_report_group']}"
             self.assertIn(
-                f"SupplementaryGroups={self.variables['hermes_runtime_readers_group']}",
+                f"SupplementaryGroups={supplementary_groups}\n"
+                f"Environment=HERMES_MANAGED_DIR=/etc/hermes/{profile['name']}",
                 rendered,
             )
             self.assertNotIn("HERMES_HOME=", rendered)

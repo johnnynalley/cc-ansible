@@ -235,6 +235,7 @@
           - show
           - --property=LoadState
           - --property=ActiveState
+          - --property=SubState
           - --property=UnitFileState
           - "{{ item }}"
       loop:
@@ -456,6 +457,22 @@
                  or (hermes_openclaw_evidence_projection_restart_required
                      | bool) }}
 
+        - name: Decide whether the evidence audit timer requires rescheduling
+          ansible.builtin.set_fact:
+            hermes_openclaw_evidence_audit_timer_restart_required: >-
+              {{ not (hermes_openclaw_evidence_timer_was_active | bool)
+                 or ('SubState=waiting' not in
+                     hermes_openclaw_evidence_services_before.results[2].stdout)
+                 or (hermes_openclaw_evidence_unit_changes.results
+                     | selectattr(
+                         'item.destination',
+                         'equalto',
+                         hermes_openclaw_evidence_audit_timer_live
+                       )
+                     | selectattr('changed')
+                     | list
+                     | length > 0) }}
+
         - name: Reload systemd for complete OpenClaw evidence
           ansible.builtin.systemd_service:
             daemon_reload: true
@@ -567,7 +584,10 @@
         - name: Enable periodic complete evidence drift audit
           ansible.builtin.systemd_service:
             name: "{{ hermes_openclaw_evidence_audit_timer }}"
-            state: started
+            state: >-
+              {{ 'restarted'
+                 if hermes_openclaw_evidence_audit_timer_restart_required | bool
+                 else 'started' }}
             enabled: true
 
         - name: Restore Astra Gateway after evidence convergence
