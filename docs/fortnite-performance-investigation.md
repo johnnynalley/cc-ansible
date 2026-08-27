@@ -491,14 +491,27 @@ Stopped/fetched analysis:
   files / 3.5 MB; `D3DSCache` went from 101 files / 817.7 MB to 0 files; the
   per-driver NVIDIA DX cache path did not exist. The remaining 16 DXCache files
   were tiny locked `.nvph` entries and were not forced.
+- Follow-up Rezon 1v1s testing after the shader-cache clear did not restore
+  the expected near-locked 200 FPS behavior. Do not treat shader-cache cleanup
+  as the root fix. It remains a reasonable maintenance action for DX12 shader
+  churn, but the active regression is still open.
 - The next non-app-disabling remediations are now ranked:
-  1. Run a warmup match after the shader-cache clear, then capture a benchmark
-     once DX12 shader rebuild settles.
+  1. Improve attribution in the benchmark harness before the next capture:
+     system-wide network upload was high in the Rezon run, and the next harness
+     revision records process I/O deltas in `watched-processes.csv` and
+     `top-processes.csv`. These counters are not network-specific, but they
+     can identify upload, cache, file, or socket churn candidates.
   2. Exclude heavy sync/media folders such as `C:\Users\jn\Nextcloud` from
      Windows Search indexing, or otherwise constrain Search indexing, instead
      of disabling Tracker.gg or Medal.
-  3. Run HAGS enabled/disabled A/B with reboot and capture after the cache and
-     Search-stall candidates are handled or ruled out.
+  3. Run HAGS enabled/disabled A/B with reboot and capture after the cache,
+     Search-stall, and high-upload candidates are handled or ruled out.
+  4. Test the RGB/monitoring driver stack for one session if the above fail:
+     Microsoft documents a `KB5121003` known issue for some games on systems
+     with certain RGB-related drivers/components, and this machine currently
+     has Corsair/iCUE, SignalRGB, MSI Center, and Afterburner low-level drivers
+     in the broader hardware-monitoring path. This is a controlled A/B
+     candidate, not a proved Fortnite cause.
 
 ## 2026-08-26 Rezon 1v1s After Shader-Cache Clear
 
@@ -555,6 +568,11 @@ Thermals and system pressure:
   maxed 58 C, VRAM used maxed about 2.68 GB, and PCIe stayed Gen4 x16.
 - System p95 max CPU utility was 123.7%, p95 context switches were about
   327,733/sec, p95 DPC was 2.78%, and p95 interrupts were 4.85%.
+- System-wide outbound network was unusually high for a Fortnite-only
+  competitive test: average sent throughput was about 5.1 MB/s, p95 was about
+  17.6 MB/s, and max was about 37.5 MB/s. The capture did not yet have
+  per-process network attribution, so this is a strong lead for the next
+  benchmark rather than a named culprit.
 - Highest sampled non-Fortnite process pressure included `MedalEncoder`
   max 13.0% total CPU / 208% of one logical thread, `System` max 8.9% total,
   `nextcloud` max 7.1% total, `firefox` max 5.9% total, `dwm` max 4.6% total,
@@ -565,18 +583,22 @@ Comparison and interpretation:
 - This was substantially better than the earlier 2026-08-26 Game Mode run:
   gameplay-ish RTSS average improved from 174.2 FPS to 186.0 FPS, and full
   RTSS p99 frame time improved from about 602 ms to 13.16 ms.
+- Johnny reported that this Rezon 1v1s result still felt wrong and should be
+  much closer to locked 200 FPS. Treat that correction as authoritative for the
+  workload expectation: shader-cache cleanup did not fix the active issue.
 - It is still weaker than the June good baselines in raw near-cap behavior:
   June Go Goated gameplay-ish averaged 195.5 FPS, and the June Duo loaded
   gameplay-ish band averaged 196.5 FPS. Because Rezon 1v1s is a different map,
   treat that as a regression signal, not a direct map-for-map loss.
 - The remaining issue is not thermals, RAM exhaustion, display mode capture
   validity, or a simple inability to approach 200 FPS. The data still points to
-  frame-critical CPU work plus scheduler/driver/background churn, with GPU load
-  higher than the June baselines but not thermally limited.
-- Next measurement should include one ignored warmup after the shader-cache
-  clear, then another Rezon 1v1s capture with explicit `round-start`,
-  `round-end`, and any visible hitch markers so load/exit spikes can be
-  separated from active fighting.
+  frame-critical CPU work plus scheduler/driver/background churn, high
+  outbound network activity during the run, and GPU load higher than the June
+  baselines but not thermally limited.
+- Next measurement should be another normal Rezon 1v1s or similarly repeatable
+  Creative session after the benchmark harness process-I/O update is deployed.
+  Use explicit `round-start`, `round-end`, and any visible hitch markers so
+  load/exit spikes can be separated from active fighting.
 
 ## CPU Upgrade Status
 

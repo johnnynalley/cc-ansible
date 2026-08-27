@@ -72,6 +72,12 @@ def counts_over(values, thresholds):
     return {str(t): sum(1 for v in values if v is not None and v > t) for t in thresholds}
 
 
+def mib_per_sec(value):
+    if value is None:
+        return None
+    return value / 1024 / 1024
+
+
 def truthy(value):
     return str(value).strip().lower() in ("true", "1", "yes")
 
@@ -576,6 +582,36 @@ def add_diagnosis(result):
             "detail": f"p95 DPC={dpc_p95 or 0:.2f}% interrupt={interrupt_p95 or 0:.2f}%.",
         })
 
+    network_sent_p95 = metric(system, "NetworkBytesSentPerSec", "p95")
+    network_sent_max = metric(system, "NetworkBytesSentPerSec", "max")
+    if network_sent_p95 is not None and network_sent_p95 >= 5 * 1024 * 1024:
+        top_io = []
+        for process in result.get("processes") or []:
+            write_bps = process.get("max_io_write_bytes_per_sec")
+            data_bps = process.get("max_io_data_bytes_per_sec")
+            best_bps = max(write_bps or 0.0, data_bps or 0.0)
+            if best_bps >= 1 * 1024 * 1024:
+                top_io.append((best_bps, process.get("name") or "unknown", write_bps, data_bps))
+        top_io.sort(key=lambda item: item[0], reverse=True)
+        if top_io:
+            top_io_detail = "; top process I/O: " + ", ".join(
+                f"{name} write={mib_per_sec(write_bps or 0.0):.1f} MiB/s data={mib_per_sec(data_bps or 0.0):.1f} MiB/s"
+                for _best_bps, name, write_bps, data_bps in top_io[:5]
+            )
+        else:
+            top_io_detail = "; process I/O attribution was unavailable or below threshold"
+        diagnosis.append({
+            "type": "high_network_upload_during_capture",
+            "severity": "medium",
+            "detail": (
+                f"p95 outbound network throughput was {mib_per_sec(network_sent_p95):.1f} MiB/s "
+                f"and max was {mib_per_sec(network_sent_max or 0.0):.1f} MiB/s. "
+                "This is system-wide network traffic; process I/O counters are not network-specific "
+                "but can identify upload, cache, file, or socket churn candidates"
+                f"{top_io_detail}."
+            ),
+        })
+
     encode_p95 = metric(system, "GpuEngineVideoEncodeUtilPct", "p95")
     if encode_p95 is not None and encode_p95 >= 70:
         diagnosis.append({
@@ -803,7 +839,16 @@ def main(root):
             thread_rows.append((pct, row))
     thread_rows.sort(reverse=True, key=lambda item: item[0])
 
-    proc = defaultdict(lambda: {"samples": 0, "max_total": 0.0, "max_one": 0.0, "max_ws": 0.0, "ids": set()})
+    proc = defaultdict(lambda: {
+        "samples": 0,
+        "max_total": 0.0,
+        "max_one": 0.0,
+        "max_ws": 0.0,
+        "max_io_read_bps": 0.0,
+        "max_io_write_bps": 0.0,
+        "max_io_data_bps": 0.0,
+        "ids": set(),
+    })
     for file_name in ("top-processes.csv", "watched-processes.csv"):
         for row in read_csv(root / file_name):
             name = row.get("ProcessName") or ""
@@ -813,6 +858,9 @@ def main(root):
             rec["max_total"] = max(rec["max_total"], fnum(row.get("CpuPctTotal")) or 0.0)
             rec["max_one"] = max(rec["max_one"], fnum(row.get("CpuPctOneThread")) or 0.0)
             rec["max_ws"] = max(rec["max_ws"], fnum(row.get("WorkingSetMB")) or 0.0)
+            rec["max_io_read_bps"] = max(rec["max_io_read_bps"], fnum(row.get("IOReadBytesPerSec")) or 0.0)
+            rec["max_io_write_bps"] = max(rec["max_io_write_bps"], fnum(row.get("IOWriteBytesPerSec")) or 0.0)
+            rec["max_io_data_bps"] = max(rec["max_io_data_bps"], fnum(row.get("IODataBytesPerSec")) or 0.0)
 
     preflight_rows = list(read_csv(root / "preflight.csv"))
     preflight_warnings = [
@@ -908,6 +956,9 @@ def main(root):
                 "max_cpu_pct_total": rec["max_total"],
                 "max_cpu_pct_one_thread": rec["max_one"],
                 "max_working_set_mb": rec["max_ws"],
+                "max_io_read_bytes_per_sec": rec["max_io_read_bps"],
+                "max_io_write_bytes_per_sec": rec["max_io_write_bps"],
+                "max_io_data_bytes_per_sec": rec["max_io_data_bps"],
                 "ids": sorted(item for item in rec["ids"] if item),
             }
             for name, rec in sorted(proc.items(), key=lambda item: item[1]["max_total"], reverse=True)[:30]

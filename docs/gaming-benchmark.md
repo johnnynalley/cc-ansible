@@ -163,7 +163,13 @@ It can collect:
 - RTSS shared memory: RTSS FPS and frame-time windows when enabled.
 - MSI Afterburner / MAHM shared memory: OSD FPS/frame time plus hardware-monitoring values such as CPU/GPU clocks, temperatures, power, and usage when enabled.
 - Windows event logs: warning/error/critical System and Application events for the capture window, written at stop time.
-- Process/thread sampling: watched-process CPU/memory, top process deltas, target process hot-thread samples, process inventory, OBS profile snapshot, markers, and preflight warnings.
+- Process/thread sampling: watched-process CPU/memory/I/O deltas, top process CPU/I/O deltas, target process hot-thread samples, process inventory, OBS profile snapshot, markers, and preflight warnings.
+
+The process I/O columns in `watched-processes.csv` and `top-processes.csv`
+come from raw Windows per-process I/O counters sampled as before/after deltas.
+They are not direct per-process network counters, but they help identify
+upload, cache, file, or socket churn when `system.csv` shows high network
+throughput or disk activity during a bad frame-pacing window.
 
 On `lj-gaming-pc`, the current inventory enables PresentMon, RTSS shared
 memory, MAHM/Afterburner shared memory, and NVIDIA SMI:

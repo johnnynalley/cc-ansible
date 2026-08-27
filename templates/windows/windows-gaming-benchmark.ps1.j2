@@ -595,6 +595,21 @@ function Get-ProcessCpuRows {
             continue
         }
         $deltaSeconds = [math]::Max(0, [double]$process.CPU - [double]$previous.CPU)
+        $ioReadBytes = if ($null -ne $process.IOReadBytes -and $null -ne $previous.IOReadBytes) {
+            [math]::Max(0, [double]$process.IOReadBytes - [double]$previous.IOReadBytes)
+        } else {
+            $null
+        }
+        $ioWriteBytes = if ($null -ne $process.IOWriteBytes -and $null -ne $previous.IOWriteBytes) {
+            [math]::Max(0, [double]$process.IOWriteBytes - [double]$previous.IOWriteBytes)
+        } else {
+            $null
+        }
+        $ioDataBytes = if ($null -ne $process.IODataBytes -and $null -ne $previous.IODataBytes) {
+            [math]::Max(0, [double]$process.IODataBytes - [double]$previous.IODataBytes)
+        } else {
+            $null
+        }
         [pscustomobject]@{
             Timestamp = $Timestamp.ToString('o')
             ProcessName = $process.ProcessName
@@ -604,6 +619,42 @@ function Get-ProcessCpuRows {
             CpuPctOneThread = [math]::Round(($deltaSeconds / $ElapsedSeconds) * 100, 3)
             WorkingSetMB = [math]::Round($process.WorkingSet64 / 1MB, 1)
             PrivateMemoryMB = [math]::Round($process.PrivateMemorySize64 / 1MB, 1)
+            IOReadBytes = if ($null -ne $ioReadBytes) { [math]::Round($ioReadBytes, 0) } else { $null }
+            IOWriteBytes = if ($null -ne $ioWriteBytes) { [math]::Round($ioWriteBytes, 0) } else { $null }
+            IODataBytes = if ($null -ne $ioDataBytes) { [math]::Round($ioDataBytes, 0) } else { $null }
+            IOReadBytesPerSec = if ($null -ne $ioReadBytes) { [math]::Round($ioReadBytes / $ElapsedSeconds, 3) } else { $null }
+            IOWriteBytesPerSec = if ($null -ne $ioWriteBytes) { [math]::Round($ioWriteBytes / $ElapsedSeconds, 3) } else { $null }
+            IODataBytesPerSec = if ($null -ne $ioDataBytes) { [math]::Round($ioDataBytes / $ElapsedSeconds, 3) } else { $null }
+        }
+    }
+}
+
+function Get-ProcessSnapshot {
+    $ioByPid = @{}
+    try {
+        foreach ($counter in (Get-CimInstance Win32_PerfRawData_PerfProc_Process -ErrorAction Stop)) {
+            if ($counter.IDProcess -gt 0) {
+                $ioByPid[[int]$counter.IDProcess] = $counter
+            }
+        }
+    } catch {
+        $ioByPid = @{}
+    }
+
+    Get-Process | ForEach-Object {
+        $io = $null
+        if ($ioByPid.ContainsKey([int]$_.Id)) {
+            $io = $ioByPid[[int]$_.Id]
+        }
+        [pscustomobject]@{
+            Id = $_.Id
+            ProcessName = $_.ProcessName
+            CPU = $_.CPU
+            WorkingSet64 = $_.WorkingSet64
+            PrivateMemorySize64 = $_.PrivateMemorySize64
+            IOReadBytes = if ($io) { $io.IOReadBytesPersec } else { $null }
+            IOWriteBytes = if ($io) { $io.IOWriteBytesPersec } else { $null }
+            IODataBytes = if ($io) { $io.IODataBytesPersec } else { $null }
         }
     }
 }
@@ -1429,7 +1480,7 @@ function Invoke-InteractiveSampler {
         Write-Log -State $state -Message "interactive sampler starting"
         Write-ProcessInventory -State $state -Phase 'pre-launch'
         $logicalProcessors = [int](Get-CimInstance Win32_ComputerSystem).NumberOfLogicalProcessors
-        $beforeProcesses = Get-Process | Select-Object Id, ProcessName, CPU, WorkingSet64, PrivateMemorySize64
+        $beforeProcesses = @(Get-ProcessSnapshot)
         $lastProcessTime = Get-Date
         $lastSystemTime = Get-Date
         $lastInventoryTime = Get-Date
@@ -1476,7 +1527,7 @@ function Invoke-InteractiveSampler {
             }
 
             if (($timestamp - $lastProcessTime).TotalSeconds -ge $ProcessIntervalSeconds) {
-                $afterProcesses = Get-Process | Select-Object Id, ProcessName, CPU, WorkingSet64, PrivateMemorySize64
+                $afterProcesses = @(Get-ProcessSnapshot)
                 $elapsed = [math]::Max(0.001, ($timestamp - $lastProcessTime).TotalSeconds)
                 $watchedRows = @(Get-ProcessCpuRows -Before $beforeProcesses -After $afterProcesses -Timestamp $timestamp -ElapsedSeconds $elapsed -LogicalProcessors $logicalProcessors -Names $WatchProcessNames)
                 foreach ($row in $watchedRows) {
