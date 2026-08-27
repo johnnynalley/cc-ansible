@@ -370,6 +370,71 @@ Interpretation:
   9. Only after those checks should broader Windows update rollback be
      considered, because `KB5121003` is a security cumulative update.
 
+Active follow-up capture started at `2026-08-26T20:53:16-05:00`:
+
+```text
+C:\Users\jn\AppData\Local\WindowsGamingBenchmark\Captures\20260826-205316-fortnite-game-mode-enabled-normal-workflow-20260826
+```
+
+Conditions:
+
+- Game Mode re-enabled and verified while Medal remained running:
+  `AutoGameModeEnabled=1`, `AllowAutoGameMode=1`.
+- Fortnite gameplay cap restored to `FrameRateLimit=200.000000`.
+- Tracker.gg, Medal, Firefox, SteelSeries, SignalRGB, Epic Launcher, Nextcloud,
+  Discord, and other normal workflow apps remained present.
+- Preflight warning: Memory Compression already large at about 2.49 GB.
+
+Partial live findings before the capture was stopped/fetched:
+
+- Game Mode alone did not clearly restore the old locked-200 behavior. A
+  rolling slice averaged about 170 FPS with GPU around 90%; a later recovered
+  slice averaged about 176 FPS with GPU around 88.5% and CPU temperature around
+  80.6 C.
+- The run did briefly hold roughly 192-199 FPS, then suffered a severe collapse
+  around `2026-08-26T21:07:10-05:00`; a marker was added:
+  `observed-fps-collapse-gpu-high-20260826-210710`.
+- Windows Application events line up with that collapse: five
+  `Microsoft-Windows-Search` event `10024` warnings at `21:07:36-21:07:42`
+  reported unresponsive Search filter hosts being forcibly terminated.
+  Resolved SearchFilterHost persistent handlers included Open Document Format,
+  plain text, and generic pixel/image filters. This makes Windows Search
+  indexing a strong candidate for at least that stall, especially because the
+  indexed roots include broad `C:\Users\` scope and the machine has large cloud
+  sync folders under the user profile.
+- Search CPU was quiet shortly after the event cluster, so the evidence points
+  to a burst/stall, not constant Search CPU load.
+- Fortnite's current log shows the active render path is D3D12
+  (`Using Default RHI: D3D12`) with NVIDIA driver `610.62`; Microsoft
+  "Optimizations for windowed games" mainly targets DX10/DX11 windowed or
+  borderless games, so that setting is not currently ranked as a likely D3D12
+  Performance Mode fix.
+- Fortnite logs repeatedly reported shader/material problems in this session:
+  hundreds of `Invalid shader map ID`, `invalid ShaderMap`, `uncooked shader
+  map ID`, and `Loading a material resource None` entries. Recent backup logs
+  had smaller counts, so the current log is materially noisier.
+- Epic's Fortnite support article for "stutters heavily and has below expected
+  performance on DirectX 12" says the client can repeatedly recompile DirectX
+  shaders and recommends clearing the shader cache after closing Epic Games
+  Launcher and Fortnite:
+  <https://www.epicgames.com/help/c-202300000001636/c-202300000001719/fortnite-stutters-heavily-and-has-below-expected-performance-on-directx-12-a202300000018050>.
+- Local cache inventory supports that path: `C:\Users\jn\AppData\Local\NVIDIA\DXCache`
+  is about 10.2 GB, includes a 4 GB file touched on 2026-08-26, and
+  `C:\Users\jn\AppData\Local\D3DSCache` is about 816 MB. Fortnite's
+  `PersistentDownloadDir` is about 5.3 GB. Do not clear these while Fortnite is
+  running; if approved later, close Fortnite/Epic first, back up or record the
+  touched cache paths, clear only the targeted shader/cache paths, then expect
+  the first match to rebuild shaders and possibly stutter before measuring.
+- The next non-app-disabling remediations are now ranked:
+  1. After Fortnite/Epic are closed and Johnny explicitly approves, clear the
+     official Epic-recommended DX shader cache path for NVIDIA/D3DSCache and
+     run a warmup match plus benchmark.
+  2. Exclude heavy sync/media folders such as `C:\Users\jn\Nextcloud` from
+     Windows Search indexing, or otherwise constrain Search indexing, instead
+     of disabling Tracker.gg or Medal.
+  3. Run HAGS enabled/disabled A/B with reboot and capture after the cache and
+     Search-stall candidates are handled or ruled out.
+
 ## CPU Upgrade Status
 
 Johnny ordered a Ryzen 7 5700X3D, but the installed CPU is verified as a Ryzen 7 5800X3D. The BIOS, Windows WMI, and `HKLM:\HARDWARE\DESCRIPTION\System\CentralProcessor\0` all report `AMD Ryzen 7 5800X3D 8-Core Processor`. Treat the 5800X3D as the installed and benchmark-relevant CPU.
