@@ -5,6 +5,7 @@ usage() {
   cat <<'EOF'
 Usage:
   bin/windows-gaming-benchmark status
+  bin/windows-gaming-benchmark peek [--capture-dir WINDOWS_PATH]
   bin/windows-gaming-benchmark preflight
   bin/windows-gaming-benchmark start --label LABEL [--affinity PRESET] [--priority CLASS] [--power PLAN] [--allow-preflight-warnings]
   bin/windows-gaming-benchmark mark --marker NAME
@@ -13,6 +14,7 @@ Usage:
 
 Actions:
   status      Show the current benchmark session state.
+  peek        Show a bounded mid-capture summary without fetching the archive.
   preflight   Run the lightweight preflight checks without starting a capture.
   start       Start a managed benchmark capture.
   mark        Add a marker to the active capture.
@@ -57,6 +59,7 @@ case "${action_raw,,}" in
   start) action="Start" ;;
   stop) action="Stop" ;;
   status) action="Status" ;;
+  peek) action="Peek" ;;
   mark) action="Mark" ;;
   preflight) action="Preflight" ;;
   analyze) action="Analyze" ;;

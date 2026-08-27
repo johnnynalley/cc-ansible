@@ -394,6 +394,14 @@ Partial live findings before the capture was stopped/fetched:
 - The run did briefly hold roughly 192-199 FPS, then suffered a severe collapse
   around `2026-08-26T21:07:10-05:00`; a marker was added:
   `observed-fps-collapse-gpu-high-20260826-210710`.
+- A later managed `bin/windows-gaming-benchmark peek` over
+  `21:14:35-21:22:15` found another collapse. RTSS FPS averaged 168.9 with
+  p95 198.8 and p99 199.9, but lows were bad: 113 of 360 samples were below
+  160 FPS, 44 were below 140, four were below 60, and the worst RTSS frame was
+  258.5 ms at `21:17:03`. A marker was added:
+  `observed-repeat-fps-collapse-20260826-211703`. This supports treating the
+  current regression primarily as intermittent stalls/lows rather than a
+  simple inability to render near 200 FPS.
 - Windows Application events line up with that collapse: five
   `Microsoft-Windows-Search` event `10024` warnings at `21:07:36-21:07:42`
   reported unresponsive Search filter hosts being forcibly terminated.
@@ -404,6 +412,16 @@ Partial live findings before the capture was stopped/fetched:
   sync folders under the user profile.
 - Search CPU was quiet shortly after the event cluster, so the evidence points
   to a burst/stall, not constant Search CPU load.
+- The later `21:17` collapse did not have new Search event 10024 warnings, so
+  Windows Search is a proven candidate for at least one stall, not yet a full
+  explanation for every severe drop in the active run.
+- The same live peek showed normal-workflow background CPU is still visible in
+  the sampled process tail: Fortnite dominated, but Firefox, SteelSeries GG,
+  Nextcloud, Desktop Window Manager, System, SocialClubHelper, SignalRGB,
+  explorer, audiodg, SteelSeries Sonar, and Discord all appeared in the top
+  recent CPU sample set. This does not prove any one app should be disabled,
+  but it does explain why the 5800X3D can still show frame-critical contention
+  even when total CPU usage looks low.
 - Fortnite's current log shows the active render path is D3D12
   (`Using Default RHI: D3D12`) with NVIDIA driver `610.62`; Microsoft
   "Optimizations for windowed games" mainly targets DX10/DX11 windowed or

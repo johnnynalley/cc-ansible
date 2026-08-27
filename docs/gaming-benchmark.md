@@ -52,6 +52,18 @@ bin/windows-gaming-benchmark mark --marker stutter
 bin/windows-gaming-benchmark mark --marker match-end
 ```
 
+Peek at a running capture without fetching the archive:
+
+```bash
+bin/windows-gaming-benchmark peek
+```
+
+`peek` reads bounded tails from `combined.csv`, `system.csv`,
+`top-processes.csv`, `target-threads.csv`, `markers.csv`, and recent Windows
+Search event 10024 warnings. It deliberately does not read the active
+`presentmon-console.csv`, because that file can be locked by PresentMon while a
+capture is running.
+
 Stop and fetch the capture archive for local analysis:
 
 ```bash
@@ -67,9 +79,8 @@ bin/windows-gaming-benchmark fetch --dest /tmp
 As of the 2026-08-26 regression capture, fetching while a capture is still
 active can fail because `presentmon-console.csv` is held open by the running
 sampler/PresentMon process. If you need an authoritative archive for analysis,
-use `stop --fetch`. For a quick mid-capture peek, read bounded CSV tails or
-summaries from the remote capture directory instead of starting duplicate fetch
-workers.
+use `stop --fetch`. For a quick mid-capture check, use `peek` instead of
+starting duplicate fetch workers.
 
 Fetch a specific Windows capture directory:
 

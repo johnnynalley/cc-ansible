@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-    [ValidateSet('Start', 'Stop', 'Status', 'Mark', 'Analyze', 'Preflight', 'SampleInteractive')]
+    [ValidateSet('Start', 'Stop', 'Status', 'Peek', 'Mark', 'Analyze', 'Preflight', 'SampleInteractive')]
     [string]$Action = 'Status',
     [string]$Label = 'game',
     [string]$Marker = '',
@@ -1744,6 +1744,187 @@ function Import-CsvSafe {
     return @()
 }
 
+function Import-CsvTailSafe {
+    param(
+        [string]$Path,
+        [int]$Tail = 240
+    )
+    if (-not $Path -or -not (Test-Path -LiteralPath $Path)) {
+        return @()
+    }
+    try {
+        $header = Get-Content -LiteralPath $Path -TotalCount 1 -ErrorAction Stop
+        if (-not $header) {
+            return @()
+        }
+        $tailLines = @(Get-Content -LiteralPath $Path -Tail $Tail -ErrorAction Stop)
+        if ($tailLines.Count -eq 0) {
+            return @()
+        }
+        $lines = if ($tailLines[0] -eq $header) { $tailLines } else { @($header) + $tailLines }
+        return @($lines | ConvertFrom-Csv)
+    } catch {
+        return @()
+    }
+}
+
+function Format-CountLine {
+    param(
+        [string]$Name,
+        [double[]]$Values
+    )
+    if (-not $Values -or $Values.Count -eq 0) {
+        return "${Name}: no data"
+    }
+    $below160 = @($Values | Where-Object { $_ -lt 160 }).Count
+    $below140 = @($Values | Where-Object { $_ -lt 140 }).Count
+    $below60 = @($Values | Where-Object { $_ -lt 60 }).Count
+    $atOrAbove190 = @($Values | Where-Object { $_ -ge 190 }).Count
+    return ("{0}: samples={1} below160={2} below140={3} below60={4} ge190={5}" -f $Name, $Values.Count, $below160, $below140, $below60, $atOrAbove190)
+}
+
+function Resolve-CaptureState {
+    if ($CaptureDir) {
+        return [pscustomobject]@{
+            RunDir = $CaptureDir
+            MarkersCsv = Join-Path $CaptureDir 'markers.csv'
+            CombinedCsv = Join-Path $CaptureDir 'combined.csv'
+            RtssCsv = Join-Path $CaptureDir 'rtss.csv'
+            MahmCsv = Join-Path $CaptureDir 'afterburner.csv'
+            PreflightCsv = Join-Path $CaptureDir 'preflight.csv'
+            WatchedProcessCsv = Join-Path $CaptureDir 'watched-processes.csv'
+            TopProcessCsv = Join-Path $CaptureDir 'top-processes.csv'
+            ThreadCsv = Join-Path $CaptureDir 'target-threads.csv'
+            SystemCsv = Join-Path $CaptureDir 'system.csv'
+            NvidiaSmiCsv = Join-Path $CaptureDir 'nvidia-smi.csv'
+        }
+    }
+    return Read-State
+}
+
+function Invoke-Peek {
+    $state = Resolve-CaptureState
+    if (-not $state) {
+        throw "No state or capture directory supplied."
+    }
+
+    $status = if (-not $CaptureDir) { Get-BenchmarkStatus } else { $null }
+    $combined = Import-CsvTailSafe -Path ([string]$state.CombinedCsv) -Tail 360
+    $system = Import-CsvTailSafe -Path ([string]$state.SystemCsv) -Tail 60
+    $threads = Import-CsvTailSafe -Path ([string]$state.ThreadCsv) -Tail 80
+    $topProcess = Import-CsvTailSafe -Path ([string]$state.TopProcessCsv) -Tail 180
+    $markers = Import-CsvTailSafe -Path ([string]$state.MarkersCsv) -Tail 30
+
+    $lines = [System.Collections.Generic.List[string]]::new()
+    if ($status) {
+        $lines.Add("Active: $($status.Active) sampler=$($status.SamplerActive) task=$($status.TaskState) pid=$($status.SamplerPid)")
+    }
+    $lines.Add("Capture: $($state.RunDir)")
+    if ($combined.Count -gt 0) {
+        $lines.Add("TailWindow: $($combined[0].Timestamp) -> $($combined[-1].Timestamp) rows=$($combined.Count)")
+        $targetGroups = $combined | Group-Object TargetProcessName | Sort-Object Count -Descending
+        $lines.Add("Targets:")
+        foreach ($group in $targetGroups) {
+            $name = if ($group.Name) { $group.Name } else { '<none>' }
+            $lines.Add("  $name rows=$($group.Count)")
+        }
+
+        $rtssFpsValues = Convert-ToDoubleArray -Rows $combined -Column 'RtssFpsWindow' -Minimum 1 -Maximum 1000
+        $rtssFrameValues = Convert-ToDoubleArray -Rows $combined -Column 'RtssFrameTimeMs' -Minimum 0.1 -Maximum 1000
+        $mahmFpsValues = Convert-ToDoubleArray -Rows $combined -Column 'MahmFps' -Minimum 1 -Maximum 1000
+        $mahmFrameValues = Convert-ToDoubleArray -Rows $combined -Column 'MahmFrameTimeMs' -Minimum 0.1 -Maximum 1000
+
+        $lines.Add((Get-StatsLine -Name 'RTSS FPS window' -Values $rtssFpsValues -Format 'N1'))
+        $lines.Add((Get-FpsLowLine -Name 'RTSS FPS lows' -Values $rtssFpsValues -Format 'N1'))
+        $lines.Add((Format-CountLine -Name 'RTSS FPS counts' -Values $rtssFpsValues))
+        $lines.Add((Get-FrameSpikeLine -Name 'RTSS frame spikes' -Values $rtssFrameValues -Format 'N2'))
+        $lines.Add((Get-StatsLine -Name 'Afterburner FPS' -Values $mahmFpsValues -Format 'N1'))
+        $lines.Add((Get-FrameSpikeLine -Name 'Afterburner frame spikes' -Values $mahmFrameValues -Format 'N2'))
+        $lines.Add((Get-StatsLine -Name 'MAHM GPU usage pct' -Values (Convert-ToDoubleArray -Rows $combined -Column 'GpuUsagePct' -Minimum 0 -Maximum 100) -Format 'N1'))
+        $lines.Add((Get-StatsLine -Name 'NVIDIA GPU util pct' -Values (Convert-ToDoubleArray -Rows $combined -Column 'NvidiaGpuUtilPct' -Minimum 0 -Maximum 100) -Format 'N1'))
+        $lines.Add((Get-StatsLine -Name 'CPU temp C' -Values (Convert-ToDoubleArray -Rows $combined -Column 'CpuTempC' -Minimum 0 -Maximum 120) -Format 'N1'))
+        $lines.Add((Get-StatsLine -Name 'CPU clock MHz' -Values (Convert-ToDoubleArray -Rows $combined -Column 'CpuClockMHz' -Minimum 0 -Maximum 7000) -Format 'N0'))
+        $lines.Add((Get-StatsLine -Name 'CPU max utility pct' -Values (Convert-ToDoubleArray -Rows $combined -Column 'CpuMaxUtilityPct' -Minimum 0 -Maximum 1000) -Format 'N1'))
+        $lines.Add((Get-StatsLine -Name 'Available memory MB' -Values (Convert-ToDoubleArray -Rows $combined -Column 'AvailableMBytes' -Minimum 0 -Maximum 131072) -Format 'N0'))
+        $lines.Add((Get-StatsLine -Name 'Pages/sec' -Values (Convert-ToDoubleArray -Rows $combined -Column 'PagesPerSec' -Minimum 0 -Maximum 1000000) -Format 'N1'))
+        $lines.Add((Get-StatsLine -Name 'Disk read latency ms' -Values (Convert-ToDoubleArray -Rows $combined -Column 'DiskReadLatencyMs' -Minimum 0 -Maximum 10000) -Format 'N2'))
+        $lines.Add((Get-StatsLine -Name 'Disk write latency ms' -Values (Convert-ToDoubleArray -Rows $combined -Column 'DiskWriteLatencyMs' -Minimum 0 -Maximum 10000) -Format 'N2'))
+
+        $worstFrames = @($combined |
+            Where-Object { $_.RtssFrameTimeMs } |
+            Sort-Object { [double]$_.RtssFrameTimeMs } -Descending |
+            Select-Object -First 8)
+        if ($worstFrames.Count -gt 0) {
+            $lines.Add("Worst recent RTSS frames:")
+            foreach ($row in $worstFrames) {
+                $lines.Add("  $($row.Timestamp) fps=$($row.RtssFpsWindow) frameMs=$($row.RtssFrameTimeMs) gpu=$($row.NvidiaGpuUtilPct) cpuTemp=$($row.CpuTempC) target=$($row.TargetProcessName)")
+            }
+        }
+    } else {
+        $lines.Add("CombinedTail: no readable rows")
+    }
+
+    if ($system.Count -gt 0) {
+        $lines.Add("SystemTailRows: $($system.Count)")
+        $lines.Add((Get-StatsLine -Name 'System available memory MB' -Values (Convert-ToDoubleArray -Rows $system -Column 'AvailableMBytes' -Minimum 0 -Maximum 131072) -Format 'N0'))
+        $lines.Add((Get-StatsLine -Name 'System disk queue length' -Values (Convert-ToDoubleArray -Rows $system -Column 'DiskQueueLength' -Minimum 0 -Maximum 10000) -Format 'N2'))
+    }
+
+    if ($threads.Count -gt 0) {
+        $lines.Add("Hottest recent target threads:")
+        $threads |
+            Sort-Object { [double]$_.OneThreadPct } -Descending |
+            Select-Object -First 8 |
+            ForEach-Object {
+                $lines.Add("  $($_.Timestamp) tid=$($_.ThreadId) oneThreadPct=$($_.OneThreadPct) state=$($_.State) wait=$($_.WaitReason)")
+            }
+    }
+
+    if ($topProcess.Count -gt 0) {
+        $lines.Add("Top recent sampled process CPU seconds:")
+        $topProcess | Group-Object ProcessName | ForEach-Object {
+            [pscustomobject]@{
+                ProcessName = $_.Name
+                CpuSeconds = ($_.Group | ForEach-Object { [double]$_.CpuSeconds } | Measure-Object -Sum).Sum
+            }
+        } | Sort-Object CpuSeconds -Descending | Select-Object -First 12 | ForEach-Object {
+            $lines.Add("  $($_.ProcessName) $([math]::Round($_.CpuSeconds, 2))")
+        }
+    }
+
+    $eventStart = (Get-Date).AddMinutes(-30)
+    if ($state.StartTime) {
+        try {
+            $eventStart = [datetime]::Parse([string]$state.StartTime)
+        } catch {
+            $eventStart = (Get-Date).AddMinutes(-30)
+        }
+    }
+    $searchEvents = @(Get-WinEvent -FilterHashtable @{
+        LogName = 'Application'
+        ProviderName = 'Microsoft-Windows-Search'
+        Id = 10024
+        StartTime = $eventStart
+    } -ErrorAction SilentlyContinue)
+    $lines.Add("Search10024SinceStart: $($searchEvents.Count)")
+    foreach ($event in ($searchEvents | Sort-Object TimeCreated -Descending | Select-Object -First 5)) {
+        $message = (($event.Message -replace '\s+', ' ').Trim())
+        if ($message.Length -gt 180) {
+            $message = $message.Substring(0, 180)
+        }
+        $lines.Add("  $($event.TimeCreated.ToString('o')) $message")
+    }
+
+    if ($markers.Count -gt 0) {
+        $lines.Add("Recent markers:")
+        foreach ($marker in $markers) {
+            $lines.Add("  $($marker.Timestamp) $($marker.Marker)")
+        }
+    }
+
+    $lines
+}
+
 function Invoke-Analyze {
     param(
         [object]$State = $null,
@@ -1955,6 +2136,7 @@ switch ($Action) {
     'Start' { Start-Benchmark }
     'Stop' { Stop-Benchmark }
     'Status' { Get-BenchmarkStatus }
+    'Peek' { Invoke-Peek }
     'Mark' { Mark-Benchmark }
     'Analyze' { Invoke-Analyze }
     'Preflight' { Invoke-BenchmarkPreflight }
