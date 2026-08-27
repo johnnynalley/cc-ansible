@@ -573,6 +573,20 @@ Thermals and system pressure:
   17.6 MB/s, and max was about 37.5 MB/s. The capture did not yet have
   per-process network attribution, so this is a strong lead for the next
   benchmark rather than a named culprit.
+- Offline correlation after the first analysis found that weak active minutes
+  often overlapped with high outbound traffic and scheduler/interrupt churn:
+  `22:25` averaged about 173.7 FPS with about 11.6 MiB/s sent, and `22:28`
+  averaged about 179.5 FPS with about 18.3 MiB/s average / 35.7 MiB/s max
+  sent. Nearby top non-Fortnite CPU bursts repeatedly included `firefox`,
+  `dwm`, `SignalRgb`, `nextcloud`, `System`, and later `MedalEncoder`. This is
+  not process-level network proof; use the next process-I/O-enabled capture to
+  attribute it.
+- Target thread sampling did not show one Fortnite thread permanently pinned at
+  100%; the hottest sampled thread reached about 92% of one logical processor.
+  The CPU-side issue is still real because PresentMon CPU busy stayed above the
+  5 ms / 200 FPS budget, but the shape is frame-critical work plus
+  scheduler/driver/background contention rather than a single always-maxed
+  thread.
 - Highest sampled non-Fortnite process pressure included `MedalEncoder`
   max 13.0% total CPU / 208% of one logical thread, `System` max 8.9% total,
   `nextcloud` max 7.1% total, `firefox` max 5.9% total, `dwm` max 4.6% total,
