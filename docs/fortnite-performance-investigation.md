@@ -271,6 +271,18 @@ Runtime pressure:
   SteelSeries Sonar max 75.5%, Explorer max 75.4%, SteelSeries GG Client max
   58.9%, SignalRGB max 56.3%, audiodg max 45.2%, SearchIndexer max 30%,
   MedalEncoder max 29.5%, Discord max 29.5%, and Defender `MsMpEng` max 28.1%.
+- Tracker.gg was present with multiple Electron/Overwolf-style helper
+  processes, including a GPU process and renderer processes, but it did not
+  appear as a meaningful CPU offender. The capture had only one top-process
+  row for `Tracker.gg`, at about 0.6% total CPU / 9.2% of one logical thread,
+  and the follow-up live samples showed its processes at 0% CPU except for one
+  10% one-thread blip.
+- NVIDIA GPU utilization was high in this capture, averaging roughly 80.7%
+  across RTSS rows and peaking at 94%. That is higher than the good-baseline
+  average, but high GPU peaks are not new by themselves: the June good capture
+  also reached about 93-97% GPU utilization at the high end. Treat the current
+  GPU pressure as contributory, especially because GPU busy p95 exceeded the
+  5 ms / 200 FPS budget, but not as the only bottleneck.
 - Context switches remained high, and the analyzer classified a hot logical
   processor plus scheduler churn/driver-interrupt pressure. This is similar in
   shape to the old frame-critical-thread bottleneck, but with more active
@@ -290,12 +302,14 @@ Interpretation:
      clean match segment after startup/transition stalls settle.
   2. If still bad, test with Medal fully closed/disabled first because it
      changed on 2026-08-23 and had an encoder process present.
-  3. Test with SignalRGB and Corsair/iCUE background components disabled only
+  3. Test with Tracker.gg/Overwolf closed as an overlay-hook A/B even though it
+     was not a CPU-heavy process in this capture.
+  4. Test with SignalRGB and Corsair/iCUE background components disabled only
      for the session, because `KB5121003` has an official RGB-driver/game
      known issue and this machine has Corsair/SignalRGB kernel drivers loaded.
-  4. If that still fails, compare a known-stable NVIDIA driver rollback against
+  5. If that still fails, compare a known-stable NVIDIA driver rollback against
      the current 610.62 branch.
-  5. Only after those checks should broader Windows update rollback be
+  6. Only after those checks should broader Windows update rollback be
      considered, because `KB5121003` is a security cumulative update.
 
 ## CPU Upgrade Status
