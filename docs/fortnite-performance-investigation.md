@@ -288,28 +288,59 @@ Runtime pressure:
   shape to the old frame-critical-thread bottleneck, but with more active
   background pressure than the June good capture.
 
+Live follow-up snapshot at `2026-08-26T20:21:00-05:00` while Fortnite was
+running:
+
+- Fortnite's saved config had changed since the capture: `FrameRateLimit=0.000000`
+  and `FrontendFrameRateLimit=120`. Treat `FrameRateLimit=0` as uncapped
+  gameplay FPS. This directly explains why the lobby can still look like a
+  120 FPS cap while gameplay drives higher GPU utilization.
+- The config file had a last write time of `2026-08-26 20:19:41` local.
+- HAGS remained disabled through `HwSchMode=1`; MPO stayed at Windows default
+  because `OverlayTestMode` was absent.
+- Game Mode-related registry values read `AutoGameModeEnabled=0` and
+  `AllowAutoGameMode=0`. Because Game Bar/Game Mode are intentionally no
+  longer Ansible-owned, verify this through the Windows Settings GUI before
+  changing it with registry writes.
+- Active GPU engine users included Fortnite graphics/compute, DWM 3D, Firefox
+  3D/video decode, MedalEncoder video encode, Discord Clips video encode, Epic
+  Launcher 3D, SteelSeries GG 3D, Rockstar SocialClub helper 3D, and a small
+  Tracker.gg 3D entry.
+
 Interpretation:
 
-- The regression is real in telemetry. It is not explained by a reset RAM
-  clock, wrong power plan, display refresh cap, Fortnite FPS cap, high-res
-  textures, or thermal throttling.
-- The strongest current suspects are recent Windows/RGB-driver interaction
-  from `KB5121003`, the same-day Fortnite content/update churn, currently hot
-  RGB/audio/sync/overlay processes, and the NVIDIA 610.62 driver difference
-  from the last documented good baseline.
+- The regression is real in telemetry. The original capture was not explained
+  by a reset RAM clock, wrong power plan, display refresh cap, high-res
+  textures, or thermal throttling. The live follow-up did identify a new
+  gameplay FPS-cap drift that must be corrected before the next comparison.
+- The live follow-up supersedes the earlier "Fortnite FPS cap stayed 200"
+  interpretation for current testing. The capture began with a 200-cap state,
+  but the live config now shows uncapped gameplay. Restore the gameplay cap
+  before blaming Tracker.gg, Medal, or broader Windows/RGB-driver changes.
+- Remaining suspects after restoring the cap are recent Windows/RGB-driver
+  interaction from `KB5121003`, the same-day Fortnite content/update churn,
+  currently hot RGB/audio/sync/overlay processes, HAGS-disabled behavior under
+  heavier GPU load, and the NVIDIA 610.62 driver difference from the last
+  documented good baseline.
 - Before changing settings, prefer a clean A/B sequence:
-  1. Reboot once, start Fortnite with the same normal workload, and capture a
+  1. Restore Fortnite's gameplay FPS cap to the intended 200 FPS value through
+     the in-game UI if possible, then capture the same normal workload.
+  2. Verify Game Mode in the Windows Settings GUI; do not force registry values
+     unless the GUI state and registry state are reconciled.
+  3. If still bad, run the already-planned HAGS A/B because current GPU load is
+     high and HAGS is still disabled.
+  4. Reboot once, start Fortnite with the same normal workload, and capture a
      clean match segment after startup/transition stalls settle.
-  2. If still bad, test with Medal fully closed/disabled first because it
+  5. If still bad, test with Medal fully closed/disabled first because it
      changed on 2026-08-23 and had an encoder process present.
-  3. Test with Tracker.gg/Overwolf closed as an overlay-hook A/B even though it
+  6. Test with Tracker.gg/Overwolf closed as an overlay-hook A/B even though it
      was not a CPU-heavy process in this capture.
-  4. Test with SignalRGB and Corsair/iCUE background components disabled only
+  7. Test with SignalRGB and Corsair/iCUE background components disabled only
      for the session, because `KB5121003` has an official RGB-driver/game
      known issue and this machine has Corsair/SignalRGB kernel drivers loaded.
-  5. If that still fails, compare a known-stable NVIDIA driver rollback against
+  8. If that still fails, compare a known-stable NVIDIA driver rollback against
      the current 610.62 branch.
-  6. Only after those checks should broader Windows update rollback be
+  9. Only after those checks should broader Windows update rollback be
      considered, because `KB5121003` is a security cumulative update.
 
 ## CPU Upgrade Status
