@@ -308,6 +308,21 @@ running after Johnny intentionally uncapped gameplay FPS as a headroom test:
   `AllowAutoGameMode=0`. Because Game Bar/Game Mode are intentionally no
   longer Ansible-owned, verify this through the Windows Settings GUI before
   changing it with registry writes.
+- Follow-up evidence points to Medal as the likely owner of the disabled Game
+  Mode state, not Tracker.gg or random Windows drift. Official Medal support
+  documents a Medal UI toggle under Settings > Windows OS Settings > Advanced
+  Settings that automatically disables Windows Game Mode for clip performance:
+  <https://support.medal.tv/support/solutions/articles/48000922112>.
+  The installed Medal app code contains `WindowsGameModeDisabled`, defaults it
+  to `true`, and the user's Medal profile has that key persisted in
+  `medal-guest.db-wal`. Current registry values are
+  `AutoGameModeEnabled=0` and `AllowAutoGameMode=0`.
+- Microsoft's older Game Mode API documentation says foreground games can
+  receive priority/exclusive resource treatment and increased GPU
+  prioritization, with the benefit depending on competing background activity:
+  <https://learn.microsoft.com/en-us/previous-versions/windows/desktop/gamemode/game-mode-portal>.
+  That makes Game Mode a valid Fortnite A/B test on this system, especially
+  with normal creator apps left running, but not a guaranteed win.
 - Active GPU engine users included Fortnite graphics/compute, DWM 3D, Firefox
   3D/video decode, MedalEncoder video encode, Discord Clips video encode, Epic
   Launcher 3D, SteelSeries GG 3D, Rockstar SocialClub helper 3D, and a small
@@ -329,8 +344,10 @@ Interpretation:
 - Before changing settings, prefer a clean A/B sequence:
   1. Use the restored 200 FPS gameplay cap for competitive frame-pacing tests;
      leave uncapped only when intentionally measuring raw headroom.
-  2. Verify Game Mode in the Windows Settings GUI; do not force registry values
-     unless the GUI state and registry state are reconciled.
+  2. Run a Game Mode A/B by turning off Medal's "disable Windows Game Mode"
+     behavior through the Medal UI, then verifying Windows Settings/registry
+     before capturing. Keep Tracker.gg and Medal otherwise running for this
+     test so the result answers the actual workflow question.
   3. If still bad, run the already-planned HAGS A/B because current GPU load is
      high and HAGS is still disabled.
   4. Reboot once, start Fortnite with the same normal workload, and capture a
