@@ -129,6 +129,40 @@ function Test-TextMatchesAnyPattern {
     return $false
 }
 
+function Redact-ProcessCommandLine {
+    param([AllowNull()][string]$CommandLine)
+    if (-not $CommandLine) {
+        return $CommandLine
+    }
+    $redacted = [string]$CommandLine
+    $rules = @(
+        @{
+            Pattern = '(?i)([-/]AUTH_(?:LOGIN|PASSWORD|TYPE)\s*=\s*)("[^"]+"|\S+)'
+            Replacement = '${1}<redacted>'
+        },
+        @{
+            Pattern = '(?i)([-/]caldera\s*=\s*)("[^"]+"|\S+)'
+            Replacement = '${1}<redacted>'
+        },
+        @{
+            Pattern = '(?i)((?:access_token|refresh_token|id_token|client_secret|sentry_key|api_key|apikey|password|token)=)([^&\s"]+)'
+            Replacement = '${1}<redacted>'
+        },
+        @{
+            Pattern = '(?i)((?:--|-|/)(?:access-token|refresh-token|id-token|client-secret|api-key|apikey|password|token)\s+)"[^"]+"'
+            Replacement = '${1}"<redacted>"'
+        },
+        @{
+            Pattern = '(?i)((?:--|-|/)(?:access-token|refresh-token|id-token|client-secret|api-key|apikey|password|token)\s+)\S+'
+            Replacement = '${1}<redacted>'
+        }
+    )
+    foreach ($rule in $rules) {
+        $redacted = [regex]::Replace($redacted, [string]$rule.Pattern, [string]$rule.Replacement)
+    }
+    return $redacted
+}
+
 function Get-ProcessCreationDate {
     param([object]$CimProcess)
     if (-not $CimProcess -or -not $CimProcess.CreationDate) {
@@ -220,8 +254,9 @@ function Invoke-PreflightCheck {
         $ageSeconds = if ($created) { [math]::Round(($now - $created).TotalSeconds, 0) } else { $null }
         $workingSetMBytes = if ($process) { [math]::Round($process.WorkingSet64 / 1MB, 1) } else { $null }
         $privateMBytes = if ($process) { [math]::Round($process.PrivateMemorySize64 / 1MB, 1) } else { $null }
-        $commandLine = [string]$cimProcess.CommandLine
-        $allowed = Test-TextMatchesAnyPattern -Text $commandLine -Patterns $PreflightAllowedPowerShellPatterns
+        $rawCommandLine = [string]$cimProcess.CommandLine
+        $commandLine = Redact-ProcessCommandLine -CommandLine $rawCommandLine
+        $allowed = Test-TextMatchesAnyPattern -Text $rawCommandLine -Patterns $PreflightAllowedPowerShellPatterns
         $oldEnough = $null -ne $ageSeconds -and $ageSeconds -ge $PreflightStalePowerShellAgeSeconds
         $largeEnough = (
             ($null -ne $workingSetMBytes -and $workingSetMBytes -ge $PreflightPowerShellWorkingSetMBytes) -or
@@ -382,7 +417,7 @@ function Write-ProcessInventory {
             ParentProcessId = $cimProcess.ParentProcessId
             SessionId = $cimProcess.SessionId
             ExecutablePath = $cimProcess.ExecutablePath
-            CommandLine = $cimProcess.CommandLine
+            CommandLine = Redact-ProcessCommandLine -CommandLine $cimProcess.CommandLine
             CpuSeconds = if ($process -and $null -ne $process.CPU) { [math]::Round($process.CPU, 3) } else { $null }
             WorkingSetMB = if ($process) { [math]::Round($process.WorkingSet64 / 1MB, 1) } else { $null }
             PrivateMemoryMB = if ($process) { [math]::Round($process.PrivateMemorySize64 / 1MB, 1) } else { $null }

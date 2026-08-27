@@ -16,6 +16,8 @@
   outbound network traffic as a follow-up attribution lead. When `event-log.csv`
   is present, it summarizes warning/error event providers and flags likely
   Search, display-driver, WHEA, disk, and app-hang evidence.
+  Process inventory command lines are expected to be redacted by the managed
+  Windows capture template before local analysis.
   Run locally on fetched capture output, for example
   `python3 scripts/gaming/analyze-gaming-capture.py <path>`.
 - `capture-wasapi-endpoint.ps1`: Records a short diagnostic WAV directly from

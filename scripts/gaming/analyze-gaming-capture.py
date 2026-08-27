@@ -2,6 +2,7 @@
 import csv
 import json
 import math
+import re
 import statistics
 import sys
 from collections import Counter, defaultdict
@@ -282,6 +283,29 @@ def truncate(text, length=240):
     return text[: length - 3] + "..."
 
 
+def redact_command_line(text):
+    text = str(text or "")
+    rules = (
+        (r"(?i)([-/]AUTH_(?:LOGIN|PASSWORD|TYPE)\s*=\s*)(\"[^\"]+\"|\S+)", r"\1<redacted>"),
+        (r"(?i)([-/]caldera\s*=\s*)(\"[^\"]+\"|\S+)", r"\1<redacted>"),
+        (
+            r"(?i)((?:access_token|refresh_token|id_token|client_secret|sentry_key|api_key|apikey|password|token)=)([^&\s\"]+)",
+            r"\1<redacted>",
+        ),
+        (
+            r"(?i)((?:--|-|/)(?:access-token|refresh-token|id-token|client-secret|api-key|apikey|password|token)\s+)\"[^\"]+\"",
+            r'\1"<redacted>"',
+        ),
+        (
+            r"(?i)((?:--|-|/)(?:access-token|refresh-token|id-token|client-secret|api-key|apikey|password|token)\s+)\S+",
+            r"\1<redacted>",
+        ),
+    )
+    for pattern, replacement in rules:
+        text = re.sub(pattern, replacement, text)
+    return text
+
+
 def summarize_inventory_pollution(root):
     allowed_powershell = (
         "windows-gaming-benchmark.ps1",
@@ -326,7 +350,7 @@ def summarize_inventory_pollution(root):
                 "max_working_set_mb": rec["max_working_set_mb"],
                 "max_private_mb": rec["max_private_mb"],
                 "max_cpu_seconds": rec["max_cpu_seconds"],
-                "command_line": truncate(command_line),
+                "command_line": truncate(redact_command_line(command_line)),
             })
         if name == "memory compression" and rec["max_working_set_mb"] >= 1024:
             warnings.append({

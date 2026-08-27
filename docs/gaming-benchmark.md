@@ -152,6 +152,11 @@ The capture script writes:
 - `obs-profile.csv`
 - `preflight.csv`
 
+`process-inventory.csv` includes executable path and redacted command-line
+context. It must not store raw launcher/game auth arguments; the managed
+template redacts common token, password, API key, and Fortnite launch auth
+fields before writing rows.
+
 ## Telemetry Sources
 
 The benchmark harness is not supposed to rely on PresentMon as the only signal.
