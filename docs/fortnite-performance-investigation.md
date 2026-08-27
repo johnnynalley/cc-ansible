@@ -500,6 +500,84 @@ Stopped/fetched analysis:
   3. Run HAGS enabled/disabled A/B with reboot and capture after the cache and
      Search-stall candidates are handled or ruled out.
 
+## 2026-08-26 Rezon 1v1s After Shader-Cache Clear
+
+Capture:
+
+```text
+C:\Users\jn\AppData\Local\WindowsGamingBenchmark\Captures\20260826-222037-fortnite-rezon-1v1s-after-shader-cache-20260826
+```
+
+Local archive/analyzed copy:
+
+```text
+/tmp/LJ-GAMING-PC-20260826-222037-fortnite-rezon-1v1s-after-shader-cache-20260826.zip
+/tmp/LJ-GAMING-PC-20260826-222037-fortnite-rezon-1v1s-after-shader-cache-20260826
+/tmp/LJ-GAMING-PC-20260826-222037-analysis.json
+```
+
+Context:
+
+- This was a Rezon 1v1s Creative capture immediately after the shader-cache
+  clear, so do not compare it as identical workload to BR, Go Goated, Cup Zone
+  Wars, or Duo baselines.
+- Capture ran from `2026-08-26T22:20:37-05:00` to
+  `2026-08-26T22:43:21-05:00`.
+- No affinity, priority, or power-plan override was applied.
+- Preflight allowed and recorded one warning: Memory Compression working set
+  was 1,786.1 MB before start, while available memory was still about 10.7 GB.
+- A live read-only System/Application warning/error query across the capture
+  window returned no events. The capture archive has no `event-log.csv` rows.
+
+Visible FPS and frame pacing:
+
+- RTSS all rows: average 183.1 FPS, p50 188.0 FPS, p95 198.0 FPS, p99
+  199.8 FPS, max 201.0 FPS.
+- RTSS gameplay-ish `fps >= 140`: average 186.0 FPS, p50 188.2 FPS, p95
+  198.0 FPS, p99 199.8 FPS. Frame-time p95 was 8.11 ms, p99 11.72 ms, max
+  22.16 ms, with only two samples over 16.67 ms and none over 25 ms.
+- RTSS near-cap `fps >= 180`: average 190.8 FPS, p50 191.9 FPS, p95 198.0
+  FPS, p99 199.8 FPS. Frame-time p95 was 7.47 ms, p99 9.94 ms, max 22.16 ms.
+- Full-window frame-time p99 was 13.16 ms. The ugly tail was p999 406 ms and
+  max 458 ms by RTSS, with three RTSS samples over 50 ms.
+- PresentMon was valid in this capture: all 218,384 rows were
+  `Hardware: Independent Flip`. PresentMon all-window average frame time was
+  6.20 ms, CPU busy averaged 5.92 ms, and GPU busy averaged 4.34 ms. Trimmed
+  first-60/last-30 values were similar: 6.14 ms frame, 5.86 ms CPU busy, and
+  4.35 ms GPU busy.
+
+Thermals and system pressure:
+
+- MAHM CPU temperature averaged 78.9 C, p95 80.1 C, p99 82.3 C, max 83.3 C.
+  CPU clock averaged 4,438 MHz and maxed 4,450 MHz. This does not show thermal
+  throttling.
+- NVIDIA SMI GPU utilization averaged 84.8%, p95 94%, max 95%; GPU temperature
+  maxed 58 C, VRAM used maxed about 2.68 GB, and PCIe stayed Gen4 x16.
+- System p95 max CPU utility was 123.7%, p95 context switches were about
+  327,733/sec, p95 DPC was 2.78%, and p95 interrupts were 4.85%.
+- Highest sampled non-Fortnite process pressure included `MedalEncoder`
+  max 13.0% total CPU / 208% of one logical thread, `System` max 8.9% total,
+  `nextcloud` max 7.1% total, `firefox` max 5.9% total, `dwm` max 4.6% total,
+  and `SignalRgb` max 4.1% total. `Tracker.gg` remained low in sampled CPU.
+
+Comparison and interpretation:
+
+- This was substantially better than the earlier 2026-08-26 Game Mode run:
+  gameplay-ish RTSS average improved from 174.2 FPS to 186.0 FPS, and full
+  RTSS p99 frame time improved from about 602 ms to 13.16 ms.
+- It is still weaker than the June good baselines in raw near-cap behavior:
+  June Go Goated gameplay-ish averaged 195.5 FPS, and the June Duo loaded
+  gameplay-ish band averaged 196.5 FPS. Because Rezon 1v1s is a different map,
+  treat that as a regression signal, not a direct map-for-map loss.
+- The remaining issue is not thermals, RAM exhaustion, display mode capture
+  validity, or a simple inability to approach 200 FPS. The data still points to
+  frame-critical CPU work plus scheduler/driver/background churn, with GPU load
+  higher than the June baselines but not thermally limited.
+- Next measurement should include one ignored warmup after the shader-cache
+  clear, then another Rezon 1v1s capture with explicit `round-start`,
+  `round-end`, and any visible hitch markers so load/exit spikes can be
+  separated from active fighting.
+
 ## CPU Upgrade Status
 
 Johnny ordered a Ryzen 7 5700X3D, but the installed CPU is verified as a Ryzen 7 5800X3D. The BIOS, Windows WMI, and `HKLM:\HARDWARE\DESCRIPTION\System\CentralProcessor\0` all report `AMD Ryzen 7 5800X3D 8-Core Processor`. Treat the 5800X3D as the installed and benchmark-relevant CPU.
