@@ -64,6 +64,18 @@ Search event 10024 warnings. It deliberately does not read the active
 `presentmon-console.csv`, because that file can be locked by PresentMon while a
 capture is running.
 
+After the managed script has already been deployed, use the lower-overhead form
+during active gameplay:
+
+```bash
+bin/windows-gaming-benchmark peek --no-deploy
+```
+
+Even `peek --no-deploy` still runs a remote PowerShell action and can perturb a
+competitive match. Prefer markers and final `stop --fetch` for authoritative
+analysis, and avoid repeated live peeks unless the diagnostic value outweighs
+the risk of adding its own stutter.
+
 Stop and fetch the capture archive for local analysis:
 
 ```bash

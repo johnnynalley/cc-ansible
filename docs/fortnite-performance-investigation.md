@@ -402,6 +402,12 @@ Partial live findings before the capture was stopped/fetched:
   `observed-repeat-fps-collapse-20260826-211703`. This supports treating the
   current regression primarily as intermittent stalls/lows rather than a
   simple inability to render near 200 FPS.
+- A follow-up full Ansible `peek` over `21:17:29-21:25:10` observed a worse
+  freeze around `21:24:51-21:24:55`, with repeated RTSS samples at 11.75 FPS
+  and 2,225 ms frame time. Because that freeze overlapped with the remote
+  full-playbook peek itself, treat it as possibly probe-induced until a final
+  stopped/fetched capture proves otherwise. The harness now documents
+  `peek --no-deploy` as the lower-overhead active-game check.
 - Windows Application events line up with that collapse: five
   `Microsoft-Windows-Search` event `10024` warnings at `21:07:36-21:07:42`
   reported unresponsive Search filter hosts being forcibly terminated.

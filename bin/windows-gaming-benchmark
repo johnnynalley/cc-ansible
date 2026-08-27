@@ -5,7 +5,7 @@ usage() {
   cat <<'EOF'
 Usage:
   bin/windows-gaming-benchmark status
-  bin/windows-gaming-benchmark peek [--capture-dir WINDOWS_PATH]
+  bin/windows-gaming-benchmark peek [--capture-dir WINDOWS_PATH] [--no-deploy]
   bin/windows-gaming-benchmark preflight
   bin/windows-gaming-benchmark start --label LABEL [--affinity PRESET] [--priority CLASS] [--power PLAN] [--allow-preflight-warnings]
   bin/windows-gaming-benchmark mark --marker NAME
@@ -33,6 +33,9 @@ Common options:
                              Record preflight warnings without blocking start.
   --fetch                   Fetch after the action completes.
   --dest DIR                Local fetch destination. Default: /tmp.
+  --no-deploy               Skip installing benchmark tooling before read-only
+                             actions. Use only after the managed script is
+                             already deployed.
 EOF
 }
 
@@ -54,6 +57,7 @@ capture_dir=""
 fetch_capture="false"
 fetch_dest="/tmp"
 preflight_fail_on_warnings="true"
+deploy_tooling="true"
 
 case "${action_raw,,}" in
   start) action="Start" ;;
@@ -120,6 +124,10 @@ while [[ $# -gt 0 ]]; do
       fetch_dest="${2:?missing value for --dest}"
       shift 2
       ;;
+    --no-deploy)
+      deploy_tooling="false"
+      shift
+      ;;
     -h|--help)
       usage
       exit 0
@@ -161,6 +169,7 @@ ansible_args=(
   -e "windows_gaming_benchmark_fetch_run_dir=$capture_dir"
   -e "windows_gaming_benchmark_fetch_dest=$fetch_dest"
   -e "windows_gaming_benchmark_preflight_fail_on_warnings=$preflight_fail_on_warnings"
+  -e "windows_gaming_benchmark_deploy_tooling=$deploy_tooling"
 )
 
 ansible-playbook "${ansible_args[@]}"

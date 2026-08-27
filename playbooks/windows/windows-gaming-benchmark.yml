@@ -30,11 +30,13 @@
         - "{{ windows_gaming_benchmark_script_dir }}"
         - "{{ windows_gaming_benchmark_state_dir }}"
         - "{{ windows_gaming_benchmark_capture_dir }}"
+      when: windows_gaming_benchmark_deploy_tooling | default(true) | bool
 
     - name: Install Windows gaming benchmark script
       ansible.windows.win_template:
         src: "{{ ansible_config_file | dirname }}/templates/windows/windows-gaming-benchmark.ps1.j2"
         dest: "{{ windows_gaming_benchmark_script_dir }}\\windows-gaming-benchmark.ps1"
+      when: windows_gaming_benchmark_deploy_tooling | default(true) | bool
 
     - name: Remove legacy Windows gaming benchmark script directories
       ansible.windows.win_powershell:
@@ -59,6 +61,7 @@
                   }
               }
           }
+      when: windows_gaming_benchmark_deploy_tooling | default(true) | bool
 
     - name: Run Windows gaming benchmark action
       ansible.windows.win_powershell:
