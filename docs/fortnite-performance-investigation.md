@@ -671,10 +671,114 @@ Comparison and interpretation:
   frame-critical CPU work plus scheduler/driver/background churn, high
   outbound network activity during the run, and GPU load higher than the June
   baselines but not thermally limited.
-- Next measurement should be another normal Rezon 1v1s or similarly repeatable
-  Creative session after the benchmark harness process-I/O update is deployed.
-  Use explicit `round-start`, `round-end`, and any visible hitch markers so
-  load/exit spikes can be separated from active fighting.
+- The requested follow-up was run on 2026-08-29 after closing Tracker.gg,
+  Firefox, and Medal. See `2026-08-29 Rezon 1v1s Clean App-Isolation Capture`.
+
+## 2026-08-29 Rezon 1v1s Clean App-Isolation Capture
+
+Capture:
+
+```text
+C:\Users\jn\AppData\Local\WindowsGamingBenchmark\Captures\20260829-140742-fortnite-rezon-1v1s-clean-no-tracker-firefox-medal-20260829
+```
+
+Local archive/analyzed copy:
+
+```text
+/tmp/LJ-GAMING-PC-20260829-140742-fortnite-rezon-1v1s-clean-no-tracker-firefox-medal-20260829.zip
+/tmp/LJ-GAMING-PC-20260829-140742-fortnite-rezon-1v1s-clean-no-tracker-firefox-medal-20260829
+/tmp/LJ-GAMING-PC-20260829-140742-analysis.json
+```
+
+Context:
+
+- Johnny closed Tracker.gg, Firefox, and Medal before this capture.
+- Process inventory for the capture did not find `firefox`, `medal`, or
+  `tracker` processes.
+- Capture ran from `2026-08-29T14:07:42-05:00` to
+  `2026-08-29T14:15:40-05:00`.
+- No affinity, priority, or power-plan override was applied.
+- Preflight recorded no warnings.
+- Markers:
+  - `loading-lobby-120fps-cap` at `2026-08-29T14:09:19-05:00`
+  - `heavy-loading-fps-drops` at `2026-08-29T14:11:01-05:00`
+  - `match-end-clean-rezon-1v1s` at `2026-08-29T14:14:46-05:00`
+- The capture archive had no System/Application warning/error event rows.
+
+Visible FPS and frame pacing:
+
+- RTSS all rows: average 158.6 FPS, p50 197.8 FPS, p95 200.0 FPS, p99
+  201.0 FPS. This all-window average is depressed by loading stalls and the
+  120 FPS lobby/tail state; it is not the stable gameplay result.
+- RTSS gameplay-ish `fps >= 140`: average 198.6 FPS, p50 199.8 FPS, p95
+  200.2 FPS, p99 201.0 FPS. Frame-time p95 was 5.95 ms, p99 6.85 ms, max
+  8.96 ms, with zero sampled rows over 16.67 ms.
+- RTSS near-cap `fps >= 180`: average 199.0 FPS, p50 199.8 FPS, p95
+  200.3 FPS, p99 201.0 FPS. Frame-time p99 was 6.85 ms and max was 8.96 ms.
+- The best stable run from `14:10:48` through `14:14:02` averaged 198.7 FPS
+  by RTSS, with p50 199.8 FPS and max sampled frame time 8.96 ms.
+- PresentMon was in `Hardware: Independent Flip`. For the clean stable window
+  from `14:10:48` through `14:13:59`, PresentMon frame time averaged 5.03 ms,
+  CPU busy averaged 4.84 ms, and GPU busy averaged 2.04 ms. PresentMon still
+  recorded a small number of >16.67 ms frames inside that stable window, but
+  no >50 ms frames before the end-transition boundary.
+
+Loading and transition stalls:
+
+- The heavy loading issue is real and separate from the stable gameplay
+  result. RTSS recorded 34 rows under 100 FPS or with >25 ms frame time.
+- Early loading/launch from `14:07:48` through `14:09:05` averaged 109.7 FPS
+  by RTSS with max sampled frame time 1,276.8 ms. A nearby system sample
+  showed page-fault activity up to 493,802/sec and pages/sec around 49.8, but
+  disk read/write latency counters stayed at 0.
+- The pre-heavy-loading cluster from `14:10:20` through `14:10:48` averaged
+  86.1 FPS by RTSS with max sampled frame time 1,319.3 ms. PresentMon for the
+  same cluster averaged 12.91 ms frame time and 12.73 ms CPU busy, with GPU
+  busy only 2.78 ms. That points to CPU/game-transition work with the GPU
+  mostly waiting, not GPU saturation.
+- The end transition around `14:14:03` through `14:14:08` also had severe
+  sampled stalls before the capture settled into the 120 FPS lobby/tail.
+- No Windows event-log warning/error rows, disk-latency spikes, or high
+  outbound upload signal accompanied this clean capture. Network sent was
+  negligible compared with the 2026-08-26 Rezon run.
+
+Thermals and system pressure:
+
+- MAHM CPU temperature averaged 65.3 C, p95 71.9 C, max 73.0 C. In the stable
+  gameplay window, CPU temperature averaged about 64.3 C and maxed 68.9 C.
+- CPU clocks stayed at 4,450 MHz in MAHM, and system CPU max utility p95 was
+  92.6%.
+- NVIDIA SMI GPU utilization averaged 36.9%, p95 41.6%, max 43%. GPU
+  temperature maxed 47 C and VRAM used maxed about 1.75 GB.
+- Context-switch and interrupt pressure were much lower than the 2026-08-26
+  Rezon run: context switches p95 about 117k/sec versus 328k/sec, DPC p95
+  1.84% versus 2.78%, interrupt p95 1.52% versus 4.85%.
+- Memory state was healthy: available memory averaged 17.2 GB, commit averaged
+  26.9 GB, and no preflight memory warnings were present.
+
+Comparison and interpretation:
+
+- Closing Tracker.gg, Firefox, and Medal produced a strong clean-condition win
+  versus the 2026-08-26 Rezon capture. Gameplay-ish RTSS average improved from
+  186.0 FPS to 198.6 FPS, and p50 improved from 188.2 FPS to 199.8 FPS.
+- Near-cap RTSS average improved from 190.8 FPS to 199.0 FPS, and near-cap p99
+  frame time improved from 9.94 ms to 6.85 ms.
+- The old capture had high GPU utilization, high outbound upload, high
+  scheduler/interrupt pressure, a Memory Compression preflight warning, and
+  active Tracker/Firefox/Medal process presence. The clean run removed those
+  app processes and the system-pressure profile improved substantially.
+- This does not prove which one of Tracker.gg, Firefox, or Medal was the
+  primary drag, because all three changed together. It does prove the clean
+  condition can restore Rezon 1v1s stable gameplay to near the 200 FPS cap.
+- Remaining issue: loading/transition stalls are still ugly. They look like
+  CPU-side game/asset/session-transition stalls with GPU waiting, not a steady
+  gameplay FPS ceiling, not thermals, not disk latency from the sampled
+  counters, and not Windows event-log errors.
+- Next controlled attribution path: keep Firefox closed because of the
+  separate 2026-08-29 virtual-memory crash RCA, then reintroduce only one of
+  Medal or Tracker.gg at a time in Rezon 1v1s. Use explicit markers for
+  loading start, gameplay start, and match/round end so transition stalls stay
+  separated from active fighting.
 
 ## CPU Upgrade Status
 
