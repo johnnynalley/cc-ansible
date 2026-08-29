@@ -200,21 +200,27 @@ Do not manually delete paks. Use Epic Games Launcher options for this setting.
    - the old OBS delta was measured on the previous 3900X baseline, where non-OBS gameplay was around 151 FPS and OBS recording was around 99-102 FPS
    - post-5800X3D clean gameplay now looks strong in Rezon 1v1s and BR, so the next meaningful tests are app-attribution and the real streaming stack, not more stripped-offline proof that the CPU upgrade works
    - first tests: normal streaming scene with stream relay, OBS preview enabled vs disabled, Game Capture stability/admin state, and whether the relay/offload path adds any measurable encode/capture pressure on the gaming PC
-2. HAGS A/B if the user approves another reboot-level graphics test:
+2. App-attribution follow-up:
+   - clean BR with Firefox/Medal/Tracker closed averaged 198.7 FPS in the gameplay-ish band
+   - BR with Firefox + Tracker open and Medal absent averaged 195.1 FPS in the gameplay-ish band, with higher GPU usage, RAM use, context switches, network traffic, and transition stalls
+   - Johnny's real workflow includes watching streams in Firefox while keeping Tracker.gg open, so treat Firefox + Tracker / no-Medal as the desired-workflow baseline
+   - next split should add Medal only on top of the same Firefox + Tracker state; if that regresses, Medal becomes the practical culprit for the workflow, even if Firefox/browser media has its own measurable baseline cost
+   - keep Firefox restart/closure as the safest pre-session habit because of the separate virtual-memory crash RCA
+3. HAGS A/B if the user approves another reboot-level graphics test:
    - current managed state disables HAGS with `HwSchMode=1`
    - Epic's FPS guide recommends enabling HAGS when available
    - test HAGS only after the current loaded baseline is preserved, and do not combine it with render-mode changes in the same run
-3. VBS/HVCI diagnostic A/B remains available only if Johnny accepts the reversible security tradeoff:
+4. VBS/HVCI diagnostic A/B remains available only if Johnny accepts the reversible security tradeoff:
    - the post-5800X3D baseline does not justify disabling it blindly
    - document current `msinfo32` / Core Isolation state before changing anything
    - if disabled for a test, reboot, run the same capture, and re-enable if there is no meaningful win
-4. Render-mode sanity checks, not a likely FPS unlock:
+5. Render-mode sanity checks, not a likely FPS unlock:
    - do not expect DX12 to beat Performance Mode for raw average FPS on this CPU-limited setup
    - DX11 or any legacy DX11 Performance path may be worth identifying only if it is still exposed/supported, but it is not expected to beat current Performance Mode for CPU frame time
    - keep render-mode tests as frame-pacing/stutter/OBS-interaction sanity checks, not likely 200 FPS paths
    - compare current Performance Mode against DX12 all-low/competitive only after multiple shader warm-up matches; if DX11 is still selectable, benchmark it separately
    - compare average FPS, 1%/0.1% lows, CPU Busy, GPU Busy, stutter markers, and input feel
-5. MPO / PresentMon validity follow-up:
+6. MPO / PresentMon validity follow-up:
    - live state before this change showed `OverlayTestMode=5`, which disables MPO
    - managed target state now removes `HKLM:\SOFTWARE\Microsoft\Windows\Dwm\OverlayTestMode`
    - applied live on 2026-06-13; verified registry value absent while HAGS remained `HwSchMode=1`
@@ -774,11 +780,10 @@ Comparison and interpretation:
   CPU-side game/asset/session-transition stalls with GPU waiting, not a steady
   gameplay FPS ceiling, not thermals, not disk latency from the sampled
   counters, and not Windows event-log errors.
-- Next controlled attribution path: keep Firefox closed because of the
-  separate 2026-08-29 virtual-memory crash RCA, then reintroduce only one of
-  Medal or Tracker.gg at a time in Rezon 1v1s. Use explicit markers for
-  loading start, gameplay start, and match/round end so transition stalls stay
-  separated from active fighting.
+- Next controlled attribution path was revised by Johnny's workflow
+  requirement: Firefox/stream viewing and Tracker.gg are expected to remain
+  open. Use the Firefox + Tracker / no-Medal BR run as the desired-workflow
+  baseline, then add Medal only on top of that state.
 
 ## 2026-08-29 BR Clean Follow-Up Capture
 
@@ -879,9 +884,130 @@ Comparison and interpretation:
 - The remaining measured pain is transition/loading/end-state stutter. Keep
   separating transition markers from fighting markers in future captures so
   load/return-to-lobby hitches do not pollute gameplay averages.
-- Next controlled attribution path remains: keep Firefox closed because of the
-  memory-crash RCA, then reintroduce only Medal or Tracker.gg one at a time.
-  After that, test the real OBS/streaming stack separately.
+- Next controlled attribution path follows Johnny's workflow requirement:
+  Firefox/stream viewing and Tracker.gg are expected to remain open. Use the
+  Firefox + Tracker / no-Medal BR run as the desired-workflow baseline, then
+  add Medal only on top of that state.
+
+## 2026-08-29 BR Firefox + Tracker / No-Medal Attribution Capture
+
+Capture:
+
+```text
+C:\Users\jn\AppData\Local\WindowsGamingBenchmark\Captures\20260829-153121-fortnite-br-firefox-tracker-no-medal-20260829
+```
+
+Local archive/analyzed copy:
+
+```text
+/tmp/LJ-GAMING-PC-20260829-153121-fortnite-br-firefox-tracker-no-medal-20260829.zip
+/tmp/LJ-GAMING-PC-20260829-153121-fortnite-br-firefox-tracker-no-medal-20260829
+/tmp/LJ-GAMING-PC-20260829-153121-analysis.json
+```
+
+Context:
+
+- Johnny opened Firefox and Tracker.gg before loading the next BR match.
+- Medal and MedalEncoder were absent in the structured process aggregate.
+- Capture ran from `2026-08-29T15:31:21-05:00` to
+  `2026-08-29T15:47:26-05:00`.
+- No affinity, priority, or power-plan override was applied.
+- Preflight had one warning: Memory Compression working set was about
+  1447.1 MB while available memory was about 14.1 GB.
+- Process-inventory pollution also flagged Memory Compression, maxing at about
+  1509.7 MB working set.
+- Markers:
+  - `br-loading-firefox-tracker-no-medal-20260829` at
+    `2026-08-29T15:31:39-05:00`
+  - `br-match-1-death-loading-next-firefox-tracker-no-medal-20260829` at
+    `2026-08-29T15:34:27-05:00`
+  - `br-match-2-done-firefox-tracker-no-medal-20260829` at
+    `2026-08-29T15:47:09-05:00`
+- The capture archive had no System/Application warning/error event rows.
+
+Visible FPS and frame pacing:
+
+- RTSS all rows averaged 182.4 FPS, p50 197.8 FPS, p95 200.0 FPS, and
+  p99 201.0 FPS. The all-window average is heavily pulled down by load,
+  death/return, next-load, and end clusters.
+- RTSS gameplay-ish `fps >= 140`: average 195.1 FPS, p50 198.0 FPS, p95
+  200.0 FPS, p99 201.0 FPS. Frame-time p95 was 7.36 ms, p99 was 8.80 ms,
+  max sampled frame time was 26.09 ms, and only one sampled row exceeded
+  16.67 ms.
+- RTSS near-cap `fps >= 180`: average 197.0 FPS, p50 198.0 FPS, p95
+  200.0 FPS, p99 201.0 FPS. Frame-time p99 was 8.69 ms and max was
+  26.09 ms.
+- The best stable run from `15:39:50` through `15:44:49` averaged 197.8 FPS
+  by RTSS, with p99 frame time 8.53 ms, max sampled frame time 12.94 ms, and
+  zero sampled rows over 16.67 ms.
+
+PresentMon and frame-pipeline data:
+
+- PresentMon was in `Hardware: Independent Flip` for 164,372 rows, so this
+  capture's PresentMon frame-pipeline data is usable.
+- PresentMon all-window frame time averaged 5.83 ms, p50 5.16 ms, p95
+  9.70 ms, p99 13.20 ms, and p99.9 30.13 ms. The max 3096.80 ms frame was
+  transition/load behavior, not clean fighting.
+- PresentMon CPU busy averaged 5.61 ms, p95 9.47 ms, and p99 12.91 ms.
+  GPU busy averaged 3.72 ms, p95 5.14 ms, and p99 5.81 ms.
+- Interpretation: this run had more CPU-frame-path pressure and more GPU work
+  than clean BR, but it still had long stretches near the 200 FPS cap.
+
+Transition stalls:
+
+- RTSS recorded 28 low/stall rows under 100 FPS or over 25 ms, compared with
+  7 in the clean BR run.
+- Most low/stall rows clustered around:
+  - initial load: `15:31:51` through `15:31:58`
+  - match-1 death/return: `15:34:07` through `15:34:14`
+  - next-load/start: `15:34:43` through `15:34:49`
+  - end/return: `15:46:50` through `15:46:56`
+- The only near-gameplay sampled hitch outside those clusters was around
+  `15:35:36-15:35:37`, where RTSS recorded one 26.09 ms frame and the next
+  sample's rolling FPS dipped.
+
+Thermals, system pressure, and process attribution:
+
+- MAHM CPU temperature averaged 76.4 C, p95 78.5 C, and maxed 80.1 C. CPU
+  clock stayed effectively pegged near 4,450 MHz.
+- NVIDIA GPU utilization averaged 65.0%, p95 79.0%, and maxed 80%, versus
+  44.9% average and 61% max in clean BR. GPU temperature maxed 60 C and VRAM
+  used maxed about 2.6 GB.
+- RAM usage averaged about 19.4 GB and maxed about 19.9 GB, versus about
+  16.8 GB average and 17.2 GB max in clean BR.
+- Context switches averaged about 138k/sec and p95 was about 152k/sec, versus
+  111k/sec average and 122k/sec p95 in clean BR.
+- Network receive averaged about 3.5 MB/sec and maxed about 39.2 MB/sec.
+  Network send averaged about 154 KB/sec and maxed about 2.55 MB/sec. This is
+  far above clean BR and is consistent with active browser/app media traffic.
+- Disk read/write latency stayed low and no event-log warnings/errors were
+  captured.
+- Firefox appeared repeatedly in top-process samples, maxing at about 5.5%
+  total CPU and about 87.8% of one logical CPU in the sampler's normalized
+  metric. Tracker.gg appeared only lightly in top-process samples, maxing at
+  about 0.6% total CPU. Medal and MedalEncoder were absent from the structured
+  aggregate.
+
+Comparison and interpretation:
+
+- Compared with clean BR, Firefox + Tracker without Medal is measurably worse:
+  gameplay-ish RTSS average fell from 198.7 FPS to 195.1 FPS, near-cap average
+  fell from 199.1 FPS to 197.0 FPS, and transition/stall rows rose from 7 to
+  28.
+- This capture does not prove Medal is the cause of the regression because a
+  weaker result happened with Medal absent. It does, however, create the right
+  no-Medal baseline for Johnny's desired workflow, where Firefox stream viewing
+  and Tracker.gg remain open.
+- The strongest signal in this run is active browser/app load: higher GPU
+  utilization, higher RAM use, higher network traffic, higher context switches,
+  and recurring Firefox CPU samples. Tracker.gg did not show enough CPU in
+  top-process samples to be the obvious primary cause here, but it still needs
+  its own split test because it was changed together with Firefox.
+- Next controlled test: keep the same Firefox stream/pages and Tracker.gg
+  state, then add Medal only and run the same kind of match. If that shows a
+  clear delta versus this baseline, Medal is the practical culprit for the
+  desired workflow. Firefox-only or Tracker-only splits remain useful only if
+  the Medal-added delta is small or ambiguous.
 
 ## CPU Upgrade Status
 
