@@ -781,19 +781,19 @@ function Get-ProcessCpuRows {
         if ($null -eq $process.CPU -or $null -eq $previous.CPU) {
             continue
         }
-        $deltaSeconds = [math]::Max(0, [double]$process.CPU - [double]$previous.CPU)
+        $deltaSeconds = [math]::Max(0.0, [double]$process.CPU - [double]$previous.CPU)
         $ioReadBytes = if ($null -ne $process.IOReadBytes -and $null -ne $previous.IOReadBytes) {
-            [math]::Max(0, [double]$process.IOReadBytes - [double]$previous.IOReadBytes)
+            [math]::Max(0.0, [double]$process.IOReadBytes - [double]$previous.IOReadBytes)
         } else {
             $null
         }
         $ioWriteBytes = if ($null -ne $process.IOWriteBytes -and $null -ne $previous.IOWriteBytes) {
-            [math]::Max(0, [double]$process.IOWriteBytes - [double]$previous.IOWriteBytes)
+            [math]::Max(0.0, [double]$process.IOWriteBytes - [double]$previous.IOWriteBytes)
         } else {
             $null
         }
         $ioDataBytes = if ($null -ne $process.IODataBytes -and $null -ne $previous.IODataBytes) {
-            [math]::Max(0, [double]$process.IODataBytes - [double]$previous.IODataBytes)
+            [math]::Max(0.0, [double]$process.IODataBytes - [double]$previous.IODataBytes)
         } else {
             $null
         }
@@ -862,7 +862,7 @@ function Write-ThreadSample {
     foreach ($thread in (Get-Process -Id $process.Id).Threads) {
         $after[$thread.Id] = $thread.TotalProcessorTime.TotalSeconds
         if ($ThreadBefore.ContainsKey($thread.Id)) {
-            $delta = [math]::Max(0, $thread.TotalProcessorTime.TotalSeconds - [double]$ThreadBefore[$thread.Id])
+            $delta = [math]::Max(0.0, $thread.TotalProcessorTime.TotalSeconds - [double]$ThreadBefore[$thread.Id])
             $rows += [pscustomobject]@{
                 Timestamp = $Timestamp.ToString('o')
                 ProcessId = $process.Id
@@ -1624,6 +1624,20 @@ function Stop-PresentMonTools {
             Stop-Process -Id ([int]$toolProcessId) -Force -ErrorAction SilentlyContinue
         }
     }
+    if ($State.PresentMonCsv) {
+        try {
+            $presentMonCsv = [string]$State.PresentMonCsv
+            $presentMonProcesses = @(Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | Where-Object {
+                $_.Name -like 'PresentMon*.exe' -and $_.CommandLine -like "*$presentMonCsv*"
+            })
+            foreach ($presentMonProcess in $presentMonProcesses) {
+                Stop-Process -Id ([int]$presentMonProcess.ProcessId) -Force -ErrorAction SilentlyContinue
+                Write-Log -State $State -Message "stopped capture-owned PresentMon pid=$($presentMonProcess.ProcessId)"
+            }
+        } catch {
+            Write-Log -State $State -Message "capture-owned PresentMon cleanup reported: $($_.Exception.Message)"
+        }
+    }
     $State.PresentMonPid = $null
     $State.PmdpProviderPid = $null
     $State.PresentMonStartedForPid = $null
@@ -1965,6 +1979,7 @@ function Stop-Benchmark {
         Start-Sleep -Seconds 1
     }
     Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false -ErrorAction SilentlyContinue
+    Stop-PresentMonTools -State $state
     $eventStart = $null
     try {
         $eventStart = [datetime]::Parse([string]$state.StartTime)

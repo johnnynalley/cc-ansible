@@ -97,6 +97,29 @@ def read_json(path):
         return json.load(fh)
 
 
+def read_text_lines(path):
+    if not path.exists():
+        return []
+    with open(path, encoding="utf-8-sig", errors="replace") as fh:
+        return [line.rstrip("\r\n") for line in fh]
+
+
+def summarize_benchmark_log(root):
+    lines = read_text_lines(root / "benchmark.log")
+    failure_lines = [
+        line
+        for line in lines
+        if "interactive sampler failed:" in line
+        or "Traceback" in line
+        or "Unhandled" in line
+    ]
+    return {
+        "rows": len(lines),
+        "failures": [truncate(line, 500) for line in failure_lines[:10]],
+        "tail": [truncate(line, 500) for line in lines[-20:]],
+    }
+
+
 def parse_presentmon_time(text):
     if not text:
         return None
@@ -483,6 +506,8 @@ def add_diagnosis(result):
     visible_fps = result.get("visible_fps") or {}
     event_log = result.get("event_log") or {}
     event_provider_ids = event_log.get("by_provider_id_level") or []
+    benchmark_log = result.get("benchmark_log") or {}
+    benchmark_failures = benchmark_log.get("failures") or []
 
     def metric(group, key, stat_name):
         value = (group.get(key) or {}).get(stat_name)
@@ -750,6 +775,12 @@ def add_diagnosis(result):
                 "severity": "medium",
                 "detail": "; ".join(risky_events[:5]),
             })
+    if benchmark_failures:
+        diagnosis.append({
+            "type": "benchmark_sampler_failure",
+            "severity": "high",
+            "detail": benchmark_failures[0],
+        })
 
     result["diagnosis"] = diagnosis
 
@@ -958,6 +989,7 @@ def main(root):
         },
         "obs_profile": summarize_obs_profile(root),
         "event_log": summarize_event_log(root),
+        "benchmark_log": summarize_benchmark_log(root),
         "presentmon": {
             "rows": len(rows),
             "first_cpu_start": rows[0]["time_text"] if rows else None,

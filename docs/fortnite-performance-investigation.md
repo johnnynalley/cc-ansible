@@ -1150,6 +1150,82 @@ Validation notes:
   2.6 GB, the largest current Firefox content process about 1.0 GB, and
   MedalEncoder about 805 MB current with a 9.4 GB peak.
 
+## 2026-08-29 Reload Normal Workflow Capture
+
+Capture:
+`20260829-164037-fortnite-reload-normal-workflow-20260829`.
+
+Local artifacts:
+
+- Archive:
+  `/tmp/LJ-GAMING-PC-20260829-164037-fortnite-reload-normal-workflow-20260829.zip`
+- Analysis:
+  `/tmp/LJ-GAMING-PC-20260829-164037-analysis.json`
+
+Scope and reliability:
+
+- Capture started at `2026-08-29T16:40:37-05:00` while Johnny was already in a
+  Reload session.
+- The sampler failed at `2026-08-29T17:18:17-05:00` before Johnny's
+  Reload-to-BR update at about `17:19`, so this artifact should be treated as a
+  Reload-only capture.
+- Stop was requested later at `2026-08-29T18:15:43-05:00`, but no samples were
+  collected between the sampler failure and stop. There is no valid long
+  120-FPS lobby tail to trim in this artifact.
+- The failure was a benchmark harness bug: process I/O deltas above Int32 range
+  made PowerShell choose the wrong `[math]::Max()` overload. The harness was
+  fixed to use double zeros for those comparisons.
+- The sampler failure also left the capture-owned PresentMon process holding
+  `presentmon-console.csv`. The harness stop path was fixed to clean up
+  capture-owned PresentMon processes by recorded PID and matching output path.
+- The local analyzer now surfaces `benchmark_sampler_failure` from
+  `benchmark.log` so this kind of truncated capture is obvious in the JSON.
+- Fix validation used smoke capture
+  `20260829-182323-benchmark-sampler-overflow-smoke-20260829`. It collected
+  44 combined rows and 6018 PresentMon rows, reported no
+  `benchmark_sampler_failure`, observed normal sampler exit, and `stop --fetch`
+  completed without the prior `presentmon-console.csv` lock failure.
+
+Metrics before the sampler failure:
+
+- Visible FPS source was RTSS.
+- All sampled RTSS rows averaged 185.0 FPS, p50 194.9 FPS, p95 199.8 FPS.
+  This all-window number includes Reload transitions/stalls.
+- Gameplay-ish `fps >= 140` rows averaged 191.2 FPS, p50 195.1 FPS, p95
+  200.0 FPS, p99 frame time 10.33 ms, max sampled gameplay-ish frame time
+  30.24 ms, with one sampled row over 16.67 ms.
+- Near-cap `fps >= 180` rows averaged 194.5 FPS, p50 196.1 FPS, p99 frame time
+  9.85 ms, with one sampled row over 16.67 ms.
+- Best stable windows included about 196.2 FPS for `16:48:08-16:53:46`,
+  195.4 FPS for `16:58:41-17:03:32`, and 194.4 FPS for `17:12:34-17:18:08`.
+- PresentMon used `Hardware: Independent Flip` throughout the captured window.
+- PresentMon/diagnosis still showed CPU-frame-time dominance: average CPU busy
+  6.00 ms versus GPU busy 3.53 ms.
+- Max logical CPU utility p95 was 114.9%, context-switch p95 was about
+  179,943/sec, NVIDIA GPU utilization p95 was 78%, and no System/Application
+  event-log warning/error rows were captured.
+- CPU temperature from MAHM averaged 78.5 C, p95 80.4 C, p99 81.4 C, and max
+  85.0 C during the captured window.
+- Preflight warnings were Memory Compression at 1242.6 MB working set and one
+  earlier Resource Exhaustion Detector event still inside the 180-minute
+  lookback. Available memory stayed healthy, with minimum sampled available
+  memory about 12.5 GB.
+- Highest non-Fortnite sampled pressure included `MedalEncoder` max 7.6% total
+  CPU and high I/O deltas, Firefox max 5.4% total CPU, and `OneDrive.Sync.Service`
+  with a large read burst. The process I/O counters are not direct network
+  attribution.
+
+Interpretation:
+
+- This capture is useful for Reload behavior before `17:18`, but it cannot
+  answer the BR question because the sampler had already died before BR.
+- The active gameplay rows were mostly playable and frequently near cap, but
+  this was weaker than the clean BR and Medal-added BR captures. Treat that as
+  mode/workload evidence, not proof that the normal app stack broke BR again.
+- The persistent bottleneck signal remains CPU frame time / hot logical CPU /
+  scheduler churn, with no GPU saturation and no event-log driver fault in this
+  artifact.
+
 ## CPU Upgrade Status
 
 Johnny ordered a Ryzen 7 5700X3D, but the installed CPU is verified as a Ryzen 7 5800X3D. The BIOS, Windows WMI, and `HKLM:\HARDWARE\DESCRIPTION\System\CentralProcessor\0` all report `AMD Ryzen 7 5800X3D 8-Core Processor`. Treat the 5800X3D as the installed and benchmark-relevant CPU.

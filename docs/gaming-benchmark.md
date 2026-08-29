@@ -101,6 +101,13 @@ sampler/PresentMon process. If you need an authoritative archive for analysis,
 use `stop --fetch`. For a quick mid-capture check, use `peek` instead of
 starting duplicate fetch workers.
 
+If `stop --fetch` fails because `presentmon-console.csv` is still locked after
+stop, first check whether the analyzer reports `benchmark_sampler_failure` or
+whether a capture-owned `PresentMon*.exe` process still has the target
+`presentmon-console.csv` in its command line. The managed harness should clean
+up those capture-owned workers, but the 2026-08-29 Reload capture exposed and
+fixed a stop-path gap after a sampler crash.
+
 Fetch a specific Windows capture directory:
 
 ```bash
@@ -112,6 +119,11 @@ Analyze after unzipping locally:
 ```bash
 python3 scripts/gaming/analyze-gaming-capture.py /tmp/fortnite-match-highres-off-lobby-to-game
 ```
+
+The analyzer reads `benchmark.log` and adds a `benchmark_sampler_failure`
+diagnosis when the sampler crashed before stop. Treat any capture with that
+diagnosis as truncated; compare the last telemetry timestamp to the stop marker
+before drawing gameplay, lobby-tail, or app-attribution conclusions.
 
 ## A/B Test Options
 
