@@ -194,11 +194,11 @@ Do not manually delete paks. Use Epic Games Launcher options for this setting.
 
 ## Current Best Candidates
 
-> Updated 2026-06-13 after the 5800X3D verification, A-XMP restore, cooling-profile checks, Performance Mode rollback, and loaded normal-use Go Goated capture. Treat this as a benchmark queue, not applied wins.
+> Updated 2026-08-29 after the 5800X3D verification, A-XMP restore, cooling-profile checks, Performance Mode rollback, Firefox memory-crash RCA, clean Rezon isolation capture, and clean BR follow-up. Treat this as a benchmark queue, not applied wins.
 
 1. Streaming/OBS capture-path baseline:
    - the old OBS delta was measured on the previous 3900X baseline, where non-OBS gameplay was around 151 FPS and OBS recording was around 99-102 FPS
-   - post-5800X3D gameplay now looks strong with NVIDIA Overlay/Instant Replay/Highlights and Game Bar enabled, so the next meaningful test is the real streaming stack, not stripped-offline gameplay
+   - post-5800X3D clean gameplay now looks strong in Rezon 1v1s and BR, so the next meaningful tests are app-attribution and the real streaming stack, not more stripped-offline proof that the CPU upgrade works
    - first tests: normal streaming scene with stream relay, OBS preview enabled vs disabled, Game Capture stability/admin state, and whether the relay/offload path adds any measurable encode/capture pressure on the gaming PC
 2. HAGS A/B if the user approves another reboot-level graphics test:
    - current managed state disables HAGS with `HwSchMode=1`
@@ -779,6 +779,109 @@ Comparison and interpretation:
   Medal or Tracker.gg at a time in Rezon 1v1s. Use explicit markers for
   loading start, gameplay start, and match/round end so transition stalls stay
   separated from active fighting.
+
+## 2026-08-29 BR Clean Follow-Up Capture
+
+Capture:
+
+```text
+C:\Users\jn\AppData\Local\WindowsGamingBenchmark\Captures\20260829-145243-fortnite-br-clean-followup-queued-20260829
+```
+
+Local archive/analyzed copy:
+
+```text
+/tmp/LJ-GAMING-PC-20260829-145243-fortnite-br-clean-followup-queued-20260829.zip
+/tmp/LJ-GAMING-PC-20260829-145243-fortnite-br-clean-followup-queued-20260829
+/tmp/LJ-GAMING-PC-20260829-145243-analysis.json
+```
+
+Context:
+
+- Johnny queued a BR match after the clean Rezon isolation test.
+- Process inventory for the capture did not find `firefox`, `medal`, or
+  `tracker` processes.
+- Capture ran from `2026-08-29T14:52:43-05:00` to
+  `2026-08-29T15:13:27-05:00`.
+- No affinity, priority, or power-plan override was applied.
+- Preflight had one warning: Memory Compression working set was about
+  1606.8 MB while available memory was still about 16.6 GB.
+- Markers:
+  - `br-queue-lobby-120fps-cap` at `2026-08-29T14:53:14-05:00`
+  - `br-match-finished` at `2026-08-29T15:13:14-05:00`
+- The capture archive had no System/Application warning/error event rows.
+
+Visible FPS and frame pacing:
+
+- RTSS all rows averaged 194.8 FPS with p50 199.8 FPS, p95 200.8 FPS, and
+  p99 201.0 FPS. The all-window average is pulled down by lobby/transition
+  state rather than by sustained gameplay.
+- RTSS gameplay-ish `fps >= 140`: average 198.7 FPS, p50 199.8 FPS, p95
+  200.8 FPS, p99 201.0 FPS. Frame-time p95 was 6.74 ms, p99 was 8.11 ms,
+  max sampled frame time was 23.68 ms, and only one sampled row exceeded
+  16.67 ms.
+- RTSS near-cap `fps >= 180`: average 199.1 FPS, p50 199.8 FPS, p95
+  200.8 FPS, p99 201.0 FPS. Frame-time p99 was 7.79 ms and max was
+  23.68 ms.
+- The best stable run from `15:01:39` through `15:12:41` averaged 199.1 FPS
+  by RTSS, with p50 199.8 FPS and p99 frame time 7.69 ms.
+- A 120 FPS tail was detected from `15:12:51` through the stop marker. Treat
+  that as lobby/sleep/end state, not active BR gameplay.
+
+PresentMon and frame-pipeline data:
+
+- PresentMon was in `Hardware: Independent Flip` for 240,577 rows, so this
+  capture's PresentMon frame-pipeline data is usable.
+- PresentMon all-window frame time averaged 5.14 ms, p50 5.01 ms, p95
+  6.89 ms, p99 8.66 ms, and p99.9 15.15 ms. The max 2692.95 ms frame lines up
+  with the end-transition cluster rather than stable fighting.
+- PresentMon CPU busy averaged 4.94 ms, p95 6.66 ms, and p99 8.48 ms.
+  GPU busy averaged 2.57 ms, p95 3.60 ms, and p99 4.26 ms.
+- Interpretation: Fortnite is still CPU-frame-path dominant for 200 FPS, but
+  in this clean BR run the CPU path was usually inside the 5 ms budget.
+
+Transition stalls:
+
+- RTSS recorded 7 low/stall rows under 100 FPS. One was early around
+  `14:53:45`; the rest clustered from `15:12:42` through `15:12:48`, before
+  the 120 FPS tail.
+- The worst RTSS/PresentMon frame was about 2693 ms at the end transition.
+  PresentMon showed CPU busy about 2693 ms, GPU busy only about 13.7 ms, and
+  GPU wait about 2679 ms for that frame.
+- This points to game/session-transition or CPU-side stall behavior with the
+  GPU waiting, not GPU saturation.
+
+Thermals and system pressure:
+
+- MAHM CPU temperature averaged 73.0 C, p95 75.9 C, p99 77.7 C, and maxed
+  79.6 C. CPU clock averaged 4449.7 MHz and p95 was 4450 MHz.
+- NVIDIA GPU utilization averaged 44.9%, p95 56.1%, and maxed 61%. GPU
+  temperature maxed 59 C, VRAM used maxed about 2.0 GB, and PCIe stayed at
+  Gen4 x16.
+- System CPU total utility averaged 59.1%, while max logical CPU utility p95
+  was 97.8%. Fortnite target-thread sampling repeatedly showed one hot thread
+  around 96-104% of a logical processor.
+- Disk read latency p95 was 0.41 ms and write latency was negligible.
+  Network send averaged about 17 KB/sec and receive about 32 KB/sec, with no
+  high-upload signature like the 2026-08-26 Rezon run.
+- The only pollution/preflight signal was Memory Compression working set over
+  1 GB. It did not coincide with low available memory or a Resource Exhaustion
+  event in this capture.
+
+Comparison and interpretation:
+
+- This clean BR run supports the same conclusion as the clean Rezon run:
+  without the earlier app/background pressure, stable Fortnite gameplay can
+  ride the 200 FPS cap again.
+- The remaining performance issue shown here is not a steady BR FPS ceiling,
+  GPU saturation, disk latency, network upload, thermal throttling, or an
+  obvious non-Fortnite process spike.
+- The remaining measured pain is transition/loading/end-state stutter. Keep
+  separating transition markers from fighting markers in future captures so
+  load/return-to-lobby hitches do not pollute gameplay averages.
+- Next controlled attribution path remains: keep Firefox closed because of the
+  memory-crash RCA, then reintroduce only Medal or Tracker.gg one at a time.
+  After that, test the real OBS/streaming stack separately.
 
 ## CPU Upgrade Status
 

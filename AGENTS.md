@@ -63,6 +63,13 @@ execution path. Record wrapper/sandbox failures separately from failures in the
 target application so superficial tooling errors do not become false incident
 evidence or leaked resource pressure.
 
+For fetched benchmark, log, or diagnostic archives, unpack and verify the
+archive before running analyzers that depend on the extracted files. Do not
+parallelize extraction with dependent analysis, even when both are local
+commands; a raced analyzer can read missing or partial state and produce false
+null metadata or incomplete metrics. If this happens, rerun the analyzer after
+verifying extraction and treat the raced output as invalid.
+
 For Ansible preflights that inspect heterogeneous path types, declare the
 expected type for every item and validate each result with optional attributes
 guarded by `default(false)`. Do not aggregate `stat.isreg`, `stat.islnk`, or
