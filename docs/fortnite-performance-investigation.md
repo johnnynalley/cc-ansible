@@ -148,8 +148,10 @@ Next actions:
 1. Before Fortnite or streaming sessions, fully restart Firefox or avoid using
    Firefox for Twitch/TikTok/stream pages while playing until the leaking tab,
    site, extension, or browser session is identified.
-2. Add Resource Exhaustion and top-memory warnings to the benchmark preflight
-   so an absurd commit consumer is flagged before Fortnite starts.
+2. Done: the benchmark preflight now records top memory consumers, flags large
+   private/commit-memory processes, and captures recent Windows Resource
+   Exhaustion Detector events so an absurd commit consumer is visible before
+   Fortnite starts.
 3. Keep the system-managed pagefile for now, but consider a fixed `C:` pagefile
    floor/ceiling such as 48-64 GB only with explicit approval. This is a crash
    safety net, not the root fix for a runaway browser process.
@@ -1121,8 +1123,32 @@ Comparison and interpretation:
 - Current practical conclusion: for Johnny's preferred workflow, Medal is not
   proven to be the culprit from this capture. Keep watching for memory growth
   and encoder/overlay spikes, but shift the next investigation toward stream
-  media load consistency, OBS/recording/streaming interaction, and transition
-  stutter separation.
+  media load consistency, OBS/recording/streaming interaction, transition
+  stutter separation, and preflight bad-state detection.
+
+## 2026-08-29 Benchmark Preflight Hardening
+
+The managed benchmark harness now records top memory consumers before capture
+start and flags large private/commit-memory consumers separately from normal
+Windows reserved virtual address space. It also captures recent
+`Microsoft-Windows-Resource-Exhaustion-Detector` event ID 2004 rows so the
+earlier Firefox low-virtual-memory failure is visible before a benchmark starts.
+
+Validation notes:
+
+- A first live preflight using raw `Win32_Process.VirtualSize` produced hundreds
+  of false warnings because normal 64-bit, Electron, UWP, and system processes
+  reserve very large address ranges.
+- The implemented check was corrected to threshold private memory and
+  pagefile-backed commit instead. Resource Exhaustion Detector event text
+  remains the source of truth for Windows-reported low virtual memory.
+- Corrected preflight at `2026-08-29T16:32:02-05:00` produced 16 rows and 3
+  warnings: Memory Compression at 1268.8 MB working set plus the two earlier
+  Resource Exhaustion Detector events from `13:39:53` and `13:44:58`.
+- Current top process memory rows were not large enough to trip the private or
+  commit thresholds: Fortnite was about 3.9 GB private/commit, Xbox app about
+  2.6 GB, the largest current Firefox content process about 1.0 GB, and
+  MedalEncoder about 805 MB current with a 9.4 GB peak.
 
 ## CPU Upgrade Status
 

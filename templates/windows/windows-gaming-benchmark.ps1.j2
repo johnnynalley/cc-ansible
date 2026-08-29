@@ -47,6 +47,10 @@ $PreflightStalePowerShellAgeSeconds = {{ windows_gaming_benchmark_preflight_stal
 $PreflightPowerShellWorkingSetMBytes = {{ windows_gaming_benchmark_preflight_powershell_working_set_mb | default(512) | int }}
 $PreflightPowerShellPrivateMBytes = {{ windows_gaming_benchmark_preflight_powershell_private_mb | default(512) | int }}
 $PreflightMemoryCompressionWorkingSetMBytes = {{ windows_gaming_benchmark_preflight_memory_compression_working_set_mb | default(512) | int }}
+$PreflightTopMemoryProcessCount = {{ windows_gaming_benchmark_preflight_top_memory_process_count | default(10) | int }}
+$PreflightLargePrivateMBytes = {{ windows_gaming_benchmark_preflight_large_private_mb | default(8192) | int }}
+$PreflightLargeCommitMBytes = {{ windows_gaming_benchmark_preflight_large_commit_mb | default(16384) | int }}
+$PreflightResourceExhaustionLookbackMinutes = {{ windows_gaming_benchmark_preflight_resource_exhaustion_lookback_minutes | default(180) | int }}
 $TargetProcessNames = @({{ windows_gaming_benchmark_target_process_names | map('to_json') | join(', ') }})
 $WatchProcessNames = @({{ windows_gaming_benchmark_watch_process_names | map('to_json') | join(', ') }})
 $PreflightAllowedPowerShellPatterns = @(
@@ -163,6 +167,45 @@ function Redact-ProcessCommandLine {
     return $redacted
 }
 
+function Limit-Text {
+    param(
+        [AllowNull()][string]$Text,
+        [int]$MaxLength = 700
+    )
+    if (-not $Text) {
+        return ''
+    }
+    $clean = [regex]::Replace([string]$Text, '\s+', ' ').Trim()
+    if ($clean.Length -le $MaxLength) {
+        return $clean
+    }
+    return $clean.Substring(0, $MaxLength) + '...'
+}
+
+function Convert-BytesToMBytes {
+    param([AllowNull()][object]$Bytes)
+    if ($null -eq $Bytes -or [string]::IsNullOrWhiteSpace([string]$Bytes)) {
+        return $null
+    }
+    try {
+        return [math]::Round(([double]$Bytes) / 1MB, 1)
+    } catch {
+        return $null
+    }
+}
+
+function Convert-KBytesToMBytes {
+    param([AllowNull()][object]$KBytes)
+    if ($null -eq $KBytes -or [string]::IsNullOrWhiteSpace([string]$KBytes)) {
+        return $null
+    }
+    try {
+        return [math]::Round(([double]$KBytes) / 1024.0, 1)
+    } catch {
+        return $null
+    }
+}
+
 function Get-ProcessCreationDate {
     param([object]$CimProcess)
     if (-not $CimProcess -or -not $CimProcess.CreationDate) {
@@ -247,9 +290,118 @@ function Invoke-PreflightCheck {
         }
     }
 
-    $cimProcesses = @(Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | Where-Object { $_.Name -in @('powershell.exe', 'pwsh.exe') })
+    $allCimProcesses = @(Get-CimInstance Win32_Process -ErrorAction SilentlyContinue)
+    $processById = @{}
+    Get-Process -ErrorAction SilentlyContinue | ForEach-Object {
+        $processById[[int]$_.Id] = $_
+    }
+
+    $processMemoryRows = [System.Collections.Generic.List[object]]::new()
+    foreach ($cimProcess in $allCimProcesses) {
+        $processId = [int]$cimProcess.ProcessId
+        $process = $processById[$processId]
+        $workingSetMBytes = if ($process) {
+            Convert-BytesToMBytes -Bytes $process.WorkingSet64
+        } else {
+            Convert-BytesToMBytes -Bytes $cimProcess.WorkingSetSize
+        }
+        $privateMBytes = if ($process) {
+            Convert-BytesToMBytes -Bytes $process.PrivateMemorySize64
+        } else {
+            $null
+        }
+        $commitMBytes = Convert-KBytesToMBytes -KBytes $cimProcess.PageFileUsage
+        $peakCommitMBytes = Convert-KBytesToMBytes -KBytes $cimProcess.PeakPageFileUsage
+        $sortMemoryMBytes = 0.0
+        foreach ($candidate in @($privateMBytes, $commitMBytes, $workingSetMBytes)) {
+            if ($null -ne $candidate -and [double]$candidate -gt $sortMemoryMBytes) {
+                $sortMemoryMBytes = [double]$candidate
+            }
+        }
+        $suspicious = (
+            ($null -ne $privateMBytes -and $privateMBytes -ge $PreflightLargePrivateMBytes) -or
+            ($null -ne $commitMBytes -and $commitMBytes -ge $PreflightLargeCommitMBytes)
+        )
+        $processMemoryRows.Add([pscustomobject]@{
+            Name = $cimProcess.Name
+            ProcessId = $processId
+            WorkingSetMB = $workingSetMBytes
+            PrivateMemoryMB = $privateMBytes
+            CommitMemoryMB = $commitMBytes
+            PeakCommitMemoryMB = $peakCommitMBytes
+            SortMemoryMB = $sortMemoryMBytes
+            Suspicious = $suspicious
+            CommandLine = Redact-ProcessCommandLine -CommandLine ([string]$cimProcess.CommandLine)
+        })
+    }
+
+    $topMemoryRows = @($processMemoryRows | Sort-Object -Property SortMemoryMB -Descending | Select-Object -First $PreflightTopMemoryProcessCount)
+    $suspiciousMemoryRows = @($processMemoryRows | Where-Object { $_.Suspicious })
+    $selectedMemoryRows = @{}
+    foreach ($row in @($topMemoryRows + $suspiciousMemoryRows)) {
+        $key = [string]$row.ProcessId
+        if ($selectedMemoryRows.ContainsKey($key)) {
+            continue
+        }
+        $selectedMemoryRows[$key] = $true
+        $detail = "working_set_mb=$($row.WorkingSetMB) private_mb=$($row.PrivateMemoryMB) commit_mb=$($row.CommitMemoryMB) peak_commit_mb=$($row.PeakCommitMemoryMB) threshold_private_mb=$PreflightLargePrivateMBytes threshold_commit_mb=$PreflightLargeCommitMBytes"
+        Write-CsvRow -Path ([string]$State.PreflightCsv) -Row ([pscustomobject]@{
+            Timestamp = $now.ToString('o')
+            Category = 'top-process-memory'
+            Name = $row.Name
+            ProcessId = $row.ProcessId
+            AgeSeconds = $null
+            WorkingSetMB = $row.WorkingSetMB
+            PrivateMemoryMB = $row.PrivateMemoryMB
+            AvailableMBytes = $availableMBytes
+            Allowed = (-not $row.Suspicious)
+            Suspicious = $row.Suspicious
+            Detail = $detail
+            CommandLine = Limit-Text -Text $row.CommandLine -MaxLength 500
+        })
+        if ($row.Suspicious) {
+            $warnings.Add("large process memory before benchmark: name=$($row.Name) pid=$($row.ProcessId) private_mb=$($row.PrivateMemoryMB) commit_mb=$($row.CommitMemoryMB)")
+        }
+    }
+
+    if ($PreflightResourceExhaustionLookbackMinutes -gt 0) {
+        $lookbackStart = $now.AddMinutes(-1 * $PreflightResourceExhaustionLookbackMinutes)
+        try {
+            $resourceEvents = @(Get-WinEvent -FilterHashtable @{
+                LogName = 'System'
+                ProviderName = 'Microsoft-Windows-Resource-Exhaustion-Detector'
+                Id = 2004
+                StartTime = $lookbackStart
+            } -MaxEvents 5 -ErrorAction SilentlyContinue)
+            foreach ($event in $resourceEvents) {
+                $ageSeconds = if ($event.TimeCreated) { [math]::Round(($now - $event.TimeCreated).TotalSeconds, 0) } else { $null }
+                $eventTimeText = if ($event.TimeCreated) { $event.TimeCreated.ToString('o') } else { '' }
+                $message = Limit-Text -Text (Redact-ProcessCommandLine -CommandLine ([string]$event.Message)) -MaxLength 700
+                $detail = "event_id=$($event.Id) time_created=$eventTimeText lookback_min=$PreflightResourceExhaustionLookbackMinutes message=$message"
+                Write-CsvRow -Path ([string]$State.PreflightCsv) -Row ([pscustomobject]@{
+                    Timestamp = $now.ToString('o')
+                    Category = 'resource-exhaustion'
+                    Name = $event.ProviderName
+                    ProcessId = $null
+                    AgeSeconds = $ageSeconds
+                    WorkingSetMB = $null
+                    PrivateMemoryMB = $null
+                    AvailableMBytes = $availableMBytes
+                    Allowed = $false
+                    Suspicious = $true
+                    Detail = $detail
+                    CommandLine = ''
+                })
+                $warnings.Add("recent resource exhaustion event before benchmark: time=$($event.TimeCreated) age_s=$ageSeconds")
+            }
+        } catch {
+            Write-Log -State $State -Message "preflight resource exhaustion event query failed: $($_.Exception.Message)"
+        }
+    }
+
+    $cimProcesses = @($allCimProcesses | Where-Object { $_.Name -in @('powershell.exe', 'pwsh.exe') })
     foreach ($cimProcess in $cimProcesses) {
-        $process = Get-Process -Id ([int]$cimProcess.ProcessId) -ErrorAction SilentlyContinue
+        $process = $processById[[int]$cimProcess.ProcessId]
         $created = Get-ProcessCreationDate -CimProcess $cimProcess
         $ageSeconds = if ($created) { [math]::Round(($now - $created).TotalSeconds, 0) } else { $null }
         $workingSetMBytes = if ($process) { [math]::Round($process.WorkingSet64 / 1MB, 1) } else { $null }

@@ -683,12 +683,39 @@ def add_diagnosis(result):
             "detail": f"Visible FPS source={visible_source} avg={visible_avg_fps:.1f}, p99 frame={p99:.2f} ms, p999 frame={p999:.2f} ms.",
         })
 
-    if result.get("preflight", {}).get("warnings"):
+    preflight_warnings = result.get("preflight", {}).get("warnings") or []
+    if preflight_warnings:
         diagnosis.append({
             "type": "preflight_warning",
             "severity": "high",
-            "detail": f"{len(result['preflight']['warnings'])} preflight warning(s) were present before capture.",
+            "detail": f"{len(preflight_warnings)} preflight warning(s) were present before capture.",
         })
+        categories = Counter(warning.get("category") or "unknown" for warning in preflight_warnings)
+        if categories.get("resource-exhaustion"):
+            diagnosis.append({
+                "type": "recent_resource_exhaustion_preflight",
+                "severity": "high",
+                "detail": (
+                    f"{categories['resource-exhaustion']} recent Windows Resource Exhaustion Detector "
+                    "event(s) were present before the capture. Treat the run as a bad-state capture "
+                    "unless the event is already explained and cleared."
+                ),
+            })
+        large_memory = [
+            warning
+            for warning in preflight_warnings
+            if warning.get("category") == "top-process-memory"
+        ]
+        if large_memory:
+            offenders = ", ".join(
+                f"{warning.get('name') or 'unknown'} pid={warning.get('process_id') or '?'}"
+                for warning in large_memory[:5]
+            )
+            diagnosis.append({
+                "type": "large_process_memory_preflight",
+                "severity": "high",
+                "detail": f"Large process memory was present before capture: {offenders}.",
+            })
     if result.get("pollution", {}).get("process_inventory_warnings"):
         diagnosis.append({
             "type": "capture_pollution",
@@ -893,6 +920,8 @@ def main(root):
             "category": row.get("Category"),
             "name": row.get("Name"),
             "process_id": row.get("ProcessId"),
+            "age_seconds": fnum(row.get("AgeSeconds")),
+            "allowed": truthy(row.get("Allowed")),
             "detail": row.get("Detail"),
             "working_set_mb": fnum(row.get("WorkingSetMB")),
             "private_memory_mb": fnum(row.get("PrivateMemoryMB")),

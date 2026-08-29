@@ -44,6 +44,13 @@ while Windows still has plenty of available RAM; in that case the warning should
 be recorded in `preflight.csv` and interpreted later, not automatically cost the
 session.
 
+Benchmark preflight records available memory, Memory Compression size, stale
+PowerShell diagnostics, top memory consumers, large process private/commit
+memory, and recent Windows Resource Exhaustion Detector events. A recent
+resource-exhaustion event or absurd process commit consumer means the capture
+should be treated as a bad-state capture unless that warning is already
+explained.
+
 Mark a moment during the run:
 
 ```bash
@@ -169,6 +176,7 @@ It can collect:
 - MSI Afterburner / MAHM shared memory: OSD FPS/frame time plus hardware-monitoring values such as CPU/GPU clocks, temperatures, power, and usage when enabled.
 - Windows event logs: warning/error/critical System and Application events for the capture window, written at stop time.
 - Process/thread sampling: watched-process CPU/memory/I/O deltas, top process CPU/I/O deltas, target process hot-thread samples, process inventory, OBS profile snapshot, markers, and preflight warnings.
+- Preflight state: available memory, Memory Compression, top process memory, suspicious private/commit memory, recent Resource Exhaustion Detector events, and stale external PowerShell workers before the capture starts.
 
 The process I/O columns in `watched-processes.csv` and `top-processes.csv`
 come from raw Windows per-process I/O counters sampled as before/after deltas.
