@@ -95,6 +95,68 @@ Live cleanup applied 2026-06-13:
 - Game Bar values `AppCaptureEnabled`, `HistoricalCaptureEnabled`, `GameDVR_Enabled`, and policy `AllowGameDVR` were removed, not replaced with new managed values.
 - Keep NIC tuning, Defender exclusion, power plan, RTSS/MAHM monitoring, benchmark tooling, and other static low-friction optimizations intact.
 
+## 2026-08-29 Fortnite Crash RCA
+
+Read-only crash evidence was collected with `scripts/gaming/collect-fortnite-crash-evidence.ps1`.
+
+Latest Fortnite crash directory:
+
+```text
+C:\Users\jn\AppData\Local\FortniteGame\Saved\Crashes\UECC-Windows-D28480164716B34EBFF5F284F892BB7E_0000
+```
+
+Last write time: `2026-08-29T13:43:00-05:00`.
+
+Fortnite's own logs point to a virtual-memory allocation failure, not a normal
+GPU-driver reset:
+
+- `FortniteGame.log` reported a critical error at line 8319.
+- The same log reported: `Ran out of memory allocating 31059968 (29.6 MiB) bytes with alignment 0. Last error msg: The paging file is too small for this operation to complete.`
+- The backup log `FortniteGame-backup-2026.08.29-18.40.54.log` reported `Runnable thread Foreground Worker #1 crashed.`
+- That backup log also reported: `Ran out of memory allocating 143892480 (137.2 MiB) bytes with alignment 0. Last error msg: The paging file is too small for this operation to complete.`
+
+Windows Resource Exhaustion Detector events line up with the crash window:
+
+- `2026-08-29T13:39:53.2810801-05:00`: Windows diagnosed low virtual memory and named `firefox.exe` PID 18204 at 98,577,752,064 bytes of virtual memory, `SignalRgb.exe` at about 4.1 GB, and `XboxPcApp.exe` at about 2.9 GB.
+- `2026-08-29T13:44:58.0618394-05:00`: Windows again diagnosed low virtual memory and named the same `firefox.exe` PID 18204 at 100,273,147,904 bytes, with `SignalRgb.exe` and `XboxPcApp.exe` again the next largest named consumers.
+
+Current post-crash state from the same collector:
+
+- The runaway Firefox PID was no longer live by the time of the collector run.
+- Commit was back to about 29.5 GB used out of an 81.3 GB commit limit.
+- The system-managed pagefile on `C:` was allocated at about 48.6 GB, with about 12.6 GB peak usage recorded.
+- `C:` had about 422.6 GB free, so the crash was not explained by the disk being full.
+- Current high private-memory processes included SignalRGB around 4 GB, Xbox app around 2.9 GB, Discord/Steam/Medal/Tracker in lower ranges, and MedalEncoder with a high recorded paged-memory peak around 9.7 GB.
+
+Interpretation:
+
+The strongest root cause is a runaway Firefox process exhausting virtual-memory
+commit around the Fortnite crash. Fortnite then failed a comparatively small
+allocation because Windows could not satisfy it at that moment. SignalRGB, Xbox,
+and MedalEncoder are worth watching because they were or had recently been
+large memory consumers, but Firefox was the dominant named offender in the
+Resource Exhaustion events.
+
+Nearby app crashes around the same window included Nextcloud, Medal
+`get-graphics-offsets64.exe`, and MSI Center `CC_Engine_x64.exe` with
+`0xc0000409`. Treat those as possible fallout from the same memory-pressure
+event or separate background-app instability until another capture proves a
+direct cause.
+
+Next actions:
+
+1. Before Fortnite or streaming sessions, fully restart Firefox or avoid using
+   Firefox for Twitch/TikTok/stream pages while playing until the leaking tab,
+   site, extension, or browser session is identified.
+2. Add Resource Exhaustion and top-memory warnings to the benchmark preflight
+   so an absurd commit consumer is flagged before Fortnite starts.
+3. Keep the system-managed pagefile for now, but consider a fixed `C:` pagefile
+   floor/ceiling such as 48-64 GB only with explicit approval. This is a crash
+   safety net, not the root fix for a runaway browser process.
+4. If SignalRGB or MedalEncoder keep showing multi-GB growth, investigate those
+   separately rather than treating this Fortnite crash as proof that they are
+   the primary cause.
+
 ## Ryzen Findings
 
 Ryzen Master full UI is not installed, but the Ryzen Master SDK CLI is present.

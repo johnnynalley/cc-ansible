@@ -26,11 +26,19 @@
   it only with the system owner's approval, write to a narrow temporary path,
   and remove the remote recording after the required analysis artifact has
   been fetched.
+- `collect-fortnite-crash-evidence.ps1`: Read-only Windows crash collector for
+  Fortnite incidents. It returns recent Application/System event evidence,
+  Reliability Monitor rows, Fortnite crash/log metadata, relevant process and
+  driver state, GPU driver version, selected hotfixes, and current Game Mode /
+  graphics registry values. It redacts token-like and Fortnite launch-auth
+  fields before emitting text.
 
 ## Safety Notes
 
 - `analyze-gaming-capture.py` is read-only; it analyzes supplied capture files
   and prints metrics.
+- `collect-fortnite-crash-evidence.ps1` is read-only and sets
+  `$Ansible.Changed = $false` when run through Ansible.
 - Prefer running locally on the controller instead of broad remote Windows
   analysis when the gaming PC is in use.
 - Microphone capture records room audio and speech. Obtain explicit approval,
