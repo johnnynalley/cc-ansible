@@ -142,6 +142,16 @@ class HermesHeartbeatStateTests(unittest.TestCase):
                     self.now - 20,
                 ),
             )
+            connection.execute(
+                "INSERT INTO session_model_usage VALUES (?,?,?,?,?)",
+                (
+                    "glm-5.2",
+                    "",
+                    "",
+                    2,
+                    self.now - 10,
+                ),
+            )
             connection.commit()
 
     def inspect(self):
@@ -171,6 +181,17 @@ class HermesHeartbeatStateTests(unittest.TestCase):
             "gemini",
         )
         self.assertEqual(
+            result["models"]["unknownProvenanceRoutes"][0]["model"],
+            "glm-5.2",
+        )
+        self.assertNotIn(
+            "glm-5.2",
+            {
+                route["model"]
+                for route in result["models"]["unexpectedMeteredRoutes"]
+            },
+        )
+        self.assertEqual(
             result["modelOverrides"][0]["provider"], "openai-codex"
         )
 
@@ -178,6 +199,65 @@ class HermesHeartbeatStateTests(unittest.TestCase):
         output = json.dumps(self.inspect())
         self.assertNotIn("private message not emitted", output)
         self.assertNotIn("secret detail must not appear", output)
+
+    def test_maintenance_lease_serializes_semantic_jobs_and_expires(self) -> None:
+        code, acquired = self.module.maintenance_lease(
+            self.home,
+            action="acquire",
+            owner="heartbeat",
+            now=self.now,
+            lease_seconds=3600,
+        )
+        self.assertEqual(code, 0)
+        self.assertEqual(acquired["status"], "acquired")
+        lease = self.home / "state" / "maintenance" / "semantic-lease.json"
+        self.assertEqual(lease.stat().st_mode & 0o777, 0o600)
+
+        code, busy = self.module.maintenance_lease(
+            self.home,
+            action="acquire",
+            owner="self-evolution",
+            now=self.now + 60,
+            lease_seconds=3600,
+        )
+        self.assertEqual(code, 3)
+        self.assertEqual(busy["status"], "busy")
+        self.assertEqual(busy["owner"], "heartbeat")
+
+        code, expired = self.module.maintenance_lease(
+            self.home,
+            action="acquire",
+            owner="self-evolution",
+            now=self.now + 3601,
+            lease_seconds=3600,
+        )
+        self.assertEqual(code, 0)
+        self.assertEqual(expired["owner"], "self-evolution")
+
+        code, released = self.module.maintenance_lease(
+            self.home,
+            action="release",
+            owner="self-evolution",
+            now=self.now + 3602,
+            lease_seconds=3600,
+        )
+        self.assertEqual(code, 0)
+        self.assertEqual(released["status"], "released")
+        self.assertFalse(lease.exists())
+
+    def test_maintenance_lease_rejects_invalid_state(self) -> None:
+        state = self.home / "state" / "maintenance"
+        state.mkdir(parents=True)
+        (state / "semantic-lease.json").write_text("not-json", encoding="utf-8")
+        code, result = self.module.maintenance_lease(
+            self.home,
+            action="acquire",
+            owner="heartbeat",
+            now=self.now,
+            lease_seconds=3600,
+        )
+        self.assertEqual(code, 2)
+        self.assertEqual(result["code"], "lease-state-invalid")
 
 
 if __name__ == "__main__":

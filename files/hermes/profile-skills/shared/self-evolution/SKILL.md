@@ -1,7 +1,7 @@
 ---
 name: self-evolution
 description: Use when a reusable agent behavior failure is exposed.
-version: 1.0.0
+version: 1.1.0
 author: ARK Infrastructure
 license: Proprietary
 platforms: [linux]
@@ -61,6 +61,24 @@ Do not assume the `sqlite3` CLI is installed. Prefer a loaded native tool or an
 existing reviewed helper for SQLite-backed state. If no reviewed interface
 exposes the required bounded fact, preserve that exact gap for the operator;
 do not create an ad-hoc query program during unattended maintenance.
+
+For unattended maintenance, the discovery allowlist is limited to the profile's
+top-level native instruction source, `SOUL.md`, `memories/USER.md`,
+`memories/MEMORY.md`, profile-local `skills/`, `state/self-evolution/`, and the
+explicit canonical repository path `workspaces/cc-ansible`. Resolve each path
+before reading it and reject anything outside that allowlist. Never recursively
+search the profile root. Never read `managed-data`, `imported-data`,
+`legacy-openclaw`, preserved evidence, backup, rollback, or migration roots
+during maintenance. Those paths remain available only for an explicit
+owner-directed evidence or migration task, never as behavior sources.
+
+Before any scheduled maintenance review, acquire the shared lease with:
+`/var/lib/hermes/astra/.hermes/profiles/astra/scripts/hermes-heartbeat-state.py --profile-home /var/lib/hermes/astra/.hermes/profiles/astra --maintenance-lease acquire --lease-owner self-evolution`.
+If it returns `busy`, return exactly `[SILENT]` without discovery or semantic
+review. A state error is one deduplicated operator gap, not permission to bypass
+the lease. Release it with the same absolute helper and `--maintenance-lease
+release --lease-owner self-evolution` after the native result is durable. Never
+delete or overwrite a live lease manually.
 
 ## Handle The Active Turn
 

@@ -316,6 +316,13 @@ def reconcile(args: argparse.Namespace) -> list[dict[str, str]]:
     home = args.home.resolve(strict=True)
     scripts_root = home / "scripts"
     jobs = load_manifest(args.manifest, scripts_root, args.profile)
+    requested_keys = list(getattr(args, "keys", None) or [])
+    if len(requested_keys) != len(set(requested_keys)):
+        raise ReconcileError("duplicate-target-key")
+    manifest_keys = {job["key"] for job in jobs}
+    unknown_keys = set(requested_keys) - manifest_keys
+    if unknown_keys:
+        raise ReconcileError(f"unknown-target-key:{sorted(unknown_keys)[0]}")
     for job in jobs:
         if not job.get("noAgent") and job.get("workdir") != str(home):
             raise ReconcileError(f"profile-workdir-required:{job['key']}")
@@ -327,6 +334,11 @@ def reconcile(args: argparse.Namespace) -> list[dict[str, str]]:
         for job in jobs
         if job.get("expiresAt") is None or job["expiresAt"] > now
     }
+    if requested_keys:
+        inactive_keys = set(requested_keys) - set(desired)
+        if inactive_keys:
+            raise ReconcileError(f"inactive-target-key:{sorted(inactive_keys)[0]}")
+        desired = {key: desired[key] for key in requested_keys}
     api = native_api()
     operation = requested_mode(args)
     mutating = operation in {"seed", "restore"}
@@ -370,6 +382,8 @@ def reconcile(args: argparse.Namespace) -> list[dict[str, str]]:
 
     if operation != "seed":
         for key, existing in sorted(by_key.items()):
+            if requested_keys and key not in desired:
+                continue
             if key in desired:
                 continue
             changes.append({"key": key, "action": "remove"})
@@ -385,6 +399,13 @@ def main() -> int:
     parser.add_argument("--manifest", type=Path, required=True)
     parser.add_argument("--home", type=Path, required=True)
     parser.add_argument("--profile", required=True)
+    parser.add_argument(
+        "--key",
+        action="append",
+        dest="keys",
+        default=[],
+        help="Limit audit or mutation to one manifest key; repeat as needed.",
+    )
     mode = parser.add_mutually_exclusive_group(required=True)
     mode.add_argument("--audit", action="store_const", const="audit", dest="operation")
     mode.add_argument("--seed", action="store_const", const="seed", dest="operation")

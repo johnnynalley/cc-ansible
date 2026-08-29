@@ -111,7 +111,7 @@ class ReconcileTests(unittest.TestCase):
     def tearDown(self):
         self.temporary.cleanup()
 
-    def args(self, apply: bool, operation: str | None = None):
+    def args(self, apply: bool, operation: str | None = None, keys=None):
         return SimpleNamespace(
             home=self.home,
             manifest=self.manifest,
@@ -119,6 +119,7 @@ class ReconcileTests(unittest.TestCase):
             apply=apply,
             check=not apply,
             operation=operation,
+            keys=list(keys or []),
         )
 
     def write_manifest(self, jobs=None):
@@ -215,6 +216,39 @@ class ReconcileTests(unittest.TestCase):
             [{"key": "test-alert", "action": "create"}],
         )
         self.assertEqual(api.jobs, [])
+
+    def test_targeted_restore_preserves_unselected_managed_jobs(self):
+        self.write_manifest()
+        api = FakeCron()
+        RECONCILE.native_api = lambda: api
+        RECONCILE.reconcile(self.args(True))
+        api.jobs[0]["prompt"] = "stale"
+        api.jobs.append(
+            {
+                "id": "unselected",
+                "name": "unselected",
+                "origin": {
+                    "kind": RECONCILE.ORIGIN_KIND,
+                    "key": "unselected",
+                    "profile": "astra",
+                    "schemaVersion": 1,
+                },
+            }
+        )
+
+        self.assertEqual(
+            RECONCILE.reconcile(
+                self.args(True, operation="restore", keys=["test-alert"])
+            ),
+            [{"key": "test-alert", "action": "update"}],
+        )
+        self.assertEqual({job["id"] for job in api.jobs}, {"job-1", "unselected"})
+
+    def test_targeted_reconcile_rejects_unknown_key(self):
+        self.write_manifest()
+        RECONCILE.native_api = lambda: FakeCron()
+        with self.assertRaisesRegex(RECONCILE.ReconcileError, "unknown-target-key"):
+            RECONCILE.reconcile(self.args(False, keys=["missing"]))
 
     def test_seed_preserves_native_edits(self):
         self.write_manifest()

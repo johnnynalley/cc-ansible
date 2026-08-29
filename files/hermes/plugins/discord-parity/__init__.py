@@ -237,6 +237,8 @@ def _allowed(args: dict[str, Any], action: str) -> dict[str, Any]:
             raise ParityError("channel-ids-required")
         if any(item not in channels for item in channel_ids):
             raise ParityError("channel-not-allowed")
+    if action == "list_threads" and args.get("parent_id") not in channels:
+        raise ParityError("channel-not-allowed")
     return policy
 
 
@@ -257,7 +259,7 @@ def _validate_args(args: dict[str, Any], action: str) -> None:
         "list_reactions": ("channel_id", "message_id", "emoji"),
         "create_poll": ("channel_id", "poll_question", "poll_options"),
         "search_messages": ("guild_id", "channel_ids", "query"),
-        "list_threads": ("guild_id",),
+        "list_threads": ("guild_id", "parent_id"),
         "thread_messages": ("guild_id", "channel_id"),
         "channel_permissions": ("guild_id", "channel_id"),
         "emoji_list": ("guild_id",),
@@ -454,14 +456,14 @@ def _dispatch(args: dict[str, Any], action: str, policy: dict[str, Any]) -> str:
         result = _request("GET", f"/guilds/{guild}/messages/search", params=params)
         return json.dumps({"schemaVersion": 1, "status": "ok", "result": result}, separators=(",", ":"))
     if action == "list_threads":
+        _verify_channel_guild(parent, guild)
         active = _request("GET", f"/guilds/{guild}/threads/active")
-        channels = set(policy.get("channels", []))
         if isinstance(active, dict) and isinstance(active.get("threads"), list):
             active = dict(active)
             active["threads"] = [
                 thread
                 for thread in active["threads"]
-                if isinstance(thread, dict) and thread.get("parent_id") in channels
+                if isinstance(thread, dict) and thread.get("parent_id") == parent
             ]
         return json.dumps({"schemaVersion": 1, "status": "ok", "result": active}, separators=(",", ":"))
     if action == "thread_messages":

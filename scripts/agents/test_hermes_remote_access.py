@@ -56,8 +56,16 @@ class HermesRemoteAccessTests(unittest.TestCase):
             ROOT
             / "files/hermes/profile-skills/astra/operational-heartbeat/SKILL.md"
         ).read_text()
-        self.assertIn("state/remote-access.json", heartbeat)
-        self.assertIn("never fall back", heartbeat)
+        normalized_heartbeat = " ".join(heartbeat.split())
+        self.assertIn(
+            "Remote-access SSH mode is intentionally disabled",
+            normalized_heartbeat,
+        )
+        self.assertIn(
+            "do not read or require `state/remote-access.json`",
+            normalized_heartbeat,
+        )
+        self.assertIn("Never fall back", normalized_heartbeat)
 
     def test_ssh_client_is_fail_closed(self):
         text = (ROOT / "templates/hermes/astra-ssh-config.j2").read_text()

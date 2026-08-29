@@ -1,7 +1,7 @@
 ---
 name: operational-heartbeat
 description: Use for Astra's stateful operational heartbeat.
-version: 1.0.0
+version: 1.1.0
 author: ARK Infrastructure
 license: Proprietary
 platforms: [linux]
@@ -74,11 +74,21 @@ heartbeat findings.
 
 ## State And Routing
 
-- Keep schedule state in `state/heartbeat/schedule.json`, schema version 2.
-  Each check owns an ISO-8601 `lastCompletedAt` and concise `lastResult`.
-- Keep alert lifecycle files under `state/heartbeat/alerts/`. Scheduling time
-  and alert fingerprints are separate. An alert receipt does not prove the
-  underlying condition still exists.
+- The immutable profile root for this job is
+  `/var/lib/hermes/astra/.hermes/profiles/astra`. Never derive it from the
+  process CWD, `$PWD`, a repository path, or a prior terminal call.
+- Keep schedule state only in
+  `/var/lib/hermes/astra/.hermes/profiles/astra/state/heartbeat/schedule.json`,
+  schema version 3. Each check owns ISO-8601 `lastAttemptAt`,
+  `lastCompletedAt`, optional `notBefore`, and concise `lastResult` fields.
+- Keep alert lifecycle files only under
+  `/var/lib/hermes/astra/.hermes/profiles/astra/state/heartbeat/alerts/`.
+  Scheduling time and alert fingerprints are separate. An alert receipt does
+  not prove the underlying condition still exists.
+- Repository inspection must use an explicit terminal-tool workdir or
+  `git -C /var/lib/hermes/astra/.hermes/profiles/astra/workspaces/cc-ansible`.
+  Never use ambient `cd` and never perform a relative state or helper read
+  after a repository probe.
 - Send actionable messages to Discord `#astra-logs`, channel
   `1482589440663617638`, through the native Discord tool. Return `[SILENT]`
   locally after delivery. Never append automation output to an active user
@@ -110,14 +120,21 @@ heartbeat findings.
 | `workspace-hygiene` | 24 hours | heavy local, serial |
 | `self-evolution` | 24 hours | state review only |
 
-On missing, legacy, or partial schedule state, run the every-poll lane plus
-exactly one oldest-overdue deferred check on every wake. The only permitted
-reason to skip that deferred check is a measured pressure-gate failure below;
-when that happens, preserve the measured gate and deferral reason in the
-check's `lastResult` without advancing `lastCompletedAt`. Continue
-oldest-due-first on later wakes. Advance a check only after a successful
-decisive probe. Never infer success from a spawned process, partial output, or
-restart.
+On missing, legacy, or partial schedule state, preserve valid timestamps and
+upgrade the state to schema 3; never reset the real state from a relative or
+missing-path premise. Run the every-poll lane plus at most one eligible due
+deferred check on every wake. A deferred check is due when `lastCompletedAt` is
+missing or older than its cadence, and eligible when `notBefore` is absent or
+has passed. Select by oldest `lastAttemptAt`, treating a missing attempt as
+oldest, then by oldest `lastCompletedAt`, then table order. Record
+`lastAttemptAt` before the probe starts.
+
+After a blocked or pressure-deferred attempt, preserve the exact reason in
+`lastResult`, set `notBefore` to the next normal heartbeat wake, and do not
+advance `lastCompletedAt`. That attempted lane must not prevent another due,
+eligible lane from being selected on the next wake. On a decisive successful
+probe, update both timestamps, clear `notBefore`, and record the normalized
+result. Never infer success from a spawned process, partial output, or restart.
 
 Run at most three explicitly lightweight checks concurrently. Run heavy checks
 and Hermes CLI commands serially. Before each heavy check read
@@ -151,8 +168,10 @@ job ID plus normalized error in `state/heartbeat/alerts/cron-health.json`.
 
 ### Interactive And Delivery Health
 
-Run `scripts/hermes-heartbeat-state.py`. It emits no message content. Treat as
-actionable: a stale active turn, an unanswered user turn, a terminal empty
+Run
+`/var/lib/hermes/astra/.hermes/profiles/astra/scripts/hermes-heartbeat-state.py`.
+It emits no message content. Treat as actionable: a stale active turn, an
+unanswered user turn, a terminal empty
 assistant turn, an unfinished tool turn with no active worker, an abandoned
 delivery obligation, or a pending/attempting/failed obligation that remains
 stale after a gateway re-probe. Hermes already retries empty responses,
@@ -183,13 +202,12 @@ fingerprint after a decisive re-probe.
 
 ### Homelab, Every 2 Hours
 
-- Read `state/remote-access.json` before remote probes. Missing state, a
-  `partial` result, or any required host absent from its verified coverage is
-  an operator-owned parity gap; report the exact missing host once and never
-  substitute an operator account or private key.
-- Use `host_admin_hosts` as the current dynamic managed-Linux inventory. A
-  required host missing from that native broker is an operator-owned parity
-  gap; never fall back to Johnny's, `dbc`'s, or Ansible's private key.
+- Use `host_admin_hosts` as the complete current managed-Linux inventory and
+  the typed probe result as the coverage authority. Remote-access SSH mode is
+  intentionally disabled; do not read or require `state/remote-access.json`
+  and do not report its absence. A required broker host or typed probe missing
+  from the active manifest is an operator-owned parity gap. Never fall back to
+  Johnny's, `dbc`'s, or Ansible's private key.
 - Use `host_admin_request` health probe `plex-local` on `media-vm`; 200, 302,
   and 401 mean up, while no response is actionable.
 - Use `host_admin_request` health probe `nextcloud-local` on `nextcloud-vm`;
@@ -220,13 +238,20 @@ destructive hail/high wind.
 
 ### Model Route Drift, Every 2 Hours
 
-Use `scripts/hermes-heartbeat-state.py`, `hermes fallback list`, and the
-root-managed config. `openai-codex` and `ollama-cloud` are approved
-subscription routes. Any recent OpenRouter, Gemini/Google, or direct OpenAI API
-billing route is actionable because Johnny rejected metered usage. A persisted
-session model override is an expected explicit `/model` choice unless it adds
-an unapproved provider/base URL; do not scrub it merely because it differs
-from the global model. Fingerprint exact route and billing mode.
+Use
+`/var/lib/hermes/astra/.hermes/profiles/astra/scripts/hermes-heartbeat-state.py`,
+`hermes fallback list`, and the root-managed config. `openai-codex` and
+`ollama-cloud` are approved subscription routes. Any recent OpenRouter,
+Gemini/Google, or direct OpenAI API billing route is actionable because Johnny
+rejected metered usage. Blank provider and billing-mode fields are unknown
+provenance, never proof of metered usage. Correlate every
+`unknownProvenanceRoutes` row with the currently configured primary and
+fallback routes; a configured approved route such as the active Ollama Cloud
+fallback is silent. Alert only when current evidence confirms an unapproved or
+metered provider. A persisted session model override is an expected explicit
+`/model` choice unless it adds an unapproved provider/base URL; do not scrub it
+merely because it differs from the global model. Fingerprint exact route and
+billing mode.
 
 ### Hermes Runtime, Every 6 Hours
 
@@ -247,8 +272,9 @@ recoveries are non-pinging when a message is useful.
 
 ### Bootstrap Budget, Every 6 Hours
 
-Run `hermes prompt-size --platform discord --json` from the profile root, then
-run `hermes skills check`. Verify every required identity, owner-context,
+Run `hermes prompt-size --platform discord --json` with terminal workdir
+`/var/lib/hermes/astra/.hermes/profiles/astra`, then run `hermes skills check`
+from that same explicit workdir. Verify every required identity, owner-context,
 memory, and managed-skill source named by the managed bootstrap contract from
 the profile root. Alert immediately for truncation, a missing native source,
 failed skill discovery, hash drift in a managed source, any production
@@ -273,6 +299,16 @@ position, and appliance. Never run a collection-wide ffmpeg scan.
 
 ### Workspace Hygiene And Self-Evolution, Every 24 Hours
 
+Before this lane's semantic review, acquire the shared maintenance lease with:
+`/var/lib/hermes/astra/.hermes/profiles/astra/scripts/hermes-heartbeat-state.py --profile-home /var/lib/hermes/astra/.hermes/profiles/astra --maintenance-lease acquire --lease-owner heartbeat`.
+If it returns `busy`, record this lane's attempt and a bounded `notBefore`, do
+not advance its completion, and leave all nonsemantic heartbeat lanes
+available on later wakes. A lease state error is one deduplicated operator gap,
+not permission to bypass the lease. Release with the same absolute helper and
+`--maintenance-lease release --lease-owner heartbeat` only after this lane's
+schedule and alert state are durable. An interrupted run may leave the lease
+until its bounded expiry; never delete or overwrite it manually.
+
 Inspect the live cc-ansible worktree, native curator/skill state, pending
 learning backlog, bootstrap/reference reconciliation, and latest
 self-evolution state. Attribute changed files to active work before alerting.
@@ -285,11 +321,22 @@ operator. Never publish healthy audit summaries.
 
 ## Publication Gate
 
-Before any message, apply the incident RCA gate and compare the normalized
-fingerprint with its alert state. Unchanged known, acknowledged, ignored,
-optional, diagnostic-only, healthy, or no-op state is silent regardless of
-age. Re-alert only for material scope/impact change, a new owner decision, an
-explicit reminder, or a useful recovery. Send a qualifying notice only through
-the native Discord tool. Regardless of whether a notice was sent, the scheduled
-final response must be exactly `[SILENT]`.
+Before any message, apply the incident RCA gate and read the lane's absolute
+alert-lifecycle file. Normalize the current condition before comparing it with
+`activeFingerprint`, `status`, `lastObservedAt`, `lastPublishedAt`, and
+`messageId`. Decide exactly one transition: `publish`, `suppress`, `resolve`,
+or `re-alert`. Unchanged known, active, acknowledged, ignored, optional,
+diagnostic-only, healthy, or no-op state must select `suppress` regardless of
+age. A useful recovery may select `resolve`; re-alert requires material
+scope/impact change, a new owner decision, or an explicit reminder.
+
+Persist the selected transition and current observation to the absolute alert
+file before invoking Discord. Only `publish`, `resolve`, or `re-alert` may call
+the Discord tool; `suppress` may not compose or send a message. After a
+successful send, persist the returned platform message ID. If delivery fails,
+retain a pending publication transition for native delivery recovery. Never
+send first and then search Discord to decide whether the message was a
+duplicate, and never retract a message merely because the pre-send state check
+was skipped. Regardless of whether a notice was sent, the scheduled final
+response must be exactly `[SILENT]`.
 Never return an internal verification summary or any other prose.

@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import fcntl
 import json
 import os
 import sqlite3
@@ -31,6 +32,17 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--window-hours", type=float, default=6.0)
     parser.add_argument("--stalled-after-seconds", type=float, default=900.0)
     parser.add_argument("--now", type=float, default=None, help=argparse.SUPPRESS)
+    parser.add_argument(
+        "--maintenance-lease",
+        choices=("acquire", "release"),
+        default=None,
+    )
+    parser.add_argument(
+        "--lease-owner",
+        choices=("heartbeat", "self-evolution"),
+        default=None,
+    )
+    parser.add_argument("--lease-seconds", type=int, default=3600)
     return parser.parse_args()
 
 
@@ -60,6 +72,115 @@ def readonly_connection(path: Path) -> sqlite3.Connection:
     connection = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
     connection.row_factory = sqlite3.Row
     return connection
+
+
+def _write_private_json(path: Path, value: dict[str, Any]) -> None:
+    temporary = path.with_name(f".{path.name}.{os.getpid()}.tmp")
+    data = json.dumps(value, sort_keys=True, separators=(",", ":")) + "\n"
+    try:
+        with temporary.open("x", encoding="utf-8") as handle:
+            os.chmod(temporary, 0o600)
+            handle.write(data)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary, path)
+    finally:
+        try:
+            temporary.unlink()
+        except FileNotFoundError:
+            pass
+
+
+def maintenance_lease(
+    profile_home: Path,
+    *,
+    action: str,
+    owner: str,
+    now: float,
+    lease_seconds: int,
+) -> tuple[int, dict[str, Any]]:
+    if owner not in {"heartbeat", "self-evolution"} or not 300 <= lease_seconds <= 7200:
+        return 2, {"schemaVersion": 1, "status": "error", "code": "invalid-lease"}
+    state = profile_home.resolve() / "state" / "maintenance"
+    state.mkdir(mode=0o700, parents=True, exist_ok=True)
+    path = state / "semantic-lease.json"
+    lock_path = state / "semantic-lease.lock"
+    with lock_path.open("a+", encoding="ascii") as lock:
+        os.chmod(lock_path, 0o600)
+        fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
+        current: dict[str, Any] | None = None
+        if path.exists():
+            try:
+                raw = load_json(path)
+            except (OSError, UnicodeError, json.JSONDecodeError):
+                return 2, {
+                    "schemaVersion": 1,
+                    "status": "error",
+                    "code": "lease-state-invalid",
+                }
+            if not isinstance(raw, dict):
+                return 2, {
+                    "schemaVersion": 1,
+                    "status": "error",
+                    "code": "lease-state-invalid",
+                }
+            current = raw
+            try:
+                current_expires_at = float(current["expiresAt"])
+            except (KeyError, TypeError, ValueError):
+                return 2, {
+                    "schemaVersion": 1,
+                    "status": "error",
+                    "code": "lease-state-invalid",
+                }
+            if (
+                current.get("schemaVersion") != 1
+                or current.get("owner") not in {"heartbeat", "self-evolution"}
+                or current_expires_at < 0
+            ):
+                return 2, {
+                    "schemaVersion": 1,
+                    "status": "error",
+                    "code": "lease-state-invalid",
+                }
+
+        if action == "acquire":
+            expires_at = current_expires_at if current else 0
+            if current and expires_at > now:
+                return 3, {
+                    "schemaVersion": 1,
+                    "status": "busy",
+                    "owner": current.get("owner"),
+                    "expiresInSeconds": max(0, int(expires_at - now)),
+                }
+            lease = {
+                "schemaVersion": 1,
+                "owner": owner,
+                "acquiredAt": now,
+                "expiresAt": now + lease_seconds,
+            }
+            _write_private_json(path, lease)
+            return 0, {
+                "schemaVersion": 1,
+                "status": "acquired",
+                "owner": owner,
+                "expiresInSeconds": lease_seconds,
+            }
+
+        if action != "release":
+            return 2, {"schemaVersion": 1, "status": "error", "code": "invalid-lease"}
+        if current and current.get("owner") != owner and current_expires_at > now:
+            return 3, {
+                "schemaVersion": 1,
+                "status": "busy",
+                "owner": current.get("owner"),
+                "expiresInSeconds": max(0, int(current_expires_at - now)),
+            }
+        try:
+            path.unlink()
+        except FileNotFoundError:
+            pass
+        return 0, {"schemaVersion": 1, "status": "released", "owner": owner}
 
 
 def latest_message_metadata(
@@ -208,6 +329,7 @@ def model_usage(
 ) -> dict[str, Any]:
     recent = []
     unexpected = []
+    unknown = []
     for row in connection.execute(
         """
         SELECT model, billing_provider, billing_mode, SUM(api_call_count) AS calls,
@@ -229,12 +351,20 @@ def model_usage(
         recent.append(item)
         provider = str(row["billing_provider"] or "").lower()
         mode = str(row["billing_mode"] or "").lower()
-        if provider in METERED_PROVIDERS or (
-            provider not in SUBSCRIPTION_PROVIDERS
-            and mode not in {"local", "subscription_included"}
-        ):
+        if not provider and not mode:
+            unknown.append(item)
+        elif provider in METERED_PROVIDERS and mode != "subscription_included":
             unexpected.append(item)
-    return {"recent": recent, "unexpectedMeteredRoutes": unexpected}
+        elif provider not in SUBSCRIPTION_PROVIDERS and mode not in {
+            "local",
+            "subscription_included",
+        }:
+            unexpected.append(item)
+    return {
+        "recent": recent,
+        "unexpectedMeteredRoutes": unexpected,
+        "unknownProvenanceRoutes": unknown,
+    }
 
 
 def model_overrides(session_index: dict[str, Any]) -> list[dict[str, Any]]:
@@ -281,7 +411,11 @@ def inspect(args: argparse.Namespace) -> dict[str, Any]:
         "modelOverrides": model_overrides(session_index),
         "discordSessions": [],
         "delivery": {"counts": {}, "unresolved": []},
-        "models": {"recent": [], "unexpectedMeteredRoutes": []},
+        "models": {
+            "recent": [],
+            "unexpectedMeteredRoutes": [],
+            "unknownProvenanceRoutes": [],
+        },
     }
 
     database = profile_home / "state.db"
@@ -303,7 +437,26 @@ def inspect(args: argparse.Namespace) -> dict[str, Any]:
 
 
 def main() -> int:
-    result = inspect(parse_args())
+    args = parse_args()
+    if args.maintenance_lease is not None:
+        if args.lease_owner is None:
+            print(
+                json.dumps(
+                    {"schemaVersion": 1, "status": "error", "code": "invalid-lease"},
+                    sort_keys=True,
+                )
+            )
+            return 2
+        code, result = maintenance_lease(
+            args.profile_home,
+            action=args.maintenance_lease,
+            owner=args.lease_owner,
+            now=args.now if args.now is not None else time.time(),
+            lease_seconds=args.lease_seconds,
+        )
+        print(json.dumps(result, sort_keys=True))
+        return code
+    result = inspect(args)
     print(json.dumps(result, indent=2, sort_keys=True))
     return 0 if not result["errors"] else 2
 

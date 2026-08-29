@@ -47,7 +47,10 @@ class DiscordParityTests(unittest.TestCase):
         self.policy = {
             "schemaVersion": 1,
             "guilds": ["1209365945882251294"],
-            "channels": ["1482585492330381343"],
+            "channels": [
+                "1482585492330381343",
+                "1482589440663617638",
+            ],
             "fileRoots": ["/tmp"],
         }
 
@@ -171,22 +174,57 @@ class DiscordParityTests(unittest.TestCase):
         self.assertEqual(result["messages"], [{"id": "1"}])
         self.assertEqual(request.call_args_list[1].kwargs["params"], {"limit": 25})
 
-    def test_thread_listing_filters_unapproved_parents(self) -> None:
+    def test_thread_listing_requires_and_filters_the_exact_parent(self) -> None:
         active = {
             "threads": [
                 {"id": "1", "parent_id": "1482585492330381343"},
-                {"id": "2", "parent_id": "1508888888888888888"},
+                {"id": "2", "parent_id": "1482589440663617638"},
             ]
         }
-        with mock.patch.object(MODULE, "_request", return_value=active):
+        parent = {
+            "id": "1482589440663617638",
+            "guild_id": "1209365945882251294",
+        }
+        with mock.patch.object(
+            MODULE, "_request", side_effect=[parent, active]
+        ) as request:
             result = json.loads(
                 MODULE._dispatch(
-                    {"guild_id": "1209365945882251294"},
+                    {
+                        "guild_id": "1209365945882251294",
+                        "parent_id": "1482589440663617638",
+                    },
                     "list_threads",
                     self.policy,
                 )
             )
-        self.assertEqual(result["result"]["threads"], [active["threads"][0]])
+        self.assertEqual(result["result"]["threads"], [active["threads"][1]])
+        self.assertEqual(
+            request.call_args_list[0].args[:2],
+            ("GET", "/channels/1482589440663617638"),
+        )
+
+    def test_thread_listing_rejects_missing_or_unapproved_parent(self) -> None:
+        for args, code in (
+            (
+                {"action": "list_threads", "guild_id": "1209365945882251294"},
+                "list_threads-parent_id-required",
+            ),
+            (
+                {
+                    "action": "list_threads",
+                    "guild_id": "1209365945882251294",
+                    "parent_id": "1508888888888888888",
+                },
+                "channel-not-allowed",
+            ),
+        ):
+            with self.subTest(args=args), mock.patch.object(
+                MODULE, "_policy", return_value=self.policy
+            ), mock.patch.object(MODULE, "_request") as request:
+                result = json.loads(MODULE._handle(args))
+            self.assertEqual(result["code"], code)
+            request.assert_not_called()
 
     def test_channel_mutation_rejects_cross_guild_target(self) -> None:
         args = {

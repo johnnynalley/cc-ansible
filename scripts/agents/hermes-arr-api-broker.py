@@ -32,7 +32,7 @@ SERVICE_RE = re.compile(r"^[a-z][a-z0-9-]{0,31}$")
 PATH_RE = re.compile(r"^/[A-Za-z0-9._~!$&'()*+,;=:@%/-]{1,511}$")
 INDEXER_UPDATE_PATH_RE = re.compile(r"^/api/v1/indexer/[1-9][0-9]{0,9}$")
 SENSITIVE_KEY_RE = re.compile(
-    r"(?:api.?key|password|passwd|secret|token|authorization|cookie|credential)",
+    r"(?:api.?key|encryption.?key|private.?key|password|passwd|secret|token|authorization|cookie|credential)",
     re.IGNORECASE,
 )
 METHODS = {"GET", "POST", "PUT", "PATCH", "DELETE"}

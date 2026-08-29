@@ -77,6 +77,8 @@ class ArrApiTests(unittest.TestCase):
     def test_secret_mutations_are_denied_recursively(self) -> None:
         for value in (
             {"apiKey": "x"},
+            {"plex": {"encryption_key": "x"}},
+            {"private.key": "x"},
             {"fields": [{"password": "x"}]},
             {"fields": [{"name": "password", "value": "x"}]},
             {"tokenValue": "x"},
@@ -173,11 +175,18 @@ class ArrApiTests(unittest.TestCase):
         value = BROKER.sanitize(
             {
                 "apiKey": "secret",
+                "plex": {"encryption_key": "encryption-secret"},
+                "private.key": "private-secret",
                 "fields": [{"name": "password", "value": "secret"}],
-                "url": "https://example.test/path?apikey=secret&safe=yes",
+                "url": (
+                    "https://example.test/path?apikey=secret&"
+                    "encryption_key=encryption-secret&safe=yes"
+                ),
             }
         )
         self.assertEqual(value["apiKey"], "[REDACTED]")
+        self.assertEqual(value["plex"]["encryption_key"], "[REDACTED]")
+        self.assertEqual(value["private.key"], "[REDACTED]")
         self.assertEqual(value["fields"][0]["value"], "[REDACTED]")
         self.assertNotIn("secret", value["url"])
         self.assertIn("safe=yes", value["url"])
@@ -188,18 +197,25 @@ class ArrApiTests(unittest.TestCase):
         self.assertEqual(BROKER.validate_query({"page": 1, "include": ["a", "b"]}), [("page", "1"), ("include", "a"), ("include", "b")])
 
     def test_plugin_rejects_unredacted_broker_response(self) -> None:
-        with self.assertRaisesRegex(PLUGIN.ArrPluginError, "unredacted"):
-            PLUGIN._validate_response(
-                {
-                    "schemaVersion": 1,
-                    "status": "ok",
-                    "service": "sonarr",
-                    "method": "GET",
-                    "path": "/api/v3/system/status",
-                    "httpStatus": 200,
-                    "body": {"apiKey": "leak"},
-                }
-            )
+        for body in (
+            {"apiKey": "leak"},
+            {"plex": {"encryption_key": "leak"}},
+            {"private.key": "leak"},
+        ):
+            with self.subTest(body=body), self.assertRaisesRegex(
+                PLUGIN.ArrPluginError, "unredacted"
+            ):
+                PLUGIN._validate_response(
+                    {
+                        "schemaVersion": 1,
+                        "status": "ok",
+                        "service": "sonarr",
+                        "method": "GET",
+                        "path": "/api/v3/system/status",
+                        "httpStatus": 200,
+                        "body": body,
+                    }
+                )
         with self.assertRaisesRegex(PLUGIN.ArrPluginError, "unredacted"):
             PLUGIN._validate_response(
                 {
@@ -374,6 +390,18 @@ class ArrApiTests(unittest.TestCase):
         self.assertNotIn("gateway\n", restart)
         self.assertNotIn("hermes-gateway-dubble", playbook)
         self.assertNotIn("hermes-gateway-rigel", playbook)
+
+    def test_smoke_covers_settings_and_exact_bazarr_regression(self) -> None:
+        smoke = (ROOT / "scripts/agents/hermes-arr-api-smoke.py").read_text(
+            encoding="utf-8"
+        )
+        for path in (
+            "/api/system/settings",
+            "/api/v1/config/host",
+            "/api/v3/config/host",
+        ):
+            self.assertIn(path, smoke)
+        self.assertIn('plex.get("encryption_key") != "[REDACTED]"', smoke)
 
 
 if __name__ == "__main__":

@@ -15,7 +15,7 @@ _MAX_REQUEST_BYTES = 256 * 1024
 _MAX_RESPONSE_BYTES = 2 * 1024 * 1024
 _TURN_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$")
 _SENSITIVE = re.compile(
-    r"(?:api.?key|password|passwd|secret|token|authorization|cookie|credential)",
+    r"(?:api.?key|encryption.?key|private.?key|password|passwd|secret|token|authorization|cookie|credential)",
     re.IGNORECASE,
 )
 _CODE = re.compile(r"^[a-z][a-z0-9-]{0,63}$")

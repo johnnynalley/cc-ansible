@@ -180,18 +180,42 @@ def _mount_fstype(path: str) -> str:
     result = run(
         [
             "/usr/bin/findmnt",
-            "--noheadings",
+            "--json",
             "--output",
-            "FSTYPE",
+            "TARGET,FSTYPE",
             "--target",
             path,
         ],
         timeout=10,
     )
-    fstype = result.stdout.strip()
-    if result.returncode != 0 or not fstype:
+    try:
+        payload = json.loads(result.stdout)
+    except (TypeError, json.JSONDecodeError) as exc:
+        raise AdminError("storage-view-unavailable") from exc
+    filesystems = payload.get("filesystems") if isinstance(payload, dict) else None
+    if result.returncode != 0 or not isinstance(filesystems, list):
         raise AdminError("storage-view-unavailable")
-    return fstype
+
+    candidates: list[tuple[str, bool]] = []
+
+    def collect(entries: list[Any]) -> None:
+        for entry in entries:
+            if not isinstance(entry, dict):
+                raise AdminError("storage-view-unavailable")
+            children = entry.get("children", [])
+            if children is None:
+                children = []
+            if not isinstance(children, list):
+                raise AdminError("storage-view-unavailable")
+            if entry.get("target") == path and isinstance(entry.get("fstype"), str):
+                candidates.append((entry["fstype"], not children))
+            collect(children)
+
+    collect(filesystems)
+    concrete = [fstype for fstype, leaf in candidates if leaf and fstype != "autofs"]
+    if len(concrete) != 1:
+        raise AdminError("storage-view-unavailable")
+    return concrete[0]
 
 
 def _probe_directory(path: str, *, require_entry: bool) -> None:

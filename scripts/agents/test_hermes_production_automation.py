@@ -32,6 +32,7 @@ def render_manifest(path: Path, *, dedicated_rigel: bool) -> dict:
         hermes_automation_owner_user_id=(
             "{{ hermes_automation_owner_user_id }}"
         ),
+        hermes_astra_logs_channel_id="{{ hermes_astra_logs_channel_id }}",
         hermes_native_update_profile_home=(
             "{{ hermes_native_update_profile_home }}"
         ),
@@ -106,10 +107,12 @@ class ProductionAutomationTests(unittest.TestCase):
             self.assertIn("memories/USER.md", by_key[key]["prompt"])
             self.assertIn("memories/MEMORY.md", by_key[key]["prompt"])
             self.assertIn("workspaces/cc-ansible", by_key[key]["prompt"])
-            self.assertIn("git -c safe.directory=$PWD", by_key[key]["prompt"])
+            self.assertIn("git -C", by_key[key]["prompt"])
             self.assertIn("Do not assume the sqlite3 CLI exists", by_key[key]["prompt"])
             self.assertNotIn("legacy-openclaw/workspace", by_key[key]["prompt"])
-            self.assertIn("never a runtime dependency", by_key[key]["prompt"])
+            self.assertIn("active discovery allowlist", by_key[key]["prompt"])
+            self.assertIn("managed-data", by_key[key]["prompt"])
+            self.assertIn("shared semantic-maintenance lease", by_key[key]["prompt"])
         self.assertNotIn("gpt-5.4-mini", source)
         fortnite = by_key["fortnite-progress"]["prompt"]
         self.assertIn("including valid zero-activity days", fortnite)
@@ -853,11 +856,17 @@ class ProductionAutomationTests(unittest.TestCase):
             "plex-corrupt-media",
         ):
             self.assertIn(f"`{probe}`", heartbeat)
-        self.assertIn(
-            "exactly one oldest-overdue deferred check on every wake",
-            heartbeat,
-        )
-        self.assertIn("measured pressure-gate failure", heartbeat)
+        self.assertIn("at most one eligible due", heartbeat)
+        self.assertIn("oldest `lastAttemptAt`", heartbeat)
+        self.assertIn("must not prevent another due", heartbeat)
+        self.assertIn("`lastAttemptAt` before the probe starts", heartbeat)
+        self.assertIn("Persist the selected transition", heartbeat)
+        self.assertIn("send first and then search Discord", heartbeat)
+        self.assertIn("unknownProvenanceRoutes", heartbeat)
+        self.assertIn("never proof of metered usage", heartbeat)
+        self.assertNotIn("Read `state/remote-access.json`", heartbeat)
+        self.assertIn("--maintenance-lease acquire --lease-owner heartbeat", heartbeat)
+        self.assertIn("leave all nonsemantic heartbeat lanes", heartbeat)
         self.assertIn("## Unattended Execution Contract", heartbeat)
         self.assertIn("## Scheduled Final Response Contract", heartbeat)
         self.assertIn(

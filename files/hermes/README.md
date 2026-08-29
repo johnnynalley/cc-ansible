@@ -70,7 +70,9 @@ reviewed Ansible Vault ciphertext seeds declared by
   the multi-megabyte native indexer schema before returning bounded matches;
   indexer test/create/update accepts secret fields separately, allows only a
   bound owner turn without another prompt, and redacts responses and
-  content-free audit records. Unbound calls are blocked. The generic request
+  content-free audit records. Nested secret-shaped keys include private and
+  encryption keys; the independent plugin boundary rejects any response the
+  broker failed to sanitize. Unbound calls are blocked. The generic request
   tool still requires write approval and rejects all
   secret-bearing mutations, and Astra receives neither the Arr API keys nor a
   general shell or network credential path.
@@ -125,7 +127,11 @@ reviewed Ansible Vault ciphertext seeds declared by
   tree is writable only by Astra and read-only to Dubble/Rigel. The bootstrap
   contract treats the native operational heartbeat as seeded mutable, so the
   reviewed recovery content stays pinned without freezing Astra's live
-  self-maintained procedure.
+  self-maintained procedure. Self-evolution and heartbeat share one bounded
+  semantic-maintenance lease: self-evolution holds it for semantic review,
+  while heartbeat uses it only for its daily workspace/self-evolution lane.
+  Native maintenance discovery is allowlisted and excludes imported, managed,
+  legacy, preserved-evidence, backup, and migration roots.
 - `profile-data-stage-contract.json` permits a copy-only inactive transaction
   for exactly the `data-stage` and `operator-reference` mappings from the
   pinned profile-import and workspace-policy contracts. It defines distinct

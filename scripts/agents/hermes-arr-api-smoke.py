@@ -48,6 +48,29 @@ def main() -> int:
                     f"status-probe-failed:{item['name']}:{value.get('code', 'invalid-response')}"
                 )
             results.append({"service": item["name"], "httpStatus": value["httpStatus"]})
+        settings_paths = {
+            "bazarr": "/api/system/settings",
+            "prowlarr": "/api/v1/config/host",
+            "radarr": "/api/v3/config/host",
+            "sonarr": "/api/v3/config/host",
+        }
+        for service, path in settings_paths.items():
+            value = json.loads(
+                module._handle_request(
+                    {"service": service, "method": "GET", "path": path}
+                )
+            )
+            if value.get("status") != "ok" or value.get("httpStatus") != 200:
+                raise RuntimeError(
+                    f"settings-probe-failed:{service}:"
+                    f"{value.get('code', 'invalid-response')}"
+                )
+            if service == "bazarr":
+                body = value.get("body")
+                plex = body.get("plex") if isinstance(body, dict) else None
+                if not isinstance(plex, dict) or plex.get("encryption_key") != "[REDACTED]":
+                    raise RuntimeError("bazarr-encryption-key-redaction-failed")
+            results.append({"service": f"{service}-settings", "httpStatus": 200})
         schema = json.loads(module._handle_prowlarr_schema({"query": "apiKey"}))
         schema_body = schema.get("body", {})
         if (

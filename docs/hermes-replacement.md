@@ -1431,6 +1431,15 @@ operator decision is blocked. Official behavior is documented under
 [persistent memory](https://hermes-agent.nousresearch.com/docs/user-guide/features/memory/)
 and [skills](https://hermes-agent.nousresearch.com/docs/user-guide/features/skills/).
 
+The native maintenance lane runs every two hours at minute 5 on odd hours,
+with a daily 04:20 backstop. It holds one profile-local semantic-maintenance
+lease while reviewing only the explicit native source allowlist and the
+read-only `cc-ansible` workspace. Imported, managed, legacy, preserved-evidence,
+backup, and migration roots are not unattended discovery sources. Heartbeat
+acquires the same lease only for its daily workspace/self-evolution lane, so a
+busy semantic review cannot starve calendar, cron, delivery, storage, weather,
+runtime, memory, bootstrap, or route checks.
+
 The agent may write stable preference or profile memory and create or improve
 a reusable profile-local skill. Profile-owned `SOUL.md` and `AGENTS.md` may
 evolve through the reviewed native workflow after ownership migration.
@@ -1569,8 +1578,14 @@ alongside the STW and Warframe minute watches, the hourly HDD deal watch, the
 social-seed review. Dedicated mode moves only the academic poll into Rigel's
 own native manifest. Root-managed systemd timers own the retained collectors,
 Warframe feed, Fortnite calendar, and three profile backups. Completed
-one-shots were not replayed; OpenClaw-specific maintenance and generic noisy
-heartbeats were retired rather than emulated.
+one-shots were not replayed. Astra's operational heartbeat is a native
+30-minute stateful job rather than a generic status prompt: every wake runs the
+lightweight lane and at most one oldest eligible deferred check, records
+blocked attempts with a bounded retry time, and persists a
+publish/suppress/resolve/re-alert transition before any Discord call. Its typed
+host probes treat an automount's `autofs` parent plus concrete `nfs4` leaf as
+one healthy NFS view. Scoped native cron reconciliation can update selected
+managed jobs without resuming an unrelated paused one-shot.
 
 The 2026-08-16 through 2026-08-20 transcript exposed two post-cutover runtime
 regressions in that automation. This was not a generic Hermes capability gap:

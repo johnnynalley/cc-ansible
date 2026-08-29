@@ -228,12 +228,27 @@ class HermesProfileSkillsTests(unittest.TestCase):
                         r"AGENTS\.md|CLAUDE\.md|\.cursorrules|\.clinerules",
                     )
                 if skill["name"] == "self-evolution":
+                    normalized_content = " ".join(content.split())
                     self.assertIn("## Unattended Maintenance Contract", content)
                     self.assertIn("## Native Layout And Bounded Probes", content)
                     self.assertIn("memories/USER.md", content)
                     self.assertIn("memories/MEMORY.md", content)
                     self.assertIn('git -c safe.directory="$PWD"', content)
                     self.assertIn("Do not assume the `sqlite3` CLI", content)
+                    self.assertIn(
+                        "Never recursively search the profile root",
+                        normalized_content,
+                    )
+                    for forbidden_root in (
+                        "`managed-data`",
+                        "`imported-data`",
+                        "`legacy-openclaw`",
+                    ):
+                        self.assertIn(forbidden_root, content)
+                    self.assertIn(
+                        "--maintenance-lease acquire --lease-owner self-evolution",
+                        content,
+                    )
                     self.assertIn(
                         "Never request interactive command",
                         " ".join(content.split()),

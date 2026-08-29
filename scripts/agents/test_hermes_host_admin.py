@@ -67,9 +67,38 @@ class HostAdminTests(unittest.TestCase):
                 TARGET.health_probe({"probe": "media-stack"})
 
     def test_media_storage_view_probe_is_host_scoped_and_bounded(self) -> None:
+        layered_mount = json.dumps(
+            {
+                "filesystems": [
+                    {
+                        "target": "/srv/media",
+                        "fstype": "autofs",
+                        "children": [
+                            {"target": "/srv/media", "fstype": "nfs4"}
+                        ],
+                    }
+                ]
+            }
+        )
+        incomplete_mount = json.dumps(
+            {
+                "filesystems": [
+                    {
+                        "target": "/srv/incomplete_downloads",
+                        "fstype": "autofs",
+                        "children": [
+                            {
+                                "target": "/srv/incomplete_downloads",
+                                "fstype": "nfs4",
+                            }
+                        ],
+                    }
+                ]
+            }
+        )
         results = [
-            mock.Mock(returncode=0, stdout="nfs4\n"),
-            mock.Mock(returncode=0, stdout="nfs4\n"),
+            mock.Mock(returncode=0, stdout=layered_mount),
+            mock.Mock(returncode=0, stdout=incomplete_mount),
             mock.Mock(returncode=0, stdout="/srv/media/plex/Movies/example\n"),
             mock.Mock(returncode=0, stdout=""),
         ]
@@ -88,6 +117,35 @@ class HostAdminTests(unittest.TestCase):
         with mock.patch.object(TARGET, "canonical_host", return_value="media-vm"):
             with self.assertRaisesRegex(TARGET.AdminError, "probe-unavailable"):
                 TARGET.health_probe({"probe": "media-storage-view"})
+
+    def test_mount_fstype_requires_one_concrete_leaf(self) -> None:
+        single = json.dumps(
+            {"filesystems": [{"target": "/srv/media", "fstype": "nfs4"}]}
+        )
+        with mock.patch.object(
+            TARGET, "run", return_value=mock.Mock(returncode=0, stdout=single)
+        ):
+            self.assertEqual(TARGET._mount_fstype("/srv/media"), "nfs4")
+
+        for payload in (
+            "not-json",
+            json.dumps({"filesystems": []}),
+            json.dumps(
+                {
+                    "filesystems": [
+                        {"target": "/srv/media", "fstype": "autofs"}
+                    ]
+                }
+            ),
+        ):
+            with self.subTest(payload=payload), mock.patch.object(
+                TARGET,
+                "run",
+                return_value=mock.Mock(returncode=0, stdout=payload),
+            ), self.assertRaisesRegex(
+                TARGET.AdminError, "storage-view-unavailable"
+            ):
+                TARGET._mount_fstype("/srv/media")
 
     def test_target_uses_only_root_managed_canonical_identity(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

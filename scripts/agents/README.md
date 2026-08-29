@@ -71,11 +71,21 @@
   inside the broker and returns at most 20 sanitized query matches; its indexer
   operation limits secret-bearing writes to native test/create/update routes,
   requires each supplied secret to match exactly one declared indexer field,
-  and never logs request or response bodies. `hermes-arr-api-validate.py` checks
-  the deployed plugin/policy/credential boundary, `hermes-arr-api-smoke.py`
-  proves each enrolled service as `hermes-astra`, and
+  and never logs request or response bodies. Structured redaction covers nested,
+  dotted, and query-string secret names, including private and encryption keys.
+  `hermes-arr-api-validate.py` checks the deployed plugin/policy/credential
+  boundary, while `hermes-arr-api-smoke.py` proves each enrolled service and a
+  sanitized settings/host response as `hermes-astra` without emitting values.
+  The smoke fails unless Bazarr's `plex.encryption_key` is exactly redacted.
   `test_hermes_arr_api.py` covers authentication errors, response bounds,
   schema filtering, secret redaction, and mutation denials.
+- `hermes-host-admin-target.py` is the forced-command target for Astra's typed
+  host-administration broker. Its storage-view probe parses structured
+  `findmnt --json` output, ignores an `autofs` parent, and requires exactly one
+  concrete leaf filesystem before reporting mergerfs or NFS health.
+- `hermes-heartbeat-state.py` emits bounded delivery, session, and model-route
+  evidence and owns the shared semantic-maintenance lease. Blank model-provider
+  provenance remains unknown rather than being classified as metered usage.
 - `hermes-disaster-recovery-stage.py` prepares the application-consistent layer
   for encrypted `nas-zfs` Restic backups. It discovers every native Hermes
   profile, refreshes and validates each product-native archive, uses SQLite's
@@ -363,6 +373,8 @@
   Hermes's native cron API without editing `jobs.json`. `--audit` reports
   declaration differences read-only, `--seed` creates only missing jobs while
   preserving native edits, and explicit `--restore` performs exact recovery.
+  Repeatable `--key` selectors scope audit or restore to named manifest jobs;
+  selected restore never deletes, resumes, or rewrites an unselected job.
   `hermes_cron_delivery.py` maintains the private delivery ledger and treats
   empty no-agent output as silent success.
 - `hermes-retained-automation.py`, `hermes-daily-summary-input.py`,
