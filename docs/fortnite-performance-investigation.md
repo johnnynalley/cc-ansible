@@ -204,7 +204,8 @@ Do not manually delete paks. Use Epic Games Launcher options for this setting.
    - clean BR with Firefox/Medal/Tracker closed averaged 198.7 FPS in the gameplay-ish band
    - BR with Firefox + Tracker open and Medal absent averaged 195.1 FPS in the gameplay-ish band, with higher GPU usage, RAM use, context switches, network traffic, and transition stalls
    - Johnny's real workflow includes watching streams in Firefox while keeping Tracker.gg open, so treat Firefox + Tracker / no-Medal as the desired-workflow baseline
-   - next split should add Medal only on top of the same Firefox + Tracker state; if that regresses, Medal becomes the practical culprit for the workflow, even if Firefox/browser media has its own measurable baseline cost
+   - BR with Firefox + Tracker + Medal averaged 196.7 FPS in the gameplay-ish band, with a 13.7 minute stable run averaging 197.3 FPS and zero sampled rows over 16.67 ms
+   - this does not implicate Medal as the large active-gameplay regression source, but Medal did add measurable background footprint and the browser/network workload was not identical between runs
    - keep Firefox restart/closure as the safest pre-session habit because of the separate virtual-memory crash RCA
 3. HAGS A/B if the user approves another reboot-level graphics test:
    - current managed state disables HAGS with `HwSchMode=1`
@@ -782,8 +783,8 @@ Comparison and interpretation:
   counters, and not Windows event-log errors.
 - Next controlled attribution path was revised by Johnny's workflow
   requirement: Firefox/stream viewing and Tracker.gg are expected to remain
-  open. Use the Firefox + Tracker / no-Medal BR run as the desired-workflow
-  baseline, then add Medal only on top of that state.
+  open. The Firefox + Tracker / no-Medal BR run is the desired-workflow
+  baseline, and the follow-up added Medal on top of that state.
 
 ## 2026-08-29 BR Clean Follow-Up Capture
 
@@ -885,9 +886,9 @@ Comparison and interpretation:
   separating transition markers from fighting markers in future captures so
   load/return-to-lobby hitches do not pollute gameplay averages.
 - Next controlled attribution path follows Johnny's workflow requirement:
-  Firefox/stream viewing and Tracker.gg are expected to remain open. Use the
-  Firefox + Tracker / no-Medal BR run as the desired-workflow baseline, then
-  add Medal only on top of that state.
+  Firefox/stream viewing and Tracker.gg are expected to remain open. The
+  Firefox + Tracker / no-Medal BR run is the desired-workflow baseline, and
+  the follow-up added Medal on top of that state.
 
 ## 2026-08-29 BR Firefox + Tracker / No-Medal Attribution Capture
 
@@ -1003,11 +1004,125 @@ Comparison and interpretation:
   and recurring Firefox CPU samples. Tracker.gg did not show enough CPU in
   top-process samples to be the obvious primary cause here, but it still needs
   its own split test because it was changed together with Firefox.
-- Next controlled test: keep the same Firefox stream/pages and Tracker.gg
-  state, then add Medal only and run the same kind of match. If that shows a
-  clear delta versus this baseline, Medal is the practical culprit for the
-  desired workflow. Firefox-only or Tracker-only splits remain useful only if
-  the Medal-added delta is small or ambiguous.
+- Next controlled test was completed in
+  `2026-08-29 BR Firefox + Tracker + Medal Attribution Capture`. Firefox-only
+  or Tracker-only splits remain useful only if future evidence still points at
+  app overhead after the Medal result below.
+
+## 2026-08-29 BR Firefox + Tracker + Medal Attribution Capture
+
+Capture:
+
+```text
+C:\Users\jn\AppData\Local\WindowsGamingBenchmark\Captures\20260829-155557-fortnite-br-firefox-tracker-medal-attribution-20260829
+```
+
+Local archive/analyzed copy:
+
+```text
+/tmp/LJ-GAMING-PC-20260829-155557-fortnite-br-firefox-tracker-medal-attribution-20260829.zip
+/tmp/LJ-GAMING-PC-20260829-155557-fortnite-br-firefox-tracker-medal-attribution-20260829
+/tmp/LJ-GAMING-PC-20260829-155557-analysis.json
+```
+
+Context:
+
+- Johnny loaded another BR match after the Firefox + Tracker / no-Medal
+  baseline.
+- Firefox, Tracker.gg, Medal, and MedalEncoder were present in this capture.
+- Capture ran from `2026-08-29T15:55:57-05:00` to
+  `2026-08-29T16:11:17-05:00`.
+- No affinity, priority, or power-plan override was applied.
+- Preflight had one warning: Memory Compression working set was about
+  1436.0 MB while available memory was about 12.6 GB.
+- Process-inventory pollution also flagged Memory Compression, maxing at about
+  1756.0 MB working set.
+- Markers:
+  - `br-loading-firefox-tracker-medal-attribution-20260829` at
+    `2026-08-29T15:56:16-05:00`
+  - `br-match-done-firefox-tracker-medal-attribution-20260829` at
+    `2026-08-29T16:11:03-05:00`
+- The capture archive had no System/Application warning/error event rows.
+
+Visible FPS and frame pacing:
+
+- RTSS all rows averaged 190.1 FPS, p50 198.8 FPS, p95 200.0 FPS, and
+  p99 200.8 FPS. The all-window average is pulled down by initial load and
+  end/return clusters.
+- RTSS gameplay-ish `fps >= 140`: average 196.7 FPS, p50 198.8 FPS, p95
+  200.0 FPS, p99 200.8 FPS. Frame-time p95 was 7.45 ms, p99 was 8.88 ms,
+  max sampled frame time was 11.84 ms, and zero sampled rows exceeded
+  16.67 ms.
+- RTSS near-cap `fps >= 180`: average 197.5 FPS, p50 198.8 FPS, p95
+  200.0 FPS, p99 200.8 FPS. Frame-time p99 was 8.83 ms and max was
+  11.72 ms.
+- The best stable run from `15:56:53` through `16:10:34` averaged 197.3 FPS
+  by RTSS for about 13.7 minutes, with p99 frame time 8.68 ms, max sampled
+  frame time 11.72 ms, and zero sampled rows over 16.67 ms.
+
+PresentMon and frame-pipeline data:
+
+- PresentMon was in `Hardware: Independent Flip` for 152,069 rows, so this
+  capture's PresentMon frame-pipeline data is usable.
+- PresentMon all-window frame time averaged 6.00 ms, p50 5.22 ms, p95
+  10.69 ms, p99 12.63 ms, and p99.9 23.80 ms. The max 2990.43 ms frame was
+  end/return behavior, not clean fighting.
+- PresentMon CPU busy averaged 5.77 ms, p95 10.45 ms, and p99 12.37 ms.
+  GPU busy averaged 3.72 ms, p95 5.21 ms, and p99 5.82 ms.
+
+Transition stalls:
+
+- RTSS recorded 17 low/stall rows under 100 FPS or over 25 ms, compared with
+  28 in the Firefox + Tracker / no-Medal run and 7 in clean BR.
+- Low/stall rows clustered around:
+  - initial load: `15:56:04` through `15:56:09`
+  - end/return: `16:10:35` through `16:10:47`
+- No sampled gameplay-ish rows exceeded 16.67 ms in this run.
+
+Thermals, system pressure, and process attribution:
+
+- MAHM CPU temperature averaged 78.1 C, p95 80.4 C, and maxed 83.2 C. CPU
+  clock stayed near 4,450 MHz.
+- NVIDIA GPU utilization averaged 72.3%, p95 88.0%, and maxed 92%, versus
+  65.0% average and 80% max in the Firefox + Tracker / no-Medal run. GPU
+  temperature maxed 61 C and VRAM used maxed about 3.3 GB.
+- RAM usage averaged about 20.9 GB and maxed about 22.5 GB, versus about
+  19.4 GB average and 19.9 GB max in the no-Medal baseline.
+- Context switches averaged about 151k/sec and p95 was about 161k/sec, versus
+  138k/sec average and 152k/sec p95 in the no-Medal baseline.
+- Network receive averaged about 0.93 MB/sec and maxed about 5.0 MB/sec,
+  which is much lower than the no-Medal run's 3.5 MB/sec average and
+  39.2 MB/sec max. Treat the browser/media workload as not perfectly matched.
+- Firefox appeared repeatedly in top-process samples, maxing at about 7.3%
+  total CPU and about 116% of one logical CPU in the sampler's normalized
+  metric.
+- Tracker.gg appeared lightly in top-process samples, maxing at about 0.6%
+  total CPU.
+- MedalEncoder appeared in top-process samples, maxing at about 3.0% total
+  CPU and about 47% of one logical CPU. In process inventory, MedalEncoder
+  maxed around 826 MB private memory and 413 MB working set.
+- Medal itself appeared lightly in top-process samples, maxing at about 0.6%
+  total CPU and about 367 MB working set.
+
+Comparison and interpretation:
+
+- Compared with the desired-workflow no-Medal baseline, adding Medal did not
+  produce a clear active-gameplay FPS regression. Gameplay-ish RTSS average
+  moved from 195.1 FPS to 196.7 FPS, near-cap average moved from 197.0 FPS to
+  197.5 FPS, and sampled gameplay rows over 16.67 ms moved from 1 to 0.
+- The Medal run still had higher RAM usage, GPU utilization, VRAM use, CPU
+  temperature, and context switches. Medal/MedalEncoder therefore have
+  measurable cost, but this capture does not support them being the major
+  reason Fortnite fails to hold the 200 FPS cap during actual fighting.
+- Because network receive was much lower in the Medal-added run, the browser
+  stream/media workload was not identical. If this needs a stricter ruling,
+  repeat A/B with the same Firefox stream quality/tab state and the same match
+  type, alternating no-Medal and Medal.
+- Current practical conclusion: for Johnny's preferred workflow, Medal is not
+  proven to be the culprit from this capture. Keep watching for memory growth
+  and encoder/overlay spikes, but shift the next investigation toward stream
+  media load consistency, OBS/recording/streaming interaction, and transition
+  stutter separation.
 
 ## CPU Upgrade Status
 
