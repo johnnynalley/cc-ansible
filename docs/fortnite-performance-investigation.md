@@ -1226,6 +1226,102 @@ Interpretation:
   scheduler churn, with no GPU saturation and no event-log driver fault in this
   artifact.
 
+## 2026-08-29 Ranked BR SignalRGB-App-Disabled Capture
+
+Capture:
+`20260829-200143-fortnite-ranked-br-signalrgb-disabled-20260829`.
+
+Local artifacts:
+
+- Archive:
+  `/tmp/LJ-GAMING-PC-20260829-200143-fortnite-ranked-br-signalrgb-disabled-20260829.zip`
+- Analysis:
+  `/tmp/LJ-GAMING-PC-20260829-200143-analysis.json`
+
+Scope and reliability:
+
+- Capture started at `2026-08-29T20:01:43-05:00` and stopped at
+  `2026-08-29T22:03:50-05:00`.
+- The sampler did not crash; `benchmark.log` had no analyzer-detected failures.
+- Johnny later said he forgot to mark the match end and had been sitting in the
+  lobby for a while. The corrected final-tail detector found the last RTSS
+  sample above 130 FPS at `2026-08-29T21:02:11-05:00`, then a final
+  120-FPS tail from `21:02:12` through stop. The final tail lasted about
+  61.6 minutes and had a 99.5% capped-sample ratio.
+- Do not compare the untrimmed all-window FPS to gameplay captures. The
+  all-window average was pulled down to 139.3 FPS by the long lobby tail and
+  transition/stall rows.
+
+Process-presence caveat:
+
+- The capture was explicitly marked
+  `workflow-caveat-signalrgb-disabled-user-confirmed`.
+- `process_presence.notable` showed the SignalRGB app absent, but
+  `SignalRgbService.exe` present.
+- Other notable missing groups were OBS, Nextcloud, iCUE, Sonobus, and Kovaak's.
+- Present groups included Fortnite, Firefox, Tracker.gg, Medal/MedalEncoder,
+  Discord, Steam, Epic Games Launcher, Rockstar/SocialClub, Xbox/Game Bar,
+  SteelSeries/Sonar, OneDrive, NVIDIA overlay, RTSS/Afterburner, and Memory
+  Compression.
+- Because process presence differs from earlier "normal workflow" captures,
+  state this delta before making performance claims. The absence of SignalRGB
+  is not the whole issue; the comparison guard is that all notable app-state
+  differences must be considered first.
+
+Tail-trimmed metrics:
+
+- Visible FPS source was RTSS.
+- Before the final lobby tail, all RTSS rows from `20:01:58` to `21:02:11`
+  averaged 159.7 FPS with p50 185.0 FPS. This includes loading, transition,
+  and stall samples, so it is not the clean gameplay number.
+- Before the final lobby tail, gameplay-ish `fps >= 140` rows averaged
+  192.3 FPS, p50 196.8 FPS, p95 200.0 FPS, p99 frame time 11.43 ms, max
+  sampled gameplay-ish frame time 123.91 ms, with 6 rows over 16.67 ms.
+- Before the final lobby tail, near-cap `fps >= 180` rows averaged 195.5 FPS,
+  p50 197.0 FPS, p95 200.0 FPS, p99 frame time 10.05 ms, max frame time
+  24.96 ms, with 3 rows over 16.67 ms.
+- Longest gameplay-ish runs included:
+  - `20:17:06-20:29:23`: 12.3 minutes, 194.0 FPS average, p99 frame 9.56 ms,
+    one row over 16.67 ms.
+  - `20:35:48-20:42:56`: 7.1 minutes, 197.0 FPS average, p99 frame 8.30 ms,
+    zero rows over 16.67 ms.
+  - `20:57:54-21:02:11`: 4.3 minutes, 191.1 FPS average, p99 frame 9.98 ms,
+    zero rows over 16.67 ms.
+
+System and process interpretation:
+
+- PresentMon used `Hardware: Independent Flip` throughout the capture and did
+  not show a visible-FPS mismatch in the analyzer.
+- The diagnosis remained CPU-frame-time dominant: PresentMon average CPU busy
+  was 6.97 ms versus GPU busy 3.32 ms.
+- Max logical CPU utility p95 was 109.2% and context-switch p95 was about
+  168,734/sec. This again points to a hot frame-critical CPU path plus
+  scheduler churn even when total CPU usage is moderate.
+- NVIDIA GPU utilization p95 was 74% and GPU temperature maxed 61 C. This was
+  not a GPU-saturation capture.
+- CPU temperature from MAHM averaged 70.7 C, p95 77.8 C, p99 79.1 C, and max
+  81.4 C, which is materially cooler than the earlier low-80s captures.
+- Preflight recorded Memory Compression at 2298.1 MB, and process inventory
+  later saw Memory Compression up to 3641.4 MB. Available memory remained
+  healthy in system counters, with minimum sampled available memory about
+  9.6 GB, so this is a captured warning rather than proof of active RAM
+  starvation.
+- Highest non-Fortnite sampled process pressure included Discord max 9.5%
+  total CPU, Firefox max 6.7%, MedalEncoder max 4.5%, OneDrive Sync max 3.4%,
+  audiodg max 3.3%, and DWM max 2.6%. Process I/O deltas were largest for
+  Fortnite, MedalEncoder, OneDrive Sync, and Firefox; these are not direct
+  per-process network counters.
+
+Conclusion:
+
+- After trimming the final lobby tail, this ranked BR run is playable and often
+  near the 200 FPS cap, but weaker than the clean BR and shorter desired-workflow
+  Medal attribution capture. Because it is longer ranked BR and has different
+  process presence, do not use it as proof that any single app helped or hurt.
+- The durable performance signal is still CPU-frame-time pressure and a hot
+  logical processor, not GPU saturation, disk latency, or an obvious single
+  background process.
+
 ## CPU Upgrade Status
 
 Johnny ordered a Ryzen 7 5700X3D, but the installed CPU is verified as a Ryzen 7 5800X3D. The BIOS, Windows WMI, and `HKLM:\HARDWARE\DESCRIPTION\System\CentralProcessor\0` all report `AMD Ryzen 7 5800X3D 8-Core Processor`. Treat the 5800X3D as the installed and benchmark-relevant CPU.

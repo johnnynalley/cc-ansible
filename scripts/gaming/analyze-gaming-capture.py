@@ -250,44 +250,50 @@ def summarize_visible_sustained_cap_tail(
     if not samples:
         return None
 
-    cutoff = None
+    last_above_index = None
     for index, sample in enumerate(samples):
-        fps = sample["fps"]
-        if fps < cap_low or fps > cap_high:
-            continue
-        window_end = sample["time"].timestamp() + min_duration_seconds
-        future = [
-            item for item in samples[index:]
-            if item["time"].timestamp() <= window_end
-        ]
-        if len(future) < min_samples:
-            continue
-        if max(item["fps"] for item in future) <= no_above:
-            cutoff = sample
-            break
+        if sample["fps"] > no_above:
+            last_above_index = index
 
-    if cutoff is None:
+    tail_start_index = 0 if last_above_index is None else last_above_index + 1
+    if tail_start_index >= len(samples):
         return None
 
-    last_above = None
-    for sample in samples:
-        if sample["time"] >= cutoff["time"]:
-            break
-        if sample["fps"] > no_above:
-            last_above = sample
+    tail = samples[tail_start_index:]
+    before = samples[:tail_start_index]
+    times = [sample["time"] for sample in tail]
+    duration_seconds = (max(times) - min(times)).total_seconds() if len(times) > 1 else 0
+    capped_rows = [
+        sample for sample in tail
+        if cap_low <= sample["fps"] <= cap_high
+    ]
+    above_rows = [
+        sample for sample in tail
+        if sample["fps"] > no_above
+    ]
+    if (
+        len(tail) < min_samples
+        or duration_seconds < min_duration_seconds
+        or len(capped_rows) < min_samples
+        or above_rows
+    ):
+        return None
 
-    before = [sample for sample in samples if sample["time"] < cutoff["time"]]
-    tail = [sample for sample in samples if sample["time"] >= cutoff["time"]]
+    cutoff = tail[0]
+    last_above = samples[last_above_index] if last_above_index is not None else None
     return {
         "cap_low": cap_low,
         "cap_high": cap_high,
         "no_above": no_above,
         "min_duration_seconds": min_duration_seconds,
         "min_samples": min_samples,
+        "method": "final_tail_after_last_sample_above_threshold",
         "cutoff_timestamp": cutoff["time"].isoformat(),
         "cutoff_fps": cutoff["fps"],
         "last_above_threshold_timestamp": last_above["time"].isoformat() if last_above else None,
         "last_above_threshold_fps": last_above["fps"] if last_above else None,
+        "tail_duration_seconds": duration_seconds,
+        "tail_capped_sample_ratio": len(capped_rows) / len(tail) if tail else None,
         "before_tail": summarize_visible_samples(before),
         "tail": summarize_visible_samples(tail),
         "before_tail_gameplayish_fps_gte_140": summarize_visible_samples([

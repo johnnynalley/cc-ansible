@@ -132,6 +132,13 @@ diagnosis when the sampler crashed before stop. Treat any capture with that
 diagnosis as truncated; compare the last telemetry timestamp to the stop marker
 before drawing gameplay, lobby-tail, or app-attribution conclusions.
 
+For captures where Johnny forgets to mark the match end and then sits in the
+Fortnite lobby, use `visible_sustained_120_cap_tail`. This detector works from
+the end of the capture by finding the final sample above the lobby threshold
+and treating the following sustained 120-FPS region as the tail. Do not cut on
+the first 120-FPS window in the file, because pre-match lobby time can be
+followed by real gameplay.
+
 The analyzer also emits `process_presence`, including `all_process_names`,
 `missing_notable_groups`, and a compact `notable` table for Fortnite, OBS,
 Firefox, Medal, Tracker/Overwolf, Discord, Steam, Epic, Rockstar, Xbox/Game
