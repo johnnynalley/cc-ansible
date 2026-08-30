@@ -1267,6 +1267,23 @@ Process-presence caveat:
   state this delta before making performance claims. The absence of SignalRGB
   is not the whole issue; the comparison guard is that all notable app-state
   differences must be considered first.
+- Follow-up on `2026-08-30` found Nextcloud was genuinely not running, not an
+  analyzer grouping miss. The raw capture CSVs had zero Nextcloud rows, the
+  live Windows process list had no Nextcloud process, and the HKCU Run entry
+  still pointed at `C:\Program Files\Nextcloud\nextcloud.exe`.
+- Nextcloud's newest client log stopped at about `2026-08-29T13:40:02-05:00`
+  with repeated CFAPI virtual-file errors against `Media/Medal/Imports/*.mp4`:
+  "The cloud operation cannot be performed on a file with incompatible
+  hardlinks." Windows Application event ID 1000 then recorded
+  `nextcloud.exe` version `34.0.2.10195` faulting in `ucrtbase.dll` at
+  `2026-08-29T13:40:08-05:00` with exception `0xc0000409`.
+- Performance Mode was not the cause of the missing Nextcloud process. Its
+  live state was inactive, with the last recorded exit on `2026-06-17`, and
+  the log showed no August 29 close/enforce entries for Nextcloud.
+- Interpretation: Nextcloud likely crashed during the earlier low-virtual-memory
+  / Medal hardlink placeholder-error window, then stayed absent because the
+  HKCU startup entry only starts it at login and does not respawn a crashed
+  desktop client.
 
 Tail-trimmed metrics:
 
