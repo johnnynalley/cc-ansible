@@ -32,6 +32,13 @@ game is foreground, it falls back to inventory order. Target markers record
 `combined.csv` includes `TargetProcessName` so mixed captures can be split by
 game later.
 
+Before comparing FPS, lows, CPU busy, GPU busy, or stutter counts across two
+captures, compare the analyzer's `process_presence.notable` sections. A capture
+where normal workflow apps are missing, newly present, or present under a
+different recording/overlay stack is not directly comparable until that process
+delta is called out. Do not bury this in raw `process-inventory.csv`; state the
+presence delta first, then interpret performance.
+
 Start while recording preflight warnings without blocking the capture:
 
 ```bash
@@ -124,6 +131,13 @@ The analyzer reads `benchmark.log` and adds a `benchmark_sampler_failure`
 diagnosis when the sampler crashed before stop. Treat any capture with that
 diagnosis as truncated; compare the last telemetry timestamp to the stop marker
 before drawing gameplay, lobby-tail, or app-attribution conclusions.
+
+The analyzer also emits `process_presence`, including `all_process_names`,
+`missing_notable_groups`, and a compact `notable` table for Fortnite, OBS,
+Firefox, Medal, Tracker/Overwolf, Discord, Steam, Epic, Rockstar, Xbox/Game
+Bar, SignalRGB app/service, iCUE/Corsair, SteelSeries, Logitech, Sonobus,
+Nextcloud, NVIDIA overlay, RTSS/Afterburner, and Memory Compression. Use this
+section for capture-to-capture comparability before making performance claims.
 
 ## A/B Test Options
 

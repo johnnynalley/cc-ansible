@@ -76,6 +76,7 @@
           AffinityMask: "{{ windows_gaming_benchmark_action_affinity_mask | default('') }}"
           PowerPlan: "{{ windows_gaming_benchmark_action_power_plan | default('current') }}"
           PriorityClass: "{{ windows_gaming_benchmark_action_priority_class | default('none') }}"
+          PreflightFailOnWarnings: "{{ windows_gaming_benchmark_preflight_fail_on_warnings | default(true) }}"
         script: |
           [CmdletBinding()]
           param(
@@ -88,7 +89,8 @@
               [string]$AffinityPreset,
               [string]$AffinityMask,
               [string]$PowerPlan,
-              [string]$PriorityClass
+              [string]$PriorityClass,
+              [string]$PreflightFailOnWarnings
           )
 
           $ErrorActionPreference = "Stop"
@@ -106,7 +108,8 @@
               -AffinityPreset $AffinityPreset `
               -AffinityMask $AffinityMask `
               -PowerPlan $PowerPlan `
-              -PriorityClass $PriorityClass
+              -PriorityClass $PriorityClass `
+              -PreflightFailOnWarningsOverride $PreflightFailOnWarnings
       register: windows_gaming_benchmark_action_result
       changed_when: windows_gaming_benchmark_action | lower in ['start', 'stop', 'mark']
       when: windows_gaming_benchmark_action | default('') | length > 0

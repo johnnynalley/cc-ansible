@@ -10,7 +10,8 @@ param(
     [string]$AffinityMask = '',
     [string]$PowerPlan = 'current',
     [ValidateSet('none', 'Idle', 'BelowNormal', 'Normal', 'AboveNormal', 'High')]
-    [string]$PriorityClass = 'none'
+    [string]$PriorityClass = 'none',
+    [string]$PreflightFailOnWarningsOverride = ''
 )
 
 $ErrorActionPreference = 'Stop'
@@ -42,6 +43,10 @@ $EventLogMaxEvents = {{ windows_gaming_benchmark_event_log_max_events | default(
 $ObsProfilePath = '{{ windows_gaming_benchmark_obs_profile_path | default("") }}'
 $PreflightEnabled = [System.Convert]::ToBoolean('{{ windows_gaming_benchmark_preflight_enabled | default(true) }}')
 $PreflightFailOnWarnings = [System.Convert]::ToBoolean('{{ windows_gaming_benchmark_preflight_fail_on_warnings | default(true) }}')
+$RuntimePreflightFailOnWarnings = $PreflightFailOnWarnings
+if ($PreflightFailOnWarningsOverride -ne '') {
+    $RuntimePreflightFailOnWarnings = [System.Convert]::ToBoolean($PreflightFailOnWarningsOverride)
+}
 $PreflightMinAvailableMBytes = {{ windows_gaming_benchmark_preflight_min_available_mb | default(4096) | int }}
 $PreflightStalePowerShellAgeSeconds = {{ windows_gaming_benchmark_preflight_stale_powershell_age_seconds | default(120) | int }}
 $PreflightPowerShellWorkingSetMBytes = {{ windows_gaming_benchmark_preflight_powershell_working_set_mb | default(512) | int }}
@@ -1898,7 +1903,7 @@ function Start-Benchmark {
         PreflightWarnings = @()
     }
     Write-ObsProfileSnapshot -State $state
-    $preflightWarnings = @(Invoke-PreflightCheck -State $state)
+    $preflightWarnings = @(Invoke-PreflightCheck -State $state -FailOnWarnings $RuntimePreflightFailOnWarnings)
     $state.PreflightWarnings = @($preflightWarnings)
     Write-State -State $state
     Set-BenchmarkPowerPlan -State $state

@@ -386,6 +386,127 @@ def summarize_inventory_pollution(root):
     return warnings
 
 
+NOTABLE_PROCESS_GROUPS = {
+    "fortnite": ("fortniteclient-win64-shipping",),
+    "kovaaks": ("fpsaimtrainer-win64-shipping", "fpsaimtrainer"),
+    "obs": ("obs64",),
+    "firefox": ("firefox",),
+    "edge": ("msedge",),
+    "medal": ("medal", "medalencoder"),
+    "tracker": ("tracker", "tracker.gg", "overwolf"),
+    "discord": ("discord",),
+    "steam": ("steam", "steamwebhelper"),
+    "epic-games-launcher": ("epicgameslauncher", "epicwebhelper"),
+    "rockstar": ("launcher", "launcherpatcher", "rockstarservice", "socialclubhelper"),
+    "xbox-game-bar": (
+        "xboxpcapp",
+        "xboxpcappft",
+        "xboxpctray",
+        "gamebar",
+        "gamebarftserver",
+        "gamebarpresencewriter",
+        "gamingservices",
+    ),
+    "signalrgb": ("signalrgb",),
+    "signalrgb-service": ("signalrgbservice",),
+    "icue": ("icue", "corsair.service", "corsairgamingaudioservice"),
+    "steelseries": (
+        "steelseriesengine",
+        "steelseriesgg",
+        "steelseriesggclient",
+        "steelseriesggez",
+        "steelseriesprism",
+        "steelseriessonar",
+    ),
+    "logitech": ("lghub", "lghub_agent", "lghub_system_tray", "lghub_updater"),
+    "sonobus": ("sonobus",),
+    "nextcloud": ("nextcloud",),
+    "onedrive": ("onedrive", "onedrive.sync.service"),
+    "nvidia-overlay": ("nvidia overlay", "nvcontainer", "nvdisplay.container"),
+    "rtss-afterburner": ("rtss", "rtsshooksloader64", "msiafterburner"),
+    "memory-compression": ("memory compression",),
+}
+
+
+def normalize_process_name(value):
+    name = str(value or "").strip().lower()
+    if name.endswith(".exe"):
+        name = name[:-4]
+    return name
+
+
+def summarize_process_presence(root):
+    rows = list(read_csv(root / "process-inventory.csv"))
+    by_name = defaultdict(lambda: {
+        "samples": 0,
+        "names": set(),
+        "ids": set(),
+        "phases": set(),
+        "max_working_set_mb": 0.0,
+        "max_private_mb": 0.0,
+        "max_cpu_seconds": 0.0,
+    })
+
+    for row in rows:
+        key = normalize_process_name(row.get("ProcessName"))
+        if not key:
+            continue
+        rec = by_name[key]
+        rec["samples"] += 1
+        rec["names"].add(row.get("ProcessName") or key)
+        if row.get("Id"):
+            rec["ids"].add(str(row.get("Id")))
+        if row.get("Phase"):
+            rec["phases"].add(row.get("Phase"))
+        rec["max_working_set_mb"] = max(rec["max_working_set_mb"], fnum(row.get("WorkingSetMB")) or 0.0)
+        rec["max_private_mb"] = max(rec["max_private_mb"], fnum(row.get("PrivateMemoryMB")) or 0.0)
+        rec["max_cpu_seconds"] = max(rec["max_cpu_seconds"], fnum(row.get("CpuSeconds")) or 0.0)
+
+    notable = {}
+    for group, names in NOTABLE_PROCESS_GROUPS.items():
+        normalized_names = {normalize_process_name(name) for name in names}
+        matches = [
+            (name, rec)
+            for name, rec in by_name.items()
+            if name in normalized_names
+        ]
+        notable[group] = {
+            "present": bool(matches),
+            "matched_process_names": sorted({
+                process_name
+                for _name, rec in matches
+                for process_name in rec["names"]
+            }),
+            "ids": sorted({
+                pid
+                for _name, rec in matches
+                for pid in rec["ids"]
+            }),
+            "phases": sorted({
+                phase
+                for _name, rec in matches
+                for phase in rec["phases"]
+            }),
+            "max_working_set_mb": max((rec["max_working_set_mb"] for _name, rec in matches), default=0.0),
+            "max_private_mb": max((rec["max_private_mb"] for _name, rec in matches), default=0.0),
+            "max_cpu_seconds": max((rec["max_cpu_seconds"] for _name, rec in matches), default=0.0),
+        }
+
+    return {
+        "rows": len(rows),
+        "distinct_process_names": len(by_name),
+        "all_process_names": sorted({
+            process_name
+            for rec in by_name.values()
+            for process_name in rec["names"]
+        }),
+        "notable": notable,
+        "missing_notable_groups": sorted(
+            group for group, summary in notable.items() if not summary["present"]
+        ),
+    }
+
+
 def summarize_obs_profile(root):
     rows = list(read_csv(root / "obs-profile.csv"))
     settings = {}
@@ -987,6 +1108,7 @@ def main(root):
         "pollution": {
             "process_inventory_warnings": summarize_inventory_pollution(root),
         },
+        "process_presence": summarize_process_presence(root),
         "obs_profile": summarize_obs_profile(root),
         "event_log": summarize_event_log(root),
         "benchmark_log": summarize_benchmark_log(root),
