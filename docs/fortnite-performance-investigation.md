@@ -1284,6 +1284,33 @@ Process-presence caveat:
   / Medal hardlink placeholder-error window, then stayed absent because the
   HKCU startup entry only starts it at login and does not respawn a crashed
   desktop client.
+- Follow-up on `2026-08-30T14:52:17-05:00` confirmed the disabled Medal
+  imports are not creating new import clips, but the stale import folder is
+  still a live Nextcloud problem. `C:\Users\jn\Nextcloud\Media\Medal\Imports`
+  had 120 files, about 5.6 GB, no files modified in the prior 24 hours, and
+  newest file time `2026-08-23T18:24:07-05:00`; the five newest sampled import
+  MP4s still had `LinkCount=2`, linking each file to both
+  `C:\Users\jn\AppData\Local\Temp\Highlights\Fortnite` and the Nextcloud
+  imports path.
+- The same probe showed fresh Nextcloud client log pressure in the prior three
+  hours: 376 `incompatible hardlinks` lines, 752 placeholder-conversion
+  failures, 2449 `Media/Medal/Imports` lines, and the last hardlink/placeholder
+  failure at `2026-08-30T14:46:52-05:00`. Treat the stale imports as still
+  capable of breaking Nextcloud sync and adding background churn until the
+  hardlinked import debris is cleaned or moved out of the sync root.
+- Medal's normal completed clips are a separate path from the broken imports:
+  the five newest sampled `Media\Medal\Clips\Fortnite` MP4s were ordinary
+  single-link files (`LinkCount=1`), not hardlinks. However,
+  `C:\Users\jn\Nextcloud\Media\Medal\Temp\RecordingBuffer` was actively
+  changing under Nextcloud during the probe, with 329 files, about 3.3 GB, and
+  newest write time `2026-08-30T14:52:12-05:00`. That makes Medal's live
+  recording buffer inside Nextcloud a current performance/sync noise source
+  even if the old import feature is disabled.
+- Current recommendation before the next strict benchmark: move Medal's active
+  recording buffer and working clip output outside `C:\Users\jn\Nextcloud`,
+  then copy or move completed clips into Nextcloud after the game/session is
+  idle. Separately clean the stale `Media\Medal\Imports` hardlinks after
+  approval. Do not treat the disabled import setting alone as sufficient.
 
 Tail-trimmed metrics:
 
