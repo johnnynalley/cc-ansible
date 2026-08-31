@@ -1306,11 +1306,21 @@ Process-presence caveat:
   newest write time `2026-08-30T14:52:12-05:00`. That makes Medal's live
   recording buffer inside Nextcloud a current performance/sync noise source
   even if the old import feature is disabled.
-- Current recommendation before the next strict benchmark: move Medal's active
-  recording buffer and working clip output outside `C:\Users\jn\Nextcloud`,
-  then copy or move completed clips into Nextcloud after the game/session is
-  idle. Separately clean the stale `Media\Medal\Imports` hardlinks after
-  approval. Do not treat the disabled import setting alone as sufficient.
+- Correction on Medal's native controls: current Medal support docs show a
+  single `Capture Folder Location` for clips/recordings, not separate native
+  disk paths for completed clips versus the recording buffer. Medal does expose
+  a `Recording Buffer` choice between disk and memory, but that is a storage
+  medium toggle, not a separate buffer-folder picker, and Medal says it only
+  applies in Clip Mode; Full Session Mode reverts to disk.
+- Current recommendation before the next strict benchmark: keep completed clips
+  in Nextcloud if that workflow is required, clean the stale
+  `Media\Medal\Imports` hardlinks after approval, and test Medal's Memory
+  buffer mode for Clip Mode if Johnny is not using Full Session Recording.
+  If that does not remove the active `Temp\RecordingBuffer` churn from the
+  Nextcloud tree, the robust alternative is local staging plus a post-session
+  mover/retention job, not a Medal-native split path. Do not claim Medal can
+  choose separate completed and buffer folders unless current app evidence
+  proves it.
 
 Tail-trimmed metrics:
 
