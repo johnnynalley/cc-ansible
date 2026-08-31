@@ -134,22 +134,28 @@ get_primary_interface() {
 }
 
 has_ipv4_address() {
-    # Check if we have a LAN IPv4 address (not Tailscale, not loopback)
+    # Only the selected primary interface can satisfy this check. Counting an
+    # address on a Docker or Proxmox guest bridge can hide a broken host path.
     local iface
     iface=$(get_primary_interface)
 
-    # Check primary interface
     if [[ -n "$iface" ]] && ip -4 addr show "$iface" 2>/dev/null | grep -q 'inet '; then
         return 0
     fi
 
-    # Fallback: check non-tailscale interfaces for private IPv4 (192.168.x, 10.x, 172.16-31.x)
-    # Excludes: 100.x (Tailscale CGNAT), 127.x (loopback)
-    if ip -4 addr show 2>/dev/null | grep -v 'tailscale0' | grep -qE 'inet (192\.168\.|10\.|172\.(1[6-9]|2[0-9]|3[01])\.)'; then
-        return 0
-    fi
-
     return 1
+}
+
+get_ifupdown_method() {
+    local iface="$1"
+
+    [[ -r /etc/network/interfaces ]] || return 1
+    awk -v iface="$iface" '
+        $1 == "iface" && $2 == iface && $3 == "inet" {
+            print $4
+            exit
+        }
+    ' /etc/network/interfaces
 }
 
 fix_proxmox_bridge() {
@@ -436,56 +442,55 @@ check_tailscale() {
 }
 
 recover_gateway() {
-    local recovery_attempt
+    local recovery_attempt iface ifupdown_method
     recovery_attempt=$(get_failure_count "dhcp_recovery")
     log "Attempting gateway recovery (attempt $((recovery_attempt + 1))/$MAX_DHCP_RECOVERY_ATTEMPTS)..."
 
-{% if ansible_facts.os_family == "Debian" %}
-    # Debian-specific recovery
-    if command -v dhclient &>/dev/null; then
-        log "Releasing and renewing DHCP lease..."
-        dhclient -r 2>/dev/null || true
-        sleep 2
-        dhclient 2>/dev/null || true
+    # A router outage is not an address-configuration failure. Never cycle a
+    # valid host interface merely because the gateway is unavailable.
+    if has_ipv4_address; then
+        log "LAN IPv4 remains configured; leaving the interface unchanged while the gateway is unavailable"
+        return 0
     fi
 
-    if [[ -f /etc/network/interfaces ]]; then
-        local iface
-        iface=$(ip route get 1.1.1.1 2>/dev/null | awk '{print $5; exit}' || echo "")
-        if [[ -n "$iface" && "$iface" != "lo" && "$iface" != "tailscale0" ]]; then
-            log "Cycling interface $iface..."
-            ifdown "$iface" 2>/dev/null || true
-            sleep 2
-            ifup "$iface" 2>/dev/null || true
-        fi
+    iface=$(get_primary_interface)
+    if [[ -z "$iface" ]]; then
+        log "No primary interface could be identified; refusing broad network recovery"
+        return 1
     fi
-{% endif %}
 
     if systemctl is-active --quiet systemd-networkd; then
-        local iface
-        iface=$(get_primary_interface)
-
-        # First try: just restart systemd-networkd
-        log "Restarting systemd-networkd..."
-        systemctl restart systemd-networkd
+        log "Reconfiguring $iface through systemd-networkd..."
+        networkctl reconfigure "$iface" 2>/dev/null || true
+        networkctl renew "$iface" 2>/dev/null || true
         sleep 5
-
-        # If still no IPv4, use networkctl reconfigure (more aggressive)
-        if ! has_ipv4_address && [[ -n "$iface" ]]; then
-            log "No IPv4 address, forcing interface reconfiguration on $iface..."
-            networkctl reconfigure "$iface" 2>/dev/null || true
-            sleep 5
-        fi
-
-        # If still no IPv4, try bringing interface down and up
-        if ! has_ipv4_address && [[ -n "$iface" ]]; then
-            log "Still no IPv4, cycling interface $iface..."
-            ip link set "$iface" down 2>/dev/null || true
-            sleep 2
-            ip link set "$iface" up 2>/dev/null || true
-            networkctl reconfigure "$iface" 2>/dev/null || true
-            sleep 5
-        fi
+{% if ansible_facts.os_family == "Debian" %}
+    elif [[ -r /etc/network/interfaces ]]; then
+        ifupdown_method=$(get_ifupdown_method "$iface" || true)
+        case "$ifupdown_method" in
+            static)
+                if command -v ifreload &>/dev/null; then
+                    log "Restoring static $iface configuration through ifupdown2..."
+                    ifreload -a 2>/dev/null || true
+                    sleep 5
+                else
+                    log "Static $iface lost its address and ifreload is unavailable; refusing DHCP or bridge cycling"
+                fi
+                ;;
+            dhcp)
+                log "Reconfiguring DHCP interface $iface through ifupdown..."
+                ifdown "$iface" 2>/dev/null || true
+                sleep 2
+                ifup "$iface" 2>/dev/null || true
+                sleep 5
+                ;;
+            *)
+                log "No supported ifupdown address method for $iface; refusing broad DHCP or interface cycling"
+                ;;
+        esac
+{% endif %}
+    else
+        log "No supported native network manager found for $iface; refusing broad recovery"
     fi
 
     # Restart systemd-resolved if it exists

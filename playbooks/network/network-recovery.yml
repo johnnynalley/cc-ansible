@@ -188,6 +188,24 @@
         mode: "0755"
       when: network_watchdog_enabled | default(true)
 
+    - name: Reject direct dhclient calls in the cross-platform watchdog
+      ansible.builtin.assert:
+        that:
+          - >-
+            (lookup(
+              'ansible.builtin.file',
+              (ansible_config_file | dirname)
+              ~ '/templates/network/network-watchdog.sh.j2'
+            ) | regex_search('(?m)^\s*dhclient(?:\s+-r)?(?:\s|$)')) is none
+        fail_msg: >-
+          The shared network watchdog must use the selected interface's native
+          manager. A direct dhclient call can configure every Proxmox bridge and
+          guest firewall interface.
+      when: network_watchdog_enabled | default(true)
+      run_once: true
+      delegate_to: localhost
+      become: false
+
     - name: Create network-watchdog script
       ansible.builtin.template:
         src: "{{ ansible_config_file | dirname }}/templates/network/network-watchdog.sh.j2"

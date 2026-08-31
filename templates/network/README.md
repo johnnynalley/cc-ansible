@@ -20,3 +20,7 @@
 
 - Workstations intentionally opt out of automated recovery. Preserve host/group
   opt-ins before changing watchdog behavior.
+- Treat an unreachable gateway with a still-configured LAN address as an
+  upstream outage; do not cycle the interface. Address recovery must use the
+  selected interface's native manager. Direct, unscoped `dhclient` calls are
+  forbidden because they can configure Proxmox guest and firewall bridges.
