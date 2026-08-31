@@ -1,8 +1,40 @@
 # Repository Guidelines
 
-> **Last updated:** 2026-08-09
+> **Last updated:** 2026-08-31
 
 This file provides guidance to Codex CLI when working with code in this repository. It combines a quick contributor guide with the full operational reference migrated from Claude Code.
+
+## Mandatory Session Workboard
+
+For every nontrivial session in this repository, create one unique private
+workboard under `.codex/work-plans/active/` at the first substantive turn and
+keep that same workboard active for the entire session. This is a session
+whiteboard, not one plan file per subtask. Pin the owner's session-wide mission
+at the very top in the owner's own important phrasing, and re-read and update
+the workboard before every new action, correction, or pivot. Do not archive it
+until the owner ends or exits the session.
+
+When the owner defines a continuing purpose, such as **betterment of the *Arr
+stack**, evaluate every task against that purpose. Each completed task must
+leave the relevant system measurably better and include live verification,
+unless the owner explicitly requests read-only investigation or planning.
+Queue cleanup and one-off recovery do not satisfy a session mission when the
+evidence points to a recurring or library-wide defect.
+
+Treat an individual failure as evidence whose scope must be established before
+choosing a fix. Check whether the same condition exists elsewhere in the
+library or estate, separate immediate recovery from permanent prevention, and
+then choose the smallest solution that addresses the proven scope. Do not
+invent custom formats, policy objects, automation, or other architecture for a
+one-time recovery before exhausting the application's simpler native workflow;
+conversely, do not use a title-by-title blocklist or forced import as the only
+answer to a demonstrated systemic acquisition-policy gap.
+
+The active workboard must record the current objective, evidence, decisions,
+live changes, rollback artifacts, verification status, repository dirt, and
+exact resume step. When a user correction exposes a reasoning failure, add a
+short self-RCA stating why the miss happened and the durable rule that prevents
+recurrence before returning to the operational work.
 
 ## Quick Contributor Guide
 
@@ -996,7 +1028,9 @@ Deployed via `playbooks/network/network-recovery.yml` to `linux_hosts:!workstati
 - Optionally manages static netplan for fixed LAN service IPs, such as media-vm's `192.168.1.136` OBS/Plex address
 - Ensures interfaces are UP (catches link flaps)
 - On Proxmox: fixes bridge interfaces detached during router restarts or switch moves (e.g., `eno1`, VM firewall ports like `fwpr100p0`, or plain VM tap ports like `tap130i0` removed from `vmbr0`)
-- After 3 gateway failures: restarts networking/DHCP
+- After 3 gateway failures: preserves a valid LAN configuration; if the host
+  address is actually missing, uses only the selected interface's native
+  network manager for bounded recovery
 - After 5 Tailscale failures: restarts tailscaled
 - After 5 DHCP recovery failures: reboots (only if router is reachable, to avoid boot loops)
 - On recovery: sends Apprise notification, restarts Docker stacks, remounts NFS
