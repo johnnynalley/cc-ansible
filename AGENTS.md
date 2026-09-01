@@ -30,6 +30,14 @@ one-time recovery before exhausting the application's simpler native workflow;
 conversely, do not use a title-by-title blocklist or forced import as the only
 answer to a demonstrated systemic acquisition-policy gap.
 
+When the owner explicitly prioritizes an immediate incident recovery, finish
+that recovery and its verification before expanding into the systemic
+follow-up. Record the broader defect and return to it afterward, but do not let
+investigation, architecture, documentation, or tooling delay the requested
+working result. If the same priority has to be repeated, treat that as plan
+drift: correct the active workboard ordering before doing more operational
+work.
+
 The active workboard must record the current objective, evidence, decisions,
 live changes, rollback artifacts, verification status, repository dirt, and
 exact resume step. When a user correction exposes a reasoning failure, add a
@@ -787,6 +795,17 @@ Primary media VM (10GB RAM, 4 cores, 200GB disk, Quadro P2200 GPU passthrough). 
 **Docker log pressure**: Docker hosts get bounded `json-file` logs from `docker_daemon_config` in `inventory/group_vars/docker_hosts/docker.yml`; media-stack containers also declare compose-level logging limits in `templates/docker/docker-media-stack.yml.j2` so recreated containers cannot grow unbounded stdout/stderr logs. SABnzbd's own internal log rotation is separate from Docker's container log. If docker-vm root fills unexpectedly, check `/var/lib/docker/containers/*/*-json.log` and `docker system df` before assuming media or Arr rollback backups are the cause. SABnzbd also has a raised compose `nofile` ulimit because heavy download/unpack bursts previously produced `OSError: [Errno 24] No file descriptors available`.
 
 **Release metadata stamper**: `playbooks/media/media-release-stamper.yml` deploys SABnzbd and qBittorrent post-download stampers that preserve grab-time evidence before Sonarr/Radarr import. qBittorrent renames payload files through its Web API to keep seeding state intact, with bounded retry/backoff configured in the deployed env; for obvious single-file video torrents, the qBit stamper uses torrent metadata directly instead of calling the qBit file-list endpoint, which can hang. DA evidence is stamped as language-combo tags such as `[JA+EN]`, `[KO+EN]`, or `[JA+KO+EN]`, per file only when audio metadata shows English plus the configured original language; qBittorrent can optionally get that original language from Sonarr/Radarr by torrent hash/download ID, and SABnzbd can optionally get it by release/job title. Arr lookup must stay bounded and non-fatal; fallback default is `jpn`, so `eng+kor` does not qualify when context is unavailable, and English-original context must not emit `[EN+EN]`. `[x265]` is stamped per file only after the payload itself contains HEVC markers or MKV video-track CodecID evidence. Platform/source tags and release-group suffixes may be copied from the parent release/job/torrent title to preserve release-context custom formats at import, but generic quality/resolution/source labels are not copied. If Sonarr context is available and a TV payload basename has an episode token but does not already contain the canonical series title, the stamper may rewrite the visible title prefix to the canonical series title while preserving a leading release-group tag. Existing-tag checks must use the payload basename, not the parent torrent directory. Stamper event logs live under the qBittorrent and SABnzbd script directories and are summarized by `scripts/media-release/sonarr_transaction_audit.py`; zero-renames can be valid when payload names already contain the needed evidence. Stamper env files must remain readable by the media containers' UID/GID `1000` without exposing them world-readable. Document behavior changes in `docs/media-release-policy.md`.
+
+Never assign a positive or negative custom-format score using evidence that
+becomes available only after a payload is downloaded or imported unless the
+same semantic evidence was already visible and matchable for the candidate at
+grab time. A post-download stamp may preserve grab-time evidence or provide
+zero-scored rename/audit metadata; it must not give the imported file a sticky
+score that equivalent future candidates cannot earn before download. Before
+changing any stamper-backed scored CF, model and verify the candidate, grab,
+queue/manual-import, imported-file, and future-candidate scores. Reject any
+unexplained score gain or loss because it can suppress valid upgrades or cause
+current-better queue pollution.
 
 **Tdarr** (disabled 2026-04-13): Media transcoding service. Commented out in `/opt/media-stack/docker-compose.yml` and `templates/docker/Caddyfile.j2`. Compose config and `/opt/media-stack/tdarr/` data preserved for easy re-enable.
 
