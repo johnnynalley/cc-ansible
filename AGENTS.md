@@ -368,6 +368,15 @@ projection to an intermediate file.
 
 Before mutating live infrastructure state, application configs, databases, service data, or generated controller/runtime files, take a targeted timestamped backup, snapshot, export, or app-native backup of the affected state unless the change is trivial and fully reproducible or the user explicitly waives backups for that operation. Record the backup path in the working notes, docs, or final response when it matters for rollback. Treat these as temporary rollback aids: keep them while the rollout is being validated, then document or perform cleanup/retention once the change is proven. Read-only diagnostics and dry runs do not need backups.
 
+Rollback artifacts must not interfere with the application state they protect.
+Do not create root-only or otherwise untraversable rollback directories inside
+an active library, scan root, queue path, or mutable application tree. Prefer a
+managed same-filesystem rollback path outside application-owned roots. When a
+same-filesystem hardlink rollback must temporarily live under an active tree,
+hide or exclude it from the application, make every parent traversable by the
+service identity, verify that traversal before restarting the service, and
+remove the temporary artifact immediately after successful validation.
+
 Treat `openclaw sessions cleanup --enforce` as destructive artifact maintenance, even when paired with a narrow option such as `--fix-missing`: it can delete unreferenced primary transcripts, trajectory/checkpoint files, and prompt blobs older than the configured retention threshold. Before applying it, inspect the dry-run's unreferenced-artifact count and back up the entire affected sessions artifact directory, not only `sessions.json`; otherwise use Doctor's rename-only orphan archival path when preservation is required.
 
 Do not introduce live or repository mitigation changes during an incident merely because they seem prudent or adjacent to the symptom. If the user did not explicitly ask for that change and it is not strictly required to complete the requested action, stop and ask permission first. When the user narrows scope, drop unrelated safety ideas and focus only on the requested investigation or fix.
