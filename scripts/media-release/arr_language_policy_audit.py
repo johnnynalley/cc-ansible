@@ -2,9 +2,9 @@
 """Audit current Sonarr/Radarr files for language-policy mismatches.
 
 Run this on docker-vm. It reads local Arr config.xml files for API keys, queries
-localhost APIs only, and optionally uses the bundled Arr ffprobe binaries through
-docker exec to inspect actual audio-track language tags. It is read-only and
-prints no secrets.
+localhost APIs only, inventories Arr's import-time embedded-subtitle metadata,
+and optionally uses the bundled Arr ffprobe binaries through docker exec to
+verify actual audio and subtitle streams. It is read-only and prints no secrets.
 """
 
 from __future__ import annotations
@@ -304,7 +304,22 @@ def file_path_from_movie(movie_path: str, movie_file: dict[str, Any] | None) -> 
     return None
 
 
-def probe_audio_languages(instance: ArrInstance, path: str, timeout: int) -> tuple[set[str], list[str]]:
+def subtitle_metadata(media_info: Any) -> tuple[set[str], int]:
+    if not isinstance(media_info, dict):
+        return set(), 0
+    raw = str(media_info.get("subtitles") or "").strip()
+    if not raw:
+        return set(), 0
+    values = [value.strip() for value in raw.split("/") if value.strip()]
+    keys = {language_key(value) for value in values}
+    return {key for key in keys if key not in UNKNOWN_KEYS}, len(values)
+
+
+def probe_media_languages(
+    instance: ArrInstance,
+    path: str,
+    timeout: int,
+) -> tuple[set[str], set[str], int, list[str]]:
     command = [
         "docker",
         "exec",
@@ -312,10 +327,8 @@ def probe_audio_languages(instance: ArrInstance, path: str, timeout: int) -> tup
         instance.probe_binary,
         "-v",
         "error",
-        "-select_streams",
-        "a",
         "-show_entries",
-        "stream_tags=language,title",
+        "stream=codec_type:stream_tags=language,title",
         "-of",
         "json",
         path,
@@ -323,22 +336,36 @@ def probe_audio_languages(instance: ArrInstance, path: str, timeout: int) -> tup
     try:
         result = subprocess.run(command, check=False, capture_output=True, text=True, timeout=timeout)
     except subprocess.TimeoutExpired:
-        return set(), [f"ffprobe timed out after {timeout}s"]
+        return set(), set(), 0, [f"ffprobe timed out after {timeout}s"]
     except OSError as exc:
-        return set(), [f"ffprobe failed to start: {exc}"]
+        return set(), set(), 0, [f"ffprobe failed to start: {exc}"]
     if result.returncode != 0:
         detail = (result.stderr or result.stdout or "").strip()
-        return set(), [detail[:300] or f"ffprobe exited {result.returncode}"]
+        return set(), set(), 0, [detail[:300] or f"ffprobe exited {result.returncode}"]
     try:
         payload = json.loads(result.stdout or "{}")
     except json.JSONDecodeError as exc:
-        return set(), [f"ffprobe JSON parse failed: {exc}"]
-    keys: set[str] = set()
+        return set(), set(), 0, [f"ffprobe JSON parse failed: {exc}"]
+    audio_keys: set[str] = set()
+    subtitle_keys: set[str] = set()
+    subtitle_count = 0
     for stream in payload.get("streams") or []:
-        tags = stream.get("tags") if isinstance(stream, dict) else None
-        if isinstance(tags, dict):
-            keys.add(language_key(str(tags.get("language") or "")))
-    return {key for key in keys if key not in UNKNOWN_KEYS}, []
+        if not isinstance(stream, dict):
+            continue
+        stream_type = str(stream.get("codec_type") or "").casefold()
+        tags = stream.get("tags")
+        key = language_key(str(tags.get("language") or "")) if isinstance(tags, dict) else "unknown"
+        if stream_type == "audio":
+            audio_keys.add(key)
+        elif stream_type == "subtitle":
+            subtitle_count += 1
+            subtitle_keys.add(key)
+    return (
+        {key for key in audio_keys if key not in UNKNOWN_KEYS},
+        {key for key in subtitle_keys if key not in UNKNOWN_KEYS},
+        subtitle_count,
+        [],
+    )
 
 
 def title_claims_dual_audio(title: str) -> bool:
@@ -352,6 +379,12 @@ def effective_languages(row: dict[str, Any]) -> set[str]:
     return set(row.get("arr_languages") or [])
 
 
+def effective_subtitles(row: dict[str, Any]) -> tuple[set[str], int]:
+    if row.get("probe_enabled") and not row.get("probe_errors"):
+        return set(row.get("probe_subtitle_languages") or []), int(row.get("probe_subtitle_count") or 0)
+    return set(row.get("arr_subtitle_languages") or []), int(row.get("arr_subtitle_count") or 0)
+
+
 def classify_flags(row: dict[str, Any]) -> list[str]:
     flags: list[str] = []
     original_key = row["original_key"]
@@ -362,6 +395,7 @@ def classify_flags(row: dict[str, Any]) -> list[str]:
     has_title_da = title_claims_dual_audio(row["source_title"])
     has_english = bool(languages & ENGLISH_KEYS)
     known_non_english = {key for key in languages if key not in ENGLISH_KEYS and key not in UNKNOWN_KEYS}
+    subtitle_languages, subtitle_count = effective_subtitles(row)
 
     if row["probe_errors"]:
         flags.append("probe_error")
@@ -393,6 +427,13 @@ def classify_flags(row: dict[str, Any]) -> list[str]:
         extra = known_non_english - {original_key}
         if extra:
             flags.append("original_plus_non_english_no_english")
+
+    if subtitle_count == 0:
+        flags.append("no_embedded_subtitles")
+    elif not (subtitle_languages & ENGLISH_KEYS):
+        flags.append("embedded_subtitles_missing_english")
+    else:
+        flags.append("embedded_english_subtitle_ok")
 
     return flags
 
@@ -429,12 +470,33 @@ def compact_row(row: dict[str, Any]) -> dict[str, Any]:
         "original_language": row["original_language"],
         "arr_languages": language_names(set(row["arr_languages"])),
         "probe_languages": language_names(set(row["probe_languages"])),
+        "arr_subtitle_languages": language_names(set(row["arr_subtitle_languages"])),
+        "arr_subtitle_count": row["arr_subtitle_count"],
+        "probe_subtitle_languages": language_names(set(row["probe_subtitle_languages"])),
+        "probe_subtitle_count": row["probe_subtitle_count"],
+        "release_group": row["release_group"],
+        "quality": row["quality"],
+        "video_codec": row["video_codec"],
+        "audio_codec": row["audio_codec"],
         "score": row.get("score"),
         "custom_formats": row["custom_formats"],
         "flags": row["flags"],
         "source_title": row["source_title"],
         "path": row["path"],
         "probe_errors": row["probe_errors"],
+    }
+
+
+def subtitle_gap_summaries(rows: list[dict[str, Any]]) -> dict[str, dict[str, int]]:
+    return {
+        "app": dict(collections.Counter(row["app"] for row in rows)),
+        "profile": dict(collections.Counter(row["profile_name"] for row in rows)),
+        "original_language": dict(
+            collections.Counter(row["original_language"] or "Unknown" for row in rows)
+        ),
+        "release_group": dict(
+            collections.Counter(row["release_group"] or "Unknown" for row in rows).most_common()
+        ),
     }
 
 
@@ -460,10 +522,19 @@ def audit_sonarr(instance: ArrInstance, api_key: str, args: argparse.Namespace) 
                 continue
             source_title = str(episode_file.get("sceneName") or episode_file.get("releaseGroup") or Path(path).name)
             arr_languages = arr_language_keys(episode_file.get("languages"))
+            media_info = episode_file.get("mediaInfo")
+            arr_subtitle_languages, arr_subtitle_count = subtitle_metadata(media_info)
             probe_languages: set[str] = set()
+            probe_subtitle_languages: set[str] = set()
+            probe_subtitle_count = 0
             probe_errors: list[str] = []
             if args.probe:
-                probe_languages, probe_errors = probe_audio_languages(instance, path, args.probe_timeout)
+                (
+                    probe_languages,
+                    probe_subtitle_languages,
+                    probe_subtitle_count,
+                    probe_errors,
+                ) = probe_media_languages(instance, path, args.probe_timeout)
             row = {
                 "app": "sonarr",
                 "id": series_id,
@@ -480,6 +551,15 @@ def audit_sonarr(instance: ArrInstance, api_key: str, args: argparse.Namespace) 
                 "original_key": language_key(item_original_language(series)),
                 "arr_languages": sorted(arr_languages),
                 "probe_languages": sorted(probe_languages),
+                "arr_subtitle_languages": sorted(arr_subtitle_languages),
+                "arr_subtitle_count": arr_subtitle_count,
+                "probe_subtitle_languages": sorted(probe_subtitle_languages),
+                "probe_subtitle_count": probe_subtitle_count,
+                "probe_enabled": args.probe,
+                "release_group": str(episode_file.get("releaseGroup") or ""),
+                "quality": str(((episode_file.get("quality") or {}).get("quality") or {}).get("name") or ""),
+                "video_codec": str(media_info.get("videoCodec") or "") if isinstance(media_info, dict) else "",
+                "audio_codec": str(media_info.get("audioCodec") or "") if isinstance(media_info, dict) else "",
                 "custom_formats": cf_names(episode_file.get("customFormats")),
                 "score": episode_file.get("customFormatScore"),
                 "source_title": source_title,
@@ -513,10 +593,19 @@ def audit_radarr(instance: ArrInstance, api_key: str, args: argparse.Namespace) 
             continue
         source_title = str(movie_file.get("sceneName") or movie_file.get("releaseGroup") or Path(path).name)
         arr_languages = arr_language_keys(movie_file.get("languages"))
+        media_info = movie_file.get("mediaInfo")
+        arr_subtitle_languages, arr_subtitle_count = subtitle_metadata(media_info)
         probe_languages: set[str] = set()
+        probe_subtitle_languages: set[str] = set()
+        probe_subtitle_count = 0
         probe_errors: list[str] = []
         if args.probe:
-            probe_languages, probe_errors = probe_audio_languages(instance, path, args.probe_timeout)
+            (
+                probe_languages,
+                probe_subtitle_languages,
+                probe_subtitle_count,
+                probe_errors,
+            ) = probe_media_languages(instance, path, args.probe_timeout)
         row = {
             "app": "radarr",
             "id": movie.get("id"),
@@ -533,6 +622,15 @@ def audit_radarr(instance: ArrInstance, api_key: str, args: argparse.Namespace) 
             "original_key": language_key(item_original_language(movie)),
             "arr_languages": sorted(arr_languages),
             "probe_languages": sorted(probe_languages),
+            "arr_subtitle_languages": sorted(arr_subtitle_languages),
+            "arr_subtitle_count": arr_subtitle_count,
+            "probe_subtitle_languages": sorted(probe_subtitle_languages),
+            "probe_subtitle_count": probe_subtitle_count,
+            "probe_enabled": args.probe,
+            "release_group": str(movie_file.get("releaseGroup") or ""),
+            "quality": str(((movie_file.get("quality") or {}).get("quality") or {}).get("name") or ""),
+            "video_codec": str(media_info.get("videoCodec") or "") if isinstance(media_info, dict) else "",
+            "audio_codec": str(media_info.get("audioCodec") or "") if isinstance(media_info, dict) else "",
             "custom_formats": cf_names(movie_file.get("customFormats")),
             "score": movie_file.get("customFormatScore"),
             "source_title": source_title,
@@ -566,6 +664,7 @@ def audit(args: argparse.Namespace) -> dict[str, Any]:
             "anime_original_plus_english_ok",
             "regular_original_plus_english_ok",
             "english_regular_has_foreign_audio",
+            "embedded_english_subtitle_ok",
         }
     ]
     suspect_group_counts: collections.Counter[tuple[str, str, str, str, str]] = collections.Counter()
@@ -580,6 +679,27 @@ def audit(args: argparse.Namespace) -> dict[str, Any]:
             )
         ] += 1
     anime_original_only = [row for row in all_rows if "anime_original_only" in row["flags"]]
+    subtitle_gaps = [
+        row
+        for row in all_rows
+        if {"no_embedded_subtitles", "embedded_subtitles_missing_english"} & set(row["flags"])
+    ]
+    subtitle_gap_counts: collections.Counter[tuple[str, str, str, str, str, str, str, str]] = collections.Counter()
+    for row in subtitle_gaps:
+        gap = "no_embedded_subtitles" if "no_embedded_subtitles" in row["flags"] else "embedded_subtitles_missing_english"
+        subtitle_gap_counts[
+            (
+                row["app"],
+                row["title"],
+                row["profile_name"],
+                row["original_language"],
+                row["release_group"],
+                row["quality"],
+                row["video_codec"],
+                gap,
+            )
+        ] += 1
+    subtitle_gap_summary = subtitle_gap_summaries(subtitle_gaps)
     report = {
         "probe_enabled": args.probe,
         "rows_scanned": len(all_rows),
@@ -604,6 +724,34 @@ def audit(args: argparse.Namespace) -> dict[str, Any]:
         "anime_original_only_samples": [
             compact_row(row) for row in sorted(anime_original_only, key=row_sort_key)[: args.limit]
         ],
+        "subtitle_gap_count": len(subtitle_gaps),
+        "subtitle_gap_app_counts": subtitle_gap_summary["app"],
+        "subtitle_gap_profile_counts": subtitle_gap_summary["profile"],
+        "subtitle_gap_original_language_counts": subtitle_gap_summary["original_language"],
+        "subtitle_gap_release_group_counts": subtitle_gap_summary["release_group"],
+        "subtitle_gap_groups": [
+            {
+                "app": app,
+                "title": title,
+                "profile": profile,
+                "original_language": original_language,
+                "release_group": release_group,
+                "quality": quality,
+                "video_codec": video_codec,
+                "gap": gap,
+                "count": count,
+            }
+            for (
+                app,
+                title,
+                profile,
+                original_language,
+                release_group,
+                quality,
+                video_codec,
+                gap,
+            ), count in subtitle_gap_counts.most_common(args.group_limit)
+        ],
     }
     if args.include_all:
         report["rows"] = [compact_row(row) for row in sorted(all_rows, key=row_sort_key)]
@@ -615,6 +763,23 @@ def print_text(report: dict[str, Any]) -> None:
     print(f"profile_counts={report['profile_counts']}")
     print(f"flag_counts={report['flag_counts']}")
     print(f"suspect_count={report['suspect_count']}")
+    print(f"subtitle_gap_count={report['subtitle_gap_count']}")
+    print(f"subtitle_gap_app_counts={report['subtitle_gap_app_counts']}")
+    print(f"subtitle_gap_profile_counts={report['subtitle_gap_profile_counts']}")
+    print(
+        "subtitle_gap_original_language_counts="
+        f"{report['subtitle_gap_original_language_counts']}"
+    )
+    print(f"subtitle_gap_release_group_counts={report['subtitle_gap_release_group_counts']}")
+    if report["subtitle_gap_groups"]:
+        print("subtitle_gap_groups:")
+        for group in report["subtitle_gap_groups"]:
+            print(
+                f"- {group['app']} | {group['title']} | count={group['count']} "
+                f"profile={group['profile']} orig={group['original_language'] or 'Unknown'} "
+                f"group={group['release_group'] or 'Unknown'} quality={group['quality'] or 'Unknown'} "
+                f"codec={group['video_codec'] or 'Unknown'} gap={group['gap']}"
+            )
     if report["suspect_groups"]:
         print("suspect_groups:")
         for group in report["suspect_groups"]:
@@ -657,7 +822,11 @@ def print_text(report: dict[str, Any]) -> None:
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--app", choices=["sonarr", "radarr", "all"], default="all")
-    parser.add_argument("--probe", action="store_true", help="inspect actual audio-track tags with ffprobe")
+    parser.add_argument(
+        "--probe",
+        action="store_true",
+        help="verify actual audio and embedded-subtitle streams with ffprobe",
+    )
     parser.add_argument("--probe-timeout", type=int, default=15)
     parser.add_argument("--title-regex", help="only audit media whose Sonarr/Radarr title matches this regex")
     parser.add_argument(

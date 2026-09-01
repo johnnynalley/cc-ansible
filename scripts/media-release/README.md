@@ -37,7 +37,9 @@
   `Dubs Only (Block)` from treating hyphenated episode-title words such as
   `Scrubba-dub-dub` as dub-release markers.
 - `arr_release_policy_audit.py`: Read-only Sonarr/Radarr release profile and
-  custom-format audit for `docker-vm`.
+  custom-format audit for `docker-vm`, including exact duplicate matching
+  definitions that may be consolidation candidates after profile-score and
+  rename review.
 - `arr_profile_math_audit.py`: Read-only Sonarr/Radarr efficient-profile
   score-band audit that checks DA, x265, quality rank, Bluray source rank,
   Dictionarry tier stacks, bounded TRaSH fallback tiers, Bluray/WEB source
@@ -73,10 +75,13 @@
   snapshot that fully paginates queues, summarizes blocked import reasons,
   active commands, and recent grab/import/delete history.
 - `arr_language_policy_audit.py`: Read-only Sonarr/Radarr current-library
-  language policy audit. It compares Arr language metadata with optional
-  ffprobe audio-track tags to find wrong original-language/English combinations,
-  DA-title/DA-CF imports without English, non-English regular-profile drift,
-  and original-only anime samples for follow-up candidate searches.
+  language and embedded-subtitle policy audit. It inventories Arr's
+  import-time subtitle metadata, compares Arr language metadata with optional
+  ffprobe audio/subtitle streams, groups releases with no embedded English
+  subtitles by title/profile/group/quality/codec, and finds wrong
+  original-language/English combinations, DA-title/DA-CF imports without
+  English, non-English regular-profile drift, and original-only anime samples
+  for follow-up candidate searches.
 - `arr_regular_dual_audio_profiles.py`: Creates or updates non-English regular
   dual-audio efficient profiles and the parsed-language `Regular Dual Audio`
   custom format, with live backups before apply.

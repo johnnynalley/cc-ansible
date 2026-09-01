@@ -41,13 +41,23 @@ def api_get(base_url: str, api_key: str, path: str, params: dict[str, Any] | Non
 
 
 def find_series(series_list: list[dict[str, Any]], query: str) -> dict[str, Any]:
-    lowered = query.lower()
+    lowered = query.casefold()
+    exact = [
+        series
+        for series in series_list
+        if query == str(series.get("id") or "")
+        or lowered == str(series.get("title") or "").casefold()
+    ]
+    if len(exact) == 1:
+        return exact[0]
+    if len(exact) > 1:
+        names = ", ".join(f"{series['id']}:{series['title']}" for series in exact)
+        raise RuntimeError(f"multiple exact series matched {query!r}: {names}")
     matches = [
         series
         for series in series_list
-        if lowered == str(series.get("title", "")).lower()
-        or lowered in str(series.get("title", "")).lower()
-        or any(lowered in str(title.get("title", "")).lower() for title in series.get("alternateTitles") or [])
+        if lowered in str(series.get("title", "")).casefold()
+        or any(lowered in str(title.get("title", "")).casefold() for title in series.get("alternateTitles") or [])
     ]
     if not matches:
         raise RuntimeError(f"no series matched {query!r}")

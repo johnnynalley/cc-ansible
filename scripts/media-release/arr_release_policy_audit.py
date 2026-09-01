@@ -65,6 +65,63 @@ def item_format_name(item: dict[str, Any], custom_formats_by_id: dict[int, dict[
     return str(item.get("name") or f"id:{cf_id}")
 
 
+def matching_definition_signature(custom_format: dict[str, Any]) -> str:
+    specifications: list[dict[str, Any]] = []
+    for specification in custom_format.get("specifications") or []:
+        if not isinstance(specification, dict):
+            continue
+        specifications.append(
+            {
+                "implementation": specification.get("implementation"),
+                "negate": bool(specification.get("negate")),
+                "required": bool(specification.get("required")),
+                "fields": specification.get("fields") or {},
+            }
+        )
+    specifications.sort(key=lambda value: json.dumps(value, sort_keys=True, separators=(",", ":")))
+    return json.dumps(specifications, sort_keys=True, separators=(",", ":"))
+
+
+def matching_definition_duplicates(
+    custom_formats: list[dict[str, Any]],
+    referenced: dict[int, set[str]],
+    profile_scores: dict[int, dict[str, int]],
+) -> list[dict[str, Any]]:
+    signatures: dict[str, list[dict[str, Any]]] = {}
+    for custom_format in custom_formats:
+        cf_id = custom_format.get("id")
+        if not isinstance(cf_id, int):
+            continue
+        signatures.setdefault(matching_definition_signature(custom_format), []).append(custom_format)
+
+    duplicates: list[dict[str, Any]] = []
+    for formats in signatures.values():
+        if len(formats) < 2:
+            continue
+        duplicates.append(
+            {
+                "formats": [
+                    {
+                        "id": custom_format["id"],
+                        "name": custom_format.get("name"),
+                        "include_in_rename": bool(
+                            custom_format.get("includeCustomFormatWhenRenaming")
+                        ),
+                        "profiles": sorted(referenced.get(custom_format["id"], set())),
+                        "scores": dict(sorted(profile_scores.get(custom_format["id"], {}).items())),
+                    }
+                    for custom_format in sorted(
+                        formats, key=lambda value: str(value.get("name") or "").casefold()
+                    )
+                ]
+            }
+        )
+    return sorted(
+        duplicates,
+        key=lambda group: str(group["formats"][0].get("name") or "").casefold(),
+    )
+
+
 def summarize_instance(instance: ArrInstance) -> dict[str, Any]:
     api_key = read_api_key(instance.config_path)
     custom_formats = api_get(instance, api_key, "/api/v3/customformat")
@@ -78,6 +135,7 @@ def summarize_instance(instance: ArrInstance) -> dict[str, Any]:
 
     referenced: dict[int, set[str]] = {}
     scored: dict[int, set[str]] = {}
+    profile_scores: dict[int, dict[str, int]] = {}
     profiles: list[dict[str, Any]] = []
 
     for profile in sorted(quality_profiles, key=lambda p: str(p.get("name", ""))):
@@ -91,6 +149,7 @@ def summarize_instance(instance: ArrInstance) -> dict[str, Any]:
             profile_name = str(profile.get("name", ""))
             referenced.setdefault(cf_id, set()).add(profile_name)
             score = int(item.get("score") or 0)
+            profile_scores.setdefault(cf_id, {})[profile_name] = score
             row = {
                 "id": cf_id,
                 "name": item_format_name(item, custom_formats_by_id),
@@ -156,6 +215,11 @@ def summarize_instance(instance: ArrInstance) -> dict[str, Any]:
         for command in commands
         if command.get("status") not in {"completed", "failed", "aborted", "cancelled"}
     ]
+    definition_duplicates = matching_definition_duplicates(
+        custom_formats,
+        referenced,
+        profile_scores,
+    )
 
     return {
         "name": instance.name,
@@ -166,6 +230,8 @@ def summarize_instance(instance: ArrInstance) -> dict[str, Any]:
         "all_zero_custom_format_count": len(all_zero),
         "unused_custom_formats": unused,
         "all_zero_custom_formats": all_zero,
+        "matching_definition_duplicate_count": len(definition_duplicates),
+        "matching_definition_duplicates": definition_duplicates,
         "queue_status": {
             "total_count": queue_status.get("totalCount"),
             "count": queue_status.get("count"),
@@ -185,6 +251,10 @@ def print_text(report: dict[str, Any]) -> None:
         print(f"  quality profiles: {instance['quality_profile_count']}")
         print(f"  unused custom formats: {instance['unused_custom_format_count']}")
         print(f"  all-zero custom formats: {instance['all_zero_custom_format_count']}")
+        print(
+            "  exact matching-definition duplicate groups: "
+            f"{instance['matching_definition_duplicate_count']}"
+        )
         print(f"  queue: {instance['queue_status']}")
         if instance["active_commands"]:
             print("  active commands:")
@@ -200,6 +270,21 @@ def print_text(report: dict[str, Any]) -> None:
                 profiles = ", ".join(cf["profiles"])
                 rename = ", rename" if cf["include_in_rename"] else ""
                 print(f"    - {cf['id']}: {cf['name']} ({profiles}{rename})")
+        if instance["matching_definition_duplicates"]:
+            print("  exact matching-definition duplicate groups:")
+            for group in instance["matching_definition_duplicates"]:
+                print(
+                    "    - "
+                    + ", ".join(
+                        f"{item['id']}:{item['name']}" for item in group["formats"]
+                    )
+                )
+                for item in group["formats"]:
+                    rename = "yes" if item["include_in_rename"] else "no"
+                    print(
+                        f"      {item['id']} rename={rename} "
+                        f"scores={item['scores']}"
+                    )
         print()
 
 
