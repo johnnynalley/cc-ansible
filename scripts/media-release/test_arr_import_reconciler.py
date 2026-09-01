@@ -162,6 +162,91 @@ class ArrImportReconcilerTests(unittest.TestCase):
                 '{"result":"imported","selected":1}\n',
             )
 
+    def test_import_history_audit_reports_post_grab_score_gain(self) -> None:
+        import_record = {
+            "eventType": "downloadFolderImported",
+            "date": "2026-09-01T01:00:00Z",
+            "downloadId": "ABC123",
+            "customFormatScore": 145000,
+            "customFormats": [
+                {"name": "Anime Dual Audio"},
+                {"name": "x265"},
+                {"name": "Tier 1"},
+            ],
+        }
+
+        class ArrClient:
+            def request(self, method, path, params=None, body=None):
+                if method == "GET" and path == "/history":
+                    return {"records": [import_record], "totalRecords": 1}
+                raise AssertionError((method, path, params, body))
+
+        class LedgerClient:
+            def request(self, method, path, params=None, body=None):
+                return {
+                    "context": {
+                        "app": "sonarr",
+                        "source_title": "Example S01",
+                        "captured_at": "2026-09-01T00:30:00Z",
+                        "custom_format_score": 40000,
+                        "custom_formats": ["Tier 1"],
+                    }
+                }
+
+        report = MODULE.audit_import_history(
+            "sonarr",
+            ArrClient(),
+            LedgerClient(),
+            MODULE.dt.datetime(2026, 8, 31, tzinfo=MODULE.dt.UTC),
+            100,
+        )
+        self.assertEqual(report["classification_counts"], {"score_drift": 1})
+        result = report["results"][0]
+        self.assertEqual(result["grab_score"], 40000)
+        self.assertEqual(
+            result["variants"][0]["gained_formats"],
+            ["Anime Dual Audio", "x265"],
+        )
+
+    def test_import_history_audit_groups_stable_pack_episodes(self) -> None:
+        records = [
+            {
+                "eventType": "downloadFolderImported",
+                "date": f"2026-09-01T01:00:0{episode}Z",
+                "downloadId": "PACK123",
+                "customFormatScore": 46200,
+                "customFormats": [{"name": "x265"}, {"name": "Tier 1"}],
+            }
+            for episode in range(2)
+        ]
+
+        class ArrClient:
+            def request(self, method, path, params=None, body=None):
+                return {"records": records, "totalRecords": len(records)}
+
+        class LedgerClient:
+            def request(self, method, path, params=None, body=None):
+                return {
+                    "context": {
+                        "app": "sonarr",
+                        "source_title": "Stable Pack",
+                        "captured_at": "2026-09-01T00:30:00Z",
+                        "custom_format_score": 46200,
+                        "custom_formats": ["Tier 1", "x265"],
+                    }
+                }
+
+        report = MODULE.audit_import_history(
+            "sonarr",
+            ArrClient(),
+            LedgerClient(),
+            MODULE.dt.datetime(2026, 8, 31, tzinfo=MODULE.dt.UTC),
+            100,
+        )
+        self.assertEqual(report["classification_counts"], {"stable": 1})
+        self.assertEqual(report["results"][0]["import_count"], 2)
+        self.assertEqual(report["results"][0]["variants"][0]["count"], 2)
+
     def test_duplicate_queue_rows_for_one_download_are_evaluated_once(self) -> None:
         row = {
             "status": "completed",

@@ -103,6 +103,8 @@
             group: root
             mode: "0755"
           register: media_release_stamper_reconciler_script
+          tags:
+            - media-release-reconciler
 
         - name: Deploy Arr import reconciler log rotation
           ansible.builtin.copy:
@@ -156,6 +158,8 @@
             - >-
               media_release_stamper_reconciler_script.changed
               or media_release_stamper_force_reconciler_reload | default(false) | bool
+          tags:
+            - media-release-reconciler
 
         - name: Start Arr grab-context service
           ansible.builtin.command:

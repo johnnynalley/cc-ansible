@@ -418,6 +418,189 @@ def heartbeat_is_fresh(path: Path, max_age: int) -> bool:
     return age <= max_age
 
 
+def parse_history_date(value: object) -> dt.datetime | None:
+    if not isinstance(value, str) or not value:
+        return None
+    try:
+        parsed = dt.datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=dt.UTC)
+    return parsed.astimezone(dt.UTC)
+
+
+def history_import_records(
+    app: str,
+    client: JsonClient,
+    since: dt.datetime,
+    max_history: int,
+) -> list[dict[str, Any]]:
+    records: list[dict[str, Any]] = []
+    page_size = min(max(max_history, 1), 1000)
+    include = (
+        {"includeSeries": "true", "includeEpisode": "true"}
+        if app == "sonarr"
+        else {"includeMovie": "true"}
+    )
+    for page in range(1, (max_history + page_size - 1) // page_size + 1):
+        payload = client.request(
+            "GET",
+            "/history",
+            {
+                **include,
+                "page": page,
+                "pageSize": page_size,
+                "sortKey": "date",
+                "sortDirection": "descending",
+            },
+        ) or {}
+        page_records = payload.get("records", payload if isinstance(payload, list) else [])
+        if not isinstance(page_records, list):
+            break
+        reached_cutoff = False
+        for record in page_records:
+            if not isinstance(record, dict):
+                continue
+            observed = parse_history_date(record.get("date"))
+            if observed is not None and observed < since:
+                reached_cutoff = True
+                continue
+            if str(record.get("eventType") or "").casefold() == "downloadfolderimported":
+                records.append(record)
+            if len(records) >= max_history:
+                return records
+        total = payload.get("totalRecords") if isinstance(payload, dict) else None
+        if reached_cutoff or len(page_records) < page_size:
+            break
+        if isinstance(total, int) and page * page_size >= total:
+            break
+    return records
+
+
+def history_download_id(record: dict[str, Any]) -> str:
+    data = record.get("data") if isinstance(record.get("data"), dict) else {}
+    return str(record.get("downloadId") or data.get("downloadId") or "").strip()
+
+
+def history_score(record: dict[str, Any]) -> int | None:
+    value = record.get("customFormatScore")
+    if value is None and isinstance(record.get("data"), dict):
+        value = record["data"].get("customFormatScore")
+    try:
+        return int(value) if value is not None else None
+    except (TypeError, ValueError):
+        return None
+
+
+def audit_import_history(
+    app: str,
+    client: JsonClient,
+    ledger: JsonClient,
+    since: dt.datetime,
+    max_history: int,
+) -> dict[str, Any]:
+    imports = history_import_records(app, client, since, max_history)
+    grouped: dict[str, list[dict[str, Any]]] = {}
+    missing_download_id = 0
+    for record in imports:
+        download_id = normalize_download_id(history_download_id(record))
+        if not download_id:
+            missing_download_id += 1
+            continue
+        grouped.setdefault(download_id, []).append(record)
+
+    results: list[dict[str, Any]] = []
+    ledger_missing = 0
+    for download_id, records in grouped.items():
+        context = ledger_context(ledger, download_id)
+        if not context or context.get("app") != app:
+            ledger_missing += 1
+            continue
+        grab_formats = set(custom_format_names(context.get("custom_formats")))
+        import_variants: dict[tuple[int | None, tuple[str, ...]], int] = {}
+        for record in records:
+            import_formats = tuple(sorted(custom_format_names(record.get("customFormats"))))
+            variant = (history_score(record), import_formats)
+            import_variants[variant] = import_variants.get(variant, 0) + 1
+
+        variants: list[dict[str, Any]] = []
+        classifications: set[str] = set()
+        grab_score = context.get("custom_format_score")
+        for (import_score, import_formats_tuple), count in import_variants.items():
+            import_formats = set(import_formats_tuple)
+            gained = sorted(import_formats - grab_formats)
+            lost = sorted(grab_formats - import_formats)
+            score_changed = (
+                isinstance(grab_score, int)
+                and isinstance(import_score, int)
+                and grab_score != import_score
+            )
+            if score_changed:
+                classification = "score_drift"
+            elif gained or lost:
+                classification = "format_drift"
+            else:
+                classification = "stable"
+            classifications.add(classification)
+            variants.append(
+                {
+                    "classification": classification,
+                    "count": count,
+                    "import_score": import_score,
+                    "gained_formats": gained,
+                    "lost_formats": lost,
+                }
+            )
+        results.append(
+            {
+                "download_id": download_id,
+                "source_title": context.get("source_title"),
+                "captured_at": context.get("captured_at"),
+                "grab_score": grab_score,
+                "grab_formats": sorted(grab_formats),
+                "import_count": len(records),
+                "classification": (
+                    "score_drift"
+                    if "score_drift" in classifications
+                    else "format_drift"
+                    if "format_drift" in classifications
+                    else "stable"
+                ),
+                "variants": sorted(
+                    variants,
+                    key=lambda item: (
+                        str(item["classification"]),
+                        item["import_score"] if isinstance(item["import_score"], int) else -1,
+                    ),
+                ),
+            }
+        )
+
+    counts: dict[str, int] = {}
+    for result in results:
+        classification = str(result["classification"])
+        counts[classification] = counts.get(classification, 0) + 1
+    return {
+        "app": app,
+        "since": since.isoformat(timespec="seconds").replace("+00:00", "Z"),
+        "history_import_records": len(imports),
+        "download_ids": len(grouped),
+        "matched_download_ids": len(results),
+        "ledger_missing_download_ids": ledger_missing,
+        "missing_download_id_records": missing_download_id,
+        "classification_counts": counts,
+        "results": sorted(
+            results,
+            key=lambda item: (
+                item["classification"] == "stable",
+                str(item.get("captured_at") or ""),
+                str(item.get("source_title") or "").casefold(),
+            ),
+        ),
+    }
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--interval", type=int, default=DEFAULT_INTERVAL)
@@ -428,6 +611,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--check-health", action="store_true")
     parser.add_argument("--max-heartbeat-age", type=int, default=180)
+    parser.add_argument("--audit-import-history", action="store_true")
+    parser.add_argument("--audit-app", choices=["sonarr", "radarr", "all"], default="all")
+    parser.add_argument("--since-hours", type=int, default=24 * 7)
+    parser.add_argument("--max-history", type=int, default=5000)
     return parser.parse_args()
 
 
@@ -441,6 +628,17 @@ def main() -> int:
         "sonarr": JsonClient(os.environ.get("SONARR_API", ""), os.environ.get("SONARR_API_KEY", "")),
         "radarr": JsonClient(os.environ.get("RADARR_API", ""), os.environ.get("RADARR_API_KEY", "")),
     }
+    if args.audit_import_history:
+        if args.since_hours <= 0 or args.max_history <= 0:
+            raise SystemExit("--since-hours and --max-history must be positive")
+        since = dt.datetime.now(dt.UTC) - dt.timedelta(hours=args.since_hours)
+        apps = list(clients) if args.audit_app == "all" else [args.audit_app]
+        report = {
+            app: audit_import_history(app, clients[app], ledger, since, args.max_history)
+            for app in apps
+        }
+        print(json.dumps(report, indent=2, sort_keys=True))
+        return 0
     state = ReconcileState(args.state)
     last_emitted: dict[str, str] = {}
     while True:
