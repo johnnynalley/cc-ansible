@@ -85,6 +85,21 @@ Verified live on 2026-06-18:
   to a parent directory search when the exact target path exists only on a full
   branch. This prevents Arr imports from getting trapped on `/srv/nas-01` when
   a season directory exists there but the branch has no usable free space.
+- Path preservation can still defeat a qBittorrent hardlink even though both
+  paths are exposed through the single `/data` container mount. On 2026-09-03,
+  exact mergerfs `user.mergerfs.basepath` evidence showed the Young Sheldon
+  S03E18 and My Hero Academia S08E02 source files on
+  `/srv/media-01/media`, while their imported library copies were placed on
+  `/srv/nas-zfs/media`. Both source and destination had the same byte size but
+  link count 1. This is the documented path-preserving-policy `EXDEV` case,
+  not a split Docker mount.
+- The leading remediation candidate is to retain `category.create=mspmfs` for
+  ordinary creates and evaluate `ignorepponrename=true` for link/rename
+  operations. That option makes a linked or renamed destination remain on the
+  source file's backing filesystem instead of enforcing the target directory's
+  existing branch placement. Do not enable it without a planned TS440 remount
+  and canaries proving qBittorrent hardlinks, SAB imports, and ordinary Arr
+  destination creation; the live pool is also Plex's storage path.
 
 ## Completed Vs Incomplete
 

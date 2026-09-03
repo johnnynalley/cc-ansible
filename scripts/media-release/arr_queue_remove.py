@@ -5,7 +5,9 @@ from __future__ import annotations
 
 import argparse
 from collections import Counter
+from datetime import datetime, timezone
 import json
+import os
 from pathlib import Path
 import re
 from typing import Any
@@ -131,6 +133,11 @@ def label_for_record(app: str, record: dict[str, Any]) -> str:
 
 
 def matches(record: dict[str, Any], args: argparse.Namespace) -> bool:
+    if args.download_id:
+        actual = str(record.get("downloadId") or "").casefold()
+        expected = {value.casefold() for value in args.download_id}
+        if actual not in expected:
+            return False
     if args.status and record.get("status") != args.status:
         return False
     if args.tracked_state and record.get("trackedDownloadState") != args.tracked_state:
@@ -172,6 +179,47 @@ def cleanup_records(
     return selected
 
 
+def write_backup_manifest(
+    backup_path: Path,
+    app: str,
+    selected: list[dict[str, Any]],
+    operations: list[dict[str, Any]],
+    args: argparse.Namespace,
+) -> Path:
+    timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    manifest = backup_path / f"{timestamp}-{app}-queue-removal.json"
+    payload = {
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "app": app,
+        "filters": {
+            "status": args.status,
+            "tracked_state": args.tracked_state,
+            "tracked_status": args.tracked_status,
+            "download_client": args.download_client,
+            "download_id": args.download_id,
+            "title_regex": args.title_regex,
+            "message_regex": args.message_regex,
+            "limit": args.limit,
+        },
+        "remove_from_client": args.remove_from_client,
+        "blocklist": args.blocklist,
+        "matched_rows": selected,
+        "operation_rows": operations,
+    }
+    fd = os.open(manifest, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as handle:
+        json.dump(payload, handle, indent=2, sort_keys=True)
+        handle.write("\n")
+    return manifest
+
+
+def require_root_only_directory(path: Path) -> None:
+    if not path.is_dir():
+        raise RuntimeError(f"backup path is not a directory: {path}")
+    if path.stat().st_mode & 0o077:
+        raise RuntimeError(f"backup path must be root-only (0700): {path}")
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--app", required=True, choices=sorted(APPS))
@@ -181,6 +229,12 @@ def main() -> int:
     parser.add_argument(
         "--download-client",
         help="Download client name to match, or 'none' for null/unavailable rows.",
+    )
+    parser.add_argument(
+        "--download-id",
+        action="append",
+        default=[],
+        help="exact download ID to match; may be repeated",
     )
     parser.add_argument("--title-regex")
     parser.add_argument("--message-regex")
@@ -210,8 +264,7 @@ def main() -> int:
         if not args.backup_path:
             raise RuntimeError("--apply requires --backup-path")
         backup_path = Path(args.backup_path)
-        if not backup_path.exists():
-            raise RuntimeError(f"backup path does not exist: {backup_path}")
+        require_root_only_directory(backup_path)
 
     app_info = APPS[args.app]
     api_key = read_api_key(app_info["config"])
@@ -226,6 +279,15 @@ def main() -> int:
     if args.limit is not None:
         selected = selected[: args.limit]
     operations = cleanup_records(selected, args.remove_from_client)
+    backup_manifest = None
+    if args.apply:
+        backup_manifest = write_backup_manifest(
+            backup_path,
+            args.app,
+            selected,
+            operations,
+            args,
+        )
 
     removals: list[dict[str, Any]] = []
     for record in operations:
@@ -273,6 +335,7 @@ def main() -> int:
                 "matched_downloads": len(operations),
                 "remove_from_client": args.remove_from_client,
                 "blocklist": args.blocklist,
+                "backup_manifest": str(backup_manifest) if backup_manifest else None,
                 "result_counts": dict(sorted(result_counts.items())),
                 "matches": [] if args.summary_only else removals,
             },

@@ -590,6 +590,60 @@ def subtitle_audit_event(args: argparse.Namespace, observed_at: str, record: dic
     return event
 
 
+def qbit_stall_audit_event(
+    args: argparse.Namespace,
+    observed_at: str,
+) -> dict[str, Any] | None:
+    if args.no_qbit_audit or not args.qbit_audit_script:
+        return None
+    command = [
+        str(args.qbit_audit_script),
+        "--problem-only",
+        "--correlate-arr",
+        "--json",
+        "--sample-limit",
+        str(args.qbit_audit_sample_limit),
+    ]
+    try:
+        completed = subprocess.run(
+            command,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            errors="replace",
+            timeout=args.qbit_audit_timeout_sec,
+            check=False,
+        )
+        payload = json.loads(completed.stdout) if completed.stdout else {}
+        if not isinstance(payload, dict):
+            raise RuntimeError("qBittorrent audit returned a non-object payload")
+        return {
+            "observedAt": observed_at,
+            "kind": "qbit_stall_snapshot",
+            "ok": completed.returncode == 0,
+            "error": (completed.stderr or "").strip()[-1000:] or None,
+            "total": payload.get("total"),
+            "stateCounts": payload.get("state_counts") or {},
+            "categoryCounts": payload.get("category_counts") or {},
+            "classificationCounts": payload.get("classification_counts") or {},
+            "findingCounts": payload.get("finding_counts") or {},
+            "samples": payload.get("samples") or {},
+        }
+    except (OSError, subprocess.TimeoutExpired, json.JSONDecodeError, RuntimeError) as exc:
+        return {
+            "observedAt": observed_at,
+            "kind": "qbit_stall_snapshot",
+            "ok": False,
+            "error": str(exc),
+            "total": None,
+            "stateCounts": {},
+            "categoryCounts": {},
+            "classificationCounts": {},
+            "findingCounts": {},
+            "samples": {},
+        }
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--base-url", default="http://127.0.0.1:8989")
@@ -609,6 +663,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--subtitle-audit-probe-timeout-sec", type=int, default=30)
     parser.add_argument("--subtitle-audit-stream-timeout-sec", type=int, default=20)
     parser.add_argument("--subtitle-audit-sample-chars", type=int, default=20000)
+    parser.add_argument("--no-qbit-audit", action="store_true")
+    parser.add_argument("--qbit-audit-script", type=Path)
+    parser.add_argument("--qbit-audit-interval-sec", type=int, default=900)
+    parser.add_argument("--qbit-audit-timeout-sec", type=int, default=120)
+    parser.add_argument("--qbit-audit-sample-limit", type=int, default=20)
     return parser.parse_args()
 
 
@@ -620,12 +679,22 @@ def main() -> int:
     observed_at = utc_now()
     observed_dt = parse_time(observed_at) or dt.datetime.now(dt.UTC)
     last_storage_snapshot_at = parse_time(state.get("last_storage_snapshot_at"))
+    last_qbit_snapshot_at = parse_time(state.get("last_qbit_snapshot_at"))
     should_storage_snapshot = (
         not args.no_storage_snapshot
         and (
             last_storage_snapshot_at is None
             or (observed_dt - last_storage_snapshot_at).total_seconds()
             >= args.storage_snapshot_interval_sec
+        )
+    )
+    should_qbit_snapshot = (
+        not args.no_qbit_audit
+        and args.qbit_audit_script is not None
+        and (
+            last_qbit_snapshot_at is None
+            or (observed_dt - last_qbit_snapshot_at).total_seconds()
+            >= args.qbit_audit_interval_sec
         )
     )
 
@@ -667,6 +736,10 @@ def main() -> int:
     )
     if should_storage_snapshot:
         append_event(args.output, storage_snapshot(args, observed_at, api_key))
+    if should_qbit_snapshot:
+        event = qbit_stall_audit_event(args, observed_at)
+        if event:
+            append_event(args.output, event)
 
     max_history_id = previous_last_id
     for record in history_records:
@@ -676,9 +749,12 @@ def main() -> int:
         "last_observed_at": observed_at,
         "last_queue_count": len(queue_records),
         "last_storage_snapshot_at": state.get("last_storage_snapshot_at"),
+        "last_qbit_snapshot_at": state.get("last_qbit_snapshot_at"),
     }
     if should_storage_snapshot:
         next_state["last_storage_snapshot_at"] = observed_at
+    if should_qbit_snapshot:
+        next_state["last_qbit_snapshot_at"] = observed_at
     save_state(args.state, next_state)
     print(
         f"recorded history={len(history_records)} queue={len(queue_records)} "
