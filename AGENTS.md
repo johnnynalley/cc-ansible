@@ -151,6 +151,14 @@ Before classifying mount drift, backup-target failure, or application storage
 permissions, verify the same state in the host namespace through an approved
 escalated read or a narrow Ansible probe.
 
+For Ansible ad-hoc commands, do not rely on quotes embedded inside the free-form
+`command -a` argument to preserve paths with spaces or nested shell variables;
+the controller, Ansible parser, and remote shell can consume different quoting
+layers. Use `ansible.builtin.command` with structured `argv` in a playbook, or a
+single deliberately quoted `ansible.builtin.shell` expression when shell
+features are required. Keep complex reusable probes in a managed repository
+script, and verify the exact target or output after execution.
+
 For substantial, interruption-prone, or self-evolving work, keep an active plan current with `update_plan` and a unique durable plan file. In this public repo, use `.codex/work-plans/active/<timestamp>-<task-slug>.md` for local agent-visible runtime plans and keep `.codex/work-plans/` Git-ignored for privacy; do not confuse Git-ignore with agent-ignore. Before pivoting to fix Codex guidance or memory, save the current objective, completed work, remaining work, touched files, validation state, git dirt, and exact resume step. If the self-maintenance improves the current task, do it after checkpointing and then reload the plan; otherwise record it as deferred and continue. At closeout, back up/archive the plan under `.codex/work-plans/completed/` or the relevant task backup path, then clear the active state.
 
 When self-updating `AGENTS.md` or another shared file, still follow the shared-file rules: inspect existing dirt, isolate unrelated hunks, validate the scoped change, check for secrets, and stage/commit only the approved hunk when committing is required. Scheduled audits can catch missed drift, but they do not replace instant self-maintenance at the moment the gap is found.
