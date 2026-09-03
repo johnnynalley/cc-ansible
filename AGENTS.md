@@ -306,6 +306,22 @@ the native path cannot meet the requirement. "The live agent must not have
 general root" is a privilege-boundary requirement, not permission to replace
 native self-update behavior.
 
+For any externally maintained product, default to the unmodified supported
+stable release and its native configuration, update mechanism, and built-in
+extensions. Do not place a private source fork, patch queue, alternate branch,
+monkey patch, post-update rewrite, or duplicate replacement plugin in its
+normal install or update path. An upstream update must not depend on Codex
+rebasing local edits, and a native feature must not be replaced with custom
+machinery merely to make it managed. Modify upstream source or replace a native
+feature only with explicit owner approval after proving the supported native
+path is insufficient and explaining the permanent upgrade, testing, and
+recovery cost. Audit existing customizations against the newest stable native
+release and retire them when native behavior covers the requirement. External
+least-privilege tools remain appropriate for genuinely external integrations,
+but keep them outside the product's source and update lifecycle. A privilege
+wrapper may snapshot, invoke, validate, and roll back a native updater; it must
+not make private code part of successful convergence.
+
 Treat a production chat Gateway as live user-facing infrastructure during
 convergence. Stage independent profile data, skills, policy, and runtime files
 without restarting the Gateway, then perform at most one required restart per
