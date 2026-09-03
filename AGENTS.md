@@ -203,6 +203,12 @@ operable through the owning agent's reviewed native workflow, then be protected
 by complete versioned backups and tested restore procedures. Ansible may seed
 or restore that state, but normal convergence must not overwrite valid
 agent-maintained changes or force routine Astra operations back through Codex.
+Do not evolve native profile guidance by repeatedly editing its repository seed
+and manually chasing checksum pins. If a repository seed genuinely changes,
+update every contract pin and validate the complete source/deployment pair in
+the same transaction; never publish either half alone. Runtime parity for
+agent-maintained guidance must validate presence, encoding, ownership, and the
+native backup contract rather than require byte equality with the initial seed.
 Before declaratively managing a new Hermes file, classify it as platform state,
 bootstrap seed, or mutable native state and document why Ansible ownership is
 required; default to mutable native ownership when the behavior is expected to
