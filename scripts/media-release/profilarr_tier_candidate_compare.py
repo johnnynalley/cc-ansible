@@ -266,6 +266,12 @@ def is_tier_name(name: str) -> bool:
     return any(keyword in lowered for keyword in RELEASE_KEYWORDS)
 
 
+def matching_live_name(database_name: str, cf_name: str, live_names: set[str]) -> str | None:
+    """Return the live name for a source CF, including managed source prefixes."""
+    candidates = (cf_name, f"{database_name} {cf_name}")
+    return next((candidate for candidate in candidates if candidate in live_names), None)
+
+
 def format_score(profile: dict[str, Any], cf_id: int | None) -> int | None:
     if cf_id is None:
         return None
@@ -485,10 +491,12 @@ def summarize_candidate(
     overlap = tokens & live_tokens
     new_tokens = tokens - live_tokens
     hints = score_hints(conn, cf_name, arr_name)
+    live_name = matching_live_name(database_name, cf_name, live_names)
     return {
         "database": database_name,
         "name": cf_name,
-        "exact_live": cf_name in live_names,
+        "exact_live": live_name is not None,
+        "live_name": live_name,
         "arr_types": sorted(arr_types),
         "condition_types": sorted(condition_types),
         "condition_count": len(conditions),
