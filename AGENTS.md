@@ -56,6 +56,14 @@ conflicts in favor of the newest recorded owner directive. Rewrite or retire
 superseded plan text in the same update so stale constraints cannot remain
 apparently authoritative.
 
+The owner's session follows the active workboard and conversation, not Codex's
+internal rollout-file or process boundaries. A turn abort, compaction, resume,
+replacement process, or instruction found in a different local rollout file
+does not make it a separate owner session and does not discard the directive.
+If an instruction belongs to the active workboard, restore its exact actionable
+meaning to the ledger and describe any failure to do so as plan-maintenance
+loss, not as an owner handoff or separate-session omission.
+
 Before closing or materially narrowing a long-running plan, reconcile every
 archived owner-supplied transcript associated with the workboard against the
 Owner Directive Ledger. Record any instruction that is missing, ambiguous, or
