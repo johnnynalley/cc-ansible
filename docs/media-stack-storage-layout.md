@@ -1,6 +1,6 @@
 # Media Stack Storage Layout
 
-> Last updated: 2026-06-18
+> Last updated: 2026-09-03
 
 This is the first reference for Sonarr/Radarr/SABnzbd/qBittorrent storage
 questions after the media automation moved to `docker-vm`. Check this document
@@ -93,13 +93,18 @@ Verified live on 2026-06-18:
   `/srv/nas-zfs/media`. Both source and destination had the same byte size but
   link count 1. This is the documented path-preserving-policy `EXDEV` case,
   not a split Docker mount.
-- The leading remediation candidate is to retain `category.create=mspmfs` for
-  ordinary creates and evaluate `ignorepponrename=true` for link/rename
-  operations. That option makes a linked or renamed destination remain on the
-  source file's backing filesystem instead of enforcing the target directory's
-  existing branch placement. Do not enable it without a planned TS440 remount
-  and canaries proving qBittorrent hardlinks, SAB imports, and ordinary Arr
-  destination creation; the live pool is also Plex's storage path.
+- `ignorepponrename=true` was enabled on 2026-09-03 while retaining
+  `category.create=mspmfs`. Mergerfs's supported runtime xattr allowed the
+  option to be changed without remounting the live Plex path; the current
+  systemd unit's `Options=` line was updated separately for reboot persistence.
+  A pre-change canary failed with `EXDEV`. After the change, the same real NFS
+  link path from `docker-vm` succeeded, and TS440 showed source and destination
+  on `/srv/media-01/media` with the same backing inode and link count `2`.
+  This proves the intended qBittorrent-to-library hardlink behavior without
+  changing ordinary create placement. The repo unit also includes
+  `/srv/media-07/media`, while the pre-existing live unit currently stops at
+  `/srv/media-06/media`; that separate branch-list drift was intentionally not
+  included in this option-only rollout.
 
 ## Completed Vs Incomplete
 
