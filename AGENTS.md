@@ -118,6 +118,15 @@ Self-evolution must not wait for the user to name the failure. Before closing a 
 
 Every user correction is a self-maintenance signal, even if it is phrased casually or arrives while another incident is active. Do not answer the correction and proceed as if nothing changed. Either persist the behavior change immediately, or explain why no durable source should change and record any paused work before returning to it.
 
+When persisting a correction, derive the broadest defensible engineering or
+workflow invariant that explains it. Do not create an army of product-specific,
+host-specific, or incident-specific rules when one general rule governs the
+same decision across multiple systems. Keep concrete names, paths, and failure
+signatures in the relevant runbook or plan as evidence and implementation
+detail; keep `AGENTS.md` focused on reusable decision boundaries. Add a narrow
+exception only when the broader rule would be incorrect or unsafe for that
+case, and state why.
+
 For quick live-state requests, especially when the user says "quick", "right now", or "rn", prioritize the fastest authoritative read path and answer as soon as that evidence is sufficient. Do not delay the answer for enrichment, broad repo discovery, service-status checks, or metadata lookups unless they are required to avoid giving a misleading result. If a slower path was taken and the faster path becomes clear during the turn, call that out immediately after answering and persist a repo guidance or runbook update before closing the correction.
 
 When a formatter, validator, diagnostic, or sandboxed command returns without a
