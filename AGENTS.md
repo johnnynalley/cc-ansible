@@ -118,14 +118,16 @@ Self-evolution must not wait for the user to name the failure. Before closing a 
 
 Every user correction is a self-maintenance signal, even if it is phrased casually or arrives while another incident is active. Do not answer the correction and proceed as if nothing changed. Either persist the behavior change immediately, or explain why no durable source should change and record any paused work before returning to it.
 
-When persisting a correction, derive the broadest defensible engineering or
-workflow invariant that explains it. Do not create an army of product-specific,
-host-specific, or incident-specific rules when one general rule governs the
-same decision across multiple systems. Keep concrete names, paths, and failure
-signatures in the relevant runbook or plan as evidence and implementation
-detail; keep `AGENTS.md` focused on reusable decision boundaries. Add a narrow
-exception only when the broader rule would be incorrect or unsafe for that
-case, and state why.
+When persisting a correction, first search the existing guidance and revise or
+remove superseded text instead of automatically appending another rule. Derive
+the broadest defensible engineering or workflow invariant that explains the
+correction. Do not create an army of product-specific, host-specific, or
+incident-specific rules when one general rule governs the same decision across
+multiple systems. Keep concrete names, paths, and failure signatures in the
+relevant runbook or plan as evidence and implementation detail; keep
+`AGENTS.md` focused on reusable decision boundaries. Add a narrow exception
+only when the broader rule would be incorrect or unsafe for that case, and
+state why.
 
 For quick live-state requests, especially when the user says "quick", "right now", or "rn", prioritize the fastest authoritative read path and answer as soon as that evidence is sufficient. Do not delay the answer for enrichment, broad repo discovery, service-status checks, or metadata lookups unless they are required to avoid giving a misleading result. If a slower path was taken and the faster path becomes clear during the turn, call that out immediately after answering and persist a repo guidance or runbook update before closing the correction.
 
@@ -172,7 +174,13 @@ For substantial, interruption-prone, or self-evolving work, keep an active plan 
 
 When self-updating `AGENTS.md` or another shared file, still follow the shared-file rules: inspect existing dirt, isolate unrelated hunks, validate the scoped change, check for secrets, and stage/commit only the approved hunk when committing is required. Scheduled audits can catch missed drift, but they do not replace instant self-maintenance at the moment the gap is found.
 
-When working on Astra/OpenClaw behavior, Codex's role is to teach Astra how to reason and maintain itself, not to replace Astra's judgment with brittle hardcoded wrappers. Prefer updating Astra's heartbeat, skills, operating docs, memory, and approval rules so Astra performs the diagnosis, classification, backup, safe fix, approval request, and follow-up notification itself. Create or modify scripts only when the script is a justified tool for Astra to use repeatedly and safely, not as the default answer to a missing behavior. If a user correction reveals this rule was missed, persist the correction to `AGENTS.md` and Codex memory immediately.
+When working on an autonomous agent's behavior, teach the agent how to reason
+and maintain itself instead of replacing its judgment with brittle hardcoded
+wrappers. Prefer its supported native guidance, skills, memory, schedules, and
+approval mechanisms so it can diagnose, classify, back up, safely act, request
+approval, and report results itself. Create a script only when it is a justified
+reusable tool for safer execution, not as the default answer to missing
+behavior.
 
 Compute Corner is Astra-centric. Prefer implementing new managed functionality
 so Astra can discover its current state, operate it, diagnose drift, and make
@@ -305,16 +313,6 @@ path; prefer the existing subscription/OAuth route or inheritance from the
 main model. A usage-billed API provider requires explicit informed approval
 after the recurring-cost and data-boundary tradeoffs are stated.
 
-For managed agent runtimes and their first-party components, inspect and
-preserve the product's supported native update lifecycle before designing
-custom update automation. A least-privilege wrapper may authorize or invoke
-one exact native update operation when the runtime is installed in root-owned
-paths, but it must not reimplement release discovery, version selection,
-dependency migration, or installation unless exact product evidence proves
-the native path cannot meet the requirement. "The live agent must not have
-general root" is a privilege-boundary requirement, not permission to replace
-native self-update behavior.
-
 For any externally maintained product, default to the unmodified supported
 stable release and its native configuration, update mechanism, and built-in
 extensions. Do not place a private source fork, patch queue, alternate branch,
@@ -328,8 +326,12 @@ recovery cost. Audit existing customizations against the newest stable native
 release and retire them when native behavior covers the requirement. External
 least-privilege tools remain appropriate for genuinely external integrations,
 but keep them outside the product's source and update lifecycle. A privilege
-wrapper may snapshot, invoke, validate, and roll back a native updater; it must
-not make private code part of successful convergence.
+wrapper may snapshot, authorize, invoke, validate, and roll back one exact
+native update operation when installation paths require elevation; it must not
+reimplement release discovery, version selection, dependency migration, or
+installation, and it must not make private code part of successful
+convergence. A least-privilege requirement is never permission to replace
+native behavior.
 
 Treat a production chat Gateway as live user-facing infrastructure during
 convergence. Stage independent profile data, skills, policy, and runtime files
