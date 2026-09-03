@@ -1478,7 +1478,11 @@ The stampers must not infer Arr ownership from similar queue titles. Sonarr and
 Radarr now write a persistent `OnGrab` record keyed by the exact download-client
 ID before the payload completes. The record contains the canonical media title,
 alternate titles, original language, expected episode IDs, source release title,
-release group, indexer, quality, and grab-time custom formats/score.
+release group, indexer, protocol, quality, grab-time custom formats/score,
+quality-profile fingerprint, and the current file ID/quality/score for each
+target at grab time. The latter two fields distinguish a release that was
+already worse when grabbed from one that lost to a later import or a changed
+profile.
 
 - qBittorrent looks up the torrent hash exactly.
 - SABnzbd looks up `SAB_NZO_ID` exactly. Its former title/substring queue
@@ -1564,18 +1568,83 @@ before submitting Arr's native command; this favors a delayed retry over a
 duplicate import when the response is lost. Nothing is permanently blocklisted.
 Run it with `--dry-run` before enabling apply on a new deployment.
 
+### Terminal Torrent Validation And Handoff
+
+The same reconciler owns a separately gated terminal handoff for completed
+qBittorrent downloads that Arr will not import. It does not change successful
+imports or Arr's native completed-download handling.
+
+1. Require an exact OnGrab ledger record, one exact qBittorrent hash, a fully
+   completed payload older than the stability window, and qBittorrent 5.2.0 or
+   newer.
+2. Read every torrent media file through a read-only `/data` mount and inspect
+   video codec, dimensions, audio languages, subtitle languages, size, inode,
+   and link count with `ffprobe`. A file that changes during probing is not
+   actionable.
+3. Require qBittorrent's media-file set to equal Arr's native manual-import
+   candidate set. Every candidate must map to the exact ledger media and target
+   IDs. Mixed, partial, changing, or unparseable packs remain untouched. A
+   same-series season/episode target disagreement is `unverifiable`, not an
+   identity failure, because it can be an Arr parser/numbering problem.
+4. Classify the exact download as `accepted`, `current_better`,
+   `superseded_in_flight`, `profile_drift`, `payload_misrepresented`,
+   `identity_mismatch`, or `unverifiable`. `accepted` and `unverifiable` stay in
+   Arr. Ordinary current-better, pack-collateral, superseded, and profile-drift
+   outcomes are never blocklisted.
+5. A candidate-side DA promise for non-English-original media requires tagged
+   original-language plus English audio in every payload file; extra languages
+   are allowed. English-original media requires English only. Unknown audio
+   tags fail closed. Advertised HEVC and resolution claims are also checked
+   against the payload. Stream evidence is an eligibility gate, never a
+   post-download positive custom-format score.
+6. Exact blocklisting is limited to a stable wrong-series/wrong-movie identity
+   or a payload contradiction. Same-media target-number disagreement and
+   numerical score loss are not proof of a bad release. A proven rejection may
+   schedule one Sonarr season search or Radarr movie search per target scope in
+   24 hours.
+7. If the torrent has already met an effective finite share quota, remove the
+   queue item through Arr with `removeFromClient=true`. Otherwise preserve the
+   exact per-torrent ratio, seeding-time, and inactive-seeding-time values; set
+   only that torrent's qBittorrent 5.2 `shareLimitAction` to
+   `RemoveWithContent`; verify the values and action by API readback; then hide
+   the item from Arr with `removeFromClient=false`. qBittorrent continues
+   seeding and deletes only download-side content when the existing quota is
+   met. Imported hardlinks remain valid.
+8. If qBittorrent write/readback, rollback verification, payload probing,
+   profile/current-file evaluation, or Arr removal fails, leave the queue item
+   visible and do not proceed. The global qBittorrent `Stop` action remains
+   unchanged.
+
+`media_release_stamper_handoff_mode` controls rollout: `disabled` does not
+evaluate terminal downloads, `audit` emits decisions without mutation, and
+`apply` enables the guarded handoff. `--handoff-download-id` plus
+`--handoff-only --once` is the canary path for one exact torrent. Persistent
+handoff/search state and structured events remain under
+`/opt/arr-grab-context/data/`; the container image adds only `ffprobe`, mounts
+the media tree read-only, and receives no Docker socket. Bounded cycles persist
+a per-application rotating download-ID cursor, so long-lived unverifiable rows
+cannot prevent later completed torrents from being evaluated. Successfully
+handed-off IDs are suppressed if an Arr queue row briefly lingers.
+
 A season search materially changes the operational cost. Sonarr first evaluates
 season packs and can choose one pack because only one episode is missing, then
 downloads and moves the entire payload before import-time episode evaluation.
 Files for episodes that already have better copies are pack collateral. The
-exact-target reconciler keeps that collateral out of the library and queue, but
-it does not prevent the pack bandwidth, SSD writes, completed-tree move, or
-temporary storage use. Preventing those costs would require a pre-download
-search/queue gate, which is intentionally outside the current approved design.
+terminal handoff clears a fully classified completed torrent from Arr without
+discarding private-tracker seed obligations, but it cannot prevent the initial
+pack bandwidth, SSD writes, completed-tree move, or temporary storage use.
+Preventing those costs would require a pre-download search/queue gate, which is
+intentionally outside the current approved design.
 
 Managed sources are `scripts/media-release/arr_import_reconciler.py` and
 `templates/docker/arr-grab-context.yml.j2`; regression coverage is in
 `scripts/media-release/test_arr_import_reconciler.py`.
+
+Future Astra evaluation for this boundary: expose the terminal classifier as a
+typed read-only operation first, then consider one exact owner-approved
+handoff action through the existing credential-isolated host-admin boundary.
+This rollout grants Astra no generic Arr/qBittorrent credentials, shell, Docker
+access, or autonomous terminal-handoff mutation.
 
 ## Download Client Storage Layout
 

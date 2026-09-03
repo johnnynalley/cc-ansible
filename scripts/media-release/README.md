@@ -54,7 +54,21 @@
   candidates, and downloads without exact context are never selected. Its
   structured output compares grab-time and import-time scores/formats and
   classifies identity conflicts, CF drift, current-better rows, and other
-  native rejections. The deployed service can run in dry-run mode before apply.
+  native rejections. Its separately gated terminal-torrent mode probes every
+  completed qBittorrent media file, requires complete pack/native-target
+  mapping, exact ledger context, and a finite seed quota, then either removes a
+  quota-complete torrent through Arr or hands it to qBittorrent's per-torrent
+  `RemoveWithContent` action before hiding it from Arr. Ordinary current-better
+  and pack-collateral outcomes are not blocklisted; exact stable payload or
+  identity contradictions may be blocklisted and receive one cooldown-bounded
+  replacement search. `disabled`, `audit`, and `apply` modes support staged
+  rollout, and any failed probe/write/readback leaves the queue item untouched.
+  Same-media episode/season target mismatches remain review-only, and a
+  persistent rotating cursor prevents unresolved rows from starving later
+  terminal downloads during bounded cycles.
+- `arr-import-reconciler.Dockerfile`: Minimal local reconciler image extension
+  that adds `ffprobe` to the unversioned Python Alpine base. The reconciler
+  receives a read-only media mount and no Docker socket.
 - `arr_profile_assignment_check.py`: Read-only Sonarr/Radarr and Seerr check
   that fails if any media assignment or request default uses balanced, test,
   old, or unknown profiles instead of efficient profiles.
