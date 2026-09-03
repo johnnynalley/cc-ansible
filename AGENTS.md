@@ -1,6 +1,6 @@
 # Repository Guidelines
 
-> **Last updated:** 2026-08-31
+> **Last updated:** 2026-09-03
 
 This file provides guidance to Codex CLI when working with code in this repository. It combines a quick contributor guide with the full operational reference migrated from Claude Code.
 
@@ -43,6 +43,24 @@ live changes, rollback artifacts, verification status, repository dirt, and
 exact resume step. When a user correction exposes a reasoning failure, add a
 short self-RCA stating why the miss happened and the durable rule that prevents
 recurrence before returning to the operational work.
+
+Maintain an explicit **Owner Directive Ledger** in the active workboard. Before
+starting work from any material owner instruction, correction, priority, scope
+boundary, approval, denial, or supersession, record a lossless actionable form
+of it in that ledger with its status and the instruction it replaces, if any.
+This must happen before delegation, implementation, or any operation likely to
+compact context. Do not assume chat history, a transcript elsewhere, an older
+plan paragraph, or model memory will preserve the instruction. On resume after
+compaction or interruption, re-read the ledger before taking action and resolve
+conflicts in favor of the newest recorded owner directive. Rewrite or retire
+superseded plan text in the same update so stale constraints cannot remain
+apparently authoritative.
+
+Before closing or materially narrowing a long-running plan, reconcile every
+archived owner-supplied transcript associated with the workboard against the
+Owner Directive Ledger. Record any instruction that is missing, ambiguous, or
+contradicted by the plan, and do not silently guess at the owner's intent. A
+completion checklist is not a substitute for this instruction-level audit.
 
 ## Quick Contributor Guide
 
