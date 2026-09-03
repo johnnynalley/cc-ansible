@@ -91,7 +91,7 @@
       "id": "identity-and-instructions",
       "source": "OpenClaw workspace identity, soul, user, agent, and tool guidance",
       "disposition": "native",
-      "target": "native Hermes bootstrap plus exact OpenClaw bootstrap/reference evidence",
+      "target": "Hermes-native profile target presence plus exact immutable OpenClaw bootstrap/reference evidence",
       "validation": "hermes-bootstrap-parity-validate runtime"
     },
     {

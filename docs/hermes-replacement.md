@@ -1406,25 +1406,26 @@ staging run and does not start a Gateway, model, scheduler, or messaging route.
 
 The replacement does not use a plugin or phrase table to decide when Astra
 should research, compare hardware, perform RCA, or learn. Each profile's
-profile-owned `AGENTS.md` is always loaded with its `SOUL.md`; Ansible seeds
-both only when absent and does not overwrite reviewed native evolution. Astra
-selects evidence from the request's intent, stakes, uncertainty, exact object,
+Hermes-native `AGENTS.md` is always loaded with its `SOUL.md`; neither file is
+deployed, converged, or runtime-pinned from Ansible after profile establishment.
+Astra selects evidence from the request's intent, stakes, uncertainty, exact object,
 current thread, and durable project state. Dubble and Rigel have separate
 operating contracts and cannot read Astra's policy or data through a shared
 profile.
 
 Hermes' native background review is the semantic self-evolution mechanism. It
-runs after a turn and can propose compact memory or procedural skill changes.
-The shared declarative self-evolution skill gives all three agents the same
-review, evidence, and proposal procedure; an approved change updates one
-canonical source and is projected to every profile. This does not merge their
-memories or grant cross-profile reads.
+runs after a turn and can directly persist compact memory, profile-local skill,
+or operating-guidance changes inside the owning agent's native write boundary.
+The fleet-shared self-evolution skill gives all three agents the same review and
+evidence procedure. Astra is its sole writer; Dubble and Rigel can propose a
+change for Astra to accept only when it is necessary and beneficial fleet-wide.
+This does not merge their memories or grant cross-profile reads.
 All three profiles set `memory.write_approval: false` and
 `skills.write_approval: false` for their isolated native state, with
 `guard_agent_created: true`. Foreground and background improvements can
-therefore persist without waiting for Johnny, while root-managed policy,
-credentials, tools, other profiles, and the fleet-shared skill remain outside
-ordinary write authority. Astra is the sole reviewer and writer for the shared
+therefore persist without waiting for Johnny, while root-owned platform policy,
+credentials, tools, and other profiles remain outside ordinary write authority.
+Astra is the sole reviewer and writer for the shared
 `self-evolution` tree; Dubble and Rigel submit bounded proposals through their
 peer path. Background maintenance remains silent unless a real owner or
 operator decision is blocked. Official behavior is documented under

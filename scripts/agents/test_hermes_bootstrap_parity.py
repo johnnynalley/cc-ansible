@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Tests for exact OpenClaw bootstrap/reference parity validation."""
+"""Tests for OpenClaw evidence and native target parity validation."""
 
 from __future__ import annotations
 
@@ -32,40 +32,27 @@ class BootstrapParityTests(unittest.TestCase):
         self.source.mkdir()
         self.profile.mkdir()
 
-        native_files = {
-            "native/AGENTS.md": b"native agents\n",
-            "native/SOUL.md": b"native soul\n",
-            "native/heartbeat.md": b"native heartbeat\n",
-        }
-        for relative, content in native_files.items():
-            path = self.repo / relative
-            path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_bytes(content)
-        for relative in ("vault/MEMORY.md.vault", "vault/USER.md.vault"):
-            path = self.repo / relative
-            path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_bytes(b"$ANSIBLE_VAULT;1.2;AES256;default\nfixture\n")
-
         target_specs = [
-            ("agents", "plain", "native/AGENTS.md", "exact", "AGENTS.md", native_files["native/AGENTS.md"]),
-            ("soul", "plain", "native/SOUL.md", "exact", "SOUL.md", native_files["native/SOUL.md"]),
-            ("heartbeat", "plain", "native/heartbeat.md", "seeded-mutable", "skills/operational-heartbeat/SKILL.md", native_files["native/heartbeat.md"]),
-            ("memory", "ansible-vault-plaintext", "vault/MEMORY.md.vault", "seeded-mutable", "MEMORY.md", b"native memory\n"),
-            ("user", "ansible-vault-plaintext", "vault/USER.md.vault", "seeded-mutable", "USER.md", b"native user\n"),
+            ("agents", "AGENTS.md", b"native agents\n"),
+            ("soul", "SOUL.md", b"native soul\n"),
+            (
+                "heartbeat",
+                "skills/operational-heartbeat/SKILL.md",
+                b"native heartbeat\n",
+            ),
+            ("memory", "memories/MEMORY.md", b"native memory\n"),
+            ("user", "memories/USER.md", b"native user\n"),
         ]
-        self.target_pins = []
-        for target_id, kind, source, runtime_policy, runtime, plaintext in target_specs:
+        self.native_targets = []
+        for target_id, runtime, content in target_specs:
             runtime_path = self.profile / runtime
             runtime_path.parent.mkdir(parents=True, exist_ok=True)
-            runtime_path.write_bytes(plaintext)
-            self.target_pins.append(
+            runtime_path.write_bytes(content)
+            self.native_targets.append(
                 {
                     "id": target_id,
-                    "kind": kind,
-                    "sourcePath": source,
-                    "sha256": hashlib.sha256(plaintext).hexdigest(),
-                    "runtimePolicy": runtime_policy,
                     "runtimePath": runtime,
+                    "requirement": "nonempty-utf8",
                 }
             )
 
@@ -155,7 +142,7 @@ class BootstrapParityTests(unittest.TestCase):
                 "MEMORY.md": "native-memory-store",
                 "USER.md": "native-memory-store",
             },
-            "managedTargetPins": self.target_pins,
+            "nativeTargets": self.native_targets,
             "bootstrapSummary": {
                 "files": len(self.bootstrap_rows),
                 "bytes": sum(row["bytes"] for row in self.bootstrap_rows),
@@ -189,28 +176,20 @@ class BootstrapParityTests(unittest.TestCase):
         self.assertEqual(result["bootstrapFiles"], 11)
         self.assertEqual(result["referenceFiles"], 3)
 
-    def test_real_runtime_pins_use_native_profile_locations(self) -> None:
+    def test_real_native_targets_have_no_repository_sources_or_hashes(self) -> None:
         contract = json.loads(REAL_CONTRACT.read_text(encoding="utf-8"))
-        pins = {row["id"]: row for row in contract["managedTargetPins"]}
+        targets = {row["id"]: row for row in contract["nativeTargets"]}
         self.assertEqual(
-            pins["astra-operational-heartbeat"]["runtimePath"],
+            targets["astra-operational-heartbeat"]["runtimePath"],
             "skills/operational-heartbeat/SKILL.md",
         )
-        heartbeat_source = ROOT / pins["astra-operational-heartbeat"]["sourcePath"]
-        self.assertEqual(
-            pins["astra-operational-heartbeat"]["sha256"],
-            hashlib.sha256(heartbeat_source.read_bytes()).hexdigest(),
-        )
-        self.assertEqual(
-            pins["astra-operational-heartbeat"]["runtimePolicy"],
-            "seeded-mutable",
-        )
-        self.assertEqual(
-            pins["astra-memory"]["runtimePath"], "memories/MEMORY.md"
-        )
-        self.assertEqual(pins["astra-memory"]["runtimePolicy"], "seeded-mutable")
-        self.assertEqual(pins["astra-user"]["runtimePath"], "memories/USER.md")
-        self.assertEqual(pins["astra-user"]["runtimePolicy"], "seeded-mutable")
+        self.assertEqual(targets["astra-memory"]["runtimePath"], "memories/MEMORY.md")
+        self.assertEqual(targets["astra-user"]["runtimePath"], "memories/USER.md")
+        for target in targets.values():
+            self.assertEqual(
+                set(target), {"id", "runtimePath", "requirement"}
+            )
+            self.assertEqual(target["requirement"], "nonempty-utf8")
 
     def test_runtime_contract_passes(self) -> None:
         result = MODULE.validate(self.args(runtime=True))
@@ -232,36 +211,44 @@ class BootstrapParityTests(unittest.TestCase):
         with self.assertRaisesRegex(MODULE.ParityError, "bootstrap-evidence-hash:CHARTER.md"):
             MODULE.validate(self.args(runtime=True))
 
-    def test_runtime_native_target_drift_fails(self) -> None:
+    def test_runtime_native_guidance_may_evolve_without_contract_change(self) -> None:
         (self.profile / "SOUL.md").write_text("drift\n", encoding="utf-8")
-        with self.assertRaisesRegex(MODULE.ParityError, "runtime-target-hash:soul"):
-            MODULE.validate(self.args(runtime=True))
+        (self.profile / "AGENTS.md").write_text(
+            "native evolved guidance\n", encoding="utf-8"
+        )
+        result = MODULE.validate(self.args(runtime=True))
+        self.assertTrue(result["runtime"])
 
-    def test_runtime_seeded_memory_may_evolve(self) -> None:
-        (self.profile / "MEMORY.md").write_text(
+    def test_runtime_native_memory_may_evolve(self) -> None:
+        (self.profile / "memories/MEMORY.md").write_text(
             "native memory with durable learning\n", encoding="utf-8"
         )
         result = MODULE.validate(self.args(runtime=True))
         self.assertTrue(result["runtime"])
 
-    def test_runtime_seeded_plain_heartbeat_may_evolve(self) -> None:
+    def test_runtime_native_heartbeat_may_evolve(self) -> None:
         (self.profile / "skills/operational-heartbeat/SKILL.md").write_text(
             "native heartbeat with durable learning\n", encoding="utf-8"
         )
         result = MODULE.validate(self.args(runtime=True))
         self.assertTrue(result["runtime"])
 
-    def test_runtime_does_not_require_encrypted_seed_source_access(self) -> None:
-        (self.repo / "vault/MEMORY.md.vault").unlink()
-        (self.repo / "vault/USER.md.vault").unlink()
+    def test_runtime_does_not_require_any_repository_profile_source(self) -> None:
+        self.assertEqual(list(self.repo.iterdir()), [])
         result = MODULE.validate(self.args(runtime=True))
         self.assertTrue(result["runtime"])
 
-    def test_runtime_does_not_require_plain_managed_source_access(self) -> None:
-        for path in ("native/AGENTS.md", "native/SOUL.md", "native/heartbeat.md"):
-            (self.repo / path).unlink()
-        result = MODULE.validate(self.args(runtime=True))
-        self.assertTrue(result["runtime"])
+    def test_runtime_rejects_empty_native_target(self) -> None:
+        (self.profile / "AGENTS.md").write_bytes(b"")
+        with self.assertRaisesRegex(MODULE.ParityError, "runtime-target-empty:agents"):
+            MODULE.validate(self.args(runtime=True))
+
+    def test_runtime_rejects_invalid_native_target_encoding(self) -> None:
+        (self.profile / "AGENTS.md").write_bytes(b"\xff")
+        with self.assertRaisesRegex(
+            MODULE.ParityError, "runtime-target-encoding:agents"
+        ):
+            MODULE.validate(self.args(runtime=True))
 
     def test_runtime_can_use_distinct_evidence_root(self) -> None:
         evidence_root = self.root / "evidence"

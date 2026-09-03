@@ -187,6 +187,7 @@ def validate(args: argparse.Namespace) -> dict[str, Any]:
         "hermes_automation_rigel_channel_id": "1000000000000001",
         "hermes_rigel_discord_channel_id": "1000000000000001",
         "hermes_automation_logs_channel_id": "1000000000000002",
+        "hermes_astra_logs_channel_id": "1000000000000007",
         "hermes_automation_social_channel_id": "1000000000000003",
         "hermes_automation_owner_user_id": "1000000000000004",
         "hermes_native_update_profile_home": "/var/lib/hermes/astra/profile",

@@ -642,17 +642,17 @@
               {{ hermes_bootstrap_parity_runtime_command.stdout | from_json }}
           when: hermes_openclaw_evidence_gateway_was_active | bool
 
-        - name: Require exact Astra bootstrap and reference runtime parity
+        - name: Require exact OpenClaw evidence and native target presence
           ansible.builtin.assert:
             that:
               - hermes_bootstrap_parity_runtime.status == 'ok'
               - hermes_bootstrap_parity_runtime.runtime | bool
               - hermes_bootstrap_parity_runtime.bootstrapFiles == 11
               - hermes_bootstrap_parity_runtime.referenceFiles == 42
-              - hermes_bootstrap_parity_runtime.managedTargets == 5
+              - hermes_bootstrap_parity_runtime.nativeTargets == 5
             fail_msg: >-
               Astra cannot read an exact legacy bootstrap/reference artifact,
-              or a native managed bootstrap target does not match its pin.
+              or a required native profile target is missing or invalid.
           when: hermes_openclaw_evidence_gateway_was_active | bool
 
         - name: Verify Astra Gateway evidence namespace when active

@@ -45,11 +45,10 @@ reviewed Ansible Vault ciphertext seeds declared by
   disposable rootless Podman container, keeps every Gateway disabled, rejects
   Discord credentials, validates the native runtime, and removes the container
   and image after acceptance.
-- `profiles/*/SOUL.md` contains the one-time bootstrap identity for Astra,
-  Dubble, and Rigel. Ansible seeds it as profile-owned native state only when
-  absent, so reviewed agent evolution is not overwritten by convergence. The
-  seed encodes transcript-derived behavior boundaries without copying
-  transcript content, user IDs, memories, or credentials.
+- `profiles/*/SOUL.md` preserves the reviewed migration-time identity export for
+  Astra, Dubble, and Rigel. It is non-authoritative evidence, not an Ansible
+  deployment source. Established live identities are Hermes-native mutable
+  state protected by native and off-host backups.
 - `jobs/rigel-academic-alerts.json` is the paused, credential-free declaration
   for Rigel's always-enabled 30-minute script-only schedule. It is activated
   through the Hermes CLI only after cutover approval; Ansible never edits
@@ -186,10 +185,11 @@ reviewed Ansible Vault ciphertext seeds declared by
   collection-only input to the single Daily Summary compose path, matching the
   current OpenClaw policy. Route identifiers remain in inventory and are never
   committed to this static-policy directory.
-- `profiles/*/AGENTS.md` contains each profile's one-time bootstrap operating
-  contract. Ansible seeds it as profile-owned native state only when absent;
-  backups and native review protect subsequent agent-authored changes. These
-  files are always-on behavior policy, not keyword-triggered skills.
+- `profiles/*/AGENTS.md` preserves migration-time operating-contract exports.
+  These copies are non-authoritative and are never converged into established
+  profiles. Each live Hermes-native `AGENTS.md` is the active always-on policy
+  and evolves through the owning agent's reviewed native workflow, with local
+  rollback and off-host recovery coverage.
 - `scripts/agents/hermes-shadow-target-audit.py` is the fail-closed validator.
 - `scripts/agents/hermes-openclaw-migration-audit.py` validates the migration
   contract and inventories top-level source metadata without reading contents.

@@ -58,14 +58,14 @@ class HermesProductionRuntimeTests(unittest.TestCase):
         backup_task = self.playbook[backup:readers]
         self.assertIn("when: not ansible_check_mode", backup_task)
 
-    def test_projection_support_and_all_profile_bootstrap_are_transactional(self) -> None:
+    def test_projection_and_platform_support_are_transactional(self) -> None:
         inspect = self.offset(
-            "Inspect existing runtime-owned support and operating contracts"
+            "Inspect existing runtime-owned platform support assets"
         )
         backup = self.offset(
-            "Back up existing runtime-owned support and operating contracts"
+            "Back up existing runtime-owned platform support assets"
         )
-        deploy = self.offset("Deploy production Hermes operating contracts")
+        deploy = self.offset("Deploy production Hermes platform support assets")
         restart = self.offset(
             "Restart production consumers natively for runtime changes"
         )
@@ -82,9 +82,6 @@ class HermesProductionRuntimeTests(unittest.TestCase):
             "scripts/agents/hermes-rigel-workflow-smoke.py",
             "files/hermes/profile-import-contract.json",
             "files/openclaw/workspace-migration-policy.json",
-            "files/hermes/profiles/rigel/HEARTBEAT.md",
-            "files/hermes/profiles/rigel/TOOLS.md",
-            "files/hermes/profiles/rigel/USER.md",
         ):
             self.assertIn(required, self.playbook)
         self.assertIn(
@@ -98,26 +95,31 @@ class HermesProductionRuntimeTests(unittest.TestCase):
         self.assertNotIn("backup: true", deployment)
         rescue = self.playbook[self.playbook.index("      rescue:"):]
         self.assertIn(
-            "Restore prior runtime-owned support and operating contracts", rescue
+            "Restore prior runtime-owned platform support assets", rescue
         )
         self.assertIn(
-            "Remove newly introduced runtime-owned support and operating contracts",
+            "Remove newly introduced runtime-owned platform support assets",
             rescue,
         )
 
-    def test_profile_guidance_is_seed_only_and_profile_owned(self) -> None:
-        deploy = self.offset("Deploy production Hermes operating contracts")
+    def test_profile_guidance_is_not_owned_by_runtime_convergence(self) -> None:
+        deploy = self.offset("Deploy production Hermes platform support assets")
         update_unit = self.offset("Deploy production Hermes update unit")
         deployment = self.playbook[deploy:update_unit]
         self.assertIn("item.owner | default('root')", deployment)
-        self.assertIn("item.seed_only | default(false)", deployment)
-        for profile in ("astra", "dubble", "rigel"):
-            self.assertIn(f"owner: hermes-{profile}", self.playbook)
-        self.assertEqual(self.playbook.count("seed_only: true"), 9)
-        rescue = self.playbook[self.playbook.index("      rescue:"):]
-        self.assertIn("item.stat.pw_name", rescue)
-        self.assertIn("item.stat.gr_name", rescue)
-        self.assertIn("item.stat.mode", rescue)
+        self.assertNotIn("seed_only", self.playbook)
+        for path in (
+            "/profiles/astra/AGENTS.md",
+            "/profiles/astra/SOUL.md",
+            "/profiles/dubble/AGENTS.md",
+            "/profiles/dubble/SOUL.md",
+            "/profiles/rigel/AGENTS.md",
+            "/profiles/rigel/SOUL.md",
+            "/profiles/rigel/HEARTBEAT.md",
+            "/profiles/rigel/TOOLS.md",
+            "/profiles/rigel/USER.md",
+        ):
+            self.assertNotIn(path, self.playbook)
 
     def test_star_plugin_is_backed_up_validated_and_restarts_only_astra(self) -> None:
         backup = self.offset("Back up live Astra Star privacy plugin")

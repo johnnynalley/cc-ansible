@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Validate exact OpenClaw bootstrap/reference reconciliation for Astra."""
+"""Validate OpenClaw evidence reconciliation and native target presence."""
 
 from __future__ import annotations
 
@@ -30,8 +30,7 @@ BOOTSTRAP_DISPOSITIONS = {
     "native-merged-and-evidence",
     "native-seeded-and-evidence",
 }
-TARGET_KINDS = {"plain", "ansible-vault-plaintext"}
-TARGET_RUNTIME_POLICIES = {"exact", "seeded-mutable"}
+NATIVE_TARGET_REQUIREMENTS = {"nonempty-utf8"}
 
 
 class ParityError(RuntimeError):
@@ -98,57 +97,36 @@ def reference_aggregate(rows: list[dict[str, Any]]) -> str:
     return digest("".join(lines).encode("utf-8"))
 
 
-def validate_target_pins(
-    contract: dict[str, Any], repo_root: Path, profile_root: Path | None
+def validate_native_targets(
+    contract: dict[str, Any], profile_root: Path | None
 ) -> dict[str, dict[str, Any]]:
-    rows = contract.get("managedTargetPins")
+    rows = contract.get("nativeTargets")
     if not isinstance(rows, list) or not rows:
-        raise ParityError("managed-target-pins-empty")
+        raise ParityError("native-targets-empty")
     by_id: dict[str, dict[str, Any]] = {}
     for row in rows:
         if not isinstance(row, dict) or set(row) != {
-            "id",
-            "kind",
-            "sourcePath",
-            "sha256",
-            "runtimePolicy",
-            "runtimePath",
+            "id", "runtimePath", "requirement"
         }:
-            raise ParityError("managed-target-pin-row")
+            raise ParityError("native-target-row")
         target_id = row.get("id")
         if not isinstance(target_id, str) or not target_id or target_id in by_id:
-            raise ParityError("managed-target-pin-id")
-        kind = row.get("kind")
-        if kind not in TARGET_KINDS:
-            raise ParityError(f"managed-target-pin-kind:{target_id}")
-        runtime_policy = row.get("runtimePolicy")
-        if runtime_policy not in TARGET_RUNTIME_POLICIES:
-            raise ParityError(f"managed-target-runtime-policy:{target_id}")
-        source_path = relative_path(row.get("sourcePath"), f"target:{target_id}")
-        expected = validate_hash(row.get("sha256"), f"target:{target_id}")
-        if kind == "plain" and profile_root is None:
-            content = require_regular(repo_root / source_path, f"target:{target_id}")
-            if digest(content) != expected:
-                raise ParityError(f"managed-target-hash:{target_id}")
-        elif profile_root is None:
-            content = require_regular(repo_root / source_path, f"target:{target_id}")
-            if not content.startswith(b"$ANSIBLE_VAULT;"):
-                raise ParityError(f"managed-target-not-vault:{target_id}")
-        relative_path(row.get("runtimePath"), f"runtime-target:{target_id}")
+            raise ParityError("native-target-id")
+        runtime_path = relative_path(
+            row.get("runtimePath"), f"runtime-target:{target_id}"
+        )
+        requirement = row.get("requirement")
+        if requirement not in NATIVE_TARGET_REQUIREMENTS:
+            raise ParityError(f"native-target-requirement:{target_id}")
         if profile_root is not None:
-            runtime = profile_root / row["runtimePath"]
+            runtime = profile_root / runtime_path
             runtime_content = require_regular(runtime, f"runtime-target:{target_id}")
-            if runtime_policy == "exact" and digest(runtime_content) != expected:
-                raise ParityError(f"runtime-target-hash:{target_id}")
-            if runtime_policy == "seeded-mutable":
-                if not runtime_content:
-                    raise ParityError(f"runtime-target-empty:{target_id}")
-                try:
-                    runtime_content.decode("utf-8")
-                except UnicodeError as exc:
-                    raise ParityError(
-                        f"runtime-target-encoding:{target_id}"
-                    ) from exc
+            if not runtime_content:
+                raise ParityError(f"runtime-target-empty:{target_id}")
+            try:
+                runtime_content.decode("utf-8")
+            except UnicodeError as exc:
+                raise ParityError(f"runtime-target-encoding:{target_id}") from exc
         by_id[target_id] = row
     return by_id
 
@@ -191,7 +169,7 @@ def validate(args: argparse.Namespace) -> dict[str, Any]:
     }:
         raise ParityError("native-loader-contract")
 
-    target_pins = validate_target_pins(contract, repo_root, profile_root)
+    native_targets = validate_native_targets(contract, profile_root)
 
     bootstrap_rows = contract.get("bootstrapFiles")
     if not isinstance(bootstrap_rows, list) or not bootstrap_rows:
@@ -223,7 +201,10 @@ def validate(args: argparse.Namespace) -> dict[str, Any]:
         if (
             not isinstance(target_ids, list)
             or not target_ids
-            or not all(isinstance(value, str) and value in target_pins for value in target_ids)
+            or not all(
+                isinstance(value, str) and value in native_targets
+                for value in target_ids
+            )
         ):
             raise ParityError(f"bootstrap-targets:{name}")
         expected_evidence = f"legacy-openclaw/workspace/{name}"
@@ -344,7 +325,7 @@ def validate(args: argparse.Namespace) -> dict[str, Any]:
         "referenceBytes": reference_bytes,
         "semanticReferences": len(semantic_paths),
         "archivalEvidence": len(reference_rows) - len(semantic_paths),
-        "managedTargets": len(target_pins),
+        "nativeTargets": len(native_targets),
         "referenceAggregateSha256": aggregate,
     }
 

@@ -10,46 +10,31 @@
     "MEMORY.md": "native-memory-store",
     "USER.md": "native-memory-store"
   },
-  "managedTargetPins": [
+  "nativeTargets": [
     {
       "id": "astra-agents",
-      "kind": "plain",
-      "sourcePath": "files/hermes/profiles/astra/AGENTS.md",
-      "sha256": "c84554944871e083e61d53c1a170c0ddf3214bd8bd42520ab190a21778bc77e2",
-      "runtimePolicy": "exact",
-      "runtimePath": "AGENTS.md"
+      "runtimePath": "AGENTS.md",
+      "requirement": "nonempty-utf8"
     },
     {
       "id": "astra-soul",
-      "kind": "plain",
-      "sourcePath": "files/hermes/profiles/astra/SOUL.md",
-      "sha256": "c111465bacf198b997934429e03ded902c9868171d5fa41a0b60b738b30d7e33",
-      "runtimePolicy": "exact",
-      "runtimePath": "SOUL.md"
+      "runtimePath": "SOUL.md",
+      "requirement": "nonempty-utf8"
     },
     {
       "id": "astra-operational-heartbeat",
-      "kind": "plain",
-      "sourcePath": "files/hermes/profile-skills/astra/operational-heartbeat/SKILL.md",
-      "sha256": "4d84aa26db0f9afb6759a784e7456488815735e47ee6a2b5cf2c875beb7fd3de",
-      "runtimePolicy": "seeded-mutable",
-      "runtimePath": "skills/operational-heartbeat/SKILL.md"
+      "runtimePath": "skills/operational-heartbeat/SKILL.md",
+      "requirement": "nonempty-utf8"
     },
     {
       "id": "astra-memory",
-      "kind": "ansible-vault-plaintext",
-      "sourcePath": "files/hermes/profile-memory/astra/MEMORY.md.vault",
-      "sha256": "0a54ff9110cf32537ac3955a3db56347e2b5ac349f96edff32359c83f76e0c2b",
-      "runtimePolicy": "seeded-mutable",
-      "runtimePath": "memories/MEMORY.md"
+      "runtimePath": "memories/MEMORY.md",
+      "requirement": "nonempty-utf8"
     },
     {
       "id": "astra-user",
-      "kind": "ansible-vault-plaintext",
-      "sourcePath": "files/hermes/profile-memory/astra/USER.md.vault",
-      "sha256": "b7a9c7ff399999b76b6cc1f925207a95ea10ac3738f7f88c3f7838d027786a23",
-      "runtimePolicy": "seeded-mutable",
-      "runtimePath": "memories/USER.md"
+      "runtimePath": "memories/USER.md",
+      "requirement": "nonempty-utf8"
     }
   ],
   "bootstrapSummary": {

@@ -89,78 +89,6 @@
         backup: repository-workspace-migration-policy.json
         group: root
         mode: "0444"
-      - source: files/hermes/profiles/astra/AGENTS.md
-        path: /var/lib/hermes/astra/.hermes/profiles/astra/AGENTS.md
-        backup: astra-AGENTS.md
-        profile: astra
-        owner: hermes-astra
-        group: hermes-astra
-        mode: "0600"
-        seed_only: true
-      - source: files/hermes/profiles/astra/SOUL.md
-        path: /var/lib/hermes/astra/.hermes/profiles/astra/SOUL.md
-        backup: astra-SOUL.md
-        profile: astra
-        owner: hermes-astra
-        group: hermes-astra
-        mode: "0600"
-        seed_only: true
-      - source: files/hermes/profiles/dubble/AGENTS.md
-        path: /var/lib/hermes/dubble/.hermes/profiles/dubble/AGENTS.md
-        backup: dubble-AGENTS.md
-        profile: dubble
-        owner: hermes-dubble
-        group: hermes-dubble
-        mode: "0600"
-        seed_only: true
-      - source: files/hermes/profiles/dubble/SOUL.md
-        path: /var/lib/hermes/dubble/.hermes/profiles/dubble/SOUL.md
-        backup: dubble-SOUL.md
-        profile: dubble
-        owner: hermes-dubble
-        group: hermes-dubble
-        mode: "0600"
-        seed_only: true
-      - source: files/hermes/profiles/rigel/AGENTS.md
-        path: /var/lib/hermes/rigel/.hermes/profiles/rigel/AGENTS.md
-        backup: rigel-AGENTS.md
-        profile: rigel
-        owner: hermes-rigel
-        group: hermes-rigel
-        mode: "0600"
-        seed_only: true
-      - source: files/hermes/profiles/rigel/HEARTBEAT.md
-        path: /var/lib/hermes/rigel/.hermes/profiles/rigel/HEARTBEAT.md
-        backup: rigel-HEARTBEAT.md
-        profile: rigel
-        owner: hermes-rigel
-        group: hermes-rigel
-        mode: "0600"
-        seed_only: true
-      - source: files/hermes/profiles/rigel/SOUL.md
-        path: /var/lib/hermes/rigel/.hermes/profiles/rigel/SOUL.md
-        backup: rigel-SOUL.md
-        profile: rigel
-        owner: hermes-rigel
-        group: hermes-rigel
-        mode: "0600"
-        seed_only: true
-      - source: files/hermes/profiles/rigel/TOOLS.md
-        path: /var/lib/hermes/rigel/.hermes/profiles/rigel/TOOLS.md
-        backup: rigel-TOOLS.md
-        profile: rigel
-        owner: hermes-rigel
-        group: hermes-rigel
-        mode: "0600"
-        seed_only: true
-      - source: files/hermes/profiles/rigel/USER.md
-        path: /var/lib/hermes/rigel/.hermes/profiles/rigel/USER.md
-        backup: rigel-USER.md
-        profile: rigel
-        owner: hermes-rigel
-        group: hermes-rigel
-        mode: "0600"
-        seed_only: true
     hermes_runtime_managed_policy_paths:
       - /etc/hermes/astra/config.yaml
       - /etc/hermes/astra/managed-policy.sha256
@@ -397,7 +325,7 @@
         - item.stat.isreg | default(false)
         - not (item.stat.islnk | default(false))
 
-    - name: Inspect existing runtime-owned support and operating contracts
+    - name: Inspect existing runtime-owned platform support assets
       ansible.builtin.stat:
         path: "{{ item.path }}"
         follow: false
@@ -407,7 +335,7 @@
       register: hermes_runtime_owned_files_before
       check_mode: false
 
-    - name: Reject unsafe runtime-owned support and operating contracts
+    - name: Reject unsafe runtime-owned platform support assets
       ansible.builtin.assert:
         that:
           - >-
@@ -415,13 +343,13 @@
             or ((item.stat.isreg | default(false))
                 and not (item.stat.islnk | default(false)))
         fail_msg: >-
-          A runtime-owned support or operating-contract path is not absent or a
+          A runtime-owned platform support path is not absent or a
           regular non-symlink file: {{ item.item.path }}.
       loop: "{{ hermes_runtime_owned_files_before.results }}"
       loop_control:
         label: "{{ item.item.path }}"
 
-    - name: Back up existing runtime-owned support and operating contracts
+    - name: Back up existing runtime-owned platform support assets
       ansible.builtin.copy:
         src: "{{ item.item.path }}"
         dest: "{{ hermes_runtime_backup_root }}/{{ item.item.backup }}"
@@ -883,14 +811,13 @@
             backup: true
           register: hermes_runtime_audit_deployment
 
-        - name: Deploy production Hermes operating contracts
+        - name: Deploy production Hermes platform support assets
           ansible.builtin.copy:
             src: "{{ playbook_dir }}/../../{{ item.source }}"
             dest: "{{ item.path }}"
             owner: "{{ item.owner | default('root') }}"
             group: "{{ item.group }}"
             mode: "{{ item.mode }}"
-            force: "{{ not (item.seed_only | default(false) | bool) }}"
           loop: "{{ hermes_runtime_owned_files }}"
           loop_control:
             label: "{{ item.path }}"
@@ -1278,7 +1205,7 @@
             mode: "0440"
           loop: "{{ hermes_runtime_managed_policy_paths }}"
 
-        - name: Restore prior runtime-owned support and operating contracts
+        - name: Restore prior runtime-owned platform support assets
           ansible.builtin.copy:
             src: "{{ hermes_runtime_backup_root }}/{{ item.item.backup }}"
             dest: "{{ item.item.path }}"
@@ -1297,7 +1224,7 @@
             - item.stat.isreg | default(false)
             - not (item.stat.islnk | default(false))
 
-        - name: Remove newly introduced runtime-owned support and operating contracts
+        - name: Remove newly introduced runtime-owned platform support assets
           ansible.builtin.file:
             path: "{{ item.item.path }}"
             state: absent

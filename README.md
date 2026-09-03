@@ -312,7 +312,7 @@ Packages are merged from multiple sources (all applicable variables combined):
 | `openclaw.yml` | `openclaw_hosts` | OpenClaw AI agent (npm install, gateway service, repo-sync/update-check timers) |
 | `hermes-shadow.yml` | `hermes_hosts` | Boot-disabled Hermes staging with signed offline command scanning and no production delivery |
 | `hermes-production-cutover.yml` | `hermes_hosts` | Disabled-by-default, rollback-capable OpenClaw-to-Hermes production handoff with two Discord consumers, native Rigel scheduling, Health continuity, and native updates |
-| `hermes-production-runtime.yml` | `hermes_hosts` | Disabled-by-default live Hermes runtime convergence with official messaging dependencies, functional Discord readiness, sequential restarts, rollback, and Health/OpenClaw gates |
+| `hermes-production-runtime.yml` | `hermes_hosts` | Disabled-by-default rebuildable Hermes platform convergence with official messaging dependencies, functional Discord readiness, sequential restarts, rollback, and Health/OpenClaw gates; profile-authored native guidance is not deployed |
 | `hermes-native-gateway-migration.yml` | `hermes_hosts` | Exact-approval migration from handwritten Gateway units and flat profile state to Hermes-native named-profile system units, with copy-first rollback |
 | `hermes-memory-continuity.yml` | `hermes_hosts` | Exact-approval, source-preserving conversion of OpenClaw LCM and approved Astra Mem0 scopes into native Hermes LCM/Mem0 stores, with dry runs, backups, exact reconciliation, and rollback |
 | `hermes-automation.yml` | `hermes_hosts` | Disabled-by-default transactional convergence of seven native jobs, retained collectors, calendar/feed timers, profile backups, and full legacy schedule reconciliation |

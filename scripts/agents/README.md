@@ -123,12 +123,14 @@
   sanitized or inventory markers. `test_hermes_openclaw_evidence.py` covers
   full path accounting, source immutability, redaction replacement, strict
   read-only projection, approval/rollback ordering, and gateway dependency.
-- `hermes-bootstrap-parity-validate.py` pins all 11 legacy Astra bootstrap
-  files and every file under `workspace/references/`, checks their exact
-  source hashes and dispositions, verifies native Hermes target hashes, and
-  proves the projected evidence plus active profile at runtime.
-  `test_hermes_bootstrap_parity.py` covers source, projection, and active
-  profile drift, including separate host-view and Gateway-view roots.
+- `hermes-bootstrap-parity-validate.py` pins all 11 immutable legacy Astra
+  bootstrap files and every file under `workspace/references/`, checks their
+  exact evidence hashes and dispositions, and verifies that mapped native
+  Hermes targets remain regular, nonempty UTF-8 files. It never compares
+  mutable native profile content to repository copies or hashes.
+  `test_hermes_bootstrap_parity.py` covers source/evidence drift, native target
+  safety and presence, independent native evolution, and separate host-view and
+  Gateway-view evidence roots.
 - `test_hermes_openclaw_dry_run.py` covers contract immutability, source
   placeholders, secret/prompt/code exclusion, ordinary-source symlink
   rejection, anonymous skill-link handling, structural report stripping,

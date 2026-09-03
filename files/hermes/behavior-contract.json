@@ -50,36 +50,38 @@
   "selfEvolution": {
     "mechanism": "hermes-native-background-review",
     "selection": "semantic-context-review",
-    "memoryWrites": "stage-for-owner-approval",
-    "skillWrites": "stage-for-owner-approval",
-    "pendingWritesSurviveRestart": true,
-    "automaticApply": false,
+    "memoryWrites": "direct-native-after-review",
+    "skillWrites": "direct-native-after-review",
+    "sharedProposalsSurviveRestart": true,
+    "automaticApply": true,
     "selfApproval": false,
+    "ownerApprovalRequiredForNativeState": false,
+    "nativePolicyWritableByOwningAgent": true,
     "rootPolicyWritableByAgent": false,
     "toolAuthorityWritableByAgent": false,
     "notifications": "off",
-    "reviewSurfaces": [
-      "/memory pending",
-      "/memory approve",
-      "/memory reject",
-      "/skills pending",
-      "/skills diff",
-      "/skills approve",
-      "/skills reject"
-    ],
     "proposalRouting": {
       "user-preference": "user-memory",
       "stable-environment-fact": "profile-memory",
       "reusable-procedure": "profile-skill",
-      "behavior-policy": "owner-managed-source",
-      "security-policy": "owner-managed-source",
-      "deployment-policy": "owner-managed-source"
+      "behavior-policy": "profile-native-guidance",
+      "security-policy": "owner-managed-platform",
+      "deployment-policy": "owner-managed-platform"
+    },
+    "sharedSelfEvolution": {
+      "writer": "astra",
+      "proposalSources": ["dubble", "rigel"],
+      "acceptance": "necessary-and-beneficial-fleet-wide"
     }
   },
-  "profilePolicies": {
-    "astra": "files/hermes/profiles/astra/AGENTS.md",
-    "dubble": "files/hermes/profiles/dubble/AGENTS.md",
-    "rigel": "files/hermes/profiles/rigel/AGENTS.md"
+  "profilePolicyOwnership": {
+    "authority": "hermes-native-profile",
+    "repositoryManaged": false,
+    "runtimePaths": {
+      "astra": "AGENTS.md",
+      "dubble": "AGENTS.md",
+      "rigel": "AGENTS.md"
+    }
   },
   "regressionCases": "files/hermes/behavior-regressions.json"
 }

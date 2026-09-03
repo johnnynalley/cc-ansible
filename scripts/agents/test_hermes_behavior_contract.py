@@ -86,27 +86,33 @@ class HermesBehaviorContractTests(unittest.TestCase):
             authorization["unexpectedMutationDisposition"], "stop-and-report"
         )
 
-    def test_native_self_evolution_is_approval_gated(self) -> None:
+    def test_native_self_evolution_is_agent_owned_and_privilege_bounded(self) -> None:
         evolution = self.contract["selfEvolution"]
         self.assertEqual(evolution["mechanism"], "hermes-native-background-review")
         self.assertEqual(evolution["selection"], "semantic-context-review")
-        self.assertEqual(evolution["memoryWrites"], "stage-for-owner-approval")
-        self.assertEqual(evolution["skillWrites"], "stage-for-owner-approval")
-        self.assertTrue(evolution["pendingWritesSurviveRestart"])
-        self.assertFalse(evolution["automaticApply"])
+        self.assertEqual(evolution["memoryWrites"], "direct-native-after-review")
+        self.assertEqual(evolution["skillWrites"], "direct-native-after-review")
+        self.assertTrue(evolution["sharedProposalsSurviveRestart"])
+        self.assertTrue(evolution["automaticApply"])
         self.assertFalse(evolution["selfApproval"])
+        self.assertFalse(evolution["ownerApprovalRequiredForNativeState"])
+        self.assertTrue(evolution["nativePolicyWritableByOwningAgent"])
         self.assertFalse(evolution["rootPolicyWritableByAgent"])
         self.assertFalse(evolution["toolAuthorityWritableByAgent"])
         self.assertEqual(evolution["notifications"], "off")
-        self.assertEqual(len(evolution["reviewSurfaces"]), 7)
+        self.assertNotIn("reviewSurfaces", evolution)
+        shared = evolution["sharedSelfEvolution"]
+        self.assertEqual(shared["writer"], "astra")
+        self.assertEqual(shared["proposalSources"], ["dubble", "rigel"])
 
-    def test_policy_changes_cannot_route_to_agent_memory_or_skills(self) -> None:
+    def test_policy_changes_follow_native_and_platform_ownership(self) -> None:
         routing = self.contract["selfEvolution"]["proposalRouting"]
         self.assertEqual(routing["user-preference"], "user-memory")
         self.assertEqual(routing["stable-environment-fact"], "profile-memory")
         self.assertEqual(routing["reusable-procedure"], "profile-skill")
-        for category in {"behavior-policy", "security-policy", "deployment-policy"}:
-            self.assertEqual(routing[category], "owner-managed-source")
+        self.assertEqual(routing["behavior-policy"], "profile-native-guidance")
+        for category in {"security-policy", "deployment-policy"}:
+            self.assertEqual(routing[category], "owner-managed-platform")
 
     def test_correction_policy_rejects_incident_rule_accumulation(self) -> None:
         corrections = self.contract["corrections"]
@@ -125,16 +131,17 @@ class HermesBehaviorContractTests(unittest.TestCase):
         )
         self.assertFalse(corrections["generatedOutputMayServeAsEvidence"])
 
-    def test_profile_operating_contracts_are_regular_repo_files(self) -> None:
+    def test_profile_operating_contracts_are_native_not_repository_managed(self) -> None:
+        ownership = self.contract["profilePolicyOwnership"]
+        self.assertEqual(ownership["authority"], "hermes-native-profile")
+        self.assertFalse(ownership["repositoryManaged"])
         expected = {"astra", "dubble", "rigel"}
-        self.assertEqual(set(self.contract["profilePolicies"]), expected)
-        for profile, source in self.contract["profilePolicies"].items():
-            path = PurePosixPath(source)
+        self.assertEqual(set(ownership["runtimePaths"]), expected)
+        for profile, runtime in ownership["runtimePaths"].items():
+            path = PurePosixPath(runtime)
             self.assertFalse(path.is_absolute())
             self.assertNotIn("..", path.parts)
-            full_path = ROOT / path
-            self.assertTrue(full_path.is_file(), profile)
-            self.assertFalse(full_path.is_symlink(), profile)
+            self.assertEqual(path.as_posix(), "AGENTS.md", profile)
 
     def test_regression_corpus_is_complete_and_sanitized(self) -> None:
         self.assertEqual(self.regressions["schemaVersion"], 1)
@@ -208,8 +215,13 @@ class HermesBehaviorContractTests(unittest.TestCase):
             self.assertIn(case["risk"], {"high", "blocking"})
 
     def test_operating_contracts_do_not_reintroduce_control_tokens(self) -> None:
-        for source in self.contract["profilePolicies"].values():
-            content = (ROOT / source).read_text(encoding="utf-8")
+        sources = (
+            ROOT / "files/hermes/profiles/astra/AGENTS.md",
+            ROOT / "files/hermes/profiles/dubble/AGENTS.md",
+            ROOT / "files/hermes/profiles/rigel/AGENTS.md",
+        )
+        for source in sources:
+            content = source.read_text(encoding="utf-8")
             self.assertNotIn("HEARTBEAT_OK", content)
             self.assertNotIn("NO_REPLY", content)
             self.assertNotIn("Correction transaction", content)
