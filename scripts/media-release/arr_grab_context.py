@@ -4,7 +4,9 @@
 from __future__ import annotations
 
 import argparse
+from contextlib import contextmanager
 import datetime as dt
+import hashlib
 import json
 import os
 import re
@@ -181,6 +183,102 @@ def release_formats(release: dict[str, Any], event: dict[str, Any]) -> list[str]
     return result
 
 
+def quality_name(value: object) -> str | None:
+    if not isinstance(value, dict):
+        text = str(value or "").strip()
+        return text or None
+    quality = value.get("quality", value)
+    if isinstance(quality, dict):
+        text = str(quality.get("name") or "").strip()
+        return text or None
+    text = str(quality or "").strip()
+    return text or None
+
+
+def profile_snapshot(profile: object) -> dict[str, Any] | None:
+    if not isinstance(profile, dict) or not isinstance(profile.get("id"), int):
+        return None
+    encoded = json.dumps(profile, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    return {
+        "id": profile["id"],
+        "name": profile.get("name"),
+        "fingerprint": hashlib.sha256(encoded).hexdigest(),
+    }
+
+
+def current_file_snapshot(target_id: int, media_file: object) -> dict[str, Any]:
+    if not isinstance(media_file, dict):
+        return {"target_id": target_id, "has_file": False}
+    return {
+        "target_id": target_id,
+        "has_file": True,
+        "file_id": media_file.get("id"),
+        "quality": quality_name(media_file.get("quality")),
+        "custom_format_score": media_file.get("customFormatScore"),
+        "custom_formats": release_formats(
+            {"customFormats": media_file.get("customFormats") or []}, {}
+        ),
+    }
+
+
+def capture_policy_state(
+    app: str,
+    media: dict[str, Any],
+    expected_episodes: list[dict[str, Any]],
+) -> tuple[dict[str, Any] | None, list[dict[str, Any]], list[str]]:
+    base_url = os.environ.get(f"{app.upper()}_API", "")
+    api_key = os.environ.get(f"{app.upper()}_API_KEY", "")
+    errors: list[str] = []
+
+    profile: dict[str, Any] | None = None
+    profile_id = media.get("qualityProfileId")
+    if isinstance(profile_id, int):
+        try:
+            profile = profile_snapshot(
+                request_json(base_url, api_key, f"qualityprofile/{profile_id}")
+            )
+        except (OSError, TimeoutError, urllib.error.URLError, ValueError) as exc:
+            errors.append(f"quality profile: {exc}")
+
+    current_files: list[dict[str, Any]] = []
+    media_id = media.get("id")
+    if app == "radarr" and isinstance(media_id, int):
+        movie_file = media.get("movieFile")
+        current_files.append(current_file_snapshot(media_id, movie_file))
+        return profile, current_files, errors
+
+    expected_ids = {
+        int(item["id"])
+        for item in expected_episodes
+        if isinstance(item.get("id"), int)
+    }
+    if app != "sonarr" or not isinstance(media_id, int) or not expected_ids:
+        return profile, current_files, errors
+
+    try:
+        episodes = request_json(base_url, api_key, f"episode?seriesId={media_id}") or []
+        episode_files = request_json(base_url, api_key, f"episodefile?seriesId={media_id}") or []
+        files_by_id = {
+            item.get("id"): item
+            for item in episode_files
+            if isinstance(item, dict) and isinstance(item.get("id"), int)
+        }
+        episodes_by_id = {
+            item.get("id"): item
+            for item in episodes
+            if isinstance(item, dict) and item.get("id") in expected_ids
+        }
+        for target_id in sorted(expected_ids):
+            episode = episodes_by_id.get(target_id) or {}
+            episode_file_id = episode.get("episodeFileId")
+            current_files.append(
+                current_file_snapshot(target_id, files_by_id.get(episode_file_id))
+            )
+    except (OSError, TimeoutError, urllib.error.URLError, ValueError) as exc:
+        errors.append(f"current episode files: {exc}")
+    return profile, current_files, errors
+
+
 def event_app(event: dict[str, Any]) -> str | None:
     if isinstance(event.get("series"), dict):
         return "sonarr"
@@ -243,11 +341,12 @@ def build_context(event: dict[str, Any]) -> dict[str, Any]:
             }
         )
 
-    quality = release.get("quality")
-    if isinstance(quality, dict):
-        quality = quality.get("quality", quality).get("name") if isinstance(quality.get("quality", quality), dict) else quality
+    profile, current_files, policy_enrichment_errors = capture_policy_state(
+        app, media, expected_episodes
+    )
+    quality = quality_name(release.get("quality"))
     context = {
-        "schema_version": 1,
+        "schema_version": 2,
         "download_id": download_id,
         "app": app,
         "instance_name": event.get("instanceName"),
@@ -261,12 +360,18 @@ def build_context(event: dict[str, Any]) -> dict[str, Any]:
         "original_languages": [original_language] if original_language else [],
         "release_group": release.get("releaseGroup"),
         "indexer": release.get("indexer"),
+        "indexer_id": release.get("indexerId"),
+        "protocol": release.get("protocol")
+        or event.get("downloadProtocol")
+        or event.get("protocol"),
         "quality": quality,
         "custom_formats": release_formats(release, event),
         "custom_format_score": release.get("customFormatScore")
         if release.get("customFormatScore") is not None
         else (event.get("customFormatInfo") or {}).get("customFormatScore"),
         "download_client": event.get("downloadClient"),
+        "quality_profile": profile,
+        "current_files": current_files,
         "media": {
             "id": media.get("id"),
             "title": canonical_title,
@@ -277,6 +382,7 @@ def build_context(event: dict[str, Any]) -> dict[str, Any]:
         },
         "expected_episodes": expected_episodes,
         "enrichment_error": enrichment_error,
+        "policy_enrichment_errors": policy_enrichment_errors,
     }
     return context
 
@@ -288,10 +394,15 @@ class ContextStore:
         path.parent.mkdir(parents=True, exist_ok=True)
         self._initialize()
 
-    def connect(self) -> sqlite3.Connection:
+    @contextmanager
+    def connect(self):
         connection = sqlite3.connect(self.path, timeout=30)
         connection.row_factory = sqlite3.Row
-        return connection
+        try:
+            with connection:
+                yield connection
+        finally:
+            connection.close()
 
     def _initialize(self) -> None:
         with self.connect() as connection:

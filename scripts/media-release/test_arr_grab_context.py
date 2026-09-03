@@ -65,7 +65,15 @@ class GrabContextTests(unittest.TestCase):
         self.assertFalse(MODULE.alias_matches_source("DBZ", "SomeDBZLikeTitle S01E01"))
 
     @mock.patch.object(MODULE, "enrich_media")
-    def test_sonarr_context_records_expected_episode_and_language(self, enrich: mock.Mock) -> None:
+    @mock.patch.object(MODULE, "capture_policy_state")
+    def test_sonarr_context_records_expected_episode_and_language(
+        self, capture: mock.Mock, enrich: mock.Mock
+    ) -> None:
+        capture.return_value = (
+            {"id": 3, "name": "shows-anime-efficient", "fingerprint": "abc123"},
+            [{"target_id": 99, "has_file": True, "file_id": 700, "custom_format_score": 45000}],
+            [],
+        )
         enrich.return_value = (
             {
                 "id": 7,
@@ -73,6 +81,7 @@ class GrabContextTests(unittest.TestCase):
                 "originalLanguage": {"name": "Japanese"},
                 "alternateTitles": [{"title": "Dragon Ball Z Kai"}],
                 "tvdbId": 88031,
+                "qualityProfileId": 3,
             },
             None,
         )
@@ -86,6 +95,8 @@ class GrabContextTests(unittest.TestCase):
                 "release": {
                     "releaseTitle": "Dragon.Ball.Z.Kai.S01E01.1080p.x265-GROUP",
                     "releaseGroup": "GROUP",
+                    "protocol": "torrent",
+                    "indexerId": 12,
                     "customFormatScore": 140000,
                     "customFormats": [{"name": "Anime Dual Audio"}, {"name": "x265"}],
                 },
@@ -96,6 +107,11 @@ class GrabContextTests(unittest.TestCase):
         self.assertTrue(context["identity_match"])
         self.assertEqual(context["expected_episodes"][0]["episode"], 1)
         self.assertEqual(context["custom_format_score"], 140000)
+        self.assertEqual(context["schema_version"], 2)
+        self.assertEqual(context["protocol"], "torrent")
+        self.assertEqual(context["indexer_id"], 12)
+        self.assertEqual(context["quality_profile"]["fingerprint"], "abc123")
+        self.assertEqual(context["current_files"][0]["file_id"], 700)
 
     @mock.patch.object(MODULE, "enrich_media")
     def test_wrong_target_context_is_marked_conflict(self, enrich: mock.Mock) -> None:
@@ -146,6 +162,29 @@ class GrabContextTests(unittest.TestCase):
             store.upsert(context)
             self.assertEqual(store.get("ABC123")["canonical_title"], "Dragon Ball Kai")
             self.assertIsNone(store.get("abc12"))
+
+    def test_profile_snapshot_changes_when_policy_changes(self) -> None:
+        first = MODULE.profile_snapshot(
+            {"id": 3, "name": "efficient", "cutoffFormatScore": 200000}
+        )
+        second = MODULE.profile_snapshot(
+            {"id": 3, "name": "efficient", "cutoffFormatScore": 200001}
+        )
+        self.assertNotEqual(first["fingerprint"], second["fingerprint"])
+
+    def test_current_file_snapshot_preserves_grab_time_score(self) -> None:
+        snapshot = MODULE.current_file_snapshot(
+            99,
+            {
+                "id": 700,
+                "quality": {"quality": {"name": "Bluray-1080p"}},
+                "customFormatScore": 145000,
+                "customFormats": [{"name": "Anime Dual Audio"}],
+            },
+        )
+        self.assertEqual(snapshot["target_id"], 99)
+        self.assertEqual(snapshot["quality"], "Bluray-1080p")
+        self.assertEqual(snapshot["custom_format_score"], 145000)
 
     def test_existing_context_identity_is_recomputed_on_lookup(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

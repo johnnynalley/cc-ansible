@@ -37,7 +37,10 @@ services:
     restart: unless-stopped
 
   arr-import-reconciler:
-    image: python:3-alpine
+    image: local/arr-import-reconciler:latest
+    build:
+      context: .
+      dockerfile: arr-import-reconciler.Dockerfile
     container_name: arr-import-reconciler
     command:
       - python3
@@ -45,7 +48,19 @@ services:
       - --interval
       - "{{ media_release_stamper_reconciler_interval | default(60) }}"
       - --event-log
-      - /data/arr-import-reconciler-events.jsonl
+      - /state/arr-import-reconciler-events.jsonl
+      - --state
+      - /state/arr-import-reconciler-state.json
+      - --handoff-mode
+      - "{{ media_release_stamper_handoff_mode | default('disabled') }}"
+      - --handoff-state
+      - /state/arr-terminal-handoff-state.json
+      - --min-payload-age
+      - "{{ media_release_stamper_handoff_min_payload_age | default(120) }}"
+      - --ffprobe-timeout
+      - "{{ media_release_stamper_handoff_ffprobe_timeout | default(30) }}"
+      - --max-handoffs-per-cycle
+      - "{{ media_release_stamper_handoff_max_per_cycle | default(5) }}"
 {% if not (media_release_stamper_reconciler_apply | default(false) | bool) %}
       - --dry-run
 {% endif %}
@@ -57,9 +72,13 @@ services:
       SONARR_API_KEY: "{{ media_release_stamper_sonarr_api_key }}"
       RADARR_API: "{{ media_release_stamper_radarr_api }}"
       RADARR_API_KEY: "{{ media_release_stamper_radarr_api_key }}"
+      QBIT_API: "{{ media_release_stamper_reconciler_qbit_api | default('http://gluetun:8085/api/v2') }}"
+      QBIT_USER: "{{ media_release_stamper_qbit_user }}"
+      QBIT_PASS: "{{ media_release_stamper_qbit_password }}"
     volumes:
       - ./arr_import_reconciler.py:/app/arr_import_reconciler.py:ro
-      - ./data:/data
+      - ./data:/state
+      - /srv/media/plex:/data:ro
     networks:
       - media-stack
     read_only: true

@@ -27,6 +27,11 @@ media_release_stamper_context_webhook_url: http://arr-grab-context:9899/v1/event
 media_release_stamper_context_retention_days: 120
 media_release_stamper_reconciler_apply: true
 media_release_stamper_reconciler_interval: 60
+media_release_stamper_handoff_mode: apply
+media_release_stamper_handoff_min_payload_age: 120
+media_release_stamper_handoff_ffprobe_timeout: 30
+media_release_stamper_handoff_max_per_cycle: 5
+media_release_stamper_reconciler_qbit_api: http://gluetun:8085/api/v2
 media_release_stamper_qbit_categories:
   - tv-sonarr
   - sonarr

@@ -4,9 +4,11 @@
 
 - `Caddyfile.j2`: Internal HTTPS routes and reverse proxies.
 - `arr-grab-context.yml.j2`: Private exact-download-ID OnGrab context ledger
-  plus exact-target import reconciler, joined to the media-stack network for
-  Sonarr/Radarr and download-client stampers. They publish no host port and
-  persist only the SQLite ledger and one-hour reconciliation-attempt state.
+  plus exact-target import reconciler and terminal qBittorrent handoff, joined
+  to the media-stack network for Sonarr/Radarr and download-client APIs. They
+  publish no host port. The reconciler persists import suppression, terminal
+  decisions, cooldown and fair-scan cursor state, and structured events; its
+  `/data` media mount is read-only and it receives no Docker socket.
 - `caddy.yml`: Caddy Docker Compose stack.
 - `caddy.Dockerfile`: Caddy image build with Cloudflare DNS support.
 - `diun.yml.j2`: Diun update-monitor configuration.

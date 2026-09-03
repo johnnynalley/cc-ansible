@@ -25,6 +25,8 @@
       register: media_release_stamper_sonarr_config
       no_log: true
       check_mode: false
+      tags:
+        - media-release-reconciler
       when: media_release_stamper_enabled | default(false)
 
     - name: Read Radarr config for media release stamping
@@ -33,6 +35,8 @@
       register: media_release_stamper_radarr_config
       no_log: true
       check_mode: false
+      tags:
+        - media-release-reconciler
       when: media_release_stamper_enabled | default(false)
 
     - name: Extract Arr API keys for media release stamping
@@ -54,6 +58,8 @@
             )[0]
           }}
       no_log: true
+      tags:
+        - media-release-reconciler
       when: media_release_stamper_enabled | default(false)
 
     - name: Configure exact Arr grab-context ledger
@@ -86,6 +92,8 @@
             group: root
             mode: "0755"
           register: media_release_stamper_context_script
+          tags:
+            - media-release-reconciler
 
         - name: Deploy Arr grab-context webhook configurator
           ansible.builtin.copy:
@@ -103,6 +111,17 @@
             group: root
             mode: "0755"
           register: media_release_stamper_reconciler_script
+          tags:
+            - media-release-reconciler
+
+        - name: Deploy Arr import reconciler image definition
+          ansible.builtin.copy:
+            src: ../../scripts/media-release/arr-import-reconciler.Dockerfile
+            dest: "{{ media_release_stamper_context_dir }}/arr-import-reconciler.Dockerfile"
+            owner: root
+            group: root
+            mode: "0644"
+          register: media_release_stamper_reconciler_image
           tags:
             - media-release-reconciler
 
@@ -131,12 +150,17 @@
             group: root
             mode: "0600"
           no_log: true
+          register: media_release_stamper_context_compose_template
+          tags:
+            - media-release-reconciler
 
         - name: Validate Arr grab-context Compose project
           ansible.builtin.command:
             cmd: docker compose -f compose.yml config --quiet
             chdir: "{{ media_release_stamper_context_dir }}"
           changed_when: false
+          tags:
+            - media-release-reconciler
           when: not ansible_check_mode
 
         - name: Reload changed Arr grab-context service code
@@ -147,16 +171,22 @@
           when:
             - not ansible_check_mode
             - media_release_stamper_context_script.changed
+          tags:
+            - media-release-reconciler
 
         - name: Reload changed exact-target Arr import reconciler code
           ansible.builtin.command:
-            cmd: docker compose -f compose.yml up -d --wait --force-recreate arr-import-reconciler
+            cmd: >-
+              docker compose -f compose.yml up -d --wait --build
+              --force-recreate arr-import-reconciler
             chdir: "{{ media_release_stamper_context_dir }}"
           changed_when: true
           when:
             - not ansible_check_mode
             - >-
               media_release_stamper_reconciler_script.changed
+              or media_release_stamper_reconciler_image.changed
+              or media_release_stamper_context_compose_template.changed
               or media_release_stamper_force_reconciler_reload | default(false) | bool
           tags:
             - media-release-reconciler
