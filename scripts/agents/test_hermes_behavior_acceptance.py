@@ -22,12 +22,12 @@ SPEC.loader.exec_module(acceptance)
 
 
 class HermesBehaviorAcceptanceTests(unittest.TestCase):
-    def test_real_contract_has_ten_model_cases_and_four_owned_integrations(self) -> None:
+    def test_real_contract_has_twelve_model_cases_and_four_owned_integrations(self) -> None:
         cases = acceptance.load_cases(CONTRACT)
         by_mode: dict[str, list[str]] = {}
         for case in cases:
             by_mode.setdefault(case["exerciseMode"], []).append(case["id"])
-        self.assertEqual(len(by_mode["isolated-model"]), 10)
+        self.assertEqual(len(by_mode["isolated-model"]), 12)
         self.assertEqual(by_mode["live-evidence"], ["current-regional-evidence"])
         self.assertEqual(by_mode["deterministic-idle"], ["expected-absence-is-data"])
         self.assertEqual(

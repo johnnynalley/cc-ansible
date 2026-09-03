@@ -15,7 +15,7 @@
       "id": "astra-agents",
       "kind": "plain",
       "sourcePath": "files/hermes/profiles/astra/AGENTS.md",
-      "sha256": "982d99f122f44ad3ee4aff0c42aa41ee491e29af4672a29900d8286263a8566f",
+      "sha256": "c84554944871e083e61d53c1a170c0ddf3214bd8bd42520ab190a21778bc77e2",
       "runtimePolicy": "exact",
       "runtimePath": "AGENTS.md"
     },

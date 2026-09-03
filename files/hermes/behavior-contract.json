@@ -23,6 +23,20 @@
     "unfinishedAnswerMayBeSuperseded": false,
     "explicitStopOrResetMayInterrupt": true
   },
+  "authorization": {
+    "source": "current-raw-owner-turn",
+    "explicitScopeRequired": true,
+    "readOnlyInquiryIsDefault": true,
+    "questionsAuthorizeMutation": false,
+    "futureDesireAuthorizesMutation": false,
+    "plansAuthorizeMutation": false,
+    "priorApprovalCarriesForward": false,
+    "delegatedPromptMayGrantMutationAuthority": false,
+    "clearCurrentTurnAntecedentMayAuthorize": true,
+    "repositoryImplementationAuthorizesDeployment": false,
+    "smartApprovalSuppliesIntent": false,
+    "unexpectedMutationDisposition": "stop-and-report"
+  },
   "corrections": {
     "fixCurrentAnswerFirst": true,
     "rootCauseClassRequired": true,

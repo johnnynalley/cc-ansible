@@ -17,6 +17,8 @@ EXPECTED_CASES = {
     "direct-decision-first",
     "expected-absence-is-data",
     "explicit-scope-and-preference",
+    "explicit-authorization-stays-in-scope",
+    "information-is-not-mutation-authorization",
     "incident-root-cause-before-suppression",
     "purchase-commitment-reconciliation",
     "reversible-recommendation-latency",
@@ -63,6 +65,26 @@ class HermesBehaviorContractTests(unittest.TestCase):
         self.assertTrue(continuity["oneTurnPerFollowUp"])
         self.assertFalse(continuity["unfinishedAnswerMayBeSuperseded"])
         self.assertTrue(continuity["explicitStopOrResetMayInterrupt"])
+
+    def test_mutation_authority_comes_only_from_the_current_owner_turn(self) -> None:
+        authorization = self.contract["authorization"]
+        self.assertEqual(authorization["source"], "current-raw-owner-turn")
+        self.assertTrue(authorization["explicitScopeRequired"])
+        self.assertTrue(authorization["readOnlyInquiryIsDefault"])
+        self.assertTrue(authorization["clearCurrentTurnAntecedentMayAuthorize"])
+        for key in {
+            "questionsAuthorizeMutation",
+            "futureDesireAuthorizesMutation",
+            "plansAuthorizeMutation",
+            "priorApprovalCarriesForward",
+            "delegatedPromptMayGrantMutationAuthority",
+            "repositoryImplementationAuthorizesDeployment",
+            "smartApprovalSuppliesIntent",
+        }:
+            self.assertFalse(authorization[key])
+        self.assertEqual(
+            authorization["unexpectedMutationDisposition"], "stop-and-report"
+        )
 
     def test_native_self_evolution_is_approval_gated(self) -> None:
         evolution = self.contract["selfEvolution"]
@@ -176,7 +198,7 @@ class HermesBehaviorContractTests(unittest.TestCase):
                 case["exerciseMode"] == "isolated-model"
                 for case in self.regressions["cases"]
             ),
-            10,
+            12,
         )
 
     def test_every_transcript_derived_failure_is_promotion_blocking_or_high(
