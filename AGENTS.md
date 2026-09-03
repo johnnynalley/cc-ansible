@@ -193,27 +193,26 @@ users, and never let those agents use Astra as a confused deputy to retrieve
 private cross-profile information. Require scoped backup, audit evidence, and
 post-change target-agent validation for Astra-initiated mutations.
 
-Do not equate durable management with continuous Ansible ownership of mutable
-agent state. Ansible owns the rebuildable platform boundary: accounts,
-packages, service units, filesystem and mount layout, least-privilege brokers,
-secret placement, backup/restore machinery, and an initial Hermes bootstrap.
-After bootstrap, Hermes-native profile configuration, skills, schedules,
-operating guidance, memory, and agent-authored state should remain writable and
-operable through the owning agent's reviewed native workflow, then be protected
-by complete versioned backups and tested restore procedures. Ansible may seed
-or restore that state, but normal convergence must not overwrite valid
-agent-maintained changes or force routine Astra operations back through Codex.
-When a managed source is protected by a checksum contract, treat the source,
-every affected pin, rollback, validation, and live publication as one
-transaction. Discover the downstream pins before the source edit, update and
-validate them in the same source change, and publish the content and contract
-together before any restart; never copy one half or rely on remembering a later
-manual hash update. Do not place evolving native state behind an exact seed pin
-unless that stricter security ownership boundary is deliberate and documented.
-Before declaratively managing a new Hermes file, classify it as platform state,
-bootstrap seed, or mutable native state and document why Ansible ownership is
-required; default to mutable native ownership when the behavior is expected to
-evolve during normal agent use.
+Do not make Ansible or this repository the source of truth for an established
+Hermes agent's mutable native state. In particular, do not deploy, converge, or
+runtime-pin active `AGENTS.md`, `SOUL.md`, memory, skills, schedules, profile
+configuration, or other agent-authored operating state from repository copies.
+Do not add checksum contracts that require a mutable native file and a separate
+repository pin to change together. Such a pin does not protect against a writer
+that is authorized to change both objects and only turns valid self-evolution
+into a fragile two-file deployment. Repository copies retained from migration
+are evidence or explicit exports only; label them non-authoritative and ensure
+normal playbook convergence never publishes them into live profiles.
+
+Ansible owns the rebuildable platform boundary only: accounts, packages,
+service units, filesystem and mount layout, least-privilege brokers, secret
+placement, and backup/restore machinery. On replacement hardware, rebuild that
+empty platform and restore the complete mutable Hermes estate from the off-host
+backup. Do not reconstruct a previously established agent from Ansible profile
+content. An initial content seed is allowed only for a genuinely new profile
+with no recoverable backup and explicit owner approval. Protect mutable native
+state with native revision history, scoped validation, local rollback, off-host
+backup, and tested restore instead of declarative convergence.
 
 Apply the same boundary to application state outside Hermes. One-time native
 configuration such as Arr indexers, priorities, profiles, tracker settings,
@@ -234,19 +233,20 @@ artifacts for quickly undoing a bad agent or configuration change; they are not
 disaster recovery when stored on the same node. Separately, regularly scheduled
 encrypted Restic backups must copy the complete recoverable Hermes estate to
 `nas-zfs`, with retention, failure alerting, and restore validation. The node-loss
-recovery contract is: use Ansible to rebuild the platform and bootstrap on a
-replacement node, then restore mutable profiles, skills, schedules, memory,
+recovery contract is: use Ansible to rebuild the empty platform on a replacement
+node, then restore mutable profiles, skills, schedules, memory,
 LCM, Mem0/Qdrant state, enrollment/runtime data, and required root-owned Hermes
 state from the off-host `nas-zfs` backup. Do not claim Hermes is fully backed up
 until both a local rollback test and an off-host replacement-node restore test
 have passed.
 
 When a behavior skill is intended to govern every agent, maintain one canonical
-shared source and project that exact reviewed content into each eligible
-profile. `self-evolution` is a fleet-wide shared skill for Astra, Dubble, and
-Rigel; do not fork profile-specific copies that can drift. Keep per-profile
-runtime roots and permissions isolated, but require the same source path and
-content hash so one reviewed improvement advances every agent together.
+Hermes-native shared source and expose that reviewed live source to each
+eligible profile. `self-evolution` is a fleet-wide shared skill for Astra,
+Dubble, and Rigel; do not fork profile-specific copies that can drift or require
+Codex to update repository checksums. Keep per-profile runtime roots and
+permissions isolated while one Astra-maintained shared revision advances every
+agent together and remains covered by native and off-host backups.
 
 When the user supplies a transcript for Astra, OpenClaw, Hermes, Dubble,
 Rigel, or another related agent, preserve the complete owner-supplied text as
