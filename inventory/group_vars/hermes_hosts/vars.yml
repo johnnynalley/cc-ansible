@@ -960,6 +960,7 @@ hermes_managed_source_patch_live: >-
 hermes_managed_source_patch_branch: astra-managed-parity
 hermes_managed_source_patch_target_branch: main
 hermes_managed_source_patch_paths:
+  - agent/agent_runtime_helpers.py
   - agent/conversation_loop.py
   - agent/todo_stop.py
   - agent/turn_context.py
@@ -973,6 +974,7 @@ hermes_managed_source_patch_paths:
   - plugins/memory/mem0/__init__.py
   - run_agent.py
   - tests/agent/test_todo_stop.py
+  - tests/agent/test_intent_ack_continuation.py
   - tests/cron/test_execution_ledger.py
   - tests/cron/test_scheduler.py
   - tests/gateway/test_queued_event_shutdown_replay.py

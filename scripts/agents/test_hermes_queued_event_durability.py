@@ -60,6 +60,7 @@ class QueuedEventDurabilityTests(unittest.TestCase):
             "CREATE TABLE IF NOT EXISTS execution_deliveries",
             "def _record_delivery_receipt(",
             "test_live_adapter_records_execution_delivery_message_id",
+            "test_marker_substrings_do_not_turn_complete_answers_into_acks",
         ):
             self.assertIn(marker, self.patch)
         self.assertNotIn('+    "tool.doc_extract": ("firecrawl-anydoc==', self.patch)
@@ -76,9 +77,11 @@ class QueuedEventDurabilityTests(unittest.TestCase):
         )
         self.assertNotIn("git reset", self.promoter)
         self.assertIn('"tests/agent/test_todo_stop.py"', self.promoter)
+        self.assertIn('"tests/agent/test_intent_ack_continuation.py"', self.promoter)
         self.assertIn('"tests/plugins/memory/test_mem0_shutdown.py"', self.promoter)
         self.assertIn('"tests/run_agent/test_memory_sync_interrupted.py"', self.promoter)
         self.assertNotIn('"-m",\n                "pytest"', self.promoter)
+        self.assertIn("import runpy", self.promoter)
         self.assertIn("patched Hermes regression failed", self.promoter)
         self.assertIn('" | ".join(detail[-12:])', self.promoter)
 
@@ -115,6 +118,7 @@ class QueuedEventDurabilityTests(unittest.TestCase):
             paths = sorted(
                 {
                     "agent/conversation_loop.py",
+                    "agent/agent_runtime_helpers.py",
                     "agent/todo_stop.py",
                     "agent/turn_context.py",
                     "cron/executions.py",
@@ -127,6 +131,7 @@ class QueuedEventDurabilityTests(unittest.TestCase):
                     "plugins/memory/mem0/__init__.py",
                     "run_agent.py",
                     "tests/agent/test_todo_stop.py",
+                    "tests/agent/test_intent_ack_continuation.py",
                     "tests/cron/test_execution_ledger.py",
                     "tests/cron/test_scheduler.py",
                     "tests/gateway/test_queued_event_shutdown_replay.py",
@@ -138,11 +143,16 @@ class QueuedEventDurabilityTests(unittest.TestCase):
             for relative in paths:
                 path = root / relative
                 path.parent.mkdir(parents=True, exist_ok=True)
-                source = (
-                    "if __name__ == '__main__':\n    pass\n"
-                    if relative.startswith("tests/")
-                    else "VALUE = 1\n"
-                )
+                if relative == "tests/agent/test_intent_ack_continuation.py":
+                    source = (
+                        "def test_all_path_drops_workspace_requirement(): pass\n"
+                        "def test_multipart_user_message_does_not_crash_on_workspace_path(): pass\n"
+                        "def test_marker_substrings_do_not_turn_complete_answers_into_acks(): pass\n"
+                    )
+                elif relative.startswith("tests/"):
+                    source = "if __name__ == '__main__':\n    pass\n"
+                else:
+                    source = "VALUE = 1\n"
                 path.write_text(source, encoding="utf-8")
             git("add", ".")
             git("commit", "-m", "base")
@@ -225,6 +235,10 @@ class QueuedEventDurabilityTests(unittest.TestCase):
         module = load_validator()
         self.assertEqual(module.REQUIRED_FILES["gateway/shutdown_flush.py"][1], "QUEUED_EVENT_BATCH_SCHEMA = 2")
         self.assertIn("agent/todo_stop.py", module.REQUIRED_FILES)
+        self.assertIn("agent/agent_runtime_helpers.py", module.REQUIRED_FILES)
+        self.assertIn(
+            "tests/agent/test_intent_ack_continuation.py", module.REQUIRED_FILES
+        )
         self.assertIn("plugins/memory/mem0/__init__.py", module.REQUIRED_FILES)
         self.assertIn("cron/executions.py", module.REQUIRED_FILES)
         self.assertIn("cron/scheduler.py", module.REQUIRED_FILES)

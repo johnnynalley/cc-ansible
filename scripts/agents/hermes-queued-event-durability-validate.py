@@ -11,6 +11,11 @@ import sys
 
 
 REQUIRED_FILES = {
+    "agent/agent_runtime_helpers.py": (
+        "_ACTION_INTENT_PATTERNS = tuple(",
+        "def _contains_exact_intent_marker(",
+        "_contains_exact_intent_marker(user_text, workspace_markers)",
+    ),
     "agent/conversation_loop.py": (
         "from agent.todo_stop import build_todo_stop_nudge",
         'final_msg["finish_reason"] = "todo_completion_required"',
@@ -84,6 +89,11 @@ REQUIRED_FILES = {
         "def test_active_todos_nudge_until_bounded_budget(",
         "def test_env_can_force_guard(",
         "def test_max_budget_is_bounded(",
+    ),
+    "tests/agent/test_intent_ack_continuation.py": (
+        "def test_marker_substrings_do_not_turn_complete_answers_into_acks(",
+        "it is already compatible",
+        "response report",
     ),
     "tests/cron/test_execution_ledger.py": (
         "test_delivery_receipt_is_content_free_and_cli_visible",

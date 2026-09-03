@@ -20,6 +20,7 @@ OFFICIAL_ORIGINS = {
     "git@github.com:NousResearch/hermes-agent.git",
 }
 PATCH_PATHS = {
+    "agent/agent_runtime_helpers.py",
     "agent/conversation_loop.py",
     "agent/todo_stop.py",
     "agent/turn_context.py",
@@ -33,6 +34,7 @@ PATCH_PATHS = {
     "plugins/memory/mem0/__init__.py",
     "run_agent.py",
     "tests/agent/test_todo_stop.py",
+    "tests/agent/test_intent_ack_continuation.py",
     "tests/cron/test_execution_ledger.py",
     "tests/cron/test_scheduler.py",
     "tests/gateway/test_queued_event_shutdown_replay.py",
@@ -168,12 +170,26 @@ def main() -> int:
             raise RuntimeError("patched Hermes sources failed bytecode compilation")
         shutil.rmtree(worktree / ".managed-pycache", ignore_errors=True)
         for test_path in (
+            "tests/agent/test_intent_ack_continuation.py",
             "tests/agent/test_todo_stop.py",
             "tests/plugins/memory/test_mem0_shutdown.py",
             "tests/run_agent/test_memory_sync_interrupted.py",
         ):
+            command = [sys.executable, test_path]
+            if test_path == "tests/agent/test_intent_ack_continuation.py":
+                command = [
+                    sys.executable,
+                    "-c",
+                    (
+                        "import runpy; "
+                        f"tests=runpy.run_path({test_path!r}); "
+                        "tests['test_all_path_drops_workspace_requirement'](); "
+                        "tests['test_multipart_user_message_does_not_crash_on_workspace_path'](); "
+                        "tests['test_marker_substrings_do_not_turn_complete_answers_into_acks']()"
+                    ),
+                ]
             test_result = subprocess.run(
-                [sys.executable, test_path],
+                command,
                 cwd=worktree,
                 env=env,
                 capture_output=True,

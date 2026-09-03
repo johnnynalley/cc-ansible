@@ -1593,6 +1593,141 @@ new file mode 100644
 +
 +if __name__ == "__main__":
 +    unittest.main()
+diff --git a/agent/agent_runtime_helpers.py b/agent/agent_runtime_helpers.py
+--- a/agent/agent_runtime_helpers.py
++++ b/agent/agent_runtime_helpers.py
+@@ -4002 +4002,34 @@
++_ACTION_INTENT_PATTERNS = tuple(
++    re.compile(pattern)
++    for pattern in (
++        r"\blook(?:s|ed|ing)?\s+(?:into|at)\b",
++        r"\binspect(?:s|ed|ing)?\b",
++        r"\bscan(?:s|ned|ning)?\b",
++        r"\bcheck(?:s|ed|ing)?\b",
++        r"\banaly[sz](?:e|es|ed|ing)\b",
++        r"\breview(?:s|ed|ing)?\b",
++        r"\bexplor(?:e|es|ed|ing)\b",
++        r"\bread(?:s|ing)?\b",
++        r"\bopen(?:s|ed|ing)?\b",
++        r"\brun(?:s|ning)?\b",
++        r"\btest(?:s|ed|ing)?\b",
++        r"\bfix(?:es|ed|ing)?\b",
++        r"\bdebug(?:s|ged|ging)?\b",
++        r"\bsearch(?:es|ed|ing)?\b",
++        r"\bfind(?:s|ing)?\b",
++        r"\bwalkthrough\b",
++        r"\breport\s+back\b",
++        r"\bsummari[sz](?:e|es|ed|ing)\b",
++    )
++)
++
++
++def _contains_exact_intent_marker(text: str, markers: tuple[str, ...]) -> bool:
++    """Match complete marker words or phrases, never arbitrary substrings."""
++    return any(
++        re.search(rf"(?<!\w){re.escape(marker)}(?!\w)", text)
++        for marker in markers
++    )
++
++
+ def looks_like_codex_intermediate_ack(
+@@ -4034,67 +4067,46 @@ def looks_like_codex_intermediate_ack(
+     if not has_future_ack:
+         return False
+-
++
+-    action_markers = (
+-        "look into",
+-        "look at",
+-        "inspect",
+-        "scan",
+-        "check",
+-        "analyz",
+-        "review",
+-        "explore",
+-        "read",
+-        "open",
+-        "run",
+-        "test",
+-        "fix",
+-        "debug",
+-        "search",
+-        "find",
+-        "walkthrough",
+-        "report back",
+-        "summarize",
+-    )
+     workspace_markers = (
+         "directory",
+         "current directory",
+         "current dir",
+         "cwd",
+         "repo",
+         "repository",
+         "codebase",
+         "project",
+         "folder",
+         "filesystem",
+         "file tree",
+         "files",
+         "path",
+     )
+-
++
+-    assistant_mentions_action = any(marker in assistant_text for marker in action_markers)
++    assistant_mentions_action = any(pattern.search(assistant_text) for pattern in _ACTION_INTENT_PATTERNS)
+     if not assistant_mentions_action:
+         return False
+-
++
+     # Opted-in (all-api_mode) path: a future-ack + action verb + no prior tool
+     # call is enough — the user asked us to keep going when the model only
+     # announces intent, regardless of whether a filesystem is involved.
+     if not require_workspace:
+         return True
+-
++
+     # ``user_message`` is typed ``str`` but can arrive as an OpenAI-style
+     # multi-part content list (``[{type:"text",...}, {type:"image_url",...}]``)
+     # for vision requests routed through the OpenAI-compat API server. A
+     # truthy list survives ``(user_message or "")`` and then ``.strip()``
+     # raises ``AttributeError`` — flatten to text first.
+     from agent.codex_responses_adapter import _summarize_user_message_for_log
+-
++
+     user_text = _summarize_user_message_for_log(user_message).strip().lower()
+     user_targets_workspace = (
+-        any(marker in user_text for marker in workspace_markers)
++        _contains_exact_intent_marker(user_text, workspace_markers)
+         or "~/" in user_text
+         or "/" in user_text
+     )
+-    assistant_targets_workspace = any(
+-        marker in assistant_text for marker in workspace_markers
+-    )
++    assistant_targets_workspace = _contains_exact_intent_marker(
++        assistant_text, workspace_markers
++    )
+     return user_targets_workspace or assistant_targets_workspace
+diff --git a/tests/agent/test_intent_ack_continuation.py b/tests/agent/test_intent_ack_continuation.py
+--- a/tests/agent/test_intent_ack_continuation.py
++++ b/tests/agent/test_intent_ack_continuation.py
+@@ -119 +119,15 @@
++def test_marker_substrings_do_not_turn_complete_answers_into_acks():
++    """#94376: `already`/`report` are not the `read`/`repo` markers."""
++    a = _agent("auto", "codex_responses")
++    user = "Evaluate only the response text for this response report."
++    answer = (
++        "Keep Item A; it is already compatible, and there is no decisive "
++        "evidence that Item B performs better. I’ll preserve verified state "
++        "and require comparative evidence before recommending replacement."
++    )
++    assert not looks_like_codex_intermediate_ack(
++        a, user, answer, [{"role": "user", "content": user}], require_workspace=True
++    )
++
++
+ # ── detector: guardrails that hold regardless of workspace ───────────────────
 diff --git a/cron/executions.py b/cron/executions.py
 index 40a9780..049a76b 100644
 --- a/cron/executions.py

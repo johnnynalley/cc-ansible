@@ -338,10 +338,16 @@
   proves the complete FIFO snapshot, full event/routing serialization, native
   replay, and stable-channel document-extraction dependency policy,
   retry release, post-persistence per-event acknowledgement markers, and
-  bounded fail-closed Mem0 shutdown ordering for active local inference. It
-  also requires native cron execution-delivery receipts to remain content-free,
-  retain confirmed platform message IDs, represent timeout-confirmed sends as
-  assumed delivery, and surface the receipt through `hermes cron runs`.
+  bounded fail-closed Mem0 shutdown ordering for active local inference.
+  It also keeps intent-ack continuation token-aware so complete answers
+  containing words such as `already` or `report` are not mistaken for
+  `read`/`repo` action announcements while genuine `running`, `checking`, and
+  `analyzing`
+  acknowledgements still continue.
+  It also requires native cron execution-delivery receipts to remain
+  content-free, retain confirmed platform message IDs, represent
+  timeout-confirmed sends as assumed delivery, and surface the receipt through
+  `hermes cron runs`.
   `test_hermes_queued_event_durability.py` covers the patch, promoter,
   validator, inventory path normalization, update policy, and production
   transaction contract.

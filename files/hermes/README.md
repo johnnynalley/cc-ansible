@@ -18,8 +18,12 @@ reviewed Ansible Vault ciphertext seeds declared by
   also append content-free platform receipts to the execution ledger, retaining
   the target, status, platform message ID when available, and timestamp without
   duplicating report content. `hermes cron runs` exposes those receipts so an
-  execution marked `ok` is no longer treated as delivery proof by itself. Ansible
-  promotes the combined patch as one committed maintained branch; Hermes's
+  execution marked `ok` is no longer treated as delivery proof by itself. The
+  patch also makes the native intent-ack classifier word-aware, preventing
+  complete answers containing `already`/`report` from matching the `read`/`repo`
+  markers while preserving genuine inflected action announcements. Ansible
+  promotes this rebuildable product-runtime patch as one committed maintained
+  branch; Hermes's
   supported `update_in_place` updater strategy merges stable upstream changes
   without discarding it.
 - `patches/hermes-lcm-oversized-sentence.patch` is a temporary stable-release
