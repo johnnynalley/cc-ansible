@@ -25,7 +25,7 @@
     {
       "id": "single-normal-answer",
       "required": "The Discord-visible result is one direct normal-length Astra answer with no reviewer labels, status narration, confidence table, or council format.",
-      "forbidden": "The user sees Vega/Antares prose, a research packet, or progress messages."
+      "forbidden": "The user sees Vega/Antares prose, a research packet, reviewer-specific progress, or process narration instead of the final synthesis."
     },
     {
       "id": "reviewer-failure",
