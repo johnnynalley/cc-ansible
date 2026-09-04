@@ -7,6 +7,7 @@ import argparse
 from contextlib import contextmanager
 import datetime as dt
 import hashlib
+import html
 import json
 import os
 import re
@@ -101,7 +102,9 @@ def normalize_language(value: object) -> str | None:
 
 
 def normalized_words(value: object) -> list[str]:
-    text = unicodedata.normalize("NFKD", str(value or ""))
+    text = html.unescape(str(value or ""))
+    text = re.sub(r"(?i)([a-z0-9])['\u2019]s\b", r"\1s", text)
+    text = unicodedata.normalize("NFKD", text)
     text = "".join(character for character in text if not unicodedata.combining(character))
     words = re.findall(r"[a-z0-9]+", text.casefold())
     return [word for word in words if word not in TECHNICAL_WORDS]
@@ -120,6 +123,30 @@ def primary_title_alias(value: str) -> str | None:
     return prefix
 
 
+def yearless_title_alias(value: str) -> str | None:
+    """Return a distinctive title with only its trailing year removed."""
+    alias = re.sub(r"\s*\((?:19|20)\d{2}\)\s*$", "", str(value or "")).strip()
+    if not alias or alias == str(value or "").strip():
+        return None
+    words = normalized_words(alias)
+    if not words or sum(len(word) for word in words) < 5:
+        return None
+    if len(words) == 1 and len(words[0]) < 5:
+        return None
+    return alias
+
+
+def articleless_title_alias(value: str) -> str | None:
+    """Return a distinctive title with only its leading English article removed."""
+    alias = re.sub(r"(?i)^(?:the|an|a)\s+", "", str(value or "")).strip()
+    if not alias or alias == str(value or "").strip():
+        return None
+    words = normalized_words(alias)
+    if not words or sum(len(word) for word in words) < 8:
+        return None
+    return alias
+
+
 def alias_matches_source(alias: str, source_title: str) -> bool:
     alias_words = normalized_words(alias)
     source_words = normalized_words(source_title)
@@ -132,7 +159,33 @@ def alias_matches_source(alias: str, source_title: str) -> bool:
     return any(source_words[index : index + width] == alias_words for index in range(len(source_words) - width + 1))
 
 
-def identity_evidence(canonical_title: str, aliases: list[str], source_title: str) -> dict[str, Any]:
+def distinctive_episode_title_match(
+    expected_episodes: list[dict[str, Any]], source_title: str
+) -> str | None:
+    candidates: list[str] = []
+    for episode in expected_episodes:
+        title = str(episode.get("title") or "").strip()
+        words = normalized_words(title)
+        if (
+            len(words) < 2
+            or sum(len(word) for word in words) < 10
+            or words[0] in {"episode", "chapter", "part"}
+        ):
+            continue
+        candidates.append(title)
+    candidates.sort(key=lambda title: len(normalized_words(title)), reverse=True)
+    return next(
+        (title for title in candidates if alias_matches_source(title, source_title)),
+        None,
+    )
+
+
+def identity_evidence(
+    canonical_title: str,
+    aliases: list[str],
+    source_title: str,
+    expected_episodes: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
     candidates = []
     for value in [canonical_title, *aliases]:
         value = str(value or "").strip()
@@ -141,11 +194,23 @@ def identity_evidence(canonical_title: str, aliases: list[str], source_title: st
         primary = primary_title_alias(value)
         if primary and primary.casefold() not in {item.casefold() for item in candidates}:
             candidates.append(primary)
+        yearless = yearless_title_alias(value)
+        if yearless and yearless.casefold() not in {item.casefold() for item in candidates}:
+            candidates.append(yearless)
+        articleless = articleless_title_alias(value)
+        if articleless and articleless.casefold() not in {
+            item.casefold() for item in candidates
+        }:
+            candidates.append(articleless)
     candidates.sort(key=lambda alias: len(normalized_words(alias)), reverse=True)
     matched_alias = next((alias for alias in candidates if alias_matches_source(alias, source_title)), None)
+    matched_episode_title = distinctive_episode_title_match(
+        expected_episodes or [], source_title
+    )
     return {
-        "identity_match": matched_alias is not None,
+        "identity_match": matched_alias is not None or matched_episode_title is not None,
         "matched_alias": matched_alias,
+        "matched_episode_title": matched_episode_title,
         "aliases": candidates,
     }
 
@@ -325,7 +390,6 @@ def build_context(event: dict[str, Any]) -> dict[str, Any]:
     source_title = str(release.get("releaseTitle") or event.get("downloadTitle") or "").strip()
     canonical_title = str(media.get("title") or event_media.get("title") or "").strip()
     aliases = alternate_titles(media)
-    identity = identity_evidence(canonical_title, aliases, source_title)
     original_language = normalize_language(media.get("originalLanguage"))
 
     expected_episodes: list[dict[str, Any]] = []
@@ -337,9 +401,14 @@ def build_context(event: dict[str, Any]) -> dict[str, Any]:
                 "id": episode.get("id"),
                 "season": episode.get("seasonNumber"),
                 "episode": episode.get("episodeNumber"),
+                "absolute_episode": episode.get("absoluteEpisodeNumber"),
                 "title": episode.get("title"),
             }
         )
+
+    identity = identity_evidence(
+        canonical_title, aliases, source_title, expected_episodes
+    )
 
     profile, current_files, policy_enrichment_errors = capture_policy_state(
         app, media, expected_episodes
@@ -356,6 +425,7 @@ def build_context(event: dict[str, Any]) -> dict[str, Any]:
         "identity_match": identity["identity_match"],
         "identity_conflict": bool(source_title and canonical_title and not identity["identity_match"]),
         "matched_alias": identity["matched_alias"],
+        "matched_episode_title": identity["matched_episode_title"],
         "source_title": source_title,
         "original_languages": [original_language] if original_language else [],
         "release_group": release.get("releaseGroup"),
@@ -457,7 +527,12 @@ class ContextStore:
         context = json.loads(row["payload"])
         canonical_title = str(context.get("canonical_title") or "").strip()
         source_title = str(context.get("source_title") or "").strip()
-        identity = identity_evidence(canonical_title, context.get("aliases") or [], source_title)
+        identity = identity_evidence(
+            canonical_title,
+            context.get("aliases") or [],
+            source_title,
+            context.get("expected_episodes") or [],
+        )
         context.update(
             {
                 "aliases": identity["aliases"],
@@ -466,6 +541,7 @@ class ContextStore:
                     source_title and canonical_title and not identity["identity_match"]
                 ),
                 "matched_alias": identity["matched_alias"],
+                "matched_episode_title": identity["matched_episode_title"],
             }
         )
         return context

@@ -53,6 +53,10 @@ services:
       - /state/arr-import-reconciler-state.json
       - --handoff-mode
       - "{{ media_release_stamper_handoff_mode | default('disabled') }}"
+      - --usenet-handoff-mode
+      - "{{ media_release_stamper_usenet_handoff_mode | default('disabled') }}"
+      - --xem-handoff-mode
+      - "{{ media_release_stamper_xem_handoff_mode | default('disabled') }}"
       - --handoff-state
       - /state/arr-terminal-handoff-state.json
       - --min-payload-age
@@ -61,6 +65,9 @@ services:
       - "{{ media_release_stamper_handoff_ffprobe_timeout | default(30) }}"
       - --max-handoffs-per-cycle
       - "{{ media_release_stamper_handoff_max_per_cycle | default(5) }}"
+{% if media_release_stamper_allow_english_original_und_audio | default(false) | bool %}
+      - --allow-english-original-und-audio
+{% endif %}
 {% if not (media_release_stamper_reconciler_apply | default(false) | bool) %}
       - --dry-run
 {% endif %}

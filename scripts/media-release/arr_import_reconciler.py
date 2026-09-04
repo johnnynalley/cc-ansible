@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import bisect
+import copy
 import datetime as dt
 import hashlib
 from http.cookiejar import CookieJar
@@ -16,6 +17,7 @@ import subprocess
 import sys
 import time
 from typing import Any
+import unicodedata
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -35,19 +37,22 @@ ID_MATCH_MARKERS = {
     "radarr": "matched to movie by id",
 }
 VIDEO_SUFFIXES = {".avi", ".m2ts", ".m4v", ".mkv", ".mov", ".mp4", ".ts", ".webm"}
+EPISODE_TOKEN_RE = re.compile(r"(?i)\bS(?P<season>\d{1,2})E(?P<episode>\d{1,3})\b")
+TECHNICAL_RELEASE_TOKEN_RE = re.compile(
+    r"(?i)\b(?:2160p|1080[pi]|720p|576[pi]|480[pi]|"
+    r"web[ ._-]?dl|webrip|webcap|blu[ ._-]?ray|bluray|bdrip|brrip|hdtv|"
+    r"x26[45]|h26[45]|hevc|av1|eac3|ac3|ddp|aac|flac|opus|dts|truehd)\b"
+)
 CURRENT_BETTER_MARKERS = {
     "already imported",
     "existing file",
     "not a custom format upgrade",
     "not an upgrade for existing",
 }
+XEM_REJECTION_MARKER = "thexem needs manual input"
 IDENTITY_REJECTION_MARKERS = {
     "does not match the series",
     "does not match the movie",
-}
-DA_FORMAT_NAMES = {
-    "anime dual audio",
-    "regular dual audio",
 }
 HEVC_FORMAT_NAMES = {
     "h.265",
@@ -55,6 +60,18 @@ HEVC_FORMAT_NAMES = {
     "x265 (hd)",
     "x265 (no hdr/dv)",
 }
+ENGLISH_ORIGINAL_REGULAR_PROFILES = {
+    "movies-regular-efficient",
+    "shows-regular-efficient",
+}
+UNTAGGED_AUDIO_AMBIGUITY_RE = re.compile(
+    r"(?i)\b(?:dual|multi(?:[ ._-]*audio)?|dubbed?|"
+    r"arabic|cantonese|chinese|danish|dutch|finnish|french|german|greek|"
+    r"hebrew|hindi|hungarian|italian|japanese|korean|norwegian|polish|"
+    r"portuguese|romanian|russian|spanish|swedish|tamil|telugu|thai|turkish|"
+    r"ara|chi|zho|dan|dut|nld|fin|fra|fre|deu|ger|ell|gre|heb|hin|hun|ita|"
+    r"jpn|kor|nor|pol|por|ron|rum|rus|spa|swe|tam|tel|tha|tur)\b"
+)
 LANGUAGE_ALIASES = {
     "chi": "zho",
     "chinese": "zho",
@@ -129,6 +146,276 @@ def expected_episode_ids(context: dict[str, Any]) -> set[int]:
         for episode in context.get("expected_episodes") or []
         if isinstance(episode, dict) and isinstance(episode.get("id"), int)
     }
+
+
+def episode_pair_from_name(value: object) -> tuple[int, int] | None:
+    matches = list(EPISODE_TOKEN_RE.finditer(Path(str(value or "")).stem))
+    if len(matches) != 1:
+        return None
+    match = matches[0]
+    return int(match.group("season")), int(match.group("episode"))
+
+
+def episode_title_region(value: object) -> str:
+    stem = Path(str(value or "")).stem
+    matches = list(EPISODE_TOKEN_RE.finditer(stem))
+    if len(matches) != 1:
+        return ""
+    region = stem[matches[0].end() :]
+    technical = TECHNICAL_RELEASE_TOKEN_RE.search(region)
+    if technical:
+        region = region[: technical.start()]
+    return region.strip(" ._-[]()")
+
+
+def expected_episode_pairs(context: dict[str, Any]) -> set[tuple[int, int]]:
+    pairs = {
+        (int(item["season"]), int(item["episode"]))
+        for item in context.get("expected_episodes") or []
+        if isinstance(item, dict)
+        and isinstance(item.get("season"), int)
+        and isinstance(item.get("episode"), int)
+    }
+    return pairs
+
+
+def normalized_title_words(value: object) -> list[str]:
+    text = unicodedata.normalize("NFKD", str(value or ""))
+    text = "".join(character for character in text if not unicodedata.combining(character))
+    return re.findall(r"[a-z0-9]+", text.casefold())
+
+
+def ordered_subsequence(needle: list[str], haystack: list[str]) -> bool:
+    index = 0
+    for word in haystack:
+        if index < len(needle) and word == needle[index]:
+            index += 1
+    return bool(needle) and index == len(needle)
+
+
+def distinctive_episode_title_matches(title: object, source: object) -> bool:
+    title_words = normalized_title_words(title)
+    lexical_words = [word for word in title_words if not word.isdigit()]
+    return (
+        len(lexical_words) >= 2
+        and sum(len(word) for word in lexical_words) >= 8
+        and lexical_words[0] not in {"episode", "chapter", "part"}
+        and ordered_subsequence(title_words, normalized_title_words(source))
+    )
+
+
+def title_confirmed_xem_correction(
+    client: JsonClient,
+    context: dict[str, Any],
+    candidates: list[dict[str, Any]],
+    diagnostics: dict[str, Any] | None = None,
+) -> tuple[dict[str, Any], list[dict[str, Any]], dict[str, Any]] | None:
+    def reject(reason: str, **details: Any) -> None:
+        if diagnostics is not None:
+            diagnostics.clear()
+            diagnostics.update({"guard": reason, **details})
+
+    media_id = (context.get("media") or {}).get("id")
+    expected = expected_episode_ids(context)
+    if not isinstance(media_id, int) or len(expected) != 1 or len(candidates) != 1:
+        reject(
+            "scope",
+            media_id=media_id,
+            expected_target_ids=sorted(expected),
+            candidate_count=len(candidates),
+        )
+        return None
+
+    candidate = candidates[0]
+    owner = candidate.get("series")
+    mapped_ids = candidate_target_ids("sonarr", candidate)
+    reasons = rejection_reasons(candidate)
+    pair = episode_pair_from_name(candidate.get("path"))
+    if not isinstance(owner, dict) or owner.get("id") != media_id:
+        reject("series_identity", media_id=media_id, candidate_series_id=(owner or {}).get("id"))
+        return None
+    if mapped_ids != expected or len(mapped_ids) != 1:
+        reject(
+            "native_target_parity",
+            expected_target_ids=sorted(expected),
+            native_target_ids=sorted(mapped_ids),
+        )
+        return None
+    if not reasons or not all(
+        XEM_REJECTION_MARKER in reason.casefold() for reason in reasons
+    ):
+        reject("native_rejections", rejections=reasons)
+        return None
+    if pair is None:
+        reject("episode_token", path=str(candidate.get("path") or ""))
+        return None
+
+    episodes = client.request("GET", "/episode", {"seriesId": media_id}) or []
+    episodes = [episode for episode in episodes if isinstance(episode, dict)]
+    by_id = {
+        episode.get("id"): episode
+        for episode in episodes
+        if isinstance(episode.get("id"), int)
+    }
+    by_pair = {
+        (episode.get("seasonNumber"), episode.get("episodeNumber")): episode
+        for episode in episodes
+        if isinstance(episode.get("seasonNumber"), int)
+        and isinstance(episode.get("episodeNumber"), int)
+    }
+    mapped = by_id.get(next(iter(mapped_ids)))
+    canonical = by_pair.get(pair)
+    source = episode_title_region(candidate.get("path"))
+    title_matches = [
+        episode
+        for episode in episodes
+        if distinctive_episode_title_matches(episode.get("title"), source)
+    ]
+    if not isinstance(mapped, dict) or not isinstance(canonical, dict):
+        reject(
+            "episode_lookup",
+            native_target_id=next(iter(mapped_ids)),
+            canonical_pair=list(pair),
+        )
+        return None
+    if mapped.get("id") == canonical.get("id"):
+        reject("not_a_correction", target_id=mapped.get("id"))
+        return None
+    if (mapped.get("sceneSeasonNumber"), mapped.get("sceneEpisodeNumber")) != pair:
+        reject(
+            "scene_pair",
+            filename_pair=list(pair),
+            native_scene_pair=[
+                mapped.get("sceneSeasonNumber"),
+                mapped.get("sceneEpisodeNumber"),
+            ],
+        )
+        return None
+    if canonical.get("monitored") is False or bool(canonical.get("hasFile")):
+        reject(
+            "canonical_target_state",
+            target_id=canonical.get("id"),
+            monitored=canonical.get("monitored"),
+            has_file=canonical.get("hasFile"),
+        )
+        return None
+    canonical_title_matches = distinctive_episode_title_matches(
+        canonical.get("title"), source
+    )
+    mapped_title_matches = distinctive_episode_title_matches(mapped.get("title"), source)
+    title_match_ids = {episode.get("id") for episode in title_matches}
+    if (
+        not canonical_title_matches
+        or mapped_title_matches
+        or title_match_ids != {canonical.get("id")}
+    ):
+        reject(
+            "canonical_title",
+            title_region=source,
+            canonical_target_id=canonical.get("id"),
+            canonical_title=canonical.get("title"),
+            canonical_title_matches=canonical_title_matches,
+            native_target_id=mapped.get("id"),
+            native_title=mapped.get("title"),
+            native_title_matches=mapped_title_matches,
+            title_match_ids=sorted(
+                target_id for target_id in title_match_ids if isinstance(target_id, int)
+            ),
+        )
+        return None
+
+    corrected_context = copy.deepcopy(context)
+    corrected_context["expected_episodes"] = [
+        {
+            "id": canonical["id"],
+            "season": canonical["seasonNumber"],
+            "episode": canonical["episodeNumber"],
+            "title": canonical.get("title"),
+        }
+    ]
+    corrected_context["current_files"] = [
+        {"target_id": canonical["id"], "has_file": False}
+    ]
+    corrected_candidate = copy.deepcopy(candidate)
+    corrected_candidate["episodes"] = [canonical]
+    corrected_candidate["rejections"] = []
+    correction = {
+        "from_target_id": mapped.get("id"),
+        "from_season": mapped.get("seasonNumber"),
+        "from_episode": mapped.get("episodeNumber"),
+        "from_title": mapped.get("title"),
+        "to_target_id": canonical.get("id"),
+        "to_season": canonical.get("seasonNumber"),
+        "to_episode": canonical.get("episodeNumber"),
+        "to_title": canonical.get("title"),
+        "scene_pair": list(pair),
+        "title_region": source,
+    }
+    return corrected_context, [corrected_candidate], correction
+
+
+def is_canonical_title_collision_current_better(
+    context: dict[str, Any],
+    candidates: list[dict[str, Any]],
+    probes: list[dict[str, Any]],
+) -> bool:
+    media = context.get("media") if isinstance(context.get("media"), dict) else {}
+    media_id = media.get("id")
+    year = media.get("year")
+    canonical_title = str(context.get("canonical_title") or "").strip()
+    expected = expected_episode_pairs(context)
+    if (
+        context.get("identity_conflict")
+        or not isinstance(media_id, int)
+        or not isinstance(year, int)
+        or str(year) not in canonical_title
+        or not expected
+        or len(candidates) != len(probes)
+        or len(probes) != len(expected)
+    ):
+        return False
+
+    canonical_prefix = f"{canonical_title} - ".casefold()
+    probe_pairs: set[tuple[int, int]] = set()
+    for probe in probes:
+        name = str(probe.get("name") or "")
+        pair = episode_pair_from_name(name)
+        if not name.casefold().startswith(canonical_prefix) or pair is None:
+            return False
+        probe_pairs.add(pair)
+    if probe_pairs != expected:
+        return False
+
+    candidate_pairs: set[tuple[int, int]] = set()
+    for candidate in candidates:
+        owner = candidate.get("series")
+        episodes = candidate.get("episodes") or []
+        reasons = rejection_reasons(candidate)
+        pair = episode_pair_from_name(candidate.get("path"))
+        if (
+            not isinstance(owner, dict)
+            or owner.get("id") == media_id
+            or len(episodes) != 1
+            or pair is None
+            or pair
+            != (
+                episodes[0].get("seasonNumber"),
+                episodes[0].get("episodeNumber"),
+            )
+            or not reasons
+            or not any(
+                any(marker in reason.casefold() for marker in CURRENT_BETTER_MARKERS)
+                for reason in reasons
+            )
+            or not all(
+                "was not found in the grabbed release" in reason.casefold()
+                or any(marker in reason.casefold() for marker in CURRENT_BETTER_MARKERS)
+                for reason in reasons
+            )
+        ):
+            return False
+        candidate_pairs.add(pair)
+    return candidate_pairs == expected
 
 
 def candidate_target_ids(app: str, candidate: dict[str, Any]) -> set[int]:
@@ -437,18 +724,26 @@ def current_policy_state(
 ) -> tuple[str | None, list[dict[str, Any]]]:
     profile = context.get("quality_profile") or {}
     profile_id = profile.get("id")
+    media_id = (context.get("media") or {}).get("id")
+    current_media: dict[str, Any] = {}
+    if not isinstance(profile_id, int) and isinstance(media_id, int):
+        current_media = client.request(
+            "GET", f"/{'series' if app == 'sonarr' else 'movie'}/{media_id}"
+        ) or {}
+        profile_id = current_media.get("qualityProfileId")
     current_profile = (
         client.request("GET", f"/qualityprofile/{profile_id}")
         if isinstance(profile_id, int)
         else None
     )
     fingerprint = profile_fingerprint(current_profile)
+    if isinstance(current_profile, dict):
+        context["current_quality_profile_name"] = current_profile.get("name")
 
-    media_id = (context.get("media") or {}).get("id")
     if app == "radarr":
         if not isinstance(media_id, int):
             return fingerprint, []
-        movie = client.request("GET", f"/movie/{media_id}") or {}
+        movie = current_media or client.request("GET", f"/movie/{media_id}") or {}
         return fingerprint, [current_file_snapshot(media_id, movie.get("movieFile"))]
 
     expected = expected_episode_ids(context)
@@ -507,7 +802,13 @@ class ReconcileState:
 class HandoffState:
     def __init__(self, path: Path):
         self.path = path
-        self.data: dict[str, Any] = {"completed": {}, "searches": {}, "cursors": {}}
+        self.data: dict[str, Any] = {
+            "completed": {},
+            "pending_imports": {},
+            "pending_searches": {},
+            "searches": {},
+            "cursors": {},
+        }
         try:
             loaded = json.loads(path.read_text(encoding="utf-8"))
             if isinstance(loaded, dict):
@@ -516,6 +817,13 @@ class HandoffState:
                         self.data[key] = loaded[key]
         except (FileNotFoundError, json.JSONDecodeError, OSError):
             pass
+        for key, value in list(self.data["completed"].items()):
+            if (
+                isinstance(value, dict)
+                and value.get("classification") == "validated_import_submitted"
+            ):
+                self.data["pending_imports"][key] = value
+                del self.data["completed"][key]
 
     def save(self) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
@@ -536,6 +844,88 @@ class HandoffState:
 
     def is_completed(self, app: str, download_id: str) -> bool:
         return f"{app}:{normalize_download_id(download_id)}" in self.data["completed"]
+
+    def pending_import(self, app: str, download_id: str) -> dict[str, Any] | None:
+        value = self.data["pending_imports"].get(
+            f"{app}:{normalize_download_id(download_id)}"
+        )
+        return value if isinstance(value, dict) else None
+
+    def mark_pending_import(
+        self,
+        app: str,
+        download_id: str,
+        command_id: int | None,
+    ) -> None:
+        self.data["pending_imports"][
+            f"{app}:{normalize_download_id(download_id)}"
+        ] = {
+            "at": iso_utc(),
+            "command_id": command_id,
+        }
+        self.save()
+
+    def clear_pending_import(self, app: str, download_id: str) -> None:
+        self.data["pending_imports"].pop(
+            f"{app}:{normalize_download_id(download_id)}", None
+        )
+        self.save()
+
+    def prune_pending_imports(self, app: str, active_download_ids: set[str]) -> None:
+        prefix = f"{app}:"
+        stale = [
+            key
+            for key in self.data["pending_imports"]
+            if key.startswith(prefix) and key.removeprefix(prefix) not in active_download_ids
+        ]
+        if not stale:
+            return
+        for key in stale:
+            del self.data["pending_imports"][key]
+        self.save()
+
+    def finish_pending_import(self, app: str, download_id: str) -> None:
+        self.data["pending_imports"].pop(
+            f"{app}:{normalize_download_id(download_id)}", None
+        )
+        self.data["completed"][f"{app}:{normalize_download_id(download_id)}"] = {
+            "at": iso_utc(),
+            "classification": "validated_import_completed",
+        }
+        self.save()
+
+    def has_pending_imports(self, app: str) -> bool:
+        prefix = f"{app}:"
+        return any(key.startswith(prefix) for key in self.data["pending_imports"])
+
+    def stage_search(self, app: str, key: str, body: dict[str, Any]) -> None:
+        if key in self.data["pending_searches"]:
+            return
+        self.data["pending_searches"][key] = {
+            "app": app,
+            "at": iso_utc(),
+            "body": body,
+        }
+        self.save()
+
+    def pending_searches(self, app: str) -> list[tuple[str, dict[str, Any]]]:
+        return sorted(
+            (
+                (key, value)
+                for key, value in self.data["pending_searches"].items()
+                if isinstance(value, dict) and value.get("app") == app
+            ),
+            key=lambda item: item[0],
+        )
+
+    def clear_pending_search(self, key: str) -> None:
+        if self.data["pending_searches"].pop(key, None) is not None:
+            self.save()
+
+    def finish_pending_search(self, key: str) -> None:
+        self.data["pending_searches"].pop(key, None)
+        self.data["searches"][key] = iso_utc()
+        self.save()
 
     def cursor(self, app: str) -> str:
         return normalize_download_id(self.data["cursors"].get(app))
@@ -568,15 +958,91 @@ def ledger_context(ledger: JsonClient, download_id: str) -> dict[str, Any] | Non
     return payload.get("context") if isinstance(payload, dict) else None
 
 
-def wait_for_command(client: JsonClient, command_id: int, timeout: int = 180) -> dict[str, Any]:
+def wait_for_command(
+    client: JsonClient,
+    command_id: int,
+    timeout: int = 180,
+    heartbeat: Path | None = None,
+) -> dict[str, Any]:
     deadline = time.monotonic() + timeout
     last: dict[str, Any] = {}
     while time.monotonic() < deadline:
+        if heartbeat is not None:
+            write_heartbeat(heartbeat)
         last = client.request("GET", f"/command/{command_id}") or {}
         if str(last.get("status") or "").casefold() in {"completed", "failed"}:
             return last
         time.sleep(2)
     return last
+
+
+def manual_import_command(
+    client: JsonClient,
+    download_id: str,
+) -> dict[str, Any] | None:
+    normalized = normalize_download_id(download_id)
+    commands = client.request("GET", "/command") or []
+    matches = []
+    for command in commands if isinstance(commands, list) else []:
+        if str(command.get("name") or "").casefold() != "manualimport":
+            continue
+        files = (command.get("body") or {}).get("files") or []
+        if any(
+            normalize_download_id(item.get("downloadId")) == normalized
+            for item in files
+            if isinstance(item, dict)
+        ):
+            matches.append(command)
+    return max(
+        matches,
+        key=lambda item: int(item.get("id") or 0),
+        default=None,
+    )
+
+
+def reconcile_pending_import(
+    app: str,
+    client: JsonClient,
+    state: HandoffState,
+    download_id: str,
+) -> dict[str, Any] | None:
+    pending = state.pending_import(app, download_id)
+    if pending is None:
+        return None
+    command_id = pending.get("command_id")
+    command: dict[str, Any] | None = None
+    if isinstance(command_id, int):
+        try:
+            candidate = client.request("GET", f"/command/{command_id}") or {}
+            command = candidate if isinstance(candidate, dict) else None
+        except urllib.error.HTTPError as exc:
+            if exc.code != 404:
+                raise
+    if command is None:
+        command = manual_import_command(client, download_id)
+        command_id = command.get("id") if isinstance(command, dict) else None
+        if isinstance(command_id, int):
+            state.mark_pending_import(app, download_id, command_id)
+    if command is None:
+        state.clear_pending_import(app, download_id)
+        return None
+
+    status = str(command.get("status") or "").casefold()
+    if status == "completed":
+        state.finish_pending_import(app, download_id)
+        return {
+            "result": "native_import_completed_waiting_for_queue_refresh",
+            "command_id": command_id,
+            "command_status": status,
+        }
+    if status in {"failed", "cancelled", "aborted"}:
+        state.clear_pending_import(app, download_id)
+        return None
+    return {
+        "result": "native_import_pending",
+        "command_id": command_id,
+        "command_status": status or "unknown",
+    }
 
 
 def queue_records(app: str, client: JsonClient) -> list[dict[str, Any]]:
@@ -603,11 +1069,14 @@ def reconcile_app(
     ledger: JsonClient,
     state: ReconcileState,
     dry_run: bool,
+    heartbeat: Path | None = None,
 ) -> list[dict[str, Any]]:
     records = queue_records(app, client)
     results: list[dict[str, Any]] = []
     seen_download_ids: set[str] = set()
     for record in records:
+        if heartbeat is not None:
+            write_heartbeat(heartbeat)
         if not is_exact_id_match_block(record, app):
             continue
         download_id = str(record.get("downloadId") or "")
@@ -662,7 +1131,11 @@ def reconcile_app(
             },
         ) or {}
         command_id = command.get("id")
-        final = wait_for_command(client, int(command_id)) if isinstance(command_id, int) else command
+        final = (
+            wait_for_command(client, int(command_id), heartbeat=heartbeat)
+            if isinstance(command_id, int)
+            else command
+        )
         result.update(
             {
                 "command_id": command_id,
@@ -809,6 +1282,56 @@ def payload_probes(
     return probes, paths
 
 
+def filesystem_payload_probes(
+    rows: list[dict[str, Any]],
+    min_payload_age: int,
+    ffprobe_timeout: int,
+) -> tuple[list[dict[str, Any]], dict[str, Path]]:
+    roots = {
+        str(row.get("outputPath") or "").strip()
+        for row in rows
+        if str(row.get("outputPath") or "").strip()
+    }
+    if len(roots) != 1:
+        raise ValueError("Usenet queue rows do not have one exact payload root")
+    root = Path(roots.pop()).resolve(strict=True)
+    data_root = Path("/data").resolve(strict=True)
+    try:
+        root.relative_to(data_root)
+    except ValueError as exc:
+        raise ValueError("Usenet payload root is outside the read-only media mount") from exc
+    if any(part.casefold().startswith("_unpack_") for part in root.parts):
+        raise ValueError("Usenet payload is still being unpacked")
+
+    candidates = [root] if root.is_file() else sorted(root.rglob("*"))
+    media_paths: list[Path] = []
+    for candidate in candidates:
+        if not candidate.is_file() or candidate.suffix.casefold() not in VIDEO_SUFFIXES:
+            continue
+        resolved = candidate.resolve(strict=True)
+        try:
+            resolved.relative_to(data_root)
+        except ValueError as exc:
+            raise ValueError("Usenet payload file escapes the read-only media mount") from exc
+        if any(part.casefold().startswith("_unpack_") for part in resolved.parts):
+            raise ValueError("Usenet payload is still being unpacked")
+        media_paths.append(resolved)
+    if not media_paths:
+        raise ValueError("Usenet payload contains no supported media files")
+
+    probes: list[dict[str, Any]] = []
+    paths: dict[str, Path] = {}
+    for path in media_paths:
+        if time.time() - path.stat().st_mtime < min_payload_age:
+            raise ValueError("Usenet payload has not reached the minimum stable age")
+        probe = ffprobe_payload_file(path, ffprobe_timeout)
+        if not probe["video_streams"] or not probe["audio_streams"]:
+            raise ValueError(f"payload lacks required video/audio streams: {path.name}")
+        probes.append(probe)
+        paths[str(path)] = path
+    return probes, paths
+
+
 def release_claims(context: dict[str, Any]) -> dict[str, Any]:
     title = str(context.get("source_title") or "")
     folded = title.casefold()
@@ -825,7 +1348,10 @@ def release_claims(context: dict[str, Any]) -> dict[str, Any]:
     if not resolution_match:
         resolution_match = re.search(r"(2160|1080|720|576|480)p", str(context.get("quality") or ""), re.I)
     return {
-        "dual_audio": dual_title or bool(formats & DA_FORMAT_NAMES),
+        # A metadata-backed DA format can match without the release title making
+        # that claim, and it may carry zero score in this profile. Only title
+        # evidence is a pre-download dual-audio contract.
+        "dual_audio": dual_title,
         "hevc": bool(re.search(r"\b(?:x265|h[ .]?265|hevc)\b", folded))
         or bool(formats & HEVC_FORMAT_NAMES),
         "resolution": int(resolution_match.group(1)) if resolution_match else None,
@@ -857,13 +1383,25 @@ def dimensions_meet_resolution(dimensions: list[str], expected: int) -> bool:
 def payload_contract(
     context: dict[str, Any],
     probes: list[dict[str, Any]],
-) -> tuple[list[dict[str, str]], list[dict[str, str]]]:
+    allow_english_original_und_audio: bool = False,
+) -> tuple[
+    list[dict[str, str]],
+    list[dict[str, str]],
+    list[dict[str, str]],
+]:
     claims = release_claims(context)
     original_languages = {
         normalize_language(value) for value in context.get("original_languages") or []
     } - {"und"}
     failures: list[dict[str, str]] = []
     unverifiable: list[dict[str, str]] = []
+    assumptions: list[dict[str, str]] = []
+    profile_name = str(
+        (context.get("quality_profile") or {}).get("name")
+        or context.get("current_quality_profile_name")
+        or ""
+    )
+    source_title = str(context.get("source_title") or "")
     for probe in probes:
         name = str(probe["name"])
         codecs = set(probe["video_codecs"])
@@ -881,6 +1419,32 @@ def payload_contract(
                     "actual": ",".join(probe["video_dimensions"]),
                 }
             )
+        if original_languages and not original_languages.issubset(languages):
+            evidence = ",".join(sorted(languages)) or "none"
+            eligible_untagged_english = (
+                allow_english_original_und_audio
+                and original_languages == {"eng"}
+                and profile_name.casefold() in ENGLISH_ORIGINAL_REGULAR_PROFILES
+                and probe.get("audio_streams") == 1
+                and languages == {"und"}
+                and not UNTAGGED_AUDIO_AMBIGUITY_RE.search(source_title)
+            )
+            if eligible_untagged_english:
+                assumptions.append(
+                    {
+                        "file": name,
+                        "assumption": "single_untagged_audio_is_original_english",
+                        "profile": profile_name,
+                    }
+                )
+            elif "und" in languages or not languages:
+                unverifiable.append(
+                    {"file": name, "claim": "original_audio", "actual": evidence}
+                )
+            else:
+                failures.append(
+                    {"file": name, "claim": "original_audio", "actual": evidence}
+                )
         if not claims["dual_audio"]:
             continue
         required = {"eng"} if original_languages == {"eng"} else {"eng", *original_languages}
@@ -894,7 +1458,7 @@ def payload_contract(
             failures.append(
                 {"file": name, "claim": "dual_audio", "actual": ",".join(sorted(languages))}
             )
-    return failures, unverifiable
+    return failures, unverifiable, assumptions
 
 
 def path_key(value: object) -> str:
@@ -929,14 +1493,20 @@ def classify_terminal_download(
     payload_paths: dict[str, Path],
     current_profile_fingerprint: str | None,
     current_files: list[dict[str, Any]],
+    allow_english_original_und_audio: bool = False,
 ) -> dict[str, Any]:
     expected = expected_episode_ids(context) if app == "sonarr" else {(context.get("media") or {}).get("id")}
     expected.discard(None)
     candidate_paths: set[str] = set()
+    canonical_title_collision = is_canonical_title_collision_current_better(
+        context, candidates, probes
+    ) if app == "sonarr" else False
     native_terminal = True
     has_eligible = False
-    identity_mismatch = bool(context.get("identity_conflict"))
+    context_identity_conflict = bool(context.get("identity_conflict"))
+    identity_mismatch = False
     target_mismatch = False
+    eligible_target_counts: dict[int, int] = {}
     per_file: list[dict[str, Any]] = []
     for candidate in candidates:
         candidate_path = path_key(candidate.get("path"))
@@ -949,11 +1519,12 @@ def classify_terminal_download(
         if (
             isinstance(owner, dict)
             and owner.get("id") != (context.get("media") or {}).get("id")
+            and not canonical_title_collision
         ) or any(
             marker in reason_text for marker in IDENTITY_REJECTION_MARKERS
         ):
             identity_mismatch = True
-        if targets and not targets.issubset(expected):
+        if targets and not targets.issubset(expected) and not canonical_title_collision:
             target_mismatch = True
             native_terminal = False
         if not isinstance(owner, dict) or not targets:
@@ -961,7 +1532,9 @@ def classify_terminal_download(
         if not reasons:
             has_eligible = True
             native_classification = "accepted"
-        elif all(
+            for target in targets:
+                eligible_target_counts[target] = eligible_target_counts.get(target, 0) + 1
+        elif canonical_title_collision or all(
             any(marker in reason.casefold() for marker in CURRENT_BETTER_MARKERS)
             for reason in reasons
         ):
@@ -983,7 +1556,17 @@ def classify_terminal_download(
     payload_mapping_complete = bool(candidates) and candidate_paths == set(payload_paths)
     if not payload_mapping_complete:
         native_terminal = False
-    failures, contract_unverifiable = payload_contract(context, probes)
+    failures, contract_unverifiable, contract_assumptions = payload_contract(
+        context,
+        probes,
+        allow_english_original_und_audio,
+    )
+    duplicate_eligible_targets = sorted(
+        target
+        for target, count in eligible_target_counts.items()
+        if count > 1
+    )
+    eligible_mapping_complete = set(eligible_target_counts) == expected
     captured_profile = (context.get("quality_profile") or {}).get("fingerprint")
     profile_changed = bool(
         captured_profile
@@ -992,20 +1575,24 @@ def classify_terminal_download(
     )
     files_changed = captured_files_changed(context.get("current_files"), current_files)
 
-    if not payload_mapping_complete or target_mismatch:
+    if not payload_mapping_complete or target_mismatch or context_identity_conflict:
         classification = "unverifiable"
     elif identity_mismatch:
         classification = "identity_mismatch"
     elif failures:
         classification = "payload_misrepresented"
-    elif has_eligible:
-        classification = "accepted"
-    elif not native_terminal or contract_unverifiable:
+    elif contract_unverifiable:
         classification = "unverifiable"
     elif profile_changed:
         classification = "profile_drift"
     elif files_changed:
         classification = "superseded_in_flight"
+    elif duplicate_eligible_targets:
+        classification = "identity_mismatch"
+    elif has_eligible and eligible_mapping_complete:
+        classification = "accepted"
+    elif has_eligible or not native_terminal:
+        classification = "unverifiable"
     else:
         classification = "current_better"
     actionable = classification in {
@@ -1022,8 +1609,11 @@ def classify_terminal_download(
         "profile_changed": profile_changed,
         "current_files_changed": files_changed,
         "target_mismatch": target_mismatch,
+        "canonical_title_collision": canonical_title_collision,
+        "duplicate_eligible_targets": duplicate_eligible_targets,
         "contract_failures": failures,
         "contract_unverifiable": contract_unverifiable,
+        "contract_assumptions": contract_assumptions,
         "payload_probes": probes,
         "per_file": per_file,
     }
@@ -1096,41 +1686,117 @@ def remove_queue_download(
     )
 
 
-def schedule_replacement_searches(
+def replacement_search_scopes(
     app: str,
-    client: JsonClient,
     context: dict[str, Any],
-    state: HandoffState,
-) -> list[dict[str, Any]]:
+) -> list[tuple[str, dict[str, Any]]]:
     media_id = (context.get("media") or {}).get("id")
     if not isinstance(media_id, int):
         return []
     if app == "radarr":
-        scopes = [(f"radarr:movie:{media_id}", {"name": "MoviesSearch", "movieIds": [media_id]})]
-    else:
-        seasons = sorted(
+        return [
+            (
+                f"radarr:movie:{media_id}",
+                {"name": "MoviesSearch", "movieIds": [media_id]},
+            )
+        ]
+    seasons = sorted(
+        {
+            int(item["season"])
+            for item in context.get("expected_episodes") or []
+            if isinstance(item, dict) and isinstance(item.get("season"), int)
+        }
+    )
+    return [
+        (
+            f"sonarr:series:{media_id}:season:{season}",
+            {"name": "SeasonSearch", "seriesId": media_id, "seasonNumber": season},
+        )
+        for season in seasons
+    ]
+
+
+def defer_replacement_searches(
+    app: str,
+    context: dict[str, Any],
+    state: HandoffState,
+) -> list[dict[str, Any]]:
+    deferred: list[dict[str, Any]] = []
+    for key, body in replacement_search_scopes(app, context):
+        if not state.search_is_allowed(key):
+            deferred.append({"scope": key, "result": "cooldown"})
+            continue
+        state.stage_search(app, key, body)
+        deferred.append({"scope": key, "result": "deferred"})
+    return deferred
+
+
+def native_manual_import_is_active(client: JsonClient) -> bool:
+    commands = client.request("GET", "/command") or []
+    return any(
+        str(command.get("name") or "").casefold() == "manualimport"
+        and str(command.get("status") or "").casefold() in {"queued", "started"}
+        for command in commands
+        if isinstance(command, dict)
+    )
+
+
+def dispatch_pending_searches(
+    app: str,
+    client: JsonClient,
+    state: HandoffState,
+    eligible_keys: set[str],
+) -> list[dict[str, Any]]:
+    pending = [
+        (key, value)
+        for key, value in state.pending_searches(app)
+        if key in eligible_keys
+    ]
+    if not pending:
+        return []
+    if state.has_pending_imports(app) or native_manual_import_is_active(client):
+        return [
             {
-                int(item["season"])
-                for item in context.get("expected_episodes") or []
-                if isinstance(item, dict) and isinstance(item.get("season"), int)
+                "download_id": f"replacement:{key}",
+                "protocol": "internal",
+                "handoff_mode": "apply",
+                "replacement_scope": key,
+                "result": "replacement_search_deferred_import_pending",
+            }
+            for key, _value in pending
+        ]
+
+    results: list[dict[str, Any]] = []
+    for key, value in pending:
+        if not state.search_is_allowed(key):
+            state.clear_pending_search(key)
+            result = "replacement_search_skipped_cooldown"
+            command_id = None
+        else:
+            body = value.get("body")
+            if not isinstance(body, dict):
+                state.clear_pending_search(key)
+                result = "replacement_search_discarded_invalid_state"
+                command_id = None
+            else:
+                response = client.request("POST", "/command", body=body) or {}
+                command_id = response.get("id")
+                if not isinstance(command_id, int):
+                    result = "replacement_search_submission_unconfirmed"
+                else:
+                    state.finish_pending_search(key)
+                    result = "replacement_search_scheduled"
+        results.append(
+            {
+                "download_id": f"replacement:{key}",
+                "protocol": "internal",
+                "handoff_mode": "apply",
+                "replacement_scope": key,
+                "result": result,
+                "command_id": command_id,
             }
         )
-        scopes = [
-            (
-                f"sonarr:series:{media_id}:season:{season}",
-                {"name": "SeasonSearch", "seriesId": media_id, "seasonNumber": season},
-            )
-            for season in seasons
-        ]
-    scheduled: list[dict[str, Any]] = []
-    for key, body in scopes:
-        if not state.search_is_allowed(key):
-            scheduled.append({"scope": key, "result": "cooldown"})
-            continue
-        state.mark_search(key)
-        response = client.request("POST", "/command", body=body) or {}
-        scheduled.append({"scope": key, "result": "scheduled", "command_id": response.get("id")})
-    return scheduled
+    return results
 
 
 def apply_terminal_handoff(
@@ -1180,24 +1846,141 @@ def apply_terminal_handoff(
             raise
         action = "hidden_from_arr_seeding_until_quota"
 
-    searches = (
-        schedule_replacement_searches(app, client, context, state) if blocklist else []
-    )
+    searches = defer_replacement_searches(app, context, state) if blocklist else []
     state.mark_completed(app, download_id, evaluation["classification"])
     return {"result": action, "replacement_searches": searches, **evaluation}
+
+
+def apply_usenet_terminal_handoff(
+    app: str,
+    client: JsonClient,
+    state: HandoffState,
+    rows: list[dict[str, Any]],
+    context: dict[str, Any],
+    evaluation: dict[str, Any],
+) -> dict[str, Any]:
+    if not evaluation["actionable"]:
+        return {"result": "left_untouched", **evaluation}
+    queue_ids = sorted(
+        {int(row["id"]) for row in rows if isinstance(row.get("id"), int)}
+    )
+    if not queue_ids:
+        return {"result": "left_untouched_no_queue_id", **evaluation}
+
+    blocklist = bool(evaluation["blocklist"])
+    remove_queue_download(client, queue_ids[0], True, blocklist)
+    searches = defer_replacement_searches(app, context, state) if blocklist else []
+    download_id = normalize_download_id(rows[0].get("downloadId"))
+    state.mark_completed(app, download_id, evaluation["classification"])
+    return {
+        "result": "removed_from_arr_and_sab",
+        "replacement_searches": searches,
+        **evaluation,
+    }
+
+
+def apply_validated_import(
+    app: str,
+    client: JsonClient,
+    state: HandoffState,
+    rows: list[dict[str, Any]],
+    context: dict[str, Any],
+    candidates: list[dict[str, Any]],
+    evaluation: dict[str, Any],
+    heartbeat: Path | None = None,
+) -> dict[str, Any]:
+    selected = select_candidates(app, context, candidates)
+    expected = expected_episode_ids(context) if app == "sonarr" else {
+        (context.get("media") or {}).get("id")
+    }
+    expected.discard(None)
+    selected_targets = {
+        target
+        for candidate in selected
+        for target in candidate_target_ids(app, candidate)
+    }
+    if not selected or selected_targets != expected:
+        return {
+            "result": "left_untouched_validated_import_incomplete",
+            **evaluation,
+        }
+
+    native_download_id = str(rows[0].get("downloadId") or "").strip()
+    command = client.request(
+        "POST",
+        "/command",
+        body={
+            "name": "ManualImport",
+            "files": [
+                import_file(app, candidate, native_download_id)
+                for candidate in selected
+            ],
+            "importMode": "Auto",
+        },
+    ) or {}
+    command_id = command.get("id")
+    if not isinstance(command_id, int):
+        return {
+            "result": "left_untouched_import_submission_unconfirmed",
+            "selected": len(selected),
+            **evaluation,
+        }
+    state.mark_pending_import(app, native_download_id, command_id)
+    return {
+        "result": "command_pending",
+        "command_id": command_id,
+        "command_status": command.get("status") or "queued",
+        "command_message": command.get("message"),
+        "selected": len(selected),
+        **evaluation,
+    }
+
+
+def terminal_rows_are_eligible(rows: list[dict[str, Any]]) -> bool:
+    if not rows or any(
+        str(row.get("status") or "").casefold() != "completed" for row in rows
+    ):
+        return False
+    states = {
+        str(row.get("trackedDownloadState") or "").casefold() for row in rows
+    }
+    if states == {"importblocked"}:
+        return True
+    if states != {"importpending"}:
+        return False
+    return all(
+        any(
+            marker in "\n".join(status_messages(row)).casefold()
+            for marker in CURRENT_BETTER_MARKERS
+        )
+        for row in rows
+    )
+
+
+def terminal_rows_are_xem_hold(rows: list[dict[str, Any]]) -> bool:
+    return bool(rows) and all(
+        str(row.get("status") or "").casefold() == "completed"
+        and str(row.get("trackedDownloadState") or "").casefold() == "importpending"
+        and XEM_REJECTION_MARKER in "\n".join(status_messages(row)).casefold()
+        for row in rows
+    )
 
 
 def reconcile_terminal_app(
     app: str,
     client: JsonClient,
     ledger: JsonClient,
-    qbit: QbitClient,
+    qbit: QbitClient | None,
     state: HandoffState,
     mode: str,
     download_ids: set[str],
     min_payload_age: int,
     ffprobe_timeout: int,
     max_downloads: int,
+    usenet_mode: str = "disabled",
+    xem_mode: str = "disabled",
+    heartbeat: Path | None = None,
+    allow_english_original_und_audio: bool = False,
 ) -> list[dict[str, Any]]:
     grouped: dict[str, list[dict[str, Any]]] = {}
     for row in queue_records(app, client):
@@ -1205,6 +1988,8 @@ def reconcile_terminal_app(
         if not download_id or (download_ids and download_id not in download_ids):
             continue
         grouped.setdefault(download_id, []).append(row)
+    state.prune_pending_imports(app, set(grouped))
+    pending_search_keys = {key for key, _value in state.pending_searches(app)}
 
     ordered_ids = sorted(grouped)
     if ordered_ids and not download_ids:
@@ -1216,37 +2001,47 @@ def reconcile_terminal_app(
     considered = 0
     last_considered = ""
     for download_id in ordered_ids:
+        if heartbeat is not None:
+            write_heartbeat(heartbeat)
         rows = grouped[download_id]
         if considered >= max_downloads:
             break
         if state.is_completed(app, download_id):
             continue
-        if not rows or any(
-            str(row.get("status") or "").casefold() != "completed"
-            or str(row.get("trackedDownloadState") or "").casefold() != "importblocked"
-            or str(row.get("protocol") or "").casefold() != "torrent"
-            for row in rows
+        xem_hold = app == "sonarr" and terminal_rows_are_xem_hold(rows)
+        protocols = {
+            str(row.get("protocol") or "").casefold() for row in rows
+        }
+        if len(protocols) != 1 or (
+            not terminal_rows_are_eligible(rows)
+            and not (xem_mode != "disabled" and xem_hold)
         ):
+            continue
+        protocol = protocols.pop()
+        protocol_mode = mode if protocol == "torrent" else usenet_mode if protocol == "usenet" else "disabled"
+        action_mode = xem_mode if xem_hold else protocol_mode
+        if action_mode == "disabled" or (protocol == "torrent" and qbit is None):
             continue
         considered += 1
         last_considered = download_id
-        base = {"app": app, "download_id": download_id, "handoff_mode": mode}
+        base = {
+            "app": app,
+            "download_id": download_id,
+            "protocol": protocol,
+            "handoff_mode": action_mode,
+        }
+        pending_result = reconcile_pending_import(
+            app, client, state, download_id
+        )
+        if pending_result is not None:
+            results.append({**base, **pending_result})
+            continue
         native_download_id = str(rows[0].get("downloadId") or "").strip()
         context = ledger_context(ledger, native_download_id)
         if not context or context.get("app") != app:
             results.append({**base, "result": "left_untouched", "classification": "unverifiable", "reason": "ledger_missing"})
             continue
-        torrent = qbit.torrent(download_id)
-        if not torrent:
-            results.append({**base, "result": "left_untouched", "classification": "unverifiable", "reason": "qbit_torrent_missing"})
-            continue
         try:
-            probes, paths = payload_probes(
-                torrent,
-                qbit.files(download_id),
-                min_payload_age,
-                ffprobe_timeout,
-            )
             media_id = (context.get("media") or {}).get("id")
             params: dict[str, Any] = {
                 "downloadId": native_download_id,
@@ -1255,30 +2050,114 @@ def reconcile_terminal_app(
             if app == "radarr" and isinstance(media_id, int):
                 params["movieId"] = media_id
             candidates = client.request("GET", "/manualimport", params) or []
-            current_profile, current_files = current_policy_state(app, client, context)
+            effective_context = context
+            xem_correction: dict[str, Any] | None = None
+            if xem_hold:
+                xem_diagnostics: dict[str, Any] = {}
+                corrected = title_confirmed_xem_correction(
+                    client, context, candidates, xem_diagnostics
+                )
+                if corrected is None:
+                    results.append(
+                        {
+                            **base,
+                            "result": "left_untouched",
+                            "classification": "unverifiable",
+                            "reason": "xem_title_correction_unproven",
+                            "xem_guard": xem_diagnostics,
+                        }
+                    )
+                    continue
+                effective_context, candidates, xem_correction = corrected
+            torrent: dict[str, Any] | None = None
+            if protocol == "torrent":
+                assert qbit is not None
+                torrent = qbit.torrent(download_id)
+                if not torrent:
+                    results.append(
+                        {
+                            **base,
+                            "result": "left_untouched",
+                            "classification": "unverifiable",
+                            "reason": "qbit_torrent_missing",
+                        }
+                    )
+                    continue
+                probes, paths = payload_probes(
+                    torrent,
+                    qbit.files(download_id),
+                    min_payload_age,
+                    ffprobe_timeout,
+                )
+            else:
+                probes, paths = filesystem_payload_probes(
+                    rows,
+                    min_payload_age,
+                    ffprobe_timeout,
+                )
+            current_profile, current_files = current_policy_state(
+                app, client, effective_context
+            )
+            if heartbeat is not None:
+                write_heartbeat(heartbeat)
             evaluation = classify_terminal_download(
                 app,
-                context,
+                effective_context,
                 candidates,
                 probes,
                 paths,
                 current_profile,
                 current_files,
+                allow_english_original_und_audio,
             )
         except (OSError, RuntimeError, subprocess.SubprocessError, ValueError, urllib.error.URLError) as exc:
             results.append(
                 {**base, "result": "left_untouched", "classification": "unverifiable", "reason": str(exc)}
             )
             continue
-        if mode != "apply":
-            results.append({**base, "result": "would_handoff" if evaluation["actionable"] else "left_untouched", **evaluation})
+        if action_mode != "apply":
+            audit_result = (
+                "would_import"
+                if evaluation["classification"] == "accepted"
+                else "would_handoff"
+                if evaluation["actionable"]
+                else "left_untouched"
+            )
+            results.append(
+                {
+                    **base,
+                    "result": audit_result,
+                    "xem_correction": xem_correction,
+                    **evaluation,
+                }
+            )
             continue
-        outcome = apply_terminal_handoff(
-            app, client, qbit, state, rows, context, torrent, evaluation
-        )
-        results.append({**base, **outcome})
+        if evaluation["classification"] == "accepted":
+            outcome = apply_validated_import(
+                app,
+                client,
+                state,
+                rows,
+                effective_context,
+                candidates,
+                evaluation,
+                heartbeat,
+            )
+        elif protocol == "torrent":
+            assert qbit is not None and torrent is not None
+            outcome = apply_terminal_handoff(
+                app, client, qbit, state, rows, effective_context, torrent, evaluation
+            )
+        else:
+            outcome = apply_usenet_terminal_handoff(
+                app, client, state, rows, effective_context, evaluation
+            )
+        results.append({**base, "xem_correction": xem_correction, **outcome})
     if last_considered and not download_ids:
         state.mark_cursor(app, last_considered)
+    results.extend(
+        dispatch_pending_searches(app, client, state, pending_search_keys)
+    )
     return results
 
 
@@ -1499,6 +2378,18 @@ def parse_args() -> argparse.Namespace:
         help="audit or apply terminal qBittorrent handoff; disabled by default",
     )
     parser.add_argument(
+        "--usenet-handoff-mode",
+        choices=["disabled", "audit", "apply"],
+        default="disabled",
+        help="audit or apply terminal SABnzbd handoff; disabled by default",
+    )
+    parser.add_argument(
+        "--xem-handoff-mode",
+        choices=["disabled", "audit", "apply"],
+        default="disabled",
+        help="audit or apply title-confirmed Sonarr TheXEM corrections",
+    )
+    parser.add_argument(
         "--handoff-download-id",
         action="append",
         default=[],
@@ -1520,6 +2411,14 @@ def parse_args() -> argparse.Namespace:
         "--handoff-only",
         action="store_true",
         help="skip exact-ID import fallback and run only terminal handoff",
+    )
+    parser.add_argument(
+        "--allow-english-original-und-audio",
+        action="store_true",
+        help=(
+            "accept one unknown-tagged audio stream as original English only "
+            "for regular English-original profiles without dual/multi/foreign markers"
+        ),
     )
     return parser.parse_args()
 
@@ -1549,9 +2448,14 @@ def main() -> int:
     handoff_state = HandoffState(args.handoff_state)
     qbit: QbitClient | None = None
     handoff_ids = {normalize_download_id(value) for value in args.handoff_download_id if value}
-    if args.handoff_mode != "disabled":
+    if (
+        args.handoff_mode != "disabled"
+        or args.usenet_handoff_mode != "disabled"
+        or args.xem_handoff_mode != "disabled"
+    ):
         if args.min_payload_age < 1 or args.ffprobe_timeout < 1 or args.max_handoffs_per_cycle < 1:
             raise SystemExit("handoff age, timeout, and cycle limit must be positive")
+    if args.handoff_mode != "disabled":
         qbit = QbitClient(
             os.environ.get("QBIT_API", ""),
             os.environ.get("QBIT_USER", ""),
@@ -1563,15 +2467,33 @@ def main() -> int:
             raise SystemExit(f"qBittorrent 5.2.0 or newer is required; found {version or 'unknown'}")
     last_emitted: dict[str, str] = {}
     while True:
+        write_heartbeat(args.heartbeat)
         for app, client in clients.items():
             try:
+                terminal_enabled = (
+                    qbit is not None
+                    or args.usenet_handoff_mode != "disabled"
+                    or args.xem_handoff_mode != "disabled"
+                )
                 results = (
                     []
-                    if args.handoff_only
-                    else reconcile_app(app, client, ledger, state, args.dry_run)
+                    if args.handoff_only or terminal_enabled
+                    else reconcile_app(
+                        app,
+                        client,
+                        ledger,
+                        state,
+                        args.dry_run,
+                        args.heartbeat,
+                    )
                 )
                 if qbit is not None:
                     qbit.login()
+                if (
+                    qbit is not None
+                    or args.usenet_handoff_mode != "disabled"
+                    or args.xem_handoff_mode != "disabled"
+                ):
                     results.extend(
                         reconcile_terminal_app(
                             app,
@@ -1584,6 +2506,10 @@ def main() -> int:
                             args.min_payload_age,
                             args.ffprobe_timeout,
                             args.max_handoffs_per_cycle,
+                            args.usenet_handoff_mode,
+                            args.xem_handoff_mode,
+                            args.heartbeat,
+                            args.allow_english_original_und_audio,
                         )
                     )
                 for result in results:

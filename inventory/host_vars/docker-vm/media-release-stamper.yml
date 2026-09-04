@@ -19,6 +19,14 @@ media_release_stamper_sonarr_api: http://sonarr:8989/api/v3
 media_release_stamper_radarr_api: http://radarr:7878/api/v3
 media_release_stamper_backup_root: /srv/live-rollbacks/docker-vm/media-release
 
+# Refresh only existing Dictionarry/TRaSH CF definitions shortly before the
+# midnight Profilarr upgrade-search window. Profile structure and scores remain
+# locally owned.
+media_release_definition_sync_enabled: true
+media_release_definition_sync_calendar: "*-*-* 23:45:00 America/Chicago"
+media_release_definition_sync_max_source_age_hours: 26
+media_release_definition_sync_snapshot_root: /srv/live-rollbacks/docker-vm/arr-policy
+
 media_release_stamper_context_enabled: true
 media_release_stamper_context_dir: /opt/arr-grab-context
 media_release_stamper_context_network: media-stack_default
@@ -28,9 +36,12 @@ media_release_stamper_context_retention_days: 120
 media_release_stamper_reconciler_apply: true
 media_release_stamper_reconciler_interval: 60
 media_release_stamper_handoff_mode: apply
+media_release_stamper_usenet_handoff_mode: apply
+media_release_stamper_xem_handoff_mode: apply
 media_release_stamper_handoff_min_payload_age: 120
 media_release_stamper_handoff_ffprobe_timeout: 30
 media_release_stamper_handoff_max_per_cycle: 5
+media_release_stamper_allow_english_original_und_audio: true
 media_release_stamper_reconciler_qbit_api: http://gluetun:8085/api/v2
 media_release_stamper_qbit_categories:
   - tv-sonarr

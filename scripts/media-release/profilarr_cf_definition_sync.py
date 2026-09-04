@@ -21,7 +21,7 @@ import urllib.error
 import urllib.request
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -30,7 +30,8 @@ DEFAULT_PROFILARR_DB = "/opt/profilarr/config/data/profilarr.db"
 DEFAULT_DATA_ROOT = "/opt/profilarr/config/data"
 DEFAULT_SNAPSHOT_ROOT = "/opt/media-stack/release-policy-snapshots"
 DEFAULT_CF_LIMIT = 100
-DEFAULT_MIN_FREE_SLOTS = 5
+DEFAULT_MAX_SOURCE_AGE_HOURS = 26.0
+REQUIRED_SOURCE_DATABASES = ("Dictionarry", "TRaSH Guides")
 
 
 @dataclass(frozen=True)
@@ -112,13 +113,19 @@ QUALITY_MODIFIER_VALUES = {
     "remux": 4,
 }
 
+RELEASE_TYPE_VALUES = {
+    "unknown": 0,
+    "singleepisode": 1,
+    "multiepisode": 2,
+    "seasonpack": 3,
+}
+
 LOCAL_CUSTOM_NAMES = {
     "2160p",
     "Anime - Dual Audio (Metadata)",
     "Anime - Dual Audio (Title)",
     "Anime Dual Audio",
     "Dubs Only (Block)",
-    "H.265",
     "Language - Not Original",
     "Local Anime Raw Group - DBD-Raws",
     "Local Anime Source Rank - Bluray",
@@ -172,8 +179,47 @@ def source_options(name: str, *aliases: str) -> tuple[SourceOption, ...]:
     )
 
 
+def dictionarry_target(
+    source_name: str,
+    targets: tuple[str, ...],
+) -> SyncTarget:
+    return SyncTarget(
+        target_name=f"Dictionarry {source_name}",
+        sources=(source("Dictionarry", source_name),),
+        targets=targets,
+    )
+
+
 def build_default_sync_targets() -> tuple[SyncTarget, ...]:
     targets: list[SyncTarget] = []
+
+    for family, tier_count in (
+        ("1080p Efficient TV Bluray", 6),
+        ("1080p Efficient TV WEB", 5),
+        ("1080p Compact TV Bluray", 6),
+        ("1080p Compact TV WEB", 5),
+        ("1080p Compact TV Trash", 2),
+    ):
+        for index in range(1, tier_count + 1):
+            targets.append(dictionarry_target(f"{family} Tier {index}", ("sonarr",)))
+
+    for family in (
+        "1080p Efficient Movie Bluray",
+        "1080p Efficient Movie WEB",
+        "1080p Compact Movie Bluray",
+        "1080p Compact Movie WEB",
+    ):
+        for index in range(1, 5):
+            targets.append(dictionarry_target(f"{family} Tier {index}", ("radarr",)))
+
+    for name in (
+        "1080p Bluray HEVC Tier 1",
+        "1080p WEB-DL HEVC Tier 1",
+    ):
+        targets.append(dictionarry_target(name, ("sonarr", "radarr")))
+
+    for index in range(1, 6):
+        targets.append(dictionarry_target(f"WEB-DL Tier {index}", ("sonarr", "radarr")))
 
     for index in range(1, 9):
         name = f"Anime BD Tier {index:02d}"
@@ -389,6 +435,73 @@ def load_candidate_databases(
     return result
 
 
+def parse_utc_time(value: Any) -> datetime | None:
+    if not value:
+        return None
+    normalized = str(value).strip().replace("Z", "+00:00")
+    if "T" not in normalized and "+" not in normalized:
+        normalized += "+00:00"
+    try:
+        parsed = datetime.fromisoformat(normalized)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
+def validate_source_freshness(
+    candidate_dbs: dict[str, dict[str, Any]],
+    max_age_hours: float,
+    now: datetime | None = None,
+) -> None:
+    if max_age_hours <= 0:
+        raise RuntimeError("max source age must be greater than zero")
+    checked_at = now or datetime.now(timezone.utc)
+    failures: list[str] = []
+    for name in REQUIRED_SOURCE_DATABASES:
+        db_info = candidate_dbs.get(name)
+        if db_info is None:
+            failures.append(f"{name} source database is unavailable")
+            continue
+        metadata = db_info["metadata"]
+        if not bool(metadata.get("enabled")):
+            failures.append(f"{name} source database is disabled")
+        if not bool(metadata.get("auto_pull")):
+            failures.append(f"{name} source database auto-pull is disabled")
+        last_synced = parse_utc_time(metadata.get("last_synced_at"))
+        if last_synced is None:
+            failures.append(f"{name} source database has no valid last sync time")
+            continue
+        age = checked_at - last_synced
+        if age < timedelta(minutes=-5):
+            failures.append(f"{name} source database last sync time is in the future")
+        elif age > timedelta(hours=max_age_hours):
+            failures.append(
+                f"{name} source database is stale ({age.total_seconds() / 3600:.1f}h; "
+                f"limit {max_age_hours:g}h)"
+            )
+    if failures:
+        raise RuntimeError("; ".join(failures))
+
+
+def running_pcd_sync_jobs(profilarr_db: Path) -> list[int]:
+    conn = sqlite3.connect(f"file:{profilarr_db}?mode=ro", uri=True)
+    try:
+        rows = conn.execute(
+            """
+            SELECT id
+            FROM job_queue
+            WHERE job_type IN ('pcd.link', 'pcd.sync')
+              AND status = 'running'
+            ORDER BY id
+            """
+        ).fetchall()
+    finally:
+        conn.close()
+    return [int(row[0]) for row in rows]
+
+
 def normalize_token(value: str) -> str:
     return re.sub(r"[^a-z0-9]+", "", value.lower())
 
@@ -533,6 +646,36 @@ def condition_payload(
             "select",
         )
 
+    if condition_type == "release_type":
+        if arr_name != "sonarr":
+            raise RuntimeError(
+                f"{condition['custom_format_name']}: release type is unsupported by {arr_name}"
+            )
+        row = conn.execute(
+            """
+            SELECT release_type
+            FROM condition_release_types
+            WHERE custom_format_name = ? AND condition_name = ?
+            """,
+            params,
+        ).fetchone()
+        if row is None:
+            return None
+        key = normalize_token(str(row["release_type"]))
+        if key not in RELEASE_TYPE_VALUES:
+            raise RuntimeError(
+                f"{condition['custom_format_name']}: unsupported release type "
+                f"{row['release_type']!r}"
+            )
+        return spec_payload(
+            arr_name,
+            condition,
+            "ReleaseTypeSpecification",
+            "Release Type",
+            RELEASE_TYPE_VALUES[key],
+            "select",
+        )
+
     raise RuntimeError(f"{condition['custom_format_name']}: unsupported condition type {condition_type!r}")
 
 
@@ -656,6 +799,29 @@ def canonical_specs(custom_format: dict[str, Any]) -> list[dict[str, Any]]:
 
 def specs_changed(live: dict[str, Any], desired: dict[str, Any]) -> bool:
     return canonical_specs(live) != canonical_specs(desired)
+
+
+def spec_deltas(
+    live: dict[str, Any],
+    desired: dict[str, Any],
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    live_specs = canonical_specs(live)
+    desired_specs = canonical_specs(desired)
+    live_keys = {json.dumps(spec, sort_keys=True, separators=(",", ":")) for spec in live_specs}
+    desired_keys = {
+        json.dumps(spec, sort_keys=True, separators=(",", ":")) for spec in desired_specs
+    }
+    added = [
+        spec
+        for spec in desired_specs
+        if json.dumps(spec, sort_keys=True, separators=(",", ":")) not in live_keys
+    ]
+    removed = [
+        spec
+        for spec in live_specs
+        if json.dumps(spec, sort_keys=True, separators=(",", ":")) not in desired_keys
+    ]
+    return added, removed
 
 
 def profile_references(
@@ -783,7 +949,6 @@ def process_instance(
     sync_targets: tuple[SyncTarget, ...],
     snapshot_dir: Path,
     cf_limit: int,
-    min_free_slots: int,
     min_spec_retention_ratio: float,
     allow_major_spec_shrink: bool,
     inspect_targets: set[str],
@@ -799,10 +964,9 @@ def process_instance(
     }
     referenced, scored = profile_references(profiles, custom_formats_by_id)
 
-    if len(custom_formats) > cf_limit - min_free_slots:
+    if len(custom_formats) > cf_limit:
         raise RuntimeError(
-            f"{instance.name}: CF count {len(custom_formats)} leaves fewer than "
-            f"{min_free_slots} free slots under limit {cf_limit}"
+            f"{instance.name}: CF count {len(custom_formats)} exceeds limit {cf_limit}"
         )
 
     sync_targets_by_name = {target.target_name: target for target in sync_targets}
@@ -911,6 +1075,7 @@ def process_instance(
             )
             continue
         changed = specs_changed(live, desired)
+        added_specs, removed_specs = spec_deltas(live, desired)
         live_spec_count = len(live.get("specifications") or [])
         desired_spec_count = len(desired.get("specifications") or [])
         if inspect_this:
@@ -951,6 +1116,8 @@ def process_instance(
                 "live_spec_count": live_spec_count,
                 "desired_spec_count": desired_spec_count,
                 "rename_flag_preserved": bool(live.get("includeCustomFormatWhenRenaming")),
+                "added_specs": added_specs,
+                "removed_specs": removed_specs,
             }
         )
         if changed and not dry_run:
@@ -965,7 +1132,6 @@ def process_instance(
         "snapshot_dir": str(snapshot_dir),
         "custom_format_count": len(custom_formats),
         "custom_format_limit": cf_limit,
-        "min_free_slots": min_free_slots,
         "ownership": ownership,
         "candidate_summaries": candidate_summary(candidate_dbs, set(custom_formats_by_name)),
         "planned_changes": changes,
@@ -981,7 +1147,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--data-root", default=DEFAULT_DATA_ROOT)
     parser.add_argument("--snapshot-root", default=DEFAULT_SNAPSHOT_ROOT)
     parser.add_argument("--cf-limit", type=int, default=DEFAULT_CF_LIMIT)
-    parser.add_argument("--min-free-slots", type=int, default=DEFAULT_MIN_FREE_SLOTS)
+    parser.add_argument(
+        "--max-source-age-hours",
+        type=float,
+        default=DEFAULT_MAX_SOURCE_AGE_HOURS,
+        help="refuse apply when an enabled upstream source is older than this many hours",
+    )
     parser.add_argument(
         "--include-disabled-databases",
         action="store_true",
@@ -1008,14 +1179,30 @@ def parse_args() -> argparse.Namespace:
         help="print live and desired specification details for a target custom format",
     )
     parser.add_argument("--manifest", help="optional JSON manifest overriding the embedded sync target list")
-    parser.add_argument("--dry-run", action="store_true")
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument(
+        "--apply",
+        action="store_true",
+        help="update existing Arr custom-format definitions",
+    )
+    mode.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="audit only (the default; retained for explicit operator commands)",
+    )
     parser.add_argument("--json", action="store_true")
     return parser.parse_args()
 
 
 def format_spec_for_text(spec: dict[str, Any]) -> str:
+    def display_value(value: Any) -> str:
+        rendered = repr(value)
+        if len(rendered) > 180:
+            return rendered[:177] + "..."
+        return rendered
+
     fields = ", ".join(
-        f"{item.get('name')}={item.get('value')!r}"
+        f"{item.get('name')}={display_value(item.get('value'))}"
         for item in spec.get("fields") or []
     )
     return (
@@ -1029,8 +1216,7 @@ def print_text(report: dict[str, Any]) -> None:
     for result in report["instances"]:
         print()
         print(
-            "{instance}: {mode}; CFs={custom_format_count}/{custom_format_limit}; "
-            "min_free_slots={min_free_slots}".format(
+            "{instance}: {mode}; CFs={custom_format_count}/{custom_format_limit}".format(
                 mode="dry-run" if result["dry_run"] else "applied",
                 **result,
             )
@@ -1055,6 +1241,14 @@ def print_text(report: dict[str, Any]) -> None:
             print(
                 "    change {target}: {source} specs {live_spec_count}->{desired_spec_count}".format(**item)
             )
+            for spec in item["added_specs"][:8]:
+                print(f"      + {format_spec_for_text(spec)}")
+            if len(item["added_specs"]) > 8:
+                print(f"      ... {len(item['added_specs']) - 8} more additions")
+            for spec in item["removed_specs"][:8]:
+                print(f"      - {format_spec_for_text(spec)}")
+            if len(item["removed_specs"]) > 8:
+                print(f"      ... {len(item['removed_specs']) - 8} more removals")
         for item in result["skipped"][:20]:
             source = f" source={item['source']}" if item.get("source") else ""
             print(f"    skip {item['target']}: {item['reason']}{source}")
@@ -1085,20 +1279,31 @@ def print_text(report: dict[str, Any]) -> None:
 
 def main() -> int:
     args = parse_args()
+    dry_run = not args.apply
+    profilarr_db = Path(args.profilarr_db)
+    if args.apply:
+        running_jobs = running_pcd_sync_jobs(profilarr_db)
+        if running_jobs:
+            raise RuntimeError(
+                "Profilarr PCD synchronization is running; refusing concurrent apply "
+                f"(jobs {running_jobs})"
+            )
     timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-    suffix = "profilarr-cf-definition-sync-dry-run" if args.dry_run else "profilarr-cf-definition-sync"
+    suffix = "profilarr-cf-definition-sync-dry-run" if dry_run else "profilarr-cf-definition-sync"
     snapshot_dir = Path(args.snapshot_root) / f"{timestamp}-{suffix}"
     snapshot_dir.mkdir(parents=True, exist_ok=False)
 
     candidate_dbs = load_candidate_databases(
-        Path(args.profilarr_db),
+        profilarr_db,
         Path(args.data_root),
         args.include_disabled_databases,
     )
+    if args.apply:
+        validate_source_freshness(candidate_dbs, args.max_source_age_hours)
     sync_targets = load_manifest(args.manifest)
     report = {
         "snapshot_dir": str(snapshot_dir),
-        "dry_run": args.dry_run,
+        "dry_run": dry_run,
         "instances": [
             process_instance(
                 instance,
@@ -1106,11 +1311,10 @@ def main() -> int:
                 sync_targets,
                 snapshot_dir,
                 args.cf_limit,
-                args.min_free_slots,
                 args.min_spec_retention_ratio,
                 args.allow_major_spec_shrink,
                 set(args.inspect_target),
-                args.dry_run,
+                dry_run,
             )
             for instance in INSTANCES
         ],

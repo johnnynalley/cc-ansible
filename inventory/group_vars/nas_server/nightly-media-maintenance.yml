@@ -2,8 +2,10 @@
 # NAS Server - Nightly Media Maintenance Coordination
 # =============================================================================
 
-# Disabled while Profilarr native upgrades run continuously.
-nightly_media_maintenance_enabled: false
+# The coordinator owns the bounded Profilarr upgrade window. Mergerfs balance
+# work remains opt-in through its queue and is not scheduled merely by enabling
+# this coordinator.
+nightly_media_maintenance_enabled: true
 nightly_media_maintenance_window: "00:00-07:00"
 nightly_media_maintenance_state_dir: /var/lib/nightly-media-maintenance
 

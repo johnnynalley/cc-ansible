@@ -19,6 +19,113 @@
   gather_facts: false
 
   tasks:
+    - name: Configure Profilarr-backed Arr definition convergence
+      when: media_release_definition_sync_enabled | default(false)
+      tags:
+        - media-release-definition-sync
+      block:
+        - name: Ensure Profilarr-backed Arr definition rollback directory exists
+          ansible.builtin.file:
+            path: "{{ media_release_definition_sync_snapshot_root }}"
+            state: directory
+            owner: root
+            group: root
+            mode: "0755"
+
+        - name: Deploy Profilarr-backed Arr definition sync
+          ansible.builtin.copy:
+            src: ../../scripts/media-release/profilarr_cf_definition_sync.py
+            dest: /usr/local/sbin/profilarr-cf-definition-sync
+            owner: root
+            group: root
+            mode: "0755"
+
+        - name: Deploy Arr profile math audit for definition convergence
+          ansible.builtin.copy:
+            src: ../../scripts/media-release/arr_profile_math_audit.py
+            dest: /usr/local/sbin/arr-profile-math-audit
+            owner: root
+            group: root
+            mode: "0755"
+
+        - name: Deploy Profilarr-backed Arr definition sync service
+          ansible.builtin.copy:
+            dest: /etc/systemd/system/profilarr-cf-definition-sync.service
+            owner: root
+            group: root
+            mode: "0644"
+            content: |
+              [Unit]
+              Description=Converge existing Arr custom-format definitions from Profilarr
+              After=network-online.target docker.service
+              Wants=network-online.target
+
+              [Service]
+              Type=oneshot
+              User=root
+              Group=root
+              UMask=0077
+              RuntimeDirectory=profilarr-cf-definition-sync
+              Environment=PYTHONDONTWRITEBYTECODE=1
+              ExecStart=/usr/bin/flock --nonblock /run/profilarr-cf-definition-sync/lock /usr/local/sbin/profilarr-cf-definition-sync --apply --snapshot-root {{ media_release_definition_sync_snapshot_root }} --max-source-age-hours {{ media_release_definition_sync_max_source_age_hours | default(26) }}
+              ExecStartPost=/usr/local/sbin/arr-profile-math-audit
+              TimeoutStartSec=10min
+              Nice=10
+              IOSchedulingClass=best-effort
+              IOSchedulingPriority=6
+              NoNewPrivileges=true
+              PrivateDevices=true
+              PrivateTmp=true
+              ProtectControlGroups=true
+              ProtectHome=true
+              ProtectKernelModules=true
+              ProtectKernelTunables=true
+              ProtectSystem=strict
+              ReadWritePaths={{ media_release_definition_sync_snapshot_root }}
+              RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+              RestrictRealtime=true
+              LockPersonality=true
+              MemoryDenyWriteExecute=true
+              CapabilityBoundingSet=
+
+        - name: Deploy Profilarr-backed Arr definition sync timer
+          ansible.builtin.copy:
+            dest: /etc/systemd/system/profilarr-cf-definition-sync.timer
+            owner: root
+            group: root
+            mode: "0644"
+            content: |
+              [Unit]
+              Description=Run Profilarr-backed Arr definition convergence before nightly upgrades
+
+              [Timer]
+              OnCalendar={{ media_release_definition_sync_calendar | default('*-*-* 23:45:00 America/Chicago') }}
+              AccuracySec=1min
+              RandomizedDelaySec=0
+              Persistent=false
+              Unit=profilarr-cf-definition-sync.service
+
+              [Install]
+              WantedBy=timers.target
+
+        - name: Validate Profilarr-backed Arr definition sync units
+          ansible.builtin.command:
+            argv:
+              - systemd-analyze
+              - verify
+              - /etc/systemd/system/profilarr-cf-definition-sync.service
+              - /etc/systemd/system/profilarr-cf-definition-sync.timer
+          changed_when: false
+          when: not ansible_check_mode
+
+        - name: Enable Profilarr-backed Arr definition sync timer
+          ansible.builtin.systemd_service:
+            name: profilarr-cf-definition-sync.timer
+            enabled: true
+            state: started
+            daemon_reload: true
+          when: not ansible_check_mode
+
     - name: Read Sonarr config for media release stamping
       ansible.builtin.slurp:
         src: "{{ media_release_stamper_sonarr_config_path | default('/opt/media-stack/sonarr/config.xml') }}"

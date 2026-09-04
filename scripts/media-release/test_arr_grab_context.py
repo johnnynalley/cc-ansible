@@ -64,6 +64,71 @@ class GrabContextTests(unittest.TestCase):
         self.assertTrue(MODULE.alias_matches_source("DBZ", "DBZ S01E01 1080p"))
         self.assertFalse(MODULE.alias_matches_source("DBZ", "SomeDBZLikeTitle S01E01"))
 
+    def test_release_without_disambiguating_year_matches_canonical_title(self) -> None:
+        result = MODULE.identity_evidence(
+            "Blade (2011)",
+            [],
+            "Blade.S01.1080p.AMZN.WEB-DL.DDP5.1.H.264-Azkars",
+        )
+        self.assertTrue(result["identity_match"])
+        self.assertEqual(result["matched_alias"], "Blade")
+
+    def test_short_generic_title_does_not_gain_yearless_alias(self) -> None:
+        result = MODULE.identity_evidence(
+            "It (1990)",
+            [],
+            "Welcome.to.Derry.S01E01.1080p.x265-GROUP",
+        )
+        self.assertFalse(result["identity_match"])
+
+    def test_leading_article_can_be_removed_from_distinctive_title(self) -> None:
+        result = MODULE.identity_evidence(
+            "The Incredible Hulk (1982)",
+            [],
+            "Incredible Hulk (1982) S1 Ep4 (DB2K9-DCP).avi",
+        )
+        self.assertTrue(result["identity_match"])
+        self.assertEqual(result["matched_alias"], "Incredible Hulk (1982)")
+
+    def test_html_ampersand_and_possessive_normalize_for_identity(self) -> None:
+        result = MODULE.identity_evidence(
+            "Marvel's Cloak & Dagger",
+            [],
+            "Marvels.Cloak.&amp;.Dagger.S01E10.1080p.WEB-DL",
+        )
+        self.assertTrue(result["identity_match"])
+
+    def test_distinctive_episode_title_can_confirm_romanized_series(self) -> None:
+        result = MODULE.identity_evidence(
+            "Disney Twisted-Wonderland: The Animation",
+            [],
+            "Dizuni.Tsuisuteddo.Wandarando.za.Animeshon.S01E08."
+            "Finale.for.Heartslabyul.1080p.WEB-DL",
+            [{"season": 1, "episode": 8, "title": "Finale for Heartslabyul"}],
+        )
+        self.assertTrue(result["identity_match"])
+        self.assertEqual(result["matched_episode_title"], "Finale for Heartslabyul")
+
+    def test_short_multiword_episode_title_can_confirm_romanized_series(self) -> None:
+        result = MODULE.identity_evidence(
+            "Disney Twisted-Wonderland: The Animation",
+            [],
+            "Dizuni.Tsuisuteddo.Wandarando.za.Animeshon.S01E06."
+            "An.Army.of.One.1080p.WEB-DL",
+            [{"season": 1, "episode": 6, "title": "An Army of One"}],
+        )
+        self.assertTrue(result["identity_match"])
+        self.assertEqual(result["matched_episode_title"], "An Army of One")
+
+    def test_generic_episode_title_cannot_override_wrong_series(self) -> None:
+        result = MODULE.identity_evidence(
+            "She-Hulk: Attorney at Law",
+            [],
+            "L.A.Law.S01E01.Episode.1.1080p.WEB-DL",
+            [{"season": 1, "episode": 1, "title": "Episode 1"}],
+        )
+        self.assertFalse(result["identity_match"])
+
     @mock.patch.object(MODULE, "enrich_media")
     @mock.patch.object(MODULE, "capture_policy_state")
     def test_sonarr_context_records_expected_episode_and_language(
@@ -91,7 +156,15 @@ class GrabContextTests(unittest.TestCase):
                 "instanceName": "Sonarr",
                 "downloadId": "ABC123",
                 "series": {"id": 7, "title": "Dragon Ball Kai"},
-                "episodes": [{"id": 99, "seasonNumber": 1, "episodeNumber": 1, "title": "Prologue"}],
+                "episodes": [
+                    {
+                        "id": 99,
+                        "seasonNumber": 1,
+                        "episodeNumber": 1,
+                        "absoluteEpisodeNumber": 17,
+                        "title": "Prologue",
+                    }
+                ],
                 "release": {
                     "releaseTitle": "Dragon.Ball.Z.Kai.S01E01.1080p.x265-GROUP",
                     "releaseGroup": "GROUP",
@@ -106,6 +179,7 @@ class GrabContextTests(unittest.TestCase):
         self.assertEqual(context["original_languages"], ["jpn"])
         self.assertTrue(context["identity_match"])
         self.assertEqual(context["expected_episodes"][0]["episode"], 1)
+        self.assertEqual(context["expected_episodes"][0]["absolute_episode"], 17)
         self.assertEqual(context["custom_format_score"], 140000)
         self.assertEqual(context["schema_version"], 2)
         self.assertEqual(context["protocol"], "torrent")

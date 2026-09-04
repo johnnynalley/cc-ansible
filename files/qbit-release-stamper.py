@@ -36,6 +36,13 @@ EPISODE_TOKEN_RE = re.compile(r"(?i)\bS\d{1,2}E\d{1,3}\b")
 EPISODE_PREFIX_RE = re.compile(
     r"(?i)^(?P<group>\[[^\]]+\]\s*)?.*?(?P<episode>S\d{1,2}E\d{1,3}.*)$"
 )
+EXPLICIT_EPISODE_RE = re.compile(r"(?i)\bS(?P<season>\d{1,2})E(?P<episode>\d{1,3})\b")
+SEASON_NUMBER_EPISODE_RE = re.compile(
+    r"(?i)\bS(?P<season>\d{1,2})\s*[-._]\s*(?P<episode>\d{1,3})\b"
+)
+BARE_NUMBERED_EPISODE_RE = re.compile(
+    r"(?P<prefix>\s+-\s+)(?P<number>\d{1,4})(?P<suffix>(?:\s+-\s+|\s+\[))"
+)
 PLATFORM_TAG_PATTERNS = (
     ("CR", re.compile(r"(?i)(?:^|[\s._\-\[\(])(?:CR|Crunchyroll)(?:$|[\s._\-\]\)])")),
     ("NF", re.compile(r"(?i)(?:^|[\s._\-\[\(])(?:NF|Netflix)(?:$|[\s._\-\]\)])")),
@@ -765,6 +772,26 @@ def series_title_from_arr_record(record: dict | None) -> str | None:
     return title or None
 
 
+def expected_episodes_from_context(
+    context: dict | None,
+    arr_record: dict | None,
+) -> list[dict[str, int]]:
+    episodes = [
+        dict(item)
+        for item in (context or {}).get("expected_episodes", [])
+        if isinstance(item, dict)
+    ]
+    record_episode = (arr_record or {}).get("episode")
+    if isinstance(record_episode, dict):
+        record_id = record_episode.get("id")
+        for episode in episodes:
+            if record_id is None or episode.get("id") == record_id:
+                absolute = record_episode.get("absoluteEpisodeNumber")
+                if isinstance(absolute, int):
+                    episode["absolute_episode"] = absolute
+    return episodes
+
+
 def safe_title_component(title: str) -> str:
     cleaned = re.sub(r"[\\/:\x00]+", " ", title)
     cleaned = re.sub(r"\s+", " ", cleaned)
@@ -785,6 +812,75 @@ def title_words_present(series_title: str, basename: str) -> bool:
     return haystack[: len(needle)] == needle
 
 
+def canonical_year_is_missing(series_title: str, basename: str) -> bool:
+    match = re.search(r"\(((?:19|20)\d{2})\)\s*$", series_title)
+    if not match:
+        return False
+    year = match.group(1)
+    yearless = series_title[: match.start()].strip()
+    return title_words_present(yearless, basename) and not re.search(
+        rf"(?<!\d){re.escape(year)}(?!\d)", basename
+    )
+
+
+def path_with_expected_episode_target(
+    path: str,
+    expected_episodes: list[dict[str, int]] | None,
+    video_count: int,
+) -> str:
+    episodes = [
+        item
+        for item in expected_episodes or []
+        if isinstance(item.get("season"), int) and isinstance(item.get("episode"), int)
+    ]
+    if not episodes or len(episodes) != video_count:
+        return path
+    by_episode = {int(item["episode"]): int(item["season"]) for item in episodes}
+    if len(by_episode) != len(episodes):
+        return path
+
+    posix_path = PurePosixPath(path)
+    basename = posix_path.name
+    explicit = EXPLICIT_EPISODE_RE.search(basename)
+    if explicit:
+        episode = int(explicit.group("episode"))
+        season = by_episode.get(episode)
+        if season is None or season == int(explicit.group("season")):
+            return path
+        replacement = f"S{season:02}E{episode:02}"
+        return str(posix_path.with_name(
+            f"{basename[:explicit.start()]}{replacement}{basename[explicit.end():]}"
+        ))
+
+    pair = SEASON_NUMBER_EPISODE_RE.search(basename)
+    if pair:
+        episode = int(pair.group("episode"))
+        season = by_episode.get(episode)
+        if season is None:
+            return path
+        replacement = f"S{season:02}E{episode:02}"
+        return str(posix_path.with_name(
+            f"{basename[:pair.start()]}{replacement}{basename[pair.end():]}"
+        ))
+
+    if len(episodes) != 1:
+        return path
+    bare = BARE_NUMBERED_EPISODE_RE.search(basename)
+    if not bare:
+        return path
+    episode = episodes[0]
+    valid_numbers = {int(episode["episode"])}
+    absolute = episode.get("absolute_episode")
+    if isinstance(absolute, int):
+        valid_numbers.add(absolute)
+    if int(bare.group("number")) not in valid_numbers:
+        return path
+    replacement = f"{bare.group('prefix')}S{episode['season']:02}E{episode['episode']:02}{bare.group('suffix')}"
+    return str(posix_path.with_name(
+        f"{basename[:bare.start()]}{replacement}{basename[bare.end():]}"
+    ))
+
+
 def path_with_episode_title_prefix(
     path: str,
     series_title: str | None,
@@ -796,14 +892,15 @@ def path_with_episode_title_prefix(
     basename = posix_path.name
     if not EPISODE_TOKEN_RE.search(basename):
         return path
-    if title_words_present(series_title, basename):
+    needs_year = canonical_year_is_missing(series_title, basename)
+    if title_words_present(series_title, basename) and not needs_year:
         return path
     alias_present = any(
         title_words_present(alias, basename)
         for alias in (aliases or [])
         if alias and alias.casefold() != series_title.casefold()
     )
-    if not alias_present and not BARE_EPISODE_RE.search(basename):
+    if not needs_year and not alias_present and not BARE_EPISODE_RE.search(basename):
         return path
     title = safe_title_component(series_title)
     if not title:
@@ -1013,8 +1110,11 @@ def rename_with_tags(
     release_group: str | None,
     series_title: str | None,
     aliases: list[str] | None = None,
+    expected_episodes: list[dict[str, int]] | None = None,
+    video_count: int = 0,
 ) -> str:
-    posix_path = PurePosixPath(path_with_episode_title_prefix(path, series_title, aliases))
+    targeted = path_with_expected_episode_target(path, expected_episodes, video_count)
+    posix_path = PurePosixPath(path_with_episode_title_prefix(targeted, series_title, aliases))
     stem = posix_path.stem
     if tags:
         stem = f"{stem} {' '.join(tags)}"
@@ -1031,18 +1131,36 @@ def rename_file_with_alternatives(
     release_group: str | None,
     series_title: str | None,
     aliases: list[str] | None,
+    expected_episodes: list[dict[str, int]] | None,
+    video_count: int,
     alternatives: list[str],
 ) -> tuple[str, str, str | None]:
     attempts = [old_path, *alternatives]
     errors: list[str] = []
     for candidate in attempts:
-        candidate_new_path = rename_with_tags(candidate, tags, release_group, series_title, aliases)
+        candidate_new_path = rename_with_tags(
+            candidate,
+            tags,
+            release_group,
+            series_title,
+            aliases,
+            expected_episodes,
+            video_count,
+        )
         try:
             client.rename_file(torrent_hash, candidate, candidate_new_path)
             return candidate, candidate_new_path, None
         except Exception as exc:  # noqa: BLE001 - try alternate qBit path forms.
             errors.append(f"{candidate}: {exc}")
-    return old_path, rename_with_tags(old_path, tags, release_group, series_title, aliases), "; ".join(errors[:3])
+    return old_path, rename_with_tags(
+        old_path,
+        tags,
+        release_group,
+        series_title,
+        aliases,
+        expected_episodes,
+        video_count,
+    ), "; ".join(errors[:3])
 
 
 def parse_categories(value: str) -> set[str]:
@@ -1152,6 +1270,7 @@ def main() -> int:
             for value in (grab_context or {}).get("aliases", [])
             if str(value).strip()
         ]
+        expected_episodes = expected_episodes_from_context(grab_context, arr_record)
         trusted_release_group = release_group_candidate(
             str((grab_context or {}).get("release_group") or "")
         )
@@ -1206,6 +1325,12 @@ def main() -> int:
                         f"{exc}"
                     )
 
+        video_count = sum(
+            1
+            for item in torrent_files
+            if PurePosixPath(str(item.get("name") or "")).suffix.lower() in VIDEO_EXTENSIONS
+        )
+
         for torrent_file in torrent_files:
             old_path = str(torrent_file.get("name") or "")
             if PurePosixPath(old_path).suffix.lower() not in VIDEO_EXTENSIONS:
@@ -1222,7 +1347,12 @@ def main() -> int:
                 trusted_release_group,
             )
             if not tags and not release_group:
-                prefixed_path = path_with_episode_title_prefix(old_path, series_title, aliases)
+                targeted_path = path_with_expected_episode_target(
+                    old_path, expected_episodes, video_count
+                )
+                prefixed_path = path_with_episode_title_prefix(
+                    targeted_path, series_title, aliases
+                )
                 if prefixed_path == old_path:
                     skipped_no_stamp += 1
                     if not reasons:
@@ -1239,7 +1369,15 @@ def main() -> int:
                     log(f"no stamp needed for {old_path!r}; reasons={','.join(reasons)}")
                     continue
 
-            new_path = rename_with_tags(old_path, tags, release_group, series_title, aliases)
+            new_path = rename_with_tags(
+                old_path,
+                tags,
+                release_group,
+                series_title,
+                aliases,
+                expected_episodes,
+                video_count,
+            )
             if new_path == old_path:
                 continue
 
@@ -1257,6 +1395,8 @@ def main() -> int:
                     release_group,
                     series_title,
                     aliases,
+                    expected_episodes,
+                    video_count,
                     [
                         str(name)
                         for name in torrent_file.get("alternative_names", [])

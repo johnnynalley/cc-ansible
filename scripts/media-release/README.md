@@ -45,6 +45,11 @@
   Dictionarry tier stacks, bounded TRaSH fallback tiers, Bluray/WEB source
   ordering, regular enabled-quality grouping, service/repack tiebreakers,
   legacy tier drift, and the CF limit.
+- `astra_arr_readonly_report.py`: Root-only fixed-code adapter for Astra's
+  `arr-queue`, `arr-policy`, `arr-transactions`, and `arr-storage` host-admin
+  health probes. It invokes only managed read-only audits, allowlists and
+  bounds returned fields, and exposes no generic command, Arr write, search,
+  import, queue-removal, or blocklist operation.
 - `arr_import_reconciler.py`: Exact-ledger import fallback for completed
   Sonarr/Radarr downloads blocked only because the release was matched by ID.
   It imports only rejection-free monitored candidates whose episode/movie IDs
@@ -65,7 +70,10 @@
   rollout, and any failed probe/write/readback leaves the queue item untouched.
   Same-media episode/season target mismatches remain review-only, and a
   persistent rotating cursor prevents unresolved rows from starving later
-  terminal downloads during bounded cycles.
+  terminal downloads during bounded cycles. Its opt-in untagged-audio exception
+  is restricted to one `und` stream on English-original regular profiles with
+  no dual, multi-audio, dubbed, or foreign-language title marker; it remains
+  disabled by default and records every accepted assumption in audit output.
 - `arr-import-reconciler.Dockerfile`: Minimal local reconciler image extension
   that adds `ffprobe` to the unversioned Python Alpine base. The reconciler
   receives a read-only media mount and no Docker socket.
@@ -79,12 +87,24 @@
 - `arr_quality_profile_report.py`: Read-only Sonarr/Radarr report of native
   quality-profile groups, useful for checking whether profile quality order is
   still blocking custom-format upgrades.
+- `arr_native_backup.py`: Trigger and poll one native Sonarr, Radarr, or
+  Prowlarr backup, then verify and report the newly created archive without
+  printing API keys.
+- `arr_zero_score_cf_cleanup.py`: Remove explicitly named custom formats only
+  after proving they have zero score on every profile and are not rename
+  formats. Apply uses Arr's native custom-format deletion lifecycle and verifies
+  that both the definition and all profile references disappear; dry-run is the
+  default and creates no files. Apply requires the managed off-host NFS rollback
+  mount and writes private CF/profile snapshots before the first deletion.
 - `arr_queue_remove.py`: Dry-run by default Sonarr/Radarr queue-row removal
-  helper with status/tracked-status/title/message filters. `--summary-only`
+  helper with status/tracked-status/title/message filters plus repeatable exact
+  `--download-id` selection. `--summary-only`
   keeps large-queue evidence bounded while retaining aggregate operation
   results. Client-removing cleanup operates once per exact download ID so pack
   rows cannot churn queue IDs during removal. `--apply` requires an existing
-  live rollback backup path and supports non-blocklisting cleanup.
+  root-only rollback path, writes a `0600` manifest containing the exact
+  selected records and filters there before deletion, and supports
+  non-blocklisting cleanup.
 - `arr_import_status_snapshot.py`: Read-only Sonarr/Radarr import-recovery
   snapshot that fully paginates queues, summarizes blocked import reasons,
   active commands, and recent grab/import/delete history.
@@ -99,6 +119,10 @@
 - `arr_regular_dual_audio_profiles.py`: Creates or updates non-English regular
   dual-audio efficient profiles and the parsed-language `Regular Dual Audio`
   custom format, with live backups before apply.
+- `arr_regular_english_language_guard.py`: Maintains the negative title-side
+  audio guard used only by English-original regular profiles. It recognizes
+  explicit foreign/dual/multi-audio markers and standalone `MULTI` release
+  tokens while excluding `MultiSub`/`MULTI.SUBS` subtitle markers.
 - `arr_promote_efficient_profiles.py`: Promotes accepted Profilarr test
   profiles into preserved production profile IDs, creates frozen balanced
   clones, reassigns media to efficient profiles, updates Seerr defaults, and
@@ -121,26 +145,66 @@
   authenticated web app or a direct SQLite/clone fallback, taking a Profilarr
   DB backup first and without printing secrets.
 - `profilarr_nightly_upgrade.py`: Opens and closes Profilarr's native Arr
-  upgrade scheduler for the overnight maintenance coordinator.
+  upgrade scheduler for the overnight maintenance coordinator. It queues one
+  immediate Sonarr run when the window opens, keeps the next native Sonarr cron
+  outside that window to prevent overlapping full-series searches, and leaves
+  Radarr's bounded movie batches hourly.
 - `profilarr_selective_cf_import.py`: Imports curated Profilarr custom formats
   into Arr test profiles without importing upstream quality profiles.
 - `profilarr_sonarr_upgrade_strategy.py`: Adjusts Profilarr's Sonarr upgrade
-  filter through stored settings with a SQLite backup.
+  filter through stored settings with a SQLite backup. Its optional episode
+  ceiling keeps Profilarr's native whole-series search limited to bounded
+  series without patching Profilarr.
 - `profilarr_state_audit.py`: Read-only audit of Profilarr database, scheduler,
   and upgrade-job state.
 - `profilarr_tier_candidate_compare.py`: Read-only comparison of live Arr
   release-tier custom formats against Profilarr/Dictionarry tier candidates,
   including optional token filtering for checking whether specific release
   groups are present upstream.
+- `prowlarr_indexer_policy_audit.py`: Read-only Prowlarr indexer-policy report
+  plus synchronized Sonarr/Radarr indexer settings, limited to enabled/search
+  state, protocol, priority, application profile, tags, seeding criteria, and
+  query/grab/minimum-seeder limits. It excludes tracker URLs, API keys,
+  credentials, and arbitrary indexer fields.
+- `prowlarr_indexer_app_profile.py`: Dry-run by default helper that moves one
+  exact Prowlarr indexer to an existing application profile. Apply requires a
+  root-only rollback path, stores the complete pre-change indexer record there,
+  runs Prowlarr's native downstream sync, verifies Sonarr and Radarr flags, and
+  restores the original record if convergence fails.
 - `qbit_queue_status.py`: Read-only qBittorrent torrent-state summary for
   Arr queue incidents. Reads `/etc/qbit-port-sync.env` on `docker-vm`, logs in
   without printing secrets, and summarizes torrent states, categories, paths,
-  and optional tracker messages. Cleanup is opt-in only: `--apply-delete`
-  requires `--delete-states` plus a manifest path, deletes through the
-  qBittorrent API with files, and skips finished/seeding torrents by default.
+  add/last-activity/completion timestamps, and optional tracker messages.
+  `--correlate-arr` joins exact torrent hashes to Sonarr/Radarr queue rows and
+  classifies long-idle zero-peer stalls, partial stalls, missing payloads,
+  orphaned client records, and explicit release-title/queue-season conflicts.
+  `--include-arr-history` adds event counts, timestamp-deduplicated grab-batch
+  counts, and originating indexer names from exact-download-ID Arr history.
+  The correlator is read-only and does not blocklist, remove, or search.
+  Tracker URLs are reduced to scheme/host/port so announce credentials cannot
+  enter console output or deletion manifests.
+  Cleanup is opt-in only: `--apply-delete`
+  requires `--delete-states`, a manifest directly inside a root-only rollback
+  path, and a complete `.torrent` plus `.fastresume` metadata backup for every
+  selected hash before it deletes through the qBittorrent API. Optional
+  repeatable `--arr-classification` filters allow an exact correlated class such
+  as `orphaned_in_download_client`. Applied cleanup can also require repeatable
+  exact `--expected-hash` values; any missing hash or classification drift
+  aborts the entire operation. Finished/seeding torrents remain skipped by
+  default. `--backup-metadata-only` requires exact expected hashes and stores
+  both restorable qBittorrent metadata files plus a `0600` manifest without
+  deleting or changing the torrent.
   `--preserve-files` changes an explicit applied removal to retain payload
   files, which is intended for a backed-up recheck canary rather than routine
   queue cleanup.
+- `sonarr_embedded_subtitle_verifier.py`: Root-side typed helper used by Astra's
+  existing host-administration boundary on `docker-vm`. It searches Sonarr by
+  exact series/season, returns opaque candidate IDs without download URLs,
+  stages one torrent outside Sonarr's category, downloads a single sample
+  episode, verifies actual `ffprobe` streams, and can expand only an eligible
+  sample to the exact season episode set. It never imports or replaces library
+  files. Transaction IDs, qBittorrent categories, paths, and cleanup remain
+  bounded; tracker and application credentials never leave the host.
 - `sab_queue_status.py`: Read-only SABnzbd queue and incomplete-folder summary
   for Arr import incidents. Reads SAB's local config on `docker-vm`, queries the
   API without printing secrets, compares active queue items with `/incomplete`
@@ -208,8 +272,14 @@
   are flagged for review; the flag does not mutate or reject releases.
 - `sonarr_grab_forensics.py`: Classifies why Sonarr queue items were grabbed
   and why they may not import; supports focused `--filter`, recent grab
-  `--history-size`, and read-only `--manual-import` rescoring checks for queue
-  pollution investigations.
+  `--history-size`, exact repeatable `--classification` filters, and read-only
+  `--manual-import` rescoring checks for queue pollution investigations.
+- `sonarr_large_series_upgrade.py`: Dry-run-by-default companion for series
+  excluded from Profilarr's whole-series episode ceiling. During the open
+  overnight window it rotates through monitored seasons, queues at most one
+  native `SeasonSearch`, and skips if Profilarr, RSS, another Sonarr search, or
+  the available-memory guard is active. It never imports, deletes, or
+  blocklists releases.
 - `sonarr_jojo_stardust_s01_repair.py`: Narrow JoJo Stardust Crusaders S01
   mismatch repair and blocklist helper.
 - `sonarr_manual_import_candidates.py`: Manual-import candidate report for one
@@ -241,7 +311,8 @@
   files, queue, and grab history.
 - `sonarr_transaction_audit.py`: Read-only summary of Sonarr transaction-monitor
   history, storage snapshots, release-stamper events, exact-ID reconciler
-  decisions, and current queue state.
+  decisions, recurring bounded qBittorrent-to-Arr stall snapshots, and current
+  queue state.
 - `sonarr_transaction_log_sanitize.py`: Redacts secret-looking fields and URL
   query parameters from Sonarr transaction-monitor JSONL logs.
 - `subtitle_language_mismatch_audit.py`: Read-only media-file subtitle audit
@@ -259,6 +330,9 @@
   one-off execution so the source remains repo-managed.
 - Run `python3 scripts/media-release/test_arr_grab_context.py` after changing
   the grab-context schema or identity matching.
+- Run `python3 scripts/media-release/test_sonarr_embedded_subtitle_verifier.py`
+  after changing staged-release selection, path mapping, stream eligibility,
+  or transaction state.
 - Run `python3 scripts/media-release/test_release_stampers.py` after changing
   exact-ID lookup or canonical-title prefix behavior in either download-client
   stamper.
@@ -269,3 +343,8 @@
   command construction.
 - Run `python3 scripts/media-release/test_sonarr_transaction_audit.py` after
   changing persistent reconciler-event parsing or summary classifications.
+- Run `python3 scripts/media-release/test_profilarr_nightly_upgrade.py`,
+  `python3 scripts/media-release/test_profilarr_sonarr_upgrade_strategy.py`,
+  and `python3 scripts/media-release/test_sonarr_large_series_upgrade.py` after
+  changing the overnight upgrade split, search-overlap guards, or season
+  rotation.

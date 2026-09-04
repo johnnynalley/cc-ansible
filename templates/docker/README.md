@@ -52,6 +52,10 @@
 - `docker-auto-update.sh.j2` supports stack-level
   `auto_update_required_paths`; use it for services whose recreate depends on
   NFS/autofs bind mounts so stale paths block the update before compose runs.
+- Stack-level `auto_update_arr_idle_checks` makes partial service updates defer
+  while a configured Sonarr/Radarr command API reports queued or running work.
+  Missing credentials, unreachable APIs, and malformed responses fail closed
+  as update errors; a legitimately busy Arr defers without an error alert.
 - `media-stack-storage-recover.sh.j2` is deliberately separate from
   `media-stack-health.sh.j2`: health checks classify/report, while recovery may
   stop/restart the media stack only after required host NFS paths or explicit

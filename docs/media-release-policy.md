@@ -42,6 +42,7 @@ a separate policy because dual audio is the highest priority there.
 - Sonarr grab/import forensics: `scripts/media-release/sonarr_grab_forensics.py`
 - Radarr grab/import forensics: `scripts/media-release/radarr_grab_forensics.py`
 - Sonarr transaction audit report: `scripts/media-release/sonarr_transaction_audit.py`
+- Astra bounded Arr report adapter: `scripts/media-release/astra_arr_readonly_report.py`
 - Arr duplicate media audit: `scripts/media-release/arr_duplicate_media_audit.py`
 - Sonarr targeted queue blocklist/removal helper:
   `scripts/media-release/sonarr_blocklist_queue_matches.py`
@@ -70,11 +71,11 @@ candidate uses the faster, non-seeding Usenet path.
 
 Prowlarr uses these indexer priority tie-breaker bands:
 
-- Usenet indexers: `1`
+- Usenet indexers, including `AnimeTosho (Usenet)`: `1`
 - Seedpool: `10`
 - SeedCore: `11`
 - HD-Space: `12`
-- Nyaa and AnimeTosho specialist anime sources: `15`
+- Nyaa specialist anime torrent source: `15`
 - Generic public torrent trackers: `25`
 
 Lower numbers are preferred. Indexer priority remains below quality, custom
@@ -88,6 +89,42 @@ minutes for both time fields. Query Limit and Grab Limit remain blank for both.
 These values and the priority bands above describe the live configuration
 verified on 2026-08-26; they are not a declarative policy for Ansible to
 reapply.
+
+On 2026-09-03, AnimeTosho was restored to normal RSS, automatic, and interactive
+participation through Prowlarr's native `AnimeTosho (Usenet)` definition at
+priority `1`. The prior torrent entry was removed only after the new definition
+passed its native test, Prowlarr sync completed, and both Sonarr and Radarr
+showed all three search modes enabled. This preserves AnimeTosho's back catalog
+without depending on old swarms whose omitted seeder values bypassed the
+downstream `minimumSeeders=1` threshold and produced repeated zero-progress
+grabs. The owner rejected both manual-only operation and custom delayed
+dead-torrent handling merely to retain the torrent endpoint. The native
+Prowlarr/Sonarr/Radarr backups and complete indexer rollback are under
+`/srv/live-rollbacks/docker-vm/arr-policy/20260903T153710Z-animetosho-usenet-migration/`.
+
+The same audit found one separate identity failure: AnimeTosho repeatedly
+offered an AnimeDevil file titled `2nd Season - Ep01`, while Sonarr attached it
+to Iruma-kun S01E01 because the release omitted a canonical `S02E01` token.
+The exact hash was grabbed in five distinct batches. On 2026-09-03 it was
+backed up, removed, and blocklisted as a stable wrong-season identity; no other
+stalled torrent was included. Sonarr blocklist record `6068` and
+`downloadFailed` history event `143196` preserve the full source title. The
+root-only rollback is
+`/srv/live-rollbacks/docker-vm/media-release/20260903T124834Z-iruma-season-mismatch/`,
+including both qBittorrent metadata files, exact queue manifest, and the nearby
+native Sonarr backup command `910283`. A single Iruma season 1 replacement
+search was then queued as command `910290`. It completed in 17 minutes with
+one report downloaded. Sonarr imported the replacement as the correct S01E01:
+Bluray-1080p HEVC, English and Japanese audio, English subtitles, and exact
+score `145000` from Dual Audio, 1080p, and x265.
+
+A post-import S01E01 interactive comparison returned 685 current release rows.
+The only higher-scoring title was a `145040` EMBER season pack, but Sonarr
+parsed its `10 bits` token as S01E10 and rejected the 15.5 GB pack both as the
+wrong requested episode and as oversized for one 25-minute episode. The selected
+per-episode Usenet release was therefore the highest acceptable candidate. This
+is a release-title/parser limitation, not a tier-ordering failure; do not loosen
+the episode identity or size checks globally to force that one malformed pack.
 
 Prowlarr indexers, priorities, and tracker settings are mutable native
 application state. Change them through Prowlarr's API/UI or Astra's
@@ -158,14 +195,20 @@ English-original regular shows and movies stay on `shows-regular-efficient` or
 Audio` at `0` so a show such as Family Guy does not prefer unrelated multi-audio
 releases over normal English releases.
 
+Because `Original` resolves to English for English-original media, the dynamic
+Original+English DA definitions may still appear in an imported file's matched
+format list. Their zero score on the regular profiles makes that display-only
+match inert; it is not a DA preference or part of the file's total score.
+
 English-original regular shows and movies also score
 `Regular English - Foreign/Multi Audio Guard` at `-100000` on
 `shows-regular-efficient` and `movies-regular-efficient` only. This is a
 title-side block for explicit
 foreign/multi-audio release markers such as `German.DL`, `FRENCH.DL`,
 standalone `DL.1080p`-style markers, `multi-audio`, `multi-language`,
-`VOSTFR`, technical `DUAL.COMPLETE.BLURAY` / quality-tagged `DUAL` markers, or
-bounded bracketed foreign+English audio labels. It exists because an Arr search
+standalone `MULTI` tokens (excluding `MultiSub`/`MULTI.SUBS`), `VOSTFR`,
+technical `DUAL.COMPLETE.BLURAY` / quality-tagged `DUAL` markers, or bounded
+bracketed foreign+English audio labels. It exists because an Arr search
 can parse those releases as English when the title still clearly says the
 release is foreign-first or multi-audio. The guard stays at `0` on anime and
 both `*-regular-dual-audio-efficient` profiles so non-English
@@ -335,6 +378,17 @@ compare grab-time, queue-time, import/delete, and storage outcomes without
 relying on memory. If an older log needs redaction, use
 `scripts/media-release/sonarr_transaction_log_sanitize.py`.
 
+The same monitor records a bounded, read-only qBittorrent-to-Arr correlation as
+`qbit_stall_snapshot` every 15 minutes by default. It calls the managed
+`qbit_queue_status.py` implementation with problem-only Arr correlation, stores
+aggregate states/classifications plus at most 20 redacted samples, and never
+copies deletion candidates into the event. A timeout or audit failure is logged
+as monitor evidence; it does not delete, blocklist, pause, search, or alert.
+The 2026-09-03 first live snapshot found eight Arr-mapped `stalledDL` torrents:
+five `stale_no_peers` and three `no_peers_within_grace`. The pre-deployment
+rollback is
+`/srv/live-rollbacks/docker-vm/media-release/20260903T130116Z-transaction-monitor-stall-audit`.
+
 `scripts/media-release/arr_duplicate_media_audit.py` is the read-only duplicate
 media check. Run it on `docker-vm` to compare Sonarr/Radarr tracked file paths
 against the visible `/srv/media/plex` library, including untracked files in
@@ -409,15 +463,33 @@ scans touched the TS440 `/srv/media` mergerfs export. TS440 owns the single
 mergerfs pool, docker-vm keeps the Arr stack, and media-vm keeps Plex.
 `inventory/group_vars/nas_server/mergerfs.yml` manages the NFS-safe mergerfs
 options `noforget`, `use_ino`, `inodecalc=path-hash`, `func.getattr=ff`, and
-`category.create=mspmfs` for that export. Do not restore
+`category.create=mspmfs` for that export. As of 2026-09-03 it also manages
+`ignorepponrename=true`, which was applied through mergerfs's runtime interface
+without remounting Plex and persisted in the live systemd unit. Do not restore
 `func.getattr=newest` casually: on 2026-06-11 Sonarr import processing wedged
 mergerfs/NFS by statting a missing destination file under a branch-local season
 folder while `newest` was active. Do not switch create policy back to plain
 `epmfs` without testing Arr imports into a season/movie folder that exists only
 on a full branch; `mspmfs` is what lets mergerfs fall back to a parent path and
-create the target on a branch with usable space. Applying changes to those
-mount options requires a planned TS440 mergerfs remount, so treat it as
-Plex-impacting until proven otherwise.
+create the target on a branch with usable space. Future option changes remain
+Plex-impacting unless the exact option is proven runtime-settable and validated
+without a remount.
+
+The 2026-09-03 hardlink audit isolated two real qBittorrent copies rather than a
+global hardlink failure. Young Sheldon S03E18 and My Hero Academia S08E02 had
+byte-identical source/destination files, but mergerfs placed each source on
+`/srv/media-01/media` and each destination on `/srv/nas-zfs/media`; all four
+paths had link count 1. The official mergerfs path-preserving-policy behavior
+explains this exact cross-branch `EXDEV` fallback. Eleven additional
+`source_missing` audit rows had intact library destinations after qBittorrent
+had already removed the completed source payload and are not import failures.
+The applied rollback is
+`/srv/nas-zfs/backups/live-rollbacks/ts440/storage/20260903T160028Z-mergerfs-ignorepponrename-preapply/`.
+The pre-change link canary failed; the post-change TS440 canary and a second
+canary through docker-vm's real NFS mount both produced one backing-filesystem
+hardlink on `/srv/media-01/media`. No Plex session or media service was stopped.
+See `docs/media-stack-storage-layout.md` for the branch-level evidence and the
+separate live-unit `/srv/media-07` drift that remains untouched.
 
 `scripts/media-release/arr_stage_profilarr_test_profiles.py` snapshots live Arr policy state
 and creates or refreshes future Profilarr test profiles by cloning the current
@@ -1095,6 +1167,22 @@ location.
   pack collateral/mapping issues, stalled/warning downloads, and active valid
   upgrades, and prints the release signals Sonarr probably used at grab time.
   Use it before considering any queue removal or download-client cleanup.
+- `scripts/media-release/qbit_queue_status.py --problem-only --correlate-arr`
+  is the matching client-side stale-download audit. It joins exact torrent
+  hashes to Sonarr/Radarr queue rows, reports redacted tracker hosts, and
+  distinguishes long-idle zero-peer downloads, partial downloads still within
+  the activity grace period, orphaned client state, missing payloads, and
+  explicit title-season/queue-season conflicts. It is read-only; a finding is
+  evidence for targeted review, not authorization to delete or blocklist. Add
+  `--include-arr-history` when timestamp-deduplicated repeat-grab batches and
+  originating indexer names are needed for prevention policy; one pack can
+  create several grab history events at the same timestamp.
+- Before an exact Arr action removes a torrent from its client, use
+  `qbit_queue_status.py --backup-metadata-only` with an exact expected hash,
+  root-only backup directory, and in-directory manifest. This preserves both
+  `.torrent` and `.fastresume` state without changing the client. Exact Arr
+  queue cleanup should additionally use `arr_queue_remove.py --download-id`
+  so a title regex alone cannot widen the operation.
 - 2026-06-04 import-recovery queue check: current-better rows were not a
   single Sonarr scoring failure. The live queue had stalled qBittorrent rows
   such as `[NH] Sonny Boy` at `45000` queued score while the imported files
@@ -1594,7 +1682,16 @@ imports or Arr's native completed-download handling.
 5. A candidate-side DA promise for non-English-original media requires tagged
    original-language plus English audio in every payload file; extra languages
    are allowed. English-original media requires English only. Unknown audio
-   tags fail closed. Advertised HEVC and resolution claims are also checked
+   tags fail closed by default. An explicit reconciler switch may accept one
+   `und` audio stream as original English only when the ledger says the title
+   is English-original, the profile is `shows-regular-efficient` or
+   `movies-regular-efficient`, the payload has exactly one audio stream, and
+   the source title has no dual, multi-audio, dubbed, or foreign-language
+   marker. Legacy ledger rows without a captured profile must resolve the
+   media's current profile from Arr before they can qualify. Every use is
+   emitted as a `contract_assumptions` audit record; anime,
+   dual-audio, non-English-original, multi-track, and foreign-marked payloads
+   remain fail closed. Advertised HEVC and resolution claims are also checked
    against the payload. Stream evidence is an eligibility gate, never a
    post-download positive custom-format score.
 6. Exact blocklisting is limited to a stable wrong-series/wrong-movie identity
@@ -2185,17 +2282,81 @@ All queue removals used `removeFromClient=true` and `blocklist=false`.
   `-955000` to `45000`, and the obsolete 720p queue row was removed without
   blocklisting.
 
-## Future Astra Arr Management Evaluation
+## Astra Arr Management
 
-Evaluate giving Astra narrowly scoped Sonarr/Radarr management capabilities;
-this is a future design item, not current authorization or a deployed feature.
-The evaluation should start with read-only queue, history, grab/import score,
-payload-language, release-group, profile-math, and hardlink evidence. Any write
-capability must use managed repository tools, exact download/media identities,
-targeted live rollback backups, dry-run output, explicit approval boundaries,
-and post-action verification. Queue removal must remain non-blocklisting by
-default, ambiguous imports must remain review-only, and Astra must not gain a
-generic Arr API or shell credential merely to implement these workflows.
+Astra has credential-isolated typed Arr access plus bounded host-side media
+verification. Read-only queue, history, grab/import score, payload-language,
+release-group, profile-math, and hardlink evidence remains the starting point.
+Writes require exact application/media identities, current rollback coverage,
+the tool's approval boundary, and post-action verification. Queue removal stays
+non-blocklisting by default and ambiguous imports stay review-only. Astra does
+not receive Arr credentials, tracker URLs, arbitrary paths, a general shell, or
+Docker access.
+
+### Safe Capability Evaluation
+
+The existing `arr_services` and approved `arr_api_request` surface provides
+bounded native API reads, and the host-admin verifier can stage and inspect
+subtitle-replacement candidates. As of 2026-09-03, Astra's existing typed
+`host_admin_request` health action also exposes four fixed reports on
+`docker-vm`:
+
+- `arr-queue`: current Sonarr queue classification plus redacted qBittorrent-to-
+  Arr exact-ID stall, grace, orphan, mismatch, and repeat-grab evidence;
+- `arr-policy`: all six efficient profiles' score, cutoff, stacking, and CF-limit
+  invariants;
+- `arr-transactions`: a bounded 72-hour Sonarr grab/import, reconciler, and
+  release-stamper history;
+- `arr-storage`: seven-day Sonarr/Radarr library byte and codec deltas plus the
+  current media-stack health result.
+
+The root-owned adapter invokes only named managed audit helpers, allowlists and
+bounds its output, and was validated through the live plugin as the real
+`hermes-astra` identity. These probes expose no generic API, shell, Docker,
+search, import, deletion, or blocklist authority, and monitor findings never
+become automatic actions.
+A future mutation surface is justified only for an exact download/media ID after
+the report proves a stable terminal condition. It must take a fresh native/local
+rollback, preserve qBittorrent metadata when relevant, default queue removal to
+non-blocklisting, require explicit approval for search/removal/blocklisting,
+and verify Arr history, queue state, client state, and rollback artifacts after
+the action. Stable wrong-media or payload-misrepresentation evidence is required
+for blocklisting; unavailable peers, current-better status, tierlessness, or a
+monitor timeout are not sufficient.
+
+### Embedded Subtitle Replacement
+
+An external subtitle downloaded after import does not satisfy an owner request
+to repair a Sonarr release that omitted subtitles. The replacement itself must
+contain an embedded English subtitle stream in every affected episode.
+
+Sonarr cannot prove that before download: its release decision is based on
+indexer metadata, title parsing, quality, and custom-format scores. Treat those
+fields as candidate-ranking evidence only. A high score, known release group,
+or the word `subbed` is never payload proof.
+
+Use the root-owned staged verifier through Astra's existing typed host-admin
+toolset:
+
+1. Search by exact Sonarr series and season and retain the opaque candidate ID.
+2. Stage one representative episode outside Sonarr's category and library.
+3. Require `ffprobe` evidence for video, audio, and a tagged embedded English
+   subtitle stream.
+4. Expand only after the sample passes and only when the candidate maps exactly
+   to Sonarr's expected season episode set.
+5. Require every selected episode to complete and pass the same stream check.
+6. Back up current application and media state, evaluate exact Sonarr manual
+   import rows, then import separately. The verifier cannot import or replace
+   library files.
+7. Clean up the isolated transaction after rejection or accepted import.
+
+The House investigation demonstrated the failure mode: the complete iVy packs
+for seasons 4 and 5 scored and imported successfully, but all 40 episodes had
+zero subtitle streams. A complete ffprobe pass found embedded English
+subtitles in the other 136 current files, including iVy season 7. The diagnosis
+is release-specific payload omission, not a release-group-wide defect or a
+Bazarr failure, and the repair must therefore be verified video release
+replacement rather than external subtitle acquisition.
 
 Reference links:
 

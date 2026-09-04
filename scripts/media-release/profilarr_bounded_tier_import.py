@@ -40,7 +40,6 @@ PROTECTED_CLEANUP_NAMES = {
     "Anime - Dual Audio (Title)",
     "Anime Dual Audio",
     "Dubs Only (Block)",
-    "H.265",
     "Language - Not Original",
     "Local Anime Raw Group - DBD-Raws",
     "Local Anime Source Rank - Bluray",

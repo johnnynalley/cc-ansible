@@ -24,6 +24,13 @@ EPISODE_TOKEN_RE = re.compile(r"(?i)\bS\d{1,2}E\d{1,3}\b")
 EPISODE_PREFIX_RE = re.compile(
     r"(?i)^(?P<group>\[[^\]]+\]\s*)?.*?(?P<episode>S\d{1,2}E\d{1,3}.*)$"
 )
+EXPLICIT_EPISODE_RE = re.compile(r"(?i)\bS(?P<season>\d{1,2})E(?P<episode>\d{1,3})\b")
+SEASON_NUMBER_EPISODE_RE = re.compile(
+    r"(?i)\bS(?P<season>\d{1,2})\s*[-._]\s*(?P<episode>\d{1,3})\b"
+)
+BARE_NUMBERED_EPISODE_RE = re.compile(
+    r"(?P<prefix>\s+-\s+)(?P<number>\d{1,4})(?P<suffix>(?:\s+-\s+|\s+\[))"
+)
 PLATFORM_TAG_PATTERNS = (
     ("CR", re.compile(r"(?i)(?:^|[\s._\-\[\(])(?:CR|Crunchyroll)(?:$|[\s._\-\]\)])")),
     ("NF", re.compile(r"(?i)(?:^|[\s._\-\[\(])(?:NF|Netflix)(?:$|[\s._\-\]\)])")),
@@ -320,6 +327,26 @@ def series_title_from_arr_record(record: dict | None) -> str | None:
     return title or None
 
 
+def expected_episodes_from_context(
+    context: dict | None,
+    arr_record: dict | None,
+) -> list[dict[str, int]]:
+    episodes = [
+        dict(item)
+        for item in (context or {}).get("expected_episodes", [])
+        if isinstance(item, dict)
+    ]
+    record_episode = (arr_record or {}).get("episode")
+    if isinstance(record_episode, dict):
+        record_id = record_episode.get("id")
+        for episode in episodes:
+            if record_id is None or episode.get("id") == record_id:
+                absolute = record_episode.get("absoluteEpisodeNumber")
+                if isinstance(absolute, int):
+                    episode["absolute_episode"] = absolute
+    return episodes
+
+
 def safe_title_component(title: str) -> str:
     cleaned = re.sub(r"[\\/:\x00]+", " ", title)
     cleaned = re.sub(r"\s+", " ", cleaned)
@@ -340,6 +367,74 @@ def title_words_present(series_title: str, basename: str) -> bool:
     return haystack[: len(needle)] == needle
 
 
+def canonical_year_is_missing(series_title: str, basename: str) -> bool:
+    match = re.search(r"\(((?:19|20)\d{2})\)\s*$", series_title)
+    if not match:
+        return False
+    year = match.group(1)
+    yearless = series_title[: match.start()].strip()
+    return title_words_present(yearless, basename) and not re.search(
+        rf"(?<!\d){re.escape(year)}(?!\d)", basename
+    )
+
+
+def path_with_expected_episode_target(
+    path: Path,
+    expected_episodes: list[dict[str, int]] | None,
+    video_count: int,
+) -> Path:
+    episodes = [
+        item
+        for item in expected_episodes or []
+        if isinstance(item.get("season"), int) and isinstance(item.get("episode"), int)
+    ]
+    if not episodes or len(episodes) != video_count:
+        return path
+    by_episode = {int(item["episode"]): int(item["season"]) for item in episodes}
+    if len(by_episode) != len(episodes):
+        return path
+
+    basename = path.name
+    explicit = EXPLICIT_EPISODE_RE.search(basename)
+    if explicit:
+        episode = int(explicit.group("episode"))
+        season = by_episode.get(episode)
+        if season is None or season == int(explicit.group("season")):
+            return path
+        replacement = f"S{season:02}E{episode:02}"
+        return path.with_name(
+            f"{basename[:explicit.start()]}{replacement}{basename[explicit.end():]}"
+        )
+
+    pair = SEASON_NUMBER_EPISODE_RE.search(basename)
+    if pair:
+        episode = int(pair.group("episode"))
+        season = by_episode.get(episode)
+        if season is None:
+            return path
+        replacement = f"S{season:02}E{episode:02}"
+        return path.with_name(
+            f"{basename[:pair.start()]}{replacement}{basename[pair.end():]}"
+        )
+
+    if len(episodes) != 1:
+        return path
+    bare = BARE_NUMBERED_EPISODE_RE.search(basename)
+    if not bare:
+        return path
+    episode = episodes[0]
+    valid_numbers = {int(episode["episode"])}
+    absolute = episode.get("absolute_episode")
+    if isinstance(absolute, int):
+        valid_numbers.add(absolute)
+    if int(bare.group("number")) not in valid_numbers:
+        return path
+    replacement = f"{bare.group('prefix')}S{episode['season']:02}E{episode['episode']:02}{bare.group('suffix')}"
+    return path.with_name(
+        f"{basename[:bare.start()]}{replacement}{basename[bare.end():]}"
+    )
+
+
 def path_with_episode_title_prefix(
     path: Path,
     series_title: str | None,
@@ -349,14 +444,15 @@ def path_with_episode_title_prefix(
         return path
     if not EPISODE_TOKEN_RE.search(path.name):
         return path
-    if title_words_present(series_title, path.name):
+    needs_year = canonical_year_is_missing(series_title, path.name)
+    if title_words_present(series_title, path.name) and not needs_year:
         return path
     alias_present = any(
         title_words_present(alias, path.name)
         for alias in (aliases or [])
         if alias and alias.casefold() != series_title.casefold()
     )
-    if not alias_present and not BARE_EPISODE_RE.search(path.name):
+    if not needs_year and not alias_present and not BARE_EPISODE_RE.search(path.name):
         return path
     title = safe_title_component(series_title)
     if not title:
@@ -730,8 +826,11 @@ def stamped_path(
     release_group: str | None,
     series_title: str | None,
     aliases: list[str] | None = None,
+    expected_episodes: list[dict[str, int]] | None = None,
+    video_count: int = 0,
 ) -> Path:
-    stamped = path_with_episode_title_prefix(path, series_title, aliases)
+    targeted = path_with_expected_episode_target(path, expected_episodes, video_count)
+    stamped = path_with_episode_title_prefix(targeted, series_title, aliases)
     stem = stamped.stem
     if tags:
         stem = f"{stem} {' '.join(tags)}"
@@ -746,15 +845,19 @@ def stamp_tree(
     parent_title: str,
     series_title: str | None,
     aliases: list[str] | None,
+    expected_episodes: list[dict[str, int]] | None,
     trusted_release_group: str | None,
     dry_run: bool,
 ) -> tuple[int, int, int]:
     changes = 0
+    video_paths = [
+        path
+        for path in download_dir.rglob("*")
+        if path.is_file() and path.suffix.lower() in VIDEO_EXTENSIONS
+    ]
     videos_scanned = 0
     skipped_no_stamp = 0
-    for path in download_dir.rglob("*"):
-        if not path.is_file() or path.suffix.lower() not in VIDEO_EXTENSIONS:
-            continue
+    for path in video_paths:
         videos_scanned += 1
 
         tags, release_group = wanted_tags(
@@ -765,13 +868,26 @@ def stamp_tree(
             trusted_release_group,
         )
         if not tags and not release_group:
-            prefixed_path = path_with_episode_title_prefix(path, series_title, aliases)
+            targeted_path = path_with_expected_episode_target(
+                path, expected_episodes, len(video_paths)
+            )
+            prefixed_path = path_with_episode_title_prefix(
+                targeted_path, series_title, aliases
+            )
             if prefixed_path == path:
                 skipped_no_stamp += 1
                 log(f"no stamp needed for {path.name!r}")
                 continue
 
-        new_path = stamped_path(path, tags, release_group, series_title, aliases)
+        new_path = stamped_path(
+            path,
+            tags,
+            release_group,
+            series_title,
+            aliases,
+            expected_episodes,
+            len(video_paths),
+        )
         if new_path == path or new_path.exists():
             continue
 
@@ -867,6 +983,7 @@ def main() -> int:
             for value in (grab_context or {}).get("aliases", [])
             if str(value).strip()
         ]
+        expected_episodes = expected_episodes_from_context(grab_context, arr_record)
         trusted_release_group = release_group_candidate(
             str((grab_context or {}).get("release_group") or "")
         )
@@ -898,6 +1015,7 @@ def main() -> int:
             parent_title,
             series_title,
             aliases,
+            expected_episodes,
             trusted_release_group,
             dry_run,
         )

@@ -10,11 +10,14 @@
   are skipped until the job is removed, completed, or deferred.
   `balance defer set --until ...` or `balance defer set --for-days ...` delays
   a queued balance job while still allowing Profilarr upgrade work during the
-  overnight window.
+  overnight window. Restore starts the media stack only after a balance-owned
+  window; a Profilarr-only window closes without touching running containers.
 - `plex-library-nightly-scan`: Refreshes Plex library sections through the
   local Plex API during the controlled overnight maintenance window.
 - `test_plex_appliance_player.py`: Regression tests for Plex appliance saved
   identity and stale-rating-key reconciliation after media replacements.
+- `test_nightly_media_maintenance.py`: Regression tests for balance-owned
+  versus Profilarr-only restore behavior.
 
 ## Safety Notes
 

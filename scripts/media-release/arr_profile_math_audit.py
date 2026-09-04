@@ -266,6 +266,7 @@ TRASH_FALLBACK_SCORES = {
 ANIME_NEGATIVE_GUARDRAILS = (
     "Anime Raws",
     "Dubs Only (Block)",
+    "No-RlsGroup",
     "Portuguese (No English)",
     "UHD 2160p - Non-Dual (Block)",
 )

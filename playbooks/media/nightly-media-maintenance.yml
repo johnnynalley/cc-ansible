@@ -16,6 +16,8 @@
   hosts: nas_server
   become: true
   gather_facts: false
+  tags:
+    - nightly-media-coordinator
 
   handlers:
     - name: Reload systemd
@@ -350,6 +352,77 @@
         - nightly_media_maintenance_plex_preferences_enabled | default(false)
         - not ansible_check_mode
 
+    - name: Ensure large-series Sonarr upgrade state directory exists
+      ansible.builtin.file:
+        path: /var/lib/sonarr-large-series-upgrade
+        state: directory
+        owner: root
+        group: root
+        mode: "0700"
+      when: nightly_media_sonarr_large_series_enabled | default(false)
+      tags: sonarr-large-series-upgrade
+
+    - name: Deploy large-series Sonarr upgrade helper
+      ansible.builtin.copy:
+        src: "{{ ansible_config_file | dirname }}/scripts/media-release/sonarr_large_series_upgrade.py"
+        dest: /usr/local/sbin/sonarr-large-series-upgrade
+        owner: root
+        group: root
+        mode: "0755"
+      when: nightly_media_sonarr_large_series_enabled | default(false)
+      tags: sonarr-large-series-upgrade
+
+    - name: Deploy large-series Sonarr upgrade units
+      ansible.builtin.template:
+        src: "{{ ansible_config_file | dirname }}/templates/media-maintenance/{{ item }}.j2"
+        dest: "/etc/systemd/system/{{ item }}"
+        owner: root
+        group: root
+        mode: "0644"
+      loop:
+        - sonarr-large-series-upgrade.service
+        - sonarr-large-series-upgrade.timer
+      notify: Reload systemd
+      when: nightly_media_sonarr_large_series_enabled | default(false)
+      tags: sonarr-large-series-upgrade
+
+    - name: Disable large-series Sonarr upgrade timer when disabled
+      ansible.builtin.systemd:
+        name: sonarr-large-series-upgrade.timer
+        enabled: false
+        state: stopped
+      failed_when: false
+      when:
+        - not (nightly_media_sonarr_large_series_enabled | default(false))
+        - not ansible_check_mode
+      tags: sonarr-large-series-upgrade
+
+    - name: Remove disabled large-series Sonarr upgrade assets
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: absent
+      loop:
+        - /usr/local/sbin/sonarr-large-series-upgrade
+        - /etc/systemd/system/sonarr-large-series-upgrade.service
+        - /etc/systemd/system/sonarr-large-series-upgrade.timer
+      notify: Reload systemd
+      when: not (nightly_media_sonarr_large_series_enabled | default(false))
+      tags: sonarr-large-series-upgrade
+
+    - name: Flush handlers after large-series Sonarr unit changes
+      ansible.builtin.meta: flush_handlers
+      tags: sonarr-large-series-upgrade
+
+    - name: Enable large-series Sonarr upgrade timer
+      ansible.builtin.systemd:
+        name: sonarr-large-series-upgrade.timer
+        enabled: true
+        state: started
+      when:
+        - nightly_media_sonarr_large_series_enabled | default(false)
+        - not ansible_check_mode
+      tags: sonarr-large-series-upgrade
+
     - name: End play when nightly media maintenance key is not available
       ansible.builtin.meta: end_host
       when: >-
@@ -364,6 +437,7 @@
         group: root
         mode: "0755"
       when: nightly_media_maintenance_profilarr_endpoint_enabled | default(false)
+      tags: profilarr-upgrade-window
 
     - name: Authorize nightly media maintenance key for Profilarr helper
       ansible.posix.authorized_key:
@@ -371,17 +445,28 @@
         key: "{{ hostvars[groups['nas_server'][0]].nightly_media_maintenance_public_key }}"
         key_options: 'command="/usr/local/sbin/profilarr-nightly-upgrade",no-agent-forwarding,no-X11-forwarding,no-port-forwarding,no-pty'
         state: present
-      when: nightly_media_maintenance_profilarr_endpoint_enabled | default(false)
+      when:
+        - nightly_media_maintenance_profilarr_endpoint_enabled | default(false)
+        - >-
+          hostvars[groups['nas_server'][0]].nightly_media_maintenance_public_key
+          is defined
+      tags: profilarr-upgrade-window
 
     - name: Remove disabled Profilarr nightly upgrade helper
       ansible.builtin.file:
         path: /usr/local/sbin/profilarr-nightly-upgrade
         state: absent
       when: not (nightly_media_maintenance_profilarr_endpoint_enabled | default(false))
+      tags: profilarr-upgrade-window
 
     - name: Remove disabled nightly media maintenance key
       ansible.posix.authorized_key:
         user: "{{ nightly_media_maintenance_profilarr_ssh_user | default('johnny') }}"
         key: "{{ hostvars[groups['nas_server'][0]].nightly_media_maintenance_public_key }}"
         state: absent
-      when: not (nightly_media_maintenance_profilarr_endpoint_enabled | default(false))
+      when:
+        - not (nightly_media_maintenance_profilarr_endpoint_enabled | default(false))
+        - >-
+          hostvars[groups['nas_server'][0]].nightly_media_maintenance_public_key
+          is defined
+      tags: profilarr-upgrade-window

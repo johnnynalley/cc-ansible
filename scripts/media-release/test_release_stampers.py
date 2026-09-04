@@ -80,6 +80,70 @@ class PrefixSafetyTests(unittest.TestCase):
         name = "Spider.2002.1080p.BluRay.x265-GROUP.mkv"
         self.assertEqual(QBIT.path_with_episode_title_prefix(name, "Spider-Noir", []), name)
 
+    def test_disambiguating_series_year_is_added_before_import(self) -> None:
+        qbit_name = "Blade.S01E01.His.Name.Is.Blade.1080p.WEB-DL.mkv"
+        sab_path = Path(qbit_name)
+        self.assertEqual(
+            QBIT.path_with_episode_title_prefix(qbit_name, "Blade (2011)", ["Blade"]),
+            "Blade (2011) - S01E01.His.Name.Is.Blade.1080p.WEB-DL.mkv",
+        )
+        self.assertEqual(
+            SAB.path_with_episode_title_prefix(sab_path, "Blade (2011)", ["Blade"]).name,
+            "Blade (2011) - S01E01.His.Name.Is.Blade.1080p.WEB-DL.mkv",
+        )
+
+    def test_single_episode_ambiguous_number_uses_exact_grab_target(self) -> None:
+        expected = [
+            {"id": 6481, "season": 8, "episode": 2, "absolute_episode": 161}
+        ]
+        qbit_name = "My Hero Academia - 002 - The End Of An Era.mkv"
+        sab_path = Path(qbit_name)
+        self.assertEqual(
+            QBIT.path_with_expected_episode_target(qbit_name, expected, 1),
+            "My Hero Academia - S08E02 - The End Of An Era.mkv",
+        )
+        self.assertEqual(
+            SAB.path_with_expected_episode_target(sab_path, expected, 1).name,
+            "My Hero Academia - S08E02 - The End Of An Era.mkv",
+        )
+
+    def test_single_episode_season_number_pair_uses_exact_grab_target(self) -> None:
+        expected = [{"id": 11291, "season": 2, "episode": 1}]
+        qbit_name = "[sam] Mushoku Tensei S2 - 01 [WEB 1080p].mkv"
+        sab_path = Path(qbit_name)
+        self.assertEqual(
+            QBIT.path_with_expected_episode_target(qbit_name, expected, 1),
+            "[sam] Mushoku Tensei S02E01 [WEB 1080p].mkv",
+        )
+        self.assertEqual(
+            SAB.path_with_expected_episode_target(sab_path, expected, 1).name,
+            "[sam] Mushoku Tensei S02E01 [WEB 1080p].mkv",
+        )
+
+    def test_pack_season_alias_uses_exact_sonarr_season(self) -> None:
+        expected = [
+            {"id": 14081 + episode, "season": 4, "episode": episode}
+            for episode in range(1, 13)
+        ]
+        qbit_name = "The Seven Deadly Sins - S05E03 - A Single-Minded Love.mkv"
+        sab_path = Path(qbit_name)
+        self.assertEqual(
+            QBIT.path_with_expected_episode_target(qbit_name, expected, 12),
+            "The Seven Deadly Sins - S04E03 - A Single-Minded Love.mkv",
+        )
+        self.assertEqual(
+            SAB.path_with_expected_episode_target(sab_path, expected, 12).name,
+            "The Seven Deadly Sins - S04E03 - A Single-Minded Love.mkv",
+        )
+
+    def test_pack_target_rewrite_requires_complete_expected_file_count(self) -> None:
+        expected = [
+            {"id": 14081 + episode, "season": 4, "episode": episode}
+            for episode in range(1, 13)
+        ]
+        name = "The Seven Deadly Sins - S05E03.mkv"
+        self.assertEqual(QBIT.path_with_expected_episode_target(name, expected, 11), name)
+
     def test_english_original_never_gets_foreign_dual_audio_tag(self) -> None:
         self.assertIsNone(QBIT.language_combo_tag_from_languages({"eng", "jpn"}, {"eng"}))
 

@@ -518,9 +518,11 @@ def cmd_run_window(args: argparse.Namespace) -> int:
 def cmd_restore(args: argparse.Namespace) -> int:
     state_dir = Path(args.state_dir)
     state = load_state(state_dir)
-    media_rc = run_shell(f"{args.media_stack_command} start")
+    media_start_needed = state.get("mode") == "balance"
+    media_rc = run_shell(f"{args.media_stack_command} start") if media_start_needed else 0
     profilarr_rc = run_shell(args.profilarr_close_command)
     state["restore"] = {
+        "media_stack_start_needed": media_start_needed,
         "media_stack_returncode": media_rc,
         "profilarr_close_returncode": profilarr_rc,
         "ran_at": now_iso(),

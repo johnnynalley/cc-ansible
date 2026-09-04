@@ -87,6 +87,62 @@ check_required_paths() {
     return "$failed"
 }
 
+{% if docker_stacks | selectattr('auto_update_arr_idle_checks', 'defined') | list | length > 0 %}
+ARR_IDLE_GUARD_ERROR=0
+check_arr_idle() {
+    local stack_name="$1"
+    shift
+
+    local spec
+    local app_name
+    local command_url
+    local config_path
+    local api_key
+    local payload
+    local active_commands
+
+    ARR_IDLE_GUARD_ERROR=0
+    for spec in "$@"; do
+        IFS='|' read -r app_name command_url config_path <<< "$spec"
+        api_key=$(sed -n 's:.*<ApiKey>\(.*\)</ApiKey>.*:\1:p' "$config_path" | head -n1)
+        if [[ -z "$api_key" ]]; then
+            log "ERROR: ${stack_name}: cannot verify ${app_name} activity; API key is absent"
+            ARR_IDLE_GUARD_ERROR=1
+            return 1
+        fi
+        if ! payload=$(curl -fsS -H "X-Api-Key: ${api_key}" \
+            --connect-timeout 3 --max-time 10 "$command_url"); then
+            log "ERROR: ${stack_name}: cannot verify ${app_name} activity; command API failed"
+            ARR_IDLE_GUARD_ERROR=1
+            return 1
+        fi
+        if ! active_commands=$(jq -er '
+            [
+              .[]
+              | select(
+                  (.status // "" | ascii_downcase) as $status
+                  | $status == "queued"
+                    or $status == "started"
+                    or $status == "running"
+                )
+              | (.name // "unknown")
+            ]
+            | unique
+            | join(",")
+        ' <<< "$payload"); then
+            log "ERROR: ${stack_name}: cannot verify ${app_name} activity; invalid command API response"
+            ARR_IDLE_GUARD_ERROR=1
+            return 1
+        fi
+        if [[ -n "$active_commands" ]]; then
+            log "${stack_name}: update deferred; ${app_name} has active commands: ${active_commands}"
+            return 1
+        fi
+    done
+
+    return 0
+}
+{% endif -%}
 send_notification() {
     local title="$1"
     local body="${2:-}"
@@ -304,7 +360,19 @@ if pull_with_retry "{{ stack.name }}" "{{ stack.path }}" "{{ stack.auto_update_s
         # Gluetun: force-recreate to clear network namespace (stale tun0 routes)
         # Dependent containers share the namespace and must be recreated together
         log "{{ stack.name }}/{{ svc }}: force-recreating with dependents..."
+{% if stack.auto_update_arr_idle_checks is defined and stack.auto_update_arr_idle_checks | length > 0 %}
+        if ! check_arr_idle "{{ stack.name }}" {% for check in stack.auto_update_arr_idle_checks %}{{ (check.name ~ '|' ~ check.url ~ '|' ~ check.config_path) | quote }} {% endfor %}; then
+            if [[ "$ARR_IDLE_GUARD_ERROR" -ne 0 ]]; then
+                ERRORS=$((ERRORS + 1))
+            fi
 {% if stack.auto_update_required_paths is defined and stack.auto_update_required_paths | length > 0 %}
+        elif ! check_required_paths "{{ stack.name }}" {% for path in stack.auto_update_required_paths %}{{ path | quote }} {% endfor %}; then
+            ERRORS=$((ERRORS + 1))
+        elif run_compose_logged "{{ stack.name }}" "{{ stack.path }}" up -d --force-recreate {{ svc }} {{ gluetun_watchdog_dependent_containers | default('qbittorrent') }}; then
+{% else %}
+        elif run_compose_logged "{{ stack.name }}" "{{ stack.path }}" up -d --force-recreate {{ svc }} {{ gluetun_watchdog_dependent_containers | default('qbittorrent') }}; then
+{% endif %}
+{% elif stack.auto_update_required_paths is defined and stack.auto_update_required_paths | length > 0 %}
         if ! check_required_paths "{{ stack.name }}" {% for path in stack.auto_update_required_paths %}{{ path | quote }} {% endfor %}; then
             ERRORS=$((ERRORS + 1))
         elif run_compose_logged "{{ stack.name }}" "{{ stack.path }}" up -d --force-recreate {{ svc }} {{ gluetun_watchdog_dependent_containers | default('qbittorrent') }}; then
@@ -317,7 +385,19 @@ if pull_with_retry "{{ stack.name }}" "{{ stack.path }}" "{{ stack.auto_update_s
             ERRORS=$((ERRORS + 1))
         fi
 {% else %}
+{% if stack.auto_update_arr_idle_checks is defined and stack.auto_update_arr_idle_checks | length > 0 %}
+        if ! check_arr_idle "{{ stack.name }}" {% for check in stack.auto_update_arr_idle_checks %}{{ (check.name ~ '|' ~ check.url ~ '|' ~ check.config_path) | quote }} {% endfor %}; then
+            if [[ "$ARR_IDLE_GUARD_ERROR" -ne 0 ]]; then
+                ERRORS=$((ERRORS + 1))
+            fi
 {% if stack.auto_update_required_paths is defined and stack.auto_update_required_paths | length > 0 %}
+        elif ! check_required_paths "{{ stack.name }}" {% for path in stack.auto_update_required_paths %}{{ path | quote }} {% endfor %}; then
+            ERRORS=$((ERRORS + 1))
+        elif run_compose_logged "{{ stack.name }}" "{{ stack.path }}" up -d {{ svc }}; then
+{% else %}
+        elif run_compose_logged "{{ stack.name }}" "{{ stack.path }}" up -d {{ svc }}; then
+{% endif %}
+{% elif stack.auto_update_required_paths is defined and stack.auto_update_required_paths | length > 0 %}
         if ! check_required_paths "{{ stack.name }}" {% for path in stack.auto_update_required_paths %}{{ path | quote }} {% endfor %}; then
             ERRORS=$((ERRORS + 1))
         elif run_compose_logged "{{ stack.name }}" "{{ stack.path }}" up -d {{ svc }}; then

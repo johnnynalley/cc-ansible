@@ -623,6 +623,12 @@ def parse_args() -> argparse.Namespace:
         help="only include queue rows matching this text; may be passed multiple times",
     )
     parser.add_argument(
+        "--classification",
+        action="append",
+        default=[],
+        help="only include download groups with this exact classification; may be repeated",
+    )
+    parser.add_argument(
         "--manual-import",
         action="store_true",
         help="ask Sonarr how filtered completed downloads would score during manual import",
@@ -676,18 +682,27 @@ def main() -> int:
             },
         )
         history_records = history.get("records", history if isinstance(history, list) else [])
+    groups = group_queue(
+        rows,
+        args.base_url,
+        api_key,
+        args.manual_import,
+        history_records,
+    )
+    if args.classification:
+        wanted = set(args.classification)
+        groups = [
+            group
+            for group in groups
+            if wanted.intersection(group["classifications"])
+        ]
     report = {
         "queue_total": queue_page.get("totalRecords") if isinstance(queue_page, dict) else len(records),
         "queue_count": len(rows),
         "details": args.details,
         "filters": args.filter,
-        "groups": group_queue(
-            rows,
-            args.base_url,
-            api_key,
-            args.manual_import,
-            history_records,
-        ),
+        "classification_filters": args.classification,
+        "groups": groups,
     }
     if args.json:
         json.dump(report, sys.stdout, indent=2, sort_keys=True)

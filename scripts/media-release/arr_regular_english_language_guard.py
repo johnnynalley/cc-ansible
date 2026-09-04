@@ -50,6 +50,7 @@ GUARD_REGEX = (
     rf"|\b(?:{LANGUAGE_CODES})[ ._-]?dl\b"
     r"|\b(?:dual[ ._-]?audio|multi[ ._-]?audio|multi[ ._-]?language|"
     r"multilang(?:uage)?|multi[ ._-]?lang)\b"
+    r"|\bmulti\b(?![ ._-]?(?:sub|subs|subtitle|subtitles)\b)"
     r"|\b(?:vostfr|vff|vfq|truefrench)\b"
     r"|(?:^|[ ._(])dl[ ._-]?(?:480p|576p|720p|1080p|2160p|4k|uhd|bluray|"
     r"bdrip|bdremux|webrip|hdtv)\b"
@@ -160,12 +161,12 @@ def find_one(
     return matches[0] if matches else None
 
 
-def title_spec(pattern: str) -> dict[str, Any]:
+def title_spec(pattern: str, instance_name: str) -> dict[str, Any]:
     return {
         "name": "Foreign or multi-audio title marker",
         "implementation": "ReleaseTitleSpecification",
         "implementationName": "Release Title",
-        "infoLink": "https://wiki.servarr.com/radarr/settings#custom-formats-2",
+        "infoLink": f"https://wiki.servarr.com/{instance_name}/settings#custom-formats-2",
         "negate": False,
         "required": True,
         "fields": [
@@ -185,14 +186,14 @@ def title_spec(pattern: str) -> dict[str, Any]:
 
 
 def custom_format_payload(
-    existing: dict[str, Any] | None, pattern: str
+    existing: dict[str, Any] | None, pattern: str, instance_name: str
 ) -> dict[str, Any]:
     payload = copy.deepcopy(existing) if existing is not None else {}
     if existing is not None and isinstance(existing.get("id"), int):
         payload["id"] = existing["id"]
     payload["name"] = CUSTOM_FORMAT_NAME
     payload["includeCustomFormatWhenRenaming"] = False
-    payload["specifications"] = [title_spec(pattern)]
+    payload["specifications"] = [title_spec(pattern, instance_name)]
     return payload
 
 
@@ -235,11 +236,15 @@ def upsert_custom_format(
     apply: bool,
 ) -> tuple[dict[str, Any], str]:
     existing = find_one(custom_formats, CUSTOM_FORMAT_NAME, "custom format")
-    payload = custom_format_payload(existing, pattern)
+    payload = custom_format_payload(existing, pattern, instance.name)
     if not apply:
-        return payload, "would-create" if existing is None else "would-update"
+        if existing is None:
+            return payload, "would-create"
+        return payload, "unchanged" if payload == existing else "would-update"
     if existing is None:
         return request_json(instance, api_key, "POST", "/api/v3/customformat", payload), "created"
+    if payload == existing:
+        return existing, "unchanged"
     return (
         request_json(
             instance,

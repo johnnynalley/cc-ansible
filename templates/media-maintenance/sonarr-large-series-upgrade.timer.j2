@@ -1,0 +1,11 @@
+[Unit]
+Description=Check hourly for a safe large-series Sonarr season upgrade
+
+[Timer]
+OnCalendar={{ nightly_media_sonarr_large_series_calendar | default('*-*-* *:30:00 America/Chicago') }}
+AccuracySec=1min
+Persistent=false
+Unit=sonarr-large-series-upgrade.service
+
+[Install]
+WantedBy=timers.target

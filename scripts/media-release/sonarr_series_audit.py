@@ -49,11 +49,22 @@ def cf_names(items: list[dict[str, Any]] | None) -> list[str]:
 
 def find_series(series_list: list[dict[str, Any]], query: str) -> dict[str, Any]:
     lowered = query.lower()
-    matches = [
+    exact_matches = [
         series
         for series in series_list
         if lowered == str(series.get("title", "")).lower()
-        or lowered in str(series.get("title", "")).lower()
+        or any(lowered == str(title.get("title", "")).lower() for title in series.get("alternateTitles") or [])
+    ]
+    if len(exact_matches) == 1:
+        return exact_matches[0]
+    if len(exact_matches) > 1:
+        names = ", ".join(f"{series['id']}:{series['title']}" for series in exact_matches)
+        raise RuntimeError(f"multiple series exactly matched {query!r}: {names}")
+
+    matches = [
+        series
+        for series in series_list
+        if lowered in str(series.get("title", "")).lower()
         or any(lowered in str(title.get("title", "")).lower() for title in series.get("alternateTitles") or [])
     ]
     if not matches:
@@ -198,7 +209,15 @@ def audit(args: argparse.Namespace) -> dict[str, Any]:
         args.base_url,
         api_key,
         "/api/v3/history",
-        {"seriesId": series["id"], "page": 1, "pageSize": args.history, "sortKey": "date", "sortDirection": "descending"},
+        {
+            "seriesId": series["id"],
+            "page": 1,
+            "pageSize": args.history,
+            "sortKey": "date",
+            "sortDirection": "descending",
+            "includeSeries": "true",
+            "includeEpisode": "true",
+        },
     )
     commands = api_get(args.base_url, api_key, "/api/v3/command")
     monitored_missing = [

@@ -4,3 +4,12 @@
 
 nightly_media_maintenance_profilarr_endpoint_enabled: true
 nightly_media_maintenance_profilarr_ssh_user: johnny
+
+# Profilarr performs whole-series Sonarr searches. Series above this threshold
+# are handled one season at a time by the guarded companion timer instead.
+nightly_media_sonarr_large_series_enabled: true
+nightly_media_sonarr_large_series_window: "00:00-07:00"
+nightly_media_sonarr_large_series_calendar: "*-*-* *:30:00 America/Chicago"
+nightly_media_sonarr_large_series_threshold: 30
+nightly_media_sonarr_large_series_max_season_episodes: 60
+nightly_media_sonarr_large_series_min_available_mib: 3072

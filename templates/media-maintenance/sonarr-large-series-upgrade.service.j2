@@ -1,0 +1,11 @@
+[Unit]
+Description=Queue one guarded Sonarr season upgrade for a large series
+After=network-online.target docker.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/sonarr-large-series-upgrade --apply --window {{ nightly_media_sonarr_large_series_window | default('00:00-07:00') | quote }} --large-series-threshold {{ nightly_media_sonarr_large_series_threshold | default(30) }} --max-season-episodes {{ nightly_media_sonarr_large_series_max_season_episodes | default(60) }} --min-available-mib {{ nightly_media_sonarr_large_series_min_available_mib | default(3072) }}
+Nice=10
+IOSchedulingClass=best-effort
+IOSchedulingPriority=6

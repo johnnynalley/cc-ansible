@@ -23,8 +23,16 @@ docker_stacks:
       - /srv/media/plex/downloads/complete
       - /srv/media/plex/Anime
       - /srv/incomplete_downloads/incomplete/torrents
+    auto_update_arr_idle_checks:
+      - name: sonarr
+        url: http://127.0.0.1:8989/api/v3/command
+        config_path: /opt/media-stack/sonarr/config.xml
+      - name: radarr
+        url: http://127.0.0.1:7878/api/v3/command
+        config_path: /opt/media-stack/radarr/config.xml
     auto_update_services:
       - gluetun
+      - prowlarr
   - name: profilarr
     path: /opt/profilarr
     build: false

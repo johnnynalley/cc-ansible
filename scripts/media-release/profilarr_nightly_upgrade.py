@@ -24,6 +24,12 @@ DEFAULT_DB = Path("/opt/profilarr/config/data/profilarr.db")
 DEFAULT_BACKUP_DIR = Path("/opt/profilarr/config/data/backups")
 DEFAULT_WAKE_COMMAND = "docker restart profilarr"
 DEFAULT_UPGRADE_CRON = "0 * * * *"
+# The window opener queues one immediate run. Keep Profilarr's next native
+# Sonarr run outside the overnight window so a timed-out SeriesSearch cannot
+# overlap another hourly full-series search. Radarr's bounded movie batches
+# remain hourly.
+DEFAULT_SONARR_UPGRADE_CRON = "0 18 * * *"
+DEFAULT_RADARR_UPGRADE_CRON = DEFAULT_UPGRADE_CRON
 
 
 def argv_from_forced_command() -> list[str]:
@@ -148,6 +154,8 @@ def open_upgrade_window(
     db_path: Path,
     backup_dir: Path,
     cron: str,
+    sonarr_cron: str | None,
+    radarr_cron: str | None,
     run_now: bool,
 ) -> tuple[Path | None, int]:
     configs = configured_upgrade_configs(conn)
@@ -157,6 +165,11 @@ def open_upgrade_window(
     run_at = iso_now() if run_now else None
     backup_path = create_sqlite_backup(db_path, backup_dir, "pre-open-upgrade-window")
     for config in configs:
+        config_cron = cron
+        if str(config.get("type") or "").lower() == "sonarr" and sonarr_cron:
+            config_cron = sonarr_cron
+        elif str(config.get("type") or "").lower() == "radarr" and radarr_cron:
+            config_cron = radarr_cron
         conn.execute(
             """
             UPDATE upgrade_configs
@@ -166,7 +179,7 @@ def open_upgrade_window(
                 updated_at = CURRENT_TIMESTAMP
             WHERE id = ?
             """,
-            (cron, run_at, config["config_id"]),
+            (config_cron, run_at, config["config_id"]),
         )
     return backup_path, len(configs)
 
@@ -234,6 +247,8 @@ def cmd_open_window(args: argparse.Namespace) -> int:
             args.db,
             args.backup_dir,
             args.cron,
+            args.sonarr_cron,
+            args.radarr_cron,
             args.run_now,
         )
         conn.commit()
@@ -288,6 +303,8 @@ def build_parser() -> argparse.ArgumentParser:
 
     open_window = sub.add_parser("open-window")
     open_window.add_argument("--cron", default=DEFAULT_UPGRADE_CRON)
+    open_window.add_argument("--sonarr-cron", default=DEFAULT_SONARR_UPGRADE_CRON)
+    open_window.add_argument("--radarr-cron", default=DEFAULT_RADARR_UPGRADE_CRON)
     open_window.add_argument("--run-now", dest="run_now", action="store_true", default=True)
     open_window.add_argument("--no-run-now", dest="run_now", action="store_false")
     open_window.add_argument("--wake-command", default=DEFAULT_WAKE_COMMAND)
@@ -303,6 +320,8 @@ def build_parser() -> argparse.ArgumentParser:
     enqueue.add_argument("--window-id")
     enqueue.add_argument("--slot")
     enqueue.add_argument("--cron", default=DEFAULT_UPGRADE_CRON)
+    enqueue.add_argument("--sonarr-cron", default=DEFAULT_SONARR_UPGRADE_CRON)
+    enqueue.add_argument("--radarr-cron", default=DEFAULT_RADARR_UPGRADE_CRON)
     enqueue.add_argument("--run-now", dest="run_now", action="store_true", default=True)
     enqueue.add_argument("--no-run-now", dest="run_now", action="store_false")
     enqueue.add_argument("--wake-command", default=DEFAULT_WAKE_COMMAND)

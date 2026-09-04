@@ -85,6 +85,7 @@ def update_filters(
     filters: list[dict[str, Any]],
     filter_id: str,
     selector: str,
+    max_episode_count: int | None,
 ) -> tuple[list[dict[str, Any]], list[str]]:
     changed: list[str] = []
     updated: list[dict[str, Any]] = []
@@ -97,6 +98,40 @@ def update_filters(
             if old_selector != selector:
                 new_filter["selector"] = selector
                 changed.append(f"{filter_id}.selector: {old_selector} -> {selector}")
+            if max_episode_count is not None:
+                group = new_filter.get("group")
+                if not isinstance(group, dict) or group.get("type") != "group":
+                    raise RuntimeError(f"filter {filter_id!r} has no supported rule group")
+                children = group.get("children")
+                if not isinstance(children, list):
+                    raise RuntimeError(f"filter {filter_id!r} has no supported rule list")
+                episode_rules = [
+                    child
+                    for child in children
+                    if isinstance(child, dict)
+                    and child.get("type") == "rule"
+                    and child.get("field") == "episode_count"
+                ]
+                if len(episode_rules) > 1:
+                    raise RuntimeError(f"filter {filter_id!r} has multiple episode_count rules")
+                desired = {
+                    "type": "rule",
+                    "field": "episode_count",
+                    "operator": "lte",
+                    "value": max_episode_count,
+                }
+                if not episode_rules:
+                    children.append(desired)
+                    changed.append(
+                        f"{filter_id}.episode_count: unset -> <= {max_episode_count}"
+                    )
+                elif episode_rules[0] != desired:
+                    old = dict(episode_rules[0])
+                    episode_rules[0].clear()
+                    episode_rules[0].update(desired)
+                    changed.append(
+                        f"{filter_id}.episode_count: {old} -> <= {max_episode_count}"
+                    )
         updated.append(new_filter)
     if not found:
         raise RuntimeError(f"filter id {filter_id!r} was not found")
@@ -110,8 +145,16 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--arr-name", default="Sonarr")
     parser.add_argument("--filter-id", default="sonarr-cutoff-unmet")
     parser.add_argument("--selector", default="random", choices=sorted(SUPPORTED_SELECTORS))
+    parser.add_argument(
+        "--max-episode-count",
+        type=int,
+        help="limit Profilarr full-series searches to this many available episodes",
+    )
     parser.add_argument("--dry-run", action="store_true")
-    return parser.parse_args()
+    args = parser.parse_args()
+    if args.max_episode_count is not None and args.max_episode_count < 1:
+        parser.error("--max-episode-count must be at least 1")
+    return args
 
 
 def main() -> int:
@@ -119,7 +162,12 @@ def main() -> int:
     conn = connect(args.db, read_only=args.dry_run)
     try:
         config = load_config(conn, args.arr_name)
-        updated_filters, changes = update_filters(config["filters"], args.filter_id, args.selector)
+        updated_filters, changes = update_filters(
+            config["filters"],
+            args.filter_id,
+            args.selector,
+            args.max_episode_count,
+        )
         print(f"Profilarr DB: {args.db}")
         print(f"Arr: {config['arr']} enabled={config['enabled']} cron={config['cron']}")
         print(f"Filter: {args.filter_id}")
