@@ -223,34 +223,40 @@ class HermesHealthDeploymentTests(unittest.TestCase):
         self.assertNotIn("/etc/openclaw-health", self.playbook + inventory)
         self.assertNotIn("openclaw_health_receiver", self.playbook + inventory)
 
-    def test_cutover_is_rollback_backed_and_write_validated(self):
-        self.assertIn("Require expected Tailscale NFS rollback origin", self.playbook)
-        self.assertIn("/srv/live-rollbacks/jn-t14s-lin/hermes-health", self.host_vars)
-        self.assertIn("Back up final legacy Health database consistently", self.playbook)
-        self.assertIn("Back up pre-cutover Hermes Health database consistently", self.playbook)
-        self.assertIn("Verify final Hermes Health database integrity", self.playbook)
-        self.assertGreaterEqual(self.playbook.count("--write-probe"), 2)
-
-    def test_old_user_service_is_disabled_only_after_validation(self):
-        verified = self.playbook.index("Verify authenticated production Health receiver")
-        disabled = self.playbook.index("Disable legacy user Health receiver after validation")
-        self.assertLess(verified, disabled)
-
-    def test_routine_production_does_not_read_migration_sources(self):
-        self.assertIn("hermes_health_receiver_migration_inputs_required", self.playbook)
-        for task in (
-            "Resolve legacy Health receiver account",
-            "Inspect legacy Health token source",
-            "Inspect legacy Health database",
-            "Verify retained Health source database integrity",
-            "Copy Health receiver token without exposing it to Ansible output",
+    def test_production_has_no_completed_migration_branch(self):
+        production_source = self.playbook + self.host_vars
+        for retired_term in (
+            "legacy",
+            "cutover",
+            "canary",
+            "/home/johnny/.openclaw",
+            "token_source",
         ):
-            block = self.playbook.split(f"- name: {task}", 1)[1].split("\n    - name:", 1)[0]
-            self.assertIn(
-                "when: hermes_health_receiver_migration_inputs_required | bool",
-                block,
-            )
+            self.assertNotIn(retired_term, production_source)
+        self.assertIn("['disabled', 'production']", self.playbook)
+
+    def test_native_state_is_required_and_checked(self):
         self.assertIn("Require protected Hermes Health token", self.playbook)
+        self.assertIn("Require restored Hermes-native Health database", self.playbook)
+        self.assertIn("Verify isolated Health database integrity", self.playbook)
+        self.assertIn("PRAGMA quick_check", self.playbook)
+        self.assertIn("hermes_health_receiver_config_dir }}/token", self.playbook)
+        self.assertIn("Restore it from backup", self.playbook)
+
+    def test_production_starts_then_authenticates_without_writing(self):
+        flushed = self.playbook.index(
+            "Flush Health receiver handlers before ensuring service state"
+        )
+        started = self.playbook.index("Keep isolated production Health receiver enabled")
+        verified = self.playbook.index("Verify authenticated production Health receiver")
+        self.assertLess(flushed, started)
+        self.assertLess(started, verified)
+        verify_block = self.playbook.split(
+            "- name: Verify authenticated production Health receiver", 1
+        )[1].split("\n    - name:", 1)[0]
+        self.assertNotIn("--write-probe", verify_block)
+        self.assertNotIn("--require-metrics", verify_block)
+        self.assertIn("hermes_health_receiver_production_check.rc == 0", verify_block)
 
     def test_only_astra_receives_aggregate_report_access(self):
         self.assertIn(

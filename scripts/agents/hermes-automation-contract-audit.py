@@ -46,7 +46,6 @@ EXPECTED_SOURCE_PINS = {
     "stateMigration": "files/hermes/openclaw-state-migration-contract.json",
     "discordCutover": "files/hermes/discord-cutover-contract.json",
     "rigelJob": "files/hermes/jobs/rigel-academic-alerts.json",
-    "healthReceiverPlaybook": "playbooks/agents/hermes-health-receiver.yml",
     "controlPlaneInventory": "scripts/agents/openclaw-control-plane-inventory.py",
 }
 EXPECTED_SCHEDULE_IDS = {

@@ -1380,56 +1380,25 @@ the supported database/plugin modernization lane only. It does not authorize
 fresh OAuth, Discord/channel activation, behavior parity, or production
 cutover.
 
-### Disabled
+### Hermes-Native Health Receiver
 
-`hermes_health_receiver_mode: production` is the normal post-cutover state.
-The variable namespace is retained only as migration compatibility; deployed
-accounts, paths, and units are Hermes-native. Disabled mode remains available
-to stop the isolated receiver without modifying retained source evidence.
+`hermes_health_receiver_mode: production` maintains the established isolated
+receiver and aggregate report publisher. `disabled` stops the isolated units;
+there is no current canary or migration mode. The completed OpenClaw handoff is
+retained in Git and rollback history rather than as an executable production
+branch.
 
-### Canary
+Normal convergence requires the protected native token and the existing
+nonempty `hermes-health`-owned SQLite database, runs `PRAGMA quick_check`,
+starts the hardened system service on `100.73.46.86:18791`, and performs an
+authenticated read-only health check. A missing database is a restore failure;
+the playbook must not create empty application state. Raw Health rows and the
+upload token remain inaccessible to model-visible profiles, while Astra can
+read only generated aggregate reports.
 
-An owner-approved canary temporarily uses:
-
-- loopback `127.0.0.1:19791`;
-- a protected byte-for-byte copy of the current token;
-- a consistent SQLite `.backup` of the current database;
-- the hardened system service and aggregate summary publisher.
-
-The playbook requires existing mode-`0600` token input and a nonempty legacy
-database. It validates the canary with a helper that reads the token from disk,
-so the secret never enters arguments, Ansible output, or the service
-environment. Canary mode leaves the current production listener untouched and
-does not enable the new receiver at boot.
-
-### Production Cutover
-
-First production activation requires all three settings in the attended run:
-
-```yaml
-hermes_health_receiver_mode: production
-hermes_health_receiver_cutover_requested: true
-hermes_health_receiver_cutover_approved: true
-```
-
-The playbook then:
-
-1. Creates a root-only timestamped backup of the legacy unit, nonsecret
-   environment, token, and a consistent SQLite database copy.
-2. Stops both receiver processes before the final SQLite backup.
-3. Atomically promotes the final database under `hermes-health` ownership.
-4. Starts the production system service on `100.73.46.86:18791`.
-5. Performs an authenticated result-only check and requires retained metrics.
-6. Disables the old user unit and writes a root-owned completion marker.
-
-If any cutover task or validation fails, the isolated service is stopped and
-the legacy user service is restarted. After success, set both one-time cutover
-booleans back to `false`; subsequent `production` runs require the completion
-marker and converge the stable service normally.
-
-The iPhone Health Auto Export client still needs one real post-cutover export.
-Server health, database parity, and the authenticated write probe do not prove
-that the phone's saved endpoint and token still work.
+The iPhone Health Auto Export endpoint is operational state outside this
+playbook. A successful server health check does not prove a later phone upload;
+verify a real export separately when endpoint or network routing changes.
 
 ## Gateway Migration Gate
 

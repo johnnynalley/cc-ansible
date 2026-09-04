@@ -149,7 +149,9 @@ reviewed Ansible Vault ciphertext seeds declared by
   attachments, restart, rollback, and Rigel idle silence.
 - `automation-contract.json` preserves the historical source inventory of 28
   observed cron declarations and three logical heartbeat lanes. It is design
-  evidence, not the production scheduler source of truth.
+  evidence, not the production scheduler source of truth. Its source pins cover
+  immutable migration evidence only; it does not hash-pin the current mutable
+  Health receiver implementation.
   `automation-regressions.json` contains 14 sanitized promotion cases for
   inventory drift, one-shot handling, ownership, delivery isolation, Health,
   Siri, scheduler overlap, and rollback.
@@ -208,8 +210,8 @@ reviewed Ansible Vault ciphertext seeds declared by
   production Gateway readiness gate.
 - `scripts/agents/hermes-automation-contract-audit.py` validates the complete
   31-lane schedule inventory, target owner/mode/output boundaries, current
-  Health and Siri dispositions, handoff order, source pins, and optionally a
-  fresh redacted OpenClaw SQLite inventory.
+  Health and Siri dispositions, handoff order, immutable evidence pins, and
+  optionally a fresh redacted OpenClaw SQLite inventory.
 
 The target declaration is deliberately structured. Do not replace it with
 natural-language phrase matching. Update the schema, validator, tests, and

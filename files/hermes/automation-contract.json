@@ -15,10 +15,6 @@
       "path": "files/hermes/jobs/rigel-academic-alerts.json",
       "sha256": "e4ccc6aa5b7eccd5f8730b4ad5abdec68b1ad401d8013c8b86cc6c320de4ff0a"
     },
-    "healthReceiverPlaybook": {
-      "path": "playbooks/agents/hermes-health-receiver.yml",
-      "sha256": "460795d54eee702b0f1bd113566cfa2580fcbd311f55d48e8a235a6ec0d5b813"
-    },
     "controlPlaneInventory": {
       "path": "scripts/agents/openclaw-control-plane-inventory.py",
       "sha256": "90993d045c25c992fc6e6a4abe137d77ab170ec9a55b433b8545ad3c2a16be79"

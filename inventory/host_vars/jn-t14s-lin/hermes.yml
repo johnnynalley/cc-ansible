@@ -2,28 +2,11 @@
 # jn-t14s-lin - Hermes-native services
 # =============================================================================
 
-# Health ingestion runs independently from model-visible agent profiles. The
-# legacy inputs are consulted only for an explicit canary or one-time cutover.
+# Health ingestion runs independently from model-visible agent profiles.
 hermes_health_receiver_mode: production
-hermes_health_receiver_cutover_requested: false
-hermes_health_receiver_cutover_approved: false
 hermes_health_receiver_user: hermes-health
 hermes_health_receiver_group: hermes-health
 hermes_health_receiver_data_dir: /var/lib/hermes/health
-hermes_health_receiver_backup_dir: /srv/live-rollbacks/jn-t14s-lin/hermes-health
-hermes_health_receiver_legacy_user: johnny
-hermes_health_receiver_legacy_db: >-
-  /home/johnny/.openclaw/workspace/data/health.db
-hermes_health_receiver_legacy_unit: >-
-  /home/johnny/.config/systemd/user/health-receiver.service
-hermes_health_receiver_legacy_env: >-
-  /home/johnny/.config/openclaw/receivers/health-receiver.env
-hermes_health_receiver_token_source: >-
-  /home/johnny/.config/openclaw/receivers/health-receiver.token
-hermes_health_receiver_canary_bind: 127.0.0.1
-hermes_health_receiver_canary_port: 19791
-hermes_health_receiver_canary_sources:
-  - 127.0.0.1
 hermes_health_receiver_production_bind: 100.73.46.86
 hermes_health_receiver_production_port: 18791
 hermes_health_receiver_production_sources:

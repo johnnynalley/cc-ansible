@@ -13,33 +13,19 @@
 
   vars:
     hermes_health_receiver_effective_bind: >-
-      {{ hermes_health_receiver_canary_bind
-         if hermes_health_receiver_mode == 'canary'
-         else hermes_health_receiver_production_bind }}
+      {{ hermes_health_receiver_production_bind }}
     hermes_health_receiver_effective_port: >-
-      {{ hermes_health_receiver_canary_port
-         if hermes_health_receiver_mode == 'canary'
-         else hermes_health_receiver_production_port }}
+      {{ hermes_health_receiver_production_port }}
     hermes_health_receiver_effective_sources: >-
-      {{ hermes_health_receiver_canary_sources
-         if hermes_health_receiver_mode == 'canary'
-         else hermes_health_receiver_production_sources }}
-    hermes_health_receiver_migration_inputs_required: >-
-      {{
-        hermes_health_receiver_mode == 'canary'
-        or (
-          hermes_health_receiver_mode == 'production'
-          and hermes_health_receiver_cutover_requested | default(false) | bool
-        )
-      }}
+      {{ hermes_health_receiver_production_sources }}
 
   tasks:
     - name: Validate isolated Health receiver mode
       ansible.builtin.assert:
         that:
-          - hermes_health_receiver_mode | default('disabled') in ['disabled', 'canary', 'production']
+          - hermes_health_receiver_mode | default('disabled') in ['disabled', 'production']
         fail_msg: >-
-          hermes_health_receiver_mode must be disabled, canary, or production.
+          hermes_health_receiver_mode must be disabled or production.
 
     - name: Check for existing isolated Health receiver unit
       ansible.builtin.stat:
@@ -65,66 +51,11 @@
       ansible.builtin.meta: end_host
       when: hermes_health_receiver_mode == 'disabled'
 
-    - name: Require explicit approval for production cutover
-      ansible.builtin.assert:
-        that:
-          - hermes_health_receiver_cutover_approved | default(false) | bool
-        fail_msg: >-
-          Production cutover stops the legacy receiver. Set the approval flag
-          only during an owner-approved, attended migration window.
-      when:
-        - hermes_health_receiver_mode == 'production'
-        - hermes_health_receiver_cutover_requested | default(false) | bool
-
-    - name: Inspect production Health cutover marker
-      ansible.builtin.stat:
-        path: "{{ hermes_health_receiver_data_dir }}/.production-cutover-complete"
-      register: hermes_health_receiver_cutover_marker
-      check_mode: false
-
-    - name: Inspect Health canary validation marker
-      ansible.builtin.stat:
-        path: "{{ hermes_health_receiver_data_dir }}/.canary-validated"
-      register: hermes_health_receiver_canary_marker
-      check_mode: false
-
-    - name: Refuse unrequested first production activation
-      ansible.builtin.assert:
-        that:
-          - >-
-            hermes_health_receiver_cutover_requested | default(false) | bool
-            or hermes_health_receiver_cutover_marker.stat.exists
-        fail_msg: >-
-          First production activation requires an explicitly requested and
-          approved cutover. Use canary mode before that window.
-      when: hermes_health_receiver_mode == 'production'
-
-    - name: Require a validated canary before production cutover
-      ansible.builtin.assert:
-        that:
-          - hermes_health_receiver_canary_marker.stat.exists
-        fail_msg: >-
-          Production cutover is blocked until canary mode has passed its
-          authenticated receiver and aggregate-report checks.
-      when:
-        - hermes_health_receiver_mode == 'production'
-        - hermes_health_receiver_cutover_requested | default(false) | bool
-
-    - name: Set one Health cutover backup timestamp
-      ansible.builtin.set_fact:
-        hermes_health_receiver_backup_stamp: "{{ lookup('pipe', 'date -u +%Y%m%dT%H%M%SZ') }}"
-      when:
-        - hermes_health_receiver_mode == 'production'
-        - hermes_health_receiver_cutover_requested | default(false) | bool
-
     - name: Validate isolated Health receiver paths and network policy
       ansible.builtin.assert:
         that:
           - hermes_health_receiver_data_dir is match('^/var/lib/hermes/health(/[A-Za-z0-9._-]+)*$')
           - hermes_health_receiver_config_dir is match('^/etc/hermes/health(/[A-Za-z0-9._-]+)*$')
-          - hermes_health_receiver_backup_dir is match('^/srv/live-rollbacks/jn-t14s-lin/hermes-health(/[A-Za-z0-9._-]+)*$')
-          - hermes_health_receiver_legacy_db is match('^/home/[A-Za-z0-9._-]+/.+\.db$')
-          - hermes_health_receiver_token_source is match('^/home/[A-Za-z0-9._-]+/.+$')
           - hermes_health_receiver_effective_port | int >= 1024
           - hermes_health_receiver_effective_port | int <= 65535
           - hermes_health_receiver_effective_sources | length > 0
@@ -139,42 +70,6 @@
         fail_msg: "Health receiver source allowlists accept literal IPs only."
       loop: "{{ hermes_health_receiver_effective_sources }}"
 
-    - name: Verify off-host Health rollback mount is active
-      ansible.builtin.command:
-        argv:
-          - /usr/bin/mountpoint
-          - -q
-          - /srv/live-rollbacks
-      register: hermes_health_receiver_rollback_mount
-      changed_when: false
-      check_mode: false
-      when: hermes_health_receiver_migration_inputs_required | bool
-
-    - name: Read off-host Health rollback mount source
-      ansible.builtin.command:
-        argv:
-          - /usr/bin/findmnt
-          - -n
-          - -o
-          - SOURCE,FSTYPE
-          - --target
-          - /srv/live-rollbacks
-      register: hermes_health_receiver_rollback_source
-      changed_when: false
-      check_mode: false
-      when: hermes_health_receiver_migration_inputs_required | bool
-
-    - name: Require expected Tailscale NFS rollback origin
-      ansible.builtin.assert:
-        that:
-          - >-
-            hermes_health_receiver_rollback_source.stdout_lines | last
-            == '100.71.188.16:/live-rollbacks nfs4'
-        fail_msg: >-
-          Health migration requires the exact nas-zfs rollback export over
-          Tailscale; refusing to create a same-node fallback directory.
-      when: hermes_health_receiver_migration_inputs_required | bool
-
     - name: Install isolated Health receiver runtime dependencies
       ansible.builtin.apt:
         name:
@@ -182,12 +77,6 @@
           - sqlite3
         state: present
         update_cache: false
-
-    - name: Resolve legacy Health receiver account
-      ansible.builtin.getent:
-        database: passwd
-        key: "{{ hermes_health_receiver_legacy_user }}"
-      when: hermes_health_receiver_migration_inputs_required | bool
 
     - name: Create aggregate Health report reader group
       ansible.builtin.group:
@@ -242,13 +131,6 @@
           owner: "{{ hermes_health_receiver_user }}"
           group: "{{ hermes_health_report_group }}"
           mode: "2750"
-        - path: "{{ hermes_health_receiver_backup_dir }}"
-          owner: root
-          group: root
-          mode: "0700"
-      when: >-
-        item.path != hermes_health_receiver_backup_dir
-        or hermes_health_receiver_migration_inputs_required | bool
 
     - name: Deploy isolated Health receiver
       ansible.builtin.copy:
@@ -275,63 +157,6 @@
         group: root
         mode: "0755"
 
-    - name: Inspect legacy Health token source
-      ansible.builtin.stat:
-        path: "{{ hermes_health_receiver_token_source }}"
-      register: hermes_health_receiver_token_stat
-      check_mode: false
-      no_log: true
-      when: hermes_health_receiver_migration_inputs_required | bool
-
-    - name: Inspect legacy Health database
-      ansible.builtin.stat:
-        path: "{{ hermes_health_receiver_legacy_db }}"
-      register: hermes_health_receiver_legacy_db_stat
-      check_mode: false
-      when: hermes_health_receiver_migration_inputs_required | bool
-
-    - name: Require protected migration inputs
-      ansible.builtin.assert:
-        that:
-          - hermes_health_receiver_token_stat.stat.exists
-          - hermes_health_receiver_token_stat.stat.isreg
-          - hermes_health_receiver_token_stat.stat.mode == '0600'
-          - hermes_health_receiver_token_stat.stat.pw_name == hermes_health_receiver_legacy_user
-          - hermes_health_receiver_legacy_db_stat.stat.exists
-          - hermes_health_receiver_legacy_db_stat.stat.isreg
-          - hermes_health_receiver_legacy_db_stat.stat.size | int > 0
-        fail_msg: >-
-          The protected token or SQLite migration source is absent or has
-          unexpected ownership. Refusing to guess or create a replacement.
-      no_log: true
-      when: hermes_health_receiver_migration_inputs_required | bool
-
-    - name: Verify retained Health source database integrity
-      ansible.builtin.command:
-        argv:
-          - /usr/bin/sqlite3
-          - "{{ hermes_health_receiver_legacy_db }}"
-          - PRAGMA quick_check
-      register: hermes_health_receiver_source_integrity
-      changed_when: false
-      failed_when: >-
-        hermes_health_receiver_source_integrity.rc != 0
-        or hermes_health_receiver_source_integrity.stdout != 'ok'
-      check_mode: false
-      when: hermes_health_receiver_migration_inputs_required | bool
-
-    - name: Copy Health receiver token without exposing it to Ansible output
-      ansible.builtin.copy:
-        src: "{{ hermes_health_receiver_token_source }}"
-        dest: "{{ hermes_health_receiver_config_dir }}/token"
-        remote_src: true
-        owner: root
-        group: "{{ hermes_health_receiver_group }}"
-        mode: "0640"
-      no_log: true
-      notify: Restart isolated Health receiver
-      when: hermes_health_receiver_migration_inputs_required | bool
-
     - name: Inspect protected Hermes Health token
       ansible.builtin.stat:
         path: "{{ hermes_health_receiver_config_dir }}/token"
@@ -351,52 +176,24 @@
           The Hermes-native Health token is absent or has unsafe metadata.
       no_log: true
 
-    - name: Check isolated Health database state
+    - name: Inspect Hermes-native Health database
       ansible.builtin.stat:
         path: "{{ hermes_health_receiver_db }}"
       register: hermes_health_receiver_db_stat
       check_mode: false
 
-    - name: Seed canary database with a consistent SQLite backup
-      ansible.builtin.command:
-        argv:
-          - /usr/bin/sqlite3
-          - "{{ hermes_health_receiver_legacy_db }}"
-          - ".backup '{{ hermes_health_receiver_db }}.seed'"
-      when:
-        - hermes_health_receiver_mode == 'canary'
-        - not hermes_health_receiver_db_stat.stat.exists
-        - not ansible_check_mode
-      changed_when: true
-
-    - name: Protect seeded canary database
-      ansible.builtin.file:
-        path: "{{ hermes_health_receiver_db }}.seed"
-        owner: "{{ hermes_health_receiver_user }}"
-        group: "{{ hermes_health_receiver_group }}"
-        mode: "0600"
-      when:
-        - hermes_health_receiver_mode == 'canary'
-        - not hermes_health_receiver_db_stat.stat.exists
-        - not ansible_check_mode
-
-    - name: Promote seeded canary database atomically
-      ansible.builtin.command:
-        argv:
-          - /usr/bin/mv
-          - "{{ hermes_health_receiver_db }}.seed"
-          - "{{ hermes_health_receiver_db }}"
-      when:
-        - hermes_health_receiver_mode == 'canary'
-        - not hermes_health_receiver_db_stat.stat.exists
-        - not ansible_check_mode
-      changed_when: true
-
-    - name: Remove temporary canary database seed
-      ansible.builtin.file:
-        path: "{{ hermes_health_receiver_db }}.seed"
-        state: absent
-      when: hermes_health_receiver_mode == 'canary'
+    - name: Require restored Hermes-native Health database
+      ansible.builtin.assert:
+        that:
+          - hermes_health_receiver_db_stat.stat.exists
+          - hermes_health_receiver_db_stat.stat.isreg
+          - hermes_health_receiver_db_stat.stat.size | int > 0
+          - hermes_health_receiver_db_stat.stat.pw_name == hermes_health_receiver_user
+          - hermes_health_receiver_db_stat.stat.gr_name == hermes_health_receiver_group
+          - hermes_health_receiver_db_stat.stat.mode == '0600'
+        fail_msg: >-
+          The Hermes-native Health database is absent or has unsafe metadata.
+          Restore it from backup instead of creating empty application state.
 
     - name: Verify isolated Health database integrity
       ansible.builtin.command:
@@ -565,206 +362,11 @@
           WantedBy=timers.target
       notify: Reload systemd
 
-    - name: Run production Health receiver cutover
+    - name: Flush Health receiver handlers before ensuring service state
+      ansible.builtin.meta: flush_handlers
       when:
         - hermes_health_receiver_mode == 'production'
-        - hermes_health_receiver_cutover_requested | default(false) | bool
         - not ansible_check_mode
-      block:
-        - name: Create timestamped Health cutover backup directory
-          ansible.builtin.file:
-            path: "{{ hermes_health_receiver_backup_dir }}/{{ hermes_health_receiver_backup_stamp }}"
-            state: directory
-            owner: root
-            group: root
-            mode: "0700"
-
-        - name: Back up legacy Health service metadata
-          ansible.builtin.copy:
-            src: "{{ item.src }}"
-            dest: "{{ hermes_health_receiver_backup_dir }}/{{ hermes_health_receiver_backup_stamp }}/{{ item.dest }}"
-            remote_src: true
-            owner: root
-            group: root
-            mode: "0600"
-          loop:
-            - src: "{{ hermes_health_receiver_legacy_unit }}"
-              dest: health-receiver.service
-            - src: "{{ hermes_health_receiver_legacy_env }}"
-              dest: health-receiver.env
-            - src: "{{ hermes_health_receiver_token_source }}"
-              dest: health-receiver.token
-          no_log: true
-
-        - name: Stop isolated Health receiver before final database copy
-          ansible.builtin.systemd_service:
-            name: hermes-health-receiver.service
-            state: stopped
-            daemon_reload: true
-          failed_when: false
-
-        - name: Back up pre-cutover Hermes Health database consistently
-          ansible.builtin.command:
-            argv:
-              - /usr/bin/sqlite3
-              - "{{ hermes_health_receiver_db }}"
-              - >-
-                .backup '{{ hermes_health_receiver_backup_dir }}/{{
-                hermes_health_receiver_backup_stamp
-                }}/pre-cutover-hermes-health.db'
-          changed_when: true
-
-        - name: Protect pre-cutover Hermes Health database backup
-          ansible.builtin.file:
-            path: >-
-              {{ hermes_health_receiver_backup_dir }}/{{
-              hermes_health_receiver_backup_stamp
-              }}/pre-cutover-hermes-health.db
-            owner: root
-            group: root
-            mode: "0600"
-
-        - name: Stop legacy user Health receiver
-          ansible.builtin.command:
-            argv:
-              - /usr/bin/systemctl
-              - --user
-              - stop
-              - health-receiver.service
-          become_user: "{{ hermes_health_receiver_legacy_user }}"
-          environment:
-            XDG_RUNTIME_DIR: "/run/user/{{ ansible_facts.getent_passwd[hermes_health_receiver_legacy_user][1] }}"
-            DBUS_SESSION_BUS_ADDRESS: "unix:path=/run/user/{{ ansible_facts.getent_passwd[hermes_health_receiver_legacy_user][1] }}/bus"
-          changed_when: true
-
-        - name: Back up final legacy Health database consistently
-          ansible.builtin.command:
-            argv:
-              - /usr/bin/sqlite3
-              - "{{ hermes_health_receiver_legacy_db }}"
-              - ".backup '{{ hermes_health_receiver_backup_dir }}/{{ hermes_health_receiver_backup_stamp }}/health.db'"
-          changed_when: true
-
-        - name: Protect final legacy Health database backup
-          ansible.builtin.file:
-            path: "{{ hermes_health_receiver_backup_dir }}/{{ hermes_health_receiver_backup_stamp }}/health.db"
-            owner: root
-            group: root
-            mode: "0600"
-
-        - name: Create final isolated Health database copy
-          ansible.builtin.command:
-            argv:
-              - /usr/bin/sqlite3
-              - "{{ hermes_health_receiver_legacy_db }}"
-              - ".backup '{{ hermes_health_receiver_db }}.cutover'"
-          changed_when: true
-
-        - name: Protect final isolated Health database copy
-          ansible.builtin.file:
-            path: "{{ hermes_health_receiver_db }}.cutover"
-            owner: "{{ hermes_health_receiver_user }}"
-            group: "{{ hermes_health_receiver_group }}"
-            mode: "0600"
-
-        - name: Promote final isolated Health database atomically
-          ansible.builtin.command:
-            argv:
-              - /usr/bin/mv
-              - "{{ hermes_health_receiver_db }}.cutover"
-              - "{{ hermes_health_receiver_db }}"
-          changed_when: true
-
-        - name: Verify final Hermes Health database integrity
-          ansible.builtin.command:
-            argv:
-              - /usr/bin/sqlite3
-              - "{{ hermes_health_receiver_db }}"
-              - PRAGMA quick_check
-          register: hermes_health_receiver_final_integrity
-          changed_when: false
-          failed_when: >-
-            hermes_health_receiver_final_integrity.rc != 0
-            or hermes_health_receiver_final_integrity.stdout != 'ok'
-
-        - name: Remove temporary cutover database
-          ansible.builtin.file:
-            path: "{{ hermes_health_receiver_db }}.cutover"
-            state: absent
-
-        - name: Start isolated production Health receiver
-          ansible.builtin.systemd_service:
-            name: hermes-health-receiver.service
-            enabled: true
-            state: started
-            daemon_reload: true
-
-        - name: Verify authenticated production Health receiver
-          ansible.builtin.command:
-            argv:
-              - /usr/bin/python3
-              - /usr/local/libexec/hermes-health/health-receiver-check.py
-              - --url
-              - "http://{{ hermes_health_receiver_effective_bind }}:{{ hermes_health_receiver_effective_port }}/health"
-              - --token-file
-              - "{{ hermes_health_receiver_config_dir }}/token"
-              - --require-metrics
-              - --write-probe
-          register: hermes_health_receiver_cutover_check
-          changed_when: false
-          retries: 5
-          delay: 2
-          until: hermes_health_receiver_cutover_check.rc == 0
-
-        - name: Disable legacy user Health receiver after validation
-          ansible.builtin.command:
-            argv:
-              - /usr/bin/systemctl
-              - --user
-              - disable
-              - health-receiver.service
-          become_user: "{{ hermes_health_receiver_legacy_user }}"
-          environment:
-            XDG_RUNTIME_DIR: "/run/user/{{ ansible_facts.getent_passwd[hermes_health_receiver_legacy_user][1] }}"
-            DBUS_SESSION_BUS_ADDRESS: "unix:path=/run/user/{{ ansible_facts.getent_passwd[hermes_health_receiver_legacy_user][1] }}/bus"
-          changed_when: true
-
-        - name: Record completed production Health cutover
-          ansible.builtin.copy:
-            dest: "{{ hermes_health_receiver_data_dir }}/.production-cutover-complete"
-            owner: root
-            group: root
-            mode: "0400"
-            content: |
-              completed={{ hermes_health_receiver_backup_stamp }}
-              backup={{ hermes_health_receiver_backup_dir }}/{{ hermes_health_receiver_backup_stamp }}
-      rescue:
-        - name: Stop failed isolated Health receiver
-          ansible.builtin.systemd_service:
-            name: hermes-health-receiver.service
-            enabled: false
-            state: stopped
-            daemon_reload: true
-          failed_when: false
-
-        - name: Restart legacy Health receiver after failed cutover
-          ansible.builtin.command:
-            argv:
-              - /usr/bin/systemctl
-              - --user
-              - start
-              - health-receiver.service
-          become_user: "{{ hermes_health_receiver_legacy_user }}"
-          environment:
-            XDG_RUNTIME_DIR: "/run/user/{{ ansible_facts.getent_passwd[hermes_health_receiver_legacy_user][1] }}"
-            DBUS_SESSION_BUS_ADDRESS: "unix:path=/run/user/{{ ansible_facts.getent_passwd[hermes_health_receiver_legacy_user][1] }}/bus"
-          changed_when: true
-
-        - name: Fail the Health receiver cutover after rollback
-          ansible.builtin.fail:
-            msg: >-
-              Isolated Health validation failed. The legacy receiver was
-              restarted; inspect the timestamped backup and system journal.
 
     - name: Keep isolated production Health receiver enabled
       ansible.builtin.systemd_service:
@@ -774,21 +376,9 @@
         daemon_reload: true
       when:
         - hermes_health_receiver_mode == 'production'
-        - hermes_health_receiver_cutover_marker.stat.exists
-        - not (hermes_health_receiver_cutover_requested | default(false) | bool)
         - not ansible_check_mode
 
-    - name: Start isolated Health receiver canary
-      ansible.builtin.systemd_service:
-        name: hermes-health-receiver.service
-        enabled: false
-        state: started
-        daemon_reload: true
-      when:
-        - hermes_health_receiver_mode == 'canary'
-        - not ansible_check_mode
-
-    - name: Verify authenticated Health receiver canary
+    - name: Verify authenticated production Health receiver
       ansible.builtin.command:
         argv:
           - /usr/bin/python3
@@ -797,16 +387,14 @@
           - "http://{{ hermes_health_receiver_effective_bind }}:{{ hermes_health_receiver_effective_port }}/health"
           - --token-file
           - "{{ hermes_health_receiver_config_dir }}/token"
-          - --require-metrics
-          - --write-probe
-      register: hermes_health_receiver_canary_check
+      register: hermes_health_receiver_production_check
       changed_when: false
       when:
-        - hermes_health_receiver_mode == 'canary'
+        - hermes_health_receiver_mode == 'production'
         - not ansible_check_mode
       retries: 5
       delay: 2
-      until: hermes_health_receiver_canary_check.rc == 0
+      until: hermes_health_receiver_production_check.rc == 0
 
     - name: Enable aggregate Health report timer
       ansible.builtin.systemd_service:
@@ -843,19 +431,6 @@
       loop: "{{ hermes_health_receiver_reports.results | default([]) }}"
       when: not ansible_check_mode
 
-    - name: Record validated isolated Health canary
-      ansible.builtin.copy:
-        dest: "{{ hermes_health_receiver_data_dir }}/.canary-validated"
-        owner: root
-        group: root
-        mode: "0400"
-        content: |
-          validated={{ lookup('pipe', 'date -u +%Y%m%dT%H%M%SZ') }}
-          source={{ hermes_health_receiver_legacy_db }}
-      when:
-        - hermes_health_receiver_mode == 'canary'
-        - not ansible_check_mode
-
   handlers:
     - name: Reload systemd
       ansible.builtin.systemd_service:
@@ -868,6 +443,4 @@
         daemon_reload: true
       when:
         - not ansible_check_mode
-        - >-
-          hermes_health_receiver_mode == 'canary'
-          or hermes_health_receiver_cutover_marker.stat.exists
+        - hermes_health_receiver_mode == 'production'
