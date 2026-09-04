@@ -735,6 +735,11 @@ def build_backfill_command(args: argparse.Namespace) -> str:
     return command
 
 
+def backfill_progress_stalled(*, embedded: int, pending: int) -> bool:
+    """A live corpus progresses when rows embed, even if new rows add debt."""
+    return pending > 0 and embedded < 1
+
+
 def build_engine(args: argparse.Namespace):
     os.environ["HERMES_HOME"] = str(args.hermes_home)
     os.environ["LCM_DATABASE_PATH"] = str(args.database)
@@ -940,7 +945,6 @@ def main() -> int:
                         f"{args.operation} requires --apply"
                     )
                 previous_remaining: int | None = None
-                previous_uncertain: int | None = None
                 total_embedded = 0
                 output = ""
                 for pass_number in range(1, args.max_passes + 1):
@@ -980,15 +984,14 @@ def main() -> int:
                                 )
                             )
                             return 0
-                        if embedded < 1 or (
-                            previous_uncertain is not None
-                            and uncertain >= previous_uncertain
+                        if backfill_progress_stalled(
+                            embedded=embedded,
+                            pending=uncertain,
                         ):
                             raise RuntimeError(
                                 f"{args.corpus} uncertain retry made no progress: "
                                 f"embedded={embedded} uncertain={uncertain}"
                             )
-                        previous_uncertain = uncertain
                         continue
                     if remaining == 0:
                         print(
@@ -1004,9 +1007,9 @@ def main() -> int:
                             )
                         )
                         return 0
-                    if embedded < 1 or (
-                        previous_remaining is not None
-                        and remaining >= previous_remaining
+                    if backfill_progress_stalled(
+                        embedded=embedded,
+                        pending=remaining,
                     ):
                         raise RuntimeError(
                             f"{args.corpus} backfill made no progress: "

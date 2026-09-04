@@ -59,14 +59,6 @@ class HermesRigelAcademicSmokeTests(unittest.TestCase):
         with self.assertRaisesRegex(MODULE.SmokeError, "write-failed"):
             MODULE.require_success({"error": "denied"}, "write")
 
-    def test_runtime_dependency_policy_tracks_latest_stable_anydoc(self) -> None:
-        import yaml
-
-        variables = yaml.safe_load(VARS.read_text(encoding="utf-8"))
-        dependencies = variables["hermes_mem0_stable_dependencies"]
-        self.assertIn("firecrawl-anydoc", dependencies)
-        self.assertFalse(any("firecrawl-anydoc==" in item for item in dependencies))
-
     def test_smoke_output_contract_never_includes_document_content(self) -> None:
         source = SCRIPT.read_text(encoding="utf-8")
         self.assertIn("os.initgroups(user, account.pw_gid)", source)

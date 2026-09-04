@@ -13,7 +13,6 @@ from jinja2.nativetypes import NativeEnvironment
 ROOT = Path(__file__).parents[2]
 PLAYBOOK = ROOT / "playbooks" / "agents" / "hermes-shadow.yml"
 VARS = ROOT / "inventory" / "group_vars" / "hermes_hosts" / "vars.yml"
-CONFIG = ROOT / "templates" / "hermes" / "hermes-managed-config.yaml.j2"
 SERVICE = ROOT / "templates" / "hermes" / "hermes-gateway-hardening.conf.j2"
 LAUNCHER = ROOT / "templates" / "hermes" / "hermes-launcher.sh.j2"
 UPDATE_SERVICE = ROOT / "templates" / "hermes" / "hermes-native-update.service.j2"
@@ -49,7 +48,6 @@ class HermesShadowPlaybookTests(unittest.TestCase):
         cls.playbook = PLAYBOOK.read_text(encoding="utf-8")
         cls.raw_variables = yaml.safe_load(VARS.read_text(encoding="utf-8"))
         cls.variables = dict(cls.raw_variables)
-        cls.config_template = CONFIG.read_text(encoding="utf-8")
         cls.service_template = SERVICE.read_text(encoding="utf-8")
         cls.launcher_template = LAUNCHER.read_text(encoding="utf-8")
         cls.update_service_template = UPDATE_SERVICE.read_text(encoding="utf-8")
@@ -188,87 +186,11 @@ class HermesShadowPlaybookTests(unittest.TestCase):
             self.assertEqual(
                 profile["unit"], f"hermes-gateway-{profile['name']}.service"
             )
-            self.assertIn("computer_use", profile["disabled_toolsets"])
-        self.assertTrue(
-            {
-                "terminal",
-                "file",
-                "code_execution",
-                "cronjob",
-                "discord",
-                "discord_admin",
-            }
-            <= set(profiles[0]["toolsets"])
-        )
-        self.assertTrue(
-            {"terminal", "file", "code_execution", "cronjob"}.isdisjoint(
-                profiles[0]["disabled_toolsets"]
-            )
-        )
-        self.assertEqual(profiles[0]["terminal_backend"], "local")
         self.assertEqual(
-            profiles[0]["plugins_enabled"],
-            [
-                "star-dispatch-privacy",
-                "agent-docker-inventory",
-                "arr-api",
-                "host-admin",
-                "compose-admin",
-                "discord-parity",
-                "fleet-admin",
-                "hermes-lcm",
-            ],
-        )
-        for profile in profiles:
-            self.assertIn("context_engine", profile["toolsets"])
-        self.assertIn("arr_api", profiles[0]["toolsets"])
-        self.assertEqual(profiles[0]["toolsets"].count("arr_api"), 1)
-        self.assertNotIn("arr_api", profiles[1]["toolsets"])
-        self.assertNotIn("arr_api", profiles[2]["toolsets"])
-        self.assertEqual(profiles[0]["cron_approval_mode"], "approve")
-        self.assertNotIn("discord_admin", profiles[0]["disabled_toolsets"])
-        self.assertIn("fetch_messages", profiles[0]["discord_server_actions"])
-        self.assertIn("pin_message", profiles[0]["discord_server_actions"])
-        self.assertIn("create_thread", profiles[0]["discord_server_actions"])
-        self.assertNotIn("add_role", profiles[0]["discord_server_actions"])
-        self.assertNotIn("remove_role", profiles[0]["discord_server_actions"])
-        dubble = profiles[1]
-        self.assertTrue(
-            {"discord", "discord_admin", "discord_parity", "astra_handoff", "cronjob"}
-            <= set(dubble["toolsets"])
-        )
-        self.assertTrue(
-            {"terminal", "file", "code_execution"}
-            <= set(dubble["disabled_toolsets"])
-        )
-        self.assertEqual(dubble["discord_server_actions"], ["fetch_messages"])
-        self.assertEqual(dubble["cron_approval_mode"], "approve")
-        self.assertEqual(
-            dubble["bot_peers"],
-            {"astra": {"url": "http://127.0.0.1:8642"}},
-        )
-        self.assertTrue(
-            {"terminal", "file", "code_execution"}
-            <= set(dubble["disabled_toolsets"])
-        )
-        self.assertEqual(dubble["terminal_backend"], "docker")
-        self.assertEqual(
-            dubble["plugins_enabled"],
-            ["discord-parity", "astra-handoff", "hermes-lcm"],
+            [profile["terminal_backend"] for profile in profiles],
+            ["local", "docker", "local"],
         )
         rigel = profiles[2]
-        self.assertIn("file", rigel["toolsets"])
-        self.assertIn("terminal", rigel["toolsets"])
-        self.assertNotIn("file", rigel["disabled_toolsets"])
-        self.assertNotIn("terminal", rigel["disabled_toolsets"])
-        self.assertIn("code_execution", rigel["disabled_toolsets"])
-        self.assertEqual(rigel["terminal_backend"], "local")
-        self.assertEqual(
-            rigel["plugins_enabled"],
-            ["hermes-lcm", "rigel-astra-liaison"],
-        )
-        self.assertEqual(rigel["approval_mode"], "smart")
-        self.assertIn("approval_smart_policy", rigel)
         self.assertEqual(
             rigel["terminal_cwd"],
             "/var/lib/hermes/rigel/.hermes/profiles/rigel/imported-data",
@@ -276,30 +198,50 @@ class HermesShadowPlaybookTests(unittest.TestCase):
         self.assertEqual(
             rigel["gateway_working_directory"], rigel["terminal_cwd"]
         )
-        self.assertTrue(
-            {"cronjob", "discord_admin"}
-            <= set(profiles[2]["disabled_toolsets"])
-        )
-        self.assertEqual(profiles[2]["discord_server_actions"], [])
-        self.assertEqual(profiles[2]["cron_approval_mode"], "deny")
-        self.assertIn("web", profiles[0]["toolsets"])
-        for toolset in ("browser", "vision", "image_gen", "tts"):
-            self.assertIn(toolset, profiles[0]["toolsets"])
-        self.assertEqual(
-            {"browser", "vision", "image_gen", "tts"}
-            & set(profiles[1]["toolsets"]),
-            set(),
-        )
-        self.assertNotIn("messaging", profiles[0]["toolsets"])
-        self.assertNotIn("messaging", profiles[1]["toolsets"])
-        self.assertTrue(profiles[0]["native_messaging_bridge"])
-        self.assertTrue(profiles[1]["native_messaging_bridge"])
-        self.assertNotIn("native_messaging_bridge", profiles[2])
-        self.assertIn(
-            "(item.native_messaging_bridge | default(false) | bool)",
-            self.playbook,
-        )
-        self.assertIn("'messaging' not in item.toolsets", self.playbook)
+        forbidden_native_keys = {
+            "model_provider",
+            "model_default",
+            "model_max_tokens",
+            "model_supports_vision",
+            "fallback_providers",
+            "auxiliary_approval",
+            "auxiliary_background_review",
+            "image_input_mode",
+            "approval_mode",
+            "approval_smart_policy",
+            "cron_approval_mode",
+            "memory_write_approval",
+            "memory_nudge_interval",
+            "memory_char_limit",
+            "user_char_limit",
+            "skills_write_approval",
+            "skills_creation_nudge_interval",
+            "curator",
+            "allow_any_attachment",
+            "native_messaging_bridge",
+            "disabled_toolsets",
+            "approval_deny",
+            "bot_peers",
+            "todo_stop_guard",
+            "max_todo_stop_nudges",
+            "context_engine",
+            "memory_provider",
+            "plugins_enabled",
+            "toolsets",
+        }
+        for profile in profiles:
+            self.assertTrue(forbidden_native_keys.isdisjoint(profile))
+            self.assertFalse(any(key.startswith("discord_") for key in profile))
+        for forbidden_reference in (
+            "item.model_provider",
+            "item.model_default",
+            "item.fallback_providers",
+            "item.approval_mode",
+            "item.cron_approval_mode",
+            "item.disabled_toolsets",
+            "item.discord_allowed_users",
+        ):
+            self.assertNotIn(forbidden_reference, self.playbook)
         self.assertEqual(
             self.variables["hermes_native_messaging_tools"],
             [
@@ -313,36 +255,6 @@ class HermesShadowPlaybookTests(unittest.TestCase):
                 "channels_list",
             ],
         )
-        self.assertNotIn("web", profiles[1]["toolsets"])
-        self.assertNotIn("web", profiles[2]["toolsets"])
-        expected_fallbacks = [
-            {"provider": "ollama-cloud", "model": "glm-5.2"},
-            {"provider": "ollama-cloud", "model": "kimi-k2.7-code"},
-            {"provider": "ollama-cloud", "model": "deepseek-v4-pro"},
-        ]
-        for profile in profiles:
-            self.assertEqual(profile["model_provider"], "openai-codex")
-            self.assertEqual(profile["model_default"], "gpt-5.6-sol")
-            self.assertEqual(profile["model_max_tokens"], 8192)
-            self.assertEqual(profile["fallback_providers"], expected_fallbacks)
-            self.assertEqual(profile["auxiliary_approval"]["provider"], "auto")
-            self.assertEqual(
-                profile["auxiliary_approval"]["model"], ""
-            )
-            self.assertEqual(
-                profile["auxiliary_background_review"]["provider"],
-                "auto",
-            )
-            self.assertEqual(
-                profile["auxiliary_background_review"]["model"],
-                "",
-            )
-        self.assertTrue(profiles[0]["model_supports_vision"])
-        self.assertEqual(profiles[0]["image_input_mode"], "auto")
-        self.assertEqual(profiles[0]["terminal_cwd"], profiles[0]["home"])
-        self.assertFalse(profiles[0]["memory_write_approval"])
-        self.assertFalse(profiles[0]["skills_write_approval"])
-        self.assertFalse(profiles[0]["curator"]["prune_builtins"])
         self.assertEqual(
             self.variables["hermes_native_post_setup_keys"],
             ["ddgs", "agent_browser"],
@@ -375,24 +287,22 @@ class HermesShadowPlaybookTests(unittest.TestCase):
             "Inspect staged Hermes source modifications",
             "Inspect untracked Hermes source paths",
             "Validate deployed Hermes shadow contract",
-            "Validate deployed Hermes Discord cutover contract",
             "Validate deployed Hermes automation contract",
-            "Hash root-managed Hermes policy and environment",
             "Inspect legacy OpenClaw listeners before Hermes start",
         )
         for name in task_names:
             with self.subTest(task=name):
                 self.assertIn("check_mode: false", self.task(name))
 
-    def test_astra_codex_schema_migration_is_exact_and_fail_closed(self) -> None:
-        task = self.task("Migrate reviewed Astra Codex route one schema forward")
-        self.assertIn("item.item.name == 'astra'", task)
-        self.assertIn("hermes_existing_mutable_config | length == 2", task)
-        self.assertIn("['base_url', 'default', 'provider']", task)
-        self.assertIn("openai-codex", task)
-        self.assertIn("gpt-5.6-sol", task)
-        self.assertIn("https://chatgpt.com/backend-api/codex", task)
-        self.assertIn("no_log: true", task)
+    def test_established_native_profile_config_is_required_not_rewritten(self) -> None:
+        inspect = self.task("Inspect native Hermes profile configuration")
+        require = self.task("Require established native Hermes profile configuration")
+        seed = self.task("Seed mutable Hermes profile config once")
+        self.assertIn("{{ item.home }}/config.yaml", inspect)
+        self.assertIn("hermes_shadow_mode != 'bootstrap'", require)
+        self.assertIn("Restore native profile state before platform", require)
+        self.assertIn("hermes_shadow_mode == 'bootstrap'", seed)
+        self.assertIn("force: false", seed)
 
     def test_every_pinned_profile_data_destination_parent_is_declared(self) -> None:
         directories = self.task("Create Hermes root-owned deployment directories")
@@ -410,259 +320,9 @@ class HermesShadowPlaybookTests(unittest.TestCase):
             "files/openclaw/workspace-migration-policy.json", pinned_sources
         )
 
-    def test_every_managed_config_renders_with_fail_closed_policy(self) -> None:
-        template = self.environment.from_string(self.config_template)
+    def test_inventory_does_not_own_native_discord_routes(self) -> None:
         for profile in self.variables["hermes_shadow_profiles"]:
-            rendered = template.render(
-                hermes_profile=profile,
-                hermes_shadow_config_version=self.variables[
-                    "hermes_shadow_config_version"
-                ],
-                hermes_shadow_runtime_binary=self.variables[
-                    "hermes_shadow_runtime_binary"
-                ],
-                hermes_native_messaging_tools=self.variables[
-                    "hermes_native_messaging_tools"
-                ],
-                hermes_tirith_binary=self.variables["hermes_tirith_binary"],
-            )
-            config = yaml.safe_load(rendered)
-            self.assertEqual(
-                config["_config_version"],
-                self.variables["hermes_shadow_config_version"],
-            )
-            self.assertEqual(config["model"]["provider"], profile["model_provider"])
-            self.assertEqual(config["model"]["default"], profile["model_default"])
-            self.assertEqual(
-                config.get("fallback_providers", []),
-                profile.get("fallback_providers", []),
-            )
-            self.assertEqual(
-                config["approvals"]["mode"], profile["approval_mode"]
-            )
-            self.assertEqual(
-                config["approvals"]["cron_mode"], profile["cron_approval_mode"]
-            )
-            if profile["name"] == "astra":
-                self.assertEqual(config["web"]["search_backend"], "ddgs")
-            else:
-                self.assertNotIn("web", config)
-            self.assertFalse(config["security"]["allow_lazy_installs"])
-            self.assertFalse(config["security"]["allow_private_urls"])
-            self.assertEqual(
-                config["security"]["tirith_path"],
-                self.variables["hermes_tirith_binary"],
-            )
-            self.assertFalse(config["security"]["tirith_fail_open"])
-            self.assertNotIn("pre_update_backup", config["updates"])
-            self.assertEqual(
-                config["updates"]["non_interactive_local_changes"], "discard"
-            )
-            self.assertEqual(
-                config["memory"]["write_approval"],
-                profile.get("memory_write_approval", True),
-            )
-            self.assertEqual(
-                config["skills"]["write_approval"],
-                profile.get("skills_write_approval", True),
-            )
-            self.assertEqual(config["memory"]["nudge_interval"], 10)
-            self.assertEqual(config["skills"]["creation_nudge_interval"], 10)
-            self.assertEqual(
-                config["auxiliary"]["approval"], profile["auxiliary_approval"]
-            )
-            self.assertEqual(
-                config["auxiliary"]["background_review"],
-                profile["auxiliary_background_review"],
-            )
-            self.assertNotIn("vision", config["auxiliary"])
-            self.assertEqual(
-                config["terminal"]["backend"], profile["terminal_backend"]
-            )
-            if profile["name"] in {"astra", "rigel"}:
-                self.assertTrue(config["model"]["supports_vision"])
-                self.assertEqual(config["agent"]["image_input_mode"], "auto")
-            else:
-                self.assertNotIn("supports_vision", config["model"])
-                self.assertNotIn("image_input_mode", config["agent"])
-            if profile["name"] in {"astra", "rigel"}:
-                self.assertEqual(config["terminal"]["cwd"], profile["terminal_cwd"])
-            if profile["name"] == "astra":
-                self.assertEqual(config["model"]["max_tokens"], 8192)
-                self.assertEqual(config["memory"]["provider"], "mem0")
-                self.assertEqual(config["context"]["engine"], "lcm")
-                self.assertEqual(
-                    config["curator"], profile["curator"]
-                )
-                self.assertEqual(
-                    config["approvals"]["smart_policy"],
-                    profile["approval_smart_policy"],
-                )
-                self.assertEqual(config["approvals"]["mode"], "smart")
-                self.assertIn("*sudo*", config["approvals"]["deny"])
-                self.assertIn("*docker*", config["approvals"]["deny"])
-                self.assertNotIn("docker_network", config["terminal"])
-            else:
-                self.assertNotIn("curator", config)
-                if profile["name"] == "rigel":
-                    self.assertEqual(
-                        config["approvals"]["smart_policy"],
-                        profile["approval_smart_policy"],
-                    )
-                    self.assertEqual(config["approvals"]["mode"], "smart")
-                else:
-                    self.assertNotIn("smart_policy", config["approvals"])
-                    self.assertEqual(config["approvals"]["mode"], "manual")
-                if profile["terminal_backend"] == "docker":
-                    self.assertFalse(config["terminal"]["docker_network"])
-                    self.assertFalse(
-                        config["terminal"]["docker_mount_cwd_to_workspace"]
-                    )
-                    self.assertFalse(config["terminal"]["docker_run_as_host_user"])
-                    self.assertEqual(config["terminal"]["docker_forward_env"], [])
-                    self.assertEqual(config["terminal"]["docker_volumes"], [])
-                else:
-                    for key in (
-                        "docker_network",
-                        "docker_mount_cwd_to_workspace",
-                        "docker_run_as_host_user",
-                        "docker_forward_env",
-                        "docker_volumes",
-                    ):
-                        self.assertNotIn(key, config["terminal"])
-            self.assertEqual(config["delegation"]["max_iterations"], 12)
-            self.assertEqual(config["delegation"]["max_concurrent_children"], 2)
-            self.assertEqual(config["delegation"]["max_spawn_depth"], 1)
-            self.assertFalse(config["delegation"]["orchestrator_enabled"])
-            self.assertEqual(
-                config["plugins"]["enabled"],
-                profile.get("plugins_enabled", []),
-            )
-            self.assertEqual(config["plugins"]["disabled"], [])
-            self.assertEqual(config["display"]["tool_progress"], "off")
-            self.assertEqual(config["display"]["busy_input_mode"], "queue")
-            self.assertFalse(config["display"]["busy_ack_enabled"])
-            self.assertEqual(config["display"]["memory_notifications"], "off")
-            self.assertEqual(config["onboarding"]["profile_build"], "off")
-            self.assertEqual(config["unauthorized_dm_behavior"], "ignore")
-            self.assertTrue(config["group_sessions_per_user"])
-            self.assertTrue(config["discord"]["require_mention"])
-            self.assertTrue(config["discord"]["thread_require_mention"])
-            self.assertEqual(config["discord"]["allow_bots"], "none")
-            self.assertEqual(
-                {
-                    key: value.rstrip("\n")
-                    for key, value in config["discord"]["channel_prompts"].items()
-                },
-                profile["discord_channel_prompts"],
-            )
-            self.assertEqual(
-                config["discord"]["channel_skill_bindings"],
-                profile["discord_channel_skill_bindings"],
-            )
-            self.assertFalse(config["discord"]["history_backfill"])
-            self.assertFalse(config["discord"]["missed_message_backfill"]["enabled"])
-            self.assertFalse(config["discord"]["reactions"])
-            self.assertFalse(
-                config["gateway"]["platforms"]["discord"]["extra"]["slash_commands"]
-            )
-            if profile.get("native_messaging_bridge"):
-                bridge = config["mcp_servers"]["hermes_messaging"]
-                self.assertEqual(
-                    bridge["command"], self.variables["hermes_shadow_runtime_binary"]
-                )
-                self.assertEqual(bridge["args"], ["mcp", "serve"])
-                self.assertEqual(
-                    bridge["tools"]["include"],
-                    self.variables["hermes_native_messaging_tools"],
-                )
-                self.assertFalse(bridge["tools"]["resources"])
-                self.assertFalse(bridge["tools"]["prompts"])
-                self.assertEqual(
-                    bridge["env"]["DISCORD_BOT_TOKEN"], "${DISCORD_BOT_TOKEN}"
-                )
-                self.assertEqual(
-                    bridge["env"]["HERMES_MANAGED_DIR"],
-                    f"/etc/hermes/{profile['name']}/mcp-server",
-                )
-                self.assertNotIn("permissions_list_open", str(bridge))
-                self.assertNotIn("permissions_respond", str(bridge))
-            else:
-                self.assertNotIn("mcp_servers", config)
-
-        isolated_scope = self.task(
-            "Create isolated native MCP server managed scopes"
-        )
-        self.assertIn("/etc/hermes/{{ item.name }}/mcp-server", isolated_scope)
-        self.assertIn('mode: "0750"', isolated_scope)
-
-    def test_managed_profiles_preserve_production_discord_routes(self) -> None:
-        profiles = {
-            profile["name"]: profile
-            for profile in self.variables["hermes_shadow_profiles"]
-        }
-        owner = "740687933803331726"
-        self.assertEqual(profiles["astra"]["discord_allowed_users"], [owner])
-        self.assertEqual(profiles["astra"]["discord_admin_users"], [owner])
-        self.assertEqual(
-            profiles["astra"]["discord_allowed_channels"],
-            ["1482585492330381343", "1488752822466904256"],
-        )
-        self.assertEqual(
-            profiles["astra"]["discord_free_response_channels"],
-            profiles["astra"]["discord_allowed_channels"],
-        )
-        self.assertEqual(
-            profiles["astra"]["discord_ignored_channels"],
-            ["1482589440663617638"],
-        )
-        self.assertEqual(
-            profiles["astra"]["discord_channel_skill_bindings"],
-            [
-                {
-                    "id": "1488752822466904256",
-                    "skills": ["source-grounded-study"],
-                }
-            ],
-        )
-        self.assertEqual(profiles["dubble"]["discord_allowed_users"], [])
-        self.assertEqual(
-            profiles["dubble"]["discord_allowed_roles"],
-            ["1209365945882251294"],
-        )
-        self.assertEqual(profiles["dubble"]["discord_admin_users"], [owner])
-        self.assertEqual(
-            profiles["dubble"]["discord_allowed_channels"],
-            ["1483229851350728784"],
-        )
-        self.assertEqual(
-            profiles["dubble"]["discord_free_response_channels"],
-            profiles["dubble"]["discord_allowed_channels"],
-        )
-        dedicated = {
-            profile["name"]: profile
-            for profile in self.resolved_profiles(True)
-        }
-        self.assertEqual(
-            dedicated["astra"]["discord_allowed_channels"],
-            ["1482585492330381343"],
-        )
-        self.assertEqual(
-            dedicated["rigel"]["discord_allowed_channels"],
-            ["1488752822466904256"],
-        )
-        self.assertEqual(
-            dedicated["rigel"]["discord_free_response_channels"],
-            dedicated["rigel"]["discord_allowed_channels"],
-        )
-        self.assertEqual(
-            profiles["dubble"]["discord_ignored_channels"],
-            ["1483229869079920741"],
-        )
-        self.assertEqual(profiles["rigel"]["discord_allowed_users"], [])
-        self.assertEqual(profiles["rigel"].get("discord_allowed_roles", []), [])
-        self.assertEqual(profiles["rigel"]["discord_allowed_channels"], [])
-        self.assertEqual(profiles["rigel"]["discord_admin_users"], [])
+            self.assertFalse(any(key.startswith("discord_") for key in profile))
 
     def test_star_validation_is_idempotent_during_plugin_promotion(self) -> None:
         validator = STAR_VALIDATOR.read_text(encoding="utf-8")
@@ -690,10 +350,6 @@ class HermesShadowPlaybookTests(unittest.TestCase):
             "hermes_agent_browser_selector_live": self.variables[
                 "hermes_agent_browser_selector_live"
             ],
-            "hermes_discord_audit_live": self.variables["hermes_discord_audit_live"],
-            "hermes_discord_contract_live": self.variables[
-                "hermes_discord_contract_live"
-            ],
             "hermes_discord_runtime_audit_live": self.variables[
                 "hermes_discord_runtime_audit_live"
             ],
@@ -711,9 +367,6 @@ class HermesShadowPlaybookTests(unittest.TestCase):
             ],
             "hermes_profile_skills_contract_live": self.variables[
                 "hermes_profile_skills_contract_live"
-            ],
-            "hermes_native_profile_skills_enabled": self.variables[
-                "hermes_native_profile_skills_enabled"
             ],
             "hermes_shared_self_evolution_source": self.variables[
                 "hermes_shared_self_evolution_source"
@@ -868,19 +521,6 @@ class HermesShadowPlaybookTests(unittest.TestCase):
             **{
                 key: self.variables[key]
                 for key in (
-                    "hermes_lcm_embedding_provider",
-                    "hermes_lcm_embedding_model",
-                    "hermes_lcm_ollama_base_url",
-                    "hermes_lcm_embedding_storage_dtype",
-                    "hermes_lcm_embedding_store_dim",
-                    "hermes_lcm_embedding_binary_prescreen",
-                    "hermes_lcm_embedding_content_policy",
-                    "hermes_lcm_embedding_max_batch_items",
-                    "hermes_lcm_embedding_query_timeout_s",
-                    "hermes_lcm_recall_query_timeout_s",
-                    "hermes_lcm_embedding_backfill_timeout_s",
-                    "hermes_lcm_proactive_recall_enabled",
-                    "hermes_lcm_temporal_rollups_enabled",
                     "hermes_health_report_group",
                     "hermes_health_receiver_report_dir",
                     "hermes_health_receiver_db",
@@ -973,25 +613,37 @@ class HermesShadowPlaybookTests(unittest.TestCase):
                 ),
                 rendered,
             )
-            self.assertIn("hermes-discord-cutover-audit", rendered)
-            self.assertNotIn("hermes-automation-contract-audit", rendered)
             self.assertIn(
-                "ExecStartPre=+/usr/bin/sha256sum --check --status --strict",
+                f"Environment=LCM_DATABASE_PATH={profile['home']}/lcm.db",
                 rendered,
             )
-            self.assertIn("managed-policy.sha256", rendered)
+            self.assertIn(
+                f"EnvironmentFile=-{profile['home']}/lcm.env",
+                rendered,
+            )
+            self.assertIn(
+                f"Environment=MEM0_DIR={profile['home']}/mem0",
+                rendered,
+            )
+            for managed_option in (
+                "LCM_EMBEDDINGS_ENABLED=",
+                "LCM_EMBEDDING_PROVIDER=",
+                "LCM_EMBEDDING_MODEL=",
+                "LCM_PROACTIVE_RECALL_ENABLED=",
+                "LCM_TEMPORAL_ROLLUPS_ENABLED=",
+            ):
+                self.assertNotIn(managed_option, rendered)
+            self.assertNotIn("hermes-discord-cutover-audit", rendered)
+            self.assertNotIn("hermes-automation-contract-audit", rendered)
+            self.assertNotIn("managed-policy.sha256", rendered)
             self.assertIn(
                 f"ExecStartPre={self.variables['hermes_tirith_binary']} --version",
                 rendered,
             )
-            managed_skills_bind = (
-                f"BindReadOnlyPaths=/etc/hermes/{profile['name']}/skills:"
-                f"{profile['home']}/skills/managed"
+            self.assertNotIn(
+                f"BindReadOnlyPaths=/etc/hermes/{profile['name']}/skills:",
+                rendered,
             )
-            if self.variables["hermes_native_profile_skills_enabled"]:
-                self.assertNotIn(managed_skills_bind, rendered)
-            else:
-                self.assertIn(managed_skills_bind, rendered)
             self.assertIn(
                 f"--mode runtime --profile {profile['name']}", rendered
             )
@@ -1052,8 +704,7 @@ class HermesShadowPlaybookTests(unittest.TestCase):
                 self.assertNotIn("star-dispatch-privacy", rendered)
                 self.assertNotIn("/home/johnny/cc-ansible", rendered)
 
-    def test_native_skill_ownership_bind_is_narrow_and_enabled(self) -> None:
-        self.assertTrue(self.variables["hermes_native_profile_skills_enabled"])
+    def test_shared_self_evolution_bind_is_the_only_shared_skill_projection(self) -> None:
         self.assertEqual(
             self.variables["hermes_shared_self_evolution_source"],
             "/var/lib/hermes/astra/.hermes/profiles/astra/skills/self-evolution",
@@ -1062,14 +713,12 @@ class HermesShadowPlaybookTests(unittest.TestCase):
             "Create read-only shared self-evolution mountpoints", self.playbook
         )
         self.assertIn(
-            "{% if hermes_native_profile_skills_enabled | bool %}",
-            self.service_template,
-        )
-        self.assertIn(
             "BindReadOnlyPaths={{ hermes_shared_self_evolution_source }}:"
             "{{ hermes_profile.home }}/skills/self-evolution",
             self.service_template,
         )
+        self.assertIn("hermes_profile.name in ['dubble', 'rigel']", self.service_template)
+        self.assertNotIn("/skills/managed", self.service_template)
 
     def test_astra_workspace_access_is_acl_scoped_without_home_or_sudo(self) -> None:
         self.assertEqual(
@@ -1287,45 +936,30 @@ class HermesShadowPlaybookTests(unittest.TestCase):
         )
         self.assertIn("/var/lib/hermes/astra/.hermes/profiles/astra/plugins", plugin)
 
-    def test_native_update_dependencies_are_bootstrapped_before_validation(self) -> None:
-        directories = self.task("Create native Hermes update dependency directories")
-        queued = self.task("Deploy native Hermes queued-event update assets")
+    def test_native_update_boundary_uses_only_supported_external_assets(self) -> None:
         browser = self.task("Deploy native Hermes browser selector")
-        resolver = self.task("Deploy native Hermes memory dependency resolver")
-        patcher = self.task("Deploy managed Hermes source patcher")
+        transaction = self.task("Deploy native Hermes update transaction helper")
         validate = self.task("Validate native Hermes update transaction contract")
-        self.assertIn("hermes_queued_event_patch_live | dirname", directories)
-        self.assertIn("hermes_managed_source_patch_staging_root", directories)
-        self.assertIn("hermes_queued_event_patch_source", queued)
-        self.assertIn("hermes_queued_event_patch_live", queued)
-        self.assertIn("hermes_queued_event_validator_source", queued)
-        self.assertIn("hermes_queued_event_validator_live", queued)
-        self.assertIn("hermes_runtime_readers_group", queued)
-        self.assertIn('mode: "0440"', queued)
         self.assertIn("hermes_agent_browser_selector_source", browser)
         self.assertIn("hermes_agent_browser_selector_live", browser)
-        self.assertIn("hermes_mem0_dependency_updater_source", resolver)
-        self.assertIn("hermes_mem0_dependency_updater_live", resolver)
-        self.assertIn('owner: root', resolver)
-        self.assertIn('group: root', resolver)
-        self.assertIn('mode: "0755"', resolver)
-        self.assertIn("hermes_managed_source_patch_source", patcher)
-        self.assertIn("hermes_managed_source_patch_live", patcher)
-        self.assertIn('owner: root', patcher)
-        self.assertIn('group: root', patcher)
-        self.assertIn('mode: "0555"', patcher)
+        self.assertIn("hermes_native_update_transaction_source", transaction)
+        self.assertIn("hermes_native_update_transaction_live", transaction)
         for task in (
-            "Create native Hermes update dependency directories",
-            "Deploy native Hermes queued-event update assets",
             "Deploy native Hermes browser selector",
-            "Deploy native Hermes memory dependency resolver",
-            "Deploy managed Hermes source patcher",
+            "Deploy native Hermes update transaction helper",
         ):
             self.assertLess(
                 self.playbook.index(task),
                 self.playbook.index("Validate native Hermes update transaction contract"),
             )
         self.assertIn("--validate-config", validate)
+        for retired in (
+            "hermes_queued_event_patch",
+            "hermes_queued_event_validator",
+            "hermes_managed_source_patch",
+            "hermes_mem0_dependency_updater",
+        ):
+            self.assertNotIn(retired, self.playbook)
 
     def test_native_updaters_own_release_selection_and_are_narrowly_triggered(self) -> None:
         values = {
@@ -1343,19 +977,10 @@ class HermesShadowPlaybookTests(unittest.TestCase):
                 "hermes_shadow_runtime_binary",
                 "hermes_shadow_runtime_root",
                 "hermes_shadow_runtime_venv",
-                "hermes_shadow_uv_bin_dir",
                 "hermes_shadow_uv_binary",
                 "hermes_shadow_uv_python_root",
-                "hermes_mem0_ollama_dependency",
-                "hermes_mem0_dependency_updater_live",
-                "hermes_mem0_stable_dependencies",
-                "hermes_mem0_spacy_model",
-                "hermes_native_post_setup_keys",
-                "hermes_agent_browser_selector_live",
-                "hermes_queued_event_validator_live",
                 "hermes_native_update_transaction_live",
                 "hermes_native_update_transaction_config",
-                "hermes_native_update_rollback_root",
                 "hermes_tirith_binary",
                 "hermes_tirith_update_service",
                 "hermes_tirith_update_timer",
@@ -1394,7 +1019,6 @@ class HermesShadowPlaybookTests(unittest.TestCase):
         )
         self.assertIn(values["hermes_native_update_transaction_live"], hermes_service)
         self.assertIn(values["hermes_native_update_transaction_config"], hermes_service)
-        self.assertIn(values["hermes_native_update_rollback_root"], hermes_service)
         self.assertIn(
             f"ReadOnlyPaths={values['hermes_native_update_transaction_config']} "
             f"{values['hermes_shadow_uv_binary']} "
@@ -1472,7 +1096,6 @@ class HermesShadowPlaybookTests(unittest.TestCase):
         checkout_root = self.task("Keep Hermes runtime root traversable")
         update_state = self.task("Keep Astra native update roots private")
         root_state = self.task("Normalize native update root state files")
-        rollback = self.task("Create native Hermes update rollback root")
         obsolete_account = self.task(
             "Remove obsolete separate Hermes updater account"
         )
@@ -1490,14 +1113,6 @@ class HermesShadowPlaybookTests(unittest.TestCase):
         self.assertIn("name: hermes-native-updater", obsolete_account)
         self.assertIn("state: absent", obsolete_account)
         self.assertNotIn("ansible.posix.acl", checkout + update_state + root_state)
-        self.assertIn("hermes_native_update_user", rollback)
-        self.assertIn("hermes_native_update_group", rollback)
-        self.assertIn('mode: "0700"', rollback)
-        self.assertEqual(
-            self.variables["hermes_native_update_rollback_root"],
-            "/srv/live-rollbacks/jn-t14s-lin/hermes-native-update",
-        )
-
         native_backends = self.task("Install required Hermes native tool backends")
         self.assertIn("/usr/sbin/runuser", native_backends)
         self.assertIn("hermes_native_post_setup_keys", native_backends)
@@ -1516,37 +1131,18 @@ class HermesShadowPlaybookTests(unittest.TestCase):
         self.assertIn("enabled: true", automatic)
         self.assertIn("hermes_native_updates_automatic", automatic)
 
-    def test_profile_config_schema_and_managed_scope_are_fail_closed(self) -> None:
+    def test_profile_config_is_native_mutable_and_managed_scope_is_secrets_only(self) -> None:
         seed = self.task("Seed mutable Hermes profile config once")
-        repair = self.task("Stamp only newly seeded empty Hermes profile configs")
-        migrate = self.task("Migrate reviewed Hermes profile configs one schema forward")
-        schema = self.task("Require current mutable Hermes config schema")
+        inspect = self.task("Inspect native Hermes profile configuration")
+        require = self.task("Require established native Hermes profile configuration")
         native_check = self.task(
             "Validate merged Hermes config as each service identity"
         )
-        hashes = self.task("Hash root-managed Hermes policy and environment")
-        manifests = self.task("Deploy root-owned Hermes policy checksum manifests")
         self.assertIn("hermes_shadow_config_version", seed)
         self.assertIn("force: false", seed)
-        self.assertIn("from_yaml) == {}", repair)
-        self.assertIn("hermes_shadow_version_only_migration_from", migrate)
-        self.assertIn("item.item.name in ['dubble', 'rigel']", migrate)
-        self.assertIn("item.item.name == 'astra'", migrate)
-        self.assertIn("reasoning_effort", migrate)
-        self.assertIn("show_reasoning", migrate)
-        self.assertIn("backup: true", migrate)
-        self.assertIn("+ 1", migrate)
-        self.assertIn("no_log: true", migrate)
-        self.assertIn("hermes_shadow_config_version", schema)
-        self.assertIn("ansible_check_mode", schema)
-        self.assertIn("item.item.name in ['dubble', 'rigel']", schema)
-        self.assertIn("from_yaml) | length == 1", schema)
-        self.assertIn("item.item.name == 'astra'", schema)
-        self.assertIn("from_yaml) | length == 2", schema)
-        self.assertIn("reasoning_effort", schema)
-        self.assertIn("show_reasoning", schema)
-        self.assertIn("['base_url', 'default', 'provider']", schema)
-        self.assertIn("hermes_shadow_version_only_migration_from", schema)
+        self.assertIn("hermes_shadow_mode == 'bootstrap'", seed)
+        self.assertIn("{{ item.home }}/config.yaml", inspect)
+        self.assertIn("hermes_shadow_mode != 'bootstrap'", require)
         self.assertIn("/usr/bin/systemd-run", native_check)
         self.assertIn("--property=EnvironmentFile=", native_check)
         self.assertIn("item.environment_file", native_check)
@@ -1554,12 +1150,15 @@ class HermesShadowPlaybookTests(unittest.TestCase):
         self.assertIn("- check", native_check)
         self.assertIn("check_mode: false", native_check)
         self.assertIn("no_log: true", native_check)
-        self.assertIn("sha256sum", hashes)
-        self.assertIn("config.yaml", hashes)
-        self.assertIn(".env", hashes)
-        self.assertIn("managed-policy.sha256", manifests)
-        self.assertIn("owner: root", manifests)
-        self.assertIn('mode: "0440"', manifests)
+        for forbidden in (
+            "managed-policy.sha256",
+            "hermes-managed-config.yaml.j2",
+            "/etc/hermes/astra/config.yaml",
+            "/etc/hermes/dubble/config.yaml",
+            "/etc/hermes/rigel/config.yaml",
+            "/skills/managed",
+        ):
+            self.assertNotIn(forbidden, self.playbook)
 
     def test_enrolled_runtime_maintenance_is_explicit_and_stays_offline(self) -> None:
         mode = self.task("Validate Hermes shadow mode")
@@ -1621,34 +1220,20 @@ class HermesShadowPlaybookTests(unittest.TestCase):
         self.assertIn("hermes_gateway_legacy_readiness_marker", legacy)
         self.assertIn("state: absent", legacy)
 
-    def test_discord_contract_is_deployed_and_validated_without_secrets(self) -> None:
-        contract = self.task("Deploy Hermes Discord cutover contract")
-        audit = self.task("Deploy Hermes Discord contract audit")
-        sources = self.task("Deploy pinned Hermes Discord audit sources")
-        live_delivery_audit = self.task(
-            "Deploy executable OpenClaw delivery cutover audit"
-        )
-        reconciliation = self.task(
-            "Deploy exact delivery-recovery reconciliation tool"
-        )
-        validation = self.task("Validate deployed Hermes Discord cutover contract")
+    def test_discord_cutover_artifacts_are_not_runtime_dependencies(self) -> None:
         environment = self.task("Seed root-managed Hermes service environment once")
         local_environment = self.task(
             "Remove profile-local environment files from Hermes shadow"
         )
-        self.assertIn("hermes_discord_contract_source", contract)
-        self.assertIn("hermes_discord_audit_source", audit)
-        self.assertIn("discord-regressions.json", sources)
-        self.assertIn("openclaw-delivery-cutover-audit.py", sources)
-        self.assertIn(
-            "/usr/local/libexec/openclaw-delivery-cutover-audit.py",
-            live_delivery_audit,
-        )
-        self.assertIn('mode: "0755"', live_delivery_audit)
-        self.assertIn("hermes_delivery_reconcile_source", reconciliation)
-        self.assertIn("hermes_delivery_reconcile_live", reconciliation)
-        self.assertIn('mode: "0755"', reconciliation)
-        self.assertIn("--repository-root", validation)
+        for historical_dependency in (
+            "Deploy Hermes Discord cutover contract",
+            "Deploy Hermes Discord contract audit",
+            "Deploy pinned Hermes Discord audit sources",
+            "Deploy executable OpenClaw delivery cutover audit",
+            "Deploy exact delivery-recovery reconciliation tool",
+            "Validate deployed Hermes Discord cutover contract",
+        ):
+            self.assertNotIn(historical_dependency, self.playbook)
         self.assertIn("item.environment_file", environment)
         self.assertIn("/etc/hermes/", environment)
         self.assertIn("owner: root", environment)

@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import stat
 import tempfile
 import unittest
 from pathlib import Path
@@ -17,6 +18,8 @@ PLAYBOOK = ROOT / "playbooks/agents/hermes-host-admin.yml"
 HARDENING = ROOT / "templates/hermes/hermes-gateway-hardening.conf.j2"
 VARS = ROOT / "inventory/group_vars/hermes_hosts/vars.yml"
 SHARED_VARS = ROOT / "inventory/group_vars/all/hermes-host-admin.yml"
+MEDIA_VERIFIER = ROOT / "scripts/media-release/sonarr_embedded_subtitle_verifier.py"
+SMOKE = ROOT / "scripts/agents/hermes-host-admin-smoke.py"
 
 
 def load(name: str, path: Path):
@@ -53,6 +56,38 @@ class HostAdminTests(unittest.TestCase):
             TARGET.handle({"schemaVersion": 1, "action": "service-stop", "service": "hermes-gateway-astra.service"})
         with self.assertRaisesRegex(TARGET.AdminError, "invalid-probe"):
             TARGET.handle({"schemaVersion": 1, "action": "health", "probe": "shell"})
+        with self.assertRaisesRegex(TARGET.AdminError, "invalid-request"):
+            TARGET.handle({"schemaVersion": 1, "action": "status", "seriesId": 43})
+
+    def test_target_media_verifier_is_typed_host_scoped_and_bounded(self) -> None:
+        trusted = mock.Mock(st_mode=stat.S_IFREG | 0o555, st_uid=0)
+        helper = {
+            "schemaVersion": 1,
+            "status": "ok",
+            "body": {"seriesId": 43, "seasonNumber": 4, "candidates": []},
+        }
+        result = mock.Mock(returncode=0, stdout=json.dumps(helper))
+        request = {
+            "schemaVersion": 1,
+            "action": "media-release-search",
+            "seriesId": 43,
+            "seasonNumber": 4,
+        }
+        with mock.patch.object(
+            TARGET, "canonical_host", return_value="docker-vm"
+        ), mock.patch.object(TARGET.os, "lstat", return_value=trusted), mock.patch.object(
+            TARGET, "run_with_input", return_value=result
+        ) as run:
+            value = TARGET.handle(request)
+        self.assertEqual(value["body"]["seriesId"], 43)
+        self.assertEqual(run.call_args.args[0], [str(TARGET.MEDIA_VERIFIER)])
+        sent = json.loads(run.call_args.args[1])
+        self.assertEqual(sent["action"], "search")
+        self.assertNotIn("host", sent)
+        self.assertNotIn("downloadUrl", sent)
+        with mock.patch.object(TARGET, "canonical_host", return_value="media-vm"):
+            with self.assertRaisesRegex(TARGET.AdminError, "operation-unavailable"):
+                TARGET.media_release_action("media-release-search", request)
 
     def test_health_probes_are_typed_read_only_and_host_scoped(self) -> None:
         with mock.patch.object(TARGET, "canonical_host", return_value="docker-vm"), mock.patch.object(TARGET.Path, "is_file", return_value=True), mock.patch.object(TARGET, "run") as run:
@@ -231,8 +266,54 @@ class HostAdminTests(unittest.TestCase):
             }
             value = json.loads(PLUGIN._handle_request({"host": "docker-vm", "action": "health", "probe": "media-stack"}))
         self.assertEqual(value["status"], "ok")
-        call.assert_called_once_with("docker-vm", "health", None, "media-stack")
+        call.assert_called_once_with("docker-vm", "health", None, "media-stack", None)
         self.assertIn("media-storage-view", PLUGIN._PROBES)
+
+    def test_plugin_media_release_shapes_and_approval_are_bounded(self) -> None:
+        search = {
+            "host": "docker-vm",
+            "action": "media-release-search",
+            "seriesId": 43,
+            "seasonNumber": 4,
+        }
+        with mock.patch.object(PLUGIN, "_call") as call:
+            call.return_value = {
+                "schemaVersion": 1,
+                "status": "ok",
+                "host": "docker-vm",
+                "action": "media-release-search",
+                "body": {"candidates": []},
+            }
+            value = json.loads(PLUGIN._handle_request(search))
+        self.assertEqual(value["status"], "ok")
+        call.assert_called_once_with(
+            "docker-vm", "media-release-search", None, None, {"seriesId": 43, "seasonNumber": 4}
+        )
+        self.assertIsNone(
+            PLUGIN._approval("host_admin_request", search, turn_id="turn-media")
+        )
+        stage = {
+            "host": "docker-vm",
+            "action": "media-release-stage",
+            "seriesId": 43,
+            "seasonNumber": 4,
+            "sampleEpisode": 1,
+            "candidateId": "a" * 64,
+        }
+        approval = PLUGIN._approval(
+            "host_admin_request", stage, turn_id="turn-media"
+        )
+        self.assertEqual(approval["action"], "approve")
+        self.assertNotIn("candidateId", approval["reason"])
+        for invalid in (
+            {**stage, "downloadUrl": "https://tracker.invalid/private"},
+            {**stage, "host": "media-vm"},
+            {**stage, "candidateId": "short"},
+        ):
+            self.assertEqual(
+                json.loads(PLUGIN._handle_request(invalid))["code"],
+                "invalid-request",
+            )
 
     def test_plugin_rejects_response_from_another_inventory_host(self) -> None:
         response = {
@@ -248,7 +329,7 @@ class HostAdminTests(unittest.TestCase):
                 PLUGIN._call("docker-vm", "status")
 
     def test_managed_sources_contain_no_secret_or_general_shell_boundary(self) -> None:
-        for path in (TARGET_PATH, PLUGIN_PATH):
+        for path in (TARGET_PATH, PLUGIN_PATH, MEDIA_VERIFIER):
             text = path.read_text(encoding="utf-8")
             self.assertNotIn("shell=True", text)
             self.assertNotIn("GEMINI_API_KEY", text)
@@ -274,6 +355,15 @@ class HostAdminTests(unittest.TestCase):
         self.assertIn("Deploy root-owned canonical host-admin identity", playbook)
         self.assertIn("hermes_host_admin_target_identity", playbook)
         self.assertIn("Discover the target LAN endpoint", playbook)
+        self.assertIn("Read prior host administration endpoint manifest", playbook)
+        self.assertIn("Retain a still-present prior managed-LAN endpoint", playbook)
+        self.assertIn("Resolve one canonical managed-LAN endpoint", playbook)
+        self.assertIn("ansible_all_ipv4_addresses", playbook)
+        self.assertIn("ansible_facts['all_ipv4_addresses']", playbook)
+        self.assertIn("^192[.]168[.]1[.][0-9]+$", playbook)
+        self.assertIn("| unique | list", playbook)
+        self.assertNotIn("ansible_facts.all_ipv4_addresses", playbook)
+        self.assertNotIn("ansible_default_ipv4", playbook)
         self.assertIn("Require the target endpoint on the managed LAN", playbook)
         self.assertIn("Stop after target read-only check-mode preflight\n      ansible.builtin.meta: end_host", playbook)
         self.assertIn("restrict,command=", playbook)
@@ -284,6 +374,15 @@ class HostAdminTests(unittest.TestCase):
         self.assertNotIn("docker.sock", hardening)
         self.assertIn("not hermes_host_admin_defer_gateway_restart | bool", playbook)
         self.assertIn("restartDeferred", playbook)
+        self.assertIn("Deploy root-owned embedded-subtitle verifier", playbook)
+
+    def test_smoke_can_exercise_the_read_only_media_search(self) -> None:
+        smoke = SMOKE.read_text(encoding="utf-8")
+        self.assertIn("--media-series-id", smoke)
+        self.assertIn("--media-season-number", smoke)
+        self.assertIn('"action": "media-release-search"', smoke)
+        self.assertIn('"host": "docker-vm"', smoke)
+        self.assertNotIn("downloadUrl", smoke)
 
 
 if __name__ == "__main__":

@@ -26,32 +26,8 @@
       /var/lib/hermes/astra/.{{ hermes_memory_continuity_id }}-astra-profile.zip
     hermes_memory_continuity_backup_paths:
       - /etc/hermes/astra/.env
-      - /etc/hermes/astra/config.yaml
-      - /etc/hermes/astra/managed-policy.sha256
       - /etc/systemd/system/hermes-gateway-astra.service.d/10-managed.conf
       - "/etc/systemd/system/{{ hermes_native_update_service }}"
-      - "{{ hermes_star_privacy_validator_live }}"
-      - "{{ hermes_docker_inventory_validator_live }}"
-      - "{{ hermes_shadow_contract_live }}"
-      - "{{ hermes_shadow_audit_live }}"
-      - "{{ hermes_discord_contract_live }}"
-      - "{{ hermes_discord_audit_live }}"
-      - "{{ hermes_automation_contract_live }}"
-      - "{{ hermes_automation_audit_live }}"
-      - "{{ hermes_profile_data_contract_live }}"
-      - "{{ hermes_profile_data_stager_live }}"
-      - "{{ hermes_profile_transforms_contract_live }}"
-      - "{{ hermes_profile_transformer_live }}"
-      - >-
-        /usr/local/share/hermes-shadow/repository/{{ hermes_shadow_contract_source }}
-      - >-
-        /usr/local/share/hermes-shadow/repository/files/hermes/openclaw-state-migration-contract.json
-      - >-
-        /usr/local/share/hermes-shadow/repository/{{ hermes_discord_contract_source }}
-      - >-
-        /usr/local/share/hermes-shadow/repository/files/hermes/profile-import-contract.json
-      - >-
-        /usr/local/share/hermes-shadow/repository/files/openclaw/workspace-migration-policy.json
       - "{{ hermes_mem0_config_live }}"
       - "{{ hermes_mem0_migrator_live }}"
     hermes_memory_continuity_paused_timers: >-
@@ -200,7 +176,7 @@
           - /usr/bin/systemctl
           - is-active
           - "{{ item.name }}"
-      loop: "{{ hermes_production_cutover_source_system_units }}"
+      loop: "{{ hermes_retired_openclaw_system_units }}"
       register: hermes_memory_continuity_openclaw_system
       changed_when: false
       failed_when: false
@@ -211,7 +187,7 @@
         argv:
           - /usr/sbin/runuser
           - --user
-          - "{{ hermes_production_cutover_user }}"
+          - "{{ hermes_operator_user }}"
           - --
           - /usr/bin/env
           - XDG_RUNTIME_DIR=/run/user/1000
@@ -219,7 +195,7 @@
           - /usr/bin/systemctl
           - --user
           - is-active
-          - "{{ hermes_production_cutover_user_gateway }}"
+          - "{{ hermes_retired_openclaw_user_gateway }}"
       register: hermes_memory_continuity_openclaw_user
       changed_when: false
       failed_when: false
@@ -613,45 +589,6 @@
               Source backup preparation failed before any Gateway or timer
               interruption. The rollback directory was preserved for review
               and local incomplete staging was removed.
-
-    - name: Validate retained Astra provider credentials before interruption
-      block:
-        - name: Read retained Astra provider credentials privately
-          ansible.builtin.slurp:
-            src: "{{ hermes_production_cutover_source_env }}"
-          register: hermes_memory_continuity_source_environment
-          no_log: true
-
-        - name: Require complete retained Astra provider credentials
-          ansible.builtin.assert:
-            that:
-              - hermes_memory_continuity_credentials | length == 1
-              - hermes_memory_continuity_credentials[0] | length > 0
-          loop:
-            - OLLAMA_API_KEY
-            - EBAY_APP_ID
-            - EBAY_CERT_ID
-          vars:
-            hermes_memory_continuity_credentials: >-
-              {{
-                hermes_memory_continuity_source_environment.content
-                | b64decode
-                | regex_findall('(?m)^' ~ item ~ '=([^\r\n]+)$')
-              }}
-          no_log: true
-
-      rescue:
-        - name: Remove local staging after provider credential failure
-          ansible.builtin.file:
-            path: "{{ hermes_memory_continuity_local_stage }}"
-            state: absent
-
-        - name: Stop before interruption when provider credentials are incomplete
-          ansible.builtin.fail:
-            msg: >-
-              Retained Astra provider credentials are incomplete. Verified
-              source backups remain in {{ hermes_memory_continuity_backup_dir }},
-              local staging was removed, and no Gateway or timer was interrupted.
 
     - name: Inspect timer state before memory conversion
       ansible.builtin.command:
@@ -1272,93 +1209,6 @@
             mode: "0600"
           vars:
             hermes_mem0_render_collection: "{{ hermes_mem0_target_collection }}"
-
-        - name: Enroll Astra provider credentials and compatibility aliases
-          ansible.builtin.lineinfile:
-            path: /etc/hermes/astra/.env
-            regexp: "^{{ item.target }}="
-            line: >-
-              {{ item.target }}={{
-                (
-                  hermes_memory_continuity_source_environment.content
-                  | b64decode
-                  | regex_findall('(?m)^' ~ item.source ~ '=([^\r\n]+)$')
-                )[0]
-              }}
-            owner: root
-            group: hermes-astra
-            mode: "0440"
-          loop:
-            - {target: OLLAMA_API_KEY, source: OLLAMA_API_KEY}
-            - {target: EBAY_APP_ID, source: EBAY_APP_ID}
-            - {target: EBAY_CERT_ID, source: EBAY_CERT_ID}
-          no_log: true
-
-        - name: Deploy current memory-dependent Hermes policy graph
-          ansible.builtin.copy:
-            src: "{{ playbook_dir }}/../../{{ item.source }}"
-            dest: "{{ item.destination }}"
-            owner: root
-            group: root
-            mode: "{{ item.mode }}"
-          loop: "{{ hermes_memory_continuity_policy_files }}"
-          loop_control:
-            label: "{{ item.destination }}"
-
-        - name: Validate deployed Hermes target policy
-          ansible.builtin.command:
-            argv:
-              - "{{ hermes_shadow_audit_live }}"
-              - "{{ hermes_shadow_contract_live }}"
-          changed_when: false
-
-        - name: Validate deployed Hermes Discord policy graph
-          ansible.builtin.command:
-            argv:
-              - "{{ hermes_discord_audit_live }}"
-              - "{{ hermes_discord_contract_live }}"
-              - --repository-root
-              - /usr/local/share/hermes-shadow/repository
-          changed_when: false
-
-        - name: Validate deployed Hermes automation policy graph
-          ansible.builtin.command:
-            argv:
-              - "{{ hermes_automation_audit_live }}"
-              - "{{ hermes_automation_contract_live }}"
-              - --repository-root
-              - /usr/local/share/hermes-shadow/repository
-          changed_when: false
-
-        - name: Deploy Astra native local-tool and memory policy
-          ansible.builtin.template:
-            src: >-
-              {{ playbook_dir }}/../../templates/hermes/hermes-managed-config.yaml.j2
-            dest: /etc/hermes/astra/config.yaml
-            owner: root
-            group: hermes-astra
-            mode: "0440"
-          vars:
-            hermes_profile: "{{ hermes_shadow_profiles[0] }}"
-
-        - name: Refresh Astra managed-policy checksum
-          ansible.builtin.command:
-            argv:
-              - /usr/bin/sha256sum
-              - /etc/hermes/astra/config.yaml
-              - /etc/hermes/astra/.env
-          register: hermes_memory_continuity_managed_checksum
-          changed_when: false
-          no_log: true
-
-        - name: Install Astra managed-policy checksum
-          ansible.builtin.copy:
-            content: "{{ hermes_memory_continuity_managed_checksum.stdout }}\n"
-            dest: /etc/hermes/astra/managed-policy.sha256
-            owner: root
-            group: hermes-astra
-            mode: "0440"
-          no_log: true
 
         - name: Deploy memory-aware native Gateway hardening
           ansible.builtin.template:

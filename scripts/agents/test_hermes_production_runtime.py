@@ -53,7 +53,7 @@ class HermesProductionRuntimeTests(unittest.TestCase):
         self.assertLess(backup, plugin_backup)
         self.assertLess(plugin_backup, validator_backup)
         self.assertLess(validator_backup, readers)
-        self.assertIn("hermes_production_cutover_rollback_root", self.playbook)
+        self.assertIn("hermes_rollback_root", self.playbook)
         self.assertIn("check_mode: false", self.playbook[source_gate - 1800:source_gate])
         backup_task = self.playbook[backup:readers]
         self.assertIn("when: not ansible_check_mode", backup_task)
@@ -132,7 +132,7 @@ class HermesProductionRuntimeTests(unittest.TestCase):
         task = self.playbook[deploy:restart]
         self.assertIn("hermes_star_privacy_plugin_source", task)
         self.assertIn("hermes_star_privacy_validator_live", task)
-        self.assertIn("/etc/hermes/astra/config.yaml", task)
+        self.assertIn("{{ hermes_shadow_profiles[0].home }}/config.yaml", task)
         self.assertIn("Find generated Astra Star plugin backup files", task)
         self.assertIn("Remove generated Astra Star plugin backup files", task)
         self.assertIn("Deploy production Astra Star privacy validator", task)
@@ -176,15 +176,22 @@ class HermesProductionRuntimeTests(unittest.TestCase):
         self.assertNotIn("docker.sock", self.playbook)
         self.assertNotIn("group: docker", self.playbook)
 
-    def test_policy_hash_uses_each_profiles_declared_environment(self) -> None:
-        hash_task = self.playbook[
-            self.offset("Hash current production Hermes policy and environment"):
-            self.offset("Deploy current production Hermes policy checksum manifests")
-        ]
-        self.assertIn("item.environment_file", hash_task)
+    def test_runtime_convergence_does_not_own_mutable_profile_state(self) -> None:
         self.assertIn(
-            "default('/etc/hermes/' ~ item.name ~ '/.env')", hash_task
+            "Validate current native Hermes profile configuration",
+            self.playbook,
         )
+        for forbidden in (
+            "managed-policy.sha256",
+            "hermes-managed-config.yaml.j2",
+            "/etc/hermes/astra/config.yaml",
+            "/etc/hermes/dubble/config.yaml",
+            "/etc/hermes/rigel/config.yaml",
+            "/etc/hermes/astra/skills",
+            "/etc/hermes/dubble/skills",
+            "/etc/hermes/rigel/skills",
+        ):
+            self.assertNotIn(forbidden, self.playbook)
         profiles = {
             profile["name"]: profile
             for profile in self.variables["hermes_shadow_profiles"]
@@ -193,34 +200,6 @@ class HermesProductionRuntimeTests(unittest.TestCase):
             profiles["rigel"]["environment_file"],
             "/etc/hermes/private/environments/rigel.env",
         )
-
-    def test_all_profiles_can_create_guarded_agent_owned_skills(self) -> None:
-        profiles = self.variables["hermes_shadow_profiles"]
-        self.assertEqual([profile["name"] for profile in profiles], [
-            "astra", "dubble", "rigel"
-        ])
-        for profile in profiles:
-            self.assertFalse(profile["skills_write_approval"], profile["name"])
-            self.assertEqual(profile["skills_creation_nudge_interval"], 10)
-        template = (
-            ROOT / "templates" / "hermes" / "hermes-managed-config.yaml.j2"
-        ).read_text(encoding="utf-8")
-        self.assertIn("guard_agent_created: true", template)
-
-    def test_native_todo_completion_guard_is_rigel_only(self) -> None:
-        profiles = {
-            profile["name"]: profile for profile in self.variables["hermes_shadow_profiles"]
-        }
-        self.assertTrue(profiles["rigel"]["todo_stop_guard"])
-        self.assertEqual(profiles["rigel"]["max_todo_stop_nudges"], 6)
-        self.assertNotIn("todo_stop_guard", profiles["astra"])
-        self.assertNotIn("todo_stop_guard", profiles["dubble"])
-        template = (
-            ROOT / "templates" / "hermes" / "hermes-managed-config.yaml.j2"
-        ).read_text(encoding="utf-8")
-        self.assertIn("todo_stop_guard:", template)
-        self.assertIn("default(false)", template)
-        self.assertIn("max_todo_stop_nudges:", template)
 
     def test_consumers_restart_natively_after_import_proof(self) -> None:
         imports = self.offset("Validate Discord imports as every isolated identity")
@@ -291,12 +270,9 @@ class HermesProductionRuntimeTests(unittest.TestCase):
 
     def test_native_updater_transaction_is_root_owned_and_validated(self) -> None:
         deploy = self.offset("Deploy native Hermes update transaction helper")
-        rollback = self.offset("Create native Hermes update rollback root")
         render = self.offset("Render native Hermes update transaction contract")
         validate = self.offset("Validate native Hermes update transaction contract")
         update_unit = self.offset("Deploy production Hermes update unit")
-        self.assertLess(deploy, rollback)
-        self.assertLess(rollback, render)
         self.assertLess(deploy, render)
         self.assertLess(render, validate)
         self.assertLess(deploy, validate)
@@ -306,19 +282,6 @@ class HermesProductionRuntimeTests(unittest.TestCase):
         self.assertIn("hermes_native_update_transaction_config", task)
         self.assertIn("owner: root", task)
         self.assertIn('mode: "0555"', task)
-        rollback_task = self.playbook[rollback:render]
-        self.assertIn('owner: "{{ hermes_native_update_user }}"', rollback_task)
-        self.assertIn('group: "{{ hermes_native_update_group }}"', rollback_task)
-        self.assertIn('mode: "0700"', rollback_task)
-        self.assertEqual(
-            self.variables["hermes_native_update_rollback_root"],
-            "/srv/live-rollbacks/jn-t14s-lin/hermes-native-update",
-        )
-        self.assertFalse(
-            self.variables["hermes_native_update_rollback_root"].startswith(
-                self.variables["hermes_production_cutover_rollback_root"] + "/"
-            )
-        )
         proof = self.playbook[validate:update_unit]
         self.assertIn("--validate-config", proof)
 

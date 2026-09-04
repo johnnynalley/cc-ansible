@@ -17,6 +17,8 @@ from typing import Any
 
 MAX_REQUEST = 8192
 IDENTITY = Path("/etc/agent-host-admin.json")
+MEDIA_VERIFIER = Path("/usr/local/sbin/sonarr-embedded-subtitle-verifier")
+ARR_REPORTER = Path("/usr/local/sbin/astra-arr-readonly-report")
 HOST = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$")
 UNIT = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.@:-]{0,126}\.(?:service|timer)$")
 PROBE = re.compile(r"^[a-z][a-z0-9-]{0,63}$")
@@ -83,6 +85,12 @@ HEALTH_PROBES: dict[str, tuple[frozenset[str], list[str], int]] = {
         45,
     ),
 }
+ARR_REPORT_PROBES = {
+    "arr-policy": "policy",
+    "arr-queue": "queue",
+    "arr-storage": "storage",
+    "arr-transactions": "transactions",
+}
 
 
 class AdminError(RuntimeError):
@@ -94,6 +102,25 @@ def run(command: list[str], timeout: int = 30) -> subprocess.CompletedProcess[st
         return subprocess.run(
             command,
             stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            check=False,
+            text=True,
+            timeout=timeout,
+            env={"PATH": "/usr/sbin:/usr/bin:/sbin:/bin", "LANG": "C"},
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise AdminError("operation-failed") from exc
+
+
+def run_with_input(
+    command: list[str], input_data: str, timeout: int
+) -> subprocess.CompletedProcess[str]:
+    try:
+        return subprocess.run(
+            command,
+            input=input_data,
+            stdin=None,
             stdout=subprocess.PIPE,
             stderr=subprocess.DEVNULL,
             check=False,
@@ -281,6 +308,8 @@ def health_probe(request: dict[str, Any]) -> dict[str, Any]:
         raise AdminError("invalid-probe")
     if probe == "media-storage-view":
         return media_storage_view_probe()
+    if probe in ARR_REPORT_PROBES:
+        return arr_report_probe(probe)
     spec = HEALTH_PROBES.get(probe)
     if spec is None:
         raise AdminError("invalid-probe")
@@ -300,6 +329,48 @@ def health_probe(request: dict[str, Any]) -> dict[str, Any]:
         "output": output,
         "truncated": len(result.stdout.splitlines()) > 256,
     }
+
+
+def arr_report_probe(probe: str) -> dict[str, Any]:
+    if canonical_host() != "docker-vm":
+        raise AdminError("probe-unavailable")
+    try:
+        info = os.lstat(ARR_REPORTER)
+    except OSError as exc:
+        raise AdminError("probe-unavailable") from exc
+    if (
+        not stat.S_ISREG(info.st_mode)
+        or stat.S_ISLNK(info.st_mode)
+        or info.st_uid != 0
+        or stat.S_IMODE(info.st_mode) != 0o555
+    ):
+        raise AdminError("probe-unavailable")
+    result = run(
+        [str(ARR_REPORTER), "--report", ARR_REPORT_PROBES[probe]],
+        timeout=130,
+    )
+    if len(result.stdout.encode("utf-8")) > 256 * 1024:
+        raise AdminError("invalid-response")
+    try:
+        value = json.loads(result.stdout)
+    except (TypeError, json.JSONDecodeError) as exc:
+        raise AdminError("invalid-response") from exc
+    if isinstance(value, dict) and value.get("status") == "error":
+        code = value.get("code")
+        if not isinstance(code, str) or PROBE.fullmatch(code) is None:
+            raise AdminError("invalid-response")
+        raise AdminError(code)
+    if (
+        result.returncode != 0
+        or not isinstance(value, dict)
+        or set(value) != {"schemaVersion", "status", "body"}
+        or value.get("schemaVersion") != 1
+        or value.get("status") != "ok"
+        or not isinstance(value.get("body"), dict)
+        or value["body"].get("report") != probe
+    ):
+        raise AdminError("invalid-response")
+    return value["body"]
 
 
 def update() -> dict[str, Any]:
@@ -398,10 +469,68 @@ def service_action(action: str, request: dict[str, Any]) -> dict[str, Any]:
     return {"service": unit, "outcome": state, **systemctl_state(unit)}
 
 
+def media_release_action(action: str, request: dict[str, Any]) -> dict[str, Any]:
+    if canonical_host() != "docker-vm":
+        raise AdminError("operation-unavailable")
+    try:
+        info = os.lstat(MEDIA_VERIFIER)
+    except OSError as exc:
+        raise AdminError("operation-unavailable") from exc
+    if (
+        not stat.S_ISREG(info.st_mode)
+        or stat.S_ISLNK(info.st_mode)
+        or info.st_uid != 0
+        or stat.S_IMODE(info.st_mode) != 0o555
+    ):
+        raise AdminError("operation-unavailable")
+    helper_action = action.removeprefix("media-release-")
+    helper_request = {
+        key: value
+        for key, value in request.items()
+        if key not in {"action"}
+    }
+    helper_request["action"] = helper_action
+    result = run_with_input(
+        [str(MEDIA_VERIFIER)],
+        json.dumps(helper_request, sort_keys=True, separators=(",", ":")),
+        timeout=900 if helper_action == "verify" else 120,
+    )
+    if len(result.stdout) > 256 * 1024:
+        raise AdminError("operation-failed")
+    try:
+        value = json.loads(result.stdout)
+    except (TypeError, json.JSONDecodeError) as exc:
+        raise AdminError("operation-failed") from exc
+    if (
+        not isinstance(value, dict)
+        or value.get("schemaVersion") != 1
+        or value.get("status") not in {"ok", "error"}
+    ):
+        raise AdminError("operation-failed")
+    if value["status"] == "error":
+        code = value.get("code")
+        if not isinstance(code, str) or PROBE.fullmatch(code) is None:
+            raise AdminError("operation-failed")
+        raise AdminError(code)
+    if result.returncode != 0 or set(value) != {"schemaVersion", "status", "body"}:
+        raise AdminError("operation-failed")
+    return value["body"]
+
+
 def handle(request: Any) -> dict[str, Any]:
     if not isinstance(request, dict):
         raise AdminError("invalid-request")
-    allowed = {"schemaVersion", "action", "service", "probe"}
+    allowed = {
+        "schemaVersion",
+        "action",
+        "service",
+        "probe",
+        "seriesId",
+        "seasonNumber",
+        "sampleEpisode",
+        "candidateId",
+        "transactionId",
+    }
     if set(request) - allowed or request.get("schemaVersion") != 1:
         raise AdminError("invalid-request")
     action = request.get("action")
@@ -414,17 +543,44 @@ def handle(request: Any) -> dict[str, Any]:
         "service-start",
         "service-stop",
         "service-restart",
+        "media-release-search",
+        "media-release-stage",
+        "media-release-status",
+        "media-release-verify",
+        "media-release-expand",
+        "media-release-cleanup",
     }
     if action not in actions:
         raise AdminError("invalid-action")
-    if action.startswith("service-"):
+    media_fields = {
+        "media-release-search": {"schemaVersion", "action", "seriesId", "seasonNumber"},
+        "media-release-stage": {
+            "schemaVersion",
+            "action",
+            "seriesId",
+            "seasonNumber",
+            "sampleEpisode",
+            "candidateId",
+        },
+        "media-release-status": {"schemaVersion", "action", "transactionId"},
+        "media-release-verify": {"schemaVersion", "action", "transactionId"},
+        "media-release-expand": {"schemaVersion", "action", "transactionId"},
+        "media-release-cleanup": {"schemaVersion", "action", "transactionId"},
+    }
+    if action in media_fields:
+        if set(request) != media_fields[action]:
+            raise AdminError("invalid-request")
+        body = media_release_action(action, request)
+    elif action.startswith("service-"):
+        if set(request) != {"schemaVersion", "action", "service"}:
+            raise AdminError("invalid-request")
         body = service_action(action, request)
     elif action == "health":
-        if "service" in request:
+        if set(request) != {"schemaVersion", "action", "probe"}:
             raise AdminError("invalid-request")
         body = health_probe(request)
     else:
-        if "service" in request or "probe" in request:
+        if set(request) != {"schemaVersion", "action"}:
             raise AdminError("invalid-request")
         body = status_body() if action == "status" else update() if action == "update" else reboot()
     return {

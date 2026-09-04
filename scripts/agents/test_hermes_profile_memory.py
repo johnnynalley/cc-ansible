@@ -12,7 +12,6 @@ import yaml
 
 ROOT = Path(__file__).parents[2]
 CONTRACT = ROOT / "files" / "hermes" / "profile-memory-contract.json"
-TEMPLATE = ROOT / "templates" / "hermes" / "hermes-managed-config.yaml.j2"
 PLAYBOOK = ROOT / "playbooks" / "agents" / "hermes-profile-memory.yml"
 VALIDATOR = ROOT / "scripts" / "agents" / "hermes-memory-seed-validate.py"
 VARS = ROOT / "inventory" / "group_vars" / "hermes_hosts" / "vars.yml"
@@ -82,18 +81,6 @@ class HermesProfileMemoryTests(unittest.TestCase):
                 self.assertTrue(content.startswith("$ANSIBLE_VAULT;1.1;AES256\n"))
                 self.assertNotIn("Johnny", content)
                 self.assertNotIn("OpenClaw", content)
-
-    def test_template_uses_documented_limits_and_profile_scoped_approval(self) -> None:
-        template = TEMPLATE.read_text(encoding="utf-8")
-        variables = yaml.safe_load(VARS.read_text(encoding="utf-8"))
-        astra = variables["hermes_shadow_profiles"][0]
-        self.assertIn("hermes_profile.memory_char_limit | default(2200)", template)
-        self.assertIn("hermes_profile.user_char_limit | default(1375)", template)
-        self.assertIn("hermes_profile.memory_write_approval", template)
-        self.assertFalse(astra["memory_write_approval"])
-        self.assertEqual(astra["memory_nudge_interval"], 10)
-        self.assertEqual(astra["memory_char_limit"], 6000)
-        self.assertEqual(astra["user_char_limit"], 6000)
 
     def test_playbook_is_disabled_transactional_and_does_not_start_gateway(self) -> None:
         variables = yaml.safe_load(VARS.read_text(encoding="utf-8"))

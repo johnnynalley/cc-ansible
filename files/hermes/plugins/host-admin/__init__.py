@@ -23,6 +23,8 @@ _UNIT = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.@:-]{0,126}\.(?:service|timer)$")
 _PROBE = re.compile(r"^[a-z][a-z0-9-]{0,63}$")
 _TURN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$")
 _CODE = re.compile(r"^[a-z][a-z0-9-]{0,63}$")
+_CANDIDATE = re.compile(r"^[a-f0-9]{64}$")
+_TRANSACTION = re.compile(r"^[a-f0-9]{24}$")
 _SENSITIVE = re.compile(r"api.?key|password|secret|token|authorization|cookie|credential", re.I)
 
 _ACTIONS = [
@@ -34,9 +36,26 @@ _ACTIONS = [
     "service-start",
     "service-stop",
     "service-restart",
+    "media-release-search",
+    "media-release-stage",
+    "media-release-status",
+    "media-release-verify",
+    "media-release-expand",
+    "media-release-cleanup",
 ]
-_READ_ACTIONS = {"status", "health", "service-status"}
+_READ_ACTIONS = {
+    "status",
+    "health",
+    "service-status",
+    "media-release-search",
+    "media-release-status",
+    "media-release-verify",
+}
 _PROBES = [
+    "arr-policy",
+    "arr-queue",
+    "arr-storage",
+    "arr-transactions",
     "media-stack",
     "media-storage-view",
     "nextcloud-local",
@@ -55,9 +74,10 @@ _HOSTS_SCHEMA = {
 _REQUEST_SCHEMA = {
     "name": "host_admin_request",
     "description": (
-        "Read host/update/service/health state or request a managed update, reboot, or "
-        "service lifecycle action. Mutations require fresh approval. Updates use "
-        "the existing auto-updates service and may reboot under its managed policy."
+        "Read host/update/service/health state, or search, stage, inspect, expand, and "
+        "clean up isolated Sonarr release-verification transactions on docker-vm. "
+        "Mutations require fresh approval. The verifier never imports or replaces "
+        "library files; it proves actual embedded English subtitle streams first."
     ),
     "parameters": {
         "type": "object",
@@ -66,6 +86,21 @@ _REQUEST_SCHEMA = {
             "action": {"type": "string", "enum": _ACTIONS},
             "service": {"type": "string", "pattern": _UNIT.pattern, "maxLength": 128},
             "probe": {"type": "string", "enum": _PROBES},
+            "seriesId": {"type": "integer", "minimum": 1, "maximum": 2000000000},
+            "seasonNumber": {"type": "integer", "minimum": 0, "maximum": 999},
+            "sampleEpisode": {"type": "integer", "minimum": 1, "maximum": 9999},
+            "candidateId": {
+                "type": "string",
+                "pattern": _CANDIDATE.pattern,
+                "minLength": 64,
+                "maxLength": 64,
+            },
+            "transactionId": {
+                "type": "string",
+                "pattern": _TRANSACTION.pattern,
+                "minLength": 24,
+                "maxLength": 24,
+            },
         },
         "required": ["host", "action"],
         "additionalProperties": False,
@@ -146,6 +181,7 @@ def _call(
     action: str,
     service: str | None = None,
     probe: str | None = None,
+    media_fields: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     hosts = _load_hosts()
     if host not in hosts:
@@ -155,6 +191,8 @@ def _call(
         request["service"] = service
     if probe is not None:
         request["probe"] = probe
+    if media_fields:
+        request.update(media_fields)
     command = [
         "/usr/bin/ssh", "-F", "/dev/null", "-o", "BatchMode=yes", "-o", "IdentitiesOnly=yes",
         "-o", "StrictHostKeyChecking=yes", "-o", f"UserKnownHostsFile={_KNOWN_HOSTS}",
@@ -168,7 +206,7 @@ def _call(
             stdout=subprocess.PIPE,
             stderr=subprocess.DEVNULL,
             check=False,
-            timeout=55,
+            timeout=920 if action == "media-release-verify" else 140 if action.startswith("media-release-") else 55,
         )
     except (OSError, subprocess.TimeoutExpired) as exc:
         raise HostAdminError("host-unavailable") from exc
@@ -199,23 +237,82 @@ def _handle_hosts(args: dict[str, Any], **_: Any) -> str:
 
 
 def _handle_request(args: dict[str, Any], **_: Any) -> str:
-    if not isinstance(args, dict) or set(args) - {"host", "action", "service", "probe"} or not {"host", "action"} <= set(args):
+    allowed = {
+        "host",
+        "action",
+        "service",
+        "probe",
+        "seriesId",
+        "seasonNumber",
+        "sampleEpisode",
+        "candidateId",
+        "transactionId",
+    }
+    if not isinstance(args, dict) or set(args) - allowed or not {"host", "action"} <= set(args):
         return _error("invalid-request")
     host, action = args.get("host"), args.get("action")
     service = args.get("service")
     probe = args.get("probe")
     if not isinstance(host, str) or _HOST.fullmatch(host) is None or action not in _ACTIONS:
         return _error("invalid-request")
-    if action.startswith("service-"):
-        if not isinstance(service, str) or _UNIT.fullmatch(service) is None or probe is not None:
+    media_shapes = {
+        "media-release-search": {"host", "action", "seriesId", "seasonNumber"},
+        "media-release-stage": {
+            "host",
+            "action",
+            "seriesId",
+            "seasonNumber",
+            "sampleEpisode",
+            "candidateId",
+        },
+        "media-release-status": {"host", "action", "transactionId"},
+        "media-release-verify": {"host", "action", "transactionId"},
+        "media-release-expand": {"host", "action", "transactionId"},
+        "media-release-cleanup": {"host", "action", "transactionId"},
+    }
+    media_fields: dict[str, Any] | None = None
+    if action in media_shapes:
+        if host != "docker-vm" or set(args) != media_shapes[action]:
+            return _error("invalid-request")
+        media_fields = {key: value for key, value in args.items() if key not in {"host", "action"}}
+        if "seriesId" in media_fields and (
+            isinstance(media_fields["seriesId"], bool)
+            or not isinstance(media_fields["seriesId"], int)
+            or not 1 <= media_fields["seriesId"] <= 2_000_000_000
+        ):
+            return _error("invalid-request")
+        if "seasonNumber" in media_fields and (
+            isinstance(media_fields["seasonNumber"], bool)
+            or not isinstance(media_fields["seasonNumber"], int)
+            or not 0 <= media_fields["seasonNumber"] <= 999
+        ):
+            return _error("invalid-request")
+        if "sampleEpisode" in media_fields and (
+            isinstance(media_fields["sampleEpisode"], bool)
+            or not isinstance(media_fields["sampleEpisode"], int)
+            or not 1 <= media_fields["sampleEpisode"] <= 9999
+        ):
+            return _error("invalid-request")
+        if "candidateId" in media_fields and (
+            not isinstance(media_fields["candidateId"], str)
+            or _CANDIDATE.fullmatch(media_fields["candidateId"]) is None
+        ):
+            return _error("invalid-request")
+        if "transactionId" in media_fields and (
+            not isinstance(media_fields["transactionId"], str)
+            or _TRANSACTION.fullmatch(media_fields["transactionId"]) is None
+        ):
+            return _error("invalid-request")
+    elif action.startswith("service-"):
+        if set(args) != {"host", "action", "service"} or not isinstance(service, str) or _UNIT.fullmatch(service) is None:
             return _error("invalid-request")
     elif action == "health":
-        if service is not None or not isinstance(probe, str) or probe not in _PROBES:
+        if set(args) != {"host", "action", "probe"} or not isinstance(probe, str) or probe not in _PROBES:
             return _error("invalid-request")
-    elif service is not None or probe is not None:
+    elif set(args) != {"host", "action"}:
         return _error("invalid-request")
     try:
-        value = _call(host, action, service, probe)
+        value = _call(host, action, service, probe, media_fields)
     except HostAdminError as exc:
         return _error(str(exc))
     return json.dumps(value, sort_keys=True, separators=(",", ":"))
@@ -231,7 +328,10 @@ def _approval(tool_name: str, args: dict[str, Any], **context: Any) -> dict[str,
     action = args.get("action", "unknown")
     return {
         "action": "approve",
-        "reason": f"Approve managed host action {action} on {host}? Updates may invoke the host's existing reboot policy.",
+        "reason": (
+            f"Approve managed host action {action} on {host}? "
+            "Media staging remains outside Sonarr and cannot import or replace library files."
+        ),
         "rule_key": f"host-admin:{turn_id}",
     }
 

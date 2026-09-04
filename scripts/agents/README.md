@@ -2,8 +2,10 @@
 
 ## Hermes Replacement
 
-- `hermes-shadow-target-audit.py` validates the structured, credential-free
-  Gate 3 target declaration. It fails closed on unknown top-level schema,
+- `hermes-shadow-target-audit.py` validates the retained structured,
+  credential-free Gate 3 shadow/bootstrap declaration. It is an explicit
+  historical bootstrap audit, not a production Gateway dependency. It fails
+  closed on unknown top-level schema,
   production delivery/scheduling/listeners, pre-gate VM selection, Docker
   group/socket access, non-local Astra execution, any Dubble/Rigel execution,
   host mounts, forwarded secrets,
@@ -41,7 +43,7 @@
   scheduler schema, emits only counts and hashes, and deletes the copied OAuth
   state and all synthetic academic data before returning. It copies the
   academic skill from Rigel's profile-owned native `skills/academic` path into
-  the disposable profile's matching native path; the retained root-owned skill
+  the disposable profile's matching native path; the retired root-owned skill
   projection is not part of acceptance. The transient unit pins both its
   process working directory and Hermes's authoritative `TERMINAL_CWD` carrier
   to the disposable academic workspace, matching the production Gateway. It
@@ -82,7 +84,17 @@
 - `hermes-host-admin-target.py` is the forced-command target for Astra's typed
   host-administration broker. Its storage-view probe parses structured
   `findmnt --json` output, ignores an `autofs` parent, and requires exactly one
-  concrete leaf filesystem before reporting mergerfs or NFS health.
+  concrete leaf filesystem before reporting mergerfs or NFS health. On
+  `docker-vm` only, the same typed boundary invokes the root-owned Sonarr
+  embedded-subtitle verifier for isolated search/stage/status/verify/expand/
+  cleanup transactions. No download URL, credential, arbitrary path, import,
+  or library replacement is accepted through that surface. On `docker-vm`, its
+  health action also dispatches the fixed `arr-queue`, `arr-policy`,
+  `arr-transactions`, and `arr-storage` reports through the root-owned
+  `astra-arr-readonly-report`; those probe names add no mutation authority.
+- `test_hermes_arr_readonly_reports.py` checks that the plugin exposes only the
+  four fixed Arr health probes, the target validates report identity and
+  schema, and the playbook deploys both required docker-vm helpers.
 - `hermes-heartbeat-state.py` emits bounded delivery, session, and model-route
   evidence and owns the shared semantic-maintenance lease. Blank model-provider
   provenance remains unknown rather than being classified as metered usage.
@@ -165,24 +177,17 @@
 - `test_hermes_mem0_qdrant_migrate.py` covers scope selection, legacy identity
   normalization, native v3 hybrid conversion, dry-run behavior, exact
   idempotency, malformed-target rejection, and source immutability.
-- `hermes-memory-dependencies-update.py` resolves newest-stable memory packages
-  together with the active base requirements declared by the installed Hermes
-  Agent release. It evaluates platform markers, excludes inactive optional
-  extras, invokes `uv` without a shell, and prevents memory upgrades from
-  drifting shared libraries past Hermes's compatibility contract.
-- `test_hermes_memory_dependencies_update.py` covers marker filtering,
-  optional-extra exclusion, and argument-array dependency resolution.
-- `test_hermes_mem0_native_upgrade.py` covers stable-only dependency
-  resolution, exact approval, local and NFS rollback, complete v3 schema/count
-  gates, privacy controls, and native dense plus BM25 recall.
 - `test_hermes_memory_servers.py` covers official stable-only Qdrant/Ollama
   release resolution, exact approval, full-snapshot-before-outage ordering,
   checksummed staging, data/model/schema/provider acceptance, and dual-server
   rollback.
 - `hermes-lcm-native-maintenance.py` loads the installed stable LCM plugin
   through its public engine and command interfaces for content-free inventory,
-  doctor, warmup, bounded summary/chunk backfill, and sanitized cross-session
-  recall probes. Database-writing operations require an exact confirmation.
+  doctor, bounded historical backfill, and sanitized cross-session recall
+  probes. It is an external migration/diagnostic runner, not a profile-config
+  owner. Database-writing operations require an exact confirmation, and live
+  corpus progress is based on completed embeddings rather than an invalid
+  monotonic-backlog assumption.
 - `hermes-profile-lcm-import.py` selects only canonical top-level OpenClaw
   session JSONL for one agent, excludes duplicate trajectory artifacts, hashes
   and race-checks the complete source set, invokes the installed stable LCM
@@ -215,26 +220,22 @@
 - `test_hermes_lcm_native_maintenance.py` covers mutation gating, content-free
   retrieval evidence, count-only database/session inventory, and bounded
   native uncertainty recovery.
-- `test_hermes_lcm_native_features.py` covers rollback-before-vector writes,
-  local stable feature configuration, bounded dual-corpus seeding, semantic
-  recall gates, zero-drift restart suppression, and fail-closed rescue.
-- `test_hermes_lcm_backfill.py` covers exact approval, local-only bounded
-  summary/chunk timers, staggered schedules, resource priority, hardening, and
-  the absence of Gateway restarts.
+- `test_hermes_lcm_backfill.py` covers exact approval, bounded
+  summary/chunk timers, profile-owned native configuration, staggered
+  schedules, resource priority, hardening, and the absence of Gateway restarts.
 - `test_hermes_memory_continuity.py` covers exact approval, OpenClaw-offline and
   native-ExecStop gates, LCM/Mem0 dry-run-before-apply ordering, backups,
   reconciliation, live recall, service sequencing, and rollback.
 - `hermes-profile-skills-validate.py` validates reviewed declarative profile
   skills with Hermes's pinned native frontmatter parser and threat scanner,
   exact recursive source and installed hashes for skills plus approved support
-  files, the retained root-owned restore inventory, and the native skill index
-  inside the service's read-only bind namespace. That inventory is audited or
-  explicitly restored; it is not routine mutable skill ownership.
+  files, and the native skill index during an explicit one-time migration. The
+  retained inventory is evidence, not a live restore or mutable-state owner.
 - `hermes-skill-runtime-smoke.py` runs as one isolated Hermes service identity,
   exercises the native `skill_manage` create, patch, supporting-file, and delete
   path without staging approval records, verifies the agent-created threat gate,
-  and proves that profile's root-managed skill remains non-writable. It removes
-  its temporary profile-local skill before returning a content-free result.
+  and removes its temporary profile-local skill before returning a content-free
+  result.
 - `test_hermes_profile_skills.py` covers replacement of legacy phrase-triggered
   skills, semantic descriptions, capability-field exclusions, profile
   isolation, transactional rollback, native service bindings, and absence of
@@ -285,29 +286,18 @@
   untouched, malformed Star batches fail closed, dispatch turns are silent,
   completion IDs are session-bound, reset state is discarded, and only one
   failed-reviewer retry is accepted.
-- `hermes-discord-cutover-audit.py` validates the credential-free Discord
-  handoff contract. It pins the source shadow, migration, and delivery-audit
+- `hermes-discord-cutover-audit.py` validates the retained credential-free
+  Discord handoff contract. It is historical migration evidence, not a current
+  Gateway startup check. It pins the source shadow, migration, and delivery-audit
   assets; requires three distinct application/token consumers for Astra,
   Dubble, and Rigel; keeps unknown DMs, bot
   input, backfill, replay, and allow-all access disabled; and enforces
   stopped-source-before-target and stopped-target-before-rollback ordering
   while the Health receiver remains online.
-- `hermes-discord-enroll.py` performs root-only private cutover enrollment. It
-  discovers the existing Astra/Dubble routes, proves the dedicated third bot
-  can access the exact Rigel channel, rejects reused application identities,
-  writes only profile-group environments plus a mode-`0400` route manifest,
-  and emits content-free counts.
-- `test_hermes_discord_enroll.py` covers source permissions, route mismatch,
-  duplicate bot identities, private file modes, provider scope, and redacted
-  output.
 - `test_hermes_discord_cutover_audit.py` covers authority drift, shared
   identities or homes, pairing and bot loops, replay/backfill, source ordering,
   Health continuity, rollback ordering, source-hash drift, redacted output,
   and all 12 sanitized Discord promotion cases.
-- `test_hermes_production_cutover.py` proves the live playbook is inert by
-  default, backs up before source shutdown, drains before enrollment, starts
-  exactly three distinct consumers, preserves
-  Health, enables native updates, and restores OpenClaw in rescue.
 - `hermes-discord-runtime-audit.py` is the silent service readiness gate for
   the installed Discord modules, empty pairing-grant state, and the running
   Gateway's established TLS session. It prevents a cron-only Hermes process or
@@ -320,37 +310,14 @@
   selects the newest numeric release, and becomes the stable executable path
   used by Hermes without hardcoding a browser version. Its focused regression
   is `test_hermes_agent_browser_chromium.py`.
-- `hermes-native-update-sitecustomize.py` is loaded only by the dedicated
-  native updater and extends the subprocess wait only for exact
-  `systemctl start/restart hermes-gateway*` calls. This lets Hermes's native
-  updater honor the managed `Type=notify` startup budget without changing its
-  release, migration, drain, or restart logic. Its focused regression is
-  `test_hermes_native_update_sitecustomize.py`.
-- `hermes-managed-source-patch.py` promotes the reviewed source-parity patch
-  from an isolated Git worktree onto the maintained `astra-managed-parity`
-  branch. It accepts only the official Hermes origin and the reviewed exact
-  source/test path set, validates, compiles, and runs focused regressions before
-  switching the live checkout, can rebuild an outdated managed branch from
-  current `main`, and leaves release discovery and upstream merges to Hermes's
-  native updater.
-- `hermes-queued-event-durability-validate.py` is the combined source-level
-  acceptance gate run during convergence and after every native update. It
-  proves the complete FIFO snapshot, full event/routing serialization, native
-  replay, and stable-channel document-extraction dependency policy,
-  retry release, post-persistence per-event acknowledgement markers, and
-  bounded fail-closed Mem0 shutdown ordering for active local inference.
-  It also keeps intent-ack continuation token-aware so complete answers
-  containing words such as `already` or `report` are not mistaken for
-  `read`/`repo` action announcements while genuine `running`, `checking`, and
-  `analyzing`
-  acknowledgements still continue.
-  It also requires native cron execution-delivery receipts to remain
-  content-free, retain confirmed platform message IDs, represent
-  timeout-confirmed sends as assumed delivery, and surface the receipt through
-  `hermes cron runs`.
-  `test_hermes_queued_event_durability.py` covers the patch, promoter,
-  validator, inventory path normalization, update policy, and production
-  transaction contract.
+- `hermes-native-update-transaction.py` is only the root lifecycle boundary
+  needed by the shared installation: it marks and stops the system Gateways
+  that were active, invokes Hermes's unmodified native updater as
+  `hermes-astra` with native backups enabled, runs Hermes's own noninteractive
+  config migration as each isolated profile identity, and restores the same
+  Gateways. It does not discover releases, patch source, resolve dependencies,
+  implement migration rules, or replace Hermes's update and rollback logic.
+  `test_hermes_native_update_transaction.py` enforces that narrow contract.
 - `test_hermes_production_runtime.py` covers the disabled-by-default live
   convergence, OpenClaw exclusion, rollback-first sequencing, shared-code-only
   reader access, explicit-only native-unit repair, zero-drift restart

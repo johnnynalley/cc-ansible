@@ -5,6 +5,6 @@ After=hermes-fleet-admin.service
 [Service]
 SupplementaryGroups={{ hermes_fleet_admin_group }}
 EnvironmentFile=-{{ hermes_fleet_admin_gateway_environment }}
-ExecStartPre=+{{ hermes_shadow_runtime_venv }}/bin/python {{ hermes_fleet_admin_validator_live }} --source-root {{ hermes_fleet_admin_plugin_managed_root }} --runtime-root {{ hermes_fleet_admin_plugin_runtime_root }} --config /etc/hermes/astra/config.yaml --policy {{ hermes_fleet_admin_policy_live }} --socket {{ hermes_fleet_admin_socket }} --socket-group {{ hermes_fleet_admin_group }} --environment {{ hermes_fleet_admin_gateway_environment }} --state-db /var/lib/hermes/astra/.hermes/profiles/astra/state.db
+ExecStartPre=+{{ hermes_shadow_runtime_venv }}/bin/python {{ hermes_fleet_admin_validator_live }} --source-root {{ hermes_fleet_admin_plugin_managed_root }} --runtime-root {{ hermes_fleet_admin_plugin_runtime_root }} --config {{ hermes_profile.home }}/config.yaml --policy {{ hermes_fleet_admin_policy_live }} --socket {{ hermes_fleet_admin_socket }} --socket-group {{ hermes_fleet_admin_group }} --environment {{ hermes_fleet_admin_gateway_environment }} --state-db /var/lib/hermes/astra/.hermes/profiles/astra/state.db
 BindReadOnlyPaths={{ hermes_fleet_admin_plugin_managed_root }}:{{ hermes_fleet_admin_plugin_runtime_root }}
 BindReadOnlyPaths={{ hermes_fleet_admin_runtime_dir }}

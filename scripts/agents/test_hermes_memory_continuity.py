@@ -38,8 +38,6 @@ class HermesMemoryContinuityTests(unittest.TestCase):
             "Require exact source artifact copies before publication",
             "Publish verified source artifacts atomically",
             "Remove incomplete NFS source artifact partials",
-            "Validate retained Astra provider credentials before interruption",
-            "Remove local staging after provider credential failure",
             "Prepare service-owned markers for memory conversion stops",
             "Stop active native Gateways once for shared runtime conversion",
             "Reject orphaned LCM externalized-output state",
@@ -62,10 +60,6 @@ class HermesMemoryContinuityTests(unittest.TestCase):
             "Pull missing local Mem0 models",
             "Validate local Mem0 model availability",
             "Validate Hermes Python package compatibility before conversion",
-            "Deploy current memory-dependent Hermes policy graph",
-            "Validate deployed Hermes target policy",
-            "Validate deployed Hermes Discord policy graph",
-            "Validate deployed Hermes automation policy graph",
             "Validate Astra Mem0 provider recall without exposing results",
             "Reconcile preserved Mem0 v1 collection after local re-embedding",
             "Remove newly created Mem0 target after failed conversion",
@@ -85,6 +79,9 @@ class HermesMemoryContinuityTests(unittest.TestCase):
             "Fail after restoring pre-conversion memory state",
         ):
             self.assertIn(required, self.playbook)
+        self.assertNotIn("hermes_openclaw_source_env", self.playbook)
+        self.assertNotIn("/home/johnny/.openclaw/.env", self.playbook)
+        self.assertNotIn("Enroll Astra provider credentials", self.playbook)
         self.assertIn("gateway\n              - stop\n              - --system", self.playbook)
         self.assertIn(
             'name: "{{ item.item.unit }}"\n            state: started',
@@ -132,37 +129,15 @@ class HermesMemoryContinuityTests(unittest.TestCase):
             self.playbook,
         )
         self.assertNotIn("/usr/bin/sqlite3", self.playbook)
-        self.assertIn("hermes_memory_continuity_policy_files", self.playbook)
+        self.assertNotIn("hermes_memory_continuity_policy_files", self.playbook)
+        self.assertNotIn("Deploy current memory-dependent Hermes policy graph", self.playbook)
+        self.assertNotIn("Validate deployed Hermes target policy", self.playbook)
+        self.assertNotIn("Validate deployed Hermes Discord policy graph", self.playbook)
+        self.assertNotIn("Validate deployed Hermes automation policy graph", self.playbook)
         self.assertEqual(
             self.variables["hermes_lcm_externalized_output_root"],
             "/var/lib/hermes/astra/.hermes/profiles/astra/lcm-large-outputs",
         )
-        policy_sources = {
-            item["source"]
-            for item in self.variables["hermes_memory_continuity_policy_files"]
-        }
-        policy_destinations = {
-            item["destination"]
-            for item in self.variables["hermes_memory_continuity_policy_files"]
-        }
-        for source in (
-            "{{ hermes_star_privacy_validator_source }}",
-            "{{ hermes_docker_inventory_validator_source }}",
-            "{{ hermes_shadow_contract_source }}",
-            "files/hermes/openclaw-state-migration-contract.json",
-            "{{ hermes_discord_contract_source }}",
-            "{{ hermes_automation_contract_source }}",
-            "files/hermes/profile-import-contract.json",
-            "{{ hermes_profile_data_contract_source }}",
-            "{{ hermes_profile_transforms_contract_source }}",
-        ):
-            self.assertIn(source, policy_sources)
-        for destination in (
-            "{{ hermes_star_privacy_validator_live }}",
-            "{{ hermes_docker_inventory_validator_live }}",
-        ):
-            self.assertIn(destination, policy_destinations)
-            self.assertIn(destination, self.playbook)
 
     def test_mem0_scope_excludes_other_agents(self) -> None:
         self.assertEqual(
@@ -221,22 +196,15 @@ class HermesMemoryContinuityTests(unittest.TestCase):
         self.assertNotIn("gemini", source.lower())
         self.assertNotIn("openrouter", source.lower())
 
-    def test_mem0_dependency_uses_locked_extra_then_stable_native_upgrade(self) -> None:
+    def test_mem0_dependency_uses_locked_native_extra_and_provider_setup(self) -> None:
         shadow = (ROOT / "playbooks/agents/hermes-shadow.yml").read_text()
-        updater = (
-            ROOT / "templates/hermes/hermes-native-update.service.j2"
-        ).read_text()
         update_transaction = (
             ROOT / "scripts/agents/hermes-native-update-transaction.py"
         ).read_text()
         update_contract = (
             ROOT / "templates/hermes/hermes-native-update-transaction.json.j2"
         ).read_text()
-        dependency_resolver = (
-            ROOT / "scripts/agents/hermes-memory-dependencies-update.py"
-        ).read_text()
         self.assertIn("- mem0", shadow)
-        self.assertIn("[messaging,mem0,edge-tts]", update_transaction)
         self.assertEqual(
             self.variables["hermes_mem0_ollama_dependency"],
             "ollama",
@@ -248,15 +216,11 @@ class HermesMemoryContinuityTests(unittest.TestCase):
         self.assertIn("hermes_mem0_ollama_binary", self.playbook)
         self.assertNotIn("/usr/bin/ollama", self.playbook)
         self.assertIn("hermes_mem0_ollama_dependency", self.playbook)
-        self.assertIn("hermes_mem0_stable_dependencies", update_contract)
-        self.assertIn("hermes_mem0_dependency_updater_live", update_contract)
-        self.assertIn('"--prerelease",', dependency_resolver)
-        self.assertIn('"disallow",', dependency_resolver)
-        self.assertIn("spacy.load", update_transaction)
         self.assertIn("import ollama", self.playbook)
         self.assertNotIn("hermes_mem0_gemini_dependency", self.playbook)
         self.assertNotIn("hermes_mem0_gemini_dependency", update_contract)
-        self.assertIn('"pip", "check"', update_transaction)
+        self.assertNotIn("memoryDependencyUpdater", update_contract)
+        self.assertNotIn('"pip", "install"', update_transaction)
         self.assertIn("--locked", self.playbook)
         self.assertIn("- mem0", self.playbook)
         self.assertIn("- edge-tts", self.playbook)

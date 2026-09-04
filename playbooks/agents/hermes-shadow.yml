@@ -198,130 +198,9 @@
           - item.uid | int >= 62010
           - item.uid | int <= 62012
           - item.subid_start | int >= 200000
-          - item.model_provider == 'openai-codex'
-          - item.model_default == 'gpt-5.6-sol'
-          - item.model_max_tokens | int == 8192
-          - >-
-            item.fallback_providers
-            == [
-              {'provider': 'ollama-cloud', 'model': 'glm-5.2'},
-              {'provider': 'ollama-cloud', 'model': 'kimi-k2.7-code'},
-              {'provider': 'ollama-cloud', 'model': 'deepseek-v4-pro'}
-            ]
-          - item.discord_allowed_users is iterable
-          - item.discord_allowed_channels is iterable
-          - item.discord_free_response_channels is iterable
-          - item.discord_channel_prompts is mapping
-          - item.discord_channel_skill_bindings is iterable
-          - item.discord_admin_users is iterable
-          - item.discord_server_actions is iterable
-          - not item.discord_slash_commands | bool
-          - >-
-            item.plugins_enabled
-            == (
-              ['star-dispatch-privacy', 'agent-docker-inventory',
-               'arr-api', 'host-admin', 'compose-admin',
-               'discord-parity', 'fleet-admin', 'hermes-lcm']
-              if item.name == 'astra'
-              else (
-                ['discord-parity', 'astra-handoff', 'hermes-lcm']
-                if item.name == 'dubble'
-                else ['hermes-lcm', 'rigel-astra-liaison']
-              )
-            )
-          - >-
-            ('agent_docker' in item.toolsets)
-            == (item.name == 'astra')
-          - item.toolsets | length > 0
-          - >-
-            ('terminal' in item.toolsets)
-            == (item.name in ['astra', 'rigel'])
-          - >-
-            ('file' in item.toolsets)
-            == (item.name in ['astra', 'rigel'])
-          - >-
-            ('code_execution' in item.toolsets)
-            == (item.name == 'astra')
-          - >-
-            ('cronjob' in item.toolsets)
-            == (item.name in ['astra', 'dubble'])
-          - >-
-            ('discord' in item.toolsets)
-            == (item.name in ['astra', 'dubble'])
-          - >-
-            ('discord_admin' in item.toolsets)
-            == (item.name in ['astra', 'dubble'])
-          - >-
-            ('discord_parity' in item.toolsets)
-            == (item.name in ['astra', 'dubble'])
-          - >-
-            ('astra_handoff' in item.toolsets)
-            == (item.name == 'dubble')
-          - >-
-            ('rigel_astra_liaison' in item.toolsets)
-            == (item.name == 'rigel')
-          - >-
-            ('arr_api' in item.toolsets)
-            == (item.name == 'astra')
-          - >-
-            ('host_admin' in item.toolsets)
-            == (item.name == 'astra')
-          - >-
-            ('compose_admin' in item.toolsets)
-            == (item.name == 'astra')
-          - >-
-            ('fleet_admin' in item.toolsets)
-            == (item.name == 'astra')
-          - >-
-            ('browser' in item.toolsets)
-            == (item.name in ['astra', 'rigel'])
-          - >-
-            ('vision' in item.toolsets)
-            == (item.name in ['astra', 'rigel'])
-          - >-
-            ('image_gen' in item.toolsets)
-            == (item.name == 'astra')
-          - >-
-            ('tts' in item.toolsets)
-            == (item.name == 'astra')
-          - >-
-            (item.native_messaging_bridge | default(false) | bool)
-            == (item.name in ['astra', 'dubble'])
-          - "'messaging' not in item.toolsets"
-          - >-
-            ('terminal' in item.disabled_toolsets)
-            == (item.name == 'dubble')
-          - >-
-            ('file' in item.disabled_toolsets)
-            == (item.name == 'dubble')
-          - >-
-            ('code_execution' in item.disabled_toolsets)
-            == (item.name != 'astra')
-          - >-
-            ('cronjob' in item.disabled_toolsets)
-            == (item.name == 'rigel')
-          - >-
-            ('discord_admin' in item.disabled_toolsets)
-            == (item.name == 'rigel')
           - >-
             item.terminal_backend
             == ('local' if item.name in ['astra', 'rigel'] else 'docker')
-          - >-
-            item.cron_approval_mode
-            == ('approve' if item.name in ['astra', 'dubble'] else 'deny')
-          - >-
-            item.approval_mode
-            == ('smart' if item.name in ['astra', 'rigel'] else 'manual')
-          - >-
-            (item.approval_smart_policy is defined)
-            == (item.name in ['astra', 'rigel'])
-          - >-
-            (item.bot_peers is defined)
-            == (item.name == 'dubble')
-          - "'computer_use' in item.disabled_toolsets"
-          - >-
-            ('add_role' not in item.discord_server_actions)
-            and ('remove_role' not in item.discord_server_actions)
         fail_msg: >-
           Hermes profile {{ item.name }} exceeds its reviewed authority.
       loop: "{{ hermes_shadow_profiles }}"
@@ -1252,37 +1131,6 @@
       loop_control:
         label: "{{ item.name }}"
 
-    - name: Inspect native Hermes managed-skill mountpoints
-      ansible.builtin.stat:
-        path: "{{ item.home }}/skills/managed"
-        follow: false
-      loop: "{{ hermes_shadow_profiles }}"
-      loop_control:
-        label: "{{ item.name }}"
-      register: hermes_shadow_managed_skill_mountpoints
-
-    - name: Reject unsafe native Hermes managed-skill mountpoints
-      ansible.builtin.assert:
-        that:
-          - not item.stat.exists or (item.stat.isdir and not item.stat.islnk)
-        fail_msg: >-
-          A native Hermes managed-skill mountpoint is not absent or a regular,
-          non-symlink directory.
-      loop: "{{ hermes_shadow_managed_skill_mountpoints.results }}"
-      loop_control:
-        label: "{{ item.item.name }}"
-
-    - name: Create root-owned native Hermes managed-skill mountpoints
-      ansible.builtin.file:
-        path: "{{ item.home }}/skills/managed"
-        state: directory
-        owner: root
-        group: "{{ item.group }}"
-        mode: "0750"
-      loop: "{{ hermes_shadow_profiles }}"
-      loop_control:
-        label: "{{ item.name }}"
-
     - name: Create read-only shared self-evolution mountpoints
       ansible.builtin.file:
         path: "{{ item.home }}/skills/self-evolution"
@@ -1296,7 +1144,6 @@
            | list }}
       loop_control:
         label: "{{ item.name }}"
-      when: hermes_native_profile_skills_enabled | bool
 
     - name: Inspect Hermes profile-data runtime mountpoints
       ansible.builtin.stat:
@@ -1913,24 +1760,6 @@
         mode: "0755"
         backup: true
 
-    - name: Deploy Hermes Discord cutover contract
-      ansible.builtin.copy:
-        src: "{{ playbook_dir }}/../../{{ hermes_discord_contract_source }}"
-        dest: "{{ hermes_discord_contract_live }}"
-        owner: root
-        group: root
-        mode: "0644"
-        backup: true
-
-    - name: Deploy Hermes Discord contract audit
-      ansible.builtin.copy:
-        src: "{{ playbook_dir }}/../../{{ hermes_discord_audit_source }}"
-        dest: "{{ hermes_discord_audit_live }}"
-        owner: root
-        group: root
-        mode: "0755"
-        backup: true
-
     - name: Deploy Hermes Discord runtime audit
       ansible.builtin.copy:
         src: >-
@@ -1940,15 +1769,6 @@
         owner: root
         group: "{{ hermes_runtime_readers_group }}"
         mode: "0550"
-        backup: true
-
-    - name: Deploy Hermes private Discord enrollment tool
-      ansible.builtin.copy:
-        src: "{{ playbook_dir }}/../../{{ hermes_discord_enroll_source }}"
-        dest: "{{ hermes_discord_enroll_live }}"
-        owner: root
-        group: root
-        mode: "0700"
         backup: true
 
     - name: Deploy Hermes automation contract
@@ -2174,40 +1994,6 @@
         mode: "0755"
         backup: true
 
-    - name: Deploy pinned Hermes Discord audit sources
-      ansible.builtin.copy:
-        src: "{{ playbook_dir }}/../../{{ item }}"
-        dest: "/usr/local/share/hermes-shadow/repository/{{ item }}"
-        owner: root
-        group: root
-        mode: "0644"
-        backup: true
-      loop:
-        - files/hermes/shadow-target.json
-        - files/hermes/openclaw-state-migration-contract.json
-        - files/hermes/discord-regressions.json
-        - scripts/agents/openclaw-delivery-cutover-audit.py
-
-    - name: Deploy executable OpenClaw delivery cutover audit
-      ansible.builtin.copy:
-        src: >-
-          {{ playbook_dir
-             }}/../../scripts/agents/openclaw-delivery-cutover-audit.py
-        dest: /usr/local/libexec/openclaw-delivery-cutover-audit.py
-        owner: root
-        group: root
-        mode: "0755"
-        backup: true
-
-    - name: Deploy exact delivery-recovery reconciliation tool
-      ansible.builtin.copy:
-        src: "{{ playbook_dir }}/../../{{ hermes_delivery_reconcile_source }}"
-        dest: "{{ hermes_delivery_reconcile_live }}"
-        owner: root
-        group: root
-        mode: "0755"
-        backup: true
-
     - name: Deploy pinned Hermes automation audit sources
       ansible.builtin.copy:
         src: "{{ playbook_dir }}/../../{{ item }}"
@@ -2244,16 +2030,6 @@
       check_mode: false
       changed_when: false
 
-    - name: Validate deployed Hermes Discord cutover contract
-      ansible.builtin.command:
-        argv:
-          - "{{ hermes_discord_audit_live }}"
-          - "{{ hermes_discord_contract_live }}"
-          - --repository-root
-          - /usr/local/share/hermes-shadow/repository
-      check_mode: false
-      changed_when: false
-
     - name: Validate deployed Hermes automation contract
       ansible.builtin.command:
         argv:
@@ -2264,20 +2040,30 @@
       check_mode: false
       changed_when: false
 
-    - name: Deploy per-profile Hermes managed policy
-      ansible.builtin.template:
-        src: >-
-          {{ playbook_dir
-             }}/../../templates/hermes/hermes-managed-config.yaml.j2
-        dest: "/etc/hermes/{{ hermes_profile.name }}/config.yaml"
-        owner: root
-        group: "{{ hermes_profile.group }}"
-        mode: "0440"
-        backup: true
+    - name: Inspect native Hermes profile configuration
+      ansible.builtin.stat:
+        path: "{{ item.home }}/config.yaml"
+        follow: false
       loop: "{{ hermes_shadow_profiles }}"
       loop_control:
-        loop_var: hermes_profile
-        label: "{{ hermes_profile.name }}"
+        label: "{{ item.name }}"
+      register: hermes_shadow_native_configs
+      check_mode: false
+
+    - name: Require established native Hermes profile configuration
+      ansible.builtin.assert:
+        that:
+          - item.stat.exists
+          - item.stat.isreg | default(false)
+          - not (item.stat.islnk | default(false))
+        fail_msg: >-
+          Established profile {{ item.item.name }} has no safe native
+          config.yaml. Restore native profile state before platform
+          convergence instead of reseeding it from Ansible.
+      loop: "{{ hermes_shadow_native_configs.results }}"
+      loop_control:
+        label: "{{ item.item.name }}"
+      when: hermes_shadow_mode != 'bootstrap'
 
     - name: Seed mutable Hermes profile config once
       ansible.builtin.copy:
@@ -2290,192 +2076,7 @@
       loop: "{{ hermes_shadow_profiles }}"
       loop_control:
         label: "{{ item.name }}"
-
-    - name: Read mutable Hermes profile configs before schema repair
-      ansible.builtin.slurp:
-        src: "{{ item.home }}/config.yaml"
-      loop: "{{ hermes_shadow_profiles }}"
-      loop_control:
-        label: "{{ item.name }}"
-      register: hermes_shadow_mutable_configs_before_repair
-      no_log: true
-
-    - name: Stamp only newly seeded empty Hermes profile configs
-      ansible.builtin.copy:
-        content: "_config_version: {{ hermes_shadow_config_version }}\n"
-        dest: "{{ item.item.home }}/config.yaml"
-        owner: "{{ item.item.user }}"
-        group: "{{ item.item.group }}"
-        mode: "0600"
-      loop: "{{ hermes_shadow_mutable_configs_before_repair.results }}"
-      loop_control:
-        label: "{{ item.item.name }}"
-      when: (item.content | b64decode | from_yaml) == {}
-      no_log: true
-
-    - name: Migrate reviewed Hermes profile configs one schema forward
-      ansible.builtin.copy:
-        content: "_config_version: {{ hermes_shadow_config_version }}\n"
-        dest: "{{ item.item.home }}/config.yaml"
-        owner: "{{ item.item.user }}"
-        group: "{{ item.item.group }}"
-        mode: "0600"
-        backup: true
-      loop: "{{ hermes_shadow_mutable_configs_before_repair.results }}"
-      loop_control:
-        label: "{{ item.item.name }}"
-      vars:
-        hermes_existing_mutable_config: >-
-          {{ item.content | b64decode | from_yaml }}
-      when:
-        - hermes_existing_mutable_config._config_version is defined
-        - >-
-          hermes_existing_mutable_config._config_version | int
-          == hermes_shadow_version_only_migration_from | int
-        - >-
-          hermes_shadow_config_version | int
-          == hermes_shadow_version_only_migration_from | int + 1
-        - >-
-          (
-            item.item.name in ['dubble', 'rigel']
-            and hermes_existing_mutable_config | length == 1
-          )
-          or
-          (
-            item.item.name == 'astra'
-            and hermes_existing_mutable_config == {
-              '_config_version': hermes_shadow_version_only_migration_from,
-              'model': {
-                'default': 'gpt-5.6-sol',
-                'provider': 'openai-codex',
-                'base_url': 'https://chatgpt.com/backend-api/codex'
-              },
-              'agent': {'reasoning_effort': 'xhigh'},
-              'display': {
-                'platforms': {'discord': {'show_reasoning': true}}
-              }
-            }
-          )
-      no_log: true
-
-    - name: Migrate reviewed Astra Codex route one schema forward
-      ansible.builtin.copy:
-        content: >-
-          {{
-            hermes_existing_mutable_config
-            | combine({'_config_version': hermes_shadow_config_version})
-            | to_nice_yaml(indent=2, sort_keys=false)
-          }}
-        dest: "{{ item.item.home }}/config.yaml"
-        owner: "{{ item.item.user }}"
-        group: "{{ item.item.group }}"
-        mode: "0600"
-      loop: "{{ hermes_shadow_mutable_configs_before_repair.results }}"
-      loop_control:
-        label: "{{ item.item.name }}"
-      vars:
-        hermes_existing_mutable_config: >-
-          {{ item.content | b64decode | from_yaml }}
-        hermes_existing_model_route: >-
-          {{ hermes_existing_mutable_config.model | default({}) }}
-      when:
-        - item.item.name == 'astra'
-        - hermes_existing_mutable_config | length == 2
-        - hermes_existing_mutable_config._config_version is defined
-        - >-
-          hermes_existing_mutable_config._config_version | int
-          == hermes_shadow_version_only_migration_from | int
-        - >-
-          hermes_shadow_config_version | int
-          == hermes_shadow_version_only_migration_from | int + 1
-        - hermes_existing_model_route is mapping
-        - >-
-          hermes_existing_model_route.keys() | sort
-          == ['base_url', 'default', 'provider']
-        - hermes_existing_model_route.provider == 'openai-codex'
-        - hermes_existing_model_route.default == 'gpt-5.6-sol'
-        - >-
-          hermes_existing_model_route.base_url
-          == 'https://chatgpt.com/backend-api/codex'
-      no_log: true
-
-    - name: Read current mutable Hermes profile configs
-      ansible.builtin.slurp:
-        src: "{{ item.home }}/config.yaml"
-      loop: "{{ hermes_shadow_profiles }}"
-      loop_control:
-        label: "{{ item.name }}"
-      register: hermes_shadow_mutable_configs
-      no_log: true
-
-    - name: Require current mutable Hermes config schema
-      ansible.builtin.assert:
-        that:
-          - >-
-            (
-              (item.content | b64decode | from_yaml)._config_version | int
-              == hermes_shadow_config_version | int
-            )
-            or
-            (
-              ansible_check_mode
-              and
-              (item.content | b64decode | from_yaml)._config_version | int
-              == hermes_shadow_version_only_migration_from | int
-              and
-              hermes_shadow_config_version | int
-              == hermes_shadow_version_only_migration_from | int + 1
-              and
-              (
-                (
-                  item.item.name in ['dubble', 'rigel']
-                  and (item.content | b64decode | from_yaml) | length == 1
-                )
-                or
-                (
-                  item.item.name == 'astra'
-                  and (item.content | b64decode | from_yaml) == {
-                    '_config_version': hermes_shadow_version_only_migration_from,
-                    'model': {
-                      'default': 'gpt-5.6-sol',
-                      'provider': 'openai-codex',
-                      'base_url': 'https://chatgpt.com/backend-api/codex'
-                    },
-                    'agent': {'reasoning_effort': 'xhigh'},
-                    'display': {
-                      'platforms': {'discord': {'show_reasoning': true}}
-                    }
-                  }
-                )
-                or
-                (
-                  item.item.name == 'astra'
-                  and (item.content | b64decode | from_yaml) | length == 2
-                  and (item.content | b64decode | from_yaml).model is mapping
-                  and
-                  (
-                    (item.content | b64decode | from_yaml).model.keys() | sort
-                    == ['base_url', 'default', 'provider']
-                  )
-                  and
-                  (item.content | b64decode | from_yaml).model.provider
-                  == 'openai-codex'
-                  and
-                  (item.content | b64decode | from_yaml).model.default
-                  == 'gpt-5.6-sol'
-                  and
-                  (item.content | b64decode | from_yaml).model.base_url
-                  == 'https://chatgpt.com/backend-api/codex'
-                )
-              )
-            )
-        fail_msg: >-
-          Existing Hermes profile config requires an attended offline schema
-          migration before any gateway may start.
-      loop: "{{ hermes_shadow_mutable_configs.results }}"
-      loop_control:
-        label: "{{ item.item.name }}"
-      no_log: true
+      when: hermes_shadow_mode == 'bootstrap'
 
     - name: Create root-private Hermes service environment directories
       ansible.builtin.file:
@@ -2600,33 +2201,6 @@
       changed_when: false
       no_log: true
 
-    - name: Hash root-managed Hermes policy and environment
-      ansible.builtin.command:
-        argv:
-          - /usr/bin/sha256sum
-          - "/etc/hermes/{{ item.name }}/config.yaml"
-          - >-
-            {{ item.environment_file | default('/etc/hermes/' ~ item.name ~ '/.env') }}
-      loop: "{{ hermes_shadow_profiles }}"
-      loop_control:
-        label: "{{ item.name }}"
-      register: hermes_shadow_managed_policy_hashes
-      check_mode: false
-      changed_when: false
-      no_log: true
-
-    - name: Deploy root-owned Hermes policy checksum manifests
-      ansible.builtin.copy:
-        content: "{{ item.stdout }}\n"
-        dest: "/etc/hermes/{{ item.item.name }}/managed-policy.sha256"
-        owner: root
-        group: "{{ item.item.group }}"
-        mode: "0440"
-      loop: "{{ hermes_shadow_managed_policy_hashes.results }}"
-      loop_control:
-        label: "{{ item.item.name }}"
-      no_log: true
-
     - name: Remove profile-local environment files from Hermes shadow
       ansible.builtin.file:
         path: "{{ item.home }}/.env"
@@ -2651,6 +2225,7 @@
         label: "{{ item.name }}"
       tags:
         - hermes_profile_identities
+      when: hermes_shadow_mode == 'bootstrap'
 
     - name: Seed profile-owned Hermes operating contracts once
       ansible.builtin.copy:
@@ -2666,6 +2241,7 @@
       loop: "{{ hermes_shadow_profiles }}"
       loop_control:
         label: "{{ item.name }}"
+      when: hermes_shadow_mode == 'bootstrap'
 
     - name: Seed complete profile-owned Rigel bootstrap references once
       ansible.builtin.copy:
@@ -2684,6 +2260,7 @@
         - USER.md
       loop_control:
         label: "rigel/{{ item }}"
+      when: hermes_shadow_mode == 'bootstrap'
 
     - name: Remove retired Rigel channel-state compatibility root
       ansible.builtin.file:
@@ -2755,77 +2332,12 @@
         path: /usr/local/lib/hermes-native-update-python
         state: absent
 
-    - name: Create native Hermes update rollback root
-      ansible.builtin.file:
-        path: "{{ hermes_native_update_rollback_root }}"
-        state: directory
-        owner: "{{ hermes_native_update_user }}"
-        group: "{{ hermes_native_update_group }}"
-        mode: "0700"
-
-    - name: Create native Hermes update dependency directories
-      ansible.builtin.file:
-        path: "{{ item.path }}"
-        state: directory
-        owner: "{{ item.owner }}"
-        group: "{{ item.group }}"
-        mode: "{{ item.mode }}"
-      loop:
-        - path: "{{ hermes_queued_event_patch_live | dirname }}"
-          owner: root
-          group: root
-          mode: "0755"
-        - path: "{{ hermes_managed_source_patch_staging_root }}"
-          owner: "{{ hermes_native_update_user }}"
-          group: "{{ hermes_native_update_group }}"
-          mode: "0700"
-
-    - name: Deploy native Hermes queued-event update assets
-      ansible.builtin.copy:
-        src: "{{ playbook_dir }}/../../{{ item.source }}"
-        dest: "{{ item.live }}"
-        owner: root
-        group: "{{ item.group }}"
-        mode: "{{ item.mode }}"
-        backup: true
-      loop:
-        - source: "{{ hermes_queued_event_patch_source }}"
-          live: "{{ hermes_queued_event_patch_live }}"
-          group: "{{ hermes_runtime_readers_group }}"
-          mode: "0440"
-        - source: "{{ hermes_queued_event_validator_source }}"
-          live: "{{ hermes_queued_event_validator_live }}"
-          group: root
-          mode: "0555"
-
     - name: Deploy native Hermes browser selector
       ansible.builtin.copy:
         src: >-
           {{ playbook_dir
              }}/../../{{ hermes_agent_browser_selector_source }}
         dest: "{{ hermes_agent_browser_selector_live }}"
-        owner: root
-        group: root
-        mode: "0555"
-        backup: true
-
-    - name: Deploy native Hermes memory dependency resolver
-      ansible.builtin.copy:
-        src: >-
-          {{ playbook_dir
-             }}/../../{{ hermes_mem0_dependency_updater_source }}
-        dest: "{{ hermes_mem0_dependency_updater_live }}"
-        owner: root
-        group: root
-        mode: "0755"
-        backup: true
-
-    - name: Deploy managed Hermes source patcher
-      ansible.builtin.copy:
-        src: >-
-          {{ playbook_dir
-             }}/../../{{ hermes_managed_source_patch_source }}
-        dest: "{{ hermes_managed_source_patch_live }}"
         owner: root
         group: root
         mode: "0555"

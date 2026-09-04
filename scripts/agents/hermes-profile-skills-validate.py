@@ -67,20 +67,6 @@ def source_skill_path(root: Path, skill: dict[str, Any]) -> Path:
     return root / source
 
 
-def installed_skill_path(profile: dict[str, Any], skill: dict[str, Any]) -> Path:
-    managed_root = Path(profile["managedRoot"])
-    if not managed_root.is_absolute():
-        fail("managed-root-not-absolute", str(managed_root))
-    return managed_root / skill["name"] / "SKILL.md"
-
-
-def runtime_skill_path(profile: dict[str, Any], skill: dict[str, Any]) -> Path:
-    runtime_root = Path(profile["runtimeRoot"])
-    if not runtime_root.is_absolute():
-        fail("runtime-root-not-absolute", str(runtime_root))
-    return runtime_root / skill["name"] / "SKILL.md"
-
-
 def native_skill_path(profile: dict[str, Any], skill: dict[str, Any]) -> Path:
     native_root = Path(profile["nativeRoot"])
     if not native_root.is_absolute():
@@ -201,33 +187,6 @@ def validate_skill(
         fail("skill-native-scan-failed", f"{path}: {result.verdict} {finding_ids}")
 
 
-def exact_skill_tree(
-    root: Path,
-    skills: list[dict[str, Any]],
-    allowed_suffixes: set[str],
-    label: str,
-) -> None:
-    try:
-        entries = list(root.iterdir())
-    except OSError as exc:
-        fail("skill-root-unreadable", f"{label}: {exc}")
-    actual_names = {entry.name for entry in entries}
-    expected_names = {skill["name"] for skill in skills}
-    if actual_names != expected_names:
-        fail(
-            "skill-root-inventory-drift",
-            f"{label}: expected={sorted(expected_names)} actual={sorted(actual_names)}",
-        )
-    by_name = {skill["name"]: skill for skill in skills}
-    for entry in entries:
-        exact_skill_directory(
-            entry,
-            by_name[entry.name],
-            allowed_suffixes,
-            label,
-        )
-
-
 def exact_skill_directory(
     entry: Path,
     skill: dict[str, Any],
@@ -265,9 +224,6 @@ def main() -> int:
         "--mode",
         choices=(
             "source",
-            "installed",
-            "runtime",
-            "discovery",
             "native",
             "plan-native",
         ),
@@ -369,13 +325,6 @@ def main() -> int:
                     fail("native-root-entry-invalid", f"{profile_name}: {entry}")
                 if entry.name not in expected_targets:
                     native_plan["unrelatedSkillDirectories"] += 1
-        if args.mode in {"installed", "runtime", "discovery"}:
-            tree_root = Path(
-                profile["runtimeRoot"]
-                if args.mode == "runtime"
-                else profile["managedRoot"]
-            )
-            exact_skill_tree(tree_root, skills, allowed_suffixes, profile_name)
         for skill in skills:
             key = (profile_name, skill["name"])
             if key in seen_names:
@@ -384,12 +333,10 @@ def main() -> int:
             if args.mode in {"source", "plan-native"}:
                 path = source_skill_path(args.root, skill)
                 expected_source_paths.add(path.resolve())
-            elif args.mode in {"installed", "discovery"}:
-                path = installed_skill_path(profile, skill)
             elif args.mode == "native":
                 path = native_skill_path(profile, skill)
             else:
-                path = runtime_skill_path(profile, skill)
+                fail("unsupported-mode", args.mode)
             shared_reader = (
                 skill["name"] == ownership["canonicalSharedSkill"]
                 and profile_name in ownership["readOnlyProfiles"]
@@ -463,7 +410,7 @@ def main() -> int:
                         True,
                     )
                     native_plan["exact"] += 1
-            if args.mode in {"runtime", "native"}:
+            if args.mode == "native":
                 try:
                     loaded = json.loads(
                         skill_view(skill["name"], preprocess=False)
@@ -479,16 +426,9 @@ def main() -> int:
                         f"{profile_name}/{skill['name']}: {loaded.get('error')}",
                     )
 
-        if args.mode in {"runtime", "discovery", "native"}:
-            # Hermes indexes the profile-visible runtime tree. In discovery
-            # mode the files themselves are also checked through the managed
-            # source path, but a systemd bind mount does not rewrite the path
-            # returned by the native indexer back to /etc/hermes.
-            discovery_root = Path(
-                profile[
-                    "nativeRoot" if args.mode == "native" else "runtimeRoot"
-                ]
-            ).resolve()
+        if args.mode == "native":
+            # Hermes indexes the profile-owned native skill tree.
+            discovery_root = Path(profile["nativeRoot"]).resolve()
             indexed_paths = {
                 path.resolve()
                 for skills_dir in get_all_skills_dirs()

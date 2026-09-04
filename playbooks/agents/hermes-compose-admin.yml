@@ -412,8 +412,6 @@
       - "{{ hermes_compose_admin_smoke_live }}"
       - "{{ hermes_compose_admin_plugin_managed_root }}"
       - "{{ hermes_compose_admin_plugin_runtime_root }}"
-      - /etc/hermes/astra/config.yaml
-      - /etc/hermes/astra/managed-policy.sha256
       - "{{ hermes_compose_admin_dropin }}"
 
   tasks:
@@ -569,17 +567,6 @@
             - "{{ hermes_compose_admin_plugin_managed_root }}"
             - "{{ hermes_compose_admin_plugin_runtime_root }}"
 
-        - name: Render Astra policy with Compose administration toolset
-          ansible.builtin.template:
-            src: "{{ playbook_dir }}/../../templates/hermes/hermes-managed-config.yaml.j2"
-            dest: /etc/hermes/astra/config.yaml
-            owner: root
-            group: hermes-astra
-            mode: "0440"
-          vars:
-            hermes_profile: "{{ hermes_compose_admin_astra_profile }}"
-          register: hermes_compose_admin_policy_copy
-
         - name: Deploy Astra drop-in with Compose credential and plugin
           ansible.builtin.template:
             src: "{{ playbook_dir }}/../../templates/hermes/hermes-gateway-hardening.conf.j2"
@@ -590,23 +577,6 @@
           vars:
             hermes_profile: "{{ hermes_compose_admin_astra_profile }}"
           register: hermes_compose_admin_dropin_copy
-
-        - name: Hash Astra policy and environment
-          ansible.builtin.command:
-            argv: [/usr/bin/sha256sum, /etc/hermes/astra/config.yaml, /etc/hermes/astra/.env]
-          register: hermes_compose_admin_policy_hash
-          changed_when: false
-          no_log: true
-
-        - name: Publish Astra managed policy checksum
-          ansible.builtin.copy:
-            content: "{{ hermes_compose_admin_policy_hash.stdout }}\n"
-            dest: /etc/hermes/astra/managed-policy.sha256
-            owner: root
-            group: hermes-astra
-            mode: "0440"
-          register: hermes_compose_admin_checksum_copy
-          no_log: true
 
         - name: Reload systemd after Compose administration promotion
           ansible.builtin.systemd_service:
@@ -640,7 +610,7 @@
               - --runtime-root
               - "{{ hermes_compose_admin_plugin_runtime_root }}"
               - --config
-              - /etc/hermes/astra/config.yaml
+              - "{{ hermes_compose_admin_astra_profile.home }}/config.yaml"
               - --endpoints
               - "{{ hermes_compose_admin_endpoints }}"
               - --known-hosts
@@ -653,9 +623,7 @@
               {{
                 hermes_compose_admin_endpoints_copy.changed
                 or hermes_compose_admin_known_hosts_copy.changed
-                or hermes_compose_admin_policy_copy.changed
                 or hermes_compose_admin_dropin_copy.changed
-                or hermes_compose_admin_checksum_copy.changed
                 or hermes_compose_admin_plugin_copies.results | selectattr('changed') | list | length > 0
               }}
 

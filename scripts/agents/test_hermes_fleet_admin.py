@@ -53,8 +53,8 @@ class FleetAdminTests(unittest.TestCase):
             path.mkdir(parents=True, exist_ok=True)
         config = profile / "config.yaml"
         config.write_text("model:\n  default: test\n", encoding="utf-8")
-        managed = managed_root / "config.yaml"
-        managed.write_text("security:\n  redact_secrets: true\n", encoding="utf-8")
+        environment = managed_root / ".env"
+        environment.write_text("", encoding="utf-8")
         (profile / "cron/jobs.json").write_text("[]\n", encoding="utf-8")
         return {
             "user": os.getlogin() if os.isatty(0) else "nobody",
@@ -64,15 +64,18 @@ class FleetAdminTests(unittest.TestCase):
             "profile": profile,
             "workspace": workspace,
             "config": config,
-            "managed": managed,
-            "environment": managed_root / ".env",
+            "managed_dir": managed_root,
+            "environment": environment,
         }
 
     def test_fleet_targets_include_astra_and_config_is_native(self) -> None:
         self.assertEqual(PLUGIN.TARGETS, ["astra", "dubble", "rigel"])
         for target in BROKER.TARGETS.values():
             self.assertEqual(target["config"], target["profile"] / "config.yaml")
-            self.assertEqual(target["managed"], Path("/etc/hermes") / target["profile"].name / "config.yaml")
+            self.assertEqual(
+                target["managed_dir"],
+                Path("/etc/hermes") / target["profile"].name,
+            )
         smoke = (ROOT / "scripts/agents/hermes-fleet-admin-smoke.py").read_text(encoding="utf-8")
         self.assertIn('choices=["astra", "dubble", "rigel"]', smoke)
 
@@ -226,7 +229,6 @@ class FleetAdminTests(unittest.TestCase):
         service = (ROOT / "templates/hermes/hermes-fleet-admin.service.j2").read_text(encoding="utf-8")
         dropin = (ROOT / "templates/hermes/hermes-gateway-fleet-admin.conf.j2").read_text(encoding="utf-8")
         playbook = (ROOT / "playbooks/agents/hermes-fleet-admin.yml").read_text(encoding="utf-8")
-        inventory = (ROOT / "inventory/group_vars/hermes_hosts/vars.yml").read_text(encoding="utf-8")
         self.assertIn("LoadCredential=fleet-admin-key:", service)
         self.assertIn("Group={{ hermes_fleet_admin_group }}", service)
         self.assertIn("RestrictAddressFamilies=AF_UNIX", service)
@@ -253,8 +255,9 @@ class FleetAdminTests(unittest.TestCase):
         self.assertIn("hermes_fleet_admin_mutation_acceptance | bool", playbook)
         self.assertIn('path: /etc/hermes/astra\n          kind: directory', playbook)
         self.assertIn('mode: "0750"', playbook)
-        self.assertIn("- fleet-admin", inventory)
-        self.assertIn("- fleet_admin", inventory)
+        self.assertIn("hermes_fleet_admin_current_config_raw", playbook)
+        self.assertIn("hermes_fleet_admin_current_plugins", playbook)
+        self.assertIn("hermes_fleet_admin_current_toolsets", playbook)
 
 
 if __name__ == "__main__":

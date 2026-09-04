@@ -849,7 +849,7 @@ Primary media VM (10GB RAM, 4 cores, 200GB disk, Quadro P2200 GPU passthrough). 
 
 **Plex appliance operations**: Bedroom Plex is the `jn-t14s-lin` / T14s HDMI appliance; living room Plex is `mercury`. For "skip the current episode on Bedroom Plex", Bedroom not-playing incidents, HDMI login-screen/black-video incidents, Tailscale-vs-LAN Plex reachability, playback identity/session collisions, queue safety, freezing/buffering after appliance playback changes, or other appliance operator actions, start with `docs/plex-appliance-operations.md` before rediscovering service names, display ownership rules, stream-mode history, or editing `/var/lib/plex-appliance/shuffle-state.json`. The appliances intentionally stay Plex-dependent as passive Plex health monitors; do not bypass Plex with local library mounts as the normal fix.
 
-**Stream relay**: `playbooks/media/stream-relay.yml` deploys `stream-relay.service`, which receives OBS SRT on UDP 9000, encodes video once with the Quadro's `h264_nvenc`, copies OBS's incoming AAC audio tracks, and fans the encoded feed out locally over MPEG-TS/TCP to `stream-relay-output@<platform>.service` workers that push configured RTMP platforms. media-vm's LAN IP is `192.168.1.136`, managed as static netplan by `playbooks/network/network-recovery.yml`. Gaming PC OBS track 1 is the full live mix with Apple Music; track 2 is the clean mix without Apple Music. Twitch uses the FFmpeg Enhanced FLV/RTMP output path available from Ubuntu 26.04's FFmpeg 8.x so it can receive Track 1 for live playback and confirmed clean Track 2 for Twitch VODs; YouTube maps track 2 only with `aresample=async=1:first_pts=0` to give YouTube fresh 48 kHz audio timestamps; local relay VOD recording also maps track 2 only. Ubuntu 24.04's FFmpeg 6.1 FLV muxer rejects multiple audio streams, so do not deploy Twitch multitrack relay there. media-vm keeps Secure Boot enabled; keep `nvidia-dkms-580` absent so the Quadro uses Ubuntu's Canonical-signed `linux-modules-nvidia-580-generic` module. The relay intentionally avoids FFmpeg `nobuffer`/`low_delay` flags because the SRT path already has explicit latency and overly aggressive buffering caused audible artifacts in live testing. The same playbook also deploys `stream-relay-vertical.service`, a disabled-by-default Aitum Vertical RTMP ingest on TCP 1936 for a standalone YouTube vertical/Shorts stream. These services use the live-only root-readable `/etc/stream-relay/stream-relay.env` with platform stream keys; never commit stream keys. With the current TCP fanout, a platform worker that disconnects after latching usually needs a full landscape relay restart, not an output-only restart. The landscape relay binds to media-vm's LAN IP and firewall access is through the Proxmox datacenter `streaming-pc` IP set, which includes the gaming PC's LAN IP; Windows also needs a persistent host route for `192.168.1.136/32` through Ethernet because Tailscale advertises `192.168.1.0/24`. Landscape VOD recording discards tiny header-only fragments, salvages stale readable incoming files through `stream-vod-mover`, and alerts only when real files hit the failed queue or stay stuck. The operator-facing Twitch/YouTube/TikTok/Mac OBS/Aitum/SleepyChat runbook is `docs/streaming-runbook.md`; start there before changing or troubleshooting the streaming setup. Hands-off streaming automation has two health layers: `stream-relay-health.timer` on media-vm for local Apprise alerts, and Astra's live OpenClaw heartbeat file `/home/johnny/.openclaw/workspace/HEARTBEAT.md` on the OpenClaw host for external checks. Do not say Astra is wired unless that live heartbeat file contains the stream relay/VOD section and the OpenClaw host can run `ssh dbc@100.66.6.113 '/usr/local/sbin/stream-relay-health --no-alert'` successfully.
+**Stream relay**: `playbooks/media/stream-relay.yml` deploys `stream-relay.service`, which receives OBS SRT on UDP 9000, encodes video once with the Quadro's `h264_nvenc`, copies OBS's incoming AAC audio tracks, and fans the encoded feed out locally over MPEG-TS/TCP to `stream-relay-output@<platform>.service` workers that push configured RTMP platforms. media-vm's LAN IP is `192.168.1.136`, managed as static netplan by `playbooks/network/network-recovery.yml`. Gaming PC OBS track 1 is the full live mix with Apple Music; track 2 is the clean mix without Apple Music. Twitch uses the FFmpeg Enhanced FLV/RTMP output path available from Ubuntu 26.04's FFmpeg 8.x so it can receive Track 1 for live playback and confirmed clean Track 2 for Twitch VODs; YouTube maps track 2 only with `aresample=async=1:first_pts=0` to give YouTube fresh 48 kHz audio timestamps; local relay VOD recording also maps track 2 only. Ubuntu 24.04's FFmpeg 6.1 FLV muxer rejects multiple audio streams, so do not deploy Twitch multitrack relay there. media-vm keeps Secure Boot enabled; keep `nvidia-dkms-580` absent so the Quadro uses Ubuntu's Canonical-signed `linux-modules-nvidia-580-generic` module. The relay intentionally avoids FFmpeg `nobuffer`/`low_delay` flags because the SRT path already has explicit latency and overly aggressive buffering caused audible artifacts in live testing. The same playbook also deploys `stream-relay-vertical.service`, a disabled-by-default Aitum Vertical RTMP ingest on TCP 1936 for a standalone YouTube vertical/Shorts stream. These services use the live-only root-readable `/etc/stream-relay/stream-relay.env` with platform stream keys; never commit stream keys. With the current TCP fanout, a platform worker that disconnects after latching usually needs a full landscape relay restart, not an output-only restart. The landscape relay binds to media-vm's LAN IP and firewall access is through the Proxmox datacenter `streaming-pc` IP set, which includes the gaming PC's LAN IP; Windows also needs a persistent host route for `192.168.1.136/32` through Ethernet because Tailscale advertises `192.168.1.0/24`. Landscape VOD recording discards tiny header-only fragments, salvages stale readable incoming files through `stream-vod-mover`, and alerts only when real files hit the failed queue or stay stuck. The operator-facing Twitch/YouTube/TikTok/Mac OBS/Aitum/SleepyChat runbook is `docs/streaming-runbook.md`; start there before changing or troubleshooting the streaming setup. Hands-off streaming automation has two health layers: `stream-relay-health.timer` on media-vm for local Apprise alerts, and Astra's native `operational-heartbeat` skill for an external typed `host_admin_request` check. Do not say Astra is wired unless `/var/lib/hermes/astra/.hermes/profiles/astra/skills/operational-heartbeat/SKILL.md` contains the stream relay lane and the `media-vm` `stream-relay` health probe succeeds through Astra's current broker.
 
 **Immich**: Photo/video management at `photos.jnalley.me`. ML container capped at `mem_limit: 3g` to prevent OOM-freezing the VM. External library (`/srv/untitled`) is auto-locked by `immich_folder_album_creator` every 6 hours.
 
@@ -867,7 +867,7 @@ Primary media VM (10GB RAM, 4 cores, 200GB disk, Quadro P2200 GPU passthrough). 
 
 **Plex appliance state rollback backups**: Before mutating `/var/lib/plex-appliance/shuffle-state.json`, use `/usr/local/sbin/live-rollback-backup --domain plex-appliance ... --path /var/lib/plex-appliance/shuffle-state.json` on the appliance so the copy lands under the Sanoid-backed `/srv/live-rollbacks/<host>/plex-appliance/` path. Do not use `/tmp` or host-local copies as the durable rollback. On Bedroom Plex, stop both `plex-appliance-hdmi-vt-watcher.service` and `plex-appliance-tv.service` before changing state; stopping only the player is insufficient because the watcher restarts it. Never mark an item `played` unless playback reached normal completion with plausible wall-clock elapsed time; repeated failures or Plex HTTP transport interruptions must keep the item active unless file corruption is independently verified, in which case it belongs in `unplayable`.
 
-**Media stack health**: `media-stack-health.timer` on docker-vm runs every 5 minutes and validates the migrated media automation end to end: docker-vm NFS mounts, visible library directories, Sonarr/Radarr/Prowlarr/Bazarr/SABnzbd/qBittorrent/Byparr/Profilarr containers, local HTTP endpoints, qBittorrent forwarded-port sync, an in-container hardlink test from `/data/downloads/complete` to `/data/Anime`, and recent qBittorrent Sonarr/Radarr import history for definite copied imports. The real import audit is a warning by default because mergerfs branch placement can still copy some imports even when the single parent NFS mount is correct; repeated docker-vm NFS `fileid changed` messages are also warning-only by default because they can occur while Arr imports continue to progress over the TS440 mergerfs export. Treat `WARNINGS:` as something to track and triage, not as proof the migration failed. Fileid warnings should page only when paired with real breakage such as missing mounts, empty library probes, stuck D-state media probes, stopped containers, failed endpoints, or import failures, unless `media_stack_health_nfs_fileid_fail_on_threshold` is deliberately enabled for a temporary investigation. It is managed by `playbooks/media/media-stack-health.yml`. Astra's live OpenClaw heartbeat should check the cached sentinel status from outside the VM with `ssh dbc@100.108.254.100 'sudo -n /usr/local/sbin/media-stack-health --status'`, so heartbeat reads do not start fresh NFS/mergerfs-touching probes. Do not say Astra is wired unless that live heartbeat section exists in `/home/johnny/.openclaw/workspace/HEARTBEAT.md` and the SSH command succeeds from the current OpenClaw host. Operator-facing heartbeat documentation is `docs/openclaw-heartbeats.md`.
+**Media stack health**: `media-stack-health.timer` on docker-vm runs every 5 minutes and validates the migrated media automation end to end: docker-vm NFS mounts, visible library directories, Sonarr/Radarr/Prowlarr/Bazarr/SABnzbd/qBittorrent/Byparr/Profilarr containers, local HTTP endpoints, qBittorrent forwarded-port sync, an in-container hardlink test from `/data/downloads/complete` to `/data/Anime`, and recent qBittorrent Sonarr/Radarr import history for definite copied imports. The real import audit is a warning by default because mergerfs branch placement can still copy some imports even when the single parent NFS mount is correct; repeated docker-vm NFS `fileid changed` messages are also warning-only by default because they can occur while Arr imports continue to progress over the TS440 mergerfs export. Treat `WARNINGS:` as something to track and triage, not as proof the migration failed. Fileid warnings should page only when paired with real breakage such as missing mounts, empty library probes, stuck D-state media probes, stopped containers, failed endpoints, or import failures, unless `media_stack_health_nfs_fileid_fail_on_threshold` is deliberately enabled for a temporary investigation. It is managed by `playbooks/media/media-stack-health.yml`. Astra's native operational heartbeat checks the cached sentinel through `host_admin_request` with host `docker-vm`, action `health`, and probe `media-stack`; it must not start a fresh NFS/mergerfs-touching probe. Do not say Astra is wired unless the live profile-owned heartbeat skill contains that lane and the current typed broker probe succeeds. Operator-facing scheduling and retained heartbeat history are documented in `docs/openclaw-heartbeats.md`.
 
 **Docker log pressure**: Docker hosts get bounded `json-file` logs from `docker_daemon_config` in `inventory/group_vars/docker_hosts/docker.yml`; media-stack containers also declare compose-level logging limits in `templates/docker/docker-media-stack.yml.j2` so recreated containers cannot grow unbounded stdout/stderr logs. SABnzbd's own internal log rotation is separate from Docker's container log. If docker-vm root fills unexpectedly, check `/var/lib/docker/containers/*/*-json.log` and `docker system df` before assuming media or Arr rollback backups are the cause. SABnzbd also has a raised compose `nofile` ulimit because heavy download/unpack bursts previously produced `OSError: [Errno 24] No file descriptors available`.
 
@@ -1193,64 +1193,55 @@ USB drive timeout standard: all USB drives in `group_vars/nas_server/mounts.yml`
 
 FreePBX 17 PBX server (Asterisk 22, Debian 12 Bookworm). Provides a second phone number via VoIP.ms SIP trunk and Yealink SIP-T54W desk phone, with call forwarding to iPhone. Web GUI: `http://100.97.139.95/admin`. LAN IP: `192.168.1.241`, managed in `/etc/network/interfaces` by `playbooks/apps/freepbx.yml` from `templates/freepbx/interfaces.j2`. APT pinned to `bookworm` via `apt_pin_release` to prevent accidental Debian 13 upgrades. FreePBX/Asterisk packages are held (`apt-mark hold`) by the install script — module updates done through the web GUI. Sangoma Smart Firewall enabled with Tailscale CGNAT (`100.64.0.0/10`) trusted. Proxmox firewall rules: SIP (UDP 5060 from LAN + VoIP.ms), RTP (UDP 10000-20000), web GUI (TCP 80/443 Tailscale only), SSH. Config: `host_vars/freepbx-vm/` (vars.yml, packages.yml). Local restic backups: `/etc/asterisk`, `/var/lib/asterisk`, `/var/spool/asterisk`. `playbooks/apps/freepbx.yml` manages Asterisk open-file guardrails, Asterisk logrotate size caps, journald retention, and the static LAN interface config so the small root disk does not fill from PBX log storms or lose DHCP after bridge events.
 
-### OpenClaw Host (jn-t14s-lin)
+### Hermes Agent Host (jn-t14s-lin)
 
-OpenClaw AI agent platform (Node.js gateway daemon). Provides a web UI and Discord channel for interacting with the agent fleet (DBC + Fleet of Stars: main, dubble, vega, antares, rigel) — primarily backed by GPT-5.5 via OpenAI Codex, with OpenRouter and Ollama Cloud fallbacks. It runs on the T14s controller/server, so treat its repo and host access as controller-adjacent rather than as the old isolated VM boundary. The former `openclaw-vm` inventory record is retained only in `retired_hosts`.
+The official stable Hermes Agent runtime is production on the T14s controller.
+Astra, Dubble, and Rigel use separate Linux identities, native profile roots,
+Discord applications, credentials, sessions, cron stores, memory, and Gateway
+units. Treat this as controller-adjacent production infrastructure.
 
-- **Web UI**: `https://openclaw.jnalley.me` (Tailscale only, via Caddy on docker-vm)
-- **Gateway port**: 18789 (token auth, trustedProxies: docker-vm only)
-- **Host**: `jn-t14s-lin` (Kubuntu controller/server)
-- **Node.js**: 24 via NodeSource repo. Do not rely on Ubuntu's `nodejs`
-  package for OpenClaw; Ubuntu can lag behind current OpenClaw npm
-  `engines.node` floors and break native Gateway UI/bot self-updates.
-- **Docker**: Installed for OpenClaw sandbox containers and Qdrant. In `docker_hosts` group — Qdrant is managed by `docker-stacks.yml`.
-- **Gateway service**: Managed by OpenClaw itself via `openclaw gateway install` (user-level systemd unit)
-- **Config**: `~/.openclaw/openclaw.json` and `~/.openclaw/.env` — created manually, backed up by restic (NOT templated by Ansible)
-- **Astra heartbeat**: The active heartbeat prompt is `/home/johnny/.openclaw/workspace/HEARTBEAT.md` on the OpenClaw host. Treat it as live OpenClaw workspace content that Astra may edit; update it directly when changing heartbeat behavior and document the expectation in this repo. Keep the heartbeat continuously enabled, but schedule checks from structured per-check completion timestamps and the catalog cadence. Never launch the full catalog as one batch: only explicitly lightweight checks may overlap, with a maximum concurrency of three; heavy and OpenClaw CLI checks run serially behind the live host-pressure gate. Do not create an OpenClaw cron when the right primitive is the heartbeat file. Heartbeat procedure details, including the 2026-08-10 OOM RCA, stream relay, and Plex appliance verified-corruption checks, live in `docs/openclaw-heartbeats.md`.
-
-**Astra autonomy contract**: For Astra improvements, teach the agent how to think and when to use its tools. Durable changes should usually land in `HEARTBEAT.md`, OpenClaw skills, references, memory, and logs-channel reporting rules so Astra can notice problems, decide whether it can safely fix them, back up first, act on safe reversible cases, and ask Johnny for approval on risky cases. Do not default to creating separate helper scripts or cron-specific doctors unless Astra's own workflow needs that tool for repeated safe execution.
-- **Linting tools**: `ansible-lint`, `yamllint` in venv at `/opt/openclaw-venv/`
-- **PATH safety**: Do not prepend `/opt/openclaw-venv/bin` to the controller login PATH. That venv can shadow system Ansible with newer `ansible-core`; under the Codex sandbox, Ansible 2.21's local RPC manager fails before any host task runs. Keep system `/usr/bin/ansible` as the default controller Ansible and append the lint venv only as a fallback for lint tools.
-- **Timers**: repo-sync (git pull every 5 min), update-check (daily at 08:00 with Apprise notification)
-- **Playbook**: `playbooks/agents/openclaw.yml` (opt-in via `openclaw_enabled` variable)
-- **Config**: `host_vars/jn-t14s-lin/openclaw.yml`, `packages.yml`, `backup.yml`, and `docker.yml`
-- **Firewall**: Caddy proxies OpenClaw through the T14s Tailscale address; avoid opening LAN access unless explicitly required.
-- **Modernization/security source of truth**: `docs/openclaw-runtime-security.md`
-  owns the dedicated identities, immutable runtime, typed workspace/session
-  handoff, behavior and hostile-prompt rehearsals, and final single-Gateway
-  cutover gates. Do not infer production cutover from an active loopback canary.
-- **Hermes replacement source of truth**: `docs/hermes-replacement.md` owns the
-  target parity matrix, transcript-derived behavior tests, same-host isolated
-  Hermes identities, migration gates, single-path cutover, attended immediate
-  rollback, and retained offline OpenClaw reference files. Hermes replaces
-  OpenClaw on `jn-t14s-lin`; do not require a second VM or preserve a running
-  OpenClaw service after acceptance. OpenClaw remains production until those
-  gates pass; do not run Hermes migration cleanup, expose raw OpenClaw files to
-  Hermes, run both gateways concurrently, or connect a shadow profile to a
-  production bot token.
-
-**OpenClaw troubleshooting rule**: Do not assume an OpenClaw symptom is an upstream software bug or regression unless there is an exact documented GitHub issue or release note matching the observed failure. Default to diagnosing local configuration, plugin state, runtime health, gateway load, memory/LCM/mem0 state, and update drift first. Avoid update-fragile local plugin patches unless the user explicitly approves a temporary workaround.
-
-**Mem0 Memory Plugin** (`@mem0/openclaw-mem0`): Adds automatic fact extraction (auto-capture) and context injection (auto-recall) to DBC sessions. Runs alongside the existing file-based memory system (MEMORY.md, daily notes, Gemini hybrid search).
-
-- **Plugin**: Installed via `openclaw plugins install`, embeds `mem0ai/oss` SDK in-process (no separate server)
-- **Qdrant**: Vector database at `/opt/qdrant/` (Docker, localhost:6333/6334 only). Stores memory embeddings.
-- **Embedder**: Gemini (`gemini-embedding-001`) via `GEMINI_API_KEY`
-- **LLM (fact extraction)**: Configured through mem0 OSS settings. Current live config uses the OpenAI-compatible LLM provider.
-- **Plugin updates**: `openclaw plugins update --all` (DBC can schedule via OpenClaw cron)
-- **Tools**: `memory_search`, `memory_store`, `memory_get`, `memory_list`, `memory_forget`
-
-**dbc operational access** (deployed by `user-separation.yml`, Phase 1d):
-
-The `dbc` user (OpenClaw agent) has least-privilege operational access on managed hosts via Tailscale SSH. Not in the docker group — stack changes go through root-owned helper scripts with sudoers entries.
-
-| Host | Writable Files | Apply Command |
-|------|---------------|---------------|
-| jn-t14s-lin | `~/cc-ansible` (rwx), `~/.claude` (rwx) | `sudo /usr/local/bin/ansible-dryrun` (dry-run only) |
-| media-vm | `/opt/media-stack/docker-compose.yml`, `.env` | `sudo /usr/local/sbin/dbc-media-stack-apply` |
-| docker-vm | `/opt/caddy/Caddyfile` for emergency live fixes only; backport to `templates/docker/Caddyfile.j2` | `sudo /usr/local/sbin/dbc-caddy-apply` |
-
-Helper scripts validate config before applying (compose config check, Caddy validate+reload). File access is via POSIX ACLs (`setfacl`), not group membership. All hosts also have read-only sudo for `systemctl status`, `journalctl`, `zpool status`, `zfs list`, `findmnt`.
+- **Shared runtime**: `/usr/local/lib/hermes-agent`, exposed through
+  `/usr/local/bin/hermes`.
+- **Native profiles**:
+  `/var/lib/hermes/astra/.hermes/profiles/astra`,
+  `/var/lib/hermes/dubble/.hermes/profiles/dubble`, and
+  `/var/lib/hermes/rigel/.hermes/profiles/rigel`.
+- **Gateways**: `hermes-gateway-astra.service`,
+  `hermes-gateway-dubble.service`, and `hermes-gateway-rigel.service`.
+- **Native ownership**: each established profile owns its live configuration,
+  memory, skills, sessions, and cron state. Ansible owns only the rebuildable
+  platform, least-privilege broker, secret-placement, and backup boundaries.
+- **Astra heartbeat**: the active procedure is the profile-owned
+  `skills/operational-heartbeat/SKILL.md`; schedule state lives at
+  `state/heartbeat/schedule.json`. The native `astra-operational-heartbeat` cron
+  invokes it every 30 minutes. Astra may evolve the procedure through its
+  reviewed native workflow; do not overwrite it from repository migration
+  copies. Current scheduling guidance and retained source history live in
+  `docs/openclaw-heartbeats.md`.
+- **Memory**: LCM and Mem0 are supported native Hermes plugins with
+  profile-isolated state. Qdrant remains loopback-only. Provider selection and
+  plugin activation belong to each native profile, not inventory duplicates.
+- **Operational authority**: Astra uses typed least-privilege brokers for
+  current host, Docker, Arr, Discord, and fleet-administration work. It has no
+  general root or Docker-group membership. Rigel owns ordinary academic and C++
+  work in its own writable workspace. Dubble has no terminal or host authority
+  and defers permitted Plex/Arr requests to Astra.
+- **Updates**: use Hermes's unmodified native stable updater. The root wrapper
+  may snapshot, invoke, validate, and roll back that exact operation; it must
+  not patch or fork upstream source. Do not activate updates or restart
+  Gateways while an explicit owner hold is active.
+- **Backups**: native profile backups provide short-horizon rollback; encrypted
+  Restic coverage on `nas-zfs` provides node-loss recovery. Ansible rebuilds the
+  empty platform before mutable Hermes state is restored.
+- **Retired OpenClaw state**: OpenClaw services remain stopped and disabled.
+  `/home/johnny/.openclaw` is preserved only as source evidence and disaster
+  recovery input. Astra may receive an independently audited redacted read-only
+  view, but native Hermes startup and operation must not depend on that view or
+  execute anything from the retired tree.
+- **Source of truth**: `docs/hermes-replacement.md` owns current architecture,
+  parity, security, recovery, and remaining acceptance. OpenClaw playbooks,
+  contracts, and `docs/openclaw-runtime-security.md` are retained migration and
+  source-system evidence, not current production instructions.
 
 ### homebridge-lxc (CT 102 on ts440)
 

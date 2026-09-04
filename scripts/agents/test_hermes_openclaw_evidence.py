@@ -370,7 +370,13 @@ class OpenClawEvidenceTests(unittest.TestCase):
         rollback = text[text.index("rescue:") :]
         self.assertEqual(
             rollback.count(
-                "when: hermes_openclaw_evidence_gateway_was_active | bool"
+                "- hermes_openclaw_evidence_gateway_was_active | bool"
+            ),
+            2,
+        )
+        self.assertEqual(
+            rollback.count(
+                "- hermes_openclaw_evidence_gateway_restart_required | bool"
             ),
             2,
         )
@@ -452,12 +458,21 @@ class OpenClawEvidenceTests(unittest.TestCase):
         dropin = (
             ROOT / "templates/hermes/hermes-gateway-openclaw-evidence.conf.j2"
         ).read_text(encoding="utf-8")
-        self.assertIn("Requires={{ hermes_openclaw_evidence_service }}", dropin)
-        self.assertIn("BindReadOnlyPaths=", dropin)
-        self.assertIn("/workspace/AGENTS.md", dropin)
-        self.assertIn("/workspace/references", dropin)
-        self.assertIn("hermes_bootstrap_parity_validator_live", dropin)
-        self.assertIn("--runtime", dropin)
+        self.assertIn("Wants={{ hermes_openclaw_evidence_service }}", dropin)
+        self.assertNotIn("Requires=", dropin)
+        self.assertIn("BindReadOnlyPaths=-", dropin)
+        self.assertNotIn("ExecStartPre=", dropin)
+        self.assertNotIn("hermes_bootstrap_parity_validator_live", dropin)
+
+        restart_decision = playbook[
+            playbook.index("Decide whether Astra requires one namespace restart") :
+            playbook.index("Decide whether the evidence audit timer requires rescheduling")
+        ]
+        self.assertIn("hermes_openclaw_evidence_gateway_dropin", restart_decision)
+        self.assertNotIn(
+            "hermes_openclaw_evidence_projection_restart_required",
+            restart_decision,
+        )
 
         audit = (
             ROOT / "templates/hermes/hermes-openclaw-evidence-audit.service.j2"

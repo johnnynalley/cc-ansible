@@ -33,8 +33,6 @@
       - "{{ hermes_arr_api_service_unit }}"
       - "{{ hermes_arr_api_plugin_managed_root }}"
       - "{{ hermes_arr_api_plugin_runtime_root }}"
-      - /etc/hermes/astra/config.yaml
-      - /etc/hermes/astra/managed-policy.sha256
       - "{{ hermes_arr_api_dropin }}"
 
   tasks:
@@ -450,37 +448,6 @@
                 | map(attribute='service') | sort
                 == hermes_arr_api_services | map(attribute='name') | sort
 
-        - name: Render Astra managed policy with Arr API toolset
-          ansible.builtin.template:
-            src: "{{ playbook_dir }}/../../templates/hermes/hermes-managed-config.yaml.j2"
-            dest: /etc/hermes/astra/config.yaml
-            owner: root
-            group: hermes-astra
-            mode: "0440"
-          vars:
-            hermes_profile: "{{ hermes_arr_api_astra_profile }}"
-          register: hermes_arr_api_managed_policy
-
-        - name: Hash Astra managed policy and environment
-          ansible.builtin.command:
-            argv:
-              - /usr/bin/sha256sum
-              - /etc/hermes/astra/config.yaml
-              - /etc/hermes/astra/.env
-          register: hermes_arr_api_policy_hash
-          changed_when: false
-          no_log: true
-
-        - name: Publish Astra managed policy checksum
-          ansible.builtin.copy:
-            content: "{{ hermes_arr_api_policy_hash.stdout }}\n"
-            dest: /etc/hermes/astra/managed-policy.sha256
-            owner: root
-            group: hermes-astra
-            mode: "0440"
-          register: hermes_arr_api_policy_checksum
-          no_log: true
-
         - name: Reload systemd after Astra Arr API dependency promotion
           ansible.builtin.systemd_service:
             daemon_reload: true
@@ -513,7 +480,7 @@
               - --runtime-root
               - "{{ hermes_arr_api_plugin_runtime_root }}"
               - --config
-              - /etc/hermes/astra/config.yaml
+              - "{{ hermes_arr_api_astra_profile.home }}/config.yaml"
               - --socket
               - "{{ hermes_arr_api_socket }}"
               - --socket-group
@@ -524,9 +491,7 @@
           ansible.builtin.set_fact:
             hermes_arr_api_restart_required: >-
               {{
-                hermes_arr_api_managed_policy.changed
-                or hermes_arr_api_dropin_copy.changed
-                or hermes_arr_api_policy_checksum.changed
+                hermes_arr_api_dropin_copy.changed
                 or hermes_arr_api_plugin_copies.results
                    | selectattr('changed') | list | length > 0
               }}

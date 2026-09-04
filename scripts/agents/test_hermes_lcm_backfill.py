@@ -17,22 +17,25 @@ class HermesLcmBackfillTests(unittest.TestCase):
         self.assertIn("hermes_lcm_backfill_approved | bool", PLAYBOOK)
         self.assertIn("enable-native-hermes-lcm-background-backfill", VARS)
 
-    def test_backfill_is_bounded_and_local_only(self) -> None:
-        self.assertIn("hermes_lcm_native_backfill_batch: 16", VARS)
+    def test_backfill_is_bounded_and_uses_profile_owned_native_config(self) -> None:
+        self.assertIn("hermes_lcm_backfill_batch: 16", VARS)
         self.assertIn("hermes_lcm_backfill_passes_per_run: 8", VARS)
         self.assertIn("hermes_lcm_backfill_uncertain_retry_batch: 1", VARS)
         self.assertIn("hermes_lcm_backfill_uncertain_retry_max_passes: 128", VARS)
-        self.assertIn(
-            "hermes_lcm_embedding_provider in ['ollama', 'fastembed']",
-            PLAYBOOK,
-        )
         self.assertIn("backfill-bounded", SERVICE)
-        self.assertIn("LCM_EMBEDDING_PROVIDER={{ hermes_lcm_embedding_provider }}", SERVICE)
-        self.assertIn("LCM_OLLAMA_BASE_URL={{ hermes_lcm_ollama_base_url }}", SERVICE)
         self.assertIn(
-            "LCM_EMBEDDING_MAX_BATCH_ITEMS={{ hermes_lcm_embedding_max_batch_items }}",
+            "EnvironmentFile={{ hermes_lcm_backfill_profile.home }}/lcm.env",
             SERVICE,
         )
+        self.assertIn(
+            "ConditionPathExists={{ hermes_lcm_backfill_profile.home }}/lcm.env",
+            SERVICE,
+        )
+        self.assertNotIn("LCM_EMBEDDING_PROVIDER=", SERVICE)
+        self.assertNotIn("LCM_EMBEDDING_MODEL=", SERVICE)
+        self.assertNotIn("LCM_OLLAMA_BASE_URL=", SERVICE)
+        self.assertNotIn("hermes_lcm_embedding_provider", VARS)
+        self.assertIn("Deploy bounded LCM backfill runner", PLAYBOOK)
         self.assertNotIn("OPENAI_API_KEY", SERVICE)
         self.assertNotIn("GEMINI_API_KEY", SERVICE)
         self.assertNotIn("OPENROUTER_API_KEY", SERVICE)
@@ -52,7 +55,7 @@ class HermesLcmBackfillTests(unittest.TestCase):
         )
         self.assertNotIn("--retry-uncertain", SERVICE[normal:])
         self.assertIn(
-            "--limit {{ hermes_lcm_native_backfill_batch }}",
+            "--limit {{ hermes_lcm_backfill_batch }}",
             SERVICE[normal:],
         )
         self.assertIn("--approved --confirmation", SERVICE[preflight:normal])

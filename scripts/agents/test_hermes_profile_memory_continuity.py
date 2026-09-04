@@ -19,7 +19,7 @@ PARSED_PLAYBOOK = yaml.safe_load(PLAYBOOK)
 
 
 class ProfileMemoryContinuityTests(unittest.TestCase):
-    def test_rigel_and_dubble_have_isolated_stable_native_memory(self):
+    def test_rigel_and_dubble_memory_activation_is_not_inventory_owned(self):
         rigel = next(
             profile
             for profile in VARS["hermes_shadow_profiles"]
@@ -30,14 +30,15 @@ class ProfileMemoryContinuityTests(unittest.TestCase):
             for profile in VARS["hermes_shadow_profiles"]
             if profile["name"] == "dubble"
         )
-        self.assertEqual(rigel["context_engine"], "lcm")
-        self.assertEqual(rigel["memory_provider"], "mem0")
-        self.assertFalse(rigel["memory_write_approval"])
-        self.assertIn("hermes-lcm", rigel["plugins_enabled"])
-        self.assertEqual(dubble["context_engine"], "lcm")
-        self.assertEqual(dubble["memory_provider"], "mem0")
-        self.assertFalse(dubble["memory_write_approval"])
-        self.assertIn("hermes-lcm", dubble["plugins_enabled"])
+        for profile in (rigel, dubble):
+            for key in (
+                "context_engine",
+                "memory_provider",
+                "memory_write_approval",
+                "plugins_enabled",
+                "toolsets",
+            ):
+                self.assertNotIn(key, profile)
 
     def test_exact_source_and_profile_isolation_are_required(self):
         contract = VARS["hermes_profile_memory_continuity_profiles"]["rigel"]
@@ -66,7 +67,6 @@ class ProfileMemoryContinuityTests(unittest.TestCase):
     def test_transaction_is_dry_run_first_and_rollback_protected(self):
         for required in (
             "Reject profile migration while OpenClaw can write source sessions",
-            "Verify current profile managed-policy integrity",
             "Derive public-only profile LCM selection from retained route evidence",
             "Require exact public-only profile LCM selection boundary",
             "Dry-run canonical profile LCM import",
@@ -76,8 +76,6 @@ class ProfileMemoryContinuityTests(unittest.TestCase):
             "Require hash-equal profile-memory rollback archive",
             "Apply canonical profile LCM import",
             "Apply isolated profile Mem0 v3 migration",
-            "Hash isolated profile managed policy and environment",
-            "Publish isolated profile managed-policy checksum",
             "Stop active profile Gateway through native planned lifecycle",
             "Validate profile Mem0 recall without exposing memory text",
             "Validate profile LCM database inventory",
@@ -101,7 +99,13 @@ class ProfileMemoryContinuityTests(unittest.TestCase):
         )
         self.assertIn("rejectattr('item', 'equalto'", PLAYBOOK)
         self.assertIn("when: not (item.stat.exists | default(false))", PLAYBOOK)
-        self.assertIn("managed-policy.sha256", PLAYBOOK)
+        for forbidden in (
+            "managed-policy.sha256",
+            "hermes-managed-config.yaml.j2",
+            "/etc/hermes/rigel/config.yaml",
+            "/etc/hermes/dubble/config.yaml",
+        ):
+            self.assertNotIn(forbidden, PLAYBOOK)
         self.assertIn(
             ").tables.messages >= hermes_profile_memory_continuity_profile_contract.expected_eligible",
             PLAYBOOK,
@@ -121,15 +125,9 @@ class ProfileMemoryContinuityTests(unittest.TestCase):
         self.assertIn("hermes_profile_mem0_smoke_live", PLAYBOOK)
         self.assertIn("hermes_profile_memory_continuity_environment_file", PLAYBOOK)
 
-    def test_memory_mounts_are_capability_driven(self):
-        self.assertIn(
-            "hermes_profile.memory_provider | default('') == 'mem0'",
-            HARDENING,
-        )
-        self.assertIn(
-            "hermes_profile.context_engine | default('') == 'lcm'",
-            HARDENING,
-        )
+    def test_memory_paths_are_available_without_owning_native_activation(self):
+        self.assertNotIn("hermes_profile.memory_provider", HARDENING)
+        self.assertNotIn("hermes_profile.context_engine", HARDENING)
         self.assertIn("hermes_profile.home }}/lcm.db", HARDENING)
         self.assertIn("hermes_profile.home }}/mem0/fastembed-cache", HARDENING)
 

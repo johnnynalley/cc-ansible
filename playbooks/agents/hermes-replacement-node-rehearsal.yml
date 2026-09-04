@@ -155,9 +155,9 @@
       loop:
         - /usr/local/bin/hermes
         - /usr/local/lib/hermes-agent
-        - /etc/hermes/astra/config.yaml
-        - /etc/hermes/dubble/config.yaml
-        - /etc/hermes/rigel/config.yaml
+        - /var/lib/hermes/astra/.hermes/profiles/astra/config.yaml
+        - /var/lib/hermes/dubble/.hermes/profiles/dubble/config.yaml
+        - /var/lib/hermes/rigel/.hermes/profiles/rigel/config.yaml
         - /etc/systemd/system/hermes-gateway-astra.service
         - /etc/systemd/system/hermes-gateway-dubble.service
         - /etc/systemd/system/hermes-gateway-rigel.service

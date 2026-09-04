@@ -259,6 +259,17 @@ class HermesLcmNativeMaintenanceTests(unittest.TestCase):
         self.assertEqual(report["remaining"], "5")
         self.assertNotIn("failed_detail", report)
 
+    def test_live_corpus_growth_does_not_mask_embedding_progress(self) -> None:
+        self.assertFalse(
+            self.module.backfill_progress_stalled(embedded=16, pending=35644)
+        )
+        self.assertTrue(
+            self.module.backfill_progress_stalled(embedded=0, pending=35644)
+        )
+        self.assertFalse(
+            self.module.backfill_progress_stalled(embedded=0, pending=0)
+        )
+
     def test_chunk_metadata_mismatch_inventory_drops_content_and_ids(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             database = Path(tmp) / "lcm.db"

@@ -18,7 +18,6 @@ ROOT = Path(__file__).parents[2]
 CONTRACT = ROOT / "files" / "hermes" / "profile-skills-contract.json"
 MIGRATION_POLICY = ROOT / "files" / "openclaw" / "workspace-migration-policy.json"
 PLAYBOOK = ROOT / "playbooks" / "agents" / "hermes-profile-skills.yml"
-TEMPLATE = ROOT / "templates" / "hermes" / "hermes-managed-config.yaml.j2"
 VALIDATOR = ROOT / "scripts" / "agents" / "hermes-profile-skills-validate.py"
 VARS = ROOT / "inventory" / "group_vars" / "hermes_hosts" / "vars.yml"
 SPEC = importlib.util.spec_from_file_location("hermes_profile_skills", VALIDATOR)
@@ -129,14 +128,8 @@ class HermesProfileSkillsTests(unittest.TestCase):
                 profile["home"],
                 f"/var/lib/hermes/{profile_name}/.hermes/profiles/{profile_name}",
             )
-            self.assertEqual(
-                profile["managedRoot"], f"/etc/hermes/{profile_name}/skills"
-            )
-            self.assertEqual(
-                profile["runtimeRoot"],
-                f"/var/lib/hermes/{profile_name}/.hermes/profiles/"
-                f"{profile_name}/skills/managed",
-            )
+            self.assertNotIn("managedRoot", profile)
+            self.assertNotIn("runtimeRoot", profile)
             self.assertEqual(
                 profile["nativeRoot"],
                 f"/var/lib/hermes/{profile_name}/.hermes/profiles/"
@@ -147,8 +140,8 @@ class HermesProfileSkillsTests(unittest.TestCase):
         self.assertEqual(len(all_sources), 39)
         self.assertEqual(len(set(all_sources)), 37)
         playbook = PLAYBOOK.read_text(encoding="utf-8")
-        self.assertIn("hermes_profile_skills_inventory | length == 39", playbook)
-        self.assertIn("hermes_profile_skill_support_inventory | length == 13", playbook)
+        self.assertIn("hermes_native_skill_inventory | length == 39", playbook)
+        self.assertIn("hermes_native_skill_support_inventory | length == 13", playbook)
         self.assertIn("profiles.astra.skills | length == 35", playbook)
 
     def test_compute_corner_skill_routes_to_existing_native_boundaries(self) -> None:
@@ -280,28 +273,18 @@ class HermesProfileSkillsTests(unittest.TestCase):
         self.assertEqual(actual_paths, expected_paths)
 
     def test_runtime_uses_native_skill_root_in_gateway_and_cron_contexts(self) -> None:
-        template = TEMPLATE.read_text(encoding="utf-8")
         variables = yaml.safe_load(VARS.read_text(encoding="utf-8"))
-        astra = variables["hermes_shadow_profiles"][0]
-        self.assertIn("guard_agent_created: true", template)
-        self.assertIn("hermes_profile.skills_write_approval", template)
-        self.assertFalse(astra["skills_write_approval"])
-        self.assertEqual(astra["skills_creation_nudge_interval"], 10)
-        self.assertTrue(variables["hermes_native_profile_skills_enabled"])
         self.assertEqual(
             variables["hermes_shared_self_evolution_source"],
             "/var/lib/hermes/astra/.hermes/profiles/astra/skills/self-evolution",
         )
-        self.assertNotIn("external_dirs:", template)
         unit = (
             ROOT / "templates" / "hermes" / "hermes-gateway-hardening.conf.j2"
         ).read_text(encoding="utf-8")
-        self.assertIn("BindReadOnlyPaths=/etc/hermes/", unit)
-        self.assertIn("/skills/managed", unit)
-        self.assertIn("hermes_native_profile_skills_enabled", unit)
+        self.assertNotIn("/skills/managed", unit)
+        self.assertNotIn("managed-policy.sha256", unit)
         self.assertIn("hermes_shared_self_evolution_source", unit)
-        self.assertIn("'native' if hermes_native_profile_skills_enabled", unit)
-        self.assertIn("else 'runtime'", unit)
+        self.assertIn("hermes_profile.name in ['dubble', 'rigel']", unit)
         validator = VALIDATOR.read_text(encoding="utf-8")
         self.assertIn('"native"', validator)
         self.assertIn('"plan-native"', validator)
@@ -311,46 +294,22 @@ class HermesProfileSkillsTests(unittest.TestCase):
             validator,
         )
 
-    def test_playbook_is_disabled_transactional_and_does_not_start_gateway(self) -> None:
+    def test_playbook_is_one_time_native_transaction_without_projection_restore(self) -> None:
         variables = yaml.safe_load(VARS.read_text(encoding="utf-8"))
         playbook = PLAYBOOK.read_text(encoding="utf-8")
         self.assertEqual(variables["hermes_profile_skills_mode"], "disabled")
         self.assertFalse(variables["hermes_profile_skills_approved"])
-        self.assertIn(
-            "['disabled', 'audit', 'restore', 'import-native']", playbook
-        )
-        self.assertIn("or hermes_profile_skills_approved | bool", playbook)
-        self.assertIn("Audit retained profile skills as root", playbook)
-        self.assertIn("Audit retained profile skills as each service identity", playbook)
-        self.assertIn("Audit retained skills through live read-only service bindings", playbook)
-        self.assertIn("Stop after retained profile-skills audit", playbook)
-        self.assertIn("Audit mode never installs or repairs them", playbook)
-        self.assertIn("Require installed Hermes gateways", playbook)
-        self.assertNotIn(
-            "Profile skills may be staged only while all profiles are stopped",
-            playbook,
-        )
+        self.assertIn("['disabled', 'import-native']", playbook)
+        self.assertIn("hermes_profile_skills_approved | bool", playbook)
+        self.assertNotIn("Audit retained profile skills", playbook)
+        self.assertNotIn("Restore managed Hermes profile skills", playbook)
+        self.assertNotIn("managedRoot", playbook)
+        self.assertNotIn("runtimeRoot", playbook)
         self.assertIn("UnitFileState=enabled", playbook)
         self.assertIn("systemctl\n              - cat", playbook)
-        self.assertIn("Back up current managed Hermes profile skills", playbook)
-        self.assertIn("Restore managed Hermes profile skills", playbook)
-        self.assertIn("Validate reviewed source skills with Hermes native parsers", playbook)
-        self.assertIn("Validate each managed skill root as its Hermes service identity", playbook)
-        self.assertIn("Require native read-only skill bindings and startup validation", playbook)
-        self.assertIn("Stop current Hermes profile-skills transaction before mutation", playbook)
-        self.assertIn("Require unchanged production user services", playbook)
-        self.assertIn("openclaw-gateway.service", playbook)
-        self.assertIn("health-receiver.service", playbook)
+        self.assertIn("Validate reviewed skill source and native import boundary", playbook)
         self.assertIn("/usr/sbin/runuser", playbook)
         self.assertIn("owner: root", playbook)
-        self.assertIn("Inspect immediate managed Hermes skill entries", playbook)
-        self.assertIn("Remove unmanaged or malformed Hermes skill entries", playbook)
-        self.assertIn("Stage exact reviewed Hermes profile supporting files", playbook)
-        self.assertIn("Install reviewed Hermes profile supporting files", playbook)
-        self.assertIn("validation.supportingFilesAllowed | bool", playbook)
-        self.assertIn("['.json', '.jsonl', '.md']", playbook)
-        self.assertNotIn("Remove prior exclusive managed Hermes skill roots", playbook)
-        self.assertIn('mode: "0440"', playbook)
         self.assertGreaterEqual(playbook.count("check_mode: false"), 4)
         self.assertNotIn("become_user:", playbook)
         self.assertNotIn("state: started", playbook)
@@ -365,10 +324,7 @@ class HermesProfileSkillsTests(unittest.TestCase):
         self.assertIn("Install native bootstrap parity contract", playbook)
         self.assertIn("Restore pre-import bootstrap parity contract", playbook)
         self.assertIn("Wait for restored Gateways to reach readiness", playbook)
-        self.assertIn(
-            "Validate restored skills through retained service bindings",
-            playbook,
-        )
+        self.assertIn("Validate restored skills through native service namespaces", playbook)
         self.assertIn("hermes_runtime_readers_group", playbook)
         self.assertNotIn("hermes gateway", playbook)
 
@@ -379,17 +335,12 @@ class HermesProfileSkillsTests(unittest.TestCase):
         self.assertIn("scan_skill", script)
         self.assertIn("skill-native-scan-failed", script)
         self.assertIn("skill-hash-drift", script)
-        self.assertIn("skill-root-inventory-drift", script)
         self.assertIn("native-skill-index-missing", script)
         self.assertIn("native-skill-view-failed", script)
         self.assertIn("skill_view(skill[\"name\"]", script)
-        self.assertIn('"discovery"', script)
         self.assertIn('"native"', script)
-        self.assertIn('profile["managedRoot"]', script)
-        self.assertIn(
-            '"nativeRoot" if args.mode == "native" else "runtimeRoot"',
-            script,
-        )
+        self.assertNotIn('profile["managedRoot"]', script)
+        self.assertNotIn('profile["runtimeRoot"]', script)
         self.assertIn("stat.S_ISLNK", script)
         self.assertIn("skill-supporting-file-hash-drift", script)
         self.assertIn("skill-tree-inventory-drift", script)
@@ -401,15 +352,13 @@ class HermesProfileSkillsTests(unittest.TestCase):
         automation = (
             ROOT / "playbooks" / "agents" / "hermes-automation.yml"
         ).read_text(encoding="utf-8")
-        native_preflight = automation.split(
-            "Verify profile-owned native skills before Gateway restart", 1
-        )[1].split("Hash bounded Hermes policy and environment", 1)[0]
-        self.assertIn("--allow-unmounted-shared-readers", native_preflight)
-        runtime_probe = automation.split(
-            "Verify profile skills through native runtime discovery", 1
-        )[1].split("Enable production automation and backup timers", 1)[0]
-        self.assertIn("- --mode\n              - native", runtime_probe)
-        self.assertNotIn("- --mode\n              - runtime", runtime_probe)
+        self.assertNotIn(
+            "Verify profile-owned native skills before Gateway restart",
+            automation,
+        )
+        self.assertNotIn("- --mode\n              - installed", automation)
+        profile_skills = PLAYBOOK.read_text(encoding="utf-8")
+        self.assertIn("'--mode', 'native', '--profile'", profile_skills)
 
     def test_native_validation_allows_safe_agent_owned_content_evolution(self) -> None:
         content = "---\nname: example\ndescription: Evolved safely.\n---\n\nBody.\n"

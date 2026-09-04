@@ -289,7 +289,8 @@ powershell -ExecutionPolicy Bypass -File C:\ProgramData\Johnny\Streaming\check-g
 The stream relay has two health layers:
 
 - `stream-relay-health.timer` runs on `media-vm` and alerts through Apprise/DBC.
-- Astra reads `/home/johnny/.openclaw/workspace/HEARTBEAT.md` on the current OpenClaw host (`jn-t14s-lin` / T14s as of 2026-05-24) and runs the external heartbeat check from there.
+- Astra's native `operational-heartbeat` skill calls the typed `host_admin`
+  `media-vm` / `stream-relay` health probe from its Hermes profile.
 
 Manual check from the Ansible controller:
 
@@ -303,7 +304,11 @@ Expected:
 OK: stream relay health checks passed
 ```
 
-The Astra heartbeat entry lives directly in `/home/johnny/.openclaw/workspace/HEARTBEAT.md` on the OpenClaw host. See `docs/openclaw-heartbeats.md` before changing heartbeat behavior.
+The active Astra heartbeat procedure is
+`/var/lib/hermes/astra/.hermes/profiles/astra/skills/operational-heartbeat/SKILL.md`,
+with schedule state under the same profile's `state/heartbeat/` directory. See
+`docs/openclaw-heartbeats.md` for current Hermes scheduling and retained source
+history before changing heartbeat behavior.
 
 Current VOD recording covers the landscape relay only. It records into `/srv/stream-vod-spool` on `media-vm`, then remuxes and delivers to `Stream VODs` inside the Nextcloud Media folder. The vertical/mobile path is not recorded until it is explicitly wired later.
 

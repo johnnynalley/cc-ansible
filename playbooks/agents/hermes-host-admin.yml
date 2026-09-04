@@ -3,7 +3,7 @@
 # Hosts: hermes_hosts, then every reachable linux_hosts member.
 # Key vars: hermes_host_admin_* and hermes_shadow_profiles.
 # Files: files/hermes/plugins/host-admin.
-# Scripts: scripts/agents/hermes-host-admin-*.py.
+# Scripts: scripts/agents/hermes-host-admin-*.py and the bounded media verifier.
 # Validation: focused tests, syntax-check, list-tasks, check-mode, live smoke.
 
 - name: Prepare the dedicated Astra host administration identity
@@ -36,6 +36,31 @@
       check_mode: false
       changed_when: false
       failed_when: hermes_host_admin_openclaw_state.stdout not in ['inactive', 'failed', 'unknown']
+
+    - name: Inspect prior host administration endpoint manifest
+      ansible.builtin.stat:
+        path: "{{ hermes_host_admin_endpoints }}"
+        follow: false
+      register: hermes_host_admin_prior_endpoints_stat
+
+    - name: Read prior host administration endpoint manifest
+      ansible.builtin.slurp:
+        src: "{{ hermes_host_admin_endpoints }}"
+      register: hermes_host_admin_prior_endpoints_slurp
+      when: hermes_host_admin_prior_endpoints_stat.stat.isreg | default(false)
+      no_log: true
+
+    - name: Preserve prior host administration endpoint records
+      ansible.builtin.set_fact:
+        hermes_host_admin_prior_endpoint_records: >-
+          {{
+            (((hermes_host_admin_prior_endpoints_slurp.content | default(''))
+              | b64decode | from_json).hosts)
+            if not (hermes_host_admin_prior_endpoints_slurp.skipped
+                    | default(false) | bool)
+            else []
+          }}
+      no_log: true
 
     - name: Stop after controller read-only check-mode preflight
       ansible.builtin.meta: end_play
@@ -110,11 +135,16 @@
       /var/backups/hermes-host-admin/{{ hermes_host_admin_target_transaction_id }}
     hermes_host_admin_target_backup_archive: >-
       {{ hermes_host_admin_target_backup_root }}/target-state.tar
-    hermes_host_admin_target_paths:
-      - "{{ hermes_host_admin_target_live }}"
-      - "{{ hermes_host_admin_target_identity }}"
-      - "{{ hermes_host_admin_sudoers }}"
-      - "{{ hermes_host_admin_home }}"
+    hermes_host_admin_target_paths: >-
+      {{
+        [hermes_host_admin_target_live, hermes_host_admin_target_identity,
+         hermes_host_admin_sudoers, hermes_host_admin_home]
+        + ([hermes_host_admin_media_verifier_live,
+            hermes_host_admin_media_verifier_state,
+            hermes_host_admin_arr_reporter_live,
+            hermes_host_admin_transaction_audit_live]
+           if inventory_hostname == 'docker-vm' else [])
+      }}
 
   pre_tasks:
     - name: Probe bounded target SSH reachability
@@ -137,20 +167,47 @@
 
     - name: Discover the target LAN endpoint
       ansible.builtin.setup:
-        filter: ansible_default_ipv4
+        filter: ansible_all_ipv4_addresses
         gather_subset:
           - '!all'
           - '!min'
           - network
       check_mode: false
 
+    - name: Select the single managed-LAN endpoint
+      ansible.builtin.set_fact:
+        hermes_host_admin_target_lan_addresses: >-
+          {{
+            ansible_facts['all_ipv4_addresses'] | default([])
+            | select('match', '^192[.]168[.]1[.][0-9]+$') | unique | list
+          }}
+
+    - name: Retain a still-present prior managed-LAN endpoint
+      ansible.builtin.set_fact:
+        hermes_host_admin_prior_lan_addresses: >-
+          {{
+            hostvars[groups['hermes_hosts'][0]].hermes_host_admin_prior_endpoint_records
+            | selectattr('name', 'equalto', inventory_hostname)
+            | map(attribute='address')
+            | intersect(hermes_host_admin_target_lan_addresses)
+            | list
+          }}
+
+    - name: Resolve one canonical managed-LAN endpoint
+      ansible.builtin.set_fact:
+        hermes_host_admin_selected_lan_addresses: >-
+          {{
+            hermes_host_admin_prior_lan_addresses
+            if hermes_host_admin_prior_lan_addresses | length == 1
+            else (hermes_host_admin_target_lan_addresses
+                  if hermes_host_admin_target_lan_addresses | length == 1
+                  else [])
+          }}
+
     - name: Require the target endpoint on the managed LAN
       ansible.builtin.assert:
         that:
-          - ansible_facts.default_ipv4.address is string
-          - ansible_facts.default_ipv4.address | length > 0
-          - ansible_facts.default_ipv4.network == hermes_host_admin_endpoint_network
-          - ansible_facts.default_ipv4.prefix | string == hermes_host_admin_endpoint_prefix
+          - hermes_host_admin_selected_lan_addresses | length == 1
 
   tasks:
     - name: Require exact target enrollment authorization
@@ -258,6 +315,38 @@
             group: root
             mode: "0555"
 
+        - name: Deploy root-owned embedded-subtitle verifier
+          ansible.builtin.copy:
+            src: "{{ playbook_dir }}/../../{{ hermes_host_admin_media_verifier_source }}"
+            dest: "{{ hermes_host_admin_media_verifier_live }}"
+            owner: root
+            group: root
+            mode: "0555"
+          when: inventory_hostname == 'docker-vm'
+
+        - name: Deploy root-owned read-only Arr report helpers
+          ansible.builtin.copy:
+            src: "{{ playbook_dir }}/../../{{ item.source }}"
+            dest: "{{ item.destination }}"
+            owner: root
+            group: root
+            mode: "0555"
+          loop:
+            - source: "{{ hermes_host_admin_arr_reporter_source }}"
+              destination: "{{ hermes_host_admin_arr_reporter_live }}"
+            - source: "{{ hermes_host_admin_transaction_audit_source }}"
+              destination: "{{ hermes_host_admin_transaction_audit_live }}"
+          when: inventory_hostname == 'docker-vm'
+
+        - name: Create private media-verification transaction state
+          ansible.builtin.file:
+            path: "{{ hermes_host_admin_media_verifier_state }}"
+            state: directory
+            owner: root
+            group: root
+            mode: "0700"
+          when: inventory_hostname == 'docker-vm'
+
         - name: Deploy root-owned canonical host-admin identity
           ansible.builtin.copy:
             content: >-
@@ -311,7 +400,7 @@
         - name: Record successful target enrollment
           ansible.builtin.set_fact:
             hermes_host_admin_enrolled: true
-            hermes_host_admin_endpoint_address: "{{ ansible_facts.default_ipv4.address }}"
+            hermes_host_admin_endpoint_address: "{{ hermes_host_admin_selected_lan_addresses | first }}"
             hermes_host_admin_endpoint_host_key: >-
               {{ (hermes_host_admin_target_host_key.content | b64decode | trim).split()[0:2] | join(' ') }}
           no_log: true
@@ -368,8 +457,6 @@
       - "{{ hermes_host_admin_smoke_live }}"
       - "{{ hermes_host_admin_plugin_managed_root }}"
       - "{{ hermes_host_admin_plugin_runtime_root }}"
-      - /etc/hermes/astra/config.yaml
-      - /etc/hermes/astra/managed-policy.sha256
       - "{{ hermes_host_admin_dropin }}"
 
   tasks:
@@ -525,17 +612,6 @@
             - "{{ hermes_host_admin_plugin_managed_root }}"
             - "{{ hermes_host_admin_plugin_runtime_root }}"
 
-        - name: Render Astra policy with host administration toolset
-          ansible.builtin.template:
-            src: "{{ playbook_dir }}/../../templates/hermes/hermes-managed-config.yaml.j2"
-            dest: /etc/hermes/astra/config.yaml
-            owner: root
-            group: hermes-astra
-            mode: "0440"
-          vars:
-            hermes_profile: "{{ hermes_host_admin_astra_profile }}"
-          register: hermes_host_admin_policy_copy
-
         - name: Deploy Astra drop-in with host administration credential and plugin
           ansible.builtin.template:
             src: "{{ playbook_dir }}/../../templates/hermes/hermes-gateway-hardening.conf.j2"
@@ -546,23 +622,6 @@
           vars:
             hermes_profile: "{{ hermes_host_admin_astra_profile }}"
           register: hermes_host_admin_dropin_copy
-
-        - name: Hash Astra policy and environment
-          ansible.builtin.command:
-            argv: [/usr/bin/sha256sum, /etc/hermes/astra/config.yaml, /etc/hermes/astra/.env]
-          register: hermes_host_admin_policy_hash
-          changed_when: false
-          no_log: true
-
-        - name: Publish Astra managed policy checksum
-          ansible.builtin.copy:
-            content: "{{ hermes_host_admin_policy_hash.stdout }}\n"
-            dest: /etc/hermes/astra/managed-policy.sha256
-            owner: root
-            group: hermes-astra
-            mode: "0440"
-          register: hermes_host_admin_checksum_copy
-          no_log: true
 
         - name: Reload systemd after host administration promotion
           ansible.builtin.systemd_service:
@@ -596,7 +655,7 @@
               - --runtime-root
               - "{{ hermes_host_admin_plugin_runtime_root }}"
               - --config
-              - /etc/hermes/astra/config.yaml
+              - "{{ hermes_host_admin_astra_profile.home }}/config.yaml"
               - --endpoints
               - "{{ hermes_host_admin_endpoints }}"
               - --known-hosts
@@ -609,9 +668,7 @@
               {{
                 hermes_host_admin_endpoints_copy.changed
                 or hermes_host_admin_known_hosts_copy.changed
-                or hermes_host_admin_policy_copy.changed
                 or hermes_host_admin_dropin_copy.changed
-                or hermes_host_admin_checksum_copy.changed
                 or hermes_host_admin_plugin_copies.results | selectattr('changed') | list | length > 0
               }}
 

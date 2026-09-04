@@ -7,38 +7,11 @@ sessions, or transcripts. The only memory payloads allowed here are the
 reviewed Ansible Vault ciphertext seeds declared by
 `profile-memory-contract.json`.
 
-- `patches/queued-event-shutdown-replay.patch` is the reviewed local Hermes
-  source-parity patch. It persists the complete accepted Discord event FIFO,
-  including routing/trust/media metadata, across planned or unexpected Gateway
-  shutdowns and replays it through native session handling. It also makes the
-  document extractor follow the separately enforced non-prerelease stable
-  dependency channel instead of forcing an obsolete exact release, and keeps
-  Mem0's backend open until active local sync work completes rather than
-  closing its client underneath an in-flight request. Native cron deliveries
-  also append content-free platform receipts to the execution ledger, retaining
-  the target, status, platform message ID when available, and timestamp without
-  duplicating report content. `hermes cron runs` exposes those receipts so an
-  execution marked `ok` is no longer treated as delivery proof by itself. The
-  patch also makes the native intent-ack classifier word-aware, preventing
-  complete answers containing `already`/`report` from matching the `read`/`repo`
-  markers while preserving genuine inflected action announcements. Ansible
-  promotes this rebuildable product-runtime patch as one committed maintained
-  branch; Hermes's
-  supported `update_in_place` updater strategy merges stable upstream changes
-  without discarding it.
-- `patches/hermes-lcm-oversized-sentence.patch` is a temporary stable-release
-  hotfix for the upstream chunker path that otherwise emits one unbounded chunk
-  when a message contains a sentence without punctuation. It bounds those rare
-  atomic spans without truncating or reordering retained content and adds an
-  upstream-style regression. Retire the patch when an official production-
-  stable `hermes-lcm` tag includes equivalent coverage; do not carry it across
-  that fix merely because an older local branch exists.
-
-- `shadow-target.json` is the Gate 3 target declaration. It keeps Hermes in a
-  tokenless, delivery-disabled, scheduler-disabled shadow state and records the
-  required identities, paths, sandbox, approval, broker, backup, and rollback
-  boundaries. It also requires a root-managed offline command scanner, disabled
-  runtime lazy installs, blocked private URLs, and fail-closed Tirith behavior.
+- `shadow-target.json` is the retained Gate 3 bootstrap declaration. It keeps
+  the explicit shadow rehearsal tokenless, delivery-disabled, and
+  scheduler-disabled while recording the required identities, paths, sandbox,
+  approval, broker, backup, and rollback boundaries. It is not current native
+  profile configuration or production Gateway startup policy.
   Astra's declared terminal is native local under its dedicated no-login
   account. Rigel receives Hermes's native file and local terminal tools against
   only its isolated writable academic tree, under its separate unprivileged
@@ -79,6 +52,15 @@ reviewed Ansible Vault ciphertext seeds declared by
   tool still requires write approval and rejects all
   secret-bearing mutations, and Astra receives neither the Arr API keys nor a
   general shell or network credential path.
+- `plugins/host-admin/` retains one typed host-administration toolset. Its
+  `docker-vm` media-release actions call the root-side staged Sonarr verifier:
+  read-only search/status/stream verification is immediate, while stage,
+  season expansion, and cleanup use the existing turn-bound approval hook.
+  The plugin cannot accept tracker URLs or payload paths and cannot import or
+  replace library files. Its `arr-queue`, `arr-policy`, `arr-transactions`, and
+  `arr-storage` health probes are fixed read-only reports from `docker-vm`;
+  they do not add generic shell, API, search, deletion, import, or blocklist
+  authority.
 - `openclaw-state-migration-contract.json` maps every current OpenClaw
   state-root category to a curated import, source-preserving LCM conversion,
   disabled rebuild, cutover-only credential re-enrollment, external owner, or
@@ -102,20 +84,15 @@ reviewed Ansible Vault ciphertext seeds declared by
   `profile-memory/*/*.vault` is ciphertext only; decrypted staging is
   root-private under `/run` and removed after every transaction.
 - `profile-skills-contract.json` declares reviewed Hermes-native declarative
-  skill restore baselines for Astra, Dubble, and Rigel. Source, retained
-  projection, one-time import, and rollback content remains hash-exact. After
-  native ownership is active, startup instead requires every baseline skill to
-  remain present, Hermes-discoverable, frontmatter-valid, and clean under the
-  native threat scanner while permitting the owning agent to revise content or
-  add profile-local skills. Rigel receives the complete
+  migration baselines for Astra, Dubble, and Rigel. The source and one-time
+  import evidence remain hash-exact, but they are not a live restore source and
+  normal convergence does not compare them with or publish them over native
+  profile state. Rigel's migration evidence includes the complete
   academic skill plus its 13 hash-pinned protocol/template files. All three
   profiles receive `self-evolution` from the single canonical
   `profile-skills/shared/self-evolution/SKILL.md`; profile-specific duplicate
-  sources are forbidden. The retained exact projection remains an auditable,
-  explicit rollback source while native ownership is migrated. The default-off
-  native ownership gate removes the broad projection only after an attended
-  import; Astra then owns the canonical local `self-evolution` tree and Dubble
-  and Rigel receive only that directory through a read-only service bind.
+  sources are forbidden. Astra owns the canonical local `self-evolution` tree;
+  Dubble and Rigel receive only that directory through a read-only service bind.
   Installed trees remain isolated and profile memory/state is not shared. Skill
   sources include Astra's unified `compute-corner-administration` entry point,
   which routes live discovery and approved changes through the existing typed
@@ -124,10 +101,10 @@ reviewed Ansible Vault ciphertext seeds declared by
   The reviewed skill sources and approved supporting Markdown/JSON contain no
   executable, credential requirement, inline command expansion, or automation
   blueprint. The pinned native frontmatter validator and threat scanner must
-  pass exact hashes before root-owned `/etc/hermes/<profile>/skills` content is
-  restored. The retained tree remains a recovery baseline after ordinary skills
-  move to profile-owned native roots. One canonical shared `self-evolution`
-  tree is writable only by Astra and read-only to Dubble/Rigel. The bootstrap
+  pass the retained source before a one-time migration. Node-loss recovery uses
+  the complete off-host Hermes backup, not `/etc/hermes/<profile>/skills`.
+  One canonical shared `self-evolution` tree is writable only by Astra and
+  read-only to Dubble/Rigel. The bootstrap
   contract treats the native operational heartbeat as seeded mutable, so the
   reviewed recovery content stays pinned without freezing Astra's live
   self-maintained procedure. Self-evolution and heartbeat share one bounded
@@ -161,15 +138,12 @@ reviewed Ansible Vault ciphertext seeds declared by
   hook-only output boundary; it exposes no model tool and leaves ordinary
   delegation unchanged. `star-regressions.json` contains seven sanitized runtime
   promotion cases.
-- `discord-cutover-contract.json` pins the inert shadow and source-delivery
-  controls, requires three distinct Discord consumers for three logical roles, and
-  defines the attended one-consumer-per-identity cutover and rollback order.
-  It contains only private enrollment references, never identity values or
-  tokens.
-  `playbooks/agents/hermes-production-cutover.yml` is the disabled-by-default
-  live transaction that implements that order. It uses Hermes's native cron
-  and send interfaces, never edits `jobs.json` directly, and restores
-  OpenClaw automatically if a promotion assertion fails.
+- `discord-cutover-contract.json` is retained historical migration evidence. It
+  records the reviewed one-consumer-per-identity cutover and rollback order and
+  contains only private enrollment references, never identity values or tokens.
+  The completed executable cutover playbook is retired; Git history and the
+  retained rollback/evidence artifacts preserve that transaction without
+  leaving a stale path that can overwrite current native profile state.
   `discord-regressions.json` contains 12 sanitized promotion cases for route
   isolation, authorization, DM silence, duplicate consumers, replay, hostile
   attachments, restart, rollback, and Rigel idle silence.
@@ -194,7 +168,9 @@ reviewed Ansible Vault ciphertext seeds declared by
   profiles. Each live Hermes-native `AGENTS.md` is the active always-on policy
   and evolves through the owning agent's reviewed native workflow, with local
   rollback and off-host recovery coverage.
-- `scripts/agents/hermes-shadow-target-audit.py` is the fail-closed validator.
+- `scripts/agents/hermes-shadow-target-audit.py` is the fail-closed validator
+  for the explicit retained shadow/bootstrap audit, not a production Gateway
+  dependency.
 - `scripts/agents/hermes-openclaw-migration-audit.py` validates the migration
   contract and inventories top-level source metadata without reading contents.
 - `scripts/agents/hermes-openclaw-dry-run.py` builds a temporary placeholder
@@ -214,8 +190,8 @@ reviewed Ansible Vault ciphertext seeds declared by
   bounded metadata and hashes.
 - `scripts/agents/hermes-profile-skills-validate.py` applies Hermes's pinned
   native frontmatter validator, threat scanner, exact recursive inventory/hash
-  checks for skills and approved support files, and native runtime-index proof
-  to the reviewed per-profile skills.
+  checks to retained migration sources and supports explicit one-time native
+  import verification. It is not a recurring profile-state convergence tool.
 - `scripts/agents/hermes-profile-data-stage.py` plans, copies, and verifies the
   reviewed project/reference inventory without following links, preserving
   executable bits, mounting the source, or importing raw content as prompts.
@@ -228,7 +204,8 @@ reviewed Ansible Vault ciphertext seeds declared by
 - `scripts/agents/hermes-discord-cutover-audit.py` validates source pins,
   distinct profile and Discord identities, inert authority, ordered source
   drain and target activation, rollback, Health continuity, and the complete
-  sanitized promotion corpus.
+  sanitized promotion corpus. It is retained migration evidence and is not a
+  production Gateway readiness gate.
 - `scripts/agents/hermes-automation-contract-audit.py` validates the complete
   31-lane schedule inventory, target owner/mode/output boundaries, current
   Health and Siri dispositions, handoff order, source pins, and optionally a

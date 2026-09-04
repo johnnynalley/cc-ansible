@@ -1,23 +1,22 @@
 ---
-# Purpose: Audit or converge bounded, local-only native LCM historical backfill.
+# Purpose: Audit or install temporary bounded LCM historical-backfill units.
 # Hosts: hermes_hosts.
-# Key vars: hermes_lcm_backfill_*; hermes_lcm_embedding_*.
+# Key vars: hermes_lcm_backfill_*; hermes_lcm_native_maintenance_*.
 # Templates: templates/hermes/hermes-lcm-backfill.*.j2.
 # Validation: ansible-playbook playbooks/agents/hermes-lcm-backfill.yml
 #             --syntax-check.
 
-- name: Converge Astra native LCM background backfill
+- name: Manage temporary Astra LCM historical backfill
   hosts: hermes_hosts
   become: true
   gather_facts: false
   serial: 1
 
   pre_tasks:
-    - name: Validate native LCM backfill operating mode
+    - name: Validate temporary LCM backfill operating mode
       ansible.builtin.assert:
         that:
           - hermes_lcm_backfill_mode in ['audit', 'apply']
-          - hermes_lcm_embedding_provider in ['ollama', 'fastembed']
           - >-
             hermes_lcm_backfill_mode != 'apply'
             or (
@@ -26,9 +25,8 @@
                   == hermes_lcm_backfill_required_confirmation
             )
         fail_msg: >-
-          LCM backfill requires a local embedding provider; mutation also
-          requires apply mode, explicit approval, and the exact confirmation
-          phrase.
+          LCM backfill mutation requires apply mode, explicit approval, and
+          the exact confirmation phrase.
 
   tasks:
     - name: Select the managed Astra profile for LCM backfill
@@ -50,8 +48,8 @@
         - name: runtime selector
           path: "{{ hermes_shadow_runtime_venv }}/bin/python"
           expected_type: runtime_selector
-        - name: maintenance utility
-          path: "{{ hermes_lcm_native_maintenance_live }}"
+        - name: profile-owned native environment
+          path: "{{ hermes_lcm_backfill_profile.home }}/lcm.env"
           expected_type: regular
       register: hermes_lcm_backfill_prerequisites
 
@@ -74,45 +72,20 @@
       loop_control:
         label: "{{ item.item.name }}"
 
-    - name: Build native LCM backfill command environment
-      ansible.builtin.set_fact:
-        hermes_lcm_backfill_command_prefix: >-
-          {{ ['/usr/sbin/runuser', '--user',
-              hermes_lcm_backfill_profile.user, '--', '/usr/bin/env',
-              'HOME=' + hermes_lcm_backfill_profile.account_home,
-              'HERMES_HOME=' + hermes_lcm_backfill_profile.home,
-              'LCM_DATABASE_PATH=' + hermes_lcm_target_database,
-              'LCM_EMBEDDINGS_ENABLED=true',
-              'LCM_EMBEDDING_PROVIDER=' + hermes_lcm_embedding_provider,
-              'LCM_EMBEDDING_MODEL=' + hermes_lcm_embedding_model,
-              'LCM_OLLAMA_BASE_URL=' + hermes_lcm_ollama_base_url,
-              'LCM_EMBEDDING_STORAGE_DTYPE=' +
-                hermes_lcm_embedding_storage_dtype,
-              'LCM_EMBEDDING_STORE_DIM=' +
-                (hermes_lcm_embedding_store_dim | string),
-              'LCM_EMBEDDING_BINARY_PRESCREEN=' +
-                (hermes_lcm_embedding_binary_prescreen
-                 | ternary('true', 'false')),
-              'LCM_EMBED_CONTENT_POLICY=' +
-                hermes_lcm_embedding_content_policy,
-              'LCM_EMBEDDING_BACKFILL_TIMEOUT_S=' +
-                (hermes_lcm_embedding_backfill_timeout_s | string),
-              'LCM_EMBEDDING_BACKFILL_BUDGET_S=0',
-              hermes_shadow_runtime_venv + '/bin/python',
-              hermes_lcm_native_maintenance_live] }}
+    - name: Inspect installed bounded LCM backfill runner
+      ansible.builtin.stat:
+        path: "{{ hermes_lcm_native_maintenance_live }}"
+      register: hermes_lcm_backfill_runner_before
 
-    - name: Preview bounded LCM backfill lanes
-      ansible.builtin.command:
-        argv: >-
-          {{ hermes_lcm_backfill_command_prefix
-             + ['backfill', '--corpus', item.corpus, '--limit',
-                (hermes_lcm_native_backfill_batch | string)] }}
-      loop: "{{ hermes_lcm_backfill_lanes }}"
-      loop_control:
-        label: "{{ item.corpus }}"
-      register: hermes_lcm_backfill_preview
-      changed_when: false
-      check_mode: false
+    - name: Require installed bounded runner for read-only audit
+      ansible.builtin.assert:
+        that:
+          - hermes_lcm_backfill_runner_before.stat.exists
+          - hermes_lcm_backfill_runner_before.stat.isreg | default(false)
+        fail_msg: >-
+          The bounded backfill runner is absent; use explicitly approved apply
+          mode to install the temporary migration units and runner.
+      when: hermes_lcm_backfill_mode == 'audit'
 
     - name: Inspect installed LCM backfill unit files
       ansible.builtin.stat:
@@ -148,12 +121,12 @@
       changed_when: false
       failed_when: false
 
-    - name: Report native LCM backfill audit
+    - name: Report temporary LCM backfill audit
       ansible.builtin.debug:
         msg:
-          previews: >-
-            {{ hermes_lcm_backfill_preview.results
-               | map(attribute='stdout') | list }}
+          profile_environment: >-
+            {{ hermes_lcm_backfill_profile.home }}/lcm.env
+          runner_installed: "{{ hermes_lcm_backfill_runner_before.stat.exists }}"
           unit_files_present: >-
             {{ hermes_lcm_backfill_unit_files.results
                | map(attribute='stat.exists') | list }}
@@ -165,11 +138,31 @@
                | map(attribute='stdout') | list }}
           mutation_authorized: "{{ hermes_lcm_backfill_mode == 'apply' }}"
 
-    - name: Stop after read-only native LCM backfill audit
+    - name: Stop after read-only temporary LCM backfill audit
       ansible.builtin.meta: end_host
       when: hermes_lcm_backfill_mode == 'audit'
 
-    - name: Preview native LCM backfill services
+    - name: Preview bounded LCM backfill runner deployment
+      ansible.builtin.copy:
+        src: >-
+          {{ playbook_dir }}/../../{{ hermes_lcm_native_maintenance_source }}
+        dest: "{{ hermes_lcm_native_maintenance_live }}"
+        owner: root
+        group: root
+        mode: "0755"
+      check_mode: true
+
+    - name: Deploy bounded LCM backfill runner
+      ansible.builtin.copy:
+        src: >-
+          {{ playbook_dir }}/../../{{ hermes_lcm_native_maintenance_source }}
+        dest: "{{ hermes_lcm_native_maintenance_live }}"
+        owner: root
+        group: root
+        mode: "0755"
+      when: not ansible_check_mode
+
+    - name: Preview temporary LCM backfill services
       ansible.builtin.template:
         src: >-
           {{ playbook_dir }}/../../templates/hermes/hermes-lcm-backfill.service.j2
@@ -186,7 +179,7 @@
       check_mode: true
       register: hermes_lcm_backfill_service_preview
 
-    - name: Preview native LCM backfill timers
+    - name: Preview temporary LCM backfill timers
       ansible.builtin.template:
         src: >-
           {{ playbook_dir }}/../../templates/hermes/hermes-lcm-backfill.timer.j2
@@ -206,7 +199,7 @@
       ansible.builtin.meta: end_host
       when: ansible_check_mode
 
-    - name: Converge native LCM backfill services
+    - name: Converge temporary LCM backfill services
       ansible.builtin.template:
         src: >-
           {{ playbook_dir }}/../../templates/hermes/hermes-lcm-backfill.service.j2
@@ -223,7 +216,7 @@
         hermes_lcm_backfill_lane: "{{ item }}"
       register: hermes_lcm_backfill_services
 
-    - name: Converge native LCM backfill timers
+    - name: Converge temporary LCM backfill timers
       ansible.builtin.template:
         src: >-
           {{ playbook_dir }}/../../templates/hermes/hermes-lcm-backfill.timer.j2
@@ -260,7 +253,7 @@
         label: "{{ item.0.corpus }}.{{ item.1 }}"
       changed_when: false
 
-    - name: Enable native LCM backfill timers
+    - name: Enable temporary LCM backfill timers
       ansible.builtin.systemd_service:
         name: "hermes-lcm-{{ item.corpus }}-backfill.timer"
         enabled: true
@@ -269,7 +262,7 @@
       loop_control:
         label: "{{ item.corpus }}"
 
-    - name: Require enabled active native LCM backfill timers
+    - name: Require enabled active temporary LCM backfill timers
       ansible.builtin.command:
         argv:
           - /usr/bin/systemctl

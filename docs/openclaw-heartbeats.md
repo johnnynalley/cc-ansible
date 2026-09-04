@@ -3,14 +3,13 @@
 ## Current Production
 
 Hermes owns production scheduling on `jn-t14s-lin`. OpenClaw's Gateway and
-scheduler are stopped and disabled. Astra has seven native jobs:
-
-- Rigel academic evaluation every 30 minutes, continuously;
-- STW and Warframe deterministic watches every minute;
-- the HDD deal review every hour;
-- Daily Summary at 07:08 America/Chicago;
-- Fortnite progress at 06:50 America/Chicago; and
-- weekly social-seed review Sunday at 09:00 America/Chicago.
+scheduler are stopped and disabled. The reviewed native fleet has 19 jobs: 17
+owned by Astra, one by Dubble, and one by Rigel. Astra's jobs include the
+30-minute operational heartbeat, self-evolution maintenance and daily
+backstop, bounded deterministic watches, Daily Summary, Fortnite progress,
+media/report review, and the weekly social-seed review. Rigel's academic
+evaluation remains continuously scheduled; Dubble retains its scoped support
+follow-up.
 
 The source inventory contained 26 current OpenClaw cron rows, three logical
 heartbeats, and two historical completed one-shots. All 31 lanes have an
@@ -22,13 +21,19 @@ calendar synchronization, profile backups, native updates, and service health.
 
 ## Production Contract
 
-The scheduling source of truth is the credential-free template
-`templates/hermes/astra-production-jobs.json.j2`, rendered with private route
-values into `/etc/hermes/astra/production-jobs.json`. The convergence entrypoint
-is `playbooks/agents/hermes-automation.yml`. It backs up profile and runtime
-state, keeps check mode read-only, excludes active timers from the transaction,
-restores their prior state, reconciles through Hermes's native cron API, and
-rolls back on any failed assertion.
+Each profile's native cron store is the production source of truth. Use
+Hermes's native cron API as that profile identity after a scoped native backup.
+The credential-free job templates and reconciliation file are retained
+migration/disaster-recovery declarations, not continuously enforced schedule
+policy. `playbooks/agents/hermes-automation.yml` normally runs in `preserve`
+mode and must not add, remove, or rewrite native jobs; `seed` and `restore` are
+explicit, separately confirmed recovery actions.
+
+Astra's active heartbeat procedure is profile-owned at
+`/var/lib/hermes/astra/.hermes/profiles/astra/skills/operational-heartbeat/SKILL.md`.
+Its mutable schedule and alert state live under
+`/var/lib/hermes/astra/.hermes/profiles/astra/state/heartbeat/`. Repository
+skill copies are retained import evidence and must not overwrite the live tree.
 
 Rigel is never disabled merely because a semester is complete. Its script-only
 job reads structured canonical course state and an optional pending-calendar
@@ -46,12 +51,14 @@ serializes native jobs to avoid the legacy unbounded heartbeat fan-out.
 
 When changing production scheduling:
 
-1. Update the production job template or the owning systemd collector.
-2. Update the 31-lane reconciliation when ownership or disposition changes.
-3. Extend the relevant `test_hermes_*automation.py` regression.
-4. Run the automation playbook in check mode, then apply it transactionally.
-5. Prove native cron zero drift, expected idle silence, timer health, profile
-   backups, OpenClaw exclusion, and Health receiver continuity.
+1. Back up the affected native profile and inspect current cron state.
+2. Change the job through Hermes's native cron API as the owning profile.
+3. Read back the exact schedule, prompt, toolsets, route, and enabled state.
+4. Prove a natural or explicitly triggered run, expected idle silence, delivery
+   receipt where applicable, timer health, and OpenClaw exclusion.
+5. Update retained reconciliation evidence only when lane ownership or the
+   source-to-target migration disposition changes; do not turn it into normal
+   convergence policy.
 
 ## Retained OpenClaw Historical Reference
 

@@ -20,12 +20,8 @@
       {{ (hermes_production_consumer_profiles
           | selectattr('name', 'equalto', hermes_profile_memory_continuity_profile)
           | list | first) }}
-    hermes_profile_memory_continuity_config: >-
-      /etc/hermes/{{ hermes_profile_memory_continuity_profile }}/config.yaml
     hermes_profile_memory_continuity_dropin: >-
       /etc/systemd/system/{{ hermes_profile_memory_continuity_consumer.unit }}.d/10-managed.conf
-    hermes_profile_memory_continuity_managed_policy: >-
-      /etc/hermes/{{ hermes_profile_memory_continuity_profile }}/managed-policy.sha256
     hermes_profile_memory_continuity_environment_file: >-
       {{ hermes_profile_memory_continuity_consumer.environment_file
          | default('/etc/hermes/' + hermes_profile_memory_continuity_profile + '/.env') }}
@@ -49,6 +45,8 @@
     hermes_profile_memory_continuity_handoff_validator_source_path: >-
       {{ ansible_config_file | dirname }}/{{
         hermes_astra_handoff_validator_source }}
+    hermes_profile_memory_continuity_lcm_maintenance_source_path: >-
+      {{ ansible_config_file | dirname }}/{{ hermes_lcm_native_maintenance_source }}
     hermes_profile_memory_continuity_selection_manifest: >-
       /run/hermes-{{ hermes_profile_memory_continuity_profile }}-public-memory-selection.json
     hermes_profile_memory_continuity_external_importer: >-
@@ -123,12 +121,6 @@
                   == hermes_profile_memory_continuity_profile_contract.required_confirmation
             )
           - hermes_profile_memory_continuity_profile in ['rigel', 'dubble']
-          - hermes_profile_memory_continuity_consumer.context_engine == 'lcm'
-          - hermes_profile_memory_continuity_consumer.memory_provider == 'mem0'
-          - not hermes_profile_memory_continuity_consumer.memory_write_approval
-          - >-
-            'hermes-lcm'
-            in hermes_profile_memory_continuity_consumer.plugins_enabled
           - hermes_lcm_release_track == 'stable'
           - >-
             hermes_profile_memory_continuity_profile_contract.mem0_agent_id
@@ -212,16 +204,6 @@
             | map(attribute='stdout') | select('equalto', 'active') | list
             | length == 0
           - hermes_profile_memory_continuity_openclaw_user.stdout != 'active'
-
-    - name: Verify current profile managed-policy integrity
-      ansible.builtin.command:
-        argv:
-          - /usr/bin/sha256sum
-          - --check
-          - --status
-          - --strict
-          - "{{ hermes_profile_memory_continuity_managed_policy }}"
-      changed_when: false
 
     - name: Derive public-only profile LCM selection from retained route evidence
       ansible.builtin.script:
@@ -395,9 +377,7 @@
         {{ [
              hermes_profile_memory_continuity_profile_contract.target_db,
              hermes_profile_memory_continuity_mem0_config,
-             hermes_profile_memory_continuity_config,
              hermes_profile_memory_continuity_dropin,
-             hermes_profile_memory_continuity_managed_policy,
              hermes_profile_memory_continuity_importer_live,
              hermes_profile_memory_privacy_auditor_live,
              hermes_profile_mem0_smoke_live,
@@ -596,6 +576,10 @@
                  {
                    'source': hermes_profile_memory_continuity_mem0_migrator_source_path,
                    'target': hermes_mem0_migrator_live
+                 },
+                 {
+                   'source': hermes_profile_memory_continuity_lcm_maintenance_source_path,
+                   'target': hermes_lcm_native_maintenance_live
                  }
                ]
                + ([{
@@ -700,38 +684,6 @@
               {{ hermes_profile_memory_continuity_profile_contract.mem0_target_collection }}
           register: hermes_profile_memory_continuity_mem0_config_change
 
-        - name: Render isolated profile managed config
-          ansible.builtin.template:
-            src: >-
-              {{ playbook_dir }}/../../templates/hermes/hermes-managed-config.yaml.j2
-            dest: "{{ hermes_profile_memory_continuity_config }}"
-            owner: root
-            group: "{{ hermes_profile_memory_continuity_consumer.group }}"
-            mode: "0440"
-          vars:
-            hermes_profile: "{{ hermes_profile_memory_continuity_consumer }}"
-          register: hermes_profile_memory_continuity_config_change
-
-        - name: Hash isolated profile managed policy and environment
-          ansible.builtin.command:
-            argv:
-              - /usr/bin/sha256sum
-              - "{{ hermes_profile_memory_continuity_config }}"
-              - "{{ hermes_profile_memory_continuity_environment_file }}"
-          register: hermes_profile_memory_continuity_policy_hash
-          changed_when: false
-          no_log: true
-
-        - name: Publish isolated profile managed-policy checksum
-          ansible.builtin.copy:
-            content: "{{ hermes_profile_memory_continuity_policy_hash.stdout }}\n"
-            dest: "{{ hermes_profile_memory_continuity_managed_policy }}"
-            owner: root
-            group: "{{ hermes_profile_memory_continuity_consumer.group }}"
-            mode: "0440"
-          register: hermes_profile_memory_continuity_policy_change
-          no_log: true
-
         - name: Render isolated profile Gateway hardening
           ansible.builtin.template:
             src: >-
@@ -749,8 +701,6 @@
             hermes_profile_memory_continuity_restart_required: >-
               {{
                 hermes_profile_memory_continuity_mem0_config_change.changed
-                or hermes_profile_memory_continuity_config_change.changed
-                or hermes_profile_memory_continuity_policy_change.changed
                 or hermes_profile_memory_continuity_dropin_change.changed
               }}
 

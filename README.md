@@ -311,15 +311,13 @@ Packages are merged from multiple sources (all applicable variables combined):
 | `vm-storage-gate.yml` | `proxmox_nodes` | Per-VM start gate: hookscript blocks `qm start`/`pct start` if VM's declared host mountpoints aren't mounted. Per-VM declarations in `host_vars/<vm>/storage.yml` |
 | `openclaw.yml` | `openclaw_hosts` | OpenClaw AI agent (npm install, gateway service, repo-sync/update-check timers) |
 | `hermes-shadow.yml` | `hermes_hosts` | Boot-disabled Hermes staging with signed offline command scanning and no production delivery |
-| `hermes-production-cutover.yml` | `hermes_hosts` | Disabled-by-default, rollback-capable OpenClaw-to-Hermes production handoff with two Discord consumers, native Rigel scheduling, Health continuity, and native updates |
 | `hermes-production-runtime.yml` | `hermes_hosts` | Disabled-by-default rebuildable Hermes platform convergence with official messaging dependencies, functional Discord readiness, sequential restarts, rollback, and Health/OpenClaw gates; profile-authored native guidance is not deployed |
-| `hermes-native-gateway-migration.yml` | `hermes_hosts` | Exact-approval migration from handwritten Gateway units and flat profile state to Hermes-native named-profile system units, with copy-first rollback |
 | `hermes-memory-continuity.yml` | `hermes_hosts` | Exact-approval, source-preserving conversion of OpenClaw LCM and approved Astra Mem0 scopes into native Hermes LCM/Mem0 stores, with dry runs, backups, exact reconciliation, and rollback |
 | `hermes-automation.yml` | `hermes_hosts` | Disabled-by-default transactional convergence of seven native jobs, retained collectors, calendar/feed timers, profile backups, and full legacy schedule reconciliation |
 | `hermes-docker-inventory.yml` | `hermes_hosts` | Approval-gated promotion of Astra's fixed Docker inventory/update tools, native per-turn update approval hook, credentials, validation, and rollback |
 | `hermes-openclaw-dry-run.yml` | `hermes_hosts` | Operator-approved, shape-only official importer inventory with no source content, activation, or service-state change |
 | `hermes-profile-memory.yml` | `hermes_hosts` | Disabled-by-default, transactional native memory seeding for Astra and Rigel; Dubble remains empty and all Gateways remain stopped |
-| `hermes-profile-skills.yml` | `hermes_hosts` | Disabled-by-default, transactional staging of seven native skill deployments with exact hashes, root-owned per-profile sources, and read-only runtime discovery proof |
+| `hermes-profile-skills.yml` | `hermes_hosts` | Disabled-by-default one-time import of the reviewed migration baseline into profile-owned native skill roots; not used for normal convergence or disaster recovery |
 | `hermes-profile-data.yml` | `hermes_hosts` | Disabled-by-default, copy-only staging of reviewed project data and read-only operator references into isolated Hermes profile roots; memory, credentials, transforms, and activation remain excluded |
 | `hermes-profile-transforms.yml` | `hermes_hosts` | Disabled-by-default, transactional schema normalization of six reviewed legacy state sources into isolated Hermes writable/read-only roots; raw source and activation remain excluded |
 | `hermes-health-receiver.yml` | `hermes_hosts` | Hermes-native isolated Health receiver and aggregate-only report publisher (disabled by default) |
@@ -1090,10 +1088,10 @@ created.
   `playbooks/agents/hermes-production-runtime.yml` is disabled by default,
   backs up live units, requires OpenClaw offline, uses Hermes's native Gateway
   lifecycle, and preserves Health
-- **Native service ownership**:
-  `playbooks/agents/hermes-native-gateway-migration.yml` copy-migrates profile
-  state into native named-profile homes and uses `hermes gateway install
-  --system`; Ansible owns only security/readiness drop-ins around those units
+- **Native service ownership**: the completed one-time migration moved profile
+  state into native named-profile homes and installed the base units with
+  `hermes gateway install --system`. The migration playbook is retired; Ansible
+  owns only rebuildable security/readiness drop-ins around those native units
 - **Native role tools**: Astra uses Hermes's local terminal, file, and code
   toolsets as the dedicated no-login `hermes-astra` account plus typed
   least-privilege administration brokers. Rigel has bounded local file and

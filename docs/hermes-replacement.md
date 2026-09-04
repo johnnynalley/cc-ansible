@@ -355,8 +355,7 @@ Dubble uses approved channel scope for public support plus a private admin-user
 set; it still has no terminal or infrastructure authority. Slash-command
 registration remains off during initial cutover.
 
-The owner-authorized handoff is break-before-make and is implemented by the
-disabled-by-default `playbooks/agents/hermes-production-cutover.yml`:
+The owner-authorized handoff was completed as a break-before-make transaction:
 
 1. Back up OpenClaw and every Hermes profile; prove both schedulers and all
    sessions idle.
@@ -372,15 +371,14 @@ disabled-by-default `playbooks/agents/hermes-production-cutover.yml`:
    prove Astra, Dubble, and Rigel as separate consumers.
 5. Enable only reviewed schedules and prove Rigel's idle tick remains empty.
 
-The playbook also enables Hermes's and Tirith's native update timers, keeps the
-independent Health receiver online, records only content-free root-private
-evidence, and has an automatic rescue block that stops Hermes and restores the
-previous OpenClaw unit state if any post-stop assertion fails. The neutral
-`.gateway-ready` marker replaces the staging-era `.shadow-ready` name.
-The shadow convergence permits one narrow mutable-config schema migration for
-Astra's already-proven native Codex route: schema 34, exactly the provider,
-model, and official Codex base URL fields, to schema 35. Any additional field
-or route drift still requires an offline reviewed migration.
+The completed transaction enabled Hermes's and Tirith's native update timers,
+kept the independent Health receiver online, and retained content-free evidence
+plus rollback artifacts. Its executable playbook is retired so it cannot replay
+the migration or overwrite current agent-owned native configuration. Git history
+is the source for the former implementation. Current platform convergence
+requires an existing valid native config and invokes Hermes's own migration
+surface during native updates; it does not render profile behavior from
+inventory.
 
 History and missed-message backfill remain disabled, so a message sent during
 the maintenance gap is not reconstructed later. This is an explicit short
@@ -390,11 +388,12 @@ quarantine its credential files, prove absence, then restart OpenClaw and prove
 one new response. Neither runtime is cleaned up, and the external Health
 receiver stays running during cutover and rollback.
 
-The machine-readable source is
-`files/hermes/discord-cutover-contract.json`; its validator is
-`scripts/agents/hermes-discord-cutover-audit.py`; private route discovery and
-credential enrollment are performed by
-`scripts/agents/hermes-discord-enroll.py`. Twelve sanitized runtime
+The machine-readable historical source is
+`files/hermes/discord-cutover-contract.json`, and its validator is
+`scripts/agents/hermes-discord-cutover-audit.py`. The one-time private
+OpenClaw-to-Hermes credential enrollment executable has been retired; current
+native profile credentials and routes are protected by the normal backup and
+restore contract rather than rebuilt from OpenClaw. Twelve sanitized runtime
 cases in `files/hermes/discord-regressions.json` block promotion until the
 isolated deployment proves route isolation, unauthorized user/channel and DM
 silence, token-lock behavior, bot-loop prevention, no restart replay, hostile
@@ -413,7 +412,8 @@ Production currently has 19 reviewed native jobs: 17 owned by Astra, one by
 Dubble, and one by Rigel. The original declaration is retained as migration
 and disaster-recovery evidence, but each service-owned `cron/jobs.json` is the
 normal source of truth after the one-time import. Gateway startup validates
-the immutable OpenClaw parity contract and never runs exact cron
+the current native configuration and deployed extension boundaries; it does
+not run the immutable OpenClaw schedule/parity contract or exact cron
 reconciliation. Normal `hermes-automation.yml` convergence uses schedule mode
 `preserve`; it reports content-free drift counts and does not add, remove, or
 rewrite native jobs.
@@ -545,24 +545,17 @@ Initial production policy:
   approval policy; Dubble and Rigel deny cron commands.
 - Explicit Discord allowlists; no allow-all mode.
 - `memory.write_approval: false` and `skills.write_approval: false` for guarded
-  profile-local evolution. Root-managed policy and shared-skill authority remain
-  outside ordinary profile writes.
+  profile-local evolution. Each agent owns its native profile state; Astra alone
+  owns the canonical shared-skill authority.
 - Agent-created skill scanning enabled; third-party skills are not installed
   until inspected and pinned by provenance, not by stale application version.
-- The retained reviewed-skill baseline is declarative, exact-hashed, and
-  root-owned under `/etc/hermes/<profile>/skills`. It remains mounted read-only
-  at `~/.hermes/skills/managed` as a validated rollback source during the
-  ownership transition. `hermes-profile-skills.yml` may audit it without
-  mutation or restore it only with explicit approval; ordinary convergence
-  must not re-project it over agent-authored state. The accepted target moves
-  ordinary skills into each profile-owned native root and keeps one canonical
-  `self-evolution` tree writable only by Astra and read-only to Dubble/Rigel.
-  `hermes_native_profile_skills_enabled` is the default-off unit-layout gate
-  for that handoff. It must be enabled only in the attended import transaction
-  after all 39 installed skill instances and supporting files are backed up,
-  copied into native roots, validated, and covered by off-host rollback. In
-  native mode the broad managed-skill bind disappears; Dubble and Rigel receive
-  only Astra's local `skills/self-evolution` through a read-only bind.
+- The retained reviewed-skill baseline and exact hashes are migration evidence,
+  not a live source of truth. Normal convergence does not mount, restore, or
+  re-project `/etc/hermes/<profile>/skills` over agent-authored state. Ordinary
+  skills live in each profile-owned native root. One canonical `self-evolution`
+  tree is writable only by Astra and is exposed read-only to Dubble and Rigel.
+  Node-loss recovery restores those native trees from the complete off-host
+  Hermes backup instead of reconstructing them from repository copies.
 - No auto-accepted hooks. Any hook is root-reviewed and its consent record is
   audited after edits because Hermes hook consent keys the command path, not
   script content.
@@ -700,19 +693,14 @@ backup, dependency migration, syntax rollback, config migration, and Gateway
 restart remain in upstream Hermes. The bridge does not implement an updater.
 Dubble and Rigel have no update trigger or sudoers entry.
 
-One reviewed reliability correction is maintained as a committed
-`astra-managed-parity` branch rather than an uncommitted source edit. It
-persists the complete accepted inbound event FIFO before Gateway teardown,
-including message, media, routing, profile, and trust fields; restores those
-events through normal adapter/session dispatch; and acknowledges each event
-only after that event's turn and transcript/session writes succeed. Production
-convergence applies the patch in an isolated Git worktree, validates and
-compiles the exact four changed paths, commits before switching the live
-checkout, and takes a full Git bundle first. Hermes's supported
-`updates.parked_branch_strategy: update_in_place` keeps the maintained branch
-checked out and merges `origin/main` into it during native updates. A merge
-conflict aborts the update without dropping the patch, and a source validator
-runs after every successful native update.
+Hermes remains on the clean upstream stable branch. Production convergence
+must not create, promote, merge, or preserve a private Hermes source branch,
+and the native updater must not depend on a local patch applying after each
+release. Reliability requirements such as accepted-event durability must use
+behavior present in the supported stable runtime or a supported extension
+point outside the source and update lifecycle. If neither is sufficient, the
+gap remains explicit until the owner approves the recurring maintenance cost
+of a source modification.
 
 The oneshot runs as `hermes-astra`, not root, and invokes the native CLI entry
 directly so it cannot recurse through the launcher trigger. This lets Hermes use
@@ -731,7 +719,9 @@ It is now enabled in production together with Tirith's native updater. Hermes's 
 default quick snapshot protects critical Astra state before code or dependency
 changes; the retained host migration backup protects the complete profile,
 checkout, and separately managed Dubble and Rigel profiles. Config checks and
-policy hashes remain startup gates, not a replacement update pipeline.
+supported extension validators remain startup gates. Historical migration
+contracts and policy hashes remain explicit audit evidence, not production
+startup dependencies or a replacement update pipeline.
 
 Hermes intentionally excludes the optional `messaging` and `mem0` profiles from
 `all`. Bootstrap therefore synchronizes both official extras from the reviewed
@@ -780,16 +770,13 @@ retain bounded handoff/canonical-source workflows instead of unnecessary
 public egress. DDGS remains a rate-limited search backend and does not provide
 page extraction; a credentialed extraction provider is an optional future
 upgrade, not assumed parity.
-Bundled skills are initially opted out; only reviewed, required skills are
-seeded per role. The currently retained root-owned baseline is bind-mounted at
-`skills/managed` and validated through the same `skill_view` path cron uses.
-That path is a migration/restore baseline, not the mutable ownership target.
-Hermes searches the profile-local native skill root before configured external
-roots, and treats external roots as externally owned for autonomous lifecycle
-maintenance. The ownership migration therefore seeds ordinary skills into the
-profile-local root and uses a separate Astra-owned shared path for
-`self-evolution`; it must remove duplicate-name ambiguity before retiring the
-retained bind.
+Bundled skills are initially opted out; only reviewed, required skills were
+seeded per role during migration. The former root-owned `skills/managed`
+projection and its restore path are retired. Hermes now reads ordinary skills
+from each profile-owned native root and reads `self-evolution` from the single
+Astra-owned shared path, mounted read-only for Dubble and Rigel. The retained
+repository baseline and hashes are migration evidence only; complete native
+state is restored from the off-host Hermes backup.
 
 Hermes v0.20.0 otherwise starts a background Tirith installer when the scanner
 is absent. The managed deployment disables that lazy path and authenticates the
@@ -871,23 +858,21 @@ Root-owned managed scope enforces at least:
 - a write-safe root limited to the role's export/work area; and
 - only the minimum role-specific toolsets.
 
-Hermes's native managed-scope loader is deliberately fail-open on parse errors,
-so filesystem ownership alone is not the startup gate. Each profile unit first
-verifies a root-owned SHA-256 manifest covering its managed `config.yaml` and
-`.env`; any edit, truncation, or unapproved credential/policy change therefore
-blocks startup before Hermes can ignore the managed layer. Both mutable and
-managed config carry the release's reviewed schema version, and an older
-non-empty mutable config requires an attended offline migration.
+Each profile's native `config.yaml`, memory, schedules, and ordinary skills are
+agent-owned mutable state. Startup runs Hermes's native config validation but
+does not compare that state with an inventory-rendered copy or repository hash.
+Root-owned service environments retain only secrets and platform authority that
+the profile must not be able to rewrite. Native revision history, scoped local
+rollback, and encrypted off-host backup protect mutable profile state.
 
-Hooks and plugins default to empty. Astra alone enables the reviewed
-`star-dispatch-privacy` hook plugin. Root owns identical managed and runtime
-trees; startup rejects inventory, ownership, mode, hash, configured-plugin,
-hook-set, or tool-registration drift before the Gateway process runs. The
-service bind-mounts the managed tree read-only over the runtime tree. Any other
-hook or plugin still requires source review, provenance, a failure-mode test, a
-rollback artifact, and explicit activation. Because Hermes hook consent keys
-the command string rather than script content, an unchanged path with changed
-bytes is untrusted until re-audited.
+External plugins and privilege brokers remain root-installed platform assets
+because their code or credentials cross the profile's authority boundary. Their
+source, runtime projection, and registration are validated before Gateway start,
+but normal convergence does not rewrite the profile's plugin choices. The
+canonical shared `self-evolution` skill is Astra-owned and exposed read-only to
+Dubble and Rigel; ordinary profile skills are not repository-pinned or
+bind-mounted from Ansible. New external hooks or plugins still require source
+review, provenance, a failure-mode test, rollback, and explicit activation.
 
 ### Systemd And Network
 
@@ -1292,14 +1277,14 @@ an inconsistent nonempty target is a hard failure.
 The 2026-08-26 local chunk backfill exposed a stable-plugin boundary defect:
 `hermes-lcm` v0.20.0 treated one punctuation-free sentence as one atomic chunk,
 so Qwen rejected retained spans whose real tokenizer expansion exceeded its
-32K context even though LCM's `cl100k` estimate remained below 16K. The reviewed
-temporary patch at
-`files/hermes/patches/hermes-lcm-oversized-sentence.patch` bounds only those
-atomic spans at 600 estimated tokens and 4,096 characters without truncating,
-dropping, or reordering retained text. It is promoted as clean local plugin
-commit `057614f6f550418eba519eec24a5bddfbe8f6e6f` atop official stable v0.20.0;
-all 27 upstream chunking tests pass. Retire that commit and patch when a newer
-production-stable upstream tag includes equivalent behavior.
+32K context even though LCM's `cl100k` estimate remained below 16K. A temporary
+private patch proved a bounded-chunk workaround, but carrying that patch as a
+local plugin branch made every native update dependent on private source
+maintenance. Repository convergence no longer carries or promotes it. Keep the
+official production-stable plugin unmodified; handle oversized inputs through
+supported native behavior, or fail the affected maintenance item explicitly
+until upstream ships a stable correction. Live retirement of the former local
+branch remains pending while the owner-away no-restart hold is active.
 
 The content-private `reconcile-chunks` maintenance operation compares active
 chunk metadata with the current chunker and re-embeds only mismatched rows. It
@@ -1518,14 +1503,14 @@ is the planned-stop marker written by `hermes gateway stop --system` before
 systemd sends `SIGTERM`. Managed maintenance now writes that marker through the
 shared planned-stop task before stopping a Gateway.
 
-`playbooks/agents/hermes-native-gateway-migration.yml` is the exact-approval
-transaction used for that repair. It pauses update and automation timers,
-marks configured stops as planned, stops each active consumer once, refreshes the stopped
-file inventory, archives and copy-migrates profile state into native named
-profiles, invokes Hermes's native system installer, applies only hardened
-drop-ins, verifies Discord ownership, and retains the old roots and units for
-rollback. The follow-up runtime and automation playbooks converge all
-consumers and timers against the new paths.
+The exact-approval migration transaction used for that repair paused update and
+automation timers, marked planned stops, archived and copy-migrated profile
+state into native named profiles, invoked Hermes's native system installer,
+verified Discord ownership, and retained the old roots and units for rollback.
+That completed one-time playbook is now retired so it cannot recreate the old
+root-owned skill projection. Git history and the retained rollback artifacts
+preserve its audit evidence. Runtime convergence now validates and hardens the
+native units without re-running the migration.
 
 Gate 9 was not exercised against production during this closeout because it
 would deliberately interrupt the now-live Hermes Discord path and briefly

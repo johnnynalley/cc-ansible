@@ -127,19 +127,11 @@ approvals:
         self.assertLess(verify, create)
         self.assertIn("/usr/bin/mountpoint", playbook[verify:create])
 
-    def test_promotion_accepts_already_current_mutable_schema(self) -> None:
+    def test_promotion_does_not_rewrite_native_config_schema(self) -> None:
         playbook = PLAYBOOK.read_text(encoding="utf-8")
-        require = playbook.index(
-            "Require current or one-step prior mutable config schema"
-        )
-        promote = playbook.index(
-            "Promote mutable Hermes config schema without changing values"
-        )
-        self.assertIn("hermes_shadow_config_version | int", playbook[require:promote])
-        self.assertIn(
-            "== hermes_shadow_version_only_migration_from | int",
-            playbook[promote:],
-        )
+        self.assertNotIn("Promote mutable Hermes config schema", playbook)
+        self.assertNotIn("hermes_shadow_version_only_migration_from", playbook)
+        self.assertNotIn("/etc/hermes/astra/config.yaml", playbook)
 
     def test_registers_dynamic_manifest_backed_docker_tools(self) -> None:
         context = Context()

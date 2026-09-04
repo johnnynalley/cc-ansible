@@ -226,28 +226,14 @@ class ProductionAutomationTests(unittest.TestCase):
             "Preserve native profile backups in the rollback directory",
             "Require unique rollback paths inside approved roots",
             "Resolve the managed Hermes Python prerequisite",
-            "Hash bounded Hermes policy and environment",
-            "Remove duplicate managed root from mutable skill discovery",
-            "Verify every managed skill source before Gateway restart",
-            "Verify profile-owned native skills before Gateway restart",
-            "Build managed profile skill inventory for automation convergence",
-            "Require the complete managed profile skill inventory",
-            "Publish reviewed managed Hermes profile skills",
-            "Publish managed Hermes profile skill contract",
+            "Publish retained profile skill parity contract",
             "Publish mutable native bootstrap parity contract",
-            "Resolve the installed stable Hermes config schema",
-            "Migrate isolated profile configs through native Hermes",
-            "Re-read mutable profile configs after native migration",
             "Resolve production Gateway mount namespaces",
             "Require live production Gateway processes",
-            "Verify profile skills through native runtime discovery",
             "Inspect subscription-backed primary model credentials",
             "Require native subscription-backed primary model credentials",
-            "hermes_profile_skills_validator_source",
-            "hermes_profile_skills_validator_live",
             "hermes_bootstrap_parity_validator_live",
             "hermes_bootstrap_parity_contract_live",
-            "Deploy bounded Hermes policy checksum manifests",
             "Stop and disable superseded collapsed Daily Summary timer",
             "Remove superseded collapsed Daily Summary timer",
             "Deploy exact native Gateway update sudoers bridge",
@@ -260,7 +246,6 @@ class ProductionAutomationTests(unittest.TestCase):
             "Deploy Rigel production cron manifest",
             "Verify production cron manifests are readable by their profiles",
             "Remove superseded private production cron manifests",
-            "Validate complete OpenClaw parity before interruption",
             "Audit Astra native schedule declarations after convergence",
             "Audit Dubble native schedule declarations after convergence",
             "Audit Rigel native schedule declarations after convergence",
@@ -285,13 +270,19 @@ class ProductionAutomationTests(unittest.TestCase):
             "Stop after read-only Hermes automation check-mode preflight",
         ):
             self.assertIn(required, text)
-        self.assertIn("managed-policy.sha256", text)
-        self.assertIn("/etc/hermes/astra/skills", text)
-        self.assertIn("hermes_automation_profile_skill_copies.results", text)
-        managed_skill_publish = text.split(
-            "Publish reviewed managed Hermes profile skills", 1
-        )[1].split("Publish managed Hermes profile skill contract", 1)[0]
-        self.assertNotIn("backup: true", managed_skill_publish)
+        for forbidden in (
+            "managed-policy.sha256",
+            "hermes-managed-config.yaml.j2",
+            "/etc/hermes/astra/config.yaml",
+            "/etc/hermes/dubble/config.yaml",
+            "/etc/hermes/rigel/config.yaml",
+            "/etc/hermes/astra/skills",
+            "/etc/hermes/dubble/skills",
+            "/etc/hermes/rigel/skills",
+            "Publish reviewed managed Hermes profile skills",
+            "Migrate isolated profile configs through native Hermes",
+        ):
+            self.assertNotIn(forbidden, text)
         self.assertEqual(
             text.count('group: "{{ hermes_runtime_readers_group }}"'),
             5,
@@ -318,11 +309,6 @@ class ProductionAutomationTests(unittest.TestCase):
         self.assertIn("auth\n          - list", text)
         self.assertIn("do not substitute a metered API key", text)
         self.assertIn(
-            "| reject('equalto', hermes_managed_skill_root)",
-            text,
-        )
-        self.assertNotIn("+ [hermes_managed_skill_root]", text)
-        self.assertIn(
             "not (hermes_automation_transaction_succeeded | default(false) | bool)",
             text,
         )
@@ -340,37 +326,10 @@ class ProductionAutomationTests(unittest.TestCase):
         )
         self.assertIn("hermes_automation_defer_gateway_restart", text)
         self.assertIn("rejectattr('active', 'equalto', 'inactive')", text)
-        self.assertIn(
-            "hermes_automation_profile_skills_inventory | length == 39",
-            text,
-        )
         self.assertGreaterEqual(
             text.count("not hermes_automation_defer_gateway_restart | bool"),
             12,
         )
-        self.assertIn("map('regex_replace', '$', '/config.yaml')", text)
-        self.assertIn("from hermes_cli.config import check_config_version, migrate_config", text)
-        self.assertIn("migrate_config(interactive=False, quiet=True)", text)
-        self.assertIn("hermes_automation_runtime_config_schema.stdout | int", text)
-        migration = text.index(
-            "Migrate isolated profile configs through native Hermes"
-        )
-        refreshed = text.index(
-            "Re-read mutable profile configs after native migration"
-        )
-        schema_gate = text.index(
-            "Require safe current mutable Hermes profile configs"
-        )
-        self.assertLess(migration, refreshed)
-        self.assertLess(refreshed, schema_gate)
-        self.assertIn(
-            "hermes_automation_mutable_configs_after_migration.results",
-            text,
-        )
-        self.assertIn("--mode\n              - installed", text)
-        self.assertIn("--mode\n              - native", text)
-        self.assertIn("/usr/bin/nsenter", text)
-        self.assertIn('"HERMES_HOME={{ item.item.home }}"', text)
         self.assertIn("ansible.builtin.template", text)
         self.assertIn("templates/hermes", text)
         self.assertNotIn("\n              - start\n              - --system", text)
@@ -449,14 +408,14 @@ class ProductionAutomationTests(unittest.TestCase):
             variables["hermes_native_update_gateway_wait_seconds"], 120
         )
         self.assertIn('"update",', transaction)
-        self.assertIn("--gateway", transaction)
         self.assertIn("--yes", transaction)
-        self.assertIn("[messaging,mem0,edge-tts]", transaction)
-        self.assertIn("hermes_mem0_stable_dependencies", contract)
-        self.assertIn("ollama", variables["hermes_mem0_stable_dependencies"])
-        self.assertIn('"pip", "install", "--strict"', transaction)
+        self.assertIn('"--backup"', transaction)
+        self.assertIn('"--branch"', transaction)
+        self.assertIn('"--switch-branch"', transaction)
+        self.assertNotIn("hermes_mem0_stable_dependencies", contract)
+        self.assertNotIn('"pip", "install"', transaction)
         self.assertNotIn("hermes_mem0_gemini_dependency", contract)
-        self.assertIn('"pip", "check"', transaction)
+        self.assertNotIn("memoryDependencyUpdater", contract)
         self.assertIn("restore_active_profiles", transaction)
 
     def test_public_fetch_uses_standalone_driver_without_privilege_exception(self):
@@ -492,21 +451,6 @@ class ProductionAutomationTests(unittest.TestCase):
         self.assertIn("NoNewPrivileges=true", apply)
         self.assertIn("hermes-fortnite-calendar-fetch.service", apply)
         self.assertIn("--schedule-file", apply)
-
-    def test_gateway_policy_serializes_cron_and_suppresses_progress(self):
-        text = (ROOT / "templates/hermes/hermes-managed-config.yaml.j2").read_text()
-        self.assertIn("max_parallel_jobs: 1", text)
-        self.assertIn('tool_progress: "off"', text)
-        self.assertIn("progress_notices: false", text)
-        self.assertIn(
-            "HERMES_MANAGED_DIR: /etc/hermes/{{ hermes_profile.name }}/mcp-server",
-            text,
-        )
-        self.assertIn(
-            "Create isolated native MCP server managed scopes",
-            (ROOT / "playbooks/agents/hermes-automation.yml").read_text(),
-        )
-        self.assertIn("background_process_notifications: error", text)
 
     def test_daily_summary_collector_can_read_its_real_inputs(self):
         text = (
@@ -616,38 +560,6 @@ class ProductionAutomationTests(unittest.TestCase):
         self.assertIn("hermes_astra_freshrss_live_root", unit)
 
     def test_astra_has_native_providers_with_private_credential_rollout(self):
-        variables = yaml.safe_load(
-            (ROOT / "inventory/group_vars/hermes_hosts/vars.yml").read_text()
-        )
-        astra = next(
-            profile
-            for profile in variables["hermes_shadow_profiles"]
-            if profile["name"] == "astra"
-        )
-        expected_fallbacks = [
-            {"provider": "ollama-cloud", "model": "glm-5.2"},
-            {"provider": "ollama-cloud", "model": "kimi-k2.7-code"},
-            {"provider": "ollama-cloud", "model": "deepseek-v4-pro"},
-        ]
-        for profile in variables["hermes_shadow_profiles"]:
-            self.assertEqual(profile["model_provider"], "openai-codex")
-            self.assertEqual(profile["model_default"], "gpt-5.6-sol")
-            self.assertEqual(profile["fallback_providers"], expected_fallbacks)
-        template = (
-            ROOT / "templates/hermes/hermes-managed-config.yaml.j2"
-        ).read_text()
-        self.assertIn("fallback_providers:", template)
-        self.assertIn("provider: openai-codex", template)
-        self.assertIn("provider: edge", template)
-        self.assertIn("hermes_profile.allow_any_attachment", template)
-        rigel = next(
-            profile
-            for profile in variables["hermes_shadow_profiles"]
-            if profile["name"] == "rigel"
-        )
-        self.assertTrue(astra["allow_any_attachment"])
-        self.assertTrue(rigel["allow_any_attachment"])
-        self.assertIn("fallback.provider", template)
         playbook = (ROOT / "playbooks/agents/hermes-automation.yml").read_text()
         self.assertIn(
             "Read native Astra provider credentials privately", playbook
@@ -682,6 +594,9 @@ class ProductionAutomationTests(unittest.TestCase):
         ):
             self.assertIn(name, playbook)
             self.assertNotIn(f"source: {name}", playbook)
+        self.assertIn("Require native Fortnite collector credentials", playbook)
+        self.assertNotIn("hermes_openclaw_source_env", playbook)
+        self.assertNotIn("/home/johnny/.openclaw/.env", playbook)
 
     def test_astra_calendar_and_mail_are_native_service_identity_tools(self):
         playbook = (ROOT / "playbooks/agents/hermes-automation.yml").read_text()
@@ -735,21 +650,21 @@ class ProductionAutomationTests(unittest.TestCase):
             ROOT
             / "templates/hermes/hermes-gateway-astra-automation.conf.j2"
         ).read_text()
-        dubble = (
-            ROOT
-            / "templates/hermes/hermes-gateway-dubble-automation.conf.j2"
-        ).read_text()
         rigel = (
             ROOT
             / "templates/hermes/hermes-gateway-rigel-automation.conf.j2"
         ).read_text()
         self.assertNotIn("hermes_automation_audit_live", base)
-        for rendered in (dropin, dubble, rigel):
+        for rendered in (dropin, rigel):
             self.assertNotIn("hermes_cron_reconcile_live", rendered)
-            self.assertIn("hermes_openclaw_parity_validator_live", rendered)
-        self.assertIn("hermes_automation_manifest_live", dropin)
-        self.assertIn("hermes_dubble_automation_manifest_live", dubble)
-        self.assertIn("hermes_rigel_automation_manifest_live", rigel)
+            self.assertNotIn("hermes_openclaw_parity_validator_live", rendered)
+        self.assertIn("hermes_automation_readers_group", dropin)
+        self.assertIn("hermes_automation_readers_group", rigel)
+        self.assertEqual(
+            list((ROOT / "templates/hermes").glob("*dubble*automation*")),
+            [],
+        )
+        self.assertIn("Remove obsolete Dubble automation parity gate", playbook)
         self.assertIn(
             "Remove superseded native-migration startup drop-in",
             playbook,

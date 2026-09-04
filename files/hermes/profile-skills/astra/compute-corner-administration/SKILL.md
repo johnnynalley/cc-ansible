@@ -57,6 +57,43 @@ one host is not estate-wide health.
   and `skill_manage` paths. Schedules use the native `cronjob` toolset. Do not
   edit backing JSON stores directly.
 
+## Embedded Subtitle Release Verification
+
+When the owner asks to replace video files that lack subtitles, require a
+Sonarr-managed replacement whose actual media payload contains embedded English
+subtitle streams. Do not use Bazarr or external `.srt` files as the repair, and
+do not infer streams from a release title, indexer description, custom format,
+or prior release-group reputation.
+
+1. Read the current Sonarr series, episode-file, profile, history, queue, and
+   release evidence. Confirm affected episodes with payload-level stream
+   evidence.
+2. Use `host_admin_request` on `docker-vm` with `media-release-search`. Select
+   an exact opaque `candidateId`; rejection text such as current-score-higher
+   does not prove the candidate lacks subtitles.
+3. With approval, use `media-release-stage` for one representative episode.
+   The transaction uses an isolated qBittorrent category and never enters
+   Sonarr's queue.
+4. Poll `media-release-status`, then use `media-release-verify`. Continue only
+   when the sample has video, audio, and an actual tagged embedded English
+   subtitle stream.
+5. With approval, use `media-release-expand`. This is allowed only after the
+   sample passes and only when the torrent contains the exact Sonarr episode set
+   for that season.
+6. After completion, run `media-release-verify` again. `eligibleForImport` must
+   be true, with no missing or duplicate episodes and every selected file
+   complete and stream-eligible.
+7. Before import or existing-file replacement, verify current local and
+   off-host rollback coverage and evaluate Sonarr's exact manual-import rows.
+   The verifier deliberately cannot perform the import. Keep ambiguous mappings
+   review-only and validate imported files through Sonarr and `ffprobe`.
+8. Use `media-release-cleanup` for rejected or completed staging transactions.
+
+Never pass download URLs, tracker credentials, filesystem paths, or raw torrent
+data to the tool. If the typed operation cannot express the candidate, escalate
+the boundary instead of using a general shell or downloading directly into the
+library.
+
 ## Mutation Contract
 
 Before a change, identify the exact target, current state, intended outcome,

@@ -453,9 +453,7 @@
                    )
                  | selectattr('changed')
                  | list
-                 | length > 0
-                 or (hermes_openclaw_evidence_projection_restart_required
-                     | bool) }}
+                 | length > 0 }}
 
         - name: Decide whether the evidence audit timer requires rescheduling
           ansible.builtin.set_fact:
@@ -608,7 +606,9 @@
               - "{{ hermes_openclaw_evidence_gateway_unit }}"
           register: hermes_openclaw_evidence_gateway_pid
           changed_when: false
-          when: hermes_openclaw_evidence_gateway_was_active | bool
+          when:
+            - hermes_openclaw_evidence_gateway_was_active | bool
+            - hermes_openclaw_evidence_gateway_restart_required | bool
 
         - name: Verify exact bootstrap and references inside Astra's namespace
           ansible.builtin.command:
@@ -634,13 +634,17 @@
               - --runtime
           register: hermes_bootstrap_parity_runtime_command
           changed_when: false
-          when: hermes_openclaw_evidence_gateway_was_active | bool
+          when:
+            - hermes_openclaw_evidence_gateway_was_active | bool
+            - hermes_openclaw_evidence_gateway_restart_required | bool
 
         - name: Parse Astra bootstrap and reference runtime verification
           ansible.builtin.set_fact:
             hermes_bootstrap_parity_runtime: >-
               {{ hermes_bootstrap_parity_runtime_command.stdout | from_json }}
-          when: hermes_openclaw_evidence_gateway_was_active | bool
+          when:
+            - hermes_openclaw_evidence_gateway_was_active | bool
+            - hermes_openclaw_evidence_gateway_restart_required | bool
 
         - name: Require exact OpenClaw evidence and native target presence
           ansible.builtin.assert:
@@ -653,7 +657,9 @@
             fail_msg: >-
               Astra cannot read an exact legacy bootstrap/reference artifact,
               or a required native profile target is missing or invalid.
-          when: hermes_openclaw_evidence_gateway_was_active | bool
+          when:
+            - hermes_openclaw_evidence_gateway_was_active | bool
+            - hermes_openclaw_evidence_gateway_restart_required | bool
 
         - name: Verify Astra Gateway evidence namespace when active
           ansible.builtin.command:
@@ -663,14 +669,18 @@
               - --quiet
               - "{{ hermes_openclaw_evidence_gateway_unit }}"
           changed_when: false
-          when: hermes_openclaw_evidence_gateway_was_active | bool
+          when:
+            - hermes_openclaw_evidence_gateway_was_active | bool
+            - hermes_openclaw_evidence_gateway_restart_required | bool
 
       rescue:
         - name: Stop Astra Gateway during complete evidence rollback
           ansible.builtin.systemd_service:
             name: "{{ hermes_openclaw_evidence_gateway_unit }}"
             state: stopped
-          when: hermes_openclaw_evidence_gateway_was_active | bool
+          when:
+            - hermes_openclaw_evidence_gateway_was_active | bool
+            - hermes_openclaw_evidence_gateway_restart_required | bool
           failed_when: false
 
         - name: Stop complete evidence units during rollback
@@ -757,7 +767,9 @@
           ansible.builtin.systemd_service:
             name: "{{ hermes_openclaw_evidence_gateway_unit }}"
             state: started
-          when: hermes_openclaw_evidence_gateway_was_active | bool
+          when:
+            - hermes_openclaw_evidence_gateway_was_active | bool
+            - hermes_openclaw_evidence_gateway_restart_required | bool
           failed_when: false
 
         - name: Fail complete OpenClaw evidence transaction after rollback

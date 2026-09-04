@@ -13,6 +13,13 @@ hermes_host_admin_group: agent-host-admin
 hermes_host_admin_home: /var/lib/agent-host-admin
 hermes_host_admin_target_source: scripts/agents/hermes-host-admin-target.py
 hermes_host_admin_target_live: /usr/local/sbin/agent-host-admin
+hermes_host_admin_media_verifier_source: scripts/media-release/sonarr_embedded_subtitle_verifier.py
+hermes_host_admin_media_verifier_live: /usr/local/sbin/sonarr-embedded-subtitle-verifier
+hermes_host_admin_media_verifier_state: /var/lib/hermes-media-release-verifier
+hermes_host_admin_arr_reporter_source: scripts/media-release/astra_arr_readonly_report.py
+hermes_host_admin_arr_reporter_live: /usr/local/sbin/astra-arr-readonly-report
+hermes_host_admin_transaction_audit_source: scripts/media-release/sonarr_transaction_audit.py
+hermes_host_admin_transaction_audit_live: /usr/local/sbin/sonarr-transaction-audit
 hermes_host_admin_target_identity: /etc/agent-host-admin.json
 hermes_host_admin_sudoers: /etc/sudoers.d/agent-host-admin
 hermes_host_admin_endpoint_network: 192.168.1.0

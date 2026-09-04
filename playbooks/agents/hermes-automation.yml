@@ -23,21 +23,13 @@
     hermes_automation_backup_id: >-
       {{ ansible_facts['date_time']['iso8601_basic_short'] }}-pre-automation
     hermes_automation_backup_root: >-
-      {{ hermes_production_cutover_rollback_root
+      {{ hermes_rollback_root
          }}/{{ hermes_automation_backup_id }}
     hermes_automation_user_environment:
       XDG_RUNTIME_DIR: >-
-        /run/user/{{ hermes_production_cutover_user_uid }}
+        /run/user/{{ hermes_operator_uid }}
       DBUS_SESSION_BUS_ADDRESS: >-
-        unix:path=/run/user/{{ hermes_production_cutover_user_uid }}/bus
-    hermes_automation_profile_skills_contract: >-
-      {{
-        lookup(
-          'ansible.builtin.file',
-          ansible_config_file | dirname
-          ~ '/' ~ hermes_profile_skills_contract_source
-        ) | from_json
-      }}
+        unix:path=/run/user/{{ hermes_operator_uid }}/bus
     hermes_automation_template_units:
       - name: hermes-retained-automation@.service
         source: hermes-retained-automation@.service.j2
@@ -78,8 +70,7 @@
           '/etc/hermes/dubble/production-jobs.json',
           '/etc/hermes/astra/production-automation-reconciliation.json',
           hermes_automation_reconciliation_live,
-          hermes_openclaw_parity_contract_live,
-          hermes_production_cutover_enrollment,
+          hermes_private_discord_enrollment,
           '/etc/hermes/astra/.env',
           '/etc/hermes/dubble/.env',
           hermes_automation_rigel_environment_file,
@@ -106,32 +97,14 @@
           hermes_astra_khal_config_live,
           hermes_astra_himalaya_config_live,
           hermes_astra_himalaya_live_binary,
-          hermes_openclaw_parity_validator_live,
           hermes_profile_skills_validator_live,
           hermes_profile_skills_contract_live,
           hermes_bootstrap_parity_validator_live,
-          hermes_bootstrap_parity_contract_live,
-          '/etc/hermes/astra/skills',
-          '/etc/hermes/dubble/skills',
-          '/etc/hermes/rigel/skills'
+          hermes_bootstrap_parity_contract_live
         ]
-        + hermes_shadow_profiles
-          | map(attribute='name')
-          | map('regex_replace', '^', '/etc/hermes/')
-          | map('regex_replace', '$', '/config.yaml')
-          | list
-        + hermes_shadow_profiles
-          | map(attribute='name')
-          | map('regex_replace', '^', '/etc/hermes/')
-          | map('regex_replace', '$', '/managed-policy.sha256')
-          | list
         + hermes_shadow_profiles
           | map(attribute='account_home')
           | map('regex_replace', '$', '/.hermes/.backup.lock')
-          | list
-        + hermes_shadow_profiles
-          | map(attribute='home')
-          | map('regex_replace', '$', '/config.yaml')
           | list
         + hermes_automation_system_units
           | map('regex_replace', '^', '/etc/systemd/system/')
@@ -205,53 +178,17 @@
           confirmation string; normal platform convergence preserves schedules.
       when: hermes_automation_schedule_mode in ['seed', 'restore']
 
-    - name: Build managed profile skill inventory for automation convergence
-      ansible.builtin.set_fact:
-        hermes_automation_profile_skills_inventory: >-
-          {{
-            (hermes_automation_profile_skills_inventory | default([]))
-            + [
-                item.1 | combine({
-                  'profile': item.0.key,
-                  'group': item.0.value.group,
-                  'managedRoot': item.0.value.managedRoot
-                })
-              ]
-          }}
-      loop: >-
-        {{
-          hermes_automation_profile_skills_contract.profiles
-          | dict2items
-          | subelements('value.skills')
-        }}
-      loop_control:
-        label: "{{ item.0.key }}/{{ item.1.name }}"
-
-    - name: Require the complete managed profile skill inventory
-      ansible.builtin.assert:
-        that:
-          - >-
-            hermes_automation_profile_skills_contract.profiles.keys()
-            | list | sort == ['astra', 'dubble', 'rigel']
-          - hermes_automation_profile_skills_inventory | length == 39
-          - >-
-            hermes_automation_profile_skills_inventory
-            | map(attribute='profile') | unique | sort
-            == ['astra', 'dubble', 'rigel']
-        fail_msg: >-
-          Automation refuses to publish an incomplete managed skill contract.
-
     - name: Check OpenClaw user Gateway before automation convergence
       ansible.builtin.command:
         argv:
           - /usr/sbin/runuser
           - --user
-          - "{{ hermes_production_cutover_user }}"
+          - "{{ hermes_operator_user }}"
           - --
           - /usr/bin/systemctl
           - --user
           - is-active
-          - "{{ hermes_production_cutover_user_gateway }}"
+          - "{{ hermes_retired_openclaw_user_gateway }}"
       environment: "{{ hermes_automation_user_environment }}"
       register: hermes_automation_openclaw_state
       changed_when: false
@@ -376,11 +313,8 @@
           - "{{ hermes_shadow_runtime_binary }}"
           - auth
           - list
-          - "{{ item.model_provider }}"
-      loop: >-
-        {{ hermes_shadow_profiles
-           | selectattr('model_provider', 'equalto', 'openai-codex')
-           | list }}
+          - openai-codex
+      loop: "{{ hermes_shadow_profiles }}"
       loop_control:
         label: "{{ item.name }}"
       register: hermes_automation_subscription_auth
@@ -747,56 +681,14 @@
           }}
       no_log: true
 
-    - name: Read preserved Fortnite credentials for one-time native migration
-      ansible.builtin.slurp:
-        src: "{{ hermes_production_cutover_source_env }}"
-      register: hermes_automation_fortnite_migration_environment
-      when: hermes_automation_missing_fortnite_credentials | length > 0
-      no_log: true
-
-    - name: Require complete preserved Fortnite migration credentials
+    - name: Require native Fortnite collector credentials
       ansible.builtin.assert:
         that:
-          - hermes_automation_fortnite_migration_values | length == 1
-          - hermes_automation_fortnite_migration_values[0] | length > 0
-          - >-
-            hermes_automation_fortnite_migration_values[0]
-            is not search('[\r\n]')
+          - hermes_automation_missing_fortnite_credentials | length == 0
         fail_msg: >-
-          A missing Fortnite credential cannot be migrated into native Hermes
-          storage. No native credential was changed.
-      loop: "{{ hermes_automation_missing_fortnite_credentials }}"
-      loop_control:
-        label: "{{ item }}"
-      vars:
-        hermes_automation_fortnite_migration_values: >-
-          {{
-            hermes_automation_fortnite_migration_environment.content
-            | b64decode
-            | regex_findall('(?m)^' ~ item ~ '=([^\r\n]+)$')
-          }}
-      when: hermes_automation_missing_fortnite_credentials | length > 0
-      no_log: true
-
-    - name: Migrate Fortnite credentials into native Hermes storage once
-      ansible.builtin.lineinfile:
-        path: "{{ hermes_automation_native_environment_live }}"
-        regexp: "^{{ item }}="
-        line: >-
-          {{ item }}={{
-            (
-              hermes_automation_fortnite_migration_environment.content
-              | b64decode
-              | regex_findall('(?m)^' ~ item ~ '=([^\r\n]+)$')
-            )[0]
-          }}
-        owner: root
-        group: hermes-astra
-        mode: "0440"
-      loop: "{{ hermes_automation_missing_fortnite_credentials }}"
-      loop_control:
-        label: "{{ item }}"
-      when: hermes_automation_missing_fortnite_credentials | length > 0
+          Astra's native environment is missing required Fortnite collector
+          credentials. Restore the native secret backup; do not read or migrate
+          credentials from the retired OpenClaw tree.
       no_log: true
 
     - name: Refresh native Astra credentials after one-time migration
@@ -1226,7 +1118,7 @@
             src: >-
               {{ playbook_dir
                  }}/../../templates/hermes/hermes-private-discord-enrollment.json.j2
-            dest: "{{ hermes_production_cutover_enrollment }}"
+            dest: "{{ hermes_private_discord_enrollment }}"
             owner: root
             group: root
             mode: "0400"
@@ -1564,8 +1456,6 @@
               destination: "{{ hermes_fortnite_calendar_compat_live }}"
             - source: "{{ hermes_fortnite_calendar_fetch_source }}"
               destination: "{{ hermes_fortnite_calendar_fetch_live }}"
-            - source: "{{ hermes_openclaw_parity_validator_source }}"
-              destination: "{{ hermes_openclaw_parity_validator_live }}"
             - source: "{{ hermes_profile_skills_validator_source }}"
               destination: "{{ hermes_profile_skills_validator_live }}"
             - source: "{{ hermes_bootstrap_parity_validator_source }}"
@@ -1814,17 +1704,6 @@
             - /etc/hermes/dubble/production-jobs.json
             - /etc/hermes/astra/production-automation-reconciliation.json
 
-        - name: Deploy the exhaustive OpenClaw parity contract
-          ansible.builtin.copy:
-            src: >-
-              {{ playbook_dir }}/../../{{
-                 hermes_openclaw_parity_contract_source }}
-            dest: "{{ hermes_openclaw_parity_contract_live }}"
-            owner: root
-            group: hermes-runtime-readers
-            mode: "0440"
-            backup: true
-
         - name: Deploy the reviewed production schedule reconciliation
           ansible.builtin.copy:
             src: >-
@@ -1835,37 +1714,6 @@
             group: "{{ hermes_runtime_readers_group }}"
             mode: "0440"
             backup: true
-
-        - name: Validate complete OpenClaw parity before interruption
-          ansible.builtin.command:
-            argv:
-              - "{{ hermes_shadow_runtime_venv }}/bin/python"
-              - "{{ hermes_openclaw_parity_validator_live }}"
-              - --contract
-              - "{{ hermes_openclaw_parity_contract_live }}"
-              - --skills
-              - "{{ hermes_profile_skills_contract_live }}"
-              - --automation
-              - "{{ hermes_automation_reconciliation_live }}"
-              - --astra-manifest
-              - "{{ hermes_automation_manifest_live }}"
-              - --dubble-manifest
-              - "{{ hermes_dubble_automation_manifest_live }}"
-              - --rigel-manifest
-              - "{{ hermes_rigel_automation_manifest_live }}"
-              - --rigel-delivery-mode
-              - >-
-                {{
-                  'dedicated'
-                  if hermes_rigel_dedicated_discord_enabled | bool
-                  else 'fallback'
-                }}
-              - --source-jobs
-              - "{{ hermes_openclaw_current_cron_state }}"
-              - --historical-source-jobs
-              - "{{ hermes_openclaw_historical_cron_state }}"
-          register: hermes_automation_parity_validation
-          changed_when: false
 
         - name: Deploy bounded automation systemd units
           ansible.builtin.template:
@@ -1878,16 +1726,6 @@
           loop: "{{ hermes_automation_template_units }}"
           loop_control:
             label: "{{ item.name }}"
-
-        - name: Deploy compatibility-safe memory dependency resolver
-          ansible.builtin.copy:
-            src: >-
-              {{ ansible_config_file | dirname }}/{{ hermes_mem0_dependency_updater_source }}
-            dest: "{{ hermes_mem0_dependency_updater_live }}"
-            owner: root
-            group: root
-            mode: "0755"
-            backup: true
 
         - name: Deploy corrected Hermes native update unit
           ansible.builtin.template:
@@ -1923,46 +1761,7 @@
           loop_control:
             label: "{{ item.name }}"
 
-        - name: Create exclusive managed Hermes skill roots
-          ansible.builtin.file:
-            path: "{{ item.value.managedRoot }}"
-            state: directory
-            owner: root
-            group: "{{ item.value.group }}"
-            mode: "0750"
-          loop: >-
-            {{
-              hermes_automation_profile_skills_contract.profiles
-              | dict2items
-            }}
-          loop_control:
-            label: "{{ item.key }}"
-
-        - name: Create managed Hermes profile skill directories
-          ansible.builtin.file:
-            path: "{{ item.managedRoot }}/{{ item.name }}"
-            state: directory
-            owner: root
-            group: "{{ item.group }}"
-            mode: "0750"
-          loop: "{{ hermes_automation_profile_skills_inventory }}"
-          loop_control:
-            label: "{{ item.profile }}/{{ item.name }}"
-
-        - name: Publish reviewed managed Hermes profile skills
-          ansible.builtin.copy:
-            src: >-
-              {{ ansible_config_file | dirname }}/{{ item.source }}
-            dest: "{{ item.managedRoot }}/{{ item.name }}/SKILL.md"
-            owner: root
-            group: "{{ item.group }}"
-            mode: "0440"
-          loop: "{{ hermes_automation_profile_skills_inventory }}"
-          loop_control:
-            label: "{{ item.profile }}/{{ item.name }}"
-          register: hermes_automation_profile_skill_copies
-
-        - name: Publish managed Hermes profile skill contract
+        - name: Publish retained profile skill parity contract
           ansible.builtin.copy:
             src: >-
               {{ ansible_config_file | dirname }}/{{
@@ -1986,244 +1785,6 @@
             backup: true
           register: hermes_automation_bootstrap_parity_contract_copy
 
-        - name: Resolve the installed stable Hermes config schema
-          ansible.builtin.command:
-            argv:
-              - "{{ hermes_shadow_runtime_venv }}/bin/python"
-              - -c
-              - >-
-                from hermes_cli.config_defaults import DEFAULT_CONFIG;
-                print(int(DEFAULT_CONFIG['_config_version']))
-          register: hermes_automation_runtime_config_schema
-          changed_when: false
-
-        - name: Require a valid installed stable Hermes config schema
-          ansible.builtin.assert:
-            that:
-              - >-
-                hermes_automation_runtime_config_schema.stdout
-                is match('^[1-9][0-9]*$')
-              - >-
-                hermes_automation_runtime_config_schema.stdout | int
-                >= hermes_shadow_config_version | int
-            fail_msg: >-
-              Installed Hermes reports an invalid or older config schema than
-              the reviewed stable repository baseline.
-
-        - name: Deploy bounded Hermes managed policies
-          ansible.builtin.template:
-            src: >-
-              {{ playbook_dir
-                 }}/../../templates/hermes/hermes-managed-config.yaml.j2
-            dest: "/etc/hermes/{{ hermes_profile.name }}/config.yaml"
-            owner: root
-            group: "{{ hermes_profile.group }}"
-            mode: "0440"
-            backup: true
-          loop: "{{ hermes_shadow_profiles }}"
-          loop_control:
-            loop_var: hermes_profile
-            label: "{{ hermes_profile.name }}"
-          vars:
-            hermes_managed_config_version: >-
-              {{ hermes_automation_runtime_config_schema.stdout | int }}
-          register: hermes_automation_managed_policies
-
-        - name: Read mutable Hermes profile configs for native skill discovery
-          ansible.builtin.slurp:
-            src: "{{ item.home }}/config.yaml"
-          loop: "{{ hermes_shadow_profiles }}"
-          loop_control:
-            label: "{{ item.name }}"
-          register: hermes_automation_mutable_configs_before_skills
-          no_log: true
-
-        - name: Migrate isolated profile configs through native Hermes
-          ansible.builtin.command:
-            argv:
-              - /usr/sbin/runuser
-              - --user
-              - "{{ item.item.user }}"
-              - --
-              - /usr/bin/env
-              - "HOME={{ item.item.account_home }}"
-              - "HERMES_HOME={{ item.item.home }}"
-              - PYTHONNOUSERSITE=1
-              - "{{ hermes_shadow_runtime_venv }}/bin/python"
-              - -c
-              - >-
-                import json;
-                from hermes_cli.config import check_config_version, migrate_config;
-                before, latest = check_config_version();
-                result = migrate_config(interactive=False, quiet=True)
-                if before < latest else {};
-                after, observed_latest = check_config_version();
-                print(json.dumps({'after': after, 'before': before,
-                'latest': observed_latest}, sort_keys=True));
-                raise SystemExit(0 if after == observed_latest and before == after
-                else 3 if after == observed_latest else 1)
-          loop: "{{ hermes_automation_mutable_configs_before_skills.results }}"
-          loop_control:
-            label: "{{ item.item.name }}"
-          register: hermes_automation_profile_config_migrations
-          changed_when: hermes_automation_profile_config_migrations.rc == 3
-          failed_when: >-
-            hermes_automation_profile_config_migrations.rc not in [0, 3]
-          check_mode: false
-          no_log: true
-
-        - name: Re-read mutable profile configs after native migration
-          ansible.builtin.slurp:
-            src: "{{ item.home }}/config.yaml"
-          loop: "{{ hermes_shadow_profiles }}"
-          loop_control:
-            label: "{{ item.name }}"
-          register: hermes_automation_mutable_configs_after_migration
-          no_log: true
-
-        - name: Require safe current mutable Hermes profile configs
-          ansible.builtin.assert:
-            that:
-              - hermes_mutable_config is mapping
-              - hermes_mutable_config._config_version is defined
-              - >-
-                hermes_mutable_config._config_version | int
-                == hermes_automation_runtime_config_schema.stdout | int
-              - >-
-                hermes_mutable_config.skills is not defined
-                or hermes_mutable_config.skills is mapping
-              - >-
-                hermes_mutable_external_dirs is sequence
-                and hermes_mutable_external_dirs is not string
-            fail_msg: >-
-              A mutable Hermes profile config is malformed or on an unexpected
-              schema. Refusing to alter user-owned skill discovery settings.
-          loop: "{{ hermes_automation_mutable_configs_after_migration.results }}"
-          loop_control:
-            label: "{{ item.item.name }}"
-          vars:
-            hermes_mutable_config: >-
-              {{ item.content | b64decode | from_yaml }}
-            hermes_mutable_external_dirs: >-
-              {{
-                (hermes_mutable_config.skills | default({})).external_dirs
-                | default([])
-              }}
-          no_log: true
-
-        - name: Remove duplicate managed root from mutable skill discovery
-          ansible.builtin.copy:
-            content: >-
-              {{
-                hermes_mutable_config
-                | combine({
-                    'skills': hermes_mutable_skills
-                      | combine({
-                          'external_dirs': hermes_mutable_external_dirs
-                            | reject('equalto', hermes_managed_skill_root)
-                            | list
-                        })
-                  })
-                | to_nice_yaml(indent=2, sort_keys=false)
-              }}
-            dest: "{{ item.item.home }}/config.yaml"
-            owner: "{{ item.item.user }}"
-            group: "{{ item.item.group }}"
-            mode: "0600"
-          loop: "{{ hermes_automation_mutable_configs_after_migration.results }}"
-          loop_control:
-            label: "{{ item.item.name }}"
-          vars:
-            hermes_mutable_config: >-
-              {{ item.content | b64decode | from_yaml }}
-            hermes_mutable_skills: >-
-              {{ hermes_mutable_config.skills | default({}) }}
-            hermes_mutable_external_dirs: >-
-              {{ hermes_mutable_skills.external_dirs | default([]) }}
-            hermes_managed_skill_root: >-
-              {{ '/etc/hermes/' ~ item.item.name ~ '/skills' }}
-          register: hermes_automation_profile_skill_configs
-          no_log: true
-
-        - name: Verify every managed skill source before Gateway restart
-          ansible.builtin.command:
-            argv:
-              - /usr/sbin/runuser
-              - --user
-              - "{{ item.user }}"
-              - --
-              - /usr/bin/env
-              - "HOME={{ item.account_home }}"
-              - "HERMES_HOME={{ item.home }}"
-              - "{{ hermes_shadow_runtime_venv }}/bin/python"
-              - "{{ hermes_profile_skills_validator_live }}"
-              - --contract
-              - "{{ hermes_profile_skills_contract_live }}"
-              - --mode
-              - installed
-              - --profile
-              - "{{ item.name }}"
-              - --hermes-source
-              - /usr/local/lib/hermes-agent
-          loop: "{{ hermes_shadow_profiles }}"
-          loop_control:
-            label: "{{ item.name }}"
-          changed_when: false
-
-        - name: Verify profile-owned native skills before Gateway restart
-          ansible.builtin.command:
-            argv:
-              - /usr/sbin/runuser
-              - --user
-              - "{{ item.user }}"
-              - --
-              - /usr/bin/env
-              - "HOME={{ item.account_home }}"
-              - "HERMES_HOME={{ item.home }}"
-              - "{{ hermes_shadow_runtime_venv }}/bin/python"
-              - "{{ hermes_profile_skills_validator_live }}"
-              - --contract
-              - "{{ hermes_profile_skills_contract_live }}"
-              - --mode
-              - native
-              - --profile
-              - "{{ item.name }}"
-              - --hermes-source
-              - /usr/local/lib/hermes-agent
-              - --allow-unmounted-shared-readers
-          loop: "{{ hermes_shadow_profiles }}"
-          loop_control:
-            label: "{{ item.name }}"
-          changed_when: false
-
-        - name: Hash bounded Hermes policy and environment
-          ansible.builtin.command:
-            argv:
-              - /usr/bin/sha256sum
-              - "/etc/hermes/{{ item.name }}/config.yaml"
-              - >-
-                {{ item.environment_file | default('/etc/hermes/' ~ item.name ~ '/.env') }}
-          loop: "{{ hermes_shadow_profiles }}"
-          loop_control:
-            label: "{{ item.name }}"
-          register: hermes_automation_policy_hashes
-          changed_when: false
-          no_log: true
-
-        - name: Deploy bounded Hermes policy checksum manifests
-          ansible.builtin.copy:
-            content: "{{ item.stdout }}\n"
-            dest: >-
-              /etc/hermes/{{ item.item.name }}/managed-policy.sha256
-            owner: root
-            group: "{{ item.item.group }}"
-            mode: "0440"
-          loop: "{{ hermes_automation_policy_hashes.results }}"
-          loop_control:
-            label: "{{ item.item.name }}"
-          no_log: true
-          register: hermes_automation_policy_manifests
-
         - name: Create Astra Gateway systemd drop-in directory
           ansible.builtin.file:
             path: >-
@@ -2233,7 +1794,7 @@
             group: root
             mode: "0755"
 
-        - name: Deploy Astra immutable automation parity gate
+        - name: Deploy Astra automation reader boundary
           ansible.builtin.template:
             src: >-
               {{ playbook_dir
@@ -2245,24 +1806,10 @@
             backup: true
           register: hermes_automation_astra_gateway_dropin
 
-        - name: Create Dubble Gateway systemd drop-in directory
+        - name: Remove obsolete Dubble automation parity gate
           ansible.builtin.file:
-            path: "{{ hermes_dubble_automation_gateway_dropin | dirname }}"
-            state: directory
-            owner: root
-            group: root
-            mode: "0755"
-
-        - name: Deploy Dubble immutable automation parity gate
-          ansible.builtin.template:
-            src: >-
-              {{ playbook_dir
-                 }}/../../templates/hermes/hermes-gateway-dubble-automation.conf.j2
-            dest: "{{ hermes_dubble_automation_gateway_dropin }}"
-            owner: root
-            group: root
-            mode: "0644"
-            backup: true
+            path: "{{ hermes_dubble_automation_gateway_dropin }}"
+            state: absent
           register: hermes_automation_dubble_gateway_dropin
 
         - name: Create Rigel Gateway systemd drop-in directory
@@ -2273,7 +1820,7 @@
             group: root
             mode: "0755"
 
-        - name: Deploy Rigel immutable automation parity gate
+        - name: Deploy Rigel automation reader boundary
           ansible.builtin.template:
             src: >-
               {{ playbook_dir
@@ -2419,20 +1966,7 @@
           ansible.builtin.set_fact:
             hermes_automation_shared_policy_changed: >-
               {{
-                (
-                  hermes_automation_managed_policies.results
-                  | selectattr('hermes_profile.name', 'equalto', 'dubble')
-                  | map(attribute='changed')
-                  | first
-                )
-                or
-                (
-                  hermes_automation_policy_manifests.results
-                  | selectattr('item.item.name', 'equalto', 'dubble')
-                  | map(attribute='changed')
-                  | first
-                )
-                or hermes_automation_dubble_peer_environment.changed
+                hermes_automation_dubble_peer_environment.changed
                 or
                 (
                   hermes_automation_fallback_provider_environments.results
@@ -2443,29 +1977,6 @@
                   | length > 0
                 )
                 or hermes_automation_dubble_gateway_dropin.changed
-                or
-                (
-                  hermes_automation_profile_config_migrations.results
-                  | selectattr('item.item.name', 'equalto', 'dubble')
-                  | map(attribute='changed')
-                  | first
-                )
-                or
-                (
-                  hermes_automation_profile_skill_configs.results
-                  | selectattr('item.item.name', 'equalto', 'dubble')
-                  | map(attribute='changed')
-                  | first
-                )
-                or
-                (
-                  hermes_automation_profile_skill_copies.results
-                  | selectattr('item.profile', 'equalto', 'dubble')
-                  | map(attribute='changed')
-                  | select('equalto', true)
-                  | list
-                  | length > 0
-                )
                 or hermes_automation_dubble_schedule_reconcile_required | bool
               }}
             hermes_automation_astra_restart_required: >-
@@ -2482,75 +1993,12 @@
                   | length > 0
                 )
                 or hermes_automation_astra_peer_environment.changed
-                or
-                (
-                  hermes_automation_profile_config_migrations.results
-                  | selectattr('item.item.name', 'equalto', 'astra')
-                  | map(attribute='changed')
-                  | first
-                )
-                or
-                (
-                  hermes_automation_managed_policies.results
-                  | selectattr('hermes_profile.name', 'equalto', 'astra')
-                  | map(attribute='changed')
-                  | first
-                )
-                or
-                (
-                  hermes_automation_policy_manifests.results
-                  | selectattr('item.item.name', 'equalto', 'astra')
-                  | map(attribute='changed')
-                  | first
-                )
                 or hermes_automation_astra_gateway_dropin.changed
-                or hermes_automation_bootstrap_parity_contract_copy.changed
-                or
-                (
-                  hermes_automation_root_helper_copies.results
-                  | selectattr(
-                      'item.destination',
-                      'equalto',
-                      hermes_bootstrap_parity_validator_live
-                    )
-                  | map(attribute='changed')
-                  | first
-                )
-                or
-                (
-                  hermes_automation_profile_skill_configs.results
-                  | selectattr('item.item.name', 'equalto', 'astra')
-                  | map(attribute='changed')
-                  | first
-                )
-                or
-                (
-                  hermes_automation_profile_skill_copies.results
-                  | selectattr('item.profile', 'equalto', 'astra')
-                  | map(attribute='changed')
-                  | select('equalto', true)
-                  | list
-                  | length > 0
-                )
               }}
             hermes_automation_rigel_restart_required: >-
               {{
                 hermes_rigel_dedicated_discord_enabled | bool
                 and (
-                  (
-                    hermes_automation_managed_policies.results
-                    | selectattr('hermes_profile.name', 'equalto', 'rigel')
-                    | map(attribute='changed')
-                    | first
-                  )
-                  or
-                  (
-                    hermes_automation_policy_manifests.results
-                    | selectattr('item.item.name', 'equalto', 'rigel')
-                    | map(attribute='changed')
-                    | first
-                  )
-                  or
                   (
                     hermes_automation_fallback_provider_environments.results
                     | selectattr('item.profile', 'equalto', 'rigel')
@@ -2562,29 +2010,6 @@
                   or hermes_automation_rigel_discord_environment.changed
                   or hermes_automation_rigel_gateway_dropin.changed
                   or hermes_automation_rigel_scripts_deployed.changed
-                  or
-                  (
-                    hermes_automation_profile_config_migrations.results
-                    | selectattr('item.item.name', 'equalto', 'rigel')
-                    | map(attribute='changed')
-                    | first
-                  )
-                  or
-                  (
-                    hermes_automation_profile_skill_configs.results
-                    | selectattr('item.item.name', 'equalto', 'rigel')
-                    | map(attribute='changed')
-                    | first
-                  )
-                  or
-                  (
-                    hermes_automation_profile_skill_copies.results
-                    | selectattr('item.profile', 'equalto', 'rigel')
-                    | map(attribute='changed')
-                    | select('equalto', true)
-                    | list
-                    | length > 0
-                  )
                   or hermes_automation_rigel_schedule_reconcile_required | bool
                 )
               }}
@@ -2925,35 +2350,6 @@
           loop: "{{ hermes_automation_gateway_pids.results }}"
           loop_control:
             label: "{{ item.item.name }}"
-          when: not hermes_automation_defer_gateway_restart | bool
-
-        - name: Verify profile skills through native runtime discovery
-          ansible.builtin.command:
-            argv:
-              - /usr/bin/nsenter
-              - "--mount=/proc/{{ item.stdout }}/ns/mnt"
-              - --
-              - /usr/sbin/runuser
-              - --user
-              - "{{ item.item.user }}"
-              - --
-              - /usr/bin/env
-              - "HOME={{ item.item.account_home }}"
-              - "HERMES_HOME={{ item.item.home }}"
-              - "{{ hermes_shadow_runtime_venv }}/bin/python"
-              - "{{ hermes_profile_skills_validator_live }}"
-              - --contract
-              - "{{ hermes_profile_skills_contract_live }}"
-              - --mode
-              - native
-              - --profile
-              - "{{ item.item.name }}"
-              - --hermes-source
-              - /usr/local/lib/hermes-agent
-          loop: "{{ hermes_automation_gateway_pids.results }}"
-          loop_control:
-            label: "{{ item.item.name }}"
-          changed_when: false
           when: not hermes_automation_defer_gateway_restart | bool
 
         - name: Enable production automation and backup timers

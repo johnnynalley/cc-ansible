@@ -48,8 +48,6 @@
       "user": "hermes-astra",
       "group": "hermes-astra",
       "home": "/var/lib/hermes/astra/.hermes/profiles/astra",
-      "managedRoot": "/etc/hermes/astra/skills",
-      "runtimeRoot": "/var/lib/hermes/astra/.hermes/profiles/astra/skills/managed",
       "nativeRoot": "/var/lib/hermes/astra/.hermes/profiles/astra/skills",
       "skills": [
         {
@@ -68,7 +66,7 @@
           "name": "compute-corner-administration",
           "description": "Use for Compute Corner operations and approved changes.",
           "source": "files/hermes/profile-skills/astra/compute-corner-administration/SKILL.md",
-          "sha256": "3f734bd56d637b72578a23571e9f24ef1b270292d3ee83d8b2f12ace3e851333"
+          "sha256": "75ef1008272a181f79cb5551b128dc2095cd996de42a5537efd8fcc60b4873b1"
         },
         {
           "name": "consequential-recommendation",
@@ -268,8 +266,6 @@
       "user": "hermes-dubble",
       "group": "hermes-dubble",
       "home": "/var/lib/hermes/dubble/.hermes/profiles/dubble",
-      "managedRoot": "/etc/hermes/dubble/skills",
-      "runtimeRoot": "/var/lib/hermes/dubble/.hermes/profiles/dubble/skills/managed",
       "nativeRoot": "/var/lib/hermes/dubble/.hermes/profiles/dubble/skills",
       "skills": [
         {
@@ -290,8 +286,6 @@
       "user": "hermes-rigel",
       "group": "hermes-rigel",
       "home": "/var/lib/hermes/rigel/.hermes/profiles/rigel",
-      "managedRoot": "/etc/hermes/rigel/skills",
-      "runtimeRoot": "/var/lib/hermes/rigel/.hermes/profiles/rigel/skills/managed",
       "nativeRoot": "/var/lib/hermes/rigel/.hermes/profiles/rigel/skills",
       "skills": [
         {

@@ -200,9 +200,9 @@ and return `SQLITE_FULL` even when the host filesystem has ample free space.
 | `/etc/systemd/system/immich-media-inbox-cloud.{service,timer}` | Ansible, root | Automatic cloud queue drain |
 
 The Astra skill lives at
-`/home/johnny/.openclaw/workspace/skills/immich-media-inbox/SKILL.md`. It invokes
-the wrapper over Tailscale SSH and may trigger the same bounded worker for an
-immediate drain; no application URL exists.
+`/var/lib/hermes/astra/.hermes/profiles/astra/skills/immich-media-inbox/SKILL.md`.
+It invokes the bounded native broker path and may trigger the same worker for
+an immediate drain; no application URL exists.
 
 ## Deployment
 

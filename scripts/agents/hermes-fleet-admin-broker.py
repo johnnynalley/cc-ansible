@@ -53,7 +53,7 @@ TARGETS = {
         "profile": Path("/var/lib/hermes/astra/.hermes/profiles/astra"),
         "workspace": Path("/var/lib/hermes/profile-data/astra/writable"),
         "config": Path("/var/lib/hermes/astra/.hermes/profiles/astra/config.yaml"),
-        "managed": Path("/etc/hermes/astra/config.yaml"),
+        "managed_dir": Path("/etc/hermes/astra"),
         "environment": Path("/etc/hermes/astra/.env"),
     },
     "dubble": {
@@ -64,7 +64,7 @@ TARGETS = {
         "profile": Path("/var/lib/hermes/dubble/.hermes/profiles/dubble"),
         "workspace": Path("/var/lib/hermes/profile-data/dubble/writable"),
         "config": Path("/var/lib/hermes/dubble/.hermes/profiles/dubble/config.yaml"),
-        "managed": Path("/etc/hermes/dubble/config.yaml"),
+        "managed_dir": Path("/etc/hermes/dubble"),
         "environment": Path("/etc/hermes/dubble/.env"),
     },
     "rigel": {
@@ -75,7 +75,7 @@ TARGETS = {
         "profile": Path("/var/lib/hermes/rigel/.hermes/profiles/rigel"),
         "workspace": Path("/var/lib/hermes/profile-data/rigel/writable"),
         "config": Path("/var/lib/hermes/rigel/.hermes/profiles/rigel/config.yaml"),
-        "managed": Path("/etc/hermes/rigel/config.yaml"),
+        "managed_dir": Path("/etc/hermes/rigel"),
         "environment": Path("/etc/hermes/private/environments/rigel.env"),
     },
 }
@@ -435,7 +435,7 @@ def validate_runtime(target_name: str) -> dict[str, Any]:
         "--property=SupplementaryGroups=hermes-runtime-readers",
         f"--property=EnvironmentFile={target['environment']}",
         f"--setenv=HOME={target['account']}", f"--setenv=HERMES_HOME={target['profile']}",
-        f"--setenv=HERMES_MANAGED_DIR={target['managed'].parent}", "/usr/local/bin/hermes", "config", "check",
+        f"--setenv=HERMES_MANAGED_DIR={target['managed_dir']}", "/usr/local/bin/hermes", "config", "check",
     ]
     result = subprocess.run(command, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=45, check=False)
     if result.returncode != 0:

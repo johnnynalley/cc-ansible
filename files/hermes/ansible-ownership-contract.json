@@ -218,6 +218,62 @@
       "backup": "restic"
     },
     {
+      "id": "astra-retired-root-config",
+      "prefix": "/etc/hermes/astra/config.yaml",
+      "classification": "legacy-retirement",
+      "owner": "root",
+      "normalConvergence": "must-be-absent-after-native-transition",
+      "backup": "migration-evidence"
+    },
+    {
+      "id": "dubble-retired-root-config",
+      "prefix": "/etc/hermes/dubble/config.yaml",
+      "classification": "legacy-retirement",
+      "owner": "root",
+      "normalConvergence": "must-be-absent-after-native-transition",
+      "backup": "migration-evidence"
+    },
+    {
+      "id": "rigel-retired-root-config",
+      "prefix": "/etc/hermes/rigel/config.yaml",
+      "classification": "legacy-retirement",
+      "owner": "root",
+      "normalConvergence": "must-be-absent-after-native-transition",
+      "backup": "migration-evidence"
+    },
+    {
+      "id": "astra-retired-root-skills",
+      "prefix": "/etc/hermes/astra/skills",
+      "classification": "legacy-retirement",
+      "owner": "root",
+      "normalConvergence": "must-remain-off-runtime-path",
+      "backup": "migration-evidence"
+    },
+    {
+      "id": "dubble-retired-root-skills",
+      "prefix": "/etc/hermes/dubble/skills",
+      "classification": "legacy-retirement",
+      "owner": "root",
+      "normalConvergence": "must-remain-off-runtime-path",
+      "backup": "migration-evidence"
+    },
+    {
+      "id": "rigel-retired-root-skills",
+      "prefix": "/etc/hermes/rigel/skills",
+      "classification": "legacy-retirement",
+      "owner": "root",
+      "normalConvergence": "must-remain-off-runtime-path",
+      "backup": "migration-evidence"
+    },
+    {
+      "id": "retained-profile-skills-contract",
+      "prefix": "/etc/hermes/profile-skills-contract.json",
+      "classification": "evidence",
+      "owner": "root",
+      "normalConvergence": "read-only-migration-evidence",
+      "backup": "rebuildable"
+    },
+    {
       "id": "root-hermes-policy",
       "prefix": "/etc/hermes",
       "classification": "platform",
@@ -335,14 +391,6 @@
       "classification": "platform",
       "owner": "root",
       "normalConvergence": "native-update",
-      "backup": "rebuildable-with-rollback"
-    },
-    {
-      "id": "hermes-managed-source-patches",
-      "prefix": "/usr/local/share/hermes-managed-patches",
-      "classification": "platform",
-      "owner": "root",
-      "normalConvergence": "reviewed-native-source-promotion",
       "backup": "rebuildable-with-rollback"
     },
     {

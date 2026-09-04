@@ -25,9 +25,6 @@ UMask=0077
 NoNewPrivileges=true
 ProtectSystem=strict
 ProtectHome=true
-{% if not (hermes_native_profile_skills_enabled | bool) %}
-BindReadOnlyPaths=/etc/hermes/astra/skills:/var/lib/hermes/astra/.hermes/profiles/astra/skills/managed
-{% endif %}
 BindPaths={{ hermes_profile_data_root }}/astra/writable:/var/lib/hermes/astra/.hermes/profiles/astra/imported-data
 BindReadOnlyPaths={{ hermes_profile_data_root }}/astra/managed:/var/lib/hermes/astra/.hermes/profiles/astra/managed-data
 BindPaths={{ hermes_profile_transforms_root }}/astra/writable:/var/lib/hermes/astra/.hermes/profiles/astra/transformed-data

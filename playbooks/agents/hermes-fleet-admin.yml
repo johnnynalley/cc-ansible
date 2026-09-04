@@ -29,8 +29,7 @@
       - "{{ hermes_fleet_admin_policy_live }}"
       - "{{ hermes_fleet_admin_plugin_managed_root }}"
       - "{{ hermes_fleet_admin_plugin_runtime_root }}"
-      - /etc/hermes/astra/config.yaml
-      - /etc/hermes/astra/managed-policy.sha256
+      - "{{ hermes_fleet_admin_astra_profile.home }}/config.yaml"
       - "{{ hermes_fleet_admin_dropin }}"
 
   tasks:
@@ -54,8 +53,6 @@
           - hermes_astra_discord_channel_id is match('^[0-9]+$')
           - hermes_fleet_admin_astra_profile.name == 'astra'
           - hermes_fleet_admin_astra_profile.user == 'hermes-astra'
-          - "'fleet-admin' in hermes_fleet_admin_astra_profile.plugins_enabled"
-          - "'fleet_admin' in hermes_fleet_admin_astra_profile.toolsets"
         fail_msg: Fleet administration requires exact owner-provenance policy and authorization.
 
     - name: Inspect fleet administration dependencies
@@ -68,8 +65,6 @@
           owner: root
           group: hermes-astra
         - path: /etc/hermes/astra/.env
-          kind: file
-        - path: /etc/hermes/astra/config.yaml
           kind: file
         - path: /var/lib/hermes/astra/.hermes/profiles/astra/state.db
           kind: file
@@ -89,10 +84,6 @@
           kind: directory
         - path: /var/lib/hermes/profile-data/rigel/writable
           kind: directory
-        - path: /etc/hermes/dubble/config.yaml
-          kind: file
-        - path: /etc/hermes/rigel/config.yaml
-          kind: file
       register: hermes_fleet_admin_dependencies
 
     - name: Require safe fleet administration dependencies
@@ -219,7 +210,7 @@
 
     - name: Read current Astra native configuration
       ansible.builtin.slurp:
-        path: /etc/hermes/astra/config.yaml
+        path: "{{ hermes_fleet_admin_astra_profile.home }}/config.yaml"
       register: hermes_fleet_admin_current_config_raw
       no_log: true
 
@@ -228,17 +219,18 @@
         hermes_fleet_admin_current_config: >-
           {{ hermes_fleet_admin_current_config_raw.content | b64decode | from_yaml }}
         hermes_fleet_admin_current_plugins: >-
-          {{ (hermes_fleet_admin_current_config_raw.content | b64decode | from_yaml)
-             .plugins.enabled }}
+          {{ ((hermes_fleet_admin_current_config_raw.content | b64decode | from_yaml)
+              .plugins | default({})).enabled | default([]) }}
         hermes_fleet_admin_current_toolsets: >-
           {{ (hermes_fleet_admin_current_config_raw.content | b64decode | from_yaml)
-             .toolsets }}
+             .toolsets | default([]) }}
         hermes_fleet_admin_target_plugins: >-
-          {{ ((hermes_fleet_admin_current_config_raw.content | b64decode | from_yaml)
-              .plugins.enabled + ['fleet-admin']) | unique | list }}
+          {{ ((((hermes_fleet_admin_current_config_raw.content | b64decode | from_yaml)
+              .plugins | default({})).enabled | default([])) + ['fleet-admin'])
+             | unique | list }}
         hermes_fleet_admin_target_toolsets: >-
-          {{ ((hermes_fleet_admin_current_config_raw.content | b64decode | from_yaml)
-              .toolsets + ['fleet_admin']) | unique | list }}
+          {{ (((hermes_fleet_admin_current_config_raw.content | b64decode | from_yaml)
+              .toolsets | default([])) + ['fleet_admin']) | unique | list }}
       no_log: true
 
     - name: Require list-typed Astra plugin and toolset configuration
@@ -440,11 +432,14 @@
         - name: Append fleet plugin through Hermes native configuration
           ansible.builtin.command:
             argv:
+              - /usr/sbin/runuser
+              - --user
+              - hermes-astra
+              - --
               - /usr/bin/env
-              - --unset=HERMES_MANAGED
-              - --unset=HERMES_MANAGED_DIR
-              - HOME=/etc/hermes/astra
-              - HERMES_HOME=/etc/hermes/astra
+              - HOME=/var/lib/hermes/astra
+              - HERMES_HOME=/var/lib/hermes/astra/.hermes/profiles/astra
+              - HERMES_MANAGED_DIR=/etc/hermes/astra
               - "{{ hermes_shadow_runtime_binary }}"
               - config
               - set
@@ -459,11 +454,14 @@
         - name: Append fleet toolset through Hermes native configuration
           ansible.builtin.command:
             argv:
+              - /usr/sbin/runuser
+              - --user
+              - hermes-astra
+              - --
               - /usr/bin/env
-              - --unset=HERMES_MANAGED
-              - --unset=HERMES_MANAGED_DIR
-              - HOME=/etc/hermes/astra
-              - HERMES_HOME=/etc/hermes/astra
+              - HOME=/var/lib/hermes/astra
+              - HERMES_HOME=/var/lib/hermes/astra/.hermes/profiles/astra
+              - HERMES_MANAGED_DIR=/etc/hermes/astra
               - "{{ hermes_shadow_runtime_binary }}"
               - config
               - set
@@ -477,11 +475,11 @@
 
         - name: Preserve Astra native configuration ownership
           ansible.builtin.file:
-            path: /etc/hermes/astra/config.yaml
+            path: "{{ hermes_fleet_admin_astra_profile.home }}/config.yaml"
             state: file
-            owner: root
+            owner: hermes-astra
             group: hermes-astra
-            mode: "0440"
+            mode: "0600"
           register: hermes_fleet_admin_config_permissions
 
         - name: Reassert platform traversal after Hermes native configuration
@@ -495,7 +493,7 @@
 
         - name: Read Astra configuration after native fleet append
           ansible.builtin.slurp:
-            path: /etc/hermes/astra/config.yaml
+            path: "{{ hermes_fleet_admin_astra_profile.home }}/config.yaml"
           register: hermes_fleet_admin_updated_config_raw
           when: not ansible_check_mode
           no_log: true
@@ -526,28 +524,6 @@
           vars:
             hermes_profile: "{{ hermes_fleet_admin_astra_profile }}"
           register: hermes_fleet_admin_dropin_copy
-
-        - name: Hash Astra managed policy and primary environment
-          ansible.builtin.command:
-            argv:
-              - /usr/bin/sha256sum
-              - /etc/hermes/astra/config.yaml
-              - /etc/hermes/astra/.env
-          register: hermes_fleet_admin_policy_hash
-          changed_when: false
-          when: not ansible_check_mode
-          no_log: true
-
-        - name: Publish Astra managed policy checksum
-          ansible.builtin.copy:
-            content: "{{ hermes_fleet_admin_policy_hash.stdout }}\n"
-            dest: /etc/hermes/astra/managed-policy.sha256
-            owner: root
-            group: hermes-astra
-            mode: "0440"
-          register: hermes_fleet_admin_policy_checksum
-          when: not ansible_check_mode
-          no_log: true
 
         - name: Reload systemd for fleet administration
           ansible.builtin.systemd_service:
@@ -608,7 +584,7 @@
               - --runtime-root
               - "{{ hermes_fleet_admin_plugin_runtime_root }}"
               - --config
-              - /etc/hermes/astra/config.yaml
+              - "{{ hermes_fleet_admin_astra_profile.home }}/config.yaml"
               - --policy
               - "{{ hermes_fleet_admin_policy_live }}"
               - --socket
@@ -631,7 +607,6 @@
                  or hermes_fleet_admin_scope_permissions.changed
                  or hermes_fleet_admin_post_config_scope_permissions.changed
                  or hermes_fleet_admin_dropin_copy.changed
-                 or hermes_fleet_admin_policy_checksum.changed
                  or hermes_fleet_admin_policy_copy.changed
                  or hermes_fleet_admin_environment_copy.changed
                  or hermes_fleet_admin_plugin_copies.results
